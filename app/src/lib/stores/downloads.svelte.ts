@@ -43,7 +43,19 @@ function apply(snapshot: DownloadsSnapshot): void {
 export async function init(): Promise<UnlistenFn> {
   sampler = createSampler(performance.now());
   graphs = {};
-  apply(await api.listDownloads());
+  // Listen BEFORE pulling the first snapshot. The other order lost every
+  // change between the two: an install that finished in that gap left its
+  // row "Downloading" until something else changed (first-run setup queues
+  // its emulators just before the shell mounts this store, 2026-10-28).
+  // Every event carries the whole list, so one that lands while the pull is
+  // in flight is newer than the pull's answer, which is then dropped.
+  let eventSeen = false;
+  const unlisten = await listen<DownloadsSnapshot>('downloads-changed', (e) => {
+    eventSeen = true;
+    apply(e.payload);
+  });
+  const initial = await api.listDownloads();
+  if (!eventSeen) apply(initial);
   const timer = setInterval(() => {
     tick(sampler, performance.now());
     // `graphsOf` returns the same record while nothing changed; skipping the
@@ -51,9 +63,6 @@ export async function init(): Promise<UnlistenFn> {
     const next = graphsOf(sampler);
     if (next !== graphs) graphs = next;
   }, SAMPLE_INTERVAL_MS);
-  const unlisten = await listen<DownloadsSnapshot>('downloads-changed', (e) => {
-    apply(e.payload);
-  });
   return () => {
     clearInterval(timer);
     unlisten();

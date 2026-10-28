@@ -119,3 +119,50 @@ describe('downloads store sampling', () => {
     expect(downloads.hasLive).toBe(true);
   });
 });
+
+describe('downloads store start-up', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.doUnmock('../api');
+    vi.doUnmock('@tauri-apps/api/event');
+  });
+
+  it('keeps a change that lands while the first snapshot is still being fetched', async () => {
+    let resolvePull: (s: DownloadsSnapshot) => void = () => {};
+    let handler: SnapshotHandler | undefined;
+    vi.doMock('../api', () => ({
+      api: { listDownloads: () => new Promise<DownloadsSnapshot>((r) => (resolvePull = r)) },
+    }));
+    vi.doMock('@tauri-apps/api/event', () => ({
+      listen: async (_name: string, h: SnapshotHandler) => {
+        handler = h;
+        return vi.fn();
+      },
+    }));
+    const { downloads, init } = await import('./downloads.svelte');
+    const started = init();
+    await vi.waitFor(() => expect(handler).toBeDefined());
+
+    // The install finishes while the pull is in flight; the pull then answers
+    // with what it saw before that.
+    handler!({ payload: { entries: [entry({ id: 2, job: 'emulator', status: 'completed' })] } });
+    resolvePull({ entries: [entry({ id: 2, job: 'emulator', status: 'downloading' })] });
+    const stop = await started;
+
+    expect(downloads.entries[0].status).toBe('completed');
+    stop();
+  });
+
+  it('applies the first snapshot when nothing changed meanwhile', async () => {
+    const mock = wire([entry({ id: 3, status: 'queued' })]);
+    const { downloads, init } = await import('./downloads.svelte');
+    const stop = await init();
+    expect(downloads.entries[0].status).toBe('queued');
+    mock.emit([entry({ id: 3, status: 'downloading' })]);
+    expect(downloads.entries[0].status).toBe('downloading');
+    stop();
+  });
+});
