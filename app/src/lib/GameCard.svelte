@@ -188,6 +188,13 @@
     display: block;
   }
 
+  /* Near-3:4 art (within `CROP_TO_FILL_MAX`, `letterbox.ts`) fills the
+     frame and trims a sliver off two edges, instead of leaving hairline bars
+     that would each cost a full blurred backdrop. */
+  .cover :global(img[data-fit='crop']) {
+    object-fit: cover;
+  }
+
   /* Round 8: the blurred copy is rasterised at a QUARTER of the cover's
      size and scaled up by 4 — the upscale supplies most of the softening,
      so a 2.5px blur at quarter size reads like the old 10px blur at full

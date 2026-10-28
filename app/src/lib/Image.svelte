@@ -2,7 +2,7 @@
   import { fileSrc } from './fileSrc';
   import { api } from './api';
   import { imagePaths, startImageLoad, watchNear, type LoadSlot } from './imageLoad';
-  import { leavesLetterbox } from './letterbox';
+  import { coverFit, type CoverFit } from './letterbox';
 
   let {
     url,
@@ -98,21 +98,23 @@
     };
   });
 
-  /** Whether the loaded cover leaves bars for the backdrop to fill. False
-   *  until it has loaded: a backdrop behind art that fills its frame is never
-   *  seen, and it is the most expensive thing a card paints (`letterbox.ts`). */
-  let letterboxed = $state(false);
+  /** How the loaded cover sits in its frame, for a `backdrop` image only
+   *  (`letterbox.ts`). `null` until it has loaded: a backdrop behind art that
+   *  fills its frame is never seen, and it is the most expensive thing a card
+   *  paints. `crop` is set on the `<img>` as `data-fit` so the card can fill
+   *  the frame with near-3:4 art instead. */
+  let fit = $state<CoverFit | null>(null);
 
   $effect(() => {
     void url;
-    letterboxed = false;
+    fit = null;
   });
 
   function handleImgLoad(e: Event) {
     slot?.release();
     if (!backdrop) return;
     const img = e.currentTarget as HTMLImageElement;
-    letterboxed = leavesLetterbox(img.naturalWidth, img.naturalHeight, img.clientWidth, img.clientHeight);
+    fit = coverFit(img.naturalWidth, img.naturalHeight, img.clientWidth, img.clientHeight);
   }
 
   function handleImgError() {
@@ -145,7 +147,7 @@
        most a dozen images at once, the ones near the visible area first
        (`imageLoad.ts`) — fetching all of a 2000-game platform at open
        exhausted the web process's file descriptors. -->
-  {#if backdrop && letterboxed}
+  {#if backdrop && fit === 'letterbox'}
     <img
       class="backdrop"
       src={src}
@@ -162,6 +164,7 @@
     loading="eager"
     decoding="async"
     draggable="false"
+    data-fit={fit === 'crop' ? 'crop' : undefined}
     onload={handleImgLoad}
     onerror={handleImgError}
     {...rest}
