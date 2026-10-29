@@ -110,9 +110,8 @@ used for DLC and update content (`library/content.rs`).
 6. e2e fixtures and specs, SPEC, design system note.
 
 ## Status (2026-10-28)
-Steps 1–5 are done. The Server view's details panel does not show "Installing…" for a
-standard folder, because its rows are emulator jobs with no ROM id. The Downloads row
-shows the progress.
+Steps 1–5 are done. A server build's Downloads row carries its folder's ROM id, so
+that ROM's details panel in the Server view shows the install's progress and Cancel.
 
 ## Processors (user decisions, 2026-10-28)
 A Raspberry Pi build of Pico-8 tagged `arch-linux` installed on a PC and failed

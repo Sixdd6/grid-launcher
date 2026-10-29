@@ -2383,7 +2383,17 @@ impl InstallService {
             // then reads the queue under this same lock, so an admission can
             // never slip in between.
             self.check_library_gate()?;
-            match queue.admit(key, title, platform, kind) {
+            let server_rom = match &payload {
+                JobPayload::Emulator(job) => job.romm.as_ref().map(|build| build.rom_id),
+                _ => None,
+            };
+            let admission = queue.admit(key, title, platform, kind);
+            if let (Some(rom_id), Admission::Start(id) | Admission::Queued(id)) =
+                (server_rom, &admission)
+            {
+                queue.set_rom_id(*id, rom_id);
+            }
+            match admission {
                 Admission::Start(id) => (true, Some((id, payload))),
                 Admission::Queued(id) => {
                     self.pending_jobs.lock().unwrap().insert(id, payload);

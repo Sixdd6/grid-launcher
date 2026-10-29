@@ -375,6 +375,16 @@ impl QueueState {
         self.prune_terminal();
     }
 
+    /// Ties entry `id` to the server ROM it comes from. A server emulator
+    /// build is keyed by its source id, but it is still a file of one ROM:
+    /// with the ROM id on its row, that ROM's details panel follows it like a
+    /// game install (progress, Cancel).
+    pub fn set_rom_id(&mut self, id: u64, rom_id: i64) {
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.id == id) {
+            entry.rom_id = rom_id;
+        }
+    }
+
     /// The id of the oldest entry for `rom_id` that has not reached a
     /// terminal status yet (`Queued`, `Downloading` or `Installing`), or
     /// `None` when the game has no live entry.

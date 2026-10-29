@@ -167,6 +167,10 @@ async fn only_the_chosen_build_is_downloaded_and_it_registers_with_its_source() 
         "the Downloads row carries the Emulator badge"
     );
     assert_eq!(row.source_id, "romm:ps2/pcsx2 (playstation 2)");
+    assert_eq!(
+        row.rom_id, 700,
+        "the row carries its ROM, so that ROM's details panel follows it"
+    );
 
     let entry = harness.entry(PCSX2);
     let expected = harness
