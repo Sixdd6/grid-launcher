@@ -181,22 +181,34 @@ fn tags(stem: &str) -> Vec<&str> {
 }
 
 /// RomM's version-tag style: `v`, then dot-separated parts that each start
-/// with a digit (`v2.0.2`, `v1.21`, `v0.2.7a6`, `v2412`).
+/// with a digit (`v2.0.2`, `v1.21`, `v0.2.7a6`, `v2412`). A semver
+/// pre-release (`v2.0.0-rc.1`) is read too.
 fn is_version_tag(tag: &str) -> bool {
     let Some(body) = tag.strip_prefix('v') else {
         return false;
     };
     !body.is_empty()
-        && body.split('.').all(|part| {
-            part.chars().next().is_some_and(|c| c.is_ascii_digit())
-                && part.chars().all(|c| c.is_ascii_alphanumeric())
+        && body.split('.').enumerate().all(|(i, part)| {
+            let starts_right = part
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit() || (i > 0 && c.is_ascii_alphabetic()));
+            starts_right && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
         })
+        && body.starts_with(|c: char| c.is_ascii_digit())
 }
 
 /// Compares two versions part by part: each dot-separated part by its
-/// leading number, then by what follows it. A missing part counts as 0, and a
-/// trailing letter means a later build of the same number (`0.2.7a6` is
-/// newer than `0.2.7`, as Pico-8 numbers its releases).
+/// leading number, then by what follows it. A missing part counts as 0.
+///
+/// What follows the number is read the way PEP 440 and semver read it:
+/// - a pre-release marker — `dev`, `a`/`alpha`, `b`/`beta`, `rc`/`pre`/`c` —
+///   ranks BELOW the plain number, in that order, then by its own number:
+///   `0.2.7a6` is an alpha of `0.2.7`, `2.0.0-rc.1` comes before `2.0.0`.
+///   A one-letter marker needs its number (`a6`); a word does not (`beta`).
+/// - a lone trailing letter ranks ABOVE it: `0.2.5g` is a later patch of
+///   `0.2.5`, as Pico-8 numbers its fixes.
+/// - anything else ranks above the plain number, compared as text.
 pub fn compare_versions(a: &str, b: &str) -> Ordering {
     let parts_a: Vec<&str> = a.split('.').collect();
     let parts_b: Vec<&str> = b.split('.').collect();
@@ -205,12 +217,53 @@ pub fn compare_versions(a: &str, b: &str) -> Ordering {
         let (num_b, rest_b) = split_part(parts_b.get(i).copied().unwrap_or("0"));
         let ordering = num_a
             .cmp(&num_b)
-            .then_with(|| rest_a.to_lowercase().cmp(&rest_b.to_lowercase()));
+            .then_with(|| Suffix::read(rest_a).cmp(&Suffix::read(rest_b)));
         if ordering != Ordering::Equal {
             return ordering;
         }
     }
     Ordering::Equal
+}
+
+/// What follows a version part's number, in rank order: pre-releases, then
+/// the plain number, then patches.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Suffix {
+    /// `(stage, number)`: dev 0, alpha 1, beta 2, release candidate 3.
+    PreRelease(u8, u64),
+    None,
+    Patch(String),
+}
+
+impl Suffix {
+    fn read(rest: &str) -> Suffix {
+        let text = rest.trim_start_matches(['-', '_']).to_ascii_lowercase();
+        if text.is_empty() {
+            return Suffix::None;
+        }
+        // Longest marker first: `alpha` before `a`, `preview` before `pre`.
+        const MARKERS: [(&str, u8, bool); 9] = [
+            ("alpha", 1, false),
+            ("beta", 2, false),
+            ("preview", 3, false),
+            ("pre", 3, false),
+            ("dev", 0, false),
+            ("rc", 3, false),
+            ("a", 1, true),
+            ("b", 2, true),
+            ("c", 3, true),
+        ];
+        for (marker, stage, needs_number) in MARKERS {
+            let Some(after) = text.strip_prefix(marker) else {
+                continue;
+            };
+            let digits = after.trim_start_matches(['-', '_']);
+            if digits.chars().all(|c| c.is_ascii_digit()) && !(needs_number && digits.is_empty()) {
+                return Suffix::PreRelease(stage, digits.parse().unwrap_or(0));
+            }
+        }
+        Suffix::Patch(text)
+    }
 }
 
 /// A version part's leading number and the text after it (`7a6` → 7, `a6`).
@@ -305,9 +358,42 @@ mod tests {
         assert_eq!(compare_versions("1.21", "1.3"), Ordering::Greater);
         assert_eq!(compare_versions("2.0", "2.0.0"), Ordering::Equal);
         assert_eq!(compare_versions("2412", "2409"), Ordering::Greater);
-        assert_eq!(compare_versions("0.2.7a6", "0.2.7"), Ordering::Greater);
-        assert_eq!(compare_versions("0.2.7a6", "0.2.7a5"), Ordering::Greater);
         assert_eq!(compare_versions("0.2.8", "0.2.7a6"), Ordering::Greater);
+    }
+
+    #[test]
+    fn a_pre_release_comes_before_its_release() {
+        assert_eq!(compare_versions("0.2.7a6", "0.2.7"), Ordering::Less);
+        assert_eq!(compare_versions("0.2.7a6", "0.2.7a5"), Ordering::Greater);
+        assert_eq!(compare_versions("0.2.7a6", "0.2.6"), Ordering::Greater);
+        assert_eq!(compare_versions("1.0b1", "1.0a9"), Ordering::Greater);
+        assert_eq!(compare_versions("1.0rc1", "1.0b3"), Ordering::Greater);
+        assert_eq!(compare_versions("1.0dev1", "1.0a1"), Ordering::Less);
+        assert_eq!(compare_versions("2.0.0-beta", "2.0.0"), Ordering::Less);
+        assert_eq!(compare_versions("2.0.0-rc.1", "2.0.0"), Ordering::Less);
+        assert_eq!(
+            compare_versions("2.0.0-rc.2", "2.0.0-rc.1"),
+            Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn a_lone_letter_is_a_later_patch() {
+        assert_eq!(compare_versions("0.2.5g", "0.2.5"), Ordering::Greater);
+        assert_eq!(compare_versions("0.2.5g", "0.2.5c"), Ordering::Greater);
+        assert_eq!(compare_versions("0.2.5b", "0.2.5"), Ordering::Greater);
+        assert_eq!(compare_versions("0.2.6", "0.2.5g"), Ordering::Greater);
+        // A post-release (PEP 440) is after its release too.
+        assert_eq!(compare_versions("1.0post1", "1.0"), Ordering::Greater);
+    }
+
+    #[test]
+    fn semver_pre_release_tags_parse() {
+        assert_eq!(
+            parse("A (v2.0.0-rc.1) (arch-linux-x64).zip").version,
+            "2.0.0-rc.1"
+        );
+        assert_eq!(parse_package_file("A (vbeta) (arch-linux-x64).zip"), None);
     }
 
     #[test]

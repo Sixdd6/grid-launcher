@@ -44,7 +44,14 @@ name.
   is ignored.
 - **`(v<version>)`** — the version, in RomM's version-tag style: `v` followed by
   numbers separated by dots, optionally ending in letters (`v2.0.2`, `v1.21`,
-  `v0.2.7a6`). GRID compares versions number by number to find the newest.
+  `v0.2.5g`, `v0.2.7a6`, `v2.0.0-rc.1`). GRID compares versions number by
+  number to find the newest. Letters after a number follow the usual
+  convention:
+  - a pre-release comes **before** its release: `a6` or `alpha` (alpha), `b2`
+    or `beta`, `rc1` (release candidate), `dev`. So `0.2.7a6` is older than
+    `0.2.7`.
+  - a single letter on its own is a **later** fix: `0.2.5g` is newer than
+    `0.2.5`.
 - **`(arch-<system>-<cpu>)`** — what the build runs on. Exactly one per file;
   a file without it, or with only the system (`arch-linux`), is ignored.
   - `<system>`: `linux`, `windows` or `macos`.
