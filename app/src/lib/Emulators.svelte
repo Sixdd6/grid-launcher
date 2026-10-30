@@ -59,7 +59,12 @@
   import Icon from './Icon.svelte';
   import EmulatorForm from './emulators/EmulatorForm.svelte';
   import { dynamicEmulatorNotes, emulatorNotes } from './emulators/notes';
-  import { emulatorFirmwareRows, firmwarePlatforms } from './emulators/firmware';
+  import {
+    emulatorFirmwareRows,
+    firmwareAction,
+    firmwarePlatforms,
+    FIRMWARE_ACTION_LABELS,
+  } from './emulators/firmware';
   import { installedToastText, updateConfirmText, upToDateText } from './emulators/update';
 
   // Mounted for the whole session now that Emulators is a view, so the
@@ -565,16 +570,35 @@
   // backend's pass-finished event ends it and re-reads that platform.
   let firmwareStatus = $state<Record<number, PlatformFirmwareStatus>>({});
   let firmwarePending = $state<Record<number, true>>({});
+  /** Platforms whose Unavailable click is re-reading the server. */
+  let firmwareChecking = $state<Record<number, true>>({});
 
-  function refreshFirmwareStatus(p: Platform) {
-    api
+  /** Re-reads one platform's status; resolves to it, or `null` when the
+   *  server could not say (the line is then dropped rather than wrong). */
+  function refreshFirmwareStatus(p: Platform): Promise<PlatformFirmwareStatus | null> {
+    return api
       .platformFirmwareStatus(p.id, defaultEmulatorKey(p))
-      .then((status) => (firmwareStatus = { ...firmwareStatus, [p.id]: status }))
+      .then((status) => {
+        firmwareStatus = { ...firmwareStatus, [p.id]: status };
+        return status;
+      })
       .catch(() => {
-        // No line rather than a wrong one: the server could not say.
         const { [p.id]: _gone, ...rest } = firmwareStatus;
         firmwareStatus = rest;
+        return null;
       });
+  }
+
+  /** Unavailable, clicked: ask the server again, and install when it now
+   *  has something this emulator can use. */
+  async function recheckFirmware(platformId: number, platformName: string) {
+    const p = platforms.find((x) => x.id === platformId);
+    if (!p) return;
+    firmwareChecking = { ...firmwareChecking, [platformId]: true };
+    const status = await refreshFirmwareStatus(p);
+    const { [platformId]: _done, ...rest } = firmwareChecking;
+    firmwareChecking = rest;
+    if (status?.available && !status.installed) installFirmware(platformId, platformName);
   }
 
   $effect(() => {
@@ -764,9 +788,14 @@
                         </p>
                       {/each}
                       {#each emulatorFirmwareRows(e.name, platforms, defaults, firmwareStatus) as fw (fw.platformId)}
+                        {@const action = firmwareAction(
+                          fw,
+                          firmwarePending[fw.platformId] === true,
+                          firmwareChecking[fw.platformId] === true
+                        )}
                         <div class="firmware" data-testid={`emulator-firmware-${sanitizeName(e.name)}-${fw.platformId}`}>
                           <p class="hint">{fw.label}</p>
-                          {#if fw.installed && !firmwarePending[fw.platformId]}
+                          {#if action === 'installed'}
                             <!-- Every server file is in place (the backend's
                                  installed-firmware check), so there is nothing
                                  to offer: Install again read as a failed install. -->
@@ -774,15 +803,29 @@
                               data-testid={`emulator-firmware-installed-${sanitizeName(e.name)}-${fw.platformId}`}
                               class="firmware-installed"
                             >
-                              <Icon name="check" size={14} /> Installed
+                              <Icon name="check" size={14} /> {FIRMWARE_ACTION_LABELS.installed}
                             </span>
+                          {:else if action === 'unavailable' || action === 'checking'}
+                            <!-- Nothing on the server lands in this emulator's
+                                 folders, so Install would do nothing. A click
+                                 asks the server again and installs if that
+                                 changed. -->
+                            <button
+                              data-testid={`emulator-firmware-unavailable-${sanitizeName(e.name)}-${fw.platformId}`}
+                              class="secondary"
+                              title="No firmware on the server for this emulator. Click to check again."
+                              disabled={action === 'checking'}
+                              onclick={() => recheckFirmware(fw.platformId, fw.platformName)}
+                            >
+                              {FIRMWARE_ACTION_LABELS[action]}
+                            </button>
                           {:else}
                             <button
                               data-testid={`emulator-firmware-install-${sanitizeName(e.name)}-${fw.platformId}`}
-                              disabled={firmwarePending[fw.platformId] === true}
+                              disabled={action === 'requested'}
                               onclick={() => installFirmware(fw.platformId, fw.platformName)}
                             >
-                              {firmwarePending[fw.platformId] ? 'Requested…' : 'Install firmware'}
+                              {FIRMWARE_ACTION_LABELS[action]}
                             </button>
                           {/if}
                         </div>
@@ -1228,6 +1271,18 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 10px;
+  }
+
+  /* A secondary button (D-UI convention): outlined, `--surface` on hover. */
+  .firmware button.secondary {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+  }
+
+  .firmware button.secondary:hover:not(:disabled) {
+    background: var(--surface);
+    color: var(--text);
   }
 
   .firmware-installed {

@@ -55,6 +55,7 @@ export function firmwareChipLabel(status: FirmwareChipState): string {
   if (status.file_count === 0) return 'No server firmware';
   const files = status.file_count === 1 ? '1 file' : `${status.file_count} files`;
   if (!status.has_default_emulator) return `Firmware: ${files} — no default emulator`;
+  if (!status.available) return `Firmware: ${files} · unavailable`;
   if (status.installed) return `Firmware: ${files} · installed`;
   return `Firmware: ${files}`;
 }

@@ -155,6 +155,37 @@ pub fn firmware_installed(
     any
 }
 
+/// Whether any server firmware file can land in one of `targets`: a file
+/// whose name routes there, or a zip whose name routes nowhere but that no
+/// install has looked inside yet (it may hold what a target asks for) or
+/// that an install found something in. `false` means Install would place
+/// nothing for this emulator, so the Emulators view says "Unavailable".
+pub fn firmware_available(
+    records: &[FirmwareRecord],
+    targets: &[FirmwareTarget],
+    manifest: &FirmwareManifest,
+) -> bool {
+    let keyword_targets: Vec<&FirmwareTarget> =
+        targets.iter().filter(|t| t.keywords.is_some()).collect();
+    records.iter().any(|record| {
+        let name = &record.file_name;
+        if name.is_empty() {
+            return false;
+        }
+        if !resolve_targets(name, targets).is_empty() {
+            return true;
+        }
+        if !name.to_lowercase().ends_with(".zip") || keyword_targets.is_empty() {
+            return false;
+        }
+        let recorded: Vec<&Vec<PathBuf>> = keyword_targets
+            .iter()
+            .filter_map(|t| manifest.recorded(&t.path, name))
+            .collect();
+        recorded.is_empty() || recorded.iter().any(|paths| !paths.is_empty())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,6 +309,51 @@ mod tests {
 
         std::fs::remove_file(&keys).unwrap();
         assert!(!firmware_installed(
+            &records,
+            &targets,
+            &FirmwareManifest::load(&path)
+        ));
+    }
+
+    #[test]
+    fn firmware_is_available_when_a_file_routes_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let bios = FirmwareTarget {
+            path: dir.path().to_path_buf(),
+            keywords: Some(vec!["scph".into()]),
+        };
+        let manifest = FirmwareManifest::default();
+        assert!(firmware_available(
+            &[record(1, "scph5501.bin")],
+            std::slice::from_ref(&bios),
+            &manifest
+        ));
+        assert!(!firmware_available(
+            &[record(1, "gba_bios.bin")],
+            &[bios],
+            &manifest
+        ));
+    }
+
+    #[test]
+    fn an_unopened_zip_is_available_until_an_install_finds_nothing_in_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MANIFEST_FILE);
+        let target = dir.path().join("system");
+        let targets = [FirmwareTarget {
+            path: target.clone(),
+            keywords: Some(vec!["gba_bios.bin".into()]),
+        }];
+        let records = [record(1, "gba.zip")];
+        assert!(firmware_available(
+            &records,
+            &targets,
+            &FirmwareManifest::load(&path)
+        ));
+
+        // An install looked inside and placed nothing.
+        record_installs(&path, vec![(target, "gba.zip".into(), Vec::new())]);
+        assert!(!firmware_available(
             &records,
             &targets,
             &FirmwareManifest::load(&path)

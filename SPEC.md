@@ -91,7 +91,11 @@ There are several main sections to the application with buttons across the top b
   entry with a downloaded PS3 firmware package, the note and the Install PS3 Firmware
   button. Under each emulator, one line per platform it is the default emulator for
   whose server firmware has files ("PlayStation firmware · 3 files") with Install
-  firmware, which reads "Requested…" until the background pass ends; **Add from
+  firmware, which reads "Requested…" until the background pass ends. Each server file
+  is checked against the size and MD5 the server lists before it is written. The line
+  says "✓ Installed" once every file is in place, and "Unavailable" when nothing on the
+  server can land in that emulator's folders (Install would place nothing); clicking
+  Unavailable asks the server again and installs if it now has something; **Add from
   catalog** has a search box, one row per catalog entry with its
   provider and an Install / Installed button, and a Manual tab for the hand-typed form
   (name, executable path, arguments, with the profile auto-fill); **Platform defaults**

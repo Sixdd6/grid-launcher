@@ -15,6 +15,8 @@ export type EmulatorFirmwareRow = {
   label: string;
   /** Every server file is already in place for this emulator. */
   installed: boolean;
+  /** Some server file can land in this emulator's folders. */
+  available: boolean;
 };
 
 /** Platforms whose firmware status the Installed list needs: those with a
@@ -50,7 +52,32 @@ export function emulatorFirmwareRows(
       platformName: key,
       label: `${key} firmware · ${count === 1 ? '1 file' : `${count} files`}`,
       installed: status?.installed === true,
+      available: status?.available === true,
     });
   }
   return rows;
 }
+
+/**
+ * What a firmware line offers. `requested` while an install runs,
+ * `checking` while a click on Unavailable re-reads the server, `installed`
+ * once every file is in place, `unavailable` when nothing on the server can
+ * land in this emulator's folders (Install would place nothing), else
+ * `install`.
+ */
+export type FirmwareAction = 'install' | 'requested' | 'checking' | 'installed' | 'unavailable';
+
+export function firmwareAction(row: EmulatorFirmwareRow, requested: boolean, checking: boolean): FirmwareAction {
+  if (requested) return 'requested';
+  if (checking) return 'checking';
+  if (!row.available) return 'unavailable';
+  return row.installed ? 'installed' : 'install';
+}
+
+export const FIRMWARE_ACTION_LABELS: Record<FirmwareAction, string> = {
+  install: 'Install firmware',
+  requested: 'Requested…',
+  checking: 'Checking…',
+  installed: 'Installed',
+  unavailable: 'Unavailable',
+};

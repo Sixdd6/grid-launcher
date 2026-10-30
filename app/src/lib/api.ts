@@ -666,6 +666,9 @@ export type PlatformFirmwareStatus = {
   has_default_emulator: boolean;
   /** Every server file is already installed for the default emulator. */
   installed: boolean;
+  /** Some server file can land in the default emulator's folders; when
+   *  not, Install would place nothing ("Unavailable"). */
+  available: boolean;
 };
 
 /// The `firmware-pass-finished` payload (`app/src-tauri/src/firmware_service.rs`'s
