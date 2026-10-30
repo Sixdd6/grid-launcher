@@ -122,6 +122,7 @@ describe('createHoverViewed with restartOn (pointer hover)', () => {
     const target = new EventTarget();
     const hover = createHoverViewed(120, 0, target);
     hover.start(subject('https://romm/cover.png'));
+    move(target);
     for (let i = 0; i < 10; i++) {
       vi.advanceTimersByTime(100);
       move(target);
@@ -133,11 +134,33 @@ describe('createHoverViewed with restartOn (pointer hover)', () => {
     expect(noteViewed).toHaveBeenCalledExactlyOnceWith(subject('https://romm/cover.png'));
   });
 
-  it('still starts the fetch on entry, not on the stop', () => {
+  it('starts the fetch on the first move over the card, not on the stop', () => {
     const target = new EventTarget();
     const hover = createHoverViewed(120, 0, target);
     hover.start(subject('https://romm/cover.png'));
+    expect(prefetchBackground).not.toHaveBeenCalled();
+    move(target);
+    move(target);
     expect(prefetchBackground).toHaveBeenCalledExactlyOnceWith(subject('https://romm/cover.png'));
+  });
+
+  it('a card scrolled under a still pointer changes nothing', () => {
+    // Scrolling fires an enter for each card that arrives under the pointer,
+    // and no move: neither the fetch nor the swap may follow.
+    const target = new EventTarget();
+    const hover = createHoverViewed(120, 0, target);
+    for (const name of ['a', 'b', 'c']) {
+      hover.end();
+      hover.start(subject(`https://romm/${name}.png`));
+      vi.advanceTimersByTime(50);
+    }
+    vi.advanceTimersByTime(1000);
+    expect(prefetchBackground).not.toHaveBeenCalled();
+    expect(noteViewed).not.toHaveBeenCalled();
+    // Once the user moves the mouse, the card under it counts.
+    move(target);
+    vi.advanceTimersByTime(120);
+    expect(noteViewed).toHaveBeenCalledExactlyOnceWith(subject('https://romm/c.png'));
   });
 
   it('crossing cards without stopping changes nothing', () => {
@@ -161,6 +184,7 @@ describe('createHoverViewed with restartOn (pointer hover)', () => {
     const remove = vi.spyOn(target, 'removeEventListener');
     const hover = createHoverViewed(120, 0, target);
     hover.start(subject('https://romm/cover.png'));
+    move(target);
     vi.advanceTimersByTime(120);
     expect(remove).toHaveBeenCalledWith('pointermove', expect.any(Function));
     // A move after the dwell fired must not note the subject again.

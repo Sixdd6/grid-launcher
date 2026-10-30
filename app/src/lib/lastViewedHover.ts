@@ -17,9 +17,17 @@ import { noteViewed } from './stores/lastViewed.svelte';
  * pointer to STOP on a card, not merely to enter it. Counted from entry, a
  * pointer browsing across a row at a normal pace changed the art on nearly
  * every card it crossed, and each change is a full-window cross-fade: 23ms
- * frames against 16ms with the art hidden (2026-10-28). The fetch still
- * leaves on entry. Keyboard focus passes nothing: a held arrow key is
+ * frames against 16ms with the art hidden (2026-10-28). The fetch leaves at
+ * once, not at the stop. Keyboard focus passes nothing: a held arrow key is
  * already one start per step.
+ *
+ * With `restartOn`, nothing happens on entry ALONE: the dwell and the fetch
+ * wait for the pointer's first move over the card. Scrolling slides cards
+ * under a still pointer, and the browser fires an enter for each one that
+ * arrives under it, but no move. Armed on entry, the card the scroll stopped
+ * on became the background although the mouse never moved (user report
+ * 2026-10-30). A real arrival always moves the pointer: the move that
+ * crosses into the card follows its enter event.
  */
 export function createHoverViewed(
   delayMs: number = HOVER_DELAY_MS,
@@ -33,6 +41,9 @@ export function createHoverViewed(
   let prefetchTimer: ReturnType<typeof setTimeout> | null = null;
   /** The subject whose dwell is pending, for `onMove` to re-arm. */
   let pending: BackgroundSubject | null = null;
+  /** Entered but not yet moved over: the next move starts the fetch and the
+   *  dwell (see above). */
+  let awaitingMove = false;
 
   function arm(subject: BackgroundSubject): void {
     if (timer !== null) clearTimeout(timer);
@@ -45,7 +56,12 @@ export function createHoverViewed(
   }
 
   function onMove(): void {
-    if (pending !== null) arm(pending);
+    if (pending === null) return;
+    if (awaitingMove) {
+      awaitingMove = false;
+      fetchFor(pending);
+    }
+    arm(pending);
   }
 
   function clearBoth(): void {
@@ -54,11 +70,11 @@ export function createHoverViewed(
     timer = null;
     prefetchTimer = null;
     pending = null;
+    awaitingMove = false;
     restartOn?.removeEventListener('pointermove', onMove);
   }
 
-  function start(subject: BackgroundSubject): void {
-    clearBoth();
+  function fetchFor(subject: BackgroundSubject): void {
     // The fetch is the slow part (network, decode, blur), so it is not tied
     // to the visual dwell: by default it leaves NOW, in the same task as the
     // pointer event, while the swap still waits out `delayMs`. A zero timer
@@ -71,11 +87,20 @@ export function createHoverViewed(
         prefetchTimer = null;
         prefetchBackground(subject);
       }, prefetchMs);
+  }
+
+  function start(subject: BackgroundSubject): void {
+    clearBoth();
     pending = subject;
+    if (restartOn === null) {
+      fetchFor(subject);
+      arm(subject);
+      return;
+    }
     // Passive and only while a dwell is pending: nothing listens while the
     // pointer rests or is away from the grid.
-    restartOn?.addEventListener('pointermove', onMove, { passive: true });
-    arm(subject);
+    awaitingMove = true;
+    restartOn.addEventListener('pointermove', onMove, { passive: true });
   }
 
   function end(): void {
