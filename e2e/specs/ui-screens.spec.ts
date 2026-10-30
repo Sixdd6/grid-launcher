@@ -109,6 +109,27 @@ describe('ui screens: the main views for a design review', () => {
     await setControl('card-labels', 'always');
   });
 
+  // A hovered card shows its whole title in either label mode. The first
+  // card's title is lengthened in the page, since few fixtures have one,
+  // and the card is shown in its focused state (styled as hover), since a
+  // WebDriver pointer does not reliably hold :hover for the screenshot.
+  it('a long title on hover, both label modes, dark, fade 30', async () => {
+    for (const labels of ['always', 'hover']) {
+      await appearance('dark', 30);
+      await setControl('card-labels', labels);
+      await openServerPlatform();
+      await browser.execute(() => {
+        const label = document.querySelector('[data-testid="server-grid"] [data-testid^="game-card-"] .label');
+        if (label) label.textContent = 'The Legend of a Very Long Game Title: Special Anniversary Collector’s Edition';
+        label?.closest('[data-testid^="game-card-"]')?.classList.add('focused');
+      });
+      await browser.pause(500);
+      await shot(`server-dark-fade30-long-title-${labels}`);
+    }
+    await $(testId('nav-settings')).click();
+    await setControl('card-labels', 'always');
+  });
+
   it('both card displays on a mixed-art platform (E2E_LIVE_MIXED_PLATFORM)', async () => {
     const mixed = process.env.E2E_LIVE_MIXED_PLATFORM;
     if (!mixed) return;

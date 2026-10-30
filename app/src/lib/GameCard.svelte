@@ -363,6 +363,35 @@
     opacity: 1;
   }
 
+  /* Hovered or focused, in either mode, the label shows the whole title:
+     it wraps instead of truncating, over the gap and the row below, so the
+     layout never moves. The "always" label lifts out of the flow at the
+     spot it sat in. */
+  .card:hover .label,
+  .card.focused .label,
+  .card:focus-within .label {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: calc(100% + 32px);
+    height: auto;
+    min-height: var(--label-h);
+    padding: 3px 9px;
+    line-height: 1.5;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
+    background: var(--overlay);
+    box-shadow: var(--shadow-lift);
+  }
+
+  .card:not(.hover-labels):hover .label,
+  .card:not(.hover-labels).focused .label,
+  .card:not(.hover-labels):focus-within .label {
+    top: calc(var(--cover-h) + var(--label-gap));
+  }
+
   .tag,
   .cloud-badge {
     transition: opacity var(--m-fast) ease;
