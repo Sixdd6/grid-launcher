@@ -9,6 +9,7 @@
 #   scripts/ctr.sh e2e [groups...]    run scripts/e2e.sh (env E2E_* is passed through)
 #   scripts/ctr.sh appimage [ver]     build the AppImage exactly as the release job does
 #                                     (default version 0.0.0-dev) into ctr-out/
+#   scripts/ctr.sh packages [ver]     build the release job's .deb and .rpm into ctr-out/
 #   scripts/ctr.sh clean [--all]      remove this checkout's target and node_modules volumes
 #                                     (--all: also the shared cargo and npm cache volumes)
 #
@@ -168,11 +169,31 @@ case "${1:-}" in
         "$work/squashfs-root" "$out")
       rm -rf "$work"
       ls -l "ctr-out/$out" "ctr-out/$out.zsync"' _ "$version" ;;
+  packages)
+    # The release job's .deb and .rpm (build-linux-packages in build.yml): built in the
+    # check image (Ubuntu 24.04, glibc 2.39) against the system WebKitGTK, which the
+    # packages depend on instead of bundling. The installed binary is
+    # /usr/bin/grid-launcher (mainBinaryName); an RPM version cannot hold "-", so its
+    # pre-release separator becomes "+".
+    version=${2:-0.0.0-dev}
+    printf %s "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
+      || { echo "ctr.sh: version '$version' is not semver" >&2; exit 2; }
+    mkdir -p ctr-out
+    in_ctr bash -c 'set -euo pipefail
+      version=$1
+      rpm_version=${version//-/+}
+      cd app && npm ci --no-audit --no-fund
+      npx tauri build --bundles deb --config "{\"version\":\"$version\",\"mainBinaryName\":\"grid-launcher\"}"
+      npx tauri build --bundles rpm --config "{\"version\":\"$rpm_version\",\"mainBinaryName\":\"grid-launcher\"}"
+      cd ..
+      cp "target/release/bundle/deb/GRID Launcher_${version}_amd64.deb" "ctr-out/grid-launcher_${version}_amd64.deb"
+      cp "target/release/bundle/rpm/GRID Launcher-${rpm_version}-1.x86_64.rpm" "ctr-out/grid-launcher-${rpm_version}-1.x86_64.rpm"
+      ls -l ctr-out/grid-launcher_*.deb ctr-out/grid-launcher-*.rpm' _ "$version" ;;
   clean)
     for v in target release-target app-node_modules e2e-node_modules; do podman volume rm -f "$VOL_PREFIX-$v" >/dev/null; done
     if [ "${2:-}" = "--all" ]; then
       for v in cargo-registry cargo-git npm; do podman volume rm -f "$CACHE_PREFIX-$v" >/dev/null; done
     fi
     echo "volumes removed" ;;
-  *) echo "usage: $0 {build|run <cmd...>|shell|gate|e2e [groups...]|appimage [version]|clean [--all]}" >&2; exit 2 ;;
+  *) echo "usage: $0 {build|run <cmd...>|shell|gate|e2e [groups...]|appimage [version]|packages [version]|clean [--all]}" >&2; exit 2 ;;
 esac

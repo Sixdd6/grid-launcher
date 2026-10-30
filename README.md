@@ -36,11 +36,24 @@ Emulators, Settings.
 
 Downloads are on the [Releases page](https://github.com/Sixdd6/grid-launcher/releases).
 
-- **Linux** — `grid-launcher-<version>-x86_64.AppImage`. Mark it executable and run it.
-  The AppImage carries AppImage update information, so
+- **Linux**, as a package (recommended) — `grid-launcher_<version>_amd64.deb` for Debian,
+  Ubuntu and their derivatives, or `grid-launcher-<version>-1.x86_64.rpm` for Fedora,
+  openSUSE and their derivatives. Install it with your package manager (for example
+  `sudo dnf install ./grid-launcher-<version>-1.x86_64.rpm` or
+  `sudo apt install ./grid-launcher_<version>_amd64.deb`); it pulls in WebKitGTK and
+  GTK 3, and renders with your system's WebKitGTK, which your distribution keeps updated.
+  It needs glibc 2.39 or newer. With an NVIDIA graphics card on Wayland, WebKitGTK 2.54.1
+  or newer renders on the GPU; older versions render on the CPU, which scrolls large
+  platforms less smoothly.
+- **Linux**, portable — `grid-launcher-<version>-x86_64.AppImage`. Mark it executable and
+  run it. It bundles its own WebKitGTK (2.54) and needs glibc 2.41 or newer (Debian 13,
+  Ubuntu 25.04, Fedora 42 and newer). It carries AppImage update information, so
   [AppImageUpdate](https://github.com/AppImage/AppImageUpdate) can update it in place
   from the latest release. The app itself never downloads or installs an update; it
   only shows a banner when a newer tag exists.
+- **Linux**, either way — if the window comes up blank, start GRID once with
+  `GRID_LAUNCHER_HW_ACCEL=never` and turn off Settings › Appearance › Hardware
+  acceleration.
 - **Windows** — `grid-launcher-<version>-windows-x86_64-setup.exe`, an NSIS installer
   that installs for the current user. WebView2 is downloaded by the installer if it is
   missing.

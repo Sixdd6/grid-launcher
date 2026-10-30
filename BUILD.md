@@ -226,16 +226,24 @@ keeps `0.9.0-dev`; each build job passes the real version with
    for it. `build.yml` triggers on `release: [published]` only, which covers both a
    direct publish and a draft published later.
 2. The `version` job strips the leading `v` and rejects a tag that is not semver.
-3. `check`, `check-windows` and `e2e` must pass; both build jobs `need` them, so a tag can never
-   ship artifacts from an untested tree.
+3. `check`, `check-windows` and `e2e` must pass; every build job `needs` them, so a tag can
+   never ship artifacts from an untested tree.
 4. `build-linux` builds the AppImage, extracts its AppDir, and repacks it with
    `appimagetool -u "gh-releases-zsync|Sixdd6|grid-launcher|latest|grid-launcher-*-x86_64.AppImage.zsync"`,
    because Tauri's bundler embeds no update information. It attaches
-   `grid-launcher-<version>-x86_64.AppImage` and its `.zsync`.
-5. `build-windows` builds the NSIS installer and attaches
+   `grid-launcher-<version>-x86_64.AppImage` and its `.zsync`. It runs in a Debian 13
+   container (see "Build container").
+5. `build-linux-packages` builds the `.deb` and `.rpm` on Ubuntu 24.04 and attaches
+   `grid-launcher_<version>_amd64.deb` and `grid-launcher-<version>-1.x86_64.rpm`. They
+   depend on the system's WebKitGTK instead of bundling one, so each distribution renders
+   with its own and patches it with its own updates. They install `/usr/bin/grid-launcher`
+   (`mainBinaryName`, passed at build time so local and e2e builds keep `target/*/app`).
+   An RPM version cannot contain `-`, so a pre-release's separator becomes `+` there.
+   `scripts/ctr.sh packages [version]` builds the same two files into `ctr-out/`.
+6. `build-windows` builds the NSIS installer and attaches
    `grid-launcher-<version>-windows-x86_64-setup.exe`.
 
-A `workflow_dispatch` run is a dry run: it builds version `0.0.0-dev`, uploads both
+A `workflow_dispatch` run is a dry run: it builds version `0.0.0-dev`, uploads the
 artifacts to the run, and attaches nothing to any release. A version containing `dev`
 also suppresses the app's own update check.
 
