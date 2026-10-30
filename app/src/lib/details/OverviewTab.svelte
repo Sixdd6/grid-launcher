@@ -1,27 +1,22 @@
 <script lang="ts">
   import type { RomDetail } from '../api';
-  import Image from '../Image.svelte';
   import { epochDate } from './header';
-  import { overviewStrip } from './media';
+  import { descriptionParagraphs } from './overview';
   import { relatedKindLabel, relatedOnServer } from './related';
 
   let {
-    name,
     description,
-    screenshotUrls,
     detail,
     serverTitles,
   }: {
-    name: string;
     description: string;
-    screenshotUrls: string[];
     detail: RomDetail | null;
     /** Every title on this game's platform, for design §7's "filtered to
      *  titles present on the server". Empty until the list loads. */
     serverTitles: string[];
   } = $props();
 
-  let strip = $derived(overviewStrip(screenshotUrls));
+  let paragraphs = $derived(descriptionParagraphs(description));
 
   let related = $derived(relatedOnServer(detail?.related ?? [], serverTitles));
 
@@ -45,124 +40,116 @@
       ] as const
     ).filter(([, , value]) => value.trim() !== '')
   );
-
-  let failedScreenshots = $state<Record<string, true>>({});
-  function markScreenshotFailed(url: string) {
-    failedScreenshots = { ...failedScreenshots, [url]: true };
-  }
 </script>
 
+<!-- The description and the facts side by side, so the text keeps a
+     readable line length and the facts use the width instead of trailing
+     down one edge; they stack when the popup is narrow. Screenshots live on
+     the Media tab only. -->
 <div class="overview">
-  <p data-testid="details-description" class="description">{description}</p>
+  <div class="main">
+    <div data-testid="details-description" class="description">
+      {#each paragraphs as paragraph, i (i)}
+        <p>{paragraph}</p>
+      {:else}
+        <p class="empty">No description available</p>
+      {/each}
+    </div>
+
+    {#if related.length}
+      <div class="related" data-testid="details-related">
+        <h3>Related</h3>
+        <div class="chips">
+          {#each related as entry, i (entry.name)}
+            <span class="related-chip" data-testid={`details-related-${i}`}>
+              {entry.name}
+              <em>{relatedKindLabel(entry.kind)}</em>
+            </span>
+          {/each}
+        </div>
+      </div>
+    {/if}
+  </div>
 
   {#if metaRows.length}
     <dl class="meta">
       {#each metaRows as [key, label, value] (key)}
-        <dt>{label}</dt>
-        <dd data-testid={`details-meta-${key}`}>{value}</dd>
+        <div class="fact">
+          <dt>{label}</dt>
+          <dd data-testid={`details-meta-${key}`}>{value}</dd>
+        </div>
       {/each}
     </dl>
-  {/if}
-
-  {#if strip.length}
-    <div class="shots" data-testid="details-screenshots">
-      {#each strip as url, i (url)}
-        {#if !failedScreenshots[url]}
-          <Image
-            {url}
-            alt={`${name} screenshot ${i + 1}`}
-            data-testid={`details-screenshot-${i}`}
-            onerror={() => markScreenshotFailed(url)}
-          />
-        {/if}
-      {/each}
-    </div>
-  {:else}
-    <p class="empty" data-testid="details-no-screenshots">No screenshots available</p>
-  {/if}
-
-  {#if related.length}
-    <div class="related" data-testid="details-related">
-      <h3>Related</h3>
-      <div class="chips">
-        {#each related as entry, i (entry.name)}
-          <span class="related-chip" data-testid={`details-related-${i}`}>
-            {entry.name}
-            <em>{relatedKindLabel(entry.kind)}</em>
-          </span>
-        {/each}
-      </div>
-    </div>
   {/if}
 </div>
 
 <style>
   .overview {
     display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 20px 28px;
+  }
+
+  .main {
+    flex: 1 1 340px;
+    min-width: 0;
+    display: flex;
     flex-direction: column;
     gap: 16px;
   }
 
+  /* About 70 characters a line at most, with room between lines and
+     paragraphs: the server's descriptions are often one long block. */
   .description {
-    margin: 0;
+    max-width: 68ch;
     color: var(--text);
     font-size: 14px;
-    line-height: 1.5;
+    line-height: 1.65;
   }
 
-  .meta {
-    display: grid;
-    grid-template-columns: 140px 1fr;
-    gap: 6px 12px;
+  .description p {
     margin: 0;
+  }
+
+  .description p + p {
+    margin-top: 0.75em;
+  }
+
+  /* Each fact is its label over its value, on a quiet panel beside the
+     text. */
+  .meta {
+    flex: 0 1 220px;
+    min-width: 180px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 0;
+    padding: 14px 16px;
+    border-radius: var(--r-row);
+    background: var(--surface);
+    border: 1px solid var(--line);
   }
 
   .meta dt {
+    margin-bottom: 2px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.05em;
   }
 
   .meta dd {
     margin: 0;
-    /* A grid item defaults to `min-width: auto`; one unbreakable company
-       or franchise token would otherwise widen the whole right column. */
+    /* One unbreakable company or franchise token must not widen the panel. */
     min-width: 0;
     overflow-wrap: anywhere;
     color: var(--text);
     font-size: 13px;
-  }
-
-  .shots {
-    display: flex;
-    gap: 8px;
-    overflow-x: auto;
-    padding-bottom: 4px;
-  }
-
-  .shots :global(img) {
-    height: 110px;
-    width: auto;
-    flex: none;
-    border-radius: var(--r-chip);
-    object-fit: cover;
-  }
-
-  /* `Image.svelte`'s loading state is a <div class="skeleton">, not an <img>,
-     and its own `height: 100%` collapses against this auto-height flex line.
-     Without an explicit box the strip shows nothing until each screenshot
-     decodes, so the row jumps in as the images arrive. 16:9 keeps the
-     placeholder the width a landscape screenshot will take. */
-  .shots :global(.skeleton) {
-    height: 110px;
-    width: calc(110px * 16 / 9);
-    flex: none;
-    border-radius: var(--r-chip);
+    line-height: 1.4;
   }
 
   .empty {
-    margin: 0;
     color: var(--text-muted);
     font-size: 13px;
   }

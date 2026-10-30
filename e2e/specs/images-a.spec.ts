@@ -88,23 +88,26 @@ describe('images (a): cover, screenshots, install, library grid', () => {
       TRANSITION_TIMEOUT,
       "rom 101's details-cover",
     );
-    await waitForLoadedImage(
-      testId('details-screenshot-0'),
-      TRANSITION_TIMEOUT,
-      "rom 101's details-screenshot-0",
-    );
-    await waitForLoadedImage(
-      testId('details-screenshot-1'),
-      TRANSITION_TIMEOUT,
-      "rom 101's details-screenshot-1",
-    );
-    // Fixture rom 101's third merged_screenshots entry is a foreign URL
-    // (https://img.example/box-front.jpg); server_resolver filters any URL
-    // whose host isn't the RomM server's own, so it never becomes a third
-    // screenshot_urls entry and no details-screenshot-2 node ever exists.
-    await expect($(testId('details-screenshot-2'))).not.toExist();
-
     await expect($(testId('details-description'))).toHaveText('A classic platformer.');
+
+    // Screenshots are on the Media tab only. Fixture rom 101's third
+    // merged_screenshots entry is a foreign URL
+    // (https://img.example/box-front.jpg); server_resolver filters any URL
+    // whose host isn't the RomM server's own, so the tab's third tile is the
+    // trailer, not a third screenshot.
+    await $(testId('details-tab-media')).click();
+    await waitForLoadedImage(
+      `${testId('details-media-0')} img`,
+      TRANSITION_TIMEOUT,
+      "rom 101's first screenshot",
+    );
+    await waitForLoadedImage(
+      `${testId('details-media-1')} img`,
+      TRANSITION_TIMEOUT,
+      "rom 101's second screenshot",
+    );
+    await expect($(testId('details-media-play-2'))).toExist();
+    await $(testId('details-tab-overview')).click();
 
     await $(testId('details-close')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
@@ -238,17 +241,6 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     await $(testId('details-panel')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the details overlay never opened for rom 103',
-    });
-
-    await waitForLoadedImage(
-      testId('details-screenshot-0'),
-      TRANSITION_TIMEOUT,
-      "rom 103's first screenshot",
-    );
-    await $(testId('details-screenshot-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      reverse: true,
-      timeoutMsg: 'the 404 screenshot tile never went away on the Overview strip',
     });
 
     await $(testId('details-tab-media')).click();

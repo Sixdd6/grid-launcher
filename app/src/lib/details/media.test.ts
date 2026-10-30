@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  OVERVIEW_STRIP_LIMIT,
   fullIndex,
   galleryItems,
   isYoutubeId,
   nextIndex,
-  overviewStrip,
   prevIndex,
   trailerPoster,
   viewableIndex,
@@ -241,18 +239,6 @@ describe('the viewer anchor (design §7)', () => {
       'http://s/3.png': true,
     };
     expect(shown(failed, 1)).toBe(null);
-  });
-});
-
-describe('overviewStrip', () => {
-  it('caps at design §7 first six', () => {
-    const urls = Array.from({ length: 9 }, (_, i) => `http://s/${i}.png`);
-    expect(overviewStrip(urls)).toHaveLength(OVERVIEW_STRIP_LIMIT);
-    expect(overviewStrip(urls)[5]).toBe('http://s/5.png');
-  });
-
-  it('passes a shorter list through', () => {
-    expect(overviewStrip(['a', 'b'])).toEqual(['a', 'b']);
   });
 });
 

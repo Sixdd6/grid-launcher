@@ -288,9 +288,11 @@ The right side carries the title, one header line (platform · release year · d
 genres · rating), chips for the playing state, the identification state, region and language
 flags and the version, then up to five tabs:
 
-- **Overview** — the summary, a metadata grid (developer, companies, release, genres, game
-  modes, players, franchises), the first six screenshots, and a Related row filtered to
-  titles the server actually holds for that platform.
+- **Overview** — the summary, split into paragraphs at the server's own line breaks and
+  kept to a readable line length, with the Related row (filtered to titles the server
+  actually holds for that platform) under it; beside them, a facts panel (developer,
+  companies, release, genres, game modes, players, franchises), which moves under the
+  summary when the popup is narrow. Screenshots are on the Media tab only.
 - **Media** — every screenshot plus the trailer and any server-hosted video. Clicking a tile
   opens a fullscreen viewer with arrows, Esc and a caption.
 - **Saves** — the Manage Saves / Emulator Saves / Manage States panels described below.

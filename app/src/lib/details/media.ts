@@ -157,13 +157,6 @@ export function prevIndex(current: number, count: number): number {
   return (current - 1 + count) % count;
 }
 
-/** Design §7 Overview: "screenshot strip (first six of `merged_screenshots`)". */
-export const OVERVIEW_STRIP_LIMIT = 6;
-
-export function overviewStrip(urls: string[]): string[] {
-  return urls.slice(0, OVERVIEW_STRIP_LIMIT);
-}
-
 /** The line the viewer shows when the bytes of a hosted video never arrive. */
 export const VIDEO_LOAD_FAILED = 'This video could not be loaded';
 

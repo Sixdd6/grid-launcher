@@ -879,7 +879,7 @@
 
         <div class="tabpanel" role="tabpanel">
           {#if activeTab === 'overview'}
-            <OverviewTab name={subject.name} {description} {screenshotUrls} {detail} {serverTitles} />
+            <OverviewTab {description} {detail} {serverTitles} />
           {:else if activeTab === 'media'}
             <MediaTab
               items={mediaItems}
