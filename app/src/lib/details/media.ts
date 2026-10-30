@@ -199,3 +199,24 @@ export function videoLoadMessage(detail: string | null): string {
   if (trimmed === '') return VIDEO_LOAD_FAILED;
   return `${VIDEO_LOAD_FAILED} (${trimmed}).`;
 }
+
+/** The most the viewer enlarges media past its own resolution: beyond 2x,
+ *  a small screenshot turns visibly soft and blocky. */
+export const VIEWER_MAX_SCALE = 2;
+
+/**
+ * The size the viewer shows media of `width`×`height` px at: as large as
+ * fits `availWidth`×`availHeight` at its own shape, but never more than
+ * `maxScale` times its own size. Whole pixels; zero for an unknown size.
+ */
+export function fitMedia(
+  width: number,
+  height: number,
+  availWidth: number,
+  availHeight: number,
+  maxScale = VIEWER_MAX_SCALE
+): { width: number; height: number } {
+  if (!(width > 0 && height > 0 && availWidth > 0 && availHeight > 0)) return { width: 0, height: 0 };
+  const scale = Math.min(availWidth / width, availHeight / height, maxScale);
+  return { width: Math.floor(width * scale), height: Math.floor(height * scale) };
+}

@@ -3,6 +3,7 @@
   import Icon from '../Icon.svelte';
   import Image from '../Image.svelte';
   import {
+    fitMedia,
     nextIndex,
     prevIndex,
     trailerPoster,
@@ -33,6 +34,40 @@
 
   let viewerEl = $state<HTMLElement | null>(null);
   let current = $derived(items[index] ?? null);
+
+  // The media is shown as large as the stage allows at its own shape, but
+  // never past twice its own resolution (`fitMedia`), and the arrows sit
+  // just outside its edges, stopping at the window's edge when it is wide.
+  let stageWidth = $state(0);
+  let stageHeight = $state(0);
+  /** The current item's own size once known: a screenshot's on load, a
+   *  hosted video's from its metadata. Reset whenever the item changes. */
+  let natural = $state<{ width: number; height: number } | null>(null);
+  // Keyed by caption, not by the item object: `items` is rebuilt on every
+  // recompute in Details.svelte, and an image that has already loaded
+  // would never measure itself again.
+  let currentKey = $derived(current?.caption ?? '');
+  $effect(() => {
+    void currentKey;
+    natural = null;
+  });
+  /** The trailer poster's frame: 16:9, at most 1280 wide, never enlarged.
+   *  Room is left under it for the "open in your browser" note. */
+  const TRAILER_FRAME = { width: 1280, height: 720 };
+  const TRAILER_NOTE_PX = 48;
+  let mediaSize = $derived.by(() => {
+    if (current === null) return { width: 0, height: 0 };
+    if (current.kind === 'youtube') {
+      return fitMedia(TRAILER_FRAME.width, TRAILER_FRAME.height, stageWidth, stageHeight - TRAILER_NOTE_PX, 1);
+    }
+    if (current.kind === 'video') {
+      const size = natural ?? TRAILER_FRAME;
+      return fitMedia(size.width, size.height, stageWidth, stageHeight);
+    }
+    return natural ? fitMedia(natural.width, natural.height, stageWidth, stageHeight) : { width: 0, height: 0 };
+  });
+  /** One arrow (44px) and its gap (12px) each side of the media. */
+  const ARROW_ROOM_PX = 2 * (44 + 12);
 
   // The hosted video's URL, or null for any other item. The resolve effect
   // below keys on THIS and never on `current`: `items` is rebuilt
@@ -159,39 +194,55 @@
       <Icon name="close" size={20} />
     </button>
 
-    {#if items.length > 1}
-      <button
-        data-testid="media-viewer-prev"
-        class="icon-btn icon prev"
-        onclick={() => go(prevIndex(index, items.length))}
-        aria-label="Previous"
-      >
-        <Icon name="chevronLeft" size={20} />
-      </button>
-      <button
-        data-testid="media-viewer-next"
-        class="icon-btn icon next"
-        onclick={() => go(nextIndex(index, items.length))}
-        aria-label="Next"
-      >
-        <Icon name="chevronRight" size={20} />
-      </button>
-    {/if}
+    <div class="stage" bind:clientWidth={stageWidth} bind:clientHeight={stageHeight}>
+      {#if items.length > 1}
+        <!-- As wide as the media plus an arrow each side, and no wider than
+             the stage: the arrows hug the media, and on wide media stop at
+             the window's edge, over the media. -->
+        <div
+          class="nav"
+          style:width={mediaSize.width > 0 ? `min(${mediaSize.width + ARROW_ROOM_PX}px, 100%)` : '100%'}
+        >
+          <button
+            data-testid="media-viewer-prev"
+            class="icon-btn icon prev"
+            onclick={() => go(prevIndex(index, items.length))}
+            aria-label="Previous"
+          >
+            <Icon name="chevronLeft" size={20} />
+          </button>
+          <button
+            data-testid="media-viewer-next"
+            class="icon-btn icon next"
+            onclick={() => go(nextIndex(index, items.length))}
+            aria-label="Next"
+          >
+            <Icon name="chevronRight" size={20} />
+          </button>
+        </div>
+      {/if}
 
-    <div class="stage">
       {#if current.kind === 'screenshot'}
         <!-- No error line here: `items` is already the viewable list
              (`viewableItems` in Details.svelte), so a screenshot that fails
              leaves the list and the viewer moves to the next one — the same
              thing the Media tab does with its tile. `onScreenshotError` is
              what removes it. -->
-        <Image
-          url={current.url}
-          alt={current.caption}
-          placeholder="Screenshot"
-          data-testid="media-viewer-image"
-          onerror={() => onScreenshotError(current.url)}
-        />
+        <div
+          class="shot"
+          class:sized={mediaSize.width > 0}
+          style:width={mediaSize.width > 0 ? `${mediaSize.width}px` : null}
+          style:height={mediaSize.height > 0 ? `${mediaSize.height}px` : null}
+        >
+          <Image
+            url={current.url}
+            alt={current.caption}
+            placeholder="Screenshot"
+            data-testid="media-viewer-image"
+            onmeasure={(width, height) => (natural = { width, height })}
+            onerror={() => onScreenshotError(current.url)}
+          />
+        </div>
       {:else if current.kind === 'youtube'}
         <!-- No embed: an iframe to youtube-nocookie.com never plays on
              Linux. The page origin is `tauri://localhost`, a "local scheme"
@@ -206,7 +257,11 @@
           thumbnailFailed[current.videoId] === true
         )}
         <div class="youtube-wrap">
-          <div class="frame youtube-frame">
+          <div
+            class="frame youtube-frame"
+            style:width={mediaSize.width > 0 ? `${mediaSize.width}px` : null}
+            style:height={mediaSize.height > 0 ? `${mediaSize.height}px` : null}
+          >
             {#if poster.kind === 'youtube'}
               <!-- Plain <img>, deliberately NOT `Image.svelte`: that
                    component fetches through `ensure_image` -> RommClient,
@@ -257,8 +312,14 @@
           <video
             data-testid="media-viewer-video"
             class="frame"
+            style:width={mediaSize.width > 0 ? `${mediaSize.width}px` : null}
+            style:height={mediaSize.height > 0 ? `${mediaSize.height}px` : null}
             src={videoSrc}
             controls
+            onloadedmetadata={(e) => {
+              const v = e.currentTarget as HTMLVideoElement;
+              if (v.videoWidth > 0 && v.videoHeight > 0) natural = { width: v.videoWidth, height: v.videoHeight };
+            }}
             onerror={() => (videoError = true)}
           ></video>
           {#if videoError}
@@ -301,27 +362,60 @@
     display: grid;
     grid-template-rows: 1fr auto;
     place-items: center;
-    padding: 48px;
+    /* Clear of the close button above; 16px at the sides, which is where
+       the arrows stop on wide media. */
+    padding: 64px 16px 16px;
     box-sizing: border-box;
   }
 
   .stage {
+    position: relative;
     display: grid;
     place-items: center;
     width: 100%;
     height: 100%;
     min-height: 0;
+    min-width: 0;
   }
 
-  .stage :global(img) {
+  /* Every child shares the one centred cell, so the arrows' row centres on
+     the media. */
+  .stage > :global(*) {
+    grid-area: 1 / 1;
+  }
+
+  .nav {
+    position: relative;
+    z-index: 1;
+    height: 44px;
+    pointer-events: none;
+  }
+
+  .nav .icon {
+    pointer-events: auto;
+  }
+
+  /* The fitted size is set once the image has measured itself; until then
+     it is held invisible, so it never flashes at its own size first. */
+  .shot {
+    display: grid;
+    place-items: center;
     max-width: 100%;
     max-height: 100%;
+  }
+
+  .shot :global(img) {
+    display: block;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
   }
 
+  .shot:not(.sized) :global(img) {
+    visibility: hidden;
+  }
+
   .frame {
-    width: min(100%, 1280px);
-    aspect-ratio: 16 / 9;
     border: none;
     background: #000;
   }
@@ -424,18 +518,13 @@
     right: 16px;
   }
 
-  /* `top: 50%` alone put the button's TOP edge on the centre line, so both
-     nav buttons rendered 22px low. The translate is what actually centres
-     them. */
   .prev {
-    left: 16px;
-    top: 50%;
-    transform: translateY(-50%);
+    left: 0;
+    top: 0;
   }
 
   .next {
-    right: 16px;
-    top: 50%;
-    transform: translateY(-50%);
+    right: 0;
+    top: 0;
   }
 </style>

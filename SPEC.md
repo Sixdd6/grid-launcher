@@ -297,6 +297,9 @@ flags and the version, then up to five tabs:
   overflows: Screenshots (every screenshot, at its own shape) and Videos (the trailer and
   any server-hosted video). A row with nothing in it is left out. Clicking a tile opens a
   fullscreen viewer with arrows, Esc and a caption, which walks screenshots then videos.
+  The viewer shows each item as large as the window allows at its own shape, but never
+  more than twice its own resolution; the arrows sit just outside the media's edges and
+  stop at the window's edge when the media is wide.
 - **Saves** — the Manage Saves / Emulator Saves / Manage States panels described below.
 - **Files** — every file the server lists with its size and its version (the version tag
   parsed out of the file name, else the file's last-modified date), the installed-versus-

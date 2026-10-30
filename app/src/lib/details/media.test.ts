@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   fullIndex,
   galleryItems,
+  fitMedia,
   isYoutubeId,
   mediaSections,
   nextIndex,
@@ -342,5 +343,25 @@ describe('mediaSections', () => {
   it('leaves out a screenshot whose image failed', () => {
     const { screenshots } = mediaSections(items, { a: true });
     expect(screenshots.map((e) => e.index)).toEqual([1]);
+  });
+});
+
+describe('fitMedia', () => {
+  it('fills the space at the media shape when that is within 2x', () => {
+    expect(fitMedia(1280, 720, 1600, 1000)).toEqual({ width: 1600, height: 900 });
+    expect(fitMedia(1000, 1000, 1600, 900)).toEqual({ width: 900, height: 900 });
+  });
+
+  it('never enlarges past twice the media size', () => {
+    expect(fitMedia(320, 240, 2560, 1400)).toEqual({ width: 640, height: 480 });
+  });
+
+  it('shrinks media larger than the space', () => {
+    expect(fitMedia(3840, 2160, 1920, 1080)).toEqual({ width: 1920, height: 1080 });
+  });
+
+  it('is zero while a size is unknown', () => {
+    expect(fitMedia(0, 0, 1600, 900)).toEqual({ width: 0, height: 0 });
+    expect(fitMedia(640, 480, 0, 900)).toEqual({ width: 0, height: 0 });
   });
 });
