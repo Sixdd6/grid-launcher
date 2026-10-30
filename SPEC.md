@@ -293,8 +293,10 @@ flags and the version, then up to five tabs:
   actually holds for that platform) under it; beside them, a facts panel (developer,
   companies, release, genres, game modes, players, franchises), which moves under the
   summary when the popup is narrow. Screenshots are on the Media tab only.
-- **Media** — every screenshot plus the trailer and any server-hosted video. Clicking a tile
-  opens a fullscreen viewer with arrows, Esc and a caption.
+- **Media** — two horizontally scrolling rows, each with its count and arrows when it
+  overflows: Screenshots (every screenshot, at its own shape) and Videos (the trailer and
+  any server-hosted video). A row with nothing in it is left out. Clicking a tile opens a
+  fullscreen viewer with arrows, Esc and a caption, which walks screenshots then videos.
 - **Saves** — the Manage Saves / Emulator Saves / Manage States panels described below.
 - **Files** — every file the server lists with its size and its version (the version tag
   parsed out of the file name, else the file's last-modified date), the installed-versus-

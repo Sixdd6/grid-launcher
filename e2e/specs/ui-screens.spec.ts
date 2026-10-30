@@ -97,6 +97,22 @@ describe('ui screens: the main views for a design review', () => {
     }
   }
 
+  it('the Media tab, both themes, fade 30', async () => {
+    for (const theme of ['dark', 'light']) {
+      await appearance(theme, 30);
+      await openServerPlatform();
+      const card = await $('[data-testid="server-grid"] [data-testid^="game-card-"]');
+      if (!(await card.isExisting())) continue;
+      await card.click();
+      await $(testId('details-panel')).waitForDisplayed({ timeout: 20_000 });
+      await $(testId('details-tab-media')).click();
+      await browser.pause(2500);
+      await shot(`details-media-${theme}-fade30`);
+      await $(testId('details-tab-overview')).click();
+      await $(testId('details-close')).click();
+    }
+  });
+
   it('labels on hover, both themes, fade 60', async () => {
     for (const theme of ['dark', 'light']) {
       await appearance(theme, 60);

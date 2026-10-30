@@ -89,6 +89,31 @@ export function galleryItems(input: MediaGalleryInput): MediaItem[] {
   return items;
 }
 
+/** One tile of a Media tab row, with its index in the full gallery list,
+ *  which is what the viewer and the `details-media-<i>` ids use. */
+export type MediaEntry = { item: MediaItem; index: number };
+
+/**
+ * The Media tab's two rows: screenshots, and videos (the trailer and a
+ * hosted video). A screenshot whose image failed is left out, as
+ * `viewableItems` leaves it out of the viewer.
+ */
+export function mediaSections(
+  items: MediaItem[],
+  failed: Record<string, true>
+): { screenshots: MediaEntry[]; videos: MediaEntry[] } {
+  const screenshots: MediaEntry[] = [];
+  const videos: MediaEntry[] = [];
+  items.forEach((item, index) => {
+    if (item.kind === 'screenshot') {
+      if (failed[item.url] !== true) screenshots.push({ item, index });
+    } else {
+      videos.push({ item, index });
+    }
+  });
+  return { screenshots, videos };
+}
+
 /**
  * The gallery items a user can actually look at: every screenshot whose
  * image failed to load is dropped, exactly as `MediaTab.svelte` drops its

@@ -3,6 +3,7 @@ import {
   fullIndex,
   galleryItems,
   isYoutubeId,
+  mediaSections,
   nextIndex,
   prevIndex,
   trailerPoster,
@@ -321,5 +322,25 @@ describe('videoLoadMessage', () => {
     expect(videoLoadMessage('  not connected  ')).toBe(
       'This video could not be loaded (not connected).'
     );
+  });
+});
+
+describe('mediaSections', () => {
+  const items = [
+    { kind: 'screenshot' as const, url: 'a', caption: 'G — screenshot 1' },
+    { kind: 'screenshot' as const, url: 'b', caption: 'G — screenshot 2' },
+    { kind: 'youtube' as const, videoId: 'dQw4w9WgXcQ', caption: 'G — trailer' },
+    { kind: 'video' as const, url: '/v.mp4', caption: 'G — video' },
+  ];
+
+  it('splits screenshots from videos, keeping each full-list index', () => {
+    const { screenshots, videos } = mediaSections(items, {});
+    expect(screenshots.map((e) => e.index)).toEqual([0, 1]);
+    expect(videos.map((e) => e.index)).toEqual([2, 3]);
+  });
+
+  it('leaves out a screenshot whose image failed', () => {
+    const { screenshots } = mediaSections(items, { a: true });
+    expect(screenshots.map((e) => e.index)).toEqual([1]);
   });
 });
