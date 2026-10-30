@@ -2,6 +2,7 @@
 // persisted value, the components own the markup, this module owns the
 // three numbers and the template string they turn into.
 import type { CardSizeName } from '../api';
+import type { CardLabels } from './labels';
 
 export const CARD_SIZES = ['small', 'medium', 'large'] as const;
 export type CardSize = CardSizeName;
@@ -76,48 +77,37 @@ export function parseTracks(template: string | null | undefined): number[] | nul
 }
 
 /**
- * The cover's fixed aspect ratio (design §5, user decision 2026-09-05).
- * Applied to the cover box; a loaded image with a different intrinsic
- * ratio is fitted inside it (`object-fit: contain`) over a blurred copy of
- * itself, so rows stay even and no box art is cropped.
+ * Every card's cell is 3:4 (design §5): wide enough for a column, as tall as
+ * a portrait box. The cover inside keeps its OWN shape (look-and-feel plan
+ * 2026-10-30): it is fitted inside the cell, never cropped, and sits on the
+ * cell's bottom edge so the titles and the next row line up whatever the
+ * shape. Width over height, for the windowed grid's row arithmetic.
  */
-export const CARD_COVER_RATIO = '3 / 4';
+export const CARD_CELL_ASPECT = 3 / 4;
 
-/** The same ratio as a number, width over height, for the windowed grid's
- *  row arithmetic (`window.ts`). */
-export const CARD_COVER_ASPECT = 3 / 4;
+/** The "Always visible" label under the cover: its height, and the gap
+ *  above it, in px. "Visible on hover" reserves neither: its label floats
+ *  over the gap below the cover. */
+export const LABEL_HEIGHT_PX = 24;
+export const LABEL_GAP_PX = 8;
 
-/** The one-line title strip under the cover, in px. */
-export const TITLE_ROW_HEIGHT_PX = 22;
+/** The height a card adds under its cell for its label, in px. */
+export function labelRowPx(labels: CardLabels): number {
+  return labels === 'always' ? LABEL_GAP_PX + LABEL_HEIGHT_PX : 0;
+}
 
 /**
- * The gap between the cover and the title strip, and the height of the
- * centred Play/Install button, in px.
+ * The hover bar's strip at the bottom of the cover, in px: Play/Install,
+ * Cloud sync and Details sit in it, and nothing interactive sits above it.
  *
- * Both are part of the click-safety arithmetic below, so the component sets
- * them as CSS custom properties (`--card-gap`, `--primary-h`) from these
- * constants rather than hard-coding the numbers in its stylesheet. That way
- * the test and the rendered CSS cannot drift apart.
+ * That keeps the band around the CARD ROOT's centre free of controls.
+ * WebdriverIO clicks an element's centre, and `library-card-<id>` /
+ * `game-card-<id>` are what the specs click to open Details: a control
+ * there would launch or install instead. The root is the cell plus the
+ * label row, so its centre is at `(cell + labelRow) / 2`, and the cover's
+ * bottom is the cell's bottom whatever the cover's shape. `size.test.ts`
+ * proves the strip clears the centre for every card size and both label
+ * modes. Clicks on the cover above the strip, or on the empty part of a
+ * cell above a short cover, fall through to the root and open Details.
  */
-export const CARD_GAP_PX = 4;
-export const PRIMARY_HEIGHT_PX = 30;
-
-/**
- * Where the hover overlay's centred Play/Install sits, as a fraction of the
- * cover height, and how tall the bottom action row's reserved strip is.
- *
- * These two numbers exist so the band around the CARD ROOT's centre stays
- * free of interactive controls. WebdriverIO clicks an element's centre, and
- * `library-card-<id>` / `game-card-<id>` are the ids the specs click to
- * open Details — if the primary action or the action row covered that
- * point, every spec click would launch or install instead. The card root is
- * the cover plus `CARD_GAP_PX` plus `TITLE_ROW_HEIGHT_PX`, so its centre
- * lands at `(cover + CARD_GAP_PX + TITLE_ROW_HEIGHT_PX) / 2` — below 59% of
- * the cover for every size this app renders. `size.test.ts` proves the
- * primary button (centred at 34% of the cover, `PRIMARY_HEIGHT_PX` tall)
- * and the action row (the last `ACTION_ROW_HEIGHT_PX` px) both clear it.
- * The gradient overlay itself is `pointer-events: none`, so a click in that
- * band falls through to the card root and opens Details.
- */
-export const PRIMARY_CENTRE_FRACTION = 0.34;
-export const ACTION_ROW_HEIGHT_PX = 38;
+export const ACTION_BAR_HEIGHT_PX = 38;

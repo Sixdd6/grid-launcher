@@ -1,22 +1,19 @@
 <script lang="ts">
   import { fileSrc } from './fileSrc';
   import { api } from './api';
-  import { backdropPaths, imagePaths, startImageLoad, watchNear, type LoadSlot } from './imageLoad';
-  import { coverFit, type CoverFit } from './letterbox';
+  import { imagePaths, startImageLoad, watchNear, type LoadSlot } from './imageLoad';
 
   let {
     url,
     alt,
     placeholder = alt,
     onerror,
-    backdrop = false,
     ...rest
   }: {
     url: string | null;
     alt: string;
     placeholder?: string;
     onerror?: () => void;
-    backdrop?: boolean;
     [key: string]: unknown;
   } = $props();
   let src = $state<string | null>(null);
@@ -98,54 +95,8 @@
     };
   });
 
-  /** How the loaded cover sits in its frame, for a `backdrop` image only
-   *  (`letterbox.ts`). `null` until it has loaded: a backdrop behind art that
-   *  fills its frame is never seen, and it is the most expensive thing a card
-   *  paints. `crop` is set on the `<img>` as `data-fit` so the card can fill
-   *  the frame with near-3:4 art instead. */
-  let fit = $state<CoverFit | null>(null);
-
-  $effect(() => {
-    void url;
-    fit = null;
-  });
-
-  /** The letterboxed cover's backdrop: a small, already blurred and darkened
-   *  JPEG the backend builds once (`ensureCardBackdrop`), scaled up behind
-   *  the bars. No CSS filter: blurring the cover on every paint made a
-   *  platform of square covers scroll at 35ms a frame (`images::backdrop`).
-   *  Until it arrives, or if it cannot be built, the bars stay plain. */
-  let backdropSrc = $state<string | null>(null);
-
-  $effect(() => {
-    backdropSrc = null;
-    const cover = url;
-    if (!backdrop || fit !== 'letterbox' || !cover) return;
-    const known = backdropPaths.get(cover);
-    if (known !== undefined) {
-      backdropSrc = fileSrc(known);
-      return;
-    }
-    let cancelled = false;
-    api
-      .ensureCardBackdrop(cover)
-      .then((path) => {
-        backdropPaths.set(cover, path);
-        if (!cancelled) backdropSrc = fileSrc(path);
-      })
-      .catch(() => {
-        // Plain bars: the cover itself is what matters.
-      });
-    return () => {
-      cancelled = true;
-    };
-  });
-
-  function handleImgLoad(e: Event) {
+  function handleImgLoad() {
     slot?.release();
-    if (!backdrop) return;
-    const img = e.currentTarget as HTMLImageElement;
-    fit = coverFit(img.naturalWidth, img.naturalHeight, img.clientWidth, img.clientHeight);
   }
 
   function handleImgError() {
@@ -178,24 +129,12 @@
        most a dozen images at once, the ones near the visible area first
        (`imageLoad.ts`) — fetching all of a 2000-game platform at open
        exhausted the web process's file descriptors. -->
-  {#if backdrop && fit === 'letterbox' && backdropSrc}
-    <img
-      class="backdrop"
-      src={backdropSrc}
-      alt=""
-      aria-hidden="true"
-      loading="eager"
-      decoding="async"
-      draggable="false"
-    />
-  {/if}
   <img
     {src}
     {alt}
     loading="eager"
     decoding="async"
     draggable="false"
-    data-fit={fit === 'crop' ? 'crop' : undefined}
     onload={handleImgLoad}
     onerror={handleImgError}
     {...rest}

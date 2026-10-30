@@ -493,9 +493,9 @@
 
 <svelte:window onkeydown={onKey} />
 
-<section data-testid="server-section" class="server over-art">
+<section data-testid="server-section" class="server">
   {#if showLibraryBanner}
-    <div data-testid="library-path-banner" class="library-banner">
+    <div data-testid="library-path-banner" class="library-banner panel">
       <span>Set a library folder to install games.</span>
       <input
         data-testid="library-path-input"
@@ -519,7 +519,7 @@
   {/if}
 
   {#if !session.connected}
-    <div data-testid="server-offline" class="offline">
+    <div data-testid="server-offline" class="offline panel">
       Not connected to {hostOf(session.serverUrl)}
       <button data-testid="server-retry" onclick={() => retry()}>Retry</button>
     </div>
@@ -533,6 +533,7 @@
       />
 
       <div class="body">
+        <div class="head panel">
         <header data-testid="server-platform-header" class="platform-header">
           <h2>{activePlatformName}</h2>
           {#if !gamesLoading}
@@ -584,9 +585,10 @@
             </select>
           </label>
         </div>
+        </div>
 
         {#if actionError}
-          <p data-testid="server-error" class="error" role="alert">{actionError}</p>
+          <p data-testid="server-error" class="error panel" role="alert">{actionError}</p>
           {#if actionError === umuOfferFor}<UmuInstallOffer />{/if}
         {/if}
 
@@ -595,7 +597,7 @@
                "no games" about the new one before it has answered would be a
                guess. -->
         {:else if visible.length === 0}
-          <p data-testid="server-empty" class="empty">
+          <p data-testid="server-empty" class="empty panel">
             {search.trim() === ''
               ? 'This platform has no games'
               : `No games match “${search.trim()}”`}
@@ -604,6 +606,7 @@
           <CardGrid
             bind:this={grid}
             gridId="server-grid"
+            labels={uiSettings.cardLabels}
             size={uiSettings.cardSizeServer}
             items={visible}
             key={(game) => game.id}
@@ -619,6 +622,8 @@
                 installed={isInstalled(game, activePlatformName)}
                 updateLabel={updates.labelFor(game.id)}
                 {cloudPlatforms}
+                labels={uiSettings.cardLabels}
+                showPlatform={false}
                 focused={i === focusIndex && inputMode.directional}
                 onOpen={() => {
                   // A click moves the selection, so keyboard navigation
@@ -663,6 +668,7 @@
   .columns {
     display: flex;
     align-items: stretch;
+    gap: var(--gutter);
     flex: 1 1 auto;
     min-height: 0;
   }
@@ -678,16 +684,21 @@
     overflow-y: auto;
   }
 
+  /* The header, chips and toolbar are one panel: they belong together, and
+     their text never sits on the art. */
+  .head {
+    flex: none;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
   .platform-header {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
     gap: 8px 14px;
-    padding: 16px 24px 0;
-    width: 100%;
-    max-width: 1920px;
-    margin: 0 auto;
-    box-sizing: border-box;
   }
 
   .platform-header h2 {
@@ -725,9 +736,9 @@
     font: inherit;
     font-size: 11px;
     padding: 4px 10px;
-    border-radius: var(--r-chip);
-    border: 1px solid var(--border);
-    background: var(--surface);
+    border-radius: var(--r-pill);
+    border: 1px solid var(--line-strong);
+    background: transparent;
     color: var(--text-muted);
   }
 
@@ -760,11 +771,6 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 12px 24px 0;
-    width: 100%;
-    max-width: 1920px;
-    margin: 0 auto;
-    box-sizing: border-box;
   }
 
   .search {
@@ -775,8 +781,8 @@
     box-sizing: border-box;
     padding: 0 10px;
     border-radius: var(--r-control);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+    background: var(--field);
     color: var(--text-h);
   }
 
@@ -795,19 +801,25 @@
     box-sizing: border-box;
     padding: 0 8px;
     border-radius: var(--r-control);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+    background: var(--field);
     color: var(--text-h);
   }
 
+  /* Notices sit on their own small panel: never bare text on the art. */
+  .empty,
+  .error {
+    align-self: flex-start;
+    margin: var(--gutter) 0 0;
+    padding: 10px 14px;
+  }
+
   .empty {
-    padding: 40px 24px;
     color: var(--text-muted);
     font-size: 14px;
   }
 
   .error {
-    margin: 8px 24px 0;
     color: var(--danger);
     font-size: 12px;
   }
@@ -817,8 +829,8 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 10px;
-    padding: 10px 24px;
-    background: var(--surface);
+    padding: 10px 16px;
+    margin-bottom: var(--gutter);
     color: var(--text-h);
     font-size: 13px;
   }
@@ -829,8 +841,8 @@
     font: inherit;
     padding: 6px 8px;
     border-radius: var(--r-control);
-    border: 1px solid var(--border);
-    background: var(--bg);
+    border: 1px solid var(--line-strong);
+    background: var(--field);
     color: var(--text-h);
   }
 

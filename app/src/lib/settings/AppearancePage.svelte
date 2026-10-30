@@ -11,12 +11,14 @@
     commitBackgroundFade,
     previewBackgroundFade,
     setBackgroundEnabled,
+    setCardLabels,
     setCardSize,
     setTheme,
     uiSettings,
   } from '../stores/uiSettings.svelte';
   import { BLUR_MAX, FADE_MAX, type ThemeChoice } from '../theme';
   import { CARD_SIZES, cardSizeLabel, normalizeCardSize } from '../cards/size';
+  import { CARD_LABEL_MODES, cardLabelsLabel, normalizeCardLabels } from '../cards/labels';
   import { backgroundEnabled, CARD_SIZE_VIEWS } from './appearance';
 
   function onThemeChange(e: Event) {
@@ -29,6 +31,10 @@
 
   function onToggle(e: Event) {
     setBackgroundEnabled((e.currentTarget as HTMLInputElement).checked).catch(() => {});
+  }
+
+  function onCardLabels(e: Event) {
+    setCardLabels(normalizeCardLabels((e.currentTarget as HTMLSelectElement).value)).catch(() => {});
   }
 
   function onCardSize(view: 'library' | 'server', e: Event) {
@@ -139,6 +145,15 @@
     </select>
   </div>
 {/each}
+
+<div class="field">
+  <label for="card-labels">Game labels</label>
+  <select data-testid="card-labels" id="card-labels" value={uiSettings.cardLabels} onchange={onCardLabels}>
+    {#each CARD_LABEL_MODES as mode (mode)}
+      <option value={mode}>{cardLabelsLabel(mode)}</option>
+    {/each}
+  </select>
+</div>
 
 <style>
   .field {

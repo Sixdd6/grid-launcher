@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ACTION_ROW_HEIGHT_PX,
-  CARD_COVER_RATIO,
-  CARD_GAP_PX,
+  ACTION_BAR_HEIGHT_PX,
+  CARD_CELL_ASPECT,
   CARD_SIZES,
-  PRIMARY_CENTRE_FRACTION,
-  PRIMARY_HEIGHT_PX,
-  TITLE_ROW_HEIGHT_PX,
+  LABEL_GAP_PX,
+  LABEL_HEIGHT_PX,
   cardMinPx,
+  labelRowPx,
   cardSizeLabel,
   columnsOf,
   gridTemplate,
@@ -96,42 +95,37 @@ describe('parseTracks', () => {
 
 describe('card hover geometry (E2E click safety)', () => {
   // Specs click `library-card-<id>` / `game-card-<id>` to open Details, and
-  // WebdriverIO clicks an element's CENTRE — which also hovers it, raising
-  // the overlay. If the centred Play/Install button or the action row sat
-  // under that point, every such click would launch or install instead.
-  // The card root is the cover plus the gap plus a one-line title, so its
-  // centre is always BELOW the cover's centre; the overlay keeps that band
-  // free.
+  // WebdriverIO clicks an element's CENTRE — which also hovers it, showing
+  // the hover bar. If a bar control sat under that point, every such click
+  // would launch or install instead. The card root is the 3:4 cell plus the
+  // label row; the cover sits on the cell's bottom edge whatever its shape,
+  // so the bar (the cover's bottom strip) is always at the cell's bottom.
   //
   // Every number here is an exported constant that `GameCard.svelte` feeds
   // into its own CSS as a custom property, so this arithmetic guards what
   // the browser actually lays out.
-  const heights = [160, 213, 267, 400]; // small, medium, large, a stretched large
-  const rootCentre = (cover: number) => (cover + CARD_GAP_PX + TITLE_ROW_HEIGHT_PX) / 2;
+  const cells = [160, 213, 267, 400]; // small, medium, large, a stretched large
+  const rootCentre = (cell: number, labelRow: number) => (cell + labelRow) / 2;
 
-  it('never puts the centred primary action under the card root centre', () => {
-    for (const cover of heights) {
-      const primaryBottom = cover * PRIMARY_CENTRE_FRACTION + PRIMARY_HEIGHT_PX / 2;
-      expect(primaryBottom).toBeLessThan(rootCentre(cover));
+  it('never puts the hover bar under the card root centre, in either label mode', () => {
+    for (const cell of cells) {
+      for (const labels of ['always', 'hover'] as const) {
+        const barTop = cell - ACTION_BAR_HEIGHT_PX;
+        expect(barTop).toBeGreaterThan(rootCentre(cell, labelRowPx(labels)));
+      }
     }
   });
 
-  it('never puts the bottom action row under the card root centre', () => {
-    for (const cover of heights) {
-      const actionRowTop = cover - ACTION_ROW_HEIGHT_PX;
-      expect(actionRowTop).toBeGreaterThan(rootCentre(cover));
-    }
+  it('derives the cells from the grids own minimum column widths', () => {
+    // 3:4 at each minimum column width — the smallest cell each size can
+    // lay out, and so the tightest case for the bound above.
+    const derived = CARD_SIZES.map((size) => Math.round(cardMinPx(size) / CARD_CELL_ASPECT));
+    expect(derived).toEqual([160, 213, 267]);
+    for (const cell of derived) expect(cells).toContain(cell);
   });
 
-  it('derives the covers from the grids own minimum column widths', () => {
-    // 3:4 at each minimum column width — the smallest cover each size can
-    // lay out, and so the tightest case for the two bounds above.
-    const covers = CARD_SIZES.map((size) => Math.round((cardMinPx(size) * 4) / 3));
-    expect(covers).toEqual([160, 213, 267]);
-    for (const cover of covers) expect(heights).toContain(cover);
-  });
-
-  it('states the 3:4 fallback ratio design section 5 requires', () => {
-    expect(CARD_COVER_RATIO).toBe('3 / 4');
+  it('reserves a label row for "Always visible" and none for "Visible on hover"', () => {
+    expect(labelRowPx('always')).toBe(LABEL_GAP_PX + LABEL_HEIGHT_PX);
+    expect(labelRowPx('hover')).toBe(0);
   });
 });

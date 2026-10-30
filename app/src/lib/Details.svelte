@@ -987,7 +987,7 @@
   .backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background: var(--scrim);
     backdrop-filter: blur(6px);
     display: grid;
     place-items: center;
@@ -1001,14 +1001,18 @@
     box-sizing: border-box;
     padding: 24px;
     border-radius: var(--r-dialog);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    /* The overlay level (look-and-feel plan 2026-10-30): opaque, with a
+       shadow over the scrim, and no coloured edge. */
+    background: var(--overlay);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-overlay);
   }
 
+  /* The dialog takes focus when it opens so the keyboard lands inside it;
+     the dialog itself is not a control, so it draws no ring. Its controls
+     draw theirs. */
   .panel:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 2px;
+    outline: none;
   }
 
   /* The left column is fixed at design §7's 240px; only the right column's
@@ -1053,18 +1057,29 @@
     color: var(--primary);
   }
 
+  /* The whole cover at its own shape, never cropped: the box shrinks to the
+     image, capped at the column's width and a portrait cover's height, so
+     a square or wide cover leaves no gap above the actions. */
   .cover {
-    width: 100%;
-    aspect-ratio: 3 / 4;
-    border-radius: var(--r-row);
-    overflow: hidden;
+    display: flex;
+    justify-content: center;
     flex: none;
   }
 
   .cover :global(img) {
+    display: block;
+    max-width: 100%;
+    max-height: 320px;
+    border-radius: var(--r-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .cover :global(.skeleton),
+  .cover :global(.placeholder) {
     width: 100%;
-    height: 100%;
-    object-fit: cover;
+    aspect-ratio: 3 / 4;
+    height: auto;
+    border-radius: var(--r-card);
   }
 
   h2 {

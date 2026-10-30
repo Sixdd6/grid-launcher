@@ -215,7 +215,7 @@
 </header>
 
 {#if !session.connected && session.lastError}
-  <p data-testid="session-error" class="error-line over-art">{session.lastError}</p>
+  <p data-testid="session-error" class="error-line">{session.lastError}</p>
 {/if}
 
 <!-- All five views stay mounted and switch with `hidden` (design §3), so
@@ -267,8 +267,10 @@
     height: var(--topbar-h);
     padding: 0 16px;
     box-sizing: border-box;
-    background: var(--surface-2);
-    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    -webkit-backdrop-filter: var(--panel-blur);
+    backdrop-filter: var(--panel-blur);
+    border-bottom: 1px solid var(--line);
     position: sticky;
     top: 0;
     z-index: 5;
@@ -303,7 +305,7 @@
     flex: 0 0 auto;
     padding: 3px;
     border-radius: var(--r-pill);
-    background: var(--surface);
+    background: var(--field);
   }
 
   .pill {
@@ -390,9 +392,9 @@
     min-width: 200px;
     padding: 4px;
     border-radius: var(--r-row);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--line);
+    background: var(--overlay);
+    box-shadow: var(--shadow-overlay);
   }
 
   .server-menu button {
@@ -431,6 +433,7 @@
     flex: none;
     margin: 0;
     padding: 4px 16px;
+    background: var(--panel);
     color: var(--danger);
     font-size: 11px;
   }
@@ -449,6 +452,8 @@
        edge. A view that scrolls as a whole gets its breathing room from
        `.view.scrolls` below. */
     box-sizing: border-box;
+    /* The gutter around the view's panels: the art shows through it. */
+    padding: var(--gutter);
     /* The app's scroll boundary. `#app` is exactly one viewport tall, so a
        view that overflows scrolls HERE and never on the document; the fixed
        `BackgroundArt` layer then stays composited instead of repainting its
@@ -461,7 +466,7 @@
   /* Downloads is the one view with no rail: it scrolls as a whole, so its
      last row keeps some room above the window's (or the strip's) edge. */
   .view.scrolls {
-    padding-bottom: 24px;
+    padding-bottom: calc(var(--gutter) + 12px);
   }
 
 </style>

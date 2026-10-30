@@ -7,7 +7,7 @@
 // and hover (measured 2026-10-20). The cost is the number of cards in the
 // DOM, so only the rows near the visible part of the scroll container exist.
 // A platform that fits on screen renders every card, exactly as before.
-import { CARD_COVER_ASPECT, CARD_GAP_PX, TITLE_ROW_HEIGHT_PX } from './size';
+import { CARD_CELL_ASPECT } from './size';
 
 /** The grid's `gap`, in px. `CardGrid.svelte` sets it from this. */
 export const GRID_GAP_PX = 16;
@@ -41,14 +41,15 @@ export type WindowRange = {
 
 /**
  * A card's row height and pitch for a column `trackPx` wide. Matches the
- * card's own layout: a 3:4 cover, then `CARD_GAP_PX`, then the title.
+ * card's own layout: a 3:4 cell, then its label row (`labelRowPx`: the
+ * "Always visible" label, or nothing for "Visible on hover").
  *
  * Rounded to whole px, and the grid lays its rows out at exactly this height
  * (`grid-auto-rows`). WebKit rounds a fractional row to 1/64 px, which over
  * the 800 rows of a 2500-game platform put the math 4px off the layout.
  */
-export function rowMetrics(trackPx: number, gap: number = GRID_GAP_PX): RowMetrics {
-  const rowHeight = Math.round(trackPx / CARD_COVER_ASPECT + CARD_GAP_PX + TITLE_ROW_HEIGHT_PX);
+export function rowMetrics(trackPx: number, gap: number = GRID_GAP_PX, labelRow: number = 0): RowMetrics {
+  const rowHeight = Math.round(trackPx / CARD_CELL_ASPECT + labelRow);
   return { rowHeight, pitch: rowHeight + gap };
 }
 

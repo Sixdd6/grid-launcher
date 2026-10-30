@@ -263,6 +263,7 @@ describe('background blur', () => {
       background_blur: 0,
       card_size_library: 'medium',
       card_size_server: 'medium',
+      card_labels: 'always',
     });
   });
 
@@ -284,5 +285,46 @@ describe('background blur', () => {
     await store.commitBackgroundBlur(18);
     await store.setCardSize('library', 'large');
     expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ background_blur: 18 }));
+  });
+});
+
+describe('game labels', () => {
+  async function loadStore(labels: unknown) {
+    vi.resetModules();
+    vi.stubGlobal('localStorage', fakeStorage());
+    vi.stubGlobal('document', { documentElement: { dataset: {} } });
+    vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
+    const setUiSettings = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('../api', () => ({
+      api: {
+        getUiSettings: () =>
+          Promise.resolve({
+            theme: 'system',
+            background_fade: 25,
+            background_blur: 2,
+            card_size_library: 'medium',
+            card_size_server: 'medium',
+            card_labels: labels,
+          }),
+        setUiSettings,
+      },
+    }));
+    const store = await import('./uiSettings.svelte');
+    await store.initUiSettings();
+    return { store, setUiSettings };
+  }
+
+  it('loads the stored mode, and a config without one shows labels always', async () => {
+    expect((await loadStore('hover')).store.uiSettings.cardLabels).toBe('hover');
+    expect((await loadStore(undefined)).store.uiSettings.cardLabels).toBe('always');
+  });
+
+  it('applies a change at once and saves it with the rest of the settings', async () => {
+    const { store, setUiSettings } = await loadStore('always');
+    await store.setCardLabels('hover');
+    expect(store.uiSettings.cardLabels).toBe('hover');
+    expect(setUiSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ card_labels: 'hover', background_fade: 25 }),
+    );
   });
 });

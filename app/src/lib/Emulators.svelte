@@ -625,7 +625,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-<section data-testid="emulators-view" class="emulators over-art" aria-label="Emulators">
+<section data-testid="emulators-view" class="emulators" aria-label="Emulators">
   <RailPane entries={railRows} testId="emulators-rail" ariaLabel="Emulator categories" onSelect={(k) => (page = k)} />
 
   <div class="panes">
@@ -944,6 +944,7 @@
   .emulators {
     display: flex;
     align-items: stretch;
+    gap: var(--gutter);
     height: 100%;
     min-height: 0;
   }
@@ -960,6 +961,14 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
+    /* The pages are a panel: forms and lists never sit on the art. */
+    background: var(--panel);
+    -webkit-backdrop-filter: var(--panel-blur);
+    backdrop-filter: var(--panel-blur);
+    border: 1px solid var(--line);
+    border-radius: var(--r-panel);
+    box-sizing: border-box;
+    overflow: hidden;
   }
 
   /* No `display` on `.pane` itself: the `hidden` attribute's UA rule must
@@ -1004,16 +1013,16 @@
     z-index: 20;
     display: grid;
     place-items: center;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--scrim);
   }
 
   .setup-dialog {
     width: min(680px, calc(100vw - 48px));
     height: min(720px, calc(100vh - 48px));
     border-radius: var(--r-dialog);
-    border: 1px solid var(--border);
-    background: var(--bg);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--line);
+    background: var(--overlay);
+    box-shadow: var(--shadow-overlay);
     overflow: hidden;
   }
 
@@ -1089,7 +1098,7 @@
     padding: 16px;
     box-sizing: border-box;
     border: 1px solid var(--border);
-    border-radius: var(--r-card);
+    border-radius: var(--r-panel);
     background: var(--surface-2);
     animation: sheet-in var(--m-base) ease;
   }

@@ -57,19 +57,21 @@
 </nav>
 
 <style>
-  /* Design §5: the rail is 220px. It is filled with the same opaque panel
-     as the top bar (Shell.svelte) so its labels read against a flat surface
-     instead of the background art; the `.over-art` halo is switched off
-     inside it in app.css for the same reason. */
+  /* Design §5: the rail is 220px. A floating panel (look-and-feel plan
+     2026-10-30), separated from the view by the shell's gutter, so it reads
+     as its own group and its labels never sit on the art. */
   .rail {
     flex: 0 0 220px;
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 16px 8px;
+    padding: 8px;
     box-sizing: border-box;
-    background: var(--surface-2);
-    border-right: 1px solid var(--border);
+    background: var(--panel);
+    -webkit-backdrop-filter: var(--panel-blur);
+    backdrop-filter: var(--panel-blur);
+    border: 1px solid var(--line);
+    border-radius: var(--r-panel);
     overflow-y: auto;
   }
 
@@ -100,12 +102,14 @@
   }
 
   .rail-item:hover {
-    background: var(--surface);
+    background: var(--field);
     color: var(--text-h);
   }
 
+  /* The one selected style for rows: a primary tint and an inset bar. */
   .rail-item.active {
-    background: var(--surface);
+    background: var(--selected);
+    box-shadow: inset 3px 0 0 var(--primary);
     color: var(--text-h);
     font-weight: 600;
   }

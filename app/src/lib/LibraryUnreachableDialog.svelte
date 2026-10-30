@@ -199,7 +199,7 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
-    border-radius: var(--r-card);
+    border-radius: var(--r-panel);
     border: 1px solid var(--border);
     border-top: 3px solid var(--gold);
     background: var(--surface-2);

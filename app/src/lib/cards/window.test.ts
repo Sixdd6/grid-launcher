@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CARD_GAP_PX, TITLE_ROW_HEIGHT_PX } from './size';
+import { labelRowPx } from './size';
 import {
   BUFFER_ROWS,
   GRID_GAP_PX,
@@ -11,15 +11,20 @@ import {
 } from './window';
 
 describe('rowMetrics', () => {
-  it('is a 3:4 cover plus the gap and the title strip, then the grid gap', () => {
-    const { rowHeight, pitch } = rowMetrics(150);
-    expect(rowHeight).toBe(200 + CARD_GAP_PX + TITLE_ROW_HEIGHT_PX);
+  it('is a 3:4 cell plus the label row, then the grid gap', () => {
+    const labelRow = labelRowPx('always');
+    const { rowHeight, pitch } = rowMetrics(150, GRID_GAP_PX, labelRow);
+    expect(rowHeight).toBe(200 + labelRow);
     expect(pitch).toBe(rowHeight + GRID_GAP_PX);
+  });
+
+  it('has no label row when labels show on hover', () => {
+    expect(rowMetrics(150, GRID_GAP_PX, labelRowPx('hover')).rowHeight).toBe(200);
   });
 
   it('rounds to whole px, so the layout and the math agree over many rows', () => {
     // 188.25 / (3/4) = 251 exactly; 188.3 gives 251.07 and rounds to 251.
-    expect(rowMetrics(188.3).rowHeight).toBe(251 + CARD_GAP_PX + TITLE_ROW_HEIGHT_PX);
+    expect(rowMetrics(188.3, GRID_GAP_PX, 32).rowHeight).toBe(251 + 32);
     expect(Number.isInteger(rowMetrics(181.7).rowHeight)).toBe(true);
   });
 

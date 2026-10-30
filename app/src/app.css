@@ -9,12 +9,27 @@
   --surface: rgba(0, 0, 0, 0.035);
   --surface-2: #ffffff;
   --border: #dcdce6;
+  /* Surface levels (look-and-feel plan 2026-10-30): the art is the canvas;
+     text sits on a PANEL (the panel colour at a fixed opacity floor, with a
+     backdrop blur) or on an OVERLAY (opaque, shadowed, over a scrim). The
+     fade setting changes the art only, never these floors, so text keeps
+     WCAG AA on any art: 0.86 holds muted text above 4.5:1 even over
+     pure-black art here and pure-white art in dark mode. */
+  --panel: rgba(250, 250, 253, 0.86);
+  --panel-blur: blur(18px) saturate(1.15);
+  --overlay: #ffffff;
+  --scrim: rgba(236, 236, 244, 0.62);
+  --line: rgba(17, 17, 23, 0.1);
+  --line-strong: rgba(17, 17, 23, 0.2);
+  --field: rgba(17, 17, 23, 0.05);
+  --selected: rgba(85, 62, 152, 0.14);
+  --focus: #553e98;
+  --shadow-card: 0 8px 22px rgba(20, 20, 40, 0.26), 0 2px 5px rgba(20, 20, 40, 0.16);
+  --shadow-overlay: 0 24px 60px rgba(20, 20, 40, 0.3), 0 4px 12px rgba(20, 20, 40, 0.16);
+  --label: rgba(250, 250, 253, 0.88);
   --text: #111117;
   --text-h: #111117;
   --text-muted: #3d3d52;
-  --text-halo:
-    0 0 2px rgba(245, 245, 250, 0.92),
-    0 0 8px rgba(245, 245, 250, 0.6);
 
   /* Brand — primary darkens in light mode (design §4) */
   --primary: #553e98;
@@ -44,14 +59,19 @@
   /* Type */
   --sans: 'Segoe UI', system-ui, Inter, Roboto, sans-serif;
 
-  /* Radii (design §4: 4 controls / 6 chips / 8 rows / 14 cards / 100 pills;
-     the modal panels — details, pickers, confirmations — take 12) */
+  /* Radii (design §4: 4 controls / 6 chips / 8 rows / 10 covers / 14 panels /
+     100 pills; the modal panels — details, pickers, confirmations — take 12) */
   --r-control: 4px;
   --r-chip: 6px;
   --r-row: 8px;
   --r-dialog: 12px;
-  --r-card: 14px;
+  --r-card: 10px;
+  --r-panel: 14px;
   --r-pill: 100px;
+
+  /* The gap between the shell's panels (the rail, the view) and around
+     them: the art shows through it. */
+  --gutter: 12px;
 
   /* One height for every control in a toolbar row (search, selects), so a
      search field and the selects beside it share top and bottom edges
@@ -88,14 +108,23 @@
     --surface: rgba(255, 255, 255, 0.07);
     --surface-2: #14141f;
     --border: #22223a;
+    --panel: rgba(14, 14, 24, 0.86);
+    --panel-blur: blur(18px) saturate(1.15);
+    --overlay: #15151f;
+    --scrim: rgba(4, 4, 10, 0.62);
+    --line: rgba(255, 255, 255, 0.09);
+    --line-strong: rgba(255, 255, 255, 0.17);
+    --field: rgba(255, 255, 255, 0.07);
+    --selected: rgba(139, 116, 232, 0.22);
+    --focus: #b9a8ff;
+    --shadow-card: 0 10px 26px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+    --shadow-overlay: 0 28px 70px rgba(0, 0, 0, 0.6), 0 4px 14px rgba(0, 0, 0, 0.4);
+    --label: rgba(14, 14, 24, 0.86);
     --text: #ffffff;
     --text-h: #ffffff;
     --text-muted: #c8c8dc;
     --danger: #ff5050;
     --gold: #f5c451;
-    --text-halo:
-      0 0 2px rgba(7, 7, 15, 0.85),
-      0 0 8px rgba(7, 7, 15, 0.5);
     --primary: #8b74e8;
     --primary-hover: #a18fff;
     --primary-pressed: #6043c8;
@@ -111,14 +140,23 @@
   --surface: rgba(255, 255, 255, 0.07);
   --surface-2: #14141f;
   --border: #22223a;
+  --panel: rgba(14, 14, 24, 0.86);
+  --panel-blur: blur(18px) saturate(1.15);
+  --overlay: #15151f;
+  --scrim: rgba(4, 4, 10, 0.62);
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.17);
+  --field: rgba(255, 255, 255, 0.07);
+  --selected: rgba(139, 116, 232, 0.22);
+  --focus: #b9a8ff;
+  --shadow-card: 0 10px 26px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-overlay: 0 28px 70px rgba(0, 0, 0, 0.6), 0 4px 14px rgba(0, 0, 0, 0.4);
+  --label: rgba(14, 14, 24, 0.86);
   --text: #ffffff;
   --text-h: #ffffff;
   --text-muted: #c8c8dc;
   --danger: #ff5050;
   --gold: #f5c451;
-  --text-halo:
-    0 0 2px rgba(7, 7, 15, 0.85),
-    0 0 8px rgba(7, 7, 15, 0.5);
   --primary: #8b74e8;
   --primary-hover: #a18fff;
   --primary-pressed: #6043c8;
@@ -132,14 +170,23 @@
   --surface: rgba(0, 0, 0, 0.035);
   --surface-2: #ffffff;
   --border: #dcdce6;
+  --panel: rgba(250, 250, 253, 0.86);
+  --panel-blur: blur(18px) saturate(1.15);
+  --overlay: #ffffff;
+  --scrim: rgba(236, 236, 244, 0.62);
+  --line: rgba(17, 17, 23, 0.1);
+  --line-strong: rgba(17, 17, 23, 0.2);
+  --field: rgba(17, 17, 23, 0.05);
+  --selected: rgba(85, 62, 152, 0.14);
+  --focus: #553e98;
+  --shadow-card: 0 8px 22px rgba(20, 20, 40, 0.26), 0 2px 5px rgba(20, 20, 40, 0.16);
+  --shadow-overlay: 0 24px 60px rgba(20, 20, 40, 0.3), 0 4px 12px rgba(20, 20, 40, 0.16);
+  --label: rgba(250, 250, 253, 0.88);
   --text: #111117;
   --text-h: #111117;
   --text-muted: #3d3d52;
   --danger: #c62828;
   --gold: #8a5a00;
-  --text-halo:
-    0 0 2px rgba(245, 245, 250, 0.92),
-    0 0 8px rgba(245, 245, 250, 0.6);
   --primary: #553e98;
   --primary-hover: #6043c8;
   --primary-pressed: #45307c;
@@ -181,35 +228,28 @@ h1 {
   box-sizing: border-box;
 }
 
-/* The five view roots paint straight onto the fixed background-art layer —
-   nothing between them sets a background. The halo is the theme's own `--bg`
-   at zero offset, so it composites to nothing on an opaque surface and to
-   nothing when the fade is 0; over art it holds a ~2px high-contrast band
-   at every glyph edge. Not a drop shadow: no offset, no colour of its own. */
-.over-art {
-  text-shadow: var(--text-halo);
+/* A panel: the surface text sits on above the art (look-and-feel plan
+   2026-10-30). Its opacity is a fixed floor (`--panel`), whatever the fade. */
+.panel {
+  background: var(--panel);
+  -webkit-backdrop-filter: var(--panel-blur);
+  backdrop-filter: var(--panel-blur);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-sizing: border-box;
 }
 
-/* Anything that carries its own fill opts out — the halo is for text on the
-   art, and inside a filled control it would only bloom the label. The rail
-   (RailPane.svelte) is an opaque panel, so it opts out as a whole. */
-.over-art .rail,
-.over-art input,
-.over-art select,
-.over-art textarea,
-.over-art .primary,
-.over-art .tag,
-.over-art .actions button,
-.over-art .form-actions button,
-.over-art .row-actions button,
-.over-art .library-banner button,
-.over-art .catalog-row button,
-.over-art .ps3-firmware button,
-.over-art .chip button,
-.over-art .offline button,
-.over-art .update-line button,
-.over-art .browse-secondary {
-  text-shadow: none;
+/* Placeholders read as hints but stay above AA on any panel: the old
+   browser default (about 2.4:1 in light mode) failed. */
+::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+/* One focus ring for every control (keyboard focus only). */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 /* The one icon-only button. Four components had hand-rolled copies of this

@@ -42,6 +42,8 @@ export type UiSettings = {
   background_blur: number;
   card_size_library: CardSizeName;
   card_size_server: CardSizeName;
+  /** "Game labels": `always` or `hover` (`ui.card_labels`). */
+  card_labels: 'always' | 'hover';
 };
 export type GameSummary = {
   id: number;
@@ -758,10 +760,6 @@ export const api = {
    *  the prefetch just drops it. */
   ensureBackgroundVariant: (url: string, blur: number) =>
     invoke<string>('ensure_background_variant', { url, blur }),
-  /** A game card's letterbox backdrop for a cover URL: a small pre-blurred,
-   *  pre-darkened JPEG (`images::backdrop`), built once and cached. Same host
-   *  filter as `ensureImage`. */
-  ensureCardBackdrop: (url: string) => invoke<string>('ensure_card_backdrop', { url }),
   /** Opens a trailer's YouTube watch page in the system browser (the media
    *  viewer's "Watch on YouTube" button). `videoId` is validated on the
    *  Rust side before it reaches a URL; rejects with "not a YouTube video

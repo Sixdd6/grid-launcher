@@ -1,6 +1,7 @@
 <script lang="ts" generics="T">
   import { untrack, type Snippet } from 'svelte';
-  import { columnsOf, gridTemplate, parseTracks, type CardSize } from './cards/size';
+  import { columnsOf, gridTemplate, labelRowPx, parseTracks, type CardSize } from './cards/size';
+  import type { CardLabels } from './cards/labels';
   import {
     BUFFER_ROWS,
     GRID_GAP_PX,
@@ -18,6 +19,7 @@
     key,
     card,
     size,
+    labels,
     gridId,
     bufferRows = BUFFER_ROWS,
   }: {
@@ -27,12 +29,14 @@
     /** One card, given its item and its index in `items`. */
     card: Snippet<[T, number]>;
     size: CardSize;
+    /** The "Game labels" setting: it decides the label row's height. */
+    labels: CardLabels;
     gridId: string;
     bufferRows?: number;
   } = $props();
 
   /** The grid's own top padding, in px, above the first row. */
-  const PAD_TOP_PX = 16;
+  const PAD_TOP_PX = 18;
   /** The grid's own bottom padding, in px, below the last row. */
   const PAD_BOTTOM_PX = 24;
 
@@ -66,7 +70,7 @@
     const tracks = parseTracks(getComputedStyle(grid).gridTemplateColumns);
     if (tracks === null) return;
     trackCount = tracks.length;
-    metrics = rowMetrics(tracks[0], GRID_GAP_PX);
+    metrics = rowMetrics(tracks[0], GRID_GAP_PX, labelRowPx(labels));
     if (rowHeight !== metrics.rowHeight) rowHeight = metrics.rowHeight;
   }
 
@@ -141,8 +145,10 @@
 
   $effect(() => {
     // A new card size changes the template but not the grid's own box, so
-    // the ResizeObserver above never hears of it.
+    // the ResizeObserver above never hears of it. A new label mode changes
+    // the row height the same way.
     void size;
+    void labels;
     untrack(() => {
       measureTracks();
       update();
@@ -220,7 +226,9 @@
     grid-template-columns: var(--template);
     grid-auto-rows: var(--row-h);
     gap: var(--gap);
-    padding: var(--pad-top) 24px var(--pad-bottom);
+    /* A little side room so a lifted card's shadow is not clipped by the
+       scroll container; the cards line up with the header panel above. */
+    padding: var(--pad-top) 4px var(--pad-bottom);
     width: 100%;
     max-width: 1920px;
     margin: 0 auto;

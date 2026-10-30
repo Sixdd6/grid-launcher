@@ -2,15 +2,9 @@
   import Image from './Image.svelte';
   import Icon from './Icon.svelte';
   import { cardBadges, UPDATE_TAG_TEXT } from './cards/badges';
+  import type { CardLabels } from './cards/labels';
   import { cardPrimaryLabel, MISSING_BADGE_TEXT } from './library/missing';
-  import {
-    ACTION_ROW_HEIGHT_PX,
-    CARD_COVER_RATIO,
-    CARD_GAP_PX,
-    PRIMARY_CENTRE_FRACTION,
-    PRIMARY_HEIGHT_PX,
-    TITLE_ROW_HEIGHT_PX,
-  } from './cards/size';
+  import { ACTION_BAR_HEIGHT_PX, LABEL_GAP_PX, LABEL_HEIGHT_PX } from './cards/size';
 
   let {
     testId,
@@ -23,6 +17,8 @@
     missing = false,
     updateLabel,
     cloudPlatforms,
+    labels,
+    showPlatform = true,
     focused,
     onOpen,
     onPrimary,
@@ -44,6 +40,13 @@
     missing?: boolean;
     updateLabel: string | null;
     cloudPlatforms: ReadonlySet<string>;
+    /** The "Game labels" setting: a label always under the cover, or only on
+     *  hover and keyboard focus. */
+    labels: CardLabels;
+    /** The platform chip, for grids that mix platforms (Library). A
+     *  single-platform grid (Server) leaves it off: every card would say the
+     *  same thing over its cover. */
+    showPlatform?: boolean;
     focused: boolean;
     onOpen: () => void;
     onPrimary: () => void;
@@ -67,78 +70,93 @@
   }
 </script>
 
+<!-- A card is the cover at its own shape (look-and-feel plan 2026-10-30):
+     no frame and no backdrop, fitted inside a 3:4 cell and sitting on the
+     cell's bottom edge, so rows and labels line up whatever the shape. -->
 <div
   data-testid={testId}
   data-index={index}
   class="card"
+  class:hover-labels={labels === 'hover'}
   class:focused
   onclick={onOpen}
   onmouseenter={onHoverStart}
   onmouseleave={onHoverEnd}
   role="presentation"
-  style="--cover-ratio: {CARD_COVER_RATIO}; --title-h: {TITLE_ROW_HEIGHT_PX}px; --card-gap: {CARD_GAP_PX}px; --primary-y: {PRIMARY_CENTRE_FRACTION * 100}%; --primary-h: {PRIMARY_HEIGHT_PX}px; --action-h: {ACTION_ROW_HEIGHT_PX}px"
+  style="--label-h: {LABEL_HEIGHT_PX}px; --label-gap: {LABEL_GAP_PX}px; --bar-h: {ACTION_BAR_HEIGHT_PX}px"
 >
-  <div class="cover">
-    <Image url={coverUrl} alt={title} placeholder="No cover" backdrop />
+  <div class="cell">
+    <div class="cover">
+      <Image url={coverUrl} alt={title} placeholder="No cover" />
 
-    <!-- Top-left tags stack in one column so MISSING and UPDATE never cover
-         each other (a missing game can still have a newer server version). -->
-    {#if missing || badges.update}
-      <div class="tag-stack">
-        {#if missing}
-          <span data-testid={`library-card-missing-${badgeId}`} class="tag missing" title="Files not found">{MISSING_BADGE_TEXT}</span>
-        {/if}
-        {#if badges.update}
-          <span data-testid={`library-update-badge-${badgeId}`} class="tag update">{UPDATE_TAG_TEXT}</span>
-        {/if}
+      <!-- Top-left tags stack in one column so MISSING and UPDATE never cover
+           each other (a missing game can still have a newer server version). -->
+      {#if missing || badges.update}
+        <div class="tag-stack">
+          {#if missing}
+            <span data-testid={`library-card-missing-${badgeId}`} class="tag missing" title="Files not found">{MISSING_BADGE_TEXT}</span>
+          {/if}
+          {#if badges.update}
+            <span data-testid={`library-update-badge-${badgeId}`} class="tag update">{UPDATE_TAG_TEXT}</span>
+          {/if}
+        </div>
+      {/if}
+      {#if badges.installed}
+        <span data-testid={`installed-badge-${badgeId}`} class="dot" role="img" aria-label="Installed" title="Installed"></span>
+      {/if}
+      {#if showPlatform && badges.platform}
+        <span data-testid={`card-platform-${badgeId}`} class="tag platform corner">{badges.platform}</span>
+      {/if}
+      {#if badges.cloud}
+        <span data-testid={`card-cloud-badge-${badgeId}`} class="cloud-badge corner" role="img" aria-label="Cloud saves enabled" title="Cloud saves enabled"><Icon name="cloud" size={14} /></span>
+      {/if}
+
+      <!-- The shade never takes a click: a click on the cover above the bar
+           falls through to `onOpen` (see `ACTION_BAR_HEIGHT_PX`). -->
+      <div class="shade" aria-hidden="true"></div>
+
+      <!-- The bar's controls stay in the Tab order: `:focus-within` then
+           reveals it, so a keyboard user reaches Play/Install, Cloud sync
+           and Details. The card ROOT is not focusable — the views drive
+           selection with the `focused` class instead. -->
+      <div class="bar">
+        <button data-testid={`card-primary-${badgeId}`} class="primary" onclick={act(onPrimary)} tabindex="0">
+          {cardPrimaryLabel(installed, missing)}
+        </button>
+        <button
+          data-testid={`card-cloud-${badgeId}`}
+          class="round"
+          onclick={act(onCloud)}
+          tabindex="0"
+          aria-label="Cloud sync"
+          title="Cloud sync"
+        >
+          <Icon name="cloud" size={15} />
+        </button>
+        <button
+          data-testid={`card-details-${badgeId}`}
+          class="round"
+          onclick={act(onOpen)}
+          tabindex="0"
+          aria-label="Details"
+          title="Details"
+        >
+          <Icon name="more" size={15} />
+        </button>
       </div>
-    {/if}
-    {#if badges.installed}
-      <span data-testid={`installed-badge-${badgeId}`} class="dot" role="img" aria-label="Installed" title="Installed"></span>
-    {/if}
-    {#if badges.platform}
-      <span data-testid={`card-platform-${badgeId}`} class="tag platform">{badges.platform}</span>
-    {/if}
-    {#if badges.cloud}
-      <span data-testid={`card-cloud-badge-${badgeId}`} class="cloud-badge" role="img" aria-label="Cloud saves enabled" title="Cloud saves enabled"><Icon name="cloud" size={14} /></span>
-    {/if}
-
-    <!-- The gradient itself never takes a click: the band around the card
-         root's centre must fall through to `onOpen` (see size.ts). -->
-    <div class="overlay" aria-hidden="true"></div>
-
-    <button
-      data-testid={`card-primary-${badgeId}`}
-      class="primary"
-      onclick={act(onPrimary)}
-      tabindex="0"
-    >
-      {cardPrimaryLabel(installed, missing)}
-    </button>
-
-    <!-- The four overlay controls stay in the Tab order: `:focus-within`
-         then reveals the overlay, so a keyboard user reaches
-         Play/Install, Cloud sync and More. The card ROOT is not focusable —
-         the views drive selection with the `focused` class instead. -->
-    <div class="actions">
-      <button data-testid={`card-details-${badgeId}`} onclick={act(onOpen)} tabindex="0">Details</button>
-      <button data-testid={`card-cloud-${badgeId}`} onclick={act(onCloud)} tabindex="0">Cloud sync</button>
-      <button data-testid={`card-more-${badgeId}`} onclick={act(onOpen)} tabindex="0">More</button>
     </div>
   </div>
 
-  <span class="title">{title}</span>
+  <span class="label" title={title}>{title}</span>
 </div>
 
 <style>
   .card {
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: var(--card-gap);
+    gap: var(--label-gap);
     cursor: pointer;
-    transform: scale(1);
-    transition: transform var(--m-fast) cubic-bezier(0.2, 0.9, 0.3, 1.2);
-    will-change: transform;
     /* No content-visibility: with real covers, laying out and painting each
        row as it scrolled in cost more per frame (64 ms) than painting every
        card once at open (+100 ms for 300 cards). What bounds the per-frame
@@ -147,72 +165,169 @@
        (2026-10-20, `cards/window.ts`). */
   }
 
-  /* D-UI-9: hover scales 1.05. Focus (arrow keys) uses the same
-     scale so the two selection models look identical. */
+  .card.hover-labels {
+    gap: 0;
+  }
+
+  /* Above its neighbours while hovered or focused, so the lifted cover and
+     a hover label are never painted under the next card. */
   .card:hover,
-  .card.focused {
-    transform: scale(1.05);
-    z-index: 1;
+  .card.focused,
+  .card:focus-within {
+    z-index: 2;
   }
 
-  /* Drawn INSIDE the cover, with a negative offset: the ring then follows
-     the cover's rounded corners and stays within the card's own box, so a
-     focused card cannot paint over the gap to its neighbours while it is
-     scaled up. (It began as a workaround for `content-visibility`'s paint
-     containment, which round 8 removed; the inset ring is kept because it
-     is the look the design shows.) */
-  .card.focused .cover {
-    outline: 2px solid var(--primary);
-    outline-offset: -2px;
+  /* The 3:4 cell is a size container: the cover's image is capped at its
+     width and height (`cqw`/`cqh`), which fits any shape without cropping. */
+  .cell {
+    aspect-ratio: 3 / 4;
+    container-type: size;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
   }
 
+  /* The cover shrinks to its image, so the rounded corners, the shadow and
+     the badges belong to the art itself. */
   .cover {
     position: relative;
-    aspect-ratio: var(--cover-ratio);
+    max-width: 100%;
     border-radius: var(--r-card);
     overflow: hidden;
-    background: var(--surface-2);
+    box-shadow: var(--shadow-card);
+    transition:
+      transform var(--m-fast) ease,
+      box-shadow var(--m-fast) ease;
   }
 
-  /* The user's review choice ("option B"): the frame stays 3:4 so rows
-     stay even, the whole cover fits inside it, and a blurred, dimmed copy
-     of the same cover fills the letterbox for square (PS1) and wide
-     (Genesis) art instead of cropping their sides. Only then: behind a
-     cover that fills the frame it would never be seen, so `Image.svelte`
-     draws it only for art that leaves bars (`letterbox.ts`). */
   .cover :global(img) {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
     display: block;
+    max-width: 100cqw;
+    max-height: 100cqh;
   }
 
-  /* Near-3:4 art (within `CROP_TO_FILL_MAX`, `letterbox.ts`) fills the
-     frame and trims a sliver off two edges, instead of leaving hairline bars
-     that would each cost a full blurred backdrop. */
-  .cover :global(img[data-fit='crop']) {
-    object-fit: cover;
+  /* Until the image is there (loading, or none), the cover is the whole
+     cell, so the skeleton and the "No cover" placeholder keep the grid's
+     shape. */
+  .cover:not(:has(img)) {
+    width: 100cqw;
+    height: 100cqh;
+    background: var(--overlay);
   }
 
-  /* The letterbox fill behind square and wide art. Its image arrives already
-     cropped, blurred and darkened (`images::backdrop`: 48x64, the quarter-size
-     box the old CSS blurred), so this only scales it up. It used to be the
-     cover itself under `filter: blur(2.5px) brightness(0.45)`, and that blur
-     on every paint ran a platform of square covers at 35ms a frame against
-     14ms with no backdrop (2026-10-28). */
-  .cover :global(img.backdrop) {
+  /* D-UI-9: hover and keyboard focus look the same — the cover lifts. */
+  .card:hover .cover,
+  .card.focused .cover {
+    transform: translateY(-4px);
+  }
+
+  .card.focused .cover {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  .shade {
     position: absolute;
     inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
     pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--m-fast) ease;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0) 55%);
   }
 
-  .title {
-    height: var(--title-h);
-    line-height: var(--title-h);
+  /* Hidden with opacity, NOT `visibility: hidden`: WebDriver refuses to
+     click a `visibility: hidden` element, and a driver click hovers the
+     card first, which is exactly when these must become clickable.
+     `pointer-events: none` keeps them inert until then. */
+  .bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: var(--bar-h);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 6px;
+    box-sizing: border-box;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--m-fast) ease;
+  }
+
+  .card:hover .shade,
+  .card:focus-within .shade,
+  .card:hover .bar,
+  .card:focus-within .bar {
+    opacity: 1;
+  }
+
+  .card:hover .bar,
+  .card:focus-within .bar {
+    pointer-events: auto;
+  }
+
+  /* The corner badges give way to the bar while it shows. */
+  .card:hover .corner,
+  .card:focus-within .corner {
+    opacity: 0;
+  }
+
+  .primary {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 26px;
+    padding: 0 10px;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    border: none;
+    border-radius: var(--r-pill);
+    background: var(--primary);
+    color: var(--on-primary);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .primary:hover {
+    background: var(--primary-hover);
+  }
+
+  .round {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .round:hover {
+    background: var(--primary);
+    color: var(--on-primary);
+  }
+
+  /* "Always visible": a small frosted label under the cover, so the title
+     reads on any art without a panel behind the whole grid. */
+  .label {
+    align-self: center;
+    max-width: 100%;
+    height: var(--label-h);
+    line-height: var(--label-h);
+    padding: 0 9px;
+    box-sizing: border-box;
+    border-radius: var(--r-row);
+    border: 1px solid var(--line);
+    background: var(--label);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
     font-size: 12px;
     color: var(--text-h);
     white-space: nowrap;
@@ -220,90 +335,31 @@
     text-overflow: ellipsis;
   }
 
-  .overlay {
+  /* "Visible on hover": the label floats just below the cover, over the gap,
+     on an opaque overlay, and only while the card is hovered or focused. */
+  .hover-labels .label {
     position: absolute;
-    inset: 0;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity var(--m-fast) ease;
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0.15) 55%, rgba(0, 0, 0, 0.35));
-  }
-
-  .card:hover .overlay,
-  .card:focus-within .overlay {
-    opacity: 1;
-  }
-
-  /* Hidden with opacity, NOT `visibility: hidden`: WebDriver refuses to
-     click a `visibility: hidden` element, and a driver click hovers the
-     card first, which is exactly when these must become clickable.
-     `pointer-events: none` keeps them inert until then. */
-  .primary,
-  .actions {
-    position: absolute;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity var(--m-fast) ease;
-  }
-
-  .card:hover .primary,
-  .card:hover .actions,
-  .card:focus-within .primary,
-  .card:focus-within .actions {
-    opacity: 1;
-    pointer-events: auto;
-  }
-
-  .primary {
-    top: var(--primary-y);
+    top: calc(100% + 6px);
     left: 50%;
-    transform: translate(-50%, -50%);
-    font: inherit;
-    font-size: 12px;
-    font-weight: 600;
-    height: var(--primary-h);
-    padding: 0 18px;
-    border: none;
-    border-radius: var(--r-pill);
-    background: var(--primary);
-    color: var(--on-primary);
-    cursor: pointer;
-    white-space: nowrap;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: calc(100% + 32px);
+    background: var(--overlay);
+    box-shadow: var(--shadow-card);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--m-fast) ease;
   }
 
-  .primary:hover {
-    background: var(--primary-hover);
+  .hover-labels:hover .label,
+  .hover-labels.focused .label,
+  .hover-labels:focus-within .label {
+    opacity: 1;
   }
 
-  .actions {
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: var(--action-h);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    padding: 0 4px;
-    box-sizing: border-box;
-  }
-
-  .actions button {
-    font: inherit;
-    font-size: 10px;
-    padding: 3px 6px;
-    border: none;
-    border-radius: var(--r-chip);
-    background: rgba(0, 0, 0, 0.55);
-    color: #fff;
-    cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .actions button:hover {
-    background: var(--primary);
+  .tag,
+  .cloud-badge {
+    transition: opacity var(--m-fast) ease;
   }
 
   .tag {
@@ -312,7 +368,7 @@
     font-size: 10px;
     font-weight: 600;
     line-height: 1.4;
-    background: rgba(0, 0, 0, 0.65);
+    background: rgba(0, 0, 0, 0.7);
     color: #fff;
     max-width: calc(100% - 12px);
     overflow: hidden;
@@ -363,13 +419,13 @@
 
   .dot {
     position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 8px;
-    height: 8px;
+    top: 7px;
+    right: 7px;
+    width: 9px;
+    height: 9px;
     border-radius: 50%;
     background: var(--success);
-    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.6);
   }
 
   .cloud-badge {
@@ -380,7 +436,7 @@
     place-items: center;
     padding: 3px;
     border-radius: var(--r-chip);
-    background: rgba(0, 0, 0, 0.65);
+    background: rgba(0, 0, 0, 0.7);
     color: var(--info);
   }
 </style>

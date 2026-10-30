@@ -18,7 +18,7 @@ const card = createRawSnippet((item: () => Item, index: () => number) => ({
 function grid(count: number): string {
   const items = Array.from({ length: count }, (_, i) => ({ id: 100 + i }));
   return render(CardGrid<Item>, {
-    props: { items, key: (item: Item) => item.id, card, size: 'medium', gridId: 'test-grid' },
+    props: { items, key: (item: Item) => item.id, card, size: 'medium', labels: 'always', gridId: 'test-grid' },
   }).body;
 }
 
@@ -28,7 +28,7 @@ describe('CardGrid', () => {
   it('renders a short list whole, with only its own padding', () => {
     const body = grid(3);
     expect(cards(body)).toBe(3);
-    expect(body).toContain('--pad-top: 16px');
+    expect(body).toContain('--pad-top: 18px');
     expect(body).toContain('--pad-bottom: 24px');
     expect(body).toContain('data-index="2"');
   });

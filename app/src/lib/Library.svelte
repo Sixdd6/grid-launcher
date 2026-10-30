@@ -332,7 +332,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-<section data-testid="library-section" class="library over-art">
+<section data-testid="library-section" class="library">
   <RailPane
     entries={railRows}
     testId="library-rail"
@@ -341,7 +341,7 @@
   />
 
   <div class="body">
-    <div class="toolbar">
+    <div class="toolbar panel">
       <input
         data-testid="library-search"
         class="search"
@@ -371,18 +371,19 @@
     </div>
 
     {#if launchError}
-      <p data-testid="library-launch-error" class="error" role="alert">{launchError}</p>
+      <p data-testid="library-launch-error" class="error panel" role="alert">{launchError}</p>
       {#if launchError === umuOfferFor}<UmuInstallOffer />{/if}
     {/if}
 
     {#if rows.length === 0}
-      <p data-testid="library-empty" class="empty">
+      <p data-testid="library-empty" class="empty panel">
         {search.trim() === '' ? emptyText(selected) : `No games match “${search.trim()}”`}
       </p>
     {:else}
       <CardGrid
         bind:this={grid}
         gridId="library-grid"
+        labels={uiSettings.cardLabels}
         size={uiSettings.cardSizeLibrary}
         items={rows}
         key={installedKey}
@@ -399,6 +400,7 @@
             missing={isMissing(row)}
             updateLabel={updates.labelFor(row.rom_id)}
             {cloudPlatforms}
+            labels={uiSettings.cardLabels}
             focused={i === focusIndex && inputMode.directional}
             onOpen={() => {
               // A click moves the selection, so keyboard navigation resumes
@@ -434,6 +436,7 @@
   .library {
     display: flex;
     align-items: stretch;
+    gap: var(--gutter);
     height: 100%;
     min-height: 0;
   }
@@ -450,15 +453,13 @@
     overflow-y: auto;
   }
 
+  /* The toolbar is a panel: its labels and fields never sit on the art. */
   .toolbar {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 12px 24px 0;
-    width: 100%;
-    max-width: 1920px;
-    margin: 0 auto;
-    box-sizing: border-box;
+    padding: 12px 16px;
   }
 
   .search {
@@ -469,8 +470,8 @@
     box-sizing: border-box;
     padding: 0 10px;
     border-radius: var(--r-control);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+    background: var(--field);
     color: var(--text-h);
   }
 
@@ -489,19 +490,25 @@
     box-sizing: border-box;
     padding: 0 8px;
     border-radius: var(--r-control);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+    background: var(--field);
     color: var(--text-h);
   }
 
+  /* Notices sit on their own small panel: never bare text on the art. */
+  .empty,
+  .error {
+    align-self: flex-start;
+    margin: var(--gutter) 0 0;
+    padding: 10px 14px;
+  }
+
   .empty {
-    padding: 40px 24px;
     color: var(--text-muted);
     font-size: 14px;
   }
 
   .error {
-    margin: 8px 24px 0;
     color: var(--danger);
     font-size: 12px;
   }

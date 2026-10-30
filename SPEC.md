@@ -13,6 +13,15 @@ Views stay mounted and switch with the `hidden` attribute, so scroll positions a
 selections survive a switch. Behind the content sits blurred background art — the
 cover of the last game viewed, at the opacity set in Settings › Appearance.
 
+**Surfaces.** Text never sits on the raw art. There are three levels: the art (the
+canvas), **panels** and **overlays**. The top bar, each view's rail, its header and
+toolbar, and its lists and forms are frosted panels, at least 86% opaque however strong
+the art is, so every text stays above WCAG AA on any art in both themes; the rail and
+the view are separate rounded panels with a 12px gutter, where the art shows through.
+Details, dialogs and menus are opaque overlays with a shadow, over a dimming scrim. One
+selected style (a tint with an inset bar on rows, the filled pill in the top bar) and one
+keyboard focus ring apply everywhere.
+
 A 28px download strip sits at the bottom of the window. It is hidden while nothing is
 transferring; otherwise it reads `⬇ <title> · <percent> · <speed>` beside a small
 sparkline of the current transfer's last 60 seconds (network in the primary colour, disk
@@ -60,7 +69,7 @@ There are several main sections to the application with buttons across the top b
   platform header (name, ROM count, installed count, a firmware chip with an Install
   action when the server offers firmware, and the platform's default emulator chip
   linking to the Emulators view), a search box that filters the loaded platform list by
-  title, platform or genre, and a grid whose not-installed cards render dimmed until hovered. The hover action is
+  title, platform or genre, and a grid of cover cards. The hover action is
   Install for a game that is not installed and Play for one that is. The card size is
   remembered as `ui.card_size_server`. Downloads and installs are queued and handled in
   the background.
@@ -141,14 +150,20 @@ There are several main sections to the application with buttons across the top b
   **Appearance**.
 - **Appearance** (under Settings) chooses the theme — follow the OS, dark, or light —
   turns the background art on or off, sets its fade from 0 to 60 percent with a live
-  preview behind the pane, and sets the default card size for the Library and Server
-  grids. They are stored under `[ui]` in `config.toml` as `theme`, `background_fade`
-  (0 is off), `card_size_library` and `card_size_server`.
-- **Cards** (both grids) scale on hover with a gradient overlay, a centred Play or
-  Install, and an action row of Details, Cloud sync and More. Badges: an installed dot
+  preview behind the pane, sets the default card size for the Library and Server
+  grids, and sets **Game labels**: "Always visible" (a small label under every cover) or
+  "Visible on hover" (covers only; the title shows on hover or keyboard focus). They are
+  stored under `[ui]` in `config.toml` as `theme`, `background_fade` (0 is off),
+  `card_size_library`, `card_size_server` and `card_labels` (`always` or `hover`).
+- **Cards** (both grids) are just the cover, at its own shape: never cropped, with no
+  frame, fitted inside a uniform 3:4 cell and sitting on the cell's bottom edge, so rows
+  and labels line up whatever the mix of shapes. The cover has rounded corners and a soft
+  shadow. On hover or keyboard focus it lifts, and a bar at its bottom shows Play or
+  Install, Cloud sync and Details. Badges sit on the cover's corners: an installed dot
   top-right, an `UPDATE` tag top-left, a cloud icon bottom-right when the platform has
-  cloud sync configured, and a short platform name bottom-left. `Ctrl+F` focuses the
-  current view's search box.
+  cloud sync configured, and, in the Library only (the one grid that mixes platforms), a
+  short platform name bottom-left. The details sub view shows the whole cover too.
+  `Ctrl+F` focuses the current view's search box.
 
 ## Emulator Configuration
 - Emulators should support launch arguments with placeholders such as `%rom%`, `%core%`, `%RPCS3_GAMEID%`, and `%ps3_gameid%`.

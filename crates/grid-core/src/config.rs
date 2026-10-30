@@ -118,6 +118,12 @@ pub struct UiSettings {
     /// grids are browsed differently and D-UI-9 remembers them per view.
     #[serde(default = "default_card_size")]
     pub card_size_server: String,
+    /// When the grids show each game's title label: `"always"` (a small
+    /// label under every cover) or `"hover"` (only on hover or keyboard
+    /// focus). Settings › Appearance "Game labels" (look-and-feel plan
+    /// 2026-10-30). A plain string for the same reason as `theme`.
+    #[serde(default = "default_card_labels")]
+    pub card_labels: String,
 }
 
 fn default_theme() -> String {
@@ -136,6 +142,10 @@ fn default_card_size() -> String {
     "medium".to_string()
 }
 
+fn default_card_labels() -> String {
+    "always".to_string()
+}
+
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
@@ -144,6 +154,7 @@ impl Default for UiSettings {
             background_blur: default_background_blur(),
             card_size_library: default_card_size(),
             card_size_server: default_card_size(),
+            card_labels: default_card_labels(),
         }
     }
 }
@@ -1220,6 +1231,7 @@ mod tests {
         assert_eq!(loaded.ui.background_fade, 40);
         assert_eq!(loaded.ui.card_size_library, "medium");
         assert_eq!(loaded.ui.card_size_server, "medium");
+        assert_eq!(loaded.ui.card_labels, "always");
     }
 
     /// A `[ui]` table written before the blur setting existed loads the
@@ -1269,6 +1281,7 @@ mod tests {
                 background_blur: 2,
                 card_size_library: "large".to_string(),
                 card_size_server: "small".to_string(),
+                card_labels: "hover".to_string(),
             },
             ..Default::default()
         };
@@ -1276,6 +1289,7 @@ mod tests {
         let loaded = Config::load(&path).unwrap();
         assert_eq!(loaded.ui.card_size_library, "large");
         assert_eq!(loaded.ui.card_size_server, "small");
+        assert_eq!(loaded.ui.card_labels, "hover");
     }
 
     fn load_text(text: &str) -> Config {

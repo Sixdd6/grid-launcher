@@ -58,14 +58,13 @@ async function stopFrames(label: string): Promise<void> {
   );
 }
 
-/** What the grid is painting: cards, covers, letterbox backdrops, skeletons. */
+/** What the grid is painting: cards, covers, skeletons. */
 async function census(label: string): Promise<void> {
   const c = await browser.execute((sel: string) => {
     const grid = document.querySelector(sel) as HTMLElement;
     return {
       cards: grid.children.length,
-      covers: grid.querySelectorAll('img:not(.backdrop)').length,
-      backdrops: grid.querySelectorAll('img.backdrop').length,
+      covers: grid.querySelectorAll('img').length,
       loading: grid.querySelectorAll('.skeleton').length,
     };
   }, GRID);

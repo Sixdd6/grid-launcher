@@ -505,31 +505,6 @@ pub async fn ensure_background_variant(
     Ok(path.to_string_lossy().into_owned())
 }
 
-/// A game card's letterbox backdrop for a cover (`images::backdrop`): a tiny
-/// pre-blurred, pre-darkened JPEG the card scales up behind square and wide
-/// art, instead of blurring the cover with a CSS filter on every paint. Same
-/// resolution and host filter as [`ensure_image`].
-#[tauri::command]
-pub async fn ensure_card_backdrop(
-    state: State<'_, AppState>,
-    url: String,
-) -> Result<String, String> {
-    let base = state.session.server_url();
-    let resolved = filter_to_server_host(&resolve_image_url(&url, &base), &base);
-    if resolved.is_empty() {
-        return Err("the image is not hosted on the connected server".to_string());
-    }
-    let client = state.session.client();
-    let path = grid_core::images::backdrop::ensure_card_backdrop(
-        state.session.cache(),
-        client.as_deref(),
-        &resolved,
-    )
-    .await
-    .map_err(err)?;
-    Ok(path.to_string_lossy().into_owned())
-}
-
 #[tauri::command]
 pub async fn install_game(state: State<'_, AppState>, rom_id: i64) -> Result<(), String> {
     ensure_library_idle(&state)?;
@@ -655,7 +630,18 @@ pub fn normalize_ui_settings(settings: UiSettings) -> UiSettings {
         background_blur: settings.background_blur.min(MAX_BACKGROUND_BLUR),
         card_size_library: normalize_card_size(&settings.card_size_library),
         card_size_server: normalize_card_size(&settings.card_size_server),
+        card_labels: normalize_card_labels(&settings.card_labels),
     }
+}
+
+/// `"always"` or `"hover"`; anything else becomes `"always"`, the default
+/// (titles stay visible unless the user chose otherwise).
+fn normalize_card_labels(raw: &str) -> String {
+    match raw.trim() {
+        "hover" => "hover",
+        _ => "always",
+    }
+    .to_string()
 }
 
 /// One of `"small"`, `"medium"`, `"large"`; anything else becomes
@@ -3255,6 +3241,7 @@ mod ui_settings_tests {
                 background_blur: 2,
                 card_size_library: raw.to_string(),
                 card_size_server: raw.to_string(),
+                ..Default::default()
             });
             assert_eq!(out.card_size_library, expected, "library size for {raw:?}");
             assert_eq!(out.card_size_server, expected, "server size for {raw:?}");
@@ -3306,8 +3293,27 @@ mod ui_settings_tests {
                 background_blur: 2,
                 card_size_library: "medium".to_string(),
                 card_size_server: "medium".to_string(),
+                card_labels: "always".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn the_game_labels_setting_is_always_unless_it_says_hover() {
+        for (raw, expected) in [
+            ("always", "always"),
+            ("hover", "hover"),
+            ("  hover ", "hover"),
+            ("Hover", "always"),
+            ("never", "always"),
+            ("", "always"),
+        ] {
+            let out = normalize_ui_settings(UiSettings {
+                card_labels: raw.to_string(),
+                ..Default::default()
+            });
+            assert_eq!(out.card_labels, expected, "labels for {raw:?}");
+        }
     }
 
     #[test]

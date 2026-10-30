@@ -49,6 +49,10 @@ export const ICONS = {
   /** Solid right-pointing triangle; its centroid sits on x=11.3, y=12. */
   play: 'M7.5 4.5L19 12L7.5 19.5Z',
 
+  /** Three solid 1.6-radius dots on the centre line at x=6, 12 and 18: a
+   *  card's "Details" control. */
+  more: 'M7.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0zM13.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0zM19.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0z',
+
   /** The brandmark: four 6×6 cells with a 4-unit gutter, spanning 4–20. */
   grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
 } as const;
@@ -61,4 +65,4 @@ export type IconName = keyof typeof ICONS;
  * filled path must not also take the stroke, or the shape thickens by half a
  * unit on every edge and stops matching the outline icons beside it.
  */
-export const FILLED_ICONS: readonly IconName[] = ['star', 'play'];
+export const FILLED_ICONS: readonly IconName[] = ['star', 'play', 'more'];

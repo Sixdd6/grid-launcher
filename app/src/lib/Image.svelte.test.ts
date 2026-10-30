@@ -32,8 +32,8 @@ describe('the loading attributes on Image.svelte’s <img> tags', () => {
   // not mistaken for a tag.
   const tags = source.match(/<img\s[^>]*>/g) ?? [];
 
-  it('covers both the cover and the blurred backdrop copy', () => {
-    expect(tags).toHaveLength(2);
+  it('is the one cover tag (cards have no backdrop copy any more)', () => {
+    expect(tags).toHaveLength(1);
   });
 
   it('loads eagerly and decodes asynchronously', () => {

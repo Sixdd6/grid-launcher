@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FILLED_ICONS, ICONS, type IconName } from './icons';
 
-// The nine names the UI asks for. Written out here rather than derived from
+// The ten names the UI asks for. Written out here rather than derived from
 // `ICONS` so that deleting an icon a call site still uses fails this test
 // instead of silently shrinking the set.
 const EXPECTED: IconName[] = [
@@ -14,6 +14,7 @@ const EXPECTED: IconName[] = [
   'download',
   'play',
   'grid',
+  'more',
 ];
 
 // Every SVG path command letter, plus the number/separator characters a
@@ -50,8 +51,8 @@ describe('ICONS', () => {
 });
 
 describe('FILLED_ICONS', () => {
-  it('is the two solid marks', () => {
-    expect([...FILLED_ICONS].sort()).toEqual(['play', 'star']);
+  it('is the three solid marks', () => {
+    expect([...FILLED_ICONS].sort()).toEqual(['more', 'play', 'star']);
   });
 
   it('only names icons that exist', () => {

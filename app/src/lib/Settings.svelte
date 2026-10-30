@@ -43,7 +43,7 @@
   );
 </script>
 
-<section class="settings over-art" aria-label="Settings">
+<section class="settings" aria-label="Settings">
   <RailPane entries={railRows} testId="settings-rail" ariaLabel="Settings pages" onSelect={(k) => (page = k)} />
 
   <div class="panes">
@@ -81,6 +81,7 @@
   .settings {
     display: flex;
     align-items: stretch;
+    gap: var(--gutter);
     height: 100%;
     min-height: 0;
   }
@@ -94,6 +95,14 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
+    /* The pages are a panel: forms and lists never sit on the art. */
+    background: var(--panel);
+    -webkit-backdrop-filter: var(--panel-blur);
+    backdrop-filter: var(--panel-blur);
+    border: 1px solid var(--line);
+    border-radius: var(--r-panel);
+    box-sizing: border-box;
+    overflow: hidden;
   }
 
   /* No `display` on `.pane` itself: the `hidden` attribute's UA rule must

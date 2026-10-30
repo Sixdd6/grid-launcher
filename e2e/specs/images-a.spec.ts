@@ -72,25 +72,16 @@ describe('images (a): cover, screenshots, install, library grid', () => {
       timeoutMsg: 'the details overlay never opened for rom 101',
     });
 
-    // Structural fix, review round 2: `.over-art`'s halo (text-shadow)
-    // inherits through the DOM, and Details used to render inside
-    // `.server`'s `<section>` here — Server is the one entry point that
-    // opens Details from a grid whose root also carries `over-art`. The
-    // popup sits above the art on its own opaque panel and must stay
-    // outside the halo (ruling §4): its title should have no text-shadow
-    // even though the Server section root, which the halo is meant for,
-    // does.
-    const detailsTitleShadow = await browser.execute(() => {
-      const el = document.querySelector('[data-testid="details-panel"] h2');
-      return el ? getComputedStyle(el).textShadow : null;
-    });
-    expect(detailsTitleShadow).toBe('none');
-
-    const serverSectionShadow = await browser.execute(() => {
-      const el = document.querySelector('[data-testid="server-section"]');
-      return el ? getComputedStyle(el).textShadow : null;
-    });
-    expect(serverSectionShadow).not.toBe('none');
+    // Look-and-feel plan (2026-10-30): text sits on panels and overlays,
+    // never on the raw art, so nothing carries a text halo any more — not
+    // the details title, and not the Server section it opens from.
+    const shadows = await browser.execute(() =>
+      ['[data-testid="details-panel"] h2', '[data-testid="server-section"]'].map((sel) => {
+        const el = document.querySelector(sel);
+        return el ? getComputedStyle(el).textShadow : null;
+      }),
+    );
+    expect(shadows).toEqual(['none', 'none']);
 
     await waitForLoadedImage(
       testId('details-cover'),

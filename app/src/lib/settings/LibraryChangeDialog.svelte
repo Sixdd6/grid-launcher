@@ -620,7 +620,7 @@
   .backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--scrim);
     display: grid;
     place-items: center;
     z-index: 25;
@@ -635,9 +635,9 @@
     box-sizing: border-box;
     padding: 24px;
     border-radius: var(--r-dialog);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    background: var(--overlay);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-overlay);
     display: flex;
     flex-direction: column;
     gap: 16px;
