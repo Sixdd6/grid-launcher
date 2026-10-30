@@ -765,7 +765,9 @@ EOF
       if [[ -n "$python_config" ]]; then
         export E2E_PYTHON_CONFIG="$python_config"
       fi
-      exec xvfb-run -a npx wdio run wdio.conf.ts
+      # A 4K screen, so a spec can size its window up to 3840x2160
+      # (`E2E_WINDOW` in the perf probe and the screenshot group).
+      exec xvfb-run -a -s '-screen 0 3840x2160x24' npx wdio run wdio.conf.ts
     ) 2>&1 | tee "$wdio_log"
     rc="${PIPESTATUS[0]}"
     if (( rc != 0 )); then

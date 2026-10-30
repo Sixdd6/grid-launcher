@@ -169,6 +169,14 @@ appears on a command line inside it. Results are the `PERF` lines in the output:
 - `hover flick` / `browse` / `rest` — pointer browsing, with the number of background
   art changes. WebDriver pointer moves do not reach the WebKitGTK page, so the spec
   drives hover from inside the page.
+- `A/B scroll` — the same scroll with one costly style turned off at a time (cover
+  shadows, blurs, the background art, compositing layers), to find what a frame pays
+  for.
+
+Measure at 4K too: the e2e display is a 3840×2160 screen, and `E2E_WINDOW` sets the
+probe's window size (default `1600x1000`):
+
+    E2E_WINDOW=3840x2160 E2E_RELEASE=1 scripts/ctr.sh e2e large-platform-perf
 
 Frame times are `requestAnimationFrame` intervals: about 16 ms is 60 fps. The container
 renders in software under Xvfb, so compare runs with each other, not with a desktop.

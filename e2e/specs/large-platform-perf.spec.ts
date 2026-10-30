@@ -23,6 +23,9 @@ const LIVE_URL = process.env.E2E_LIVE_URL ?? '';
 const PLATFORM_ID = Number(process.env.E2E_LIVE_PLATFORM ?? '1');
 const PLATFORM_BTN = testId(`platform-btn-${PLATFORM_ID}`);
 const GRID = testId('server-grid');
+/** The window size, `WIDTHxHEIGHT` (E2E_WINDOW); 1600x1000 by default. The
+ *  test display is 4K, so up to 3840x2160 works. */
+const [WINDOW_W, WINDOW_H] = (process.env.E2E_WINDOW ?? '1600x1000').split('x').map(Number);
 
 /** Starts recording frame intervals in the page. */
 async function startFrames(): Promise<void> {
@@ -172,8 +175,9 @@ async function browse(label: string, moveMs: number, restMs = 0): Promise<void> 
     const st = document.createElement('style');
     st.id = 'perf-hover-css';
     st.textContent =
-      '[data-testid^="game-card-"].perf-hover{transform:scale(1.05)!important;z-index:1}' +
-      '.perf-hover .overlay,.perf-hover .primary,.perf-hover .actions{opacity:1!important}';
+      '[data-testid^="game-card-"].perf-hover{z-index:2}' +
+      '.perf-hover .cover{transform:translateY(-4px)!important}' +
+      '.perf-hover .shade,.perf-hover .bar{opacity:1!important}';
     document.head.appendChild(st);
   });
   await browser.pause(3000);
@@ -185,7 +189,7 @@ async function browse(label: string, moveMs: number, restMs = 0): Promise<void> 
       const cards = Array.from(grid.children).filter((c) => {
         const b = c.getBoundingClientRect();
         return b.top > top + 10 && b.bottom < window.innerHeight - 40;
-      }) as HTMLElement[];
+      }).slice(0, 40) as HTMLElement[];
       let artChanges = 0;
       const obs = new MutationObserver((recs) => (artChanges += recs.length));
       document
@@ -232,8 +236,8 @@ describe('large platform: performance probe (measurement only)', () => {
     await $(testId('connect-secret')).setValue(LIVE_URL ? (process.env.E2E_LIVE_TOKEN ?? '') : FIXTURE_TOKEN);
     await $(testId('connect-submit')).click();
     await $(PLATFORM_BTN).waitForExist({ timeout: 30_000 });
-    await browser.setWindowSize(1600, 1000);
-    console.log(`PERF mode: ${LIVE_URL ? 'live server' : 'mock'}, platform ${PLATFORM_ID}`);
+    await browser.setWindowSize(WINDOW_W, WINDOW_H);
+    console.log(`PERF mode: ${LIVE_URL ? 'live server' : 'mock'}, platform ${PLATFORM_ID}, window ${WINDOW_W}x${WINDOW_H}`);
     await timeOpen('first open');
     await browser.waitUntil(
       () => browser.execute((sel: string) => (document.querySelector(sel)?.children.length ?? 0) > 0, GRID),
@@ -300,7 +304,46 @@ describe('large platform: performance probe (measurement only)', () => {
     await stopFrames('jump to middle');
   });
 
+  it('which style costs the scrolled frames (A/B, one suspect off at a time)', async function () {
+    this.timeout(180_000);
+    const variants: [string, string][] = [
+      ['as shipped', ''],
+      ['labels without blur', '.label{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}'],
+      ['covers without shadow', '.cover{box-shadow:none!important}'],
+      ['panels without blur', '.panel,.rail,.topbar,.panes{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}'],
+      ['no background art', '[data-testid="background-art"]{display:none!important}'],
+      ['covers with a hairline, no shadow', '.cover{box-shadow:0 0 0 1px rgba(255,255,255,.08)!important}'],
+      ['art layers not promoted', '[data-testid="background-art"] .layer{will-change:auto!important}'],
+      ['art fully opaque', '[data-testid="background-art"] .layer.visible{opacity:1!important}'],
+      ['art layer hidden while it is not fading', '[data-testid="background-art"] .layer:not(.visible){display:none!important}'],
+      [
+        'all four off',
+        '.label,.panel,.rail,.topbar,.panes{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}' +
+          '.cover{box-shadow:none!important}[data-testid="background-art"]{display:none!important}',
+      ],
+    ];
+    for (const [name, css] of variants) {
+      await browser.execute((text: string) => {
+        let st = document.getElementById('perf-ab-css');
+        if (!st) {
+          st = document.createElement('style');
+          st.id = 'perf-ab-css';
+          document.head.appendChild(st);
+        }
+        st.textContent = text;
+      }, css);
+      await scrollTo(0.3);
+      await browser.pause(1500);
+      await startFrames();
+      await fling(60, 2500);
+      await stopFrames(`A/B scroll 60px/frame, ${name}`);
+    }
+    await browser.execute(() => document.getElementById('perf-ab-css')?.remove());
+  });
+
   it('pointer browsing across cards', async () => {
+    // At most 40 visible cards in turn (`browse`), so the resting pass fits
+    // the suite's two-minute limit at 4K too.
     await browse('hover flick', 30);
     await browse('hover browse', 150);
     await browse('hover rest', 200, 1300);
