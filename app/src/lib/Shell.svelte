@@ -228,10 +228,11 @@
 <div data-testid="server-view" class="view" hidden={view !== 'server'}>
   <Server
     active={view === 'server'}
-    onOpenEmulators={() => {
-      // Design §6: the default-emulator chip links to Emulators › Platform defaults.
+    onOpenEmulators={(page) => {
+      // Design §6: the default-emulator chip links to Emulators › Platform
+      // defaults, the firmware chip to Installed, where firmware installs.
       view = 'emulators';
-      emulators?.show('defaults');
+      emulators?.show(page);
     }}
   />
 </div>

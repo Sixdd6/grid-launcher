@@ -1,13 +1,10 @@
 <script lang="ts">
-  import { listen } from '@tauri-apps/api/event';
   import {
     api,
-    FIRMWARE_PASS_FINISHED_EVENT,
     type CloudPanelInfo,
     type ContentAvailability,
     type ContentKind,
     type DownloadStatus,
-    type FirmwarePassFinished,
     type GameSummary,
     type LaunchDefaults,
     type RomDetail,
@@ -29,7 +26,6 @@
   import MediaTab from './details/MediaTab.svelte';
   import MediaViewer from './details/MediaViewer.svelte';
   import SavesTab from './details/SavesTab.svelte';
-  import FilesTab from './details/FilesTab.svelte';
   import AchievementsTab from './details/AchievementsTab.svelte';
   import LinkPicker from './details/LinkPicker.svelte';
   import RemoveConfirm from './details/RemoveConfirm.svelte';
@@ -67,7 +63,6 @@
     visibleTabs,
     type DetailsTab,
   } from './details/tabs';
-  import type { FirmwareChipState } from './server/header';
 
   let {
     subject,
@@ -210,8 +205,6 @@
   // the list empty, which renders no Related row at all rather than a row
   // of titles the user may not have.
   let serverTitles = $state<string[]>([]);
-  let firmware = $state<FirmwareChipState>(null);
-  let firmwarePending = $state(false);
 
   $effect(() => {
     const platformId = detail?.platform_id ?? null;
@@ -228,59 +221,6 @@
       cancelled = true;
     };
   });
-
-  // One firmware status read. The sequence guard drops an answer that a
-  // newer read has already superseded, so the chip never steps backwards
-  // when the pass-finished refetch overtakes the first fetch.
-  let firmwareSeq = 0;
-  function refreshFirmware(platformId: number) {
-    const seq = ++firmwareSeq;
-    api
-      .platformFirmwareStatus(platformId, subject.platformName)
-      .then((status) => {
-        if (seq === firmwareSeq) firmware = status;
-      })
-      .catch(() => {
-        // Refused or unreachable. "unavailable" is the honest chip: sitting
-        // at "checking…" forever would claim a call is still in flight.
-        if (seq === firmwareSeq) firmware = 'unavailable';
-      });
-  }
-
-  $effect(() => {
-    const platformId = detail?.platform_id ?? null;
-    if (platformId === null || !session.connected) return;
-    refreshFirmware(platformId);
-  });
-
-  // The pass runs in the background and answers with one event; the button
-  // stays disabled until it lands, whether or not anything was fetched. The
-  // status is then read again, since a pass can change what the server side
-  // reports.
-  $effect(() => {
-    const unlisten = listen<FirmwarePassFinished>(FIRMWARE_PASS_FINISHED_EVENT, (e) => {
-      const platformId = detail?.platform_id ?? null;
-      if (platformId === null || e.payload.platform_id !== platformId) return;
-      firmwarePending = false;
-      refreshFirmware(platformId);
-    });
-    return () => {
-      void unlisten.then((off) => off());
-    };
-  });
-
-  async function installFirmware() {
-    const platformId = detail?.platform_id ?? null;
-    if (platformId === null) return;
-    error = null;
-    firmwarePending = true;
-    try {
-      await api.installFirmwareForPlatform(platformId, subject.platformName);
-    } catch (err) {
-      error = errorMessage(err);
-      firmwarePending = false;
-    }
-  }
 
   let pending = $derived(pendingAction !== null);
   let summary = $derived(summaryOf(subject));
@@ -435,8 +375,8 @@
   // timestamp; the installed side has no server timestamp to fall back on,
   // so it falls back to when the install landed. Those two fallbacks are
   // different quantities, so the whole comparison is gated to PC platforms
-  // (`showsFilesVersionLine`); off PC both sides are '' and `FilesTab`
-  // drops the line.
+  // (`showsFilesVersionLine`); off PC both sides are '' and the Overview
+  // drops the Version fact.
   let versionLineShown = $derived(showsFilesVersionLine(subject.platformName));
   let topLevelFile = $derived(detail?.files.find((f) => f.is_top_level) ?? detail?.files[0] ?? null);
   let serverVersion = $derived(
@@ -861,6 +801,9 @@
           </div>
         </header>
 
+        <!-- A click does not move focus to the tab (mouse-down is cancelled):
+             WebKitGTK drew the keyboard focus ring on a clicked tab. The
+             Tab key still focuses it. -->
         <div class="tabs" role="tablist">
           {#each tabs as name (name)}
             <button
@@ -869,6 +812,7 @@
               class:active={activeTab === name}
               aria-selected={activeTab === name}
               onclick={() => selectTab(name)}
+              onmousedown={(e) => e.preventDefault()}
             >
               {DETAILS_TAB_LABELS[name]}
             </button>
@@ -877,7 +821,7 @@
 
         <div class="tabpanel" role="tabpanel">
           {#if activeTab === 'overview'}
-            <OverviewTab {description} {detail} {serverTitles} />
+            <OverviewTab {description} {detail} {serverTitles} {installedNow} {installedVersion} {serverVersion} />
           {:else if activeTab === 'media'}
             <MediaTab
               items={mediaItems}
@@ -899,15 +843,6 @@
             />
           {:else if activeTab === 'achievements' && subject.romId !== null}
             <AchievementsTab romId={subject.romId} />
-          {:else}
-            <FilesTab
-              files={detail?.files ?? []}
-              {installedVersion}
-              {serverVersion}
-              {installedNow}
-              {firmware}
-              onInstallFirmware={firmwarePending ? null : installFirmware}
-            />
           {/if}
         </div>
 

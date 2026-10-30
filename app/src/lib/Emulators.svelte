@@ -9,13 +9,16 @@
   import {
     api,
     EMULATOR_INSTALLED_EVENT,
+    FIRMWARE_PASS_FINISHED_EVENT,
     SETUP_DEFAULTS_EVENT,
     type CatalogEntry,
     type EmulatorInstalledEvent,
     type EmulatorEntry,
     type EmulatorFacts,
+    type FirmwarePassFinished,
     type LaunchDefaults,
     type Platform,
+    type PlatformFirmwareStatus,
     type PlatformRef,
     type ProfileSummary,
     type SetupStarted,
@@ -55,6 +58,7 @@
   import { startSetupRun } from './stores/setupRun.svelte';
   import EmulatorForm from './emulators/EmulatorForm.svelte';
   import { dynamicEmulatorNotes, emulatorNotes } from './emulators/notes';
+  import { emulatorFirmwareRows, firmwarePlatforms } from './emulators/firmware';
   import { installedToastText, updateConfirmText, upToDateText } from './emulators/update';
 
   // Mounted for the whole session now that Emulators is a view, so the
@@ -554,6 +558,52 @@
     };
   });
 
+  // Server firmware, listed under each emulator for the platforms it is the
+  // default for (`emulators/firmware.ts`). Status is read per platform when
+  // the platforms or defaults change; Install is fire-and-forget, and the
+  // backend's pass-finished event ends it and re-reads that platform.
+  let firmwareStatus = $state<Record<number, PlatformFirmwareStatus>>({});
+  let firmwarePending = $state<Record<number, true>>({});
+
+  function refreshFirmwareStatus(p: Platform) {
+    api
+      .platformFirmwareStatus(p.id, defaultEmulatorKey(p))
+      .then((status) => (firmwareStatus = { ...firmwareStatus, [p.id]: status }))
+      .catch(() => {
+        // No line rather than a wrong one: the server could not say.
+        const { [p.id]: _gone, ...rest } = firmwareStatus;
+        firmwareStatus = rest;
+      });
+  }
+
+  $effect(() => {
+    for (const p of firmwarePlatforms(platforms, defaults, emulators.map((e) => e.name))) {
+      refreshFirmwareStatus(p);
+    }
+  });
+
+  $effect(() => {
+    const pending = listen<FirmwarePassFinished>(FIRMWARE_PASS_FINISHED_EVENT, (event) => {
+      const id = event.payload.platform_id;
+      const { [id]: _done, ...rest } = firmwarePending;
+      firmwarePending = rest;
+      const p = platforms.find((x) => x.id === id);
+      if (p) refreshFirmwareStatus(p);
+    });
+    return () => {
+      pending.then((unlisten) => unlisten());
+    };
+  });
+
+  function installFirmware(platformId: number, platformName: string) {
+    firmwarePending = { ...firmwarePending, [platformId]: true };
+    api.installFirmwareForPlatform(platformId, platformName).catch((err) => {
+      const { [platformId]: _failed, ...rest } = firmwarePending;
+      firmwarePending = rest;
+      pushToast(`Could not install ${platformName} firmware: ${errorMessage(err)}`, 'error');
+    });
+  }
+
   // The completion toast for an install OR an update, worded by the backend's
   // `fresh` flag. Mounted once for the session: the install runs in the
   // background, so the view it started from may be long gone by then.
@@ -711,6 +761,18 @@
                         <p data-testid={`emulator-note-${note.key}-${sanitizeName(e.name)}`} class="note">
                           {note.text}
                         </p>
+                      {/each}
+                      {#each emulatorFirmwareRows(e.name, platforms, defaults, firmwareStatus) as fw (fw.platformId)}
+                        <div class="firmware" data-testid={`emulator-firmware-${sanitizeName(e.name)}-${fw.platformId}`}>
+                          <p class="hint">{fw.label}</p>
+                          <button
+                            data-testid={`emulator-firmware-install-${sanitizeName(e.name)}-${fw.platformId}`}
+                            disabled={firmwarePending[fw.platformId] === true}
+                            onclick={() => installFirmware(fw.platformId, fw.platformName)}
+                          >
+                            {firmwarePending[fw.platformId] ? 'Requested…' : 'Install firmware'}
+                          </button>
+                        </div>
                       {/each}
                       {#if isRpcs3(e.name) && rpcs3Status.get(e.name)}
                         <div class="ps3-firmware">
@@ -1147,6 +1209,7 @@
     gap: 12px;
   }
 
+  .firmware,
   .ps3-firmware {
     display: flex;
     align-items: center;
@@ -1154,11 +1217,13 @@
     gap: 10px;
   }
 
+  .firmware .hint,
   .ps3-firmware .hint {
     flex: 1 1 auto;
     min-width: 0;
   }
 
+  .firmware button,
   .ps3-firmware button,
   .row-actions button,
   .catalog-row button {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   emulatorChipLabel,
   firmwareChipLabel,
-  firmwareInstallable,
+  firmwareChipTarget,
   platformCountsLine,
   showsEmulatorChip,
 } from './header';
@@ -73,12 +73,16 @@ describe('firmwareChipLabel', () => {
   });
 });
 
-describe('firmwareInstallable', () => {
-  it('needs both files on the server and somewhere to put them', () => {
-    expect(firmwareInstallable({ file_count: 4, has_default_emulator: true })).toBe(true);
-    expect(firmwareInstallable({ file_count: 0, has_default_emulator: true })).toBe(false);
-    expect(firmwareInstallable({ file_count: 4, has_default_emulator: false })).toBe(false);
-    expect(firmwareInstallable(null)).toBe(false);
-    expect(firmwareInstallable('unavailable')).toBe(false);
+describe('firmwareChipTarget', () => {
+  it('links to Installed when there is firmware and a default emulator to install it for', () => {
+    expect(firmwareChipTarget({ file_count: 4, has_default_emulator: true })).toBe('installed');
+  });
+  it('links to Platform defaults when there is firmware but no default emulator', () => {
+    expect(firmwareChipTarget({ file_count: 4, has_default_emulator: false })).toBe('defaults');
+  });
+  it('is a plain chip with no firmware, before the status, or when it is unavailable', () => {
+    expect(firmwareChipTarget({ file_count: 0, has_default_emulator: true })).toBe(null);
+    expect(firmwareChipTarget(null)).toBe(null);
+    expect(firmwareChipTarget('unavailable')).toBe(null);
   });
 });

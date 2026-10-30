@@ -66,8 +66,9 @@ There are several main sections to the application with buttons across the top b
   - **Remove from library (keeps files)** — the same action as for a game with no server
     id below: the Library row goes, no file is touched.
 - **Server** mirrors Library: a rail of the server's platforms (alphabetical by name) with ROM counts, a
-  platform header (name, ROM count, installed count, a firmware chip with an Install
-  action when the server offers firmware, and the platform's default emulator chip
+  platform header (name, ROM count, installed count, a firmware chip that links to
+  Emulators › Installed when the server offers firmware — or to Platform defaults when
+  the platform has no default emulator — and the platform's default emulator chip
   linking to the Emulators view), a search box that filters the loaded platform list by
   title, platform or genre, and a grid of cover cards. The hover action is
   Install for a game that is not installed and Play for one that is. The card size is
@@ -88,7 +89,10 @@ There are several main sections to the application with buttons across the top b
   **Installed** lists every configured emulator (name, path, arguments) with Edit and
   Delete — Edit opens the manual form as a sheet beside the list — and, for an RPCS3
   entry with a downloaded PS3 firmware package, the note and the Install PS3 Firmware
-  button; **Add from catalog** has a search box, one row per catalog entry with its
+  button. Under each emulator, one line per platform it is the default emulator for
+  whose server firmware has files ("PlayStation firmware · 3 files") with Install
+  firmware, which reads "Requested…" until the background pass ends; **Add from
+  catalog** has a search box, one row per catalog entry with its
   provider and an Install / Installed button, and a Manual tab for the hand-typed form
   (name, executable path, arguments, with the profile auto-fill); **Platform defaults**
   has **Set up platforms…** (the first-run platform picker, see First Run Setup) and
@@ -286,13 +290,17 @@ to Details › Uninstall, deleting a server-package emulator, and Start fresh �
 
 The right side carries the title, one header line (platform · release year · developer ·
 genres · rating), chips for the playing state, the identification state, region and language
-flags and the version, then up to five tabs:
+flags and the version, then up to four tabs:
 
 - **Overview** — the summary, split into paragraphs at the server's own line breaks and
   kept to a readable line length, with the Related row (filtered to titles the server
   actually holds for that platform) under it; beside them, a facts panel (developer,
-  companies, release, genres, game modes, players, franchises), which moves under the
-  summary when the popup is narrow. Screenshots are on the Media tab only.
+  companies, release, genres, game modes, players, franchises, size, version and
+  content), which moves under the summary when the popup is narrow. Size is the game's
+  own files' total; Version (PC platforms only) is the installed version, with the
+  server's beside it when they differ ("v1.0.0 · server v1.1.0"); Content counts the PS4
+  update / Xbox 360 DLC files the server holds ("1 update · 2 DLC"). Screenshots are on
+  the Media tab only. There is no Files tab: firmware installs from Emulators › Installed.
 - **Media** — two horizontally scrolling rows, each with its count and arrows when it
   overflows: Screenshots (every screenshot, at its own shape) and Videos (the trailer and
   any server-hosted video). A row with nothing in it is left out. Clicking a tile opens a
@@ -301,10 +309,6 @@ flags and the version, then up to five tabs:
   more than twice its own resolution; the arrows sit just outside the media's edges and
   stop at the window's edge when the media is wide.
 - **Saves** — the game's cloud saves or states, described below.
-- **Files** — every file the server lists with its size and its version (the version tag
-  parsed out of the file name, else the file's last-modified date), the installed-versus-
-  server version line, the PS4 / Xbox 360 content files, and the platform's firmware row
-  with an Install action when the server offers firmware.
 - **Achievements** — shown only when the server lists RetroAchievements achievements for
   the game. The data comes from the server only: the game's achievement list and the
   progress of the server account. A summary line (unlocked of total, points earned of

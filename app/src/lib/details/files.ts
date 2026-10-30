@@ -1,4 +1,4 @@
-// The Files tab's rows (design §7): `files[]` with name, size and the
+// File rows for the Overview facts (size, extra content): `files[]` with name, size and the
 // D-UI-10 version, plus the PS4 / Xbox 360 content rows. Pure.
 import type { RomFile } from '../api';
 import { fileVersionLabel } from './version';

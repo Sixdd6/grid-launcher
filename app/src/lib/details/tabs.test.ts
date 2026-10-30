@@ -15,7 +15,7 @@ beforeEach(() => resetRememberedTab());
 
 describe('the tab set', () => {
   it('is the four design §7 tabs plus Achievements, in order', () => {
-    expect(DETAILS_TABS).toEqual(['overview', 'media', 'saves', 'files', 'achievements']);
+    expect(DETAILS_TABS).toEqual(['overview', 'media', 'saves', 'achievements']);
   });
 
   it('labels every tab', () => {
@@ -23,7 +23,6 @@ describe('the tab set', () => {
       'Overview',
       'Media',
       'Saves',
-      'Files',
       'Achievements',
     ]);
   });
@@ -33,8 +32,9 @@ describe('the tab set', () => {
     expect(tabTestId('achievements')).toBe('details-tab-achievements');
   });
 
-  it('recognizes only the five names', () => {
-    expect(isDetailsTab('files')).toBe(true);
+  it('recognizes only the four names', () => {
+    expect(isDetailsTab('saves')).toBe(true);
+    expect(isDetailsTab('files')).toBe(false);
     expect(isDetailsTab('achievements')).toBe(true);
     expect(isDetailsTab('metadata')).toBe(false);
   });
@@ -42,19 +42,19 @@ describe('the tab set', () => {
 
 describe('tab visibility', () => {
   it('shows Achievements only when the ROM lists at least one', () => {
-    expect(visibleTabs(3)).toEqual(['overview', 'media', 'saves', 'files', 'achievements']);
-    expect(visibleTabs(0)).toEqual(['overview', 'media', 'saves', 'files']);
+    expect(visibleTabs(3)).toEqual(['overview', 'media', 'saves', 'achievements']);
+    expect(visibleTabs(0)).toEqual(['overview', 'media', 'saves']);
   });
 
   it('hides Achievements while the detail has not loaded', () => {
-    expect(visibleTabs(null)).toEqual(['overview', 'media', 'saves', 'files']);
-    expect(visibleTabs(undefined)).toEqual(['overview', 'media', 'saves', 'files']);
+    expect(visibleTabs(null)).toEqual(['overview', 'media', 'saves']);
+    expect(visibleTabs(undefined)).toEqual(['overview', 'media', 'saves']);
   });
 
   it('falls back to Overview when the chosen tab is hidden for this game', () => {
     expect(shownTab('achievements', visibleTabs(0))).toBe('overview');
     expect(shownTab('achievements', visibleTabs(5))).toBe('achievements');
-    expect(shownTab('files', visibleTabs(0))).toBe('files');
+    expect(shownTab('saves', visibleTabs(0))).toBe('saves');
   });
 });
 
@@ -69,7 +69,7 @@ describe('the remembered tab', () => {
   });
 
   it('is module scoped, so a later read sees the last write', () => {
-    rememberTab('files');
+    rememberTab('saves');
     rememberTab('media');
     expect(rememberedTab()).toBe('media');
   });

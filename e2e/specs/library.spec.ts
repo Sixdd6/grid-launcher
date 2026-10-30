@@ -300,10 +300,11 @@ describe('library', () => {
   it('hides the Achievements tab for a game without achievements', async () => {
     await $(testId('game-card-103')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    // Visibility follows the detail fetch; wait for it to land (Files lists
-    // rom 103's file) before asserting the tab is absent.
-    await $(testId('details-tab-files')).click();
-    await $('[data-testid^="details-file-"]').waitForExist({ timeout: TRANSITION_TIMEOUT });
+    // Visibility follows the detail fetch; wait for it to land (Media lists
+    // rom 103's screenshot, which only the detail carries) before asserting
+    // the tab is absent.
+    await $(testId('details-tab-media')).click();
+    await $(testId('details-media-0')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await expect($(testId('details-tab-achievements'))).not.toExist();
     await $(testId('details-tab-overview')).click();
     await $(testId('details-close')).click();

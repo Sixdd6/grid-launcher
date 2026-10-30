@@ -18,6 +18,7 @@
   import RailPane, { type RailPaneEntry } from './RailPane.svelte';
   import { fromSummary } from './details/subject';
   import type { CloudMode } from './details/cloud';
+  import type { EmulatorPage } from './emulators/pages';
   import { moveFocus, type NavDirection } from './focus/grid';
   import { isInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
   import { updates } from './stores/updates.svelte';
@@ -36,20 +37,12 @@
   import {
     emulatorChipLabel,
     firmwareChipLabel,
-    firmwareInstallable,
+    firmwareChipTarget,
     platformCountsLine,
     showsEmulatorChip,
     type FirmwareChipState,
   } from './server/header';
   import { platformLabel } from './server/platformLabel';
-  import {
-    firmwareInstallLabel,
-    firmwarePassFinished,
-    firmwareRequested,
-    firmwareStatusSettled,
-    NO_FIRMWARE_REQUEST,
-    type FirmwareRequest,
-  } from './server/firmware';
   import { savedDefaultFor } from './emulators/defaults';
   import { chordBlocked, chordContext, shouldFocusSearch } from './views/searchKeys';
   import { pickFolder } from './pickers';
@@ -57,7 +50,7 @@
   let {
     active,
     onOpenEmulators = () => {},
-  }: { active: boolean; onOpenEmulators?: () => void } = $props();
+  }: { active: boolean; onOpenEmulators?: (page: EmulatorPage) => void } = $props();
 
   let platforms = $state<Platform[]>([]);
   // `$state.raw`: a platform can hold thousands of games and the list is only
@@ -81,19 +74,16 @@
   // Platform name -> default emulator name, for the header's emulator chip.
   let defaultEmulators = $state<Record<string, string>>({});
   let firmware = $state<FirmwareChipState>(null);
-  let firmwareRequest = $state<FirmwareRequest>(NO_FIRMWARE_REQUEST);
-  // True only while THIS platform's Install is unanswered: a request left
-  // over from another platform must never disable this one's button.
-  let firmwarePending = $derived(
-    firmwareRequest.pending && firmwareRequest.platformId === activePlatform,
-  );
+  // Where the firmware chip leads: Emulators › Installed, where firmware is
+  // installed (user ruling 2026-10-30), or Platform defaults when the
+  // platform has no default emulator to install it for.
+  let firmwareTarget = $derived(firmwareChipTarget(firmware));
   // The game list belongs to the previous platform until `listGames`
   // answers. The counts line and the empty message would both state
   // something false about the new platform in that gap, so neither renders.
   let gamesLoading = $state(false);
   // The header's own error line: a refused Install. Never a path or a token —
   // the backend's command errors carry neither, and nothing is appended.
-  let headerError = $state<string | null>(null);
 
   let libraryPathInput = $state('');
   let showLibraryBanner = $state(false);
@@ -170,42 +160,31 @@
     if (id === null || name === '') return;
     void session.connected; // re-runs on reconnect
     firmware = null;
-    // A new platform is a new question: the previous platform's install
-    // button must not still read "Requested…", nor its error still stand.
-    firmwareRequest = NO_FIRMWARE_REQUEST;
-    headerError = null;
     refreshFirmwareStatus(id, name);
   });
 
-  /** One status read, with the staleness guard both callers need. Ends any
-   *  Install request for `id`: the chip is showing a fresh answer, so the
-   *  button has nothing left to wait for. */
+  /** One status read, with the staleness guard both callers need. */
   function refreshFirmwareStatus(id: number, name: string) {
     api
       .platformFirmwareStatus(id, name)
       .then((status) => {
         if (activePlatform === id) firmware = status;
-        firmwareRequest = firmwareStatusSettled(firmwareRequest, id);
       })
       .catch(() => {
         // Unreachable or refused. Say so: "checking…" forever would claim a
         // call is still in flight when none is, and reporting "no firmware"
         // would claim an answer we never got.
         if (activePlatform === id) firmware = 'unavailable';
-        firmwareRequest = firmwareStatusSettled(firmwareRequest, id);
       });
   }
 
-  // The background pass announces its own end (it is fire-and-forget, so the
-  // command's return says nothing about it). Listener first, at mount, so no
-  // event can land between an Install and the subscription.
+  // A firmware install started from Emulators announces its end; the chip
+  // re-reads the platform on screen.
   $effect(() => {
     let unlisten: UnlistenFn | null = null;
     let stopped = false;
     listen<FirmwarePassFinished>(FIRMWARE_PASS_FINISHED_EVENT, (e) => {
-      const next = firmwarePassFinished(firmwareRequest, e.payload, activePlatform);
-      firmwareRequest = next.state;
-      if (next.refetch && activePlatform !== null && activePlatformName !== '') {
+      if (e.payload.platform_id === activePlatform && activePlatformName !== '') {
         refreshFirmwareStatus(activePlatform, activePlatformName);
       }
     }).then((un) => {
@@ -231,23 +210,6 @@
       for (const off of offs) off.then((un) => un());
     };
   });
-
-  function installFirmware() {
-    const id = activePlatform;
-    if (id === null) return;
-    firmwareRequest = firmwareRequested(id);
-    headerError = null;
-    api.installFirmwareForPlatform(id, activePlatformName).catch((e) => {
-      // Same staleness guard as the status fetch: a rejection that arrives
-      // after the user moved on belongs to the platform it was asked about,
-      // not to whichever one is on screen now.
-      firmwareRequest = firmwareStatusSettled(firmwareRequest, id);
-      if (activePlatform !== id) return;
-      // The command's own message, verbatim. grid-core's command errors name
-      // no path and carry no token, and nothing is appended to them here.
-      headerError = String(e);
-    });
-  }
 
   async function checkLibraryPath() {
     try {
@@ -542,27 +504,24 @@
             </p>
           {/if}
           <div class="chips">
-            <span data-testid="server-firmware-chip" class="chip">
-              {firmwareChipLabel(firmware)}
-              {#if firmwareInstallable(firmware)}
-                <button
-                  data-testid="server-firmware-install"
-                  onclick={installFirmware}
-                  disabled={firmwarePending}
-                >
-                  {firmwareInstallLabel(firmwarePending)}
-                </button>
-              {/if}
-            </span>
+            {#if firmwareTarget}
+              <button
+                data-testid="server-firmware-chip"
+                class="chip link"
+                title="Install firmware from Emulators"
+                onclick={() => onOpenEmulators(firmwareTarget)}
+              >
+                {firmwareChipLabel(firmware)}
+              </button>
+            {:else}
+              <span data-testid="server-firmware-chip" class="chip">{firmwareChipLabel(firmware)}</span>
+            {/if}
             {#if showsEmulatorChip(activePlatformName, activePlatformRow?.slug ?? '')}
-              <button data-testid="server-emulator-chip" class="chip link" onclick={onOpenEmulators}>
+              <button data-testid="server-emulator-chip" class="chip link" onclick={() => onOpenEmulators('defaults')}>
                 {emulatorChipLabel(defaultEmulator)}
               </button>
             {/if}
           </div>
-          {#if headerError !== null}
-            <p data-testid="server-header-error" class="header-error">{headerError}</p>
-          {/if}
         </header>
 
         <div class="toolbar">
@@ -723,13 +682,6 @@
     align-items: center;
     gap: 8px;
     margin-left: auto;
-  }
-
-  .header-error {
-    flex-basis: 100%;
-    margin: 0;
-    font-size: 12px;
-    color: var(--danger);
   }
 
   .chip {

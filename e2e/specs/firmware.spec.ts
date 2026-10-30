@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import {
   APP_START_TIMEOUT,
@@ -120,6 +120,42 @@ describe('firmware', () => {
     await showServer();
     await $(testId('details-close')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+  });
+
+  it("installs a platform's firmware from its default emulator's row in Emulators", async () => {
+    // Firmware installs from Emulators › Installed (user ruling 2026-10-30).
+    // The Server header's chip links there instead of installing itself.
+    const bios = path.join(stubs(), 'duckstation', 'bios', 'scph5501.bin');
+    rmSync(bios, { force: true });
+
+    await showServer();
+    await $(testId('platform-btn-1')).click();
+    await $(testId('server-firmware-chip')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await browser.waitUntil(async () => (await $(testId('server-firmware-chip')).getText()).startsWith('Firmware: '), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the firmware chip never reported the server firmware',
+    });
+    await $(testId('server-firmware-chip')).click();
+    await $(testId('emu-page-installed')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the firmware chip did not open Emulators › Installed',
+    });
+
+    const install = $(testId('emulator-firmware-install-duckstation-(playstation-1)-1'));
+    await install.waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: "DuckStation's row never listed the PlayStation firmware",
+    });
+    await install.click();
+    await browser.waitUntil(() => existsSync(bios), {
+      timeout: FIRMWARE_TIMEOUT,
+      timeoutMsg: `Install firmware never wrote ${bios}`,
+    });
+    // The pass-finished event re-enables the button.
+    await browser.waitUntil(async () => (await install.getText()) === 'Install firmware', {
+      timeout: FIRMWARE_TIMEOUT,
+      timeoutMsg: 'the Install firmware button never came back from "Requested…"',
+    });
   });
 
   it('fetches the PS3 PUP through its own drawer row when RPCS3 is added by hand', async () => {

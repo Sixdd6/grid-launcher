@@ -113,7 +113,7 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
   });
 
-  it('renders the redesigned popup: header, tabs, related, media viewer and file version', async () => {
+  it('renders the redesigned popup: header, tabs, related and media viewer', async () => {
     await $(testId('game-card-101')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
 
@@ -125,10 +125,12 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     );
     await expect($(testId('details-verification'))).toHaveText('Identified');
 
-    // All four §11 tab ids exist, and Overview is the one showing.
-    for (const name of ['overview', 'media', 'saves', 'files']) {
+    // The three §11 tab ids exist, and Overview is the one showing.
+    for (const name of ['overview', 'media', 'saves']) {
       await expect($(testId(`details-tab-${name}`))).toExist();
     }
+    // No Files tab: its facts are on Overview, firmware is on Emulators.
+    await expect($(testId('details-tab-files'))).not.toExist();
     await expect($(testId('details-description'))).toHaveText('A classic platformer.');
     await expect($(testId('details-meta-players'))).toHaveText('1');
 
@@ -218,12 +220,6 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     await browser.keys(['Escape']);
     await $(testId('media-viewer')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
     await expect($(testId('details-panel'))).toExist();
-
-    // Files: D-UI-10 with no version tag in the name falls back to the
-    // file's own last_modified date.
-    await $(testId('details-tab-files')).click();
-    await $(testId('details-file-1001')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await expect($(testId('details-file-version-1001'))).toHaveText('2026-01-02');
 
     // Leave the session's remembered tab on Overview: it is module state,
     // so it would otherwise decide which tab the next case's popup opens on.

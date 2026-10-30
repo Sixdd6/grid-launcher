@@ -1,16 +1,23 @@
 <script lang="ts">
   import type { RomDetail } from '../api';
   import { epochDate } from './header';
-  import { descriptionParagraphs } from './overview';
+  import { contentFact, descriptionParagraphs, sizeFact, versionFact } from './overview';
   import { relatedKindLabel, relatedOnServer } from './related';
 
   let {
     description,
     detail,
     serverTitles,
+    installedNow,
+    installedVersion,
+    serverVersion,
   }: {
     description: string;
     detail: RomDetail | null;
+    installedNow: boolean;
+    /** D-UI-10 versions, `''` off PC platforms (`showsFilesVersionLine`). */
+    installedVersion: string;
+    serverVersion: string;
     /** Every title on this game's platform, for design §7's "filtered to
      *  titles present on the server". Empty until the list loads. */
     serverTitles: string[];
@@ -37,6 +44,9 @@
         ['modes', 'Game modes', detail?.game_modes ?? ''],
         ['players', 'Players', detail?.player_count ?? ''],
         ['franchises', 'Franchises', detail?.franchises ?? ''],
+        ['size', 'Size', sizeFact(detail?.files ?? [])],
+        ['version', 'Version', versionFact(installedNow, installedVersion, serverVersion)],
+        ['content', 'Content', contentFact(detail?.files ?? [])],
       ] as const
     ).filter(([, , value]) => value.trim() !== '')
   );

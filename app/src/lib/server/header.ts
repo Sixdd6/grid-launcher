@@ -59,22 +59,12 @@ export function firmwareChipLabel(status: FirmwareChipState): string {
 }
 
 /**
- * Whether the chip offers its Install action: the server lists firmware for
- * the platform AND the platform resolves to a configured emulator.
- *
- * `has_default_emulator` is exactly that and no more (`commands.rs`'s
- * `platform_firmware_status` → `default_entry_for_platform`): a config entry
- * is found for the platform's default emulator name. It does NOT say the
- * emulator's profile declares firmware targets, so a pass started from this
- * button can still end with nothing installed — which is why the button
- * reads "Requested…" rather than claiming progress, and re-enables on
- * `FIRMWARE_PASS_FINISHED_EVENT` whether or not anything was fetched.
+ * Where the firmware chip links: Emulators › Installed, where each emulator
+ * lists its platforms' server firmware with Install (user ruling 2026-10-30),
+ * or Platform defaults when the platform has no default emulator to install
+ * it for. `null` (a plain chip) when the server has no firmware for it.
  */
-export function firmwareInstallable(status: FirmwareChipState): boolean {
-  return (
-    status !== null &&
-    status !== 'unavailable' &&
-    status.file_count > 0 &&
-    status.has_default_emulator
-  );
+export function firmwareChipTarget(status: FirmwareChipState): 'installed' | 'defaults' | null {
+  if (status === null || status === 'unavailable' || status.file_count === 0) return null;
+  return status.has_default_emulator ? 'installed' : 'defaults';
 }

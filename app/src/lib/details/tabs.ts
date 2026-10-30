@@ -3,13 +3,14 @@
 // "last tab remembered per session", so it must survive closing and
 // reopening the popup but not survive a restart.
 
-export type DetailsTab = 'overview' | 'media' | 'saves' | 'files' | 'achievements';
+// No Files tab (user ruling 2026-10-30): its size, version and content lines
+// are Overview facts, and firmware installs from Emulators › Installed.
+export type DetailsTab = 'overview' | 'media' | 'saves' | 'achievements';
 
 export const DETAILS_TABS: readonly DetailsTab[] = [
   'overview',
   'media',
   'saves',
-  'files',
   'achievements',
 ] as const;
 
@@ -17,7 +18,6 @@ export const DETAILS_TAB_LABELS: Record<DetailsTab, string> = {
   overview: 'Overview',
   media: 'Media',
   saves: 'Saves',
-  files: 'Files',
   achievements: 'Achievements',
 };
 

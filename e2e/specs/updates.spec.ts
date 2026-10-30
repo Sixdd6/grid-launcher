@@ -261,17 +261,10 @@ describe('updates', () => {
     await expect($(testId('details-version'))).toHaveText('Version: v1.0.0');
     await expect($(testId('details-update'))).toHaveText('Update to v1.1.0');
 
-    // D-UI-10 on the Files tab: the tag parsed out of each file name, and
-    // the installed-vs-server line above them.
-    await $(testId('details-tab-files')).click();
-    await expect($(testId('details-files-version'))).toHaveText(
-      'Installed v1.0.0 · Server v1.1.0',
-    );
-    await expect($(testId('details-file-version-4802'))).toHaveText('v1.1.0');
-    // `game.json` carries no tag, so it falls back to its last_modified —
-    // which this fixture file does not have, leaving the cell blank.
-    expect(await $(testId('details-file-version-4803')).getText()).toBe('');
+    // D-UI-10 as the Overview's Version fact: installed, then the server's
+    // when they differ.
     await $(testId('details-tab-overview')).click();
+    await expect($(testId('details-meta-version'))).toHaveText('v1.0.0 · server v1.1.0');
 
     // Native updates confirm first (doc 10): the first click only states
     // what survives, the second one starts the job.
