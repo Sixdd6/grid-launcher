@@ -105,10 +105,14 @@ STAGE_GROUPS=(
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
   # BUILD.md "Performance probe" has how to run and read it.
   "large-platform-perf:specs/large-platform-perf.spec.ts"
+  # Screenshots only, opt-in: the main views at background fade 0/30/60 in
+  # both themes, under ctr-out/ui-screens/, against the mock or (with the
+  # E2E_LIVE_* variables) a real server.
+  "ui-screens:specs/ui-screens.spec.ts"
 )
 
 # Groups that run only when named on the command line.
-OPT_IN_GROUPS=(large-platform-perf)
+OPT_IN_GROUPS=(large-platform-perf ui-screens)
 
 # Run only the named groups by passing them as arguments, e.g.
 # `scripts/e2e.sh library downloads` — already supported by the
