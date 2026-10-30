@@ -533,7 +533,7 @@
       />
 
       <div class="body">
-        <div class="head panel">
+        <div class="head panel scrolls">
         <header data-testid="server-platform-header" class="platform-header">
           <h2>{activePlatformName}</h2>
           {#if !gamesLoading}

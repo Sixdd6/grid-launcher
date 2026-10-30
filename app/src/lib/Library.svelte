@@ -341,7 +341,7 @@
   />
 
   <div class="body">
-    <div class="toolbar panel">
+    <div class="toolbar panel scrolls">
       <input
         data-testid="library-search"
         class="search"

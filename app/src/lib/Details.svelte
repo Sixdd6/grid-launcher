@@ -1071,7 +1071,7 @@
     max-width: 100%;
     max-height: 320px;
     border-radius: var(--r-card);
-    box-shadow: var(--shadow-card);
+    box-shadow: var(--shadow-lift);
   }
 
   .cover :global(.skeleton),

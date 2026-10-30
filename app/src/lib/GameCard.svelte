@@ -217,10 +217,14 @@
     height: 100%;
   }
 
-  /* D-UI-9: hover and keyboard focus look the same — the cover lifts. */
+  /* D-UI-9: hover and keyboard focus look the same — the cover lifts, and
+     only then takes the deep shadow: a wide blurred shadow on every cover
+     was the costliest thing in a scrolled frame at 4K (perf probe A/B,
+     2026-10-30). */
   .card:hover .cover,
   .card.focused .cover {
     transform: translateY(-4px);
+    box-shadow: var(--shadow-lift);
   }
 
   .card.focused .cover {
@@ -316,7 +320,7 @@
     color: var(--on-primary);
   }
 
-  /* "Always visible": a small frosted label under the cover, so the title
+  /* "Always visible": a small label under the cover, so the title
      reads on any art without a panel behind the whole grid. */
   .label {
     align-self: center;
@@ -327,9 +331,9 @@
     box-sizing: border-box;
     border-radius: var(--r-row);
     border: 1px solid var(--line);
+    /* Nearly opaque instead of blurred: a backdrop blur per label re-ran on
+       every scrolled frame (perf probe A/B, 2026-10-30). */
     background: var(--label);
-    -webkit-backdrop-filter: blur(12px);
-    backdrop-filter: blur(12px);
     font-size: 12px;
     color: var(--text-h);
     white-space: nowrap;
@@ -347,7 +351,7 @@
     width: max-content;
     max-width: calc(100% + 32px);
     background: var(--overlay);
-    box-shadow: var(--shadow-card);
+    box-shadow: var(--shadow-lift);
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--m-fast) ease;

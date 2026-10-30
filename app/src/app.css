@@ -16,6 +16,7 @@
      WCAG AA on any art: 0.86 holds muted text above 4.5:1 even over
      pure-black art here and pure-white art in dark mode. */
   --panel: rgba(250, 250, 253, 0.86);
+  --panel-solid: rgba(250, 250, 253, 0.92);
   --panel-blur: blur(18px) saturate(1.15);
   --overlay: #ffffff;
   --scrim: rgba(236, 236, 244, 0.62);
@@ -24,9 +25,13 @@
   --field: rgba(17, 17, 23, 0.05);
   --selected: rgba(85, 62, 152, 0.14);
   --focus: #553e98;
-  --shadow-card: 0 8px 22px rgba(20, 20, 40, 0.26), 0 2px 5px rgba(20, 20, 40, 0.16);
+  /* A cover at rest has only a hairline edge: any blurred shadow on every
+     cover was the costliest thing in a scrolled 4K frame (perf probe A/B,
+     2026-10-30). The lifted (hovered, focused) cover takes the real one. */
+  --shadow-card: 0 0 0 1px rgba(17, 17, 23, 0.14);
+  --shadow-lift: 0 10px 24px rgba(20, 20, 40, 0.3);
   --shadow-overlay: 0 24px 60px rgba(20, 20, 40, 0.3), 0 4px 12px rgba(20, 20, 40, 0.16);
-  --label: rgba(250, 250, 253, 0.88);
+  --label: rgba(250, 250, 253, 0.94);
   --text: #111117;
   --text-h: #111117;
   --text-muted: #3d3d52;
@@ -109,6 +114,7 @@
     --surface-2: #14141f;
     --border: #22223a;
     --panel: rgba(14, 14, 24, 0.86);
+  --panel-solid: rgba(14, 14, 24, 0.92);
     --panel-blur: blur(18px) saturate(1.15);
     --overlay: #15151f;
     --scrim: rgba(4, 4, 10, 0.62);
@@ -117,9 +123,10 @@
     --field: rgba(255, 255, 255, 0.07);
     --selected: rgba(139, 116, 232, 0.22);
     --focus: #b9a8ff;
-    --shadow-card: 0 10px 26px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+    --shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-lift: 0 12px 28px rgba(0, 0, 0, 0.6);
     --shadow-overlay: 0 28px 70px rgba(0, 0, 0, 0.6), 0 4px 14px rgba(0, 0, 0, 0.4);
-    --label: rgba(14, 14, 24, 0.86);
+    --label: rgba(14, 14, 24, 0.92);
     --text: #ffffff;
     --text-h: #ffffff;
     --text-muted: #c8c8dc;
@@ -141,6 +148,7 @@
   --surface-2: #14141f;
   --border: #22223a;
   --panel: rgba(14, 14, 24, 0.86);
+  --panel-solid: rgba(14, 14, 24, 0.92);
   --panel-blur: blur(18px) saturate(1.15);
   --overlay: #15151f;
   --scrim: rgba(4, 4, 10, 0.62);
@@ -149,9 +157,10 @@
   --field: rgba(255, 255, 255, 0.07);
   --selected: rgba(139, 116, 232, 0.22);
   --focus: #b9a8ff;
-  --shadow-card: 0 10px 26px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-lift: 0 12px 28px rgba(0, 0, 0, 0.6);
   --shadow-overlay: 0 28px 70px rgba(0, 0, 0, 0.6), 0 4px 14px rgba(0, 0, 0, 0.4);
-  --label: rgba(14, 14, 24, 0.86);
+  --label: rgba(14, 14, 24, 0.92);
   --text: #ffffff;
   --text-h: #ffffff;
   --text-muted: #c8c8dc;
@@ -171,6 +180,7 @@
   --surface-2: #ffffff;
   --border: #dcdce6;
   --panel: rgba(250, 250, 253, 0.86);
+  --panel-solid: rgba(250, 250, 253, 0.92);
   --panel-blur: blur(18px) saturate(1.15);
   --overlay: #ffffff;
   --scrim: rgba(236, 236, 244, 0.62);
@@ -179,9 +189,10 @@
   --field: rgba(17, 17, 23, 0.05);
   --selected: rgba(85, 62, 152, 0.14);
   --focus: #553e98;
-  --shadow-card: 0 8px 22px rgba(20, 20, 40, 0.26), 0 2px 5px rgba(20, 20, 40, 0.16);
+  --shadow-card: 0 0 0 1px rgba(17, 17, 23, 0.14);
+  --shadow-lift: 0 10px 24px rgba(20, 20, 40, 0.3);
   --shadow-overlay: 0 24px 60px rgba(20, 20, 40, 0.3), 0 4px 12px rgba(20, 20, 40, 0.16);
-  --label: rgba(250, 250, 253, 0.88);
+  --label: rgba(250, 250, 253, 0.94);
   --text: #111117;
   --text-h: #111117;
   --text-muted: #3d3d52;
@@ -237,6 +248,17 @@ h1 {
   border: 1px solid var(--line);
   border-radius: var(--r-panel);
   box-sizing: border-box;
+}
+
+/* A panel that scrolls with the content under it (a view's header band, the
+   Downloads list) is not blurred: a backdrop blur re-runs on every scrolled
+   frame, and at 4K that was a large part of each frame (perf probe A/B,
+   2026-10-30). A slightly higher floor keeps it as readable as a blurred
+   panel. The top bar and the rails stay put, and keep their blur. */
+.panel.scrolls {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--panel-solid);
 }
 
 /* Placeholders read as hints but stay above AA on any panel: the old
