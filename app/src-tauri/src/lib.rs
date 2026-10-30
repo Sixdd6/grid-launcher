@@ -29,9 +29,6 @@ use tauri::{Emitter, Manager};
 /// user has not already chosen a value. The web process inherits them, so
 /// they must be set before the first webview is created.
 ///
-/// - `WEBKIT_DISABLE_DMABUF_RENDERER=1`: WebKitGTK's DMABUF renderer fails to
-///   allocate GBM buffers on some NVIDIA/Wayland stacks ("Failed to create
-///   GBM buffer ... Invalid argument"), leaving the webview blank white.
 /// - `JSC_useDFGJIT=0`: on WebKitGTK 2.52.6 (Ubuntu 24.04's, which a bundle
 ///   built there ships) the web process aborts in a garbage-collector marker
 ///   thread (`WTFCrashWithInfo` <- `JSC::MarkedBlock::aboutToMarkSlow`) a few
@@ -43,11 +40,23 @@ use tauri::{Emitter, Manager};
 ///   every WebKitGTK version, not just 2.52: the bug is unfixed upstream and
 ///   unbisected, and GRID's scripts are light enough that the Baseline JIT
 ///   costs nothing noticeable.
+/// - `WEBKIT_DISABLE_DMABUF_RENDERER=1`, only when GPU rendering is off
+///   ([`gpu_rendering`]). It was set on every machine until 2026-10-30
+///   because the DMABUF renderer left the webview blank white on some
+///   NVIDIA/Wayland stacks ("Failed to create GBM buffer ... Invalid
+///   argument"). But it is also WebKitGTK's only GPU path on Wayland: with it
+///   set, the webview painted and composited everything on the CPU, and a
+///   2000-game platform scrolled at 4-8 frames a second on a 4K window.
+///   GPU rendering is now the default, with Settings › Appearance › Hardware
+///   acceleration and `GRID_LAUNCHER_HW_ACCEL=never` as the way back.
 #[cfg(any(target_os = "linux", test))]
-const WEBKIT_ENV_OVERRIDES: [(&str, &str); 2] = [
-    ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
-    ("JSC_useDFGJIT", "0"),
-];
+fn webkit_env_overrides(gpu: bool) -> Vec<(&'static str, &'static str)> {
+    let mut overrides = vec![("JSC_useDFGJIT", "0")];
+    if !gpu {
+        overrides.push(("WEBKIT_DISABLE_DMABUF_RENDERER", "1"));
+    }
+    overrides
+}
 
 /// Whether a workaround variable should be set: only if the user has not
 /// already chosen a value (even an empty one).
@@ -57,19 +66,69 @@ fn webkit_override_needed(existing: Option<std::ffi::OsString>) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn apply_webkit_workarounds() {
-    for (name, value) in WEBKIT_ENV_OVERRIDES {
+fn apply_webkit_workarounds(gpu: bool) {
+    for (name, value) in webkit_env_overrides(gpu) {
         if webkit_override_needed(std::env::var_os(name)) {
             std::env::set_var(name, value);
         }
     }
 }
 
+/// Whether the webview renders on the GPU: `GRID_LAUNCHER_HW_ACCEL`
+/// (`always` or `never`) when set, else the Hardware acceleration setting
+/// (`ui.hardware_acceleration`, on by default). The variable exists for a
+/// machine whose window comes up blank with the GPU on: there the setting
+/// cannot be reached, but the variable can be set before starting.
+#[cfg(any(target_os = "linux", test))]
+fn gpu_rendering(env: Option<&str>, setting: bool) -> bool {
+    match env.map(str::trim) {
+        Some("always") => true,
+        Some("never") => false,
+        _ => setting,
+    }
+}
+
+/// [`gpu_rendering`] for this run: the variable, then the setting read from
+/// the config file directly (it is needed before anything else has started).
+#[cfg(target_os = "linux")]
+fn gpu_choice() -> bool {
+    gpu_rendering(
+        std::env::var("GRID_LAUNCHER_HW_ACCEL").ok().as_deref(),
+        Config::load(&Config::default_path())
+            .map(|config| config.ui.hardware_acceleration)
+            .unwrap_or(true),
+    )
+}
+
+/// Sets the webview's hardware-acceleration policy to match [`gpu_rendering`]
+/// and logs the policy WebKitGTK actually took: it keeps `Never` when it
+/// decides it cannot use the GPU, as a WebKitGTK older than 2.54 does with
+/// NVIDIA on Wayland (2026-10-30).
+#[cfg(target_os = "linux")]
+fn apply_hardware_acceleration(window: &tauri::WebviewWindow, gpu: bool) {
+    let _ = window.with_webview(move |webview| {
+        use webkit2gtk::{HardwareAccelerationPolicy, SettingsExt, WebViewExt};
+        let Some(settings) = WebViewExt::settings(&webview.inner()) else {
+            return;
+        };
+        settings.set_hardware_acceleration_policy(if gpu {
+            HardwareAccelerationPolicy::Always
+        } else {
+            HardwareAccelerationPolicy::Never
+        });
+        tracing::info!(
+            "webview: hardware acceleration policy {:?} (GPU rendering {})",
+            settings.hardware_acceleration_policy(),
+            if gpu { "on" } else { "off" }
+        );
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Must run before the webview process is created.
     #[cfg(target_os = "linux")]
-    apply_webkit_workarounds();
+    apply_webkit_workarounds(gpu_choice());
     // Logging policy (spec, normative): default filter carries no request or
     // header data anywhere; secrets are structurally unloggable (SecretString).
     // A config that cannot be read logs at the `debug_prints` default (true);
@@ -305,6 +364,8 @@ pub fn run() {
             let version = app.package_info().version.to_string();
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_title(&format!("GRID Launcher {version}"));
+                #[cfg(target_os = "linux")]
+                apply_hardware_acceleration(&window, gpu_choice());
             }
             app_update::spawn_check(
                 app.handle().clone(),
@@ -661,7 +722,18 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{webkit_override_needed, WEBKIT_ENV_OVERRIDES};
+    use super::{gpu_rendering, webkit_env_overrides, webkit_override_needed};
+
+    #[test]
+    fn gpu_rendering_follows_the_variable_then_the_setting() {
+        assert!(gpu_rendering(None, true));
+        assert!(!gpu_rendering(None, false));
+        assert!(gpu_rendering(Some("always"), false));
+        assert!(!gpu_rendering(Some(" never "), true));
+        // Anything else leaves the setting in charge.
+        assert!(gpu_rendering(Some("on"), true));
+        assert!(!gpu_rendering(Some(""), false));
+    }
 
     #[test]
     fn webkit_workarounds_apply_only_when_unset() {
@@ -672,8 +744,14 @@ mod tests {
     }
 
     #[test]
-    fn webkit_workarounds_disable_dmabuf_and_the_dfg_jit() {
-        assert!(WEBKIT_ENV_OVERRIDES.contains(&("WEBKIT_DISABLE_DMABUF_RENDERER", "1")));
-        assert!(WEBKIT_ENV_OVERRIDES.contains(&("JSC_useDFGJIT", "0")));
+    fn the_dfg_jit_is_always_off_and_dmabuf_only_without_the_gpu() {
+        assert_eq!(webkit_env_overrides(true), vec![("JSC_useDFGJIT", "0")]);
+        assert_eq!(
+            webkit_env_overrides(false),
+            vec![
+                ("JSC_useDFGJIT", "0"),
+                ("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
+            ]
+        );
     }
 }

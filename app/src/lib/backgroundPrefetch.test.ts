@@ -1,3 +1,4 @@
+import { viewportFill } from './stores/viewportFill.svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { ensureBackgroundVariant } = vi.hoisted(() => ({ ensureBackgroundVariant: vi.fn() }));
@@ -64,9 +65,9 @@ describe('prefetchBackground', () => {
       screenshots: ['https://romm/shot-1.png', 'https://romm/shot-2.png'],
       cover: 'https://romm/cover.png',
     });
-    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith('https://romm/shot-1.png', 12);
+    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith('https://romm/shot-1.png', 12, viewportFill());
     await settled();
-    expect(variantPaths.get(variantKey(12, 'https://romm/shot-1.png'))).toBe('/cache/a.bg.jpg');
+    expect(variantPaths.get(variantKey(12, 'https://romm/shot-1.png', viewportFill()))).toBe('/cache/a.bg.jpg');
   });
 
   it('asks for nothing when the subject has no art', () => {
@@ -96,10 +97,10 @@ describe('prefetchBackground', () => {
 
     blur.value = 0;
     prefetchBackground(subject);
-    expect(ensureBackgroundVariant).toHaveBeenLastCalledWith('https://romm/cover.png', 0);
+    expect(ensureBackgroundVariant).toHaveBeenLastCalledWith('https://romm/cover.png', 0, viewportFill());
     await settled();
-    expect(variantPaths.get(variantKey(0, 'https://romm/cover.png'))).toBe('/cache/a.bg.jpg');
-    expect(variantPaths.has(variantKey(12, 'https://romm/cover.png'))).toBe(true);
+    expect(variantPaths.get(variantKey(0, 'https://romm/cover.png', viewportFill()))).toBe('/cache/a.bg.jpg');
+    expect(variantPaths.has(variantKey(12, 'https://romm/cover.png', viewportFill()))).toBe(true);
   });
 
   it('swallows a rejection instead of leaving it unhandled', async () => {
@@ -107,37 +108,37 @@ describe('prefetchBackground', () => {
     expect(() =>
       prefetchBackground({ fanart: ['https://romm/art.svg'], screenshots: [], cover: null })
     ).not.toThrow();
-    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith('https://romm/art.svg', 12);
+    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith('https://romm/art.svg', 12, viewportFill());
     await settled();
-    expect(variantPaths.has(variantKey(12, 'https://romm/art.svg'))).toBe(false);
+    expect(variantPaths.has(variantKey(12, 'https://romm/art.svg', viewportFill()))).toBe(false);
   });
 });
 
 describe('rememberVariant', () => {
   it('drops the oldest entry once the cap is passed', () => {
     for (let i = 0; i < VARIANT_MEMO_CAP; i += 1)
-      rememberVariant(variantKey(12, `https://romm/${i}.png`), `/cache/${i}.bg.jpg`);
+      rememberVariant(variantKey(12, `https://romm/${i}.png`, viewportFill()), `/cache/${i}.bg.jpg`);
     expect(variantPaths.size).toBe(VARIANT_MEMO_CAP);
 
-    rememberVariant(variantKey(12, 'https://romm/new.png'), '/cache/new.bg.jpg');
+    rememberVariant(variantKey(12, 'https://romm/new.png', viewportFill()), '/cache/new.bg.jpg');
     expect(variantPaths.size).toBe(VARIANT_MEMO_CAP);
-    expect(variantPaths.has(variantKey(12, 'https://romm/0.png'))).toBe(false);
-    expect(variantPaths.has(variantKey(12, 'https://romm/1.png'))).toBe(true);
-    expect(variantPaths.get(variantKey(12, 'https://romm/new.png'))).toBe('/cache/new.bg.jpg');
+    expect(variantPaths.has(variantKey(12, 'https://romm/0.png', viewportFill()))).toBe(false);
+    expect(variantPaths.has(variantKey(12, 'https://romm/1.png', viewportFill()))).toBe(true);
+    expect(variantPaths.get(variantKey(12, 'https://romm/new.png', viewportFill()))).toBe('/cache/new.bg.jpg');
   });
 });
 
 describe('variantKey', () => {
   it('separates the sigma from the URL so two levels of one image differ', () => {
-    expect(variantKey(12, 'https://romm/a.png')).not.toBe(variantKey(0, 'https://romm/a.png'));
-    expect(variantKey(12, 'https://romm/a.png')).toBe(variantKey(12, 'https://romm/a.png'));
+    expect(variantKey(12, 'https://romm/a.png', viewportFill())).not.toBe(variantKey(0, 'https://romm/a.png', viewportFill()));
+    expect(variantKey(12, 'https://romm/a.png', viewportFill())).toBe(variantKey(12, 'https://romm/a.png', viewportFill()));
   });
 });
 
 describe('clearVariantMemo', () => {
   it('drops paths memoised at another sigma, so a returned-to blur re-fetches', () => {
-    rememberVariant(variantKey(12, 'https://romm/cover.png'), '/cache/a.bg12.jpg');
-    rememberVariant(variantKey(20, 'https://romm/cover.png'), '/cache/a.bg20.jpg');
+    rememberVariant(variantKey(12, 'https://romm/cover.png', viewportFill()), '/cache/a.bg12.jpg');
+    rememberVariant(variantKey(20, 'https://romm/cover.png', viewportFill()), '/cache/a.bg20.jpg');
 
     clearVariantMemo();
 
@@ -170,7 +171,8 @@ describe('clearVariantMemo', () => {
     warmBackground(cover(`https://romm/${PREFETCH_CONCURRENCY}.png`));
     expect(ensureBackgroundVariant).toHaveBeenLastCalledWith(
       `https://romm/${PREFETCH_CONCURRENCY}.png`,
-      20
+      20,
+      viewportFill()
     );
   });
 });
@@ -212,7 +214,7 @@ describe('the queue depth cap', () => {
     const shed = `https://romm/${PREFETCH_CONCURRENCY}.png`;
     ensureBackgroundVariant.mockClear();
     warmBackground(cover(shed));
-    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith(shed, 12);
+    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith(shed, 12, viewportFill());
   });
 
   // A promoted warm IS a hover request: the pointer is on that card. It must
@@ -289,7 +291,8 @@ describe('dropPendingWarms', () => {
     warmBackground(cover('https://romm/warm-a.png'));
     expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith(
       'https://romm/warm-a.png',
-      12
+      12,
+      viewportFill()
     );
   });
 });
@@ -301,9 +304,9 @@ describe('warmBackground', () => {
       screenshots: ['https://romm/shot-1.png'],
       cover: 'https://romm/cover.png',
     });
-    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith('https://romm/shot-1.png', 12);
+    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith('https://romm/shot-1.png', 12, viewportFill());
     await settled();
-    expect(variantPaths.get(variantKey(12, 'https://romm/shot-1.png'))).toBe('/cache/a.bg.jpg');
+    expect(variantPaths.get(variantKey(12, 'https://romm/shot-1.png', viewportFill()))).toBe('/cache/a.bg.jpg');
   });
 
   it('asks once for a URL two cards share', () => {
@@ -314,7 +317,7 @@ describe('warmBackground', () => {
   });
 
   it('skips a URL the memo already holds', () => {
-    rememberVariant(variantKey(12, 'https://romm/a.png'), '/cache/a.bg.jpg');
+    rememberVariant(variantKey(12, 'https://romm/a.png', viewportFill()), '/cache/a.bg.jpg');
     warmBackground(cover('https://romm/a.png'));
     expect(ensureBackgroundVariant).not.toHaveBeenCalled();
   });
@@ -336,7 +339,7 @@ describe('warmBackground', () => {
 
     builds.reject(0);
     await settled();
-    expect(variantPaths.has(variantKey(12, 'https://romm/a.png'))).toBe(false);
+    expect(variantPaths.has(variantKey(12, 'https://romm/a.png', viewportFill()))).toBe(false);
 
     warmBackground(cover('https://romm/a.png'));
     expect(ensureBackgroundVariant).toHaveBeenCalledOnce();
@@ -380,7 +383,7 @@ describe('the shared build queue', () => {
     await settled();
     // The hovered card, not w4 — it was pushed to the front of the pending
     // list, ahead of every warm that had not started.
-    expect(ensureBackgroundVariant).toHaveBeenLastCalledWith('https://romm/hovered.png', 12);
+    expect(ensureBackgroundVariant).toHaveBeenLastCalledWith('https://romm/hovered.png', 12, viewportFill());
   });
 
   it('promotes a warm that has not started when the same card is hovered', async () => {
@@ -395,7 +398,7 @@ describe('the shared build queue', () => {
 
     builds.resolve(0);
     await settled();
-    expect(ensureBackgroundVariant).toHaveBeenLastCalledWith('https://romm/w5.png', 12);
+    expect(ensureBackgroundVariant).toHaveBeenLastCalledWith('https://romm/w5.png', 12, viewportFill());
   });
 
   it('leaves a build already in flight where it is when it is hovered', () => {
@@ -431,7 +434,7 @@ describe('the shared build queue', () => {
     await settled();
     expect(asked()).toHaveLength(4);
     expect(inFlightBuilds()).toBe(3);
-    expect(variantPaths.get(variantKey(12, 'https://romm/w1.png'))).toBe('/cache/0.bg.jpg');
+    expect(variantPaths.get(variantKey(12, 'https://romm/w1.png', viewportFill()))).toBe('/cache/0.bg.jpg');
   });
 
   it('returns to zero in flight once every build has settled, refusals included', async () => {
@@ -453,7 +456,7 @@ describe('the shared build queue', () => {
 
     // The waiting entry's path arrives from somewhere else (the swap path
     // memoises every build it makes) before its turn comes up.
-    rememberVariant(variantKey(12, 'https://romm/queued.png'), '/cache/queued.bg.jpg');
+    rememberVariant(variantKey(12, 'https://romm/queued.png', viewportFill()), '/cache/queued.bg.jpg');
     builds.resolve(0);
     await settled();
 
@@ -507,7 +510,7 @@ describe('the scroll-idle gate', () => {
     setScrollIdle(false);
     prefetchBackground(cover('https://romm/hovered.png'));
 
-    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith('https://romm/hovered.png', 12);
+    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith('https://romm/hovered.png', 12, viewportFill());
   });
 
   it('does not let a hover drag the waiting warms out with it', () => {
@@ -515,7 +518,7 @@ describe('the scroll-idle gate', () => {
     warmBackground(cover('https://romm/warm.png'));
     prefetchBackground(cover('https://romm/hovered.png'));
 
-    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith('https://romm/hovered.png', 12);
+    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith('https://romm/hovered.png', 12, viewportFill());
   });
 
   it('keeps the warms it held back, rather than dropping them', async () => {
@@ -524,7 +527,7 @@ describe('the scroll-idle gate', () => {
     setScrollIdle(true);
 
     await settled();
-    expect(variantPaths.get(variantKey(12, 'https://romm/held.png'))).toBe('/cache/a.bg.jpg');
+    expect(variantPaths.get(variantKey(12, 'https://romm/held.png', viewportFill()))).toBe('/cache/a.bg.jpg');
   });
 
   it('a second pause changes nothing that is already in flight', () => {

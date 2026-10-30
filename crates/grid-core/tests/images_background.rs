@@ -1,5 +1,6 @@
 use grid_core::images::background::{
-    background_variant_ext, build_background_variant, ensure_background_variant, BACKGROUND_WIDTH,
+    background_fill_ext, background_variant_ext, build_background_fill, build_background_variant,
+    ensure_background_variant, BACKGROUND_WIDTH,
 };
 use grid_core::images::cache::{image_key, ImageCache, ImageError};
 use grid_core::romm::RommClient;
@@ -384,4 +385,59 @@ fn the_variant_extension_carries_the_sigma() {
     assert_eq!(background_variant_ext(0), "bg0.jpg");
     assert_eq!(background_variant_ext(12), "bg12.jpg");
     assert_eq!(background_variant_ext(40), "bg40.jpg");
+}
+
+#[test]
+fn the_window_sized_variant_is_exactly_the_window_and_covers_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = image_key("https://romm.example/cover.png");
+    let source = write_source(dir.path(), &key);
+
+    // A 3:2 source into a 16:9 window: scaled to cover, cropped to fit.
+    let out = build_background_fill(&source, dir.path(), &key, 12, 3840, 2176).unwrap();
+    assert_eq!(
+        out,
+        dir.path()
+            .join(format!("{key}.{}", background_fill_ext(12, 3840, 2176)))
+    );
+    let img = image::open(&out).unwrap();
+    assert_eq!((img.width(), img.height()), (3840, 2176));
+    // A portrait-shaped window works the same way.
+    let tall = build_background_fill(&source, dir.path(), &key, 12, 1080, 1920).unwrap();
+    let img = image::open(&tall).unwrap();
+    assert_eq!((img.width(), img.height()), (1080, 1920));
+    assert_eq!(part_files(dir.path()), 0);
+}
+
+#[test]
+fn one_window_sized_variant_per_source_beside_the_small_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = image_key("https://romm.example/cover.png");
+    let source = write_source(dir.path(), &key);
+
+    build_background_variant(&source, dir.path(), &key, 12).unwrap();
+    build_background_fill(&source, dir.path(), &key, 12, 1920, 1152).unwrap();
+    build_background_fill(&source, dir.path(), &key, 12, 3840, 2176).unwrap();
+    // The new size replaced the old one; the small variant the replenish pass
+    // keeps is untouched, and building it again keeps the window-sized one.
+    assert_eq!(
+        variant_files(dir.path(), &key),
+        vec![
+            format!("{key}.bg12.3840x2176.jpg"),
+            format!("{key}.bg12.jpg"),
+        ]
+    );
+    build_background_variant(&source, dir.path(), &key, 20).unwrap();
+    assert_eq!(
+        variant_files(dir.path(), &key),
+        vec![
+            format!("{key}.bg12.3840x2176.jpg"),
+            format!("{key}.bg20.jpg"),
+        ]
+    );
+}
+
+#[test]
+fn the_window_sized_extension_names_sigma_and_size() {
+    assert_eq!(background_fill_ext(2, 3840, 2176), "bg2.3840x2176.jpg");
 }

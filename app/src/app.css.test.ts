@@ -73,14 +73,14 @@ describe('--danger stays theme-scoped (ruling §3.1/§3.2, fix round 1)', () => 
 // art. A panel's opacity is a fixed floor in every theme block, whatever the
 // fade, so its text keeps WCAG AA on any art.
 describe('panel floor (look-and-feel plan 2026-10-30)', () => {
-  it('is 0.86 of the light panel colour in both light blocks', () => {
-    expect(rootBase).toContain('--panel: rgba(250, 250, 253, 0.86);');
-    expect(dataThemeLight).toContain('--panel: rgba(250, 250, 253, 0.86);');
+  it('is 0.92 of the light panel colour in both light blocks', () => {
+    expect(rootBase).toContain('--panel: rgba(250, 250, 253, 0.92);');
+    expect(dataThemeLight).toContain('--panel: rgba(250, 250, 253, 0.92);');
   });
 
-  it('is 0.86 of the dark panel colour in both dark blocks', () => {
-    expect(prefersDark).toContain('--panel: rgba(14, 14, 24, 0.86);');
-    expect(dataThemeDark).toContain('--panel: rgba(14, 14, 24, 0.86);');
+  it('is 0.92 of the dark panel colour in both dark blocks', () => {
+    expect(prefersDark).toContain('--panel: rgba(14, 14, 24, 0.92);');
+    expect(dataThemeDark).toContain('--panel: rgba(14, 14, 24, 0.92);');
   });
 
   it('defines an opaque overlay in every theme block', () => {

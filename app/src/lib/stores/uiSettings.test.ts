@@ -265,6 +265,7 @@ describe('background blur', () => {
       card_size_server: 'medium',
       card_labels: 'always',
       card_display: 'rows',
+      hardware_acceleration: true,
     });
   });
 
@@ -327,5 +328,43 @@ describe('game labels', () => {
     expect(setUiSettings).toHaveBeenLastCalledWith(
       expect.objectContaining({ card_labels: 'hover', background_fade: 25 }),
     );
+  });
+});
+
+describe('hardware acceleration', () => {
+  async function loadStore(stored: unknown) {
+    vi.resetModules();
+    vi.stubGlobal('localStorage', fakeStorage());
+    vi.stubGlobal('document', { documentElement: { dataset: {} } });
+    vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
+    const setUiSettings = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('../api', () => ({
+      api: {
+        getUiSettings: () =>
+          Promise.resolve({
+            theme: 'system',
+            background_fade: 25,
+            background_blur: 2,
+            card_size_library: 'medium',
+            card_size_server: 'medium',
+            hardware_acceleration: stored,
+          }),
+        setUiSettings,
+      },
+    }));
+    const store = await import('./uiSettings.svelte');
+    await store.initUiSettings();
+    return { store, setUiSettings };
+  }
+
+  it('is on unless the config turned it off', async () => {
+    expect((await loadStore(undefined)).store.uiSettings.hardwareAcceleration).toBe(true);
+    expect((await loadStore(false)).store.uiSettings.hardwareAcceleration).toBe(false);
+  });
+
+  it('saves a change with the rest of the settings', async () => {
+    const { store, setUiSettings } = await loadStore(true);
+    await store.setHardwareAcceleration(false);
+    expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ hardware_acceleration: false }));
   });
 });

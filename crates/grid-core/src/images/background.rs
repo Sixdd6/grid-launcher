@@ -83,6 +83,16 @@ pub fn build_background_variant(
     key: &str,
     sigma: u8,
 ) -> Result<PathBuf, ImageError> {
+    let blurred = blurred_small(source, sigma)?;
+    let target = dir.join(format!("{key}.{}", background_variant_ext(sigma)));
+    write_jpeg(&blurred, dir, key, &target)?;
+    remove_stale_variants(dir, key, &target);
+    Ok(target)
+}
+
+/// The source decoded, fitted inside the [`BACKGROUND_WIDTH`] box and blurred
+/// at `sigma`: the part every variant shares.
+fn blurred_small(source: &Path, sigma: u8) -> Result<image::RgbImage, ImageError> {
     let io = |e: std::io::Error| ImageError::Io(e.to_string());
     let bytes = std::fs::read(source).map_err(io)?;
     let decoded = image::load_from_memory(&bytes).map_err(|_| ImageError::Decode)?;
@@ -102,19 +112,29 @@ pub fn build_background_variant(
     // `boxes_for_gauss` still yields radius-1 boxes, so passing 0 through
     // would soften the image.
     let rgb = scaled.to_rgb8();
-    let blurred = if sigma == 0 {
+    Ok(if sigma == 0 {
         rgb
     } else {
         fast_blur(&rgb, f32::from(sigma))
-    };
+    })
+}
 
+/// Encodes `image` and writes it to `target` in `dir` through a `.part` +
+/// rename, so a killed process never leaves a half-written JPEG that a later
+/// run would serve.
+fn write_jpeg(
+    image: &image::RgbImage,
+    dir: &Path,
+    key: &str,
+    target: &Path,
+) -> Result<(), ImageError> {
+    let io = |e: std::io::Error| ImageError::Io(e.to_string());
     let mut encoded: Vec<u8> = Vec::new();
     JpegEncoder::new_with_quality(&mut encoded, BACKGROUND_JPEG_QUALITY)
-        .encode_image(&blurred)
+        .encode_image(image)
         .map_err(|_| ImageError::Encode)?;
 
     std::fs::create_dir_all(dir).map_err(io)?;
-    let target = dir.join(format!("{key}.{}", background_variant_ext(sigma)));
     // `.bg.<pid>-<seq>.part`, NOT `.part`: `ImageCache::fetch_and_store` uses
     // `<key>.part` for the source, so a shared name would let a concurrent
     // fetch rename our half-written JPEG over the source. The pid and
@@ -126,9 +146,100 @@ pub fn build_background_variant(
         TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::write(&tmp, &encoded).map_err(io)?;
-    std::fs::rename(&tmp, &target).map_err(io)?;
-    remove_stale_variants(dir, key, &target);
+    std::fs::rename(&tmp, target).map_err(io)?;
+    Ok(())
+}
+
+/// The largest window-sized variant built, per side, in px (an 8K screen).
+pub const BACKGROUND_FILL_MAX: u32 = 7680;
+
+/// The window-sized variant's extension for blur `sigma` at `width` x
+/// `height`: `bg<sigma>.<width>x<height>.jpg`. Never matches
+/// [`background_variant_ext`]'s pattern, so the two kinds of variant never
+/// delete each other (`remove_stale_variants`, `remove_stale_fills`).
+pub fn background_fill_ext(sigma: u8, width: u32, height: u32) -> String {
+    format!("bg{sigma}.{width}x{height}.jpg")
+}
+
+/// The variant at the window's own size, `width` x `height` device pixels:
+/// the blurred [`BACKGROUND_WIDTH`] image (`blurred_small`) enlarged ONCE,
+/// smoothly, to cover that box, and cropped to it from the centre.
+///
+/// The shell then draws it 1:1, unscaled. Scaling the 960px variant up to the
+/// window in CSS cost every scrolled frame a full-window resample when the
+/// webview composites on the CPU: at 3840x2160 it was the largest single cost
+/// of a frame (perf probe A/B, 2026-10-30: 106ms against 63ms unscaled).
+/// The blur still runs at 960px, so building it costs one resize and one
+/// encode more than the small variant.
+///
+/// One per source: a build deletes the source's other window-sized variants
+/// (other sizes or sigmas), but never the small variant the background
+/// replenish pass keeps (`replenish.rs`).
+///
+/// Blocking: the caller runs it on `spawn_blocking`.
+pub fn build_background_fill(
+    source: &Path,
+    dir: &Path,
+    key: &str,
+    sigma: u8,
+    width: u32,
+    height: u32,
+) -> Result<PathBuf, ImageError> {
+    let width = width.clamp(1, BACKGROUND_FILL_MAX);
+    let height = height.clamp(1, BACKGROUND_FILL_MAX);
+    let small = blurred_small(source, sigma)?;
+    let (sw, sh) = (small.width().max(1), small.height().max(1));
+    let scale = (f64::from(width) / f64::from(sw)).max(f64::from(height) / f64::from(sh));
+    let cover_w = ((f64::from(sw) * scale).ceil() as u32).max(width);
+    let cover_h = ((f64::from(sh) * scale).ceil() as u32).max(height);
+    let covered = image::imageops::resize(&small, cover_w, cover_h, FilterType::Triangle);
+    let x = (cover_w - width) / 2;
+    let y = (cover_h - height) / 2;
+    let filled = image::imageops::crop_imm(&covered, x, y, width, height).to_image();
+    let target = dir.join(format!(
+        "{key}.{}",
+        background_fill_ext(sigma, width, height)
+    ));
+    write_jpeg(&filled, dir, key, &target)?;
+    remove_stale_fills(dir, key, &target);
     Ok(target)
+}
+
+/// Deletes every window-sized variant of `key` in `dir` except `keep`
+/// (`<key>.bg<digits>.<digits>x<digits>.jpg`). Best effort, like
+/// [`remove_stale_variants`].
+fn remove_stale_fills(dir: &Path, key: &str, keep: &Path) {
+    let prefix = format!("{key}.bg");
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path == keep {
+            continue;
+        }
+        let Some(rest) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_prefix(&prefix))
+            .and_then(|rest| rest.strip_suffix(".jpg"))
+        else {
+            continue;
+        };
+        let is_fill = rest.split_once('.').is_some_and(|(sigma, size)| {
+            !sigma.is_empty()
+                && sigma.bytes().all(|b| b.is_ascii_digit())
+                && size.split_once('x').is_some_and(|(w, h)| {
+                    !w.is_empty()
+                        && !h.is_empty()
+                        && w.bytes().all(|b| b.is_ascii_digit())
+                        && h.bytes().all(|b| b.is_ascii_digit())
+                })
+        });
+        if is_fill {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }
 
 /// Deletes every variant of `key` in `dir` except `keep`: the other sigmas,
@@ -195,6 +306,28 @@ pub async fn ensure_background_variant(
         url,
         &background_variant_ext(sigma),
         move |source, dir, key| build_background_variant(source, dir, key, sigma),
+    )
+    .await
+}
+
+/// [`ensure_background_variant`] for the window-sized variant
+/// ([`build_background_fill`]), with the same dedup and failure memory.
+pub async fn ensure_background_fill(
+    cache: &ImageCache,
+    client: Option<&RommClient>,
+    url: &str,
+    sigma: u8,
+    width: u32,
+    height: u32,
+) -> Result<PathBuf, ImageError> {
+    let width = width.clamp(1, BACKGROUND_FILL_MAX);
+    let height = height.clamp(1, BACKGROUND_FILL_MAX);
+    ensure_built_variant(
+        cache,
+        client,
+        url,
+        &background_fill_ext(sigma, width, height),
+        move |source, dir, key| build_background_fill(source, dir, key, sigma, width, height),
     )
     .await
 }

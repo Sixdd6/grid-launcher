@@ -487,6 +487,8 @@ pub async fn ensure_background_variant(
     state: State<'_, AppState>,
     url: String,
     blur: u8,
+    width: Option<u32>,
+    height: Option<u32>,
 ) -> Result<String, String> {
     let base = state.session.server_url();
     let resolved = filter_to_server_host(&resolve_image_url(&url, &base), &base);
@@ -494,13 +496,32 @@ pub async fn ensure_background_variant(
         return Err("the image is not hosted on the connected server".to_string());
     }
     let client = state.session.client();
-    let path = grid_core::images::background::ensure_background_variant(
-        state.session.cache(),
-        client.as_deref(),
-        &resolved,
-        blur.min(MAX_BACKGROUND_BLUR),
-    )
-    .await
+    let cache = state.session.cache();
+    let sigma = blur.min(MAX_BACKGROUND_BLUR);
+    // With the window's size, the variant the shell draws 1:1 at it
+    // (`build_background_fill`); without, the small one.
+    let path = match (width, height) {
+        (Some(w), Some(h)) if w > 0 && h > 0 => {
+            grid_core::images::background::ensure_background_fill(
+                cache,
+                client.as_deref(),
+                &resolved,
+                sigma,
+                w,
+                h,
+            )
+            .await
+        }
+        _ => {
+            grid_core::images::background::ensure_background_variant(
+                cache,
+                client.as_deref(),
+                &resolved,
+                sigma,
+            )
+            .await
+        }
+    }
     .map_err(err)?;
     Ok(path.to_string_lossy().into_owned())
 }
@@ -632,6 +653,7 @@ pub fn normalize_ui_settings(settings: UiSettings) -> UiSettings {
         card_size_server: normalize_card_size(&settings.card_size_server),
         card_labels: normalize_card_labels(&settings.card_labels),
         card_display: normalize_card_display(&settings.card_display),
+        hardware_acceleration: settings.hardware_acceleration,
     }
 }
 
@@ -3306,6 +3328,7 @@ mod ui_settings_tests {
                 card_size_server: "medium".to_string(),
                 card_labels: "always".to_string(),
                 card_display: "rows".to_string(),
+                hardware_acceleration: true,
             }
         );
     }

@@ -40,6 +40,11 @@ tauri-plugin-window-state = "2"
 # The loopback media server's per-launch capability nonce (media_server.rs).
 getrandom = "0.3.4"
 
+# The webview's own settings (the hardware-acceleration policy, lib.rs). The
+# same crate and major version Tauri's wry already links on Linux.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "2.0"
+
 [dev-dependencies]
 tempfile = "3.27.0"
 wiremock = "0.6.5"

@@ -156,7 +156,11 @@ There are several main sections to the application with buttons across the top b
   **Game card display**: "Equal height" or "Equal width" (see Cards). They are stored
   under `[ui]` in `config.toml` as `theme`, `background_fade` (0 is off),
   `card_size_library`, `card_size_server`, `card_labels` (`always` or `hover`) and
-  `card_display` (`rows` or `columns`).
+  `card_display` (`rows` or `columns`). **Hardware acceleration** (on by default) renders
+  the window on the graphics card; it applies after a restart and is stored as
+  `hardware_acceleration`. Turning it off renders on the CPU, for a machine whose window
+  comes up blank with it on; the environment variable `GRID_LAUNCHER_HW_ACCEL=never`
+  (or `always`) overrides the setting for one start.
 - **Cards** (both grids) are each the size of their artwork: never cropped, never boxed,
   no frame. **Game card display** (Settings › Appearance) picks the layout:
   - **Equal height** (the default): rows of one height, each card as wide as its art at

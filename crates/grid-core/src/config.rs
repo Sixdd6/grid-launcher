@@ -129,6 +129,12 @@ pub struct UiSettings {
     /// Settings › Appearance "Game card display".
     #[serde(default = "default_card_display")]
     pub card_display: String,
+    /// Whether the webview renders on the GPU (Settings › Appearance ›
+    /// Hardware acceleration). Read once at startup, before the window
+    /// exists, so a change applies after a restart. `GRID_LAUNCHER_HW_ACCEL`
+    /// overrides it (the app's `gpu_rendering`).
+    #[serde(default = "default_hardware_acceleration")]
+    pub hardware_acceleration: bool,
 }
 
 fn default_theme() -> String {
@@ -155,6 +161,10 @@ fn default_card_display() -> String {
     "rows".to_string()
 }
 
+fn default_hardware_acceleration() -> bool {
+    true
+}
+
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
@@ -165,6 +175,7 @@ impl Default for UiSettings {
             card_size_server: default_card_size(),
             card_labels: default_card_labels(),
             card_display: default_card_display(),
+            hardware_acceleration: default_hardware_acceleration(),
         }
     }
 }
@@ -1243,6 +1254,10 @@ mod tests {
         assert_eq!(loaded.ui.card_size_server, "medium");
         assert_eq!(loaded.ui.card_labels, "always");
         assert_eq!(loaded.ui.card_display, "rows");
+        assert!(
+            loaded.ui.hardware_acceleration,
+            "GPU rendering is on unless turned off"
+        );
     }
 
     /// A `[ui]` table written before the blur setting existed loads the
@@ -1294,6 +1309,7 @@ mod tests {
                 card_size_server: "small".to_string(),
                 card_labels: "hover".to_string(),
                 card_display: "columns".to_string(),
+                hardware_acceleration: false,
             },
             ..Default::default()
         };
@@ -1303,6 +1319,7 @@ mod tests {
         assert_eq!(loaded.ui.card_size_server, "small");
         assert_eq!(loaded.ui.card_labels, "hover");
         assert_eq!(loaded.ui.card_display, "columns");
+        assert!(!loaded.ui.hardware_acceleration);
     }
 
     fn load_text(text: &str) -> Config {

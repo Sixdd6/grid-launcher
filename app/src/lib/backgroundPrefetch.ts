@@ -5,6 +5,7 @@
 import { api } from './api';
 import { backgroundUrls, type BackgroundSubject } from './background';
 import { uiSettings } from './stores/uiSettings.svelte';
+import { viewportFill, type Fill } from './stores/viewportFill.svelte';
 
 /** How many resolved paths to keep: enough for a long browse of one view,
  *  small enough that an all-day session cannot grow without bound. */
@@ -21,11 +22,12 @@ export const VARIANT_MEMO_CAP = 64;
  */
 export const variantPaths = new Map<string, string>();
 
-/** The memo key. The sigma is baked into the variant's file name, so one URL
- *  at two blur levels is two different files and must be two entries. The
- *  newline cannot appear in a sigma, so the two halves cannot run together. */
-export function variantKey(blur: number, url: string): string {
-  return `${blur}\n${url}`;
+/** The memo key. The sigma and the size are baked into the variant's file
+ *  name, so one URL at two blur levels or two window sizes is two different
+ *  files and must be two entries. The newline cannot appear in a sigma or a
+ *  size, so the parts cannot run together. */
+export function variantKey(blur: number, url: string, fill?: Pick<Fill, 'width' | 'height'>): string {
+  return fill ? `${blur}\n${fill.width}x${fill.height}\n${url}` : `${blur}\n${url}`;
 }
 
 /** Records `path` for `key` (from `variantKey`), dropping the oldest entries
@@ -45,23 +47,24 @@ export function rememberVariant(key: string, path: string): void {
  *  already memoised. The single place the URL priority and the sigma are
  *  read, so the hover prefetch and the scroll warmer can never disagree about
  *  which file a card means. */
-type BuildTarget = { url: string; blur: number; key: string; front: boolean };
+type BuildTarget = { url: string; blur: number; fill: Fill; key: string; front: boolean };
 
 function buildTarget(subject: BackgroundSubject, front: boolean): BuildTarget | null {
   if (uiSettings.backgroundFade === 0) return null;
   const url = backgroundUrls(subject)[0];
   if (url === undefined) return null;
   const blur = uiSettings.backgroundBlur;
-  const key = variantKey(blur, url);
+  const fill = viewportFill();
+  const key = variantKey(blur, url, fill);
   if (variantPaths.has(key)) return null;
-  return { url, blur, key, front };
+  return { url, blur, fill, key, front };
 }
 
 /** Asks the backend for one variant and memoises it. ALWAYS settles: a
  *  failure resolves rather than rejecting, so a caller counting builds in
  *  flight cannot be left holding a slot. */
 function build(target: BuildTarget): Promise<void> {
-  return api.ensureBackgroundVariant(target.url, target.blur).then(
+  return api.ensureBackgroundVariant(target.url, target.blur, target.fill).then(
     (path) => {
       rememberVariant(target.key, path);
     },

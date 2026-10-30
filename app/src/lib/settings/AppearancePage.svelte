@@ -12,6 +12,7 @@
     previewBackgroundFade,
     setBackgroundEnabled,
     setCardDisplay,
+    setHardwareAcceleration,
     setCardLabels,
     setCardSize,
     setTheme,
@@ -33,6 +34,10 @@
 
   function onToggle(e: Event) {
     setBackgroundEnabled((e.currentTarget as HTMLInputElement).checked).catch(() => {});
+  }
+
+  function onHardwareAcceleration(e: Event) {
+    setHardwareAcceleration((e.currentTarget as HTMLInputElement).checked).catch(() => {});
   }
 
   function onCardDisplay(e: Event) {
@@ -127,6 +132,18 @@
     }}
   />
   <span class="value">{uiSettings.backgroundBlur}</span>
+</div>
+
+<div class="field">
+  <label for="hardware-acceleration-toggle">Hardware acceleration</label>
+  <input
+    data-testid="hardware-acceleration-toggle"
+    id="hardware-acceleration-toggle"
+    type="checkbox"
+    checked={uiSettings.hardwareAcceleration}
+    onchange={onHardwareAcceleration}
+  />
+  <span class="value">Render with the graphics card · applies after you restart GRID</span>
 </div>
 
 <div class="field">

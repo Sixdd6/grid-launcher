@@ -31,6 +31,7 @@ const state = $state<{
   cardSizeServer: UiSettings['card_size_server'];
   cardLabels: CardLabels;
   cardDisplay: CardDisplay;
+  hardwareAcceleration: boolean;
 }>({
   theme: 'system',
   backgroundFade: FADE_DEFAULT,
@@ -40,6 +41,7 @@ const state = $state<{
   cardSizeServer: 'medium',
   cardLabels: 'always',
   cardDisplay: 'rows',
+  hardwareAcceleration: true,
 });
 
 // What "background art on" restores (design §10): the last non-zero fade
@@ -59,6 +61,7 @@ function payload(): UiSettings {
     card_size_server: state.cardSizeServer,
     card_labels: state.cardLabels,
     card_display: state.cardDisplay,
+    hardware_acceleration: state.hardwareAcceleration,
   };
 }
 
@@ -86,6 +89,9 @@ export const uiSettings = {
   },
   get cardDisplay(): CardDisplay {
     return state.cardDisplay;
+  },
+  get hardwareAcceleration(): boolean {
+    return state.hardwareAcceleration;
   },
 };
 
@@ -159,6 +165,7 @@ export async function initUiSettings(): Promise<() => void> {
     state.cardSizeServer = normalizeCardSize(stored.card_size_server);
     state.cardLabels = normalizeCardLabels(stored.card_labels ?? '');
     state.cardDisplay = normalizeCardDisplay(stored.card_display ?? '');
+    state.hardwareAcceleration = stored.hardware_acceleration ?? true;
   } catch {
     // Defaults/mirror already in `state`.
   }
@@ -221,6 +228,13 @@ export async function commitBackgroundBlur(value: number): Promise<void> {
 export async function setCardSize(view: 'library' | 'server', size: CardSize): Promise<void> {
   if (view === 'library') state.cardSizeLibrary = size;
   else state.cardSizeServer = size;
+  await api.setUiSettings(payload());
+}
+
+/** The "Hardware acceleration" switch. Persisted only: the webview reads it
+ *  once at startup, so it applies after a restart. */
+export async function setHardwareAcceleration(on: boolean): Promise<void> {
+  state.hardwareAcceleration = on;
   await api.setUiSettings(payload());
 }
 

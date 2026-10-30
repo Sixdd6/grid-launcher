@@ -7,6 +7,7 @@
   import { clearIfBottom, initialSlotState, outgoingSlot, withNextCover } from './backgroundSlots';
   import { lastViewed } from './stores/lastViewed.svelte';
   import { uiSettings } from './stores/uiSettings.svelte';
+  import { trackViewportFill, viewportFill } from './stores/viewportFill.svelte';
 
   // Two layers so a change cross-fades rather than popping (design §3:
   // 220ms, the `--m-base` token below and `CROSS_FADE_MS`, which must agree).
@@ -54,6 +55,11 @@
 
   let current = $derived(urls[index % Math.max(urls.length, 1)] ?? null);
 
+  // The window's size, so the art is built at it and drawn 1:1
+  // (`viewportFill.svelte.ts`). The listener lives as long as the shell.
+  $effect(() => trackViewportFill());
+  let fill = $derived(viewportFill());
+
   // 0–60 in the config, 0–0.6 as an opacity.
   let opacity = $derived(uiSettings.backgroundFade / 100);
 
@@ -78,6 +84,9 @@
     // Part of the variant's file name, so a change of sigma re-runs this
     // effect and asks the backend for a different file.
     const blur = uiSettings.backgroundBlur;
+    // The window's size is part of the file too: a resize past a 128px step
+    // asks for the art at the new size.
+    const size = fill;
     let cancelled = false;
     // The timeout handle is captured now and cleared on teardown: before
     // this, a rapid sequence of subjects left one pending `clearIfBottom` per
@@ -101,13 +110,13 @@
       }, CROSS_FADE_MS);
     }
 
-    const key = variantKey(blur, url);
+    const key = variantKey(blur, url, size);
     const memoised = variantPaths.get(key);
     if (memoised !== undefined) {
       untrack(() => show(memoised));
     } else {
       api
-        .ensureBackgroundVariant(url, blur)
+        .ensureBackgroundVariant(url, blur, size)
         .then((path) => {
           rememberVariant(key, path);
           if (!cancelled) untrack(() => show(path));
@@ -132,7 +141,12 @@
   });
 </script>
 
-<div data-testid="background-art" class="art" aria-hidden="true" style={`--art-opacity: ${opacity}`}>
+<div
+  data-testid="background-art"
+  class="art"
+  aria-hidden="true"
+  style={`--art-opacity: ${opacity}; --art-w: ${fill.width / fill.dpr}px; --art-h: ${fill.height / fill.dpr}px`}
+>
   <div class="layer" class:visible={slots.top === 'a'} style={slots.a ? `background-image: url("${slots.a}")` : ''}></div>
   <div class="layer" class:visible={slots.top === 'b'} style={slots.b ? `background-image: url("${slots.b}")` : ''}></div>
 </div>
@@ -155,16 +169,22 @@
        element's edges any more and there is nothing to hide. */
     inset: 0;
     background-position: center;
-    background-size: cover;
+    /* Drawn 1:1: the image was built at the window's size in device pixels
+       (`viewportFill`), so this size maps each image pixel to one screen
+       pixel and nothing is resampled per frame. Centred; the extra up to
+       127px of a rounded-up size is cropped by `.art`. */
+    background-size: var(--art-w) var(--art-h);
+    background-repeat: no-repeat;
     /* No CSS blur filter here. The blur is baked into the 960px JPEG the
        backend builds once, so the compositor uploads one small texture
        instead of re-blurring ~2.4 Mpx per layer per frame for the whole
        fade. */
     opacity: 0;
     transition: opacity var(--m-base) ease;
-    /* Promotes each layer to its own compositor layer for the fade — the
-       only property that animates here. */
-    will-change: opacity;
+    /* No standing `will-change`: WebKit promotes a layer for the length of
+       its opacity transition on its own, and a layer kept promoted was
+       re-composited (scaled up from 960px and blended) on every scrolled
+       frame of a CPU-composited 4K window (perf probe A/B, 2026-10-30). */
   }
 
   .layer.visible {

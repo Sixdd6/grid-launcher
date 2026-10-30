@@ -47,6 +47,9 @@ export type UiSettings = {
   /** "Game card display": `rows` (Equal height) or `columns` (Equal width)
    *  (`ui.card_display`). */
   card_display: 'rows' | 'columns';
+  /** "Hardware acceleration": the webview renders on the GPU. Read at
+   *  startup, so a change applies after a restart (`ui.hardware_acceleration`). */
+  hardware_acceleration: boolean;
 };
 export type GameSummary = {
   id: number;
@@ -761,8 +764,10 @@ export const api = {
    *  the cached file's name, so each level is built once. A failure means
    *  "this URL has no art" — `BackgroundArt` falls through to the next image;
    *  the prefetch just drops it. */
-  ensureBackgroundVariant: (url: string, blur: number) =>
-    invoke<string>('ensure_background_variant', { url, blur }),
+  /** The background art variant for `url` at `blur`: at `fill`'s size (the
+   *  window, drawn 1:1) when given, else the small 960px one. */
+  ensureBackgroundVariant: (url: string, blur: number, fill?: { width: number; height: number }) =>
+    invoke<string>('ensure_background_variant', { url, blur, width: fill?.width ?? null, height: fill?.height ?? null }),
   /** Opens a trailer's YouTube watch page in the system browser (the media
    *  viewer's "Watch on YouTube" button). `videoId` is validated on the
    *  Rust side before it reaches a URL; rejects with "not a YouTube video
