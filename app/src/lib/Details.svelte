@@ -11,6 +11,7 @@
     type GameSummary,
     type LaunchDefaults,
     type RomDetail,
+    type SaveType,
   } from './api';
   import { subjectFromDetails } from './background';
   import { noteViewed } from './stores/lastViewed.svelte';
@@ -39,7 +40,7 @@
   import { SKIPPED_TOAST_MS, skippedRemovalText } from './uninstallSkips';
   import { fullIndex, galleryItems, viewableIndex, viewableItems } from './details/media';
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
-  import { syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
+  import { syntheticCloudGame, type CloudMode } from './details/cloud';
   import { contentButtons, installLabel, isContentPlatform, isNativePlatform } from './details/actions';
   import { contentBlockReason } from './details/blocked';
   import {
@@ -469,7 +470,8 @@
     }
   });
 
-  let cloudMode = $state<CloudMode>(initialCloudMode);
+  /** The kind the Saves tab shows; a card's "Cloud sync" opens on saves. */
+  let cloudKind = $state<SaveType>(initialCloudMode === 'state' ? 'state' : 'save');
   let savePanelInfo = $state<CloudPanelInfo | null>(null);
   let statePanelInfo = $state<CloudPanelInfo | null>(null);
   let cloudPanelInfoError = $state<string | null>(null);
@@ -489,10 +491,6 @@
       .then((info) => (statePanelInfo = info))
       .catch((err) => (cloudPanelInfoError = errorMessage(err)));
   });
-
-  function handleCloudToggle(saveType: 'save' | 'state') {
-    cloudMode = toggleCloudMode(cloudMode, saveType);
-  }
 
   function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -895,9 +893,9 @@
               {isNative}
               {savePanelInfo}
               {statePanelInfo}
-              {cloudMode}
+              kind={cloudKind}
               infoError={cloudPanelInfoError}
-              onToggle={handleCloudToggle}
+              onKind={(kind) => (cloudKind = kind)}
             />
           {:else if activeTab === 'achievements' && subject.romId !== null}
             <AchievementsTab romId={subject.romId} />

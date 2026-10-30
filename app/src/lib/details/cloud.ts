@@ -10,35 +10,44 @@
 // those strings come from the backend verbatim and must be rendered as-is.
 import type { CloudRecord, GameSummary, InstalledGame, SaveScope, SaveType } from '../api';
 
+/** How the details popup opens: `overview` on the remembered tab, `save`
+ *  or `state` on the Saves tab showing that kind (a card's "Cloud sync"). */
 export type CloudMode = 'overview' | 'save' | 'state';
 
 /**
- * `_toggle_details_cloud_mode` (details_view_mixin.py:566): selecting the
- * mode that is already active returns to the overview; selecting the other
- * mode switches straight to it.
+ * Which kind the Saves tab shows: the one selected when the game supports
+ * it, else the other supported kind, else `null` (nothing to show). The tab
+ * always shows a list; there is no summary mode to toggle back to (user
+ * ruling 2026-10-30: a button that flipped between a summary and the list
+ * read as a broken button).
  */
-export function toggleCloudMode(current: CloudMode, requested: 'save' | 'state'): CloudMode {
-  return current === requested ? 'overview' : requested;
+export function shownCloudKind(selected: SaveType, saveSupported: boolean, stateSupported: boolean): SaveType | null {
+  const supported = { save: saveSupported, state: stateSupported };
+  if (supported[selected]) return selected;
+  const other: SaveType = selected === 'save' ? 'state' : 'save';
+  return supported[other] ? other : null;
+}
+
+/** The Saves | States switch's label for one kind; shared emulator media
+ *  (Xemu, Redream VMUs) read "Emulator Saves". */
+export function cloudKindLabel(saveType: SaveType, scope: SaveScope): string {
+  if (saveType === 'state') return 'States';
+  return scope === 'per_game' ? 'Saves' : 'Emulator Saves';
+}
+
+/** The title over a kind's list. */
+export function cloudSectionTitle(saveType: SaveType, scope: SaveScope): string {
+  if (saveType === 'state') return 'Cloud States';
+  return scope === 'per_game' ? 'Cloud Saves' : 'Emulator Saves';
 }
 
 /**
- * `_details_cloud_button_text` (cloud_mixin.py:246): states are always
- * "Manage States"; saves are "Emulator Saves" for either shared scope, else
- * "Manage Saves".
+ * `_refresh_details_cloud_panel` (details_view_mixin.py:1023-1027): "Upload
+ * Emulator Saves" for shared emulator media; otherwise "Upload Latest
+ * Save"/"Upload Latest State".
  */
-export function cloudButtonLabel(saveType: SaveType, scope: SaveScope): string {
-  if (saveType === 'state') return 'Manage States';
-  return scope === 'per_game' ? 'Manage Saves' : 'Emulator Saves';
-}
-
-/**
- * `_refresh_details_cloud_panel` (details_view_mixin.py:1023-1027): the
- * upload button reads "Upload Emulator Saves" only when the panel's own
- * title is "Emulator Saves"; otherwise "Upload Latest Save"/"Upload Latest
- * State".
- */
-export function uploadButtonLabel(saveType: SaveType, panelLabel: string): string {
-  if (saveType === 'save' && panelLabel === 'Emulator Saves') return 'Upload Emulator Saves';
+export function uploadButtonLabel(saveType: SaveType, scope: SaveScope): string {
+  if (saveType === 'save' && scope !== 'per_game') return 'Upload Emulator Saves';
   return saveType === 'save' ? 'Upload Latest Save' : 'Upload Latest State';
 }
 
@@ -76,20 +85,6 @@ export function cloudRecordSummary(record: CloudRecord, saveType: SaveType): str
 export function recordsStatusLine(count: number, saveType: SaveType): string {
   if (count <= 0) return '';
   return `Showing ${count} cloud ${saveType === 'save' ? 'saves' : 'states'}.`;
-}
-
-/**
- * Copy for the Saves tab's overview card that shows the newest cloud
- * record of one kind (user ruling 2026-09-08: the tab was blank until
- * "Manage Saves" was clicked). No Python counterpart.
- */
-export function latestRecordText(saveType: SaveType): { heading: string; loading: string; empty: string } {
-  const kind = saveType === 'save' ? 'save' : 'state';
-  return {
-    heading: `Latest cloud ${kind}`,
-    loading: `Checking cloud ${kind}s…`,
-    empty: `No cloud ${kind}s yet.`,
-  };
 }
 
 /** `_details_cloud_uploaded_text` composed into its row line (:738-739). */

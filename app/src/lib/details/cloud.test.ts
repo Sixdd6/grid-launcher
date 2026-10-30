@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import type { CloudRecord, GameSummary } from '../api';
 import {
-  cloudButtonLabel,
+  cloudKindLabel,
   cloudRecordSummary,
   cloudRecordTitle,
+  cloudSectionTitle,
   createRequestGuard,
   deleteConfirmText,
   isNativeLaunchPlatform,
   isNativePlatform,
-  latestRecordText,
   recordsStatusLine,
   restoreAllConfirmText,
   restoreConfirmText,
   sharedScopeWarning,
+  shownCloudKind,
   syntheticCloudGame,
-  toggleCloudMode,
   uploadButtonLabel,
   uploadedLine,
 } from './cloud';
@@ -107,59 +107,6 @@ describe('uploadedLine', () => {
     expect(uploadedLine(record({ absolute_time: 'Unknown upload time', relative_time: 'Unknown' }))).toBe(
       'Uploaded Unknown upload time (Unknown)'
     );
-  });
-});
-
-describe('toggleCloudMode', () => {
-  it('enters save mode from overview', () => {
-    expect(toggleCloudMode('overview', 'save')).toBe('save');
-  });
-
-  it('enters state mode from overview', () => {
-    expect(toggleCloudMode('overview', 'state')).toBe('state');
-  });
-
-  it('returns to overview when the active mode is clicked again', () => {
-    expect(toggleCloudMode('save', 'save')).toBe('overview');
-    expect(toggleCloudMode('state', 'state')).toBe('overview');
-  });
-
-  it('switches directly from one mode to the other', () => {
-    expect(toggleCloudMode('save', 'state')).toBe('state');
-    expect(toggleCloudMode('state', 'save')).toBe('save');
-  });
-});
-
-describe('cloudButtonLabel', () => {
-  it('is always "Manage States" for state mode, regardless of scope', () => {
-    expect(cloudButtonLabel('state', 'per_game')).toBe('Manage States');
-    expect(cloudButtonLabel('state', 'shared_single')).toBe('Manage States');
-  });
-
-  it('is "Manage Saves" for per-game save scope', () => {
-    expect(cloudButtonLabel('save', 'per_game')).toBe('Manage Saves');
-  });
-
-  it('is "Emulator Saves" for shared-single save scope', () => {
-    expect(cloudButtonLabel('save', 'shared_single')).toBe('Emulator Saves');
-  });
-
-  it('is "Emulator Saves" for shared-slotted save scope', () => {
-    expect(cloudButtonLabel('save', 'shared_slotted')).toBe('Emulator Saves');
-  });
-});
-
-describe('uploadButtonLabel', () => {
-  it('is "Upload Emulator Saves" when the panel label is "Emulator Saves"', () => {
-    expect(uploadButtonLabel('save', 'Emulator Saves')).toBe('Upload Emulator Saves');
-  });
-
-  it('is "Upload Latest Save" for a normal save panel', () => {
-    expect(uploadButtonLabel('save', 'Manage Saves')).toBe('Upload Latest Save');
-  });
-
-  it('is "Upload Latest State" for a state panel regardless of label', () => {
-    expect(uploadButtonLabel('state', 'Manage States')).toBe('Upload Latest State');
   });
 });
 
@@ -328,21 +275,6 @@ describe('recordsStatusLine', () => {
   });
 });
 
-describe('latestRecordText', () => {
-  it('names the kind in the heading, loading, and empty copy', () => {
-    expect(latestRecordText('save')).toEqual({
-      heading: 'Latest cloud save',
-      loading: 'Checking cloud saves…',
-      empty: 'No cloud saves yet.',
-    });
-    expect(latestRecordText('state')).toEqual({
-      heading: 'Latest cloud state',
-      loading: 'Checking cloud states…',
-      empty: 'No cloud states yet.',
-    });
-  });
-});
-
 describe('restoreAllConfirmText', () => {
   it('names the skipped folders and the risk to other games', () => {
     const result = restoreAllConfirmText("Demon's Souls", ['BCUS98174AUTO', 'NPUB30024SAVE']);
@@ -357,5 +289,42 @@ describe('restoreAllConfirmText', () => {
   it('lists at most five folders', () => {
     const folders = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'];
     expect(restoreAllConfirmText('X', folders).message).toContain('A1, A2, A3, A4, A5 and 2 more.');
+  });
+});
+
+describe('shownCloudKind', () => {
+  it('shows the selected kind when the game supports it', () => {
+    expect(shownCloudKind('save', true, true)).toBe('save');
+    expect(shownCloudKind('state', true, true)).toBe('state');
+  });
+
+  it('falls back to the other kind when the selected one is unsupported', () => {
+    expect(shownCloudKind('state', true, false)).toBe('save');
+    expect(shownCloudKind('save', false, true)).toBe('state');
+  });
+
+  it('is null when neither kind is supported', () => {
+    expect(shownCloudKind('save', false, false)).toBe(null);
+  });
+});
+
+describe('cloud labels', () => {
+  it('names the switch sides, with shared media as Emulator Saves', () => {
+    expect(cloudKindLabel('save', 'per_game')).toBe('Saves');
+    expect(cloudKindLabel('save', 'shared_single')).toBe('Emulator Saves');
+    expect(cloudKindLabel('save', 'shared_slotted')).toBe('Emulator Saves');
+    expect(cloudKindLabel('state', 'per_game')).toBe('States');
+  });
+
+  it('titles each list', () => {
+    expect(cloudSectionTitle('save', 'per_game')).toBe('Cloud Saves');
+    expect(cloudSectionTitle('save', 'shared_slotted')).toBe('Emulator Saves');
+    expect(cloudSectionTitle('state', 'per_game')).toBe('Cloud States');
+  });
+
+  it('labels the upload by kind and scope', () => {
+    expect(uploadButtonLabel('save', 'per_game')).toBe('Upload Latest Save');
+    expect(uploadButtonLabel('save', 'shared_single')).toBe('Upload Emulator Saves');
+    expect(uploadButtonLabel('state', 'per_game')).toBe('Upload Latest State');
   });
 });

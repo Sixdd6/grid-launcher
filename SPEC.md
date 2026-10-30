@@ -300,7 +300,7 @@ flags and the version, then up to five tabs:
   The viewer shows each item as large as the window allows at its own shape, but never
   more than twice its own resolution; the arrows sit just outside the media's edges and
   stop at the window's edge when the media is wide.
-- **Saves** — the Manage Saves / Emulator Saves / Manage States panels described below.
+- **Saves** — the game's cloud saves or states, described below.
 - **Files** — every file the server lists with its size and its version (the version tag
   parsed out of the file name, else the file's last-modified date), the installed-versus-
   server version line, the PS4 / Xbox 360 content files, and the platform's firmware row
@@ -338,17 +338,17 @@ cannot use Play, cloud saves or update checks.
   - **Remove from library (keeps files)** deletes the Library row only. It never uninstalls
     and never touches a file. A confirm names the folder that stays on disk.
 
-The button bar area should include:
-- `Manage Saves` for normal per-game cloud-save platforms
-- `Emulator Saves` for shared/global save media such as Xemu and Redream VMUs
-- `Manage States` when state sync is supported for that platform
+### Saves tab
+The Saves tab always shows a list; there is no button that opens or closes it. When the
+game syncs both saves and states, a two-sided switch on top picks which list shows: `Saves`
+(`Emulator Saves` for shared save media such as Xemu and Redream VMUs) or `States`. A
+"Cloud sync" action on a card opens the popup on this tab showing saves. Each list has a
+title (`Cloud Saves`, `Emulator Saves` or `Cloud States`) with a button beside it to
+manually upload the latest save/state for that scope, and fills in asynchronously.
 
-### Manage Saves/States
-Clicking the Manage Saves, Emulator Saves, or Manage States buttons in the button bar should switch the middle column of the Game Details view immediately and then populate the cloud list asynchronously for responsive feedback. The view should include a button to manually upload the latest save/state for that scope.
+The Saves/States should be listed in a vertical column with the name of the emulator used, file size, upload time and display relative 'x hours/minutes ago'. The newest is marked Latest. Each save in the list should also have right-aligned buttons: one to manually restore the save from the server, overwriting the local save (with confirmation prompt explaining the overwrite) and one to delete the save from the server (with confirmation prompt).
 
-The Saves/States should be listed in a vertical column with the name of the emulator used, file size, upload time and display relative 'x hours/minutes ago'. Each save in the list should also have right-aligned buttons: one to manually restore the save from the server, overwriting the local save (with confirmation prompt explaining the overwrite) and one to delete the save from the server (with confirmation prompt).
-
-When the panel is showing `Emulator Saves`, the entries represent shared emulator media rather than a single game's private save files, and the UI should warn the player that restoring or deleting those entries can affect every game using that shared emulator storage.
+When the list is showing `Emulator Saves`, the entries represent shared emulator media rather than a single game's private save files, and a note above the list (and each confirmation) warns the player that restoring or deleting those entries can affect every game using that shared emulator storage.
 
 ### Native Game Settings
 A game is native when its server platform's identity (the RomM platform slug: `win`, `win9x`, `linux`, …) is a Windows or Linux one, not because of the platform's display name; a custom name such as "PC Fangames & Ports" on slug `win` is still native, and the name rule ("Windows…"/"Linux…") applies only when the slug is unknown.

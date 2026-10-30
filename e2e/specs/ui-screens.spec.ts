@@ -119,6 +119,9 @@ describe('ui screens: the main views for a design review', () => {
       await shot(`media-viewer-${theme}-trailer`);
       await browser.keys('Escape');
       await $(testId('media-viewer')).waitForExist({ timeout: 20_000, reverse: true });
+      await $(testId('details-tab-saves')).click();
+      await browser.pause(1500);
+      await shot(`details-saves-${theme}-fade30`);
       await $(testId('details-tab-overview')).click();
       await $(testId('details-close')).click();
     }

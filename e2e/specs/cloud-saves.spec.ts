@@ -98,18 +98,12 @@ describe('cloud-saves', () => {
   }
 
   async function openSavePanel() {
-    // The cloud toggles live on the Saves tab (design §7). The tab itself
-    // is always mounted; the toggle only exists once the tab is showing.
+    // The cloud list lives on the Saves tab (design §7).
     await $(testId('details-tab-saves')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the details popup never rendered its Saves tab',
     });
     await $(testId('details-tab-saves')).click();
-    await $(testId('details-cloud-save-toggle')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the "Manage Saves" toggle never appeared',
-    });
-    await $(testId('details-cloud-save-toggle')).click();
     await $(testId('cloud-panel')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the cloud save panel never opened',
@@ -318,8 +312,7 @@ describe('cloud-saves', () => {
   it('block reason: a native-platform game is unsupported for save states', async () => {
     // `details_cloud_mode_supported` (ops/mod.rs) returns `false` for
     // EVERY native (Windows) game's state mode, unconditionally — so
-    // Details.svelte never renders the "Manage States" toggle for one
-    // (`{#if statePanelInfo?.supported}`, Details.svelte), and
+    // SavesTab.svelte never offers States for one (`shownCloudKind`), and
     // CloudPanel.svelte's own doc comment on `nativeStateBlocked` says
     // that combination is "only reachable defensively" through the UI.
     // This calls the real `cloud_panel_info` command directly — the same

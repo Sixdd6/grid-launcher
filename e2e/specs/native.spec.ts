@@ -180,12 +180,8 @@ describe('native', () => {
 
   /** Opens the Saves tab's native save panel for the currently open game. */
   async function openNativeSavePanel() {
+    // The Saves tab shows the list itself; there is no toggle to open it.
     await $(testId('details-tab-saves')).click();
-    await $(testId('details-cloud-save-toggle')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the Manage Saves toggle never appeared for the native game',
-    });
-    await $(testId('details-cloud-save-toggle')).click();
     await $(testId('cloud-native-status')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the native save-location section never rendered',

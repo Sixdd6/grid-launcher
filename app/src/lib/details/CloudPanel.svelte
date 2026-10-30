@@ -10,8 +10,8 @@
   } from '../api';
   import Icon from '../Icon.svelte';
   import {
-    cloudButtonLabel,
     cloudRecordSummary,
+    cloudSectionTitle,
     cloudRecordTitle,
     createRequestGuard,
     deleteConfirmText,
@@ -64,7 +64,11 @@
   // flips it to false.
   let recordsBlocked = $derived(nativeStateBlocked || (!nativeSave && !panelInfo.supported));
 
-  let panelLabel = $derived(cloudButtonLabel(saveType, panelInfo.scope));
+  let panelLabel = $derived(cloudSectionTitle(saveType, panelInfo.scope));
+  /** Shared emulator media: restoring or deleting one entry affects every
+   *  game on that emulator, so the list says so up front, not only in the
+   *  confirmation. */
+  let sharedNote = $derived(saveType === 'save' ? sharedScopeWarning(panelInfo.scope, '') : '');
   let kindLabel = $derived(saveType === 'save' ? 'saves' : 'states');
 
   let records = $state<CloudRecord[]>([]);
@@ -281,26 +285,31 @@
 </script>
 
 <div data-testid="cloud-panel" class="cloud-panel">
-  <!-- No Back button: the toggle that opened this panel closes it again
-       (`toggleCloudMode`), so a second control for the same action only
-       took space (user ruling 2026-09-08). -->
+  <!-- The title, with the upload as a secondary action beside it: a full-
+       width primary bar here competed with Play. -->
   <div class="cloud-header">
     <h3>{panelLabel}</h3>
+    {#if !nativeStateBlocked}
+      <button
+        data-testid="cloud-upload"
+        class="upload"
+        disabled={!uploadEnabled}
+        title={uploadTooltip}
+        onclick={handleUpload}
+      >
+        {uploadPending ? 'Uploading…' : uploadButtonLabel(saveType, panelInfo.scope)}
+      </button>
+    {/if}
   </div>
+
+  {#if sharedNote}
+    <p data-testid="cloud-shared-note" class="shared-note">{sharedNote}</p>
+  {/if}
 
   {#if nativeStateBlocked}
     <p data-testid="cloud-native-states-unsupported" class="hint">Save states are not supported for native games.</p>
     <p data-testid="cloud-native-states-note" class="hint">Only save file backups are supported for native games.</p>
   {:else}
-    <button
-      data-testid="cloud-upload"
-      class="upload"
-      disabled={!uploadEnabled}
-      title={uploadTooltip}
-      onclick={handleUpload}
-    >
-      {uploadPending ? 'Uploading…' : uploadButtonLabel(saveType, panelLabel)}
-    </button>
 
     {#if uploadError}<p data-testid="cloud-upload-error" class="error" role="alert">{uploadError}</p>{/if}
     {#each uploadMessages as message, i (i)}
@@ -315,10 +324,6 @@
     {#if actionNotice}<p data-testid="cloud-action-notice" class="message">{actionNotice}</p>{/if}
 
     {#if !recordsBlocked}
-      {#if nativeSave}
-        <h4 data-testid="cloud-native-saves-label" class="section-label">Cloud Saves</h4>
-      {/if}
-
       <div class="records">
         {#if recordsLoading}
           <p data-testid="cloud-loading" class="hint">Loading cloud {kindLabel}…</p>
@@ -327,10 +332,16 @@
         {:else if records.length === 0}
           <p data-testid="cloud-empty" class="hint">No cloud {kindLabel} were found for this game yet.</p>
         {:else}
-          {#each records as record (record.id)}
+          {#each records as record, i (record.id)}
             <div data-testid={`cloud-record-${record.id}`} class="record">
               <div class="record-info">
-                <p class="record-title">{cloudRecordTitle(record, saveType)}</p>
+                <p class="record-title">
+                  {cloudRecordTitle(record, saveType)}
+                  {#if i === 0}
+                    <!-- Records arrive newest first. -->
+                    <span data-testid="cloud-record-latest" class="latest">Latest</span>
+                  {/if}
+                </p>
                 <p class="record-summary">{cloudRecordSummary(record, saveType)}</p>
                 <p class="record-time">{uploadedLine(record)}</p>
               </div>
@@ -456,24 +467,54 @@
   .cloud-header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: space-between;
+    gap: 12px;
   }
 
   .cloud-header h3 {
     margin: 0;
-    font-size: 16px;
+    font-size: 15px;
     color: var(--text-h);
   }
 
   button.upload {
-    width: 100%;
+    flex: none;
     font: inherit;
-    padding: 10px 16px;
-    border-radius: var(--r-chip);
-    border: none;
+    font-size: 13px;
+    padding: 6px 14px;
+    border-radius: var(--r-control);
+    border: 1px solid var(--primary);
+    background: transparent;
+    color: var(--primary);
+    cursor: pointer;
+    transition: background var(--m-fast) ease;
+  }
+
+  button.upload:hover:not(:disabled) {
     background: var(--primary);
     color: var(--on-primary);
-    cursor: pointer;
+  }
+
+  .shared-note {
+    margin: 0;
+    padding: 8px 12px;
+    border-radius: var(--r-row);
+    border: 1px solid var(--warning);
+    color: var(--text);
+    font-size: 13px;
+  }
+
+  .latest {
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: var(--r-pill);
+    background: var(--primary);
+    color: var(--on-primary);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    vertical-align: 1px;
   }
 
   button.upload:disabled {
@@ -504,8 +545,7 @@
     color: var(--warning-text);
   }
 
-  .native-paths h4,
-  .section-label {
+  .native-paths h4 {
     margin: 0 0 4px;
     font-size: 14px;
     font-weight: 700;
