@@ -98,12 +98,17 @@ export function rowsLayout({ shapes, width, labelRow, target, gap = GAP_PX, rowG
   /** Lays `row` out at height `h`; `fill` stretches it to the full width. */
   const place = (h: number, fill: boolean) => {
     const height = Math.round(h);
+    // Edges are rounded from the exact positions, not from the previous
+    // rounded edge, so no card is more than a pixel off its art's shape:
+    // carrying the rounding along the row piled it onto the last card.
     let x = 0;
     row.forEach((i, k) => {
       const last = k === row.length - 1;
-      const right = fill && last ? width : Math.round(x + h * clampShape(shapes[i]));
-      rects[i] = { x: Math.round(x), y, w: Math.max(1, right - Math.round(x)), h: height };
-      x = right + gap;
+      const end = x + h * clampShape(shapes[i]);
+      const left = Math.round(x);
+      const right = fill && last ? width : Math.round(end);
+      rects[i] = { x: left, y, w: Math.max(1, right - left), h: height };
+      x = end + gap;
     });
     y += height + labelRow + rowGap;
     row = [];

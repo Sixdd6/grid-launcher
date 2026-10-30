@@ -189,7 +189,10 @@
 
   /* The cover is exactly the rectangle the layout gave it, which is the
      art's own shape once known. Until then (portrait) the image is
-     contained, so nothing is cropped while the grid catches up. */
+     contained, so nothing is cropped while the grid catches up. No fill
+     behind the art: the rectangle is rounded to whole pixels, and a fill
+     showed as a light edge where the art is a pixel short of it. The
+     skeleton and the placeholder bring their own. */
   .cover {
     position: relative;
     flex: none;
@@ -197,7 +200,6 @@
     height: var(--cover-h);
     border-radius: var(--r-card);
     overflow: hidden;
-    background: var(--overlay);
     box-shadow: var(--shadow-card);
     transition:
       transform var(--m-fast) ease,

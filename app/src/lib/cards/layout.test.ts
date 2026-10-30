@@ -42,11 +42,24 @@ describe('Equal height (rows)', () => {
     const shapes = [0.73, 1.86, 1, 0.73, 1.33, 0.73, 0.73, 1, 0.73, 1.43];
     const { rects } = rows(shapes);
     for (const [i, r] of rects.entries()) {
-      // Within a pixel of the art's shape, except a full row's last card,
-      // which absorbs the rounding.
+      // Within a pixel of the art's shape.
       expect(Math.abs(r.w / r.h - shapes[i])).toBeLessThan(0.05);
     }
     for (const row of byRow(rects)) expect(new Set(row.map((r) => r.h)).size).toBe(1);
+  });
+
+  it('keeps every card in a long row within a pixel of its art, the last one too', () => {
+    // A cover drawn uncropped in a box wider than its art leaves an edge, and
+    // carrying the rounding along a 14-card row used to pile pixels onto the
+    // last card.
+    const shapes = Array.from({ length: 60 }, (_, i) => [0.75, 0.7, 0.75, 0.77][i % 4]);
+    for (let width = 1200; width <= 1800; width += 7) {
+      const { rects } = rows(shapes, width, 120);
+      for (const [i, r] of rects.entries()) {
+        // A full row's height is fractional before rounding, so allow for it.
+        expect(Math.abs(r.w - r.h * shapes[i])).toBeLessThanOrEqual(1.5);
+      }
+    }
   });
 
   it('stretches each full row to the width, and leaves the last row at the target', () => {
