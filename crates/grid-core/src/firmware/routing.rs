@@ -42,7 +42,8 @@ use crate::launch::selection::{
 };
 use crate::romm::RommClient;
 
-use super::{install_platform_firmware, FirmwareOptions, FirmwareTarget};
+use super::manifest::MANIFEST_FILE;
+use super::{install_platform_firmware_recorded, FirmwareOptions, FirmwareTarget};
 
 /// `${VAR}` / `$VAR` / `%VAR%` — the union of `posixpath.expandvars` and
 /// `ntpath.expandvars` this crate needs, since a profile path written for
@@ -359,7 +360,7 @@ pub struct GameFirmwareContext<'a> {
 /// Exception as e: warnings.append(f"Firmware install error: {e}")`
 /// (install_mixin.py:648-698, three identical blocks).
 ///
-/// [`install_platform_firmware`] returns its failures as warnings and has no
+/// [`super::install_platform_firmware`] returns its failures as warnings and has no
 /// error channel of its own, so in practice only the `Ok` arm is taken. The
 /// wrap point is kept — and unit-tested — so the warning text stays in one
 /// place if that contract ever grows an `Err`.
@@ -370,16 +371,31 @@ fn wrap_install(result: Result<Vec<String>, String>) -> Vec<String> {
     }
 }
 
-/// Installs a game's platform firmware during library finalize
+/// What a platform's firmware pass does: the default emulator it installs
+/// for, and each `install_platform_firmware` call (targets and options) in
+/// order — firmware, then RetroArch core options, then RetroArch saves.
+pub struct FirmwarePlan<'a> {
+    pub entry: &'a EmulatorEntry,
+    pub passes: Vec<(Vec<FirmwareTarget>, FirmwareOptions)>,
+}
+
+impl FirmwarePlan<'_> {
+    /// Every target directory of every pass, for the installed check.
+    pub fn targets(&self) -> Vec<FirmwareTarget> {
+        self.passes
+            .iter()
+            .flat_map(|(targets, _)| targets.iter().cloned())
+            .collect()
+    }
+}
+
+/// The plan for `ctx.platform`, or `None` when there is nothing to do — a
+/// blank platform, no default emulator for it, no matching entry, a
+/// RetroArch install with no configured core, or no targets at all
 /// (`_install_firmware_for_game_without_ui`, install_mixin.py:528-697).
-///
-/// Returns the accumulated warnings joined by newlines; `""` means either
-/// success or "nothing to do" — a blank platform, no default emulator for
-/// it, no matching entry, a RetroArch install with no configured core, or
-/// no targets at all. Never fails.
-pub async fn install_for_game(client: &RommClient, ctx: &GameFirmwareContext<'_>) -> String {
+pub fn firmware_plan<'a>(ctx: &GameFirmwareContext<'a>) -> Option<FirmwarePlan<'a>> {
     if ctx.platform.trim().is_empty() {
-        return String::new();
+        return None;
     }
 
     let emulator_name = default_emulator_name_for_platform(
@@ -390,11 +406,9 @@ pub async fn install_for_game(client: &RommClient, ctx: &GameFirmwareContext<'_>
         &installed_core_resolver,
     );
     if emulator_name.trim().is_empty() {
-        return String::new();
+        return None;
     }
-    let Some(entry) = emulator_entry_by_name(&ctx.config.emulators, &emulator_name) else {
-        return String::new();
-    };
+    let entry = emulator_entry_by_name(&ctx.config.emulators, &emulator_name)?;
 
     let profile = profile_for_entry(&entry.name, &entry.path, ctx.profiles);
     let mut firmware = targets_for_entry(entry, profile, &ctx.config.library_path, ctx.config_dir);
@@ -403,20 +417,15 @@ pub async fn install_for_game(client: &RommClient, ctx: &GameFirmwareContext<'_>
     let mut extract_with_paths = false;
 
     if is_retroarch(entry, ctx.profiles) {
-        let Some(core_id) = mapping_value_for_platform(&ctx.config.retroarch_cores, ctx.platform)
-        else {
-            return String::new();
-        };
+        let core_id = mapping_value_for_platform(&ctx.config.retroarch_cores, ctx.platform)?;
         let settings = retroarch::directory_settings(&entry.path);
-        let Some(plan) = shape_for_retroarch(
+        let plan = shape_for_retroarch(
             core_id,
             core_entries(),
             &emulator_dir_of(entry),
             &settings.savefile_directory,
             firmware,
-        ) else {
-            return String::new();
-        };
+        )?;
         firmware = plan.firmware;
         configs = plan.configs;
         saves = plan.saves;
@@ -426,54 +435,60 @@ pub async fn install_for_game(client: &RommClient, ctx: &GameFirmwareContext<'_>
     }
 
     if firmware.is_empty() && configs.is_empty() && saves.is_empty() {
-        return String::new();
+        return None;
     }
 
-    let mut warnings: Vec<String> = Vec::new();
-
+    let mut passes = Vec::new();
     if !firmware.is_empty() {
         let opts = FirmwareOptions {
             skip_existing: true,
             extract_zip_with_paths: extract_with_paths,
         };
-        warnings.extend(wrap_install(Ok(install_platform_firmware(
-            client,
-            ctx.platform_id,
-            &firmware,
-            opts,
-        )
-        .await)));
+        passes.push((firmware, opts));
     }
-
     if !configs.is_empty() {
-        warnings.extend(wrap_install(Ok(install_platform_firmware(
-            client,
-            ctx.platform_id,
-            &configs,
-            FirmwareOptions::default(),
-        )
-        .await)));
+        passes.push((configs, FirmwareOptions::default()));
     }
-
     if !saves.is_empty() {
         let opts = FirmwareOptions {
             skip_existing: true,
             extract_zip_with_paths: true,
         };
-        warnings.extend(wrap_install(Ok(install_platform_firmware(
+        passes.push((saves, opts));
+    }
+    Some(FirmwarePlan { entry, passes })
+}
+
+/// Installs a game's platform firmware during library finalize
+/// (`_install_firmware_for_game_without_ui`, install_mixin.py:528-697),
+/// recording what it placed in the installed-firmware manifest beside the
+/// config file ([`MANIFEST_FILE`]).
+///
+/// Returns the accumulated warnings joined by newlines; `""` means either
+/// success or "nothing to do" ([`firmware_plan`]). Never fails.
+pub async fn install_for_game(client: &RommClient, ctx: &GameFirmwareContext<'_>) -> String {
+    let Some(plan) = firmware_plan(ctx) else {
+        return String::new();
+    };
+    let manifest = ctx.config_dir.join(MANIFEST_FILE);
+
+    let mut warnings: Vec<String> = Vec::new();
+    for (targets, opts) in &plan.passes {
+        warnings.extend(wrap_install(Ok(install_platform_firmware_recorded(
             client,
             ctx.platform_id,
-            &saves,
-            opts,
+            targets,
+            *opts,
+            Some(&manifest),
         )
         .await)));
     }
 
-    if is_dolphin(entry, ctx.profiles) {
+    if is_dolphin(plan.entry, ctx.profiles) {
         // Both results are deliberately discarded: Python wraps each in a
         // bare `except Exception: pass` (install_mixin.py:689-696).
-        let _ = dolphin::ensure_skip_ipl(&entry.path);
-        let _ = dolphin::ensure_gcpad_config(&entry.path);
+        let _ = dolphin::ensure_skip_ipl(&plan.entry.path);
+        let _ = dolphin::ensure_gcpad_config(&plan.entry.path);
     }
 
     warnings.join("\n")

@@ -10,11 +10,12 @@
 //!
 //! Per-file write dispatch (`.7z`/`.rar`, `.zip`, raw) lives in [`write`].
 
+pub mod manifest;
 pub mod routing;
 pub mod rpcs3;
 mod write;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::romm::RommClient;
 
@@ -115,6 +116,19 @@ pub async fn install_platform_firmware(
     targets: &[FirmwareTarget],
     opts: FirmwareOptions,
 ) -> Vec<String> {
+    install_platform_firmware_recorded(client, platform_id, targets, opts, None).await
+}
+
+/// [`install_platform_firmware`], also recording in the manifest at
+/// `manifest` ([`manifest::MANIFEST_FILE`]) which files each server file put
+/// in place, so the Emulators view can tell installed firmware apart.
+pub async fn install_platform_firmware_recorded(
+    client: &RommClient,
+    platform_id: i64,
+    targets: &[FirmwareTarget],
+    opts: FirmwareOptions,
+    manifest: Option<&Path>,
+) -> Vec<String> {
     if targets.is_empty() {
         return Vec::new();
     }
@@ -132,6 +146,7 @@ pub async fn install_platform_firmware(
     }
 
     let mut warnings = Vec::new();
+    let mut installs: Vec<(PathBuf, String, Vec<PathBuf>)> = Vec::new();
 
     for record in records {
         let file_name = record.file_name;
@@ -180,12 +195,15 @@ pub async fn install_platform_firmware(
                 ));
                 continue;
             }
-            if let Err(msg) =
-                write::write_firmware_file(&file_name, &data, &target.path, keep_archive, opts)
-            {
-                warnings.push(msg);
+            match write::write_firmware_file(&file_name, &data, &target.path, keep_archive, opts) {
+                Ok(placed) => installs.push((target.path.clone(), file_name.clone(), placed)),
+                Err(msg) => warnings.push(msg),
             }
         }
+    }
+
+    if let Some(path) = manifest {
+        manifest::record_installs(path, installs);
     }
 
     warnings

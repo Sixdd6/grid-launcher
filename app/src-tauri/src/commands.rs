@@ -791,6 +791,10 @@ pub struct PlatformFirmwareStatus {
     /// that firmware to be installed to. Without one there is nothing to
     /// install into, so the chip offers no action.
     pub has_default_emulator: bool,
+    /// Whether every server firmware file is already installed for the
+    /// platform's default emulator (`grid_core::firmware::manifest`), so the
+    /// Emulators view says "Installed" rather than offering Install again.
+    pub installed: bool,
 }
 
 /// `GET /api/firmware?platform_id=<id>` plus the local default-emulator
@@ -801,25 +805,48 @@ pub async fn platform_firmware_status(
     platform_id: i64,
     platform: String,
 ) -> Result<PlatformFirmwareStatus, String> {
-    let file_count = match state.session.client() {
+    let records = match state.session.client() {
         // Offline: report "no firmware" rather than an error. The chip is
         // an affordance, not a task, and the Server view is already
         // showing its own offline state when this can happen.
-        None => 0,
-        Some(client) => client.firmware(platform_id).await.map_err(err)?.len() as u32,
+        None => Vec::new(),
+        Some(client) => client.firmware(platform_id).await.map_err(err)?,
     };
-    let has_default_emulator = tokio::task::spawn_blocking(move || {
-        let Ok(config) = Config::load(&Config::default_path()) else {
-            return false;
+    let file_count = records.len() as u32;
+    let (has_default_emulator, installed) = tokio::task::spawn_blocking(move || {
+        let config_path = Config::default_path();
+        let Ok(config) = Config::load(&config_path) else {
+            return (false, false);
         };
         let profiles = grid_core::launch::profiles::load_profiles();
-        crate::firmware_service::default_entry_for_platform(&config, &platform, profiles).is_some()
+        let has_default =
+            crate::firmware_service::default_entry_for_platform(&config, &platform, profiles)
+                .is_some();
+        if !has_default || records.is_empty() {
+            return (has_default, false);
+        }
+        use grid_core::firmware::manifest::{firmware_installed, FirmwareManifest, MANIFEST_FILE};
+        use grid_core::firmware::routing::{config_dir_of, firmware_plan, GameFirmwareContext};
+        let config_dir = config_dir_of(&config_path);
+        let ctx = GameFirmwareContext {
+            platform: &platform,
+            platform_id,
+            config: &config,
+            profiles,
+            config_dir: &config_dir,
+        };
+        let installed = firmware_plan(&ctx).is_some_and(|plan| {
+            let manifest = FirmwareManifest::load(&config_dir.join(MANIFEST_FILE));
+            firmware_installed(&records, &plan.targets(), &manifest)
+        });
+        (has_default, installed)
     })
     .await
     .map_err(|e| format!("platform_firmware_status did not finish: {e}"))?;
     Ok(PlatformFirmwareStatus {
         file_count,
         has_default_emulator,
+        installed,
     })
 }
 
@@ -3438,21 +3465,29 @@ mod platform_firmware_tests {
         let status = PlatformFirmwareStatus {
             file_count: 0,
             has_default_emulator: false,
+            installed: false,
         };
         // The DTO is the whole contract: the frontend decides what to show.
         // Serialization is asserted because the field names are the API.
         let json = serde_json::to_string(&status).unwrap();
-        assert_eq!(json, r#"{"file_count":0,"has_default_emulator":false}"#);
+        assert_eq!(
+            json,
+            r#"{"file_count":0,"has_default_emulator":false,"installed":false}"#
+        );
     }
 
     #[test]
-    fn a_platform_with_files_and_an_emulator_serializes_both_flags() {
+    fn a_platform_with_installed_firmware_serializes_every_flag() {
         let status = PlatformFirmwareStatus {
             file_count: 4,
             has_default_emulator: true,
+            installed: true,
         };
         let json = serde_json::to_string(&status).unwrap();
-        assert_eq!(json, r#"{"file_count":4,"has_default_emulator":true}"#);
+        assert_eq!(
+            json,
+            r#"{"file_count":4,"has_default_emulator":true,"installed":true}"#
+        );
     }
 }
 

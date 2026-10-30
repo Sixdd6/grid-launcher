@@ -25,13 +25,13 @@ describe('firmwarePlatforms', () => {
 
 describe('emulatorFirmwareRows', () => {
   const statuses = {
-    1: { file_count: 3, has_default_emulator: true },
-    2: { file_count: 0, has_default_emulator: true },
+    1: { file_count: 3, has_default_emulator: true, installed: false },
+    2: { file_count: 0, has_default_emulator: true, installed: false },
   };
 
   it('lists the platforms the emulator is the default for that have server firmware', () => {
     expect(emulatorFirmwareRows('DuckStation', platforms, defaults, statuses)).toEqual([
-      { platformId: 1, platformName: 'PlayStation', label: 'PlayStation firmware · 3 files' },
+      { platformId: 1, platformName: 'PlayStation', label: 'PlayStation firmware · 3 files', installed: false },
     ]);
   });
 
@@ -40,8 +40,13 @@ describe('emulatorFirmwareRows', () => {
     expect(emulatorFirmwareRows('DuckStation', platforms, defaults, {})).toEqual([]);
   });
 
+  it('says when the firmware is already installed', () => {
+    const done = { 1: { file_count: 3, has_default_emulator: true, installed: true } };
+    expect(emulatorFirmwareRows('DuckStation', platforms, defaults, done)[0].installed).toBe(true);
+  });
+
   it('says one file in the singular', () => {
-    const one = { 1: { file_count: 1, has_default_emulator: true } };
+    const one = { 1: { file_count: 1, has_default_emulator: true, installed: false } };
     expect(emulatorFirmwareRows('DuckStation', platforms, defaults, one)[0].label).toBe('PlayStation firmware · 1 file');
   });
 });

@@ -56,6 +56,7 @@
   import CompatTools from './emulators/CompatTools.svelte';
   import PlatformSetup from './setup/PlatformSetup.svelte';
   import { startSetupRun } from './stores/setupRun.svelte';
+  import Icon from './Icon.svelte';
   import EmulatorForm from './emulators/EmulatorForm.svelte';
   import { dynamicEmulatorNotes, emulatorNotes } from './emulators/notes';
   import { emulatorFirmwareRows, firmwarePlatforms } from './emulators/firmware';
@@ -765,13 +766,25 @@
                       {#each emulatorFirmwareRows(e.name, platforms, defaults, firmwareStatus) as fw (fw.platformId)}
                         <div class="firmware" data-testid={`emulator-firmware-${sanitizeName(e.name)}-${fw.platformId}`}>
                           <p class="hint">{fw.label}</p>
-                          <button
-                            data-testid={`emulator-firmware-install-${sanitizeName(e.name)}-${fw.platformId}`}
-                            disabled={firmwarePending[fw.platformId] === true}
-                            onclick={() => installFirmware(fw.platformId, fw.platformName)}
-                          >
-                            {firmwarePending[fw.platformId] ? 'Requested…' : 'Install firmware'}
-                          </button>
+                          {#if fw.installed && !firmwarePending[fw.platformId]}
+                            <!-- Every server file is in place (the backend's
+                                 installed-firmware check), so there is nothing
+                                 to offer: Install again read as a failed install. -->
+                            <span
+                              data-testid={`emulator-firmware-installed-${sanitizeName(e.name)}-${fw.platformId}`}
+                              class="firmware-installed"
+                            >
+                              <Icon name="check" size={14} /> Installed
+                            </span>
+                          {:else}
+                            <button
+                              data-testid={`emulator-firmware-install-${sanitizeName(e.name)}-${fw.platformId}`}
+                              disabled={firmwarePending[fw.platformId] === true}
+                              onclick={() => installFirmware(fw.platformId, fw.platformName)}
+                            >
+                              {firmwarePending[fw.platformId] ? 'Requested…' : 'Install firmware'}
+                            </button>
+                          {/if}
                         </div>
                       {/each}
                       {#if isRpcs3(e.name) && rpcs3Status.get(e.name)}
@@ -1215,6 +1228,16 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 10px;
+  }
+
+  .firmware-installed {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--success);
   }
 
   .firmware .hint,

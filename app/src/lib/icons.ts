@@ -21,6 +21,9 @@ export const ICONS = {
   /** Apex at x=8.5, arms to x=15.5, so the mark is centred on x=12. */
   chevronLeft: 'M15.5 5L8.5 12l7 7',
 
+  /** A tick from (5, 12.5) down to (10, 17.5) and up to (19, 7): done, installed. */
+  check: 'M5 12.5l5 5L19 7',
+
   /** The mirror of `chevronLeft`, same span and same centre. */
   chevronRight: 'M8.5 5l7 7-7 7',
 

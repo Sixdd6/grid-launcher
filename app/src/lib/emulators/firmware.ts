@@ -13,6 +13,8 @@ export type EmulatorFirmwareRow = {
   /** The platform's name as the firmware commands take it. */
   platformName: string;
   label: string;
+  /** Every server file is already in place for this emulator. */
+  installed: boolean;
 };
 
 /** Platforms whose firmware status the Installed list needs: those with a
@@ -40,9 +42,15 @@ export function emulatorFirmwareRows(
   for (const p of platforms) {
     const key = defaultEmulatorKey(p);
     if (defaults.default_emulators[key] !== emulatorName) continue;
-    const count = statuses[p.id]?.file_count ?? 0;
+    const status = statuses[p.id];
+    const count = status?.file_count ?? 0;
     if (count <= 0) continue;
-    rows.push({ platformId: p.id, platformName: key, label: `${key} firmware · ${count === 1 ? '1 file' : `${count} files`}` });
+    rows.push({
+      platformId: p.id,
+      platformName: key,
+      label: `${key} firmware · ${count === 1 ? '1 file' : `${count} files`}`,
+      installed: status?.installed === true,
+    });
   }
   return rows;
 }

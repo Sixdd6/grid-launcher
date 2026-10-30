@@ -127,6 +127,8 @@ describe('firmware', () => {
     // The Server header's chip links there instead of installing itself.
     const bios = path.join(stubs(), 'duckstation', 'bios', 'scph5501.bin');
     rmSync(bios, { force: true });
+    // The first case's pass put the BIOS in place, so the row starts out
+    // Installed; with it gone again, the row offers Install.
 
     await showServer();
     await $(testId('platform-btn-1')).click();
@@ -151,11 +153,13 @@ describe('firmware', () => {
       timeout: FIRMWARE_TIMEOUT,
       timeoutMsg: `Install firmware never wrote ${bios}`,
     });
-    // The pass-finished event re-enables the button.
-    await browser.waitUntil(async () => (await install.getText()) === 'Install firmware', {
+    // The pass-finished event re-reads the status, which now finds the
+    // BIOS in place: the row says Installed instead of offering Install again.
+    await $(testId('emulator-firmware-installed-duckstation-(playstation-1)-1')).waitForExist({
       timeout: FIRMWARE_TIMEOUT,
-      timeoutMsg: 'the Install firmware button never came back from "Requested…"',
+      timeoutMsg: 'the row never said the firmware was installed',
     });
+    await expect(install).not.toExist();
   });
 
   it('fetches the PS3 PUP through its own drawer row when RPCS3 is added by hand', async () => {

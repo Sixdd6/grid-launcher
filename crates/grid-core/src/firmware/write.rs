@@ -72,7 +72,7 @@ pub(crate) fn write_firmware_file(
     target_dir: &Path,
     keep_archive: bool,
     opts: FirmwareOptions,
-) -> Result<(), String> {
+) -> Result<Vec<PathBuf>, String> {
     // Defense in depth: `install_platform_firmware` already rejects a
     // hostile record before it downloads anything, so this only fires for a
     // direct caller. Both paths produce the identical warning text.
@@ -101,7 +101,8 @@ pub(crate) fn write_firmware_file(
 }
 
 /// Writes `data` to `dest` as-is, skipping when `opts.skip_existing` and
-/// `dest` already exists. Shared by the raw (non-archive) branch and the
+/// `dest` already exists. Returns `dest` either way: it is what this file
+/// put in place (the installed-firmware manifest records it). Shared by the raw (non-archive) branch and the
 /// zip keep-as-archive branch — both use the exact same warning text
 /// (firmware_install.py:180-183, :211-215) — built here exactly once.
 fn write_raw_bytes(
@@ -109,16 +110,17 @@ fn write_raw_bytes(
     data: &[u8],
     dest: &Path,
     opts: FirmwareOptions,
-) -> Result<(), String> {
+) -> Result<Vec<PathBuf>, String> {
     if opts.skip_existing && dest.exists() {
-        return Ok(());
+        return Ok(vec![dest.to_path_buf()]);
     }
     fs::write(dest, data).map_err(|e| {
         format!(
             "Failed to write firmware {file_name} to {}: {e}",
             dest.display()
         )
-    })
+    })?;
+    Ok(vec![dest.to_path_buf()])
 }
 
 /// Builds the "Failed to extract firmware archive" warning text — shared by
@@ -144,7 +146,7 @@ fn write_archive_flat(
     target_dir: &Path,
     opts: FirmwareOptions,
     suffix: &str,
-) -> Result<(), String> {
+) -> Result<Vec<PathBuf>, String> {
     let fail = |e: String| extract_warning(file_name, e);
 
     let mut tmp = tempfile::Builder::new()
@@ -158,6 +160,7 @@ fn write_archive_flat(
     extract_archive(tmp.path(), staging.path(), &mut progress).map_err(|e| fail(e.to_string()))?;
 
     let extracted = collect_regular_files(staging.path()).map_err(|e| fail(e.to_string()))?;
+    let mut placed = Vec::new();
     for entry in extracted {
         if entry.components().any(|c| c.as_os_str() == "__MACOSX") {
             continue;
@@ -169,12 +172,12 @@ fn write_archive_flat(
             continue;
         }
         let dest = target_dir.join(name);
-        if opts.skip_existing && dest.exists() {
-            continue;
+        if !(opts.skip_existing && dest.exists()) {
+            fs::copy(&entry, &dest).map_err(|e| fail(e.to_string()))?;
         }
-        fs::copy(&entry, &dest).map_err(|e| fail(e.to_string()))?;
+        placed.push(dest);
     }
-    Ok(())
+    Ok(placed)
 }
 
 /// Recursively lists every regular file under `dir`. Does not follow
@@ -213,9 +216,10 @@ fn write_zip_members(
     data: &[u8],
     target_dir: &Path,
     opts: FirmwareOptions,
-) -> Result<(), String> {
+) -> Result<Vec<PathBuf>, String> {
     let fail = |e: String| extract_warning(file_name, e);
 
+    let mut placed = Vec::new();
     let mut archive =
         zip::ZipArchive::new(std::io::Cursor::new(data)).map_err(|e| fail(e.to_string()))?;
 
@@ -239,6 +243,7 @@ fn write_zip_members(
         };
 
         if opts.skip_existing && dest.exists() {
+            placed.push(dest);
             continue;
         }
         if let Some(parent) = dest.parent() {
@@ -249,9 +254,10 @@ fn write_zip_members(
             .read_to_end(&mut buf)
             .map_err(|e| fail(e.to_string()))?;
         fs::write(&dest, &buf).map_err(|e| fail(e.to_string()))?;
+        placed.push(dest);
     }
 
-    Ok(())
+    Ok(placed)
 }
 
 /// Path-traversal guard for an `extract_zip_with_paths` member

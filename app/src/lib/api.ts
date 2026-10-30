@@ -661,7 +661,12 @@ export type Rpcs3FirmwareStatus = { pup_path: string | null };
 
 /// The Server platform header's firmware chip input (design §6). See
 /// `app/src-tauri/src/commands.rs`'s `PlatformFirmwareStatus`.
-export type PlatformFirmwareStatus = { file_count: number; has_default_emulator: boolean };
+export type PlatformFirmwareStatus = {
+  file_count: number;
+  has_default_emulator: boolean;
+  /** Every server file is already installed for the default emulator. */
+  installed: boolean;
+};
 
 /// The `firmware-pass-finished` payload (`app/src-tauri/src/firmware_service.rs`'s
 /// `FirmwarePassFinished`). `ok` is false when the pass could not run (no

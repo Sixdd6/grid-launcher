@@ -55,12 +55,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex, RwLock};
 
 use grid_core::config::{Config, EmulatorEntry};
+use grid_core::firmware::manifest::MANIFEST_FILE;
 use grid_core::firmware::routing::{
     config_dir_of, emulator_dir_of, install_for_game, platform_ids_for_profile, targets_for_entry,
     GameFirmwareContext,
 };
 use grid_core::firmware::rpcs3::{ps3_platform_id, rpcs3_pup_path};
-use grid_core::firmware::{install_platform_firmware, FirmwareOptions};
+use grid_core::firmware::{
+    install_platform_firmware, install_platform_firmware_recorded, FirmwareOptions,
+};
 use grid_core::launch::profiles::{load_profiles, profile_for_entry};
 use grid_core::library::registry::InstalledGame;
 use grid_core::library::relocate::{GateTicket, LibraryGate};
@@ -422,14 +425,21 @@ impl FirmwareService {
         }
         let guard = FirmwareGuard::new(self.clone(), dir, None);
         let label = entry.name.clone();
+        let manifest = config_dir.join(MANIFEST_FILE);
         tauri::async_runtime::spawn(async move {
             let _guard = guard;
             let _ticket = ticket;
             let mut warnings = Vec::new();
             for id in ids {
                 warnings.extend(
-                    install_platform_firmware(&client, id, &targets, FirmwareOptions::default())
-                        .await,
+                    install_platform_firmware_recorded(
+                        &client,
+                        id,
+                        &targets,
+                        FirmwareOptions::default(),
+                        Some(&manifest),
+                    )
+                    .await,
                 );
             }
             if !warnings.is_empty() {
