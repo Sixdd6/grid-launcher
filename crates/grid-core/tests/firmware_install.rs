@@ -478,6 +478,7 @@ async fn a_zip_is_routed_by_the_members_a_keyword_target_asks_for() {
     let records = [FirmwareRecord {
         id: 40,
         file_name: "wiiu.zip".into(),
+        ..Default::default()
     }];
     assert!(!firmware_installed(
         &records,
@@ -502,4 +503,70 @@ async fn a_zip_is_routed_by_the_members_a_keyword_target_asks_for() {
         &targets,
         &FirmwareManifest::load(&manifest)
     ));
+}
+
+/// A download that does not match the server's stated size or MD5 is not
+/// written (as Argosy, RomM's own client, checks), and the warning says why.
+#[tokio::test]
+async fn a_download_that_fails_the_server_checksum_is_not_written() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/firmware"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 7, "file_name": "scph5501.bin", "file_size_bytes": 4,
+             "md5_hash": "00000000000000000000000000000000"}
+        ])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/firmware/7/content/scph5501.bin"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"BIOS".to_vec()))
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let result = install_platform_firmware(
+        &client(&server),
+        1,
+        &[plain(dir.path())],
+        FirmwareOptions::default(),
+    )
+    .await;
+    assert_eq!(result.len(), 1, "{result:?}");
+    assert!(result[0].contains("MD5"), "{result:?}");
+    assert!(!dir.path().join("scph5501.bin").exists());
+}
+
+/// The same file with the server's real size and MD5 installs as before.
+#[tokio::test]
+async fn a_download_matching_the_server_checksum_is_written() {
+    use md5::{Digest, Md5};
+    let md5: String = Md5::digest(b"BIOS")
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/firmware"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 7, "file_name": "scph5501.bin", "file_size_bytes": 4, "md5_hash": md5}
+        ])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/firmware/7/content/scph5501.bin"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"BIOS".to_vec()))
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let result = install_platform_firmware(
+        &client(&server),
+        1,
+        &[plain(dir.path())],
+        FirmwareOptions::default(),
+    )
+    .await;
+    assert_eq!(result, Vec::<String>::new());
+    assert_eq!(fs::read(dir.path().join("scph5501.bin")).unwrap(), b"BIOS");
 }

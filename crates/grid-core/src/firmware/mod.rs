@@ -17,7 +17,9 @@ mod write;
 
 use std::path::{Path, PathBuf};
 
-use crate::romm::RommClient;
+use md5::{Digest, Md5};
+
+use crate::romm::{FirmwareRecord, RommClient};
 
 /// One destination directory a firmware file may be routed to.
 ///
@@ -103,6 +105,34 @@ pub fn should_keep_zip(
     })
 }
 
+/// Checks downloaded firmware bytes against what the server states for the
+/// file: its size, then its MD5 (as Argosy, RomM's own client, does). A
+/// field the server leaves unstated is not checked. `Err` is the warning to
+/// report; nothing is written for a file that fails.
+pub fn verify_download(record: &FirmwareRecord, data: &[u8]) -> Result<(), String> {
+    let name = &record.file_name;
+    if record.file_size_bytes > 0 && data.len() as u64 != record.file_size_bytes {
+        return Err(format!(
+            "Firmware {name} was not installed: the download is {} bytes, the server lists {}",
+            data.len(),
+            record.file_size_bytes
+        ));
+    }
+    let expected = record.md5_hash.trim().to_ascii_lowercase();
+    if !expected.is_empty() {
+        let actual: String = Md5::digest(data)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        if actual != expected {
+            return Err(format!(
+                "Firmware {name} was not installed: its MD5 does not match the server's"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Downloads and installs `platform_id`'s server firmware into `targets`
 /// (`install_platform_firmware`, firmware_install.py:83-221; steps 1-9 of
 /// `docs/porting/03-library-install.md` §18). Firmware files are small, so
@@ -149,7 +179,7 @@ pub async fn install_platform_firmware_recorded(
     let mut installs: Vec<(PathBuf, String, Vec<PathBuf>)> = Vec::new();
 
     for record in records {
-        let file_name = record.file_name;
+        let file_name = record.file_name.clone();
         if file_name.is_empty() {
             continue;
         }
@@ -194,6 +224,10 @@ pub async fn install_platform_firmware_recorded(
                     continue;
                 }
             };
+            if let Err(warning) = verify_download(&record, &data) {
+                warnings.push(warning);
+                continue;
+            }
             let members = write::zip_member_names(&data);
             let mut any = false;
             for target in targets {
@@ -247,6 +281,10 @@ pub async fn install_platform_firmware_recorded(
                 continue;
             }
         };
+        if let Err(warning) = verify_download(&record, &data) {
+            warnings.push(warning);
+            continue;
+        }
 
         for target in &applicable {
             if let Err(e) = std::fs::create_dir_all(&target.path) {
@@ -273,6 +311,46 @@ pub async fn install_platform_firmware_recorded(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn stated(size: u64, md5: &str) -> FirmwareRecord {
+        FirmwareRecord {
+            id: 1,
+            file_name: "scph5501.bin".into(),
+            file_size_bytes: size,
+            md5_hash: md5.into(),
+        }
+    }
+
+    #[test]
+    fn a_download_matching_the_server_size_and_md5_passes() {
+        let actual: String = Md5::digest(b"BIOS")
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(verify_download(&stated(4, &actual), b"BIOS"), Ok(()));
+        assert_eq!(
+            verify_download(&stated(4, &actual.to_uppercase()), b"BIOS"),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_download_of_the_wrong_size_is_rejected() {
+        let err = verify_download(&stated(5, ""), b"BIOS").unwrap_err();
+        assert!(err.contains("4 bytes") && err.contains("5"), "{err}");
+    }
+
+    #[test]
+    fn a_download_with_a_different_md5_is_rejected() {
+        let err =
+            verify_download(&stated(4, "00000000000000000000000000000000"), b"BIOS").unwrap_err();
+        assert!(err.contains("MD5"), "{err}");
+    }
+
+    #[test]
+    fn unstated_size_and_md5_are_not_checked() {
+        assert_eq!(verify_download(&stated(0, ""), b"BIOS"), Ok(()));
+    }
 
     fn plain(path: &str) -> FirmwareTarget {
         FirmwareTarget {

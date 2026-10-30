@@ -300,15 +300,24 @@ pub fn sort_by_label(platforms: &mut [Platform]) {
 }
 
 /// One firmware file the server offers for a platform. The wire schema
-/// carries more fields (`file_size_bytes`, `crc_hash`, ...) this crate does
-/// not read; `#[serde(default)]` on `file_name` means an item missing it
-/// still decodes rather than being dropped by [`RommClient::firmware`]'s
-/// lenient per-item filter — only a missing/non-integer `id` drops an item.
-#[derive(Debug, Clone, Deserialize)]
+/// carries more fields (`crc_hash`, `sha1_hash`, ...) this crate does not
+/// read; `#[serde(default)]` on the rest means an item missing one still
+/// decodes rather than being dropped by [`RommClient::firmware`]'s lenient
+/// per-item filter — only a missing/non-integer `id` drops an item.
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct FirmwareRecord {
     pub id: i64,
     #[serde(default)]
     pub file_name: String,
+    /// The file's size as the server states it; `0` when unstated. A
+    /// download of any other size is rejected
+    /// (`firmware::verify_download`, as Argosy does).
+    #[serde(default)]
+    pub file_size_bytes: u64,
+    /// The file's MD5 as the server states it (lower-case hex); `""` when
+    /// unstated. A download that hashes differently is rejected.
+    #[serde(default)]
+    pub md5_hash: String,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]

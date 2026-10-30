@@ -163,6 +163,7 @@ mod tests {
         FirmwareRecord {
             id,
             file_name: name.to_string(),
+            ..Default::default()
         }
     }
 
