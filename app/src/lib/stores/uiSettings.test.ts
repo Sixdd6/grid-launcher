@@ -264,6 +264,7 @@ describe('background blur', () => {
       card_size_library: 'medium',
       card_size_server: 'medium',
       card_labels: 'always',
+      card_display: 'rows',
     });
   });
 

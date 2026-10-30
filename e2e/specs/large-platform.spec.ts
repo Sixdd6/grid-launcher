@@ -129,22 +129,26 @@ describe('large platform: windowed grid, bounded cover loading', () => {
     expect(cards).toBeLessThanOrEqual(MAX_RENDERED_CARDS);
     expect(await $(testId(`game-card-${LAST_ID}`)).isExisting()).toBe(false);
 
-    // The grid is as tall as every row laid out: its padding carries the
-    // rows that are not rendered, so the scrollbar spans the whole list.
-    const { height, expected } = await browser.execute((sel: string) => {
-      const grid = document.querySelector(sel) as HTMLElement;
-      const columns = getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length;
-      // Rects, not `offsetHeight`: the row height is fractional, and a
-      // rounded one is off by a pixel a few hundred rows over.
-      const row = (grid.firstElementChild as HTMLElement).getBoundingClientRect().height;
-      const rows = Math.ceil(2500 / columns);
-      // 16px gaps, 16px padding above the rows and 24px below.
-      return {
-        height: grid.getBoundingClientRect().height,
-        expected: rows * row + (rows - 1) * 16 + 16 + 24,
-      };
-    }, testId('server-grid'));
-    expect(Math.abs(height - expected)).toBeLessThanOrEqual(2);
+    // The grid is as tall as every card laid out (`cards/layout.ts`), so
+    // the scrollbar spans the whole list though only a screenful renders:
+    // at the very end of the scroll, the last card sits on the grid's
+    // bottom edge (its 24px padding below it, label included).
+    await scrollGrid({ to: 1e9 });
+    await $(testId(`game-card-${LAST_ID}`)).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the last card never rendered at the end of the scroll',
+    });
+    const gap = await browser.execute(
+      (gridSel: string, lastSel: string) => {
+        const grid = (document.querySelector(gridSel) as HTMLElement).getBoundingClientRect();
+        const last = (document.querySelector(lastSel) as HTMLElement).getBoundingClientRect();
+        return grid.bottom - last.bottom;
+      },
+      testId('server-grid'),
+      testId(`game-card-${LAST_ID}`),
+    );
+    expect(Math.abs(gap - 24)).toBeLessThanOrEqual(2);
+    await scrollGrid({ to: 0 });
 
     await browser.waitUntil(() => coverLoaded(FIRST_ID), {
       timeout: COVER_TIMEOUT,

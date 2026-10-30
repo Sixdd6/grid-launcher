@@ -4,7 +4,9 @@
   import { cardBadges, UPDATE_TAG_TEXT } from './cards/badges';
   import type { CardLabels } from './cards/labels';
   import { cardPrimaryLabel, MISSING_BADGE_TEXT } from './library/missing';
-  import { ACTION_BAR_HEIGHT_PX, LABEL_GAP_PX, LABEL_HEIGHT_PX } from './cards/size';
+  import { ACTION_BAR_HEIGHT_PX, LABEL_GAP_PX, LABEL_HEIGHT_PX, labelRowPx } from './cards/size';
+  import type { Rect } from './cards/layout';
+  import { recordShape } from './stores/coverShapes.svelte';
 
   let {
     testId,
@@ -18,6 +20,7 @@
     updateLabel,
     cloudPlatforms,
     labels,
+    rect,
     showPlatform = true,
     focused,
     onOpen,
@@ -25,7 +28,6 @@
     onCloud,
     onHoverStart,
     onHoverEnd,
-    onCoverMeasured,
   }: {
     testId: string;
     /** The card's position in the view's whole list, as `data-index`: the
@@ -44,6 +46,9 @@
     /** The "Game labels" setting: a label always under the cover, or only on
      *  hover and keyboard focus. */
     labels: CardLabels;
+    /** The cover's rectangle in the grid (`cards/layout.ts`): the card is
+     *  the size of its artwork. */
+    rect: Rect;
     /** The platform chip, for grids that mix platforms (Library). A
      *  single-platform grid (Server) leaves it off: every card would say the
      *  same thing over its cover. */
@@ -54,9 +59,6 @@
     onCloud: () => void;
     onHoverStart: () => void;
     onHoverEnd: () => void;
-    /** The loaded cover's natural size, for the grid's cell shape
-     *  (`cards/shape.ts`). */
-    onCoverMeasured?: (width: number, height: number) => void;
   } = $props();
 
   let badges = $derived(cardBadges({ platform, installed, updateLabel, cloudPlatforms }));
@@ -74,9 +76,9 @@
   }
 </script>
 
-<!-- A card is the cover at its own shape (look-and-feel plan 2026-10-30):
-     no frame and no backdrop, fitted inside a 3:4 cell and sitting on the
-     cell's bottom edge, so rows and labels line up whatever the shape. -->
+<!-- A card is the size of its artwork (look-and-feel plan 2026-10-30): no
+     frame and no backdrop. The grid lays it out (`cards/layout.ts`) from the
+     cover's shape, which the card records once its image has loaded. -->
 <div
   data-testid={testId}
   data-index={index}
@@ -87,11 +89,10 @@
   onmouseenter={onHoverStart}
   onmouseleave={onHoverEnd}
   role="presentation"
-  style="--label-h: {LABEL_HEIGHT_PX}px; --label-gap: {LABEL_GAP_PX}px; --bar-h: {ACTION_BAR_HEIGHT_PX}px"
+  style="--x: {rect.x}px; --y: {rect.y}px; --w: {rect.w}px; --cover-h: {rect.h}px; --card-h: {rect.h + labelRowPx(labels)}px; --label-h: {LABEL_HEIGHT_PX}px; --label-gap: {LABEL_GAP_PX}px; --bar-h: {ACTION_BAR_HEIGHT_PX}px"
 >
-  <div class="cell">
     <div class="cover">
-      <Image url={coverUrl} alt={title} placeholder="No cover" onmeasure={onCoverMeasured} />
+      <Image url={coverUrl} alt={title} placeholder="No cover" onmeasure={(w, h) => recordShape(coverUrl, w, h)} />
 
       <!-- Top-left tags stack in one column so MISSING and UPDATE never cover
            each other (a missing game can still have a newer server version). -->
@@ -149,14 +150,19 @@
         </button>
       </div>
     </div>
-  </div>
 
   <span class="label" title={title}>{title}</span>
 </div>
 
 <style>
+  /* Placed by the grid: its padding (`--pad-*`, CardGrid) plus the
+     layout's rectangle. */
   .card {
-    position: relative;
+    position: absolute;
+    left: calc(var(--pad-side, 0px) + var(--x));
+    top: calc(var(--pad-top, 0px) + var(--y));
+    width: var(--w);
+    height: var(--card-h);
     display: flex;
     flex-direction: column;
     gap: var(--label-gap);
@@ -166,7 +172,7 @@
        card once at open (+100 ms for 300 cards). What bounds the per-frame
        cost now is `CardGrid`'s window: only the rows near the visible part
        are in the DOM, so a 2000-game platform costs what a screenful does
-       (2026-10-20, `cards/window.ts`). */
+       (2026-10-20, `cards/layout.ts`). */
   }
 
   .card.hover-labels {
@@ -181,25 +187,17 @@
     z-index: 2;
   }
 
-  /* The cell is a size container: the cover's image is capped at its
-     width and height (`cqw`/`cqh`), which fits any shape without cropping. */
-  /* The ratio comes from the grid (`--cell-aspect`, `cards/shape.ts`): the
-     median shape of its covers, 3:4 until enough have loaded. */
-  .cell {
-    aspect-ratio: var(--cell-aspect, 3 / 4);
-    container-type: size;
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-  }
-
-  /* The cover shrinks to its image, so the rounded corners, the shadow and
-     the badges belong to the art itself. */
+  /* The cover is exactly the rectangle the layout gave it, which is the
+     art's own shape once known. Until then (portrait) the image is
+     contained, so nothing is cropped while the grid catches up. */
   .cover {
     position: relative;
-    max-width: 100%;
+    flex: none;
+    width: 100%;
+    height: var(--cover-h);
     border-radius: var(--r-card);
     overflow: hidden;
+    background: var(--overlay);
     box-shadow: var(--shadow-card);
     transition:
       transform var(--m-fast) ease,
@@ -208,17 +206,15 @@
 
   .cover :global(img) {
     display: block;
-    max-width: 100cqw;
-    max-height: 100cqh;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
   }
 
-  /* Until the image is there (loading, or none), the cover is the whole
-     cell, so the skeleton and the "No cover" placeholder keep the grid's
-     shape. */
-  .cover:not(:has(img)) {
-    width: 100cqw;
-    height: 100cqh;
-    background: var(--overlay);
+  .cover :global(.skeleton),
+  .cover :global(.placeholder) {
+    width: 100%;
+    height: 100%;
   }
 
   /* D-UI-9: hover and keyboard focus look the same — the cover lifts. */

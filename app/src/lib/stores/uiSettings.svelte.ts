@@ -5,6 +5,7 @@ import { api } from '../api';
 import type { UiSettings } from '../api';
 import { clearVariantMemo } from '../backgroundPrefetch';
 import { normalizeCardLabels, type CardLabels } from '../cards/labels';
+import { normalizeCardDisplay, type CardDisplay } from '../cards/layout';
 import { normalizeCardSize, type CardSize } from '../cards/size';
 import { fadeForToggle, rememberFade } from '../settings/appearance';
 import {
@@ -29,6 +30,7 @@ const state = $state<{
   cardSizeLibrary: UiSettings['card_size_library'];
   cardSizeServer: UiSettings['card_size_server'];
   cardLabels: CardLabels;
+  cardDisplay: CardDisplay;
 }>({
   theme: 'system',
   backgroundFade: FADE_DEFAULT,
@@ -37,6 +39,7 @@ const state = $state<{
   cardSizeLibrary: 'medium',
   cardSizeServer: 'medium',
   cardLabels: 'always',
+  cardDisplay: 'rows',
 });
 
 // What "background art on" restores (design §10): the last non-zero fade
@@ -55,6 +58,7 @@ function payload(): UiSettings {
     card_size_library: state.cardSizeLibrary,
     card_size_server: state.cardSizeServer,
     card_labels: state.cardLabels,
+    card_display: state.cardDisplay,
   };
 }
 
@@ -79,6 +83,9 @@ export const uiSettings = {
   },
   get cardLabels(): CardLabels {
     return state.cardLabels;
+  },
+  get cardDisplay(): CardDisplay {
+    return state.cardDisplay;
   },
 };
 
@@ -151,6 +158,7 @@ export async function initUiSettings(): Promise<() => void> {
     state.cardSizeLibrary = normalizeCardSize(stored.card_size_library);
     state.cardSizeServer = normalizeCardSize(stored.card_size_server);
     state.cardLabels = normalizeCardLabels(stored.card_labels ?? '');
+    state.cardDisplay = normalizeCardDisplay(stored.card_display ?? '');
   } catch {
     // Defaults/mirror already in `state`.
   }
@@ -213,6 +221,12 @@ export async function commitBackgroundBlur(value: number): Promise<void> {
 export async function setCardSize(view: 'library' | 'server', size: CardSize): Promise<void> {
   if (view === 'library') state.cardSizeLibrary = size;
   else state.cardSizeServer = size;
+  await api.setUiSettings(payload());
+}
+
+/** The "Game card display" select: applies at once, then persists. */
+export async function setCardDisplay(display: CardDisplay): Promise<void> {
+  state.cardDisplay = display;
   await api.setUiSettings(payload());
 }
 

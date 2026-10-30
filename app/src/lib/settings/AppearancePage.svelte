@@ -11,6 +11,7 @@
     commitBackgroundFade,
     previewBackgroundFade,
     setBackgroundEnabled,
+    setCardDisplay,
     setCardLabels,
     setCardSize,
     setTheme,
@@ -19,6 +20,7 @@
   import { BLUR_MAX, FADE_MAX, type ThemeChoice } from '../theme';
   import { CARD_SIZES, cardSizeLabel, normalizeCardSize } from '../cards/size';
   import { CARD_LABEL_MODES, cardLabelsLabel, normalizeCardLabels } from '../cards/labels';
+  import { CARD_DISPLAYS, cardDisplayLabel, normalizeCardDisplay } from '../cards/layout';
   import { backgroundEnabled, CARD_SIZE_VIEWS } from './appearance';
 
   function onThemeChange(e: Event) {
@@ -31,6 +33,10 @@
 
   function onToggle(e: Event) {
     setBackgroundEnabled((e.currentTarget as HTMLInputElement).checked).catch(() => {});
+  }
+
+  function onCardDisplay(e: Event) {
+    setCardDisplay(normalizeCardDisplay((e.currentTarget as HTMLSelectElement).value)).catch(() => {});
   }
 
   function onCardLabels(e: Event) {
@@ -145,6 +151,15 @@
     </select>
   </div>
 {/each}
+
+<div class="field">
+  <label for="card-display">Game card display</label>
+  <select data-testid="card-display" id="card-display" value={uiSettings.cardDisplay} onchange={onCardDisplay}>
+    {#each CARD_DISPLAYS as display (display)}
+      <option value={display}>{cardDisplayLabel(display)}</option>
+    {/each}
+  </select>
+</div>
 
 <div class="field">
   <label for="card-labels">Game labels</label>

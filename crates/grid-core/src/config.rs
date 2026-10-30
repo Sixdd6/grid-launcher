@@ -124,6 +124,11 @@ pub struct UiSettings {
     /// 2026-10-30). A plain string for the same reason as `theme`.
     #[serde(default = "default_card_labels")]
     pub card_labels: String,
+    /// How the grids size each card to its artwork: `"rows"` (Equal height:
+    /// justified rows) or `"columns"` (Equal width: masonry columns).
+    /// Settings › Appearance "Game card display".
+    #[serde(default = "default_card_display")]
+    pub card_display: String,
 }
 
 fn default_theme() -> String {
@@ -146,6 +151,10 @@ fn default_card_labels() -> String {
     "always".to_string()
 }
 
+fn default_card_display() -> String {
+    "rows".to_string()
+}
+
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
@@ -155,6 +164,7 @@ impl Default for UiSettings {
             card_size_library: default_card_size(),
             card_size_server: default_card_size(),
             card_labels: default_card_labels(),
+            card_display: default_card_display(),
         }
     }
 }
@@ -1232,6 +1242,7 @@ mod tests {
         assert_eq!(loaded.ui.card_size_library, "medium");
         assert_eq!(loaded.ui.card_size_server, "medium");
         assert_eq!(loaded.ui.card_labels, "always");
+        assert_eq!(loaded.ui.card_display, "rows");
     }
 
     /// A `[ui]` table written before the blur setting existed loads the
@@ -1282,6 +1293,7 @@ mod tests {
                 card_size_library: "large".to_string(),
                 card_size_server: "small".to_string(),
                 card_labels: "hover".to_string(),
+                card_display: "columns".to_string(),
             },
             ..Default::default()
         };
@@ -1290,6 +1302,7 @@ mod tests {
         assert_eq!(loaded.ui.card_size_library, "large");
         assert_eq!(loaded.ui.card_size_server, "small");
         assert_eq!(loaded.ui.card_labels, "hover");
+        assert_eq!(loaded.ui.card_display, "columns");
     }
 
     fn load_text(text: &str) -> Config {

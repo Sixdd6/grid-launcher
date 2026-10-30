@@ -4,11 +4,11 @@ import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
 
 import CardGrid from './CardGrid.svelte';
-import { INITIAL_WINDOW_CARDS } from './cards/window';
+import { INITIAL_WINDOW_CARDS } from './cards/layout';
 
 // `svelte/server` never runs `$effect`, so the grid is never measured here:
 // what renders is the window before the first measurement. The scroll-driven
-// window is `cards/window.ts`'s, and is tested there.
+// window and the layouts are `cards/layout.ts`'s, and are tested there.
 type Item = { id: number };
 
 const card = createRawSnippet((item: () => Item, index: () => number) => ({
@@ -18,7 +18,7 @@ const card = createRawSnippet((item: () => Item, index: () => number) => ({
 function grid(count: number): string {
   const items = Array.from({ length: count }, (_, i) => ({ id: 100 + i }));
   return render(CardGrid<Item>, {
-    props: { items, key: (item: Item) => item.id, card, size: 'medium', labels: 'always', gridId: 'test-grid' },
+    props: { items, key: (item: Item) => item.id, cover: () => null, card, size: 'medium', labels: 'always', display: 'rows', gridId: 'test-grid' },
   }).body;
 }
 
@@ -30,6 +30,7 @@ describe('CardGrid', () => {
     expect(cards(body)).toBe(3);
     expect(body).toContain('--pad-top: 18px');
     expect(body).toContain('--pad-bottom: 24px');
+    expect(body).toContain('data-display="rows"');
     expect(body).toContain('data-index="2"');
   });
 

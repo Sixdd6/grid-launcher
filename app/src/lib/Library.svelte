@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { cellAspectFor, recordCover } from './stores/coverShapes.svelte';
   import { untrack } from 'svelte';
   import { api, type InstalledGame } from './api';
   import UmuInstallOffer from './UmuInstallOffer.svelte';
@@ -57,8 +56,6 @@
   let updateRomIds = $derived(new Set(updates.rows.map((r) => r.rom_id)));
   let entries = $derived(railEntries(installed.list, updateRomIds, nowSeconds));
   let selected = $derived(entryForKey(entries, librarySelection.key));
-  /** The key this filter's cover shapes are kept under (`coverShapes`). */
-  let shapeKey = $derived(`library:${librarySelection.key}`);
 
   /** The rail key without its `platform:` prefix — the dash slug the
    *  §11 `library-rail-platform-<slug>` id already carries, so the count
@@ -282,7 +279,7 @@
   /** Arrow-key grid movement. */
   function moveSelection(action: NavDirection) {
     if (subject) return; // grid navigation is suspended while the overlay is open
-    focusIndex = moveFocus(focusIndex, action, grid?.columns() ?? 1, rows.length);
+    focusIndex = grid ? grid.neighbor(focusIndex, action) : moveFocus(focusIndex, action, 1, rows.length);
     // The windowed grid may not have the card rendered; it scrolls to its row.
     grid?.scrollToIndex(focusIndex);
   }
@@ -387,12 +384,13 @@
         bind:this={grid}
         gridId="library-grid"
         labels={uiSettings.cardLabels}
-        cellAspect={cellAspectFor(shapeKey)}
+        display={uiSettings.cardDisplay}
+        cover={(row) => row.cover_small_path || null}
         size={uiSettings.cardSizeLibrary}
         items={rows}
         key={installedKey}
       >
-        {#snippet card(row, i)}
+        {#snippet card(row, i, rect)}
           <GameCard
             testId={`library-card-${row.rom_id ?? `x-${i}`}`}
             index={i}
@@ -405,7 +403,7 @@
             updateLabel={updates.labelFor(row.rom_id)}
             {cloudPlatforms}
             labels={uiSettings.cardLabels}
-            onCoverMeasured={(w, h) => recordCover(shapeKey, w, h)}
+            {rect}
             focused={i === focusIndex && inputMode.directional}
             onOpen={() => {
               // A click moves the selection, so keyboard navigation resumes

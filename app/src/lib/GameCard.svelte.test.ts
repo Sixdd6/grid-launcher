@@ -17,6 +17,8 @@ function card(missing: boolean | undefined) {
       ...(missing === undefined ? {} : { missing }),
       updateLabel: null,
       cloudPlatforms: new Set<string>(),
+      labels: 'always' as const,
+      rect: { x: 10, y: 20, w: 160, h: 213 },
       focused: false,
       onOpen: () => {},
       onPrimary: () => {},
@@ -26,6 +28,13 @@ function card(missing: boolean | undefined) {
     },
   }).body;
 }
+
+describe('GameCard placement', () => {
+  it('is placed and sized by its rectangle, label row included', () => {
+    const body = card(false);
+    expect(body).toContain('--x: 10px; --y: 20px; --w: 160px; --cover-h: 213px; --card-h: 245px');
+  });
+});
 
 describe('GameCard index', () => {
   it('renders its position in the whole list as data-index, for the warmer', () => {

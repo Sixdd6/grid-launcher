@@ -631,7 +631,18 @@ pub fn normalize_ui_settings(settings: UiSettings) -> UiSettings {
         card_size_library: normalize_card_size(&settings.card_size_library),
         card_size_server: normalize_card_size(&settings.card_size_server),
         card_labels: normalize_card_labels(&settings.card_labels),
+        card_display: normalize_card_display(&settings.card_display),
     }
+}
+
+/// `"rows"` (Equal height) or `"columns"` (Equal width); anything else
+/// becomes `"rows"`, the default.
+fn normalize_card_display(raw: &str) -> String {
+    match raw.trim() {
+        "columns" => "columns",
+        _ => "rows",
+    }
+    .to_string()
 }
 
 /// `"always"` or `"hover"`; anything else becomes `"always"`, the default
@@ -3294,8 +3305,27 @@ mod ui_settings_tests {
                 card_size_library: "medium".to_string(),
                 card_size_server: "medium".to_string(),
                 card_labels: "always".to_string(),
+                card_display: "rows".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn the_card_display_setting_is_rows_unless_it_says_columns() {
+        for (raw, expected) in [
+            ("rows", "rows"),
+            ("columns", "columns"),
+            (" columns ", "columns"),
+            ("Columns", "rows"),
+            ("grid", "rows"),
+            ("", "rows"),
+        ] {
+            let out = normalize_ui_settings(UiSettings {
+                card_display: raw.to_string(),
+                ..Default::default()
+            });
+            assert_eq!(out.card_display, expected, "display for {raw:?}");
+        }
     }
 
     #[test]

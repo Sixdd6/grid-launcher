@@ -92,3 +92,38 @@ The design critique of 2026-10-30 measured the real app against a live server
 - A masonry grid (covers at full column width, variable height): it breaks
   row-based windowing and keyboard row movement.
 - New typography or a new accent colour.
+
+## Follow-up: cards sized by their artwork (user decisions, 2026-10-30)
+Arcade art mixes flyers (0.73), square art and marquees up to 1.86:1, so one
+cell shape per grid still leaves cards that are not the size of their art. The
+card is now a universal element sized to its artwork, in one of two layouts,
+chosen in Settings › Appearance › **Game card display**:
+- **Equal height** (default): justified rows. Every row is one height; each
+  card is as wide as its art at that height, and the row is stretched to the
+  full width (the last row is not).
+- **Equal width**: masonry columns. Every column is one width; each card is as
+  tall as its art; a card goes in the shortest column.
+
+Rules:
+- **Shape source.** A cover's shape is known once it loads. Until then it is
+  3:4. Shapes are cached per cover URL and persisted (localStorage, capped), so
+  a platform seen before lays out final at once. Shapes are clamped to 0.5–2.
+- **Equal height.** Target row height is the card size's 3:4 height (Small 160,
+  Medium 213, Large 267). A row breaks where its height lands closest to the
+  target, and never below 75% or above 130% of it (a row that would pass 130%
+  stays at 130% and is left-aligned).
+- **Equal width.** Column width comes from the card size's minimum width.
+  A cover wider than the column can show at 112px tall spans two columns, so no
+  cover is shorter than 112px.
+- **Click safety.** Every cover is at least 112px tall, which keeps the hover
+  bar (bottom 38px) clear of the card root's centre with a label row
+  (`size.test.ts`).
+- **Windowing.** The layout is a pure function from shapes and width to one
+  rectangle per card. Cards are absolutely positioned; only those whose
+  rectangles meet the visible part plus a buffer are rendered. The container
+  height is the layout's height.
+- **Keyboard.** Left and right step in reading order. Up and down move to the
+  nearest card above or below that overlaps horizontally (the same column in
+  Equal width, the nearest card of the next row in Equal height).
+- Replaces the per-grid cell shape (`cards/shape.ts`, `coverShapes`), which
+  this supersedes, and `cards/window.ts`'s row arithmetic.

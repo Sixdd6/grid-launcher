@@ -152,15 +152,24 @@ There are several main sections to the application with buttons across the top b
   turns the background art on or off, sets its fade from 0 to 60 percent with a live
   preview behind the pane, sets the default card size for the Library and Server
   grids, and sets **Game labels**: "Always visible" (a small label under every cover) or
-  "Visible on hover" (covers only; the title shows on hover or keyboard focus). They are
-  stored under `[ui]` in `config.toml` as `theme`, `background_fade` (0 is off),
-  `card_size_library`, `card_size_server` and `card_labels` (`always` or `hover`).
-- **Cards** (both grids) are just the cover, at its own shape: never cropped, with no
-  frame, fitted inside a cell and sitting on the cell's bottom edge, so rows and labels
-  line up whatever the mix of shapes. Every cell in a grid has the same shape: the median
-  shape of the grid's covers, measured from the first ones that load (3:4 until then,
-  from as tall as 0.6 to at most square), and kept for the session, so a platform of
-  square covers gets square cells and a platform of tall covers gets tall ones. The cover has rounded corners and a soft
+  "Visible on hover" (covers only; the title shows on hover or keyboard focus), and
+  **Game card display**: "Equal height" or "Equal width" (see Cards). They are stored
+  under `[ui]` in `config.toml` as `theme`, `background_fade` (0 is off),
+  `card_size_library`, `card_size_server`, `card_labels` (`always` or `hover`) and
+  `card_display` (`rows` or `columns`).
+- **Cards** (both grids) are each the size of their artwork: never cropped, never boxed,
+  no frame. **Game card display** (Settings › Appearance) picks the layout:
+  - **Equal height** (the default): rows of one height, each card as wide as its art at
+    that height, each full row stretched to the window's width. The row height follows
+    the card size (Small 160, Medium 213, Large 267px) and moves at most 25% down or 30%
+    up from it to fill a row.
+  - **Equal width**: columns of one width (the card size's minimum width), each card as
+    tall as its art, placed in the shortest column. Art too wide to stand 112px tall in
+    one column spans two.
+  A cover's shape is known once it loads; until then its card is portrait (3:4) and the
+  layout settles as covers arrive. Shapes are remembered across sessions, so a platform
+  seen before lays out final at once. Arrow keys move left and right in order, and up
+  and down to the nearest card above or below. The cover has rounded corners and a soft
   shadow. On hover or keyboard focus it lifts, and a bar at its bottom shows Play or
   Install, Cloud sync and Details. Badges sit on the cover's corners: an installed dot
   top-right, an `UPDATE` tag top-left, a cloud icon bottom-right when the platform has

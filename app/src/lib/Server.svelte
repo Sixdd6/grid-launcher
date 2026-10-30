@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { cellAspectFor, recordCover } from './stores/coverShapes.svelte';
   import { untrack } from 'svelte';
   import {
     api,
@@ -101,8 +100,6 @@
   let libraryPathSaving = $state(false);
   let libraryPathError = $state<string | null>(null);
 
-  /** The key this platform's cover shapes are kept under (`coverShapes`). */
-  let shapeKey = $derived(`server:${activePlatform}`);
   let activePlatformRow = $derived(platforms.find((p) => p.id === activePlatform) ?? null);
   let activePlatformName = $derived(activePlatformRow ? platformLabel(activePlatformRow) : '');
   let visible = $derived(filterServerGames(games, search));
@@ -429,7 +426,7 @@
   /** Arrow-key grid movement. */
   function moveSelection(action: NavDirection) {
     if (detailsGame) return; // grid navigation is suspended while the overlay is open
-    focusIndex = moveFocus(focusIndex, action, grid?.columns() ?? 1, visible.length);
+    focusIndex = grid ? grid.neighbor(focusIndex, action) : moveFocus(focusIndex, action, 1, visible.length);
     // The windowed grid may not have the card rendered; it scrolls to its row.
     grid?.scrollToIndex(focusIndex);
   }
@@ -610,12 +607,13 @@
             bind:this={grid}
             gridId="server-grid"
             labels={uiSettings.cardLabels}
-            cellAspect={cellAspectFor(shapeKey)}
+            display={uiSettings.cardDisplay}
+            cover={(game) => game.path_cover_small}
             size={uiSettings.cardSizeServer}
             items={visible}
             key={(game) => game.id}
           >
-            {#snippet card(game, i)}
+            {#snippet card(game, i, rect)}
               <GameCard
                 testId={`game-card-${game.id}`}
                 index={i}
@@ -627,8 +625,8 @@
                 updateLabel={updates.labelFor(game.id)}
                 {cloudPlatforms}
                 labels={uiSettings.cardLabels}
+                {rect}
                 showPlatform={false}
-                onCoverMeasured={(w, h) => recordCover(shapeKey, w, h)}
                 focused={i === focusIndex && inputMode.directional}
                 onOpen={() => {
                   // A click moves the selection, so keyboard navigation

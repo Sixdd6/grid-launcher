@@ -7,7 +7,8 @@ import type { CardLabels } from './labels';
 export const CARD_SIZES = ['small', 'medium', 'large'] as const;
 export type CardSize = CardSizeName;
 
-/** Design §5: "sizes 120 / 160 / 200px" — the grid's minimum column width. */
+/** Design §5: "sizes 120 / 160 / 200px" — Equal width's minimum column width,
+ *  and the width of a portrait cover in Equal height. */
 const MIN_PX: Record<CardSize, number> = { small: 120, medium: 160, large: 200 };
 const LABELS: Record<CardSize, string> = { small: 'Small', medium: 'Medium', large: 'Large' };
 
@@ -25,63 +26,23 @@ export function cardMinPx(size: CardSize): number {
   return MIN_PX[size];
 }
 
-export function gridTemplate(size: CardSize): string {
-  return `repeat(auto-fill, minmax(${MIN_PX[size]}px, 1fr))`;
-}
-
 export function cardSizeLabel(size: CardSize): string {
   return LABELS[size];
 }
 
 /**
- * How many columns the browser actually laid out. `auto-fill` means the
- * count depends on the window width, so keyboard focus movement cannot use
- * a constant the way the pre-redesign grids did: it reads the resolved
- * `grid-template-columns`, which is a space-separated list of concrete
- * track sizes once layout has run.
- *
- * Returns 1 — a single-column list — when there is no element, no view to
- * compute styles from, or no layout yet (`none`). One is the safe floor:
- * `moveFocus` treats every card as its own row, which navigates correctly
- * even if it navigates slowly.
+ * Equal height's target row height for a size: the 3:4 height of the size's
+ * minimum width (Small 160, Medium 213, Large 267), so a portrait cover is
+ * the size it always was (`cards/layout.ts`).
  */
-export function columnsOf(grid: HTMLElement | null): number {
-  const view = grid?.ownerDocument?.defaultView;
-  if (!grid || !view) return 1;
-  const tracks = parseTracks(view.getComputedStyle(grid).gridTemplateColumns);
-  return tracks === null ? 1 : tracks.length;
+export function targetRowPx(size: CardSize): number {
+  return Math.round(MIN_PX[size] / CARD_CELL_ASPECT);
 }
 
 /**
- * The resolved track widths of a `grid-template-columns` value, in px, or
- * `null` when it is not resolved to px tracks.
- *
- * A grid inside a `hidden` view has no layout, and its computed template
- * is the specified `repeat(auto-fill, minmax(160px, 1fr))`. Split on spaces
- * that reads as three tracks, so anything that is not a plain px length
- * makes the whole value unresolved.
- */
-export function parseTracks(template: string | null | undefined): number[] | null {
-  if (!template || template === 'none') return null;
-  const parts = template.trim().split(/\s+/).filter((t) => t.length > 0);
-  if (parts.length === 0) return null;
-  const tracks: number[] = [];
-  for (const part of parts) {
-    const match = /^(\d+(?:\.\d+)?)px$/.exec(part);
-    if (!match) return null;
-    const px = Number(match[1]);
-    if (!(px > 0)) return null;
-    tracks.push(px);
-  }
-  return tracks;
-}
-
-/**
- * Every card's cell is 3:4 (design §5): wide enough for a column, as tall as
- * a portrait box. The cover inside keeps its OWN shape (look-and-feel plan
- * 2026-10-30): it is fitted inside the cell, never cropped, and sits on the
- * cell's bottom edge so the titles and the next row line up whatever the
- * shape. Width over height, for the windowed grid's row arithmetic.
+ * The portrait shape (width over height), design §5's 3:4: what a cover is
+ * laid out as before its own shape is known, and what each card size's
+ * target height is derived from.
  */
 export const CARD_CELL_ASPECT = 3 / 4;
 
@@ -103,11 +64,10 @@ export function labelRowPx(labels: CardLabels): number {
  * That keeps the band around the CARD ROOT's centre free of controls.
  * WebdriverIO clicks an element's centre, and `library-card-<id>` /
  * `game-card-<id>` are what the specs click to open Details: a control
- * there would launch or install instead. The root is the cell plus the
- * label row, so its centre is at `(cell + labelRow) / 2`, and the cover's
- * bottom is the cell's bottom whatever the cover's shape. `size.test.ts`
- * proves the strip clears the centre for every card size and both label
- * modes. Clicks on the cover above the strip, or on the empty part of a
- * cell above a short cover, fall through to the root and open Details.
+ * there would launch or install instead. The root is the cover plus the
+ * label row, so its centre is at `(cover + labelRow) / 2`; every cover is at
+ * least `MIN_COVER_PX` tall (`cards/layout.ts`). `size.test.ts` proves the
+ * strip clears the centre at that height in both label modes. Clicks on the
+ * cover above the strip fall through to the root and open Details.
  */
 export const ACTION_BAR_HEIGHT_PX = 38;

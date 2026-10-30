@@ -109,6 +109,21 @@ describe('ui screens: the main views for a design review', () => {
     await setControl('card-labels', 'always');
   });
 
+  it('both card displays on a mixed-art platform (E2E_LIVE_MIXED_PLATFORM)', async () => {
+    const mixed = process.env.E2E_LIVE_MIXED_PLATFORM;
+    if (!mixed) return;
+    for (const display of ['rows', 'columns']) {
+      await appearance('dark', 30);
+      await setControl('card-display', display);
+      await $(testId('nav-server')).click();
+      await $(testId(`platform-btn-${mixed}`)).click();
+      await browser.pause(6000);
+      await shot(`mixed-${display}`);
+    }
+    await $(testId('nav-settings')).click();
+    await setControl('card-display', 'rows');
+  });
+
   it('the other views, dark, fade 30', async () => {
     await appearance('dark', 30);
     await shot('settings-dark-fade30');

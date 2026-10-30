@@ -44,6 +44,9 @@ export type UiSettings = {
   card_size_server: CardSizeName;
   /** "Game labels": `always` or `hover` (`ui.card_labels`). */
   card_labels: 'always' | 'hover';
+  /** "Game card display": `rows` (Equal height) or `columns` (Equal width)
+   *  (`ui.card_display`). */
+  card_display: 'rows' | 'columns';
 };
 export type GameSummary = {
   id: number;
