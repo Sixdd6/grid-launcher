@@ -706,6 +706,15 @@ mod tests {
     }
 
     #[test]
+    fn saturn_recommends_ymir_on_linux_and_windows() {
+        for os in ["linux", "windows"] {
+            let row = one("Sega Saturn", "saturn", os);
+            assert_eq!(recommended_name(&row), Some("Ymir (Sega Saturn)"), "{os}");
+            assert_eq!(row.options[0].kind, OptionKind::Standalone, "{os}");
+        }
+    }
+
+    #[test]
     fn plain_xbox_does_not_pick_up_the_xbox_360_emulators() {
         let row = one("Microsoft Xbox", "xbox", "linux");
         assert_eq!(recommended_name(&row), Some("Xemu (Xbox)"));

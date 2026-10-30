@@ -629,5 +629,51 @@
     "state_directories": [
       "."
     ]
+  },
+  {
+    "match_tokens": ["ymir-sdl3.exe", "ymir-sdl3"],
+    "source": {
+      "provider": "github-release",
+      "owner": "ymir-emu",
+      "repo": "Ymir",
+      "release_tag": "latest",
+      "asset_patterns": [
+        "ymir-windows-x86_64-AVX2-*.zip",
+        "ymir-windows-x86_64-SSE2-*.zip"
+      ],
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": [
+            "ymir-linux-x86_64-AVX2-*.tar.xz",
+            "ymir-linux-x86_64-SSE2-*.tar.xz"
+          ]
+        }
+      }
+    },
+    "name": "Ymir (Sega Saturn)",
+    "args": "-f \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["saturn"],
+    "use_game_title_as_name": false,
+    "save_strategy": "single_file",
+    "save_directories": [
+      "backup/games"
+    ],
+    "state_directories": [
+      "savestates"
+    ],
+    "user_data": [
+      "roms",
+      "backup",
+      "state",
+      "savestates",
+      "screenshots"
+    ],
+    "screenshot_directories": [
+      "screenshots"
+    ],
+    "firmware_directories": [
+      "roms/ipl"
+    ]
   }
 ]

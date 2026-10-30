@@ -25,6 +25,7 @@ pub mod rpcs3;
 pub mod shadps4_qt;
 pub mod writers;
 pub mod xemu;
+pub mod ymir;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -339,6 +340,11 @@ pub fn is_cemu(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
 /// `_is_redream_emulator_name` (cloud_mixin.py:1387).
 pub fn is_redream(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
     emulator_matches_tokens(entry, &["redream"], profiles)
+}
+
+/// The Ymir Sega Saturn emulator (`ymir-sdl3`).
+pub fn is_ymir(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
+    emulator_matches_tokens(entry, &["ymir"], profiles)
 }
 
 /// The ShadPS4 Qt launcher, which ships its own executable alongside the
@@ -753,6 +759,9 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
     }
     if is_redream(&subject, profiles) {
         record(&mut report, name, "redream", redream::ensure_settings(path));
+    }
+    if is_ymir(&subject, profiles) {
+        record(&mut report, name, "ymir", ymir::ensure_settings(path));
     }
     if is_shadps4(&subject, profiles) {
         record(

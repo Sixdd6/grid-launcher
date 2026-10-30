@@ -532,6 +532,30 @@ pub fn select_asset<'a>(
     source: &SourceMap,
     release: &'a Map<String, Value>,
 ) -> Result<&'a Map<String, Value>, SourceError> {
+    select_asset_for_cpu(source, release, host_has_avx2())
+}
+
+/// Whether this processor runs AVX2 code. Always `false` off x86-64.
+fn host_has_avx2() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        std::arch::is_x86_feature_detected!("avx2")
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
+}
+
+/// [`select_asset`] with the processor's AVX2 support given. An asset whose
+/// name says AVX2 (Ymir ships `…-AVX2-…` and `…-SSE2-…` builds) is passed
+/// over on a processor without it, so the next pattern's build is taken
+/// instead of one that would crash at start.
+fn select_asset_for_cpu<'a>(
+    source: &SourceMap,
+    release: &'a Map<String, Value>,
+    avx2: bool,
+) -> Result<&'a Map<String, Value>, SourceError> {
     let no_assets_error = || {
         SourceError(format!(
             "Selected GitHub release has no assets. release_tag='{}'",
@@ -567,6 +591,9 @@ pub fn select_asset<'a>(
             continue;
         };
         if asset_pattern_index(&name, &exclude_patterns).is_some() {
+            continue;
+        }
+        if !avx2 && name.to_lowercase().contains("avx2") {
             continue;
         }
         let preferred_index =
@@ -1410,6 +1437,29 @@ mod tests {
         assert_eq!(
             err.0,
             "No release asset matched configured patterns. include=['*.nomatch'], exclude=[], available_assets=['a.zip', 'b.zip']"
+        );
+    }
+
+    #[test]
+    fn an_avx2_build_is_taken_only_on_a_processor_with_avx2() {
+        // Ymir's v0.4.1 Linux assets, AVX2 listed first.
+        let source = map_of(json!({
+            "asset_patterns": ["ymir-linux-x86_64-AVX2-*.tar.xz", "ymir-linux-x86_64-SSE2-*.tar.xz"],
+            "asset_exclude_patterns": [],
+            "asset_preferred_patterns": []
+        }));
+        let release = map_of(json!({"tag_name": "v0.4.1", "assets": [
+            {"name": "ymir-linux-x86_64-SSE2-v0.4.1.tar.xz", "browser_download_url": "https://x/sse2"},
+            {"name": "ymir-linux-x86_64-AVX2-v0.4.1.tar.xz", "browser_download_url": "https://x/avx2"}
+        ]}));
+        let name = |a: &Map<String, Value>| str_field(a, "name");
+        assert_eq!(
+            name(select_asset_for_cpu(&source, &release, true).unwrap()),
+            "ymir-linux-x86_64-AVX2-v0.4.1.tar.xz"
+        );
+        assert_eq!(
+            name(select_asset_for_cpu(&source, &release, false).unwrap()),
+            "ymir-linux-x86_64-SSE2-v0.4.1.tar.xz"
         );
     }
 

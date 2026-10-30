@@ -17,7 +17,8 @@
     "switch": ["Eden (Nintendo Switch)"],
     "xbox": ["Xemu (Xbox)"],
     "xbox360": ["Xenia Canary (Xbox 360)", "Xenia Edge (Xbox 360)"],
-    "dc": ["Redream (Sega Dreamcast)"]
+    "dc": ["Redream (Sega Dreamcast)"],
+    "saturn": ["Ymir (Sega Saturn)"]
   },
   "not_offered": []
 }
