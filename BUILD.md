@@ -52,9 +52,17 @@ Install the frontend dependencies once:
 in a rootless Podman container, capped at 4 CPUs and 8 GB and run at low priority, so the
 desktop stays usable. The only host requirement is Podman. There are two images, each
 matching the CI job it stands in for: Ubuntu 24.04 (`localhost/grid-launcher-build:24.04`)
-for the gate, e2e, `run` and `shell`, like the check and e2e jobs; Ubuntu 22.04
-(`:22.04`) for `appimage`, like the AppImage job, so a local AppImage bundles the same
-WebKitGTK as a released one (2.50.4 today, against 24.04's 2.52.6).
+for the gate, e2e, `run` and `shell`, like the check and e2e jobs; Debian 13
+(`:debian13`) for `appimage`, like the AppImage job, so a local AppImage bundles the same
+WebKitGTK as a released one (2.54 today, against Ubuntu 24.04's 2.52.6).
+
+The AppImage is built on Debian 13 because it is the distribution with the oldest glibc
+(2.41) that ships WebKitGTK 2.54, the first WebKitGTK that renders on the GPU with NVIDIA
+on Wayland. With 2.50 (Ubuntu 22.04, the base until 2026-10-30) and 2.52 (Ubuntu 24.04
+and 26.04) WebKitGTK refused GPU rendering there and painted every frame on the CPU, which
+made scrolling a large platform stutter. The cost: the AppImage needs glibc 2.41 or newer
+(Debian 13, Ubuntu 25.04+, Fedora 42+, Arch and other rolling releases), so it no longer
+starts on Ubuntu 22.04/24.04, distributions built on them, or Debian 12.
 
     scripts/ctr.sh build             # rebuild both images (newer base, no cache, apt upgrade)
     scripts/ctr.sh gate              # the gate below, in its order
@@ -67,7 +75,7 @@ WebKitGTK as a released one (2.50.4 today, against 24.04's 2.52.6).
 `CTR_CPUS` and `CTR_MEMORY` (e.g. `2`, `4g`) can lower the cap, never raise it. Only one
 grid-launcher container runs at a time; another call waits for the lock. Only the repo is
 mounted. `target/`, `app/node_modules` and `e2e/node_modules` are Podman volumes per
-checkout (the 22.04 image has its own `target/` volume), so a container build never mixes
+checkout (the Debian 13 image has its own `target/` volume), so a container build never mixes
 with a host build in the same tree. `appimage` builds, then repacks with the same
 checksum-pinned `appimagetool` and update information as the release job, so its output
 is named and laid out like a released AppImage. The cargo
@@ -193,10 +201,15 @@ If bundling fails with `strip: ... unknown type [0x13] section '.relr.dyn'`, the
 tooling's bundled `strip` predates your system libraries' RELR relocations (seen on
 Fedora/Nobara). Work around it with `NO_STRIP=1 npx tauri build`.
 
-On some NVIDIA/Wayland stacks WebKitGTK's DMABUF renderer cannot allocate GBM buffers
-("Failed to create GBM buffer ... Invalid argument"), which leaves the window blank
-white. The app sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` at startup on Linux; export the
-variable yourself to override it.
+GRID renders on the GPU by default. WebKitGTK reaches the GPU on Wayland only through its
+DMABUF renderer, and on some NVIDIA/Wayland stacks that renderer cannot allocate GBM
+buffers ("Failed to create GBM buffer ... Invalid argument"), which leaves the window
+blank white. Start GRID with `GRID_LAUNCHER_HW_ACCEL=never` there (it sets
+`WEBKIT_DISABLE_DMABUF_RENDERER=1` and renders on the CPU), then turn Settings ›
+Appearance › Hardware acceleration off so it stays off. `GRID_LAUNCHER_HW_ACCEL=always`
+forces the GPU on whatever the setting says. The log's `webview: hardware acceleration
+policy` line says what WebKitGTK actually did: it keeps `Never` when it decides it cannot
+use the GPU.
 
 WebKitGTK 2.52.6 (Ubuntu 24.04's) can abort the web process in a JavaScriptCore
 garbage-collector thread (`JSC::MarkedBlock::aboutToMarkSlow`) soon after a large

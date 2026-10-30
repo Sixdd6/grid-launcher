@@ -1,10 +1,10 @@
 # Linux build/test image for GRID Launcher. `scripts/ctr.sh build` builds it twice:
-# Ubuntu 24.04 like the check and e2e jobs, and Ubuntu 22.04 like the AppImage job
+# Ubuntu 24.04 like the check and e2e jobs, and Debian 13 like the AppImage job
 # (.github/workflows/build.yml), so the apt package names are the ones in BUILD.md and
 # build.yml, and a local AppImage bundles the released WebKitGTK. The build context is
 # this folder only, so the repo is never sent to the builder.
-ARG UBUNTU_VERSION=24.04
-FROM docker.io/library/ubuntu:${UBUNTU_VERSION}
+ARG BASE_IMAGE=docker.io/library/ubuntu:24.04
+FROM ${BASE_IMAGE}
 
 ARG RUST_TOOLCHAIN=stable
 ARG NODE_MAJOR=24

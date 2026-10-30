@@ -149,16 +149,31 @@ jobs:
     name: AppImage
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     needs: [version, check, check-windows, e2e]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
+    # Built inside Debian 13, so the AppImage bundles its WebKitGTK 2.54: the
+    # first WebKitGTK that renders on the GPU with NVIDIA on Wayland, and
+    # Debian 13 has the oldest glibc (2.41) that ships it. Before 2026-10-30
+    # this job ran on Ubuntu 22.04 (WebKitGTK 2.50), which rendered
+    # everything on the CPU there. The AppImage now needs glibc 2.41 or newer.
+    container:
+      image: docker.io/library/debian:13
+    env:
+      # No FUSE in a container: the bundler's linuxdeploy (an AppImage itself)
+      # extracts itself and runs instead of mounting.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+      # Before checkout: git for actions/checkout, curl for the Rust
+      # toolchain, wget for appimagetool. Root in the container, so no sudo.
       - name: System dependencies (Tauri on Linux + appimagetool)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev zsync
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git curl wget xz-utils file \
+            patchelf xdg-utils build-essential pkg-config libssl-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev zsync
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch, 2026-10
         with:

@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs';
+import path from 'node:path';
 import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl } from '../helpers/env.js';
 
 /**
@@ -81,7 +83,8 @@ async function scrollTo(fraction: number): Promise<void> {
       const grid = document.querySelector(sel) as HTMLElement;
       let sc: HTMLElement | null = grid.parentElement;
       while (sc && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
-      if (!sc) throw new Error('no scroll container around the grid');
+      // No scrolling box around the grid: the page itself scrolls.
+      if (!sc) sc = document.scrollingElement as HTMLElement;
       sc.scrollTop = sc.scrollHeight * frac;
     },
     GRID,
@@ -97,7 +100,8 @@ async function fling(step: number, ms: number): Promise<void> {
       const grid = document.querySelector(sel) as HTMLElement;
       let sc: HTMLElement | null = grid.parentElement;
       while (sc && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
-      if (!sc) throw new Error('no scroll container around the grid');
+      // No scrolling box around the grid: the page itself scrolls.
+      if (!sc) sc = document.scrollingElement as HTMLElement;
       const end = performance.now() + dur;
       await new Promise<void>((resolve) => {
         const tick = () => {
@@ -308,21 +312,34 @@ describe('large platform: performance probe (measurement only)', () => {
     this.timeout(180_000);
     const variants: [string, string][] = [
       ['as shipped', ''],
-      ['labels without blur', '.label{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}'],
-      ['covers without shadow', '.cover{box-shadow:none!important}'],
-      ['panels without blur', '.panel,.rail,.topbar,.panes{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}'],
       ['no background art', '[data-testid="background-art"]{display:none!important}'],
-      ['covers with a hairline, no shadow', '.cover{box-shadow:0 0 0 1px rgba(255,255,255,.08)!important}'],
-      ['art layers not promoted', '[data-testid="background-art"] .layer{will-change:auto!important}'],
-      ['art fully opaque', '[data-testid="background-art"] .layer.visible{opacity:1!important}'],
-      ['art layer hidden while it is not fading', '[data-testid="background-art"] .layer:not(.visible){display:none!important}'],
+      ['cards hidden (what painting them costs)', '[data-testid="server-grid"] > *{visibility:hidden!important}'],
+      ['art at full opacity', '[data-testid="background-art"] .layer.visible{opacity:1!important}'],
       [
-        'all four off',
-        '.label,.panel,.rail,.topbar,.panes{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}' +
-          '.cover{box-shadow:none!important}[data-testid="background-art"]{display:none!important}',
+        'art at full opacity on its own layer',
+        '[data-testid="background-art"]{will-change:transform}[data-testid="background-art"] .layer.visible{opacity:1!important}',
+      ],
+      [
+        'art at full opacity, art and scroller layers',
+        '[data-testid="background-art"]{will-change:transform}[data-testid="background-art"] .layer.visible{opacity:1!important}[data-testid="server-section"] .body{will-change:transform}',
       ],
     ];
-    for (const [name, css] of variants) {
+    const art = await browser.execute(() =>
+      [...document.querySelectorAll('[data-testid="background-art"] .layer')].map((l) => {
+        const cs = getComputedStyle(l);
+        return `${cs.backgroundImage.slice(-60)} size=${cs.backgroundSize} opacity=${cs.opacity}`;
+      }),
+    );
+    console.log(`PERF art layers: ${JSON.stringify(art)}`);
+    // Warm the band the variants scroll through first, so the first variant
+    // is not the one that pays for decoding its covers.
+    await scrollTo(0.3);
+    await browser.pause(1500);
+    await fling(60, 2500);
+    await browser.pause(1500);
+    // Each variant twice, in two passes, so drift over the run (a cover
+    // still arriving, the container's other load) lands on all of them.
+    for (const [name, css] of [...variants, ...variants]) {
       await browser.execute((text: string) => {
         let st = document.getElementById('perf-ab-css');
         if (!st) {
@@ -337,8 +354,49 @@ describe('large platform: performance probe (measurement only)', () => {
       await startFrames();
       await fling(60, 2500);
       await stopFrames(`A/B scroll 60px/frame, ${name}`);
+      if (process.env.E2E_SCREENSHOTS) {
+        const dir = path.resolve(process.cwd(), '..', 'ctr-out', 'perf-ab');
+        mkdirSync(dir, { recursive: true });
+        await browser.saveScreenshot(path.join(dir, `${name.replace(/[^a-z0-9]+/gi, '-')}.png`));
+      }
     }
     await browser.execute(() => document.getElementById('perf-ab-css')?.remove());
+  });
+
+  it('scrolling by transform instead of by scroll position (what repainting costs)', async () => {
+    // Within the rendered band only (the window renders 600px past the
+    // screen), so every card it shows is already in the DOM: what differs from
+    // a real scroll is only that nothing is scrolled, and so nothing should
+    // need repainting.
+    await scrollTo(0.3);
+    await browser.pause(1500);
+    for (const layer of [false, true]) {
+      await startFrames();
+      await browser.execute(
+        async (sel: string, promote: boolean) => {
+          const grid = document.querySelector(sel) as HTMLElement;
+          if (promote) grid.style.willChange = 'transform';
+          const end = performance.now() + 2500;
+          let y = 0;
+          let dir = -1;
+          await new Promise<void>((resolve) => {
+            const tick = () => {
+              y += dir * 60;
+              if (y <= -480 || y >= 0) dir = -dir;
+              grid.style.transform = `translateY(${y}px)`;
+              if (performance.now() < end) requestAnimationFrame(tick);
+              else resolve();
+            };
+            requestAnimationFrame(tick);
+          });
+          grid.style.transform = '';
+          grid.style.willChange = '';
+        },
+        GRID,
+        layer,
+      );
+      await stopFrames(`transform scroll 60px/frame${layer ? ', grid on its own layer' : ''}`);
+    }
   });
 
   it('pointer browsing across cards', async () => {

@@ -13,9 +13,9 @@
 #                                     (--all: also the shared cargo and npm cache volumes)
 #
 # Two images, each matching the CI job it stands in for (.github/workflows/build.yml):
-# Ubuntu 24.04 for the gate, e2e, run and shell (the check and e2e jobs), and Ubuntu
-# 22.04 for appimage (the AppImage job), so a local AppImage bundles the same
-# WebKitGTK as a released one. Each has its own target/ volume: builds against two
+# Ubuntu 24.04 for the gate, e2e, run and shell (the check and e2e jobs), and Debian 13
+# for appimage (the AppImage job), so a local AppImage bundles the same WebKitGTK as a
+# released one. Each has its own target/ volume: builds against two
 # glibc versions must not share one.
 #
 # Only the repo is mounted (read-write). No $HOME, no display or D-Bus socket, no keyring:
@@ -26,10 +26,14 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 repo=$(pwd -P)
 
-CHECK_UBUNTU=24.04
-RELEASE_UBUNTU=22.04
+CHECK_TAG=24.04
+CHECK_BASE=docker.io/library/ubuntu:24.04
+# Debian 13 for the AppImage: the oldest glibc (2.41) that ships WebKitGTK 2.54, the
+# first WebKitGTK that renders on the GPU with NVIDIA on Wayland (2026-10-30).
+RELEASE_TAG=debian13
+RELEASE_BASE=docker.io/library/debian:13
 IMAGE_REPO=localhost/grid-launcher-build
-IMAGE=$IMAGE_REPO:$CHECK_UBUNTU
+IMAGE=$IMAGE_REPO:$CHECK_TAG
 # Owner limit (2026-10-20): at most 4 CPUs and 8 GB for grid-launcher containers, in total.
 # CTR_CPUS / CTR_MEMORY (in MB or with a g/m suffix) may lower the limit, never raise it.
 MAX_CPUS=4
@@ -61,10 +65,10 @@ TARGET_VOLUME=$VOL_PREFIX-target
 # A newer base image and no layer cache, so a rebuild is also a security refresh
 # (the image's apt packages and the latest Node/Rust releases).
 build_image() {
-  podman build --pull=newer --no-cache --build-arg "UBUNTU_VERSION=$1" -t "$IMAGE_REPO:$1" \
+  podman build --pull=newer --no-cache --build-arg "BASE_IMAGE=$2" -t "$IMAGE_REPO:$1" \
     -f scripts/container/Containerfile scripts/container
 }
-build() { build_image "$CHECK_UBUNTU" && build_image "$RELEASE_UBUNTU"; }
+build() { build_image "$CHECK_TAG" "$CHECK_BASE" && build_image "$RELEASE_TAG" "$RELEASE_BASE"; }
 
 podman_args() {
   # Create the mount points as the host user, so they are not left owned by a subuid.
@@ -98,7 +102,9 @@ podman_args() {
   fi
 }
 
-ensure_image() { podman image exists "$IMAGE" || locked build_image "${IMAGE##*:}"; }
+# The base for an image tag: the release tag's, else the check tag's.
+base_for() { [ "$1" = "$RELEASE_TAG" ] && echo "$RELEASE_BASE" || echo "$CHECK_BASE"; }
+ensure_image() { podman image exists "$IMAGE" || locked build_image "${IMAGE##*:}" "$(base_for "${IMAGE##*:}")"; }
 
 # Low priority inside the container on top of the cgroup cap.
 in_ctr() { ensure_image; podman_args; locked podman run "${args[@]}" "$IMAGE" nice -n 19 ionice -c3 "$@"; }
@@ -137,7 +143,7 @@ case "${1:-}" in
     printf %s "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
       || { echo "ctr.sh: version '$version' is not semver" >&2; exit 2; }
     mkdir -p ctr-out
-    IMAGE=$IMAGE_REPO:$RELEASE_UBUNTU
+    IMAGE=$IMAGE_REPO:$RELEASE_TAG
     TARGET_VOLUME=$VOL_PREFIX-release-target
     # The release job's steps (build-linux in build.yml): build, then repack with
     # appimagetool to embed the update information. Same tool, version and digest as
