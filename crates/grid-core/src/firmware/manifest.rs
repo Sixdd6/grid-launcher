@@ -67,14 +67,18 @@ impl FirmwareManifest {
             .insert(file_name.to_string(), placed);
     }
 
-    /// Whether `file_name` from the server is installed in `target`.
-    pub fn installed(&self, target: &Path, file_name: &str) -> bool {
-        let recorded = self
-            .targets
+    fn recorded(&self, target: &Path, file_name: &str) -> Option<&Vec<PathBuf>> {
+        self.targets
             .get(&key(target))
-            .and_then(|files| files.get(file_name));
-        if let Some(paths) = recorded {
-            if !paths.is_empty() && paths.iter().all(|p| p.exists()) {
+            .and_then(|files| files.get(file_name))
+    }
+
+    /// Whether `file_name` from the server is installed in `target`. An
+    /// empty record means an install looked and had nothing to put there,
+    /// so nothing is missing.
+    pub fn installed(&self, target: &Path, file_name: &str) -> bool {
+        if let Some(paths) = self.recorded(target, file_name) {
+            if paths.iter().all(|p| p.exists()) {
                 return true;
             }
         }
@@ -100,8 +104,11 @@ pub(crate) fn record_installs(path: &Path, installs: Vec<(PathBuf, String, Vec<P
 }
 
 /// Whether every server firmware file that routes to one of `targets` is
-/// installed there. `false` when none routes anywhere: then Install has
-/// nothing to put in place, and "Installed" would claim otherwise.
+/// installed there. A zip whose name routes nowhere is routed by its members
+/// at install time (`install_platform_firmware_recorded`), so until an
+/// install has looked inside it, it counts as not installed. `false` when
+/// nothing routes anywhere: then Install has nothing to put in place, and
+/// "Installed" would claim otherwise.
 pub fn firmware_installed(
     records: &[FirmwareRecord],
     targets: &[FirmwareTarget],
@@ -109,13 +116,39 @@ pub fn firmware_installed(
 ) -> bool {
     let mut any = false;
     for record in records {
-        if record.file_name.is_empty() {
+        let name = &record.file_name;
+        if name.is_empty() {
             continue;
         }
-        for target in resolve_targets(&record.file_name, targets) {
-            any = true;
-            if !manifest.installed(&target.path, &record.file_name) {
-                return false;
+        let applicable = resolve_targets(name, targets);
+        if !applicable.is_empty() {
+            for target in applicable {
+                any = true;
+                if !manifest.installed(&target.path, name) {
+                    return false;
+                }
+            }
+            continue;
+        }
+        let keyword_targets: Vec<&FirmwareTarget> =
+            targets.iter().filter(|t| t.keywords.is_some()).collect();
+        if !name.to_lowercase().ends_with(".zip") || keyword_targets.is_empty() {
+            continue;
+        }
+        let records: Vec<Option<&Vec<PathBuf>>> = keyword_targets
+            .iter()
+            .map(|t| manifest.recorded(&t.path, name))
+            .collect();
+        if records.iter().all(Option::is_none) {
+            // Not looked inside yet.
+            return false;
+        }
+        for paths in records.into_iter().flatten() {
+            if !paths.is_empty() {
+                any = true;
+                if !paths.iter().all(|p| p.exists()) {
+                    return false;
+                }
             }
         }
     }
@@ -209,6 +242,44 @@ mod tests {
             &[],
             &[plain(dir.path())],
             &FirmwareManifest::default()
+        ));
+    }
+
+    #[test]
+    fn a_zip_routed_by_its_members_counts_once_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MANIFEST_FILE);
+        let cemu = dir.path().join("cemu");
+        std::fs::create_dir_all(&cemu).unwrap();
+        let targets = [FirmwareTarget {
+            path: cemu.clone(),
+            keywords: Some(vec!["keys.txt".into()]),
+        }];
+        let records = [record(40, "wiiu.zip")];
+        // Before any install has looked inside: not installed.
+        assert!(!firmware_installed(
+            &records,
+            &targets,
+            &FirmwareManifest::load(&path)
+        ));
+
+        let keys = cemu.join("keys.txt");
+        std::fs::write(&keys, b"k").unwrap();
+        record_installs(
+            &path,
+            vec![(cemu.clone(), "wiiu.zip".into(), vec![keys.clone()])],
+        );
+        assert!(firmware_installed(
+            &records,
+            &targets,
+            &FirmwareManifest::load(&path)
+        ));
+
+        std::fs::remove_file(&keys).unwrap();
+        assert!(!firmware_installed(
+            &records,
+            &targets,
+            &FirmwareManifest::load(&path)
         ));
     }
 

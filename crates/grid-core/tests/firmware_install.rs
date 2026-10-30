@@ -445,3 +445,61 @@ async fn fetch_uses_platform_id_query() {
         install_platform_firmware(&client(&server), 19, &targets, FirmwareOptions::default()).await;
     assert_eq!(result, Vec::<String>::new());
 }
+
+/// A zip whose own name matches no keyword target is routed by its members:
+/// RomM's `wiiu.zip` holds the `keys.txt` Cemu's target asks for (user bug
+/// 2026-10-30). Only the asked-for member is written, and the manifest
+/// records it, so the installed check then reports the firmware installed.
+#[tokio::test]
+async fn a_zip_is_routed_by_the_members_a_keyword_target_asks_for() {
+    use grid_core::firmware::install_platform_firmware_recorded;
+    use grid_core::firmware::manifest::{firmware_installed, FirmwareManifest, MANIFEST_FILE};
+    use grid_core::romm::FirmwareRecord;
+
+    let server = MockServer::start().await;
+    let data = zip_bytes(&[("keys.txt", b"KEYS"), ("readme.md", b"R")]);
+    Mock::given(method("GET"))
+        .and(path("/api/firmware"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 40, "file_name": "wiiu.zip"}
+        ])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/firmware/40/content/wiiu.zip"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(data))
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let cemu = dir.path().join("cemu");
+    let manifest = dir.path().join(MANIFEST_FILE);
+    let targets = [routed(&cemu, &["keys.txt"])];
+    let records = [FirmwareRecord {
+        id: 40,
+        file_name: "wiiu.zip".into(),
+    }];
+    assert!(!firmware_installed(
+        &records,
+        &targets,
+        &FirmwareManifest::load(&manifest)
+    ));
+
+    let result = install_platform_firmware_recorded(
+        &client(&server),
+        42,
+        &targets,
+        FirmwareOptions::default(),
+        Some(&manifest),
+    )
+    .await;
+    assert_eq!(result, Vec::<String>::new());
+    assert_eq!(fs::read(cemu.join("keys.txt")).unwrap(), b"KEYS");
+    assert!(!cemu.join("readme.md").exists());
+    assert!(!cemu.join("wiiu.zip").exists());
+    assert!(firmware_installed(
+        &records,
+        &targets,
+        &FirmwareManifest::load(&manifest)
+    ));
+}

@@ -260,6 +260,72 @@ fn write_zip_members(
     Ok(placed)
 }
 
+/// The base names of a zip's file members (directories and `__MACOSX`
+/// entries left out), for routing an archive by what it holds. Empty for
+/// bytes that are not a readable zip.
+pub(crate) fn zip_member_names(data: &[u8]) -> Vec<String> {
+    let Ok(mut archive) = zip::ZipArchive::new(std::io::Cursor::new(data)) else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    for i in 0..archive.len() {
+        let Ok(entry) = archive.by_index(i) else {
+            continue;
+        };
+        let Ok(raw_name) = entry.name().map(|n| n.into_owned()) else {
+            continue;
+        };
+        if raw_name.ends_with('/') || raw_name.starts_with("__MACOSX") {
+            continue;
+        }
+        if let Some(name) = flat_member_name(&raw_name) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// Extracts, flat into `target_dir`, only the zip members whose lower-cased
+/// base name contains one of `keywords` — the members a keyword target asked
+/// for when the archive's own name matched none (a `wiiu.zip` holding
+/// Cemu's `keys.txt`). Honors `opts.skip_existing`; returns the files placed.
+pub(crate) fn write_zip_members_matching(
+    file_name: &str,
+    data: &[u8],
+    target_dir: &Path,
+    keywords: &[String],
+    opts: FirmwareOptions,
+) -> Result<Vec<PathBuf>, String> {
+    let fail = |e: String| extract_warning(file_name, e);
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(data)).map_err(|e| fail(e.to_string()))?;
+    let mut placed = Vec::new();
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| fail(e.to_string()))?;
+        let raw_name = entry.name().map_err(|e| fail(e.to_string()))?.into_owned();
+        if raw_name.ends_with('/') || raw_name.starts_with("__MACOSX") {
+            continue;
+        }
+        let Some(name) = flat_member_name(&raw_name) else {
+            continue;
+        };
+        let lower = name.to_lowercase();
+        if !keywords.iter().any(|kw| lower.contains(kw.as_str())) {
+            continue;
+        }
+        let dest = target_dir.join(name);
+        if !(opts.skip_existing && dest.exists()) {
+            let mut buf = Vec::new();
+            entry
+                .read_to_end(&mut buf)
+                .map_err(|e| fail(e.to_string()))?;
+            fs::write(&dest, &buf).map_err(|e| fail(e.to_string()))?;
+        }
+        placed.push(dest);
+    }
+    Ok(placed)
+}
+
 /// Path-traversal guard for an `extract_zip_with_paths` member
 /// (firmware_install.py:187-194): backslashes normalized to `/`, then
 /// `None` when the result is empty, rooted, or contains a `..` component.
@@ -333,6 +399,30 @@ mod tests {
     }
 
     // --- is_zip_bytes ---------------------------------------------------------
+
+    #[test]
+    fn zip_member_names_lists_base_names_without_folders() {
+        let data = zip_bytes(&[("wiiu/keys.txt", b"K"), ("__MACOSX/._keys.txt", b"x")]);
+        assert_eq!(zip_member_names(&data), vec!["keys.txt".to_string()]);
+        assert!(zip_member_names(b"not a zip").is_empty());
+    }
+
+    #[test]
+    fn matching_extraction_writes_only_the_members_asked_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = zip_bytes(&[("keys.txt", b"KEYS"), ("readme.md", b"R")]);
+        let placed = write_zip_members_matching(
+            "wiiu.zip",
+            &data,
+            dir.path(),
+            &["keys.txt".to_string()],
+            FirmwareOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(placed, vec![dir.path().join("keys.txt")]);
+        assert_eq!(fs::read(dir.path().join("keys.txt")).unwrap(), b"KEYS");
+        assert!(!dir.path().join("readme.md").exists());
+    }
 
     #[test]
     fn recognizes_all_three_zip_signatures() {

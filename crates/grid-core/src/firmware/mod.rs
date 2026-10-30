@@ -155,7 +155,14 @@ pub async fn install_platform_firmware_recorded(
         }
 
         let applicable = resolve_targets(&file_name, targets);
-        if applicable.is_empty() {
+        let lower = file_name.to_lowercase();
+        // A zip whose own name matches no keyword target may still hold the
+        // file one asks for (a `wiiu.zip` holding Cemu's `keys.txt`), so it
+        // is downloaded and routed by its members instead.
+        let route_inside = applicable.is_empty()
+            && lower.ends_with(".zip")
+            && targets.iter().any(|t| t.keywords.is_some());
+        if applicable.is_empty() && !route_inside {
             // No target's keywords match, so this file has nowhere to go.
             // Logged, not a warning to the caller: the pass still
             // succeeded. The file name only — never a URL or a header.
@@ -168,13 +175,67 @@ pub async fn install_platform_firmware_recorded(
         // single plain path component BEFORE the download, so a hostile
         // record costs no bytes and never reaches a write path.
         if !write::is_plain_file_name(&file_name) {
-            for target in &applicable {
+            let named: Vec<&FirmwareTarget> = if route_inside {
+                targets.iter().collect()
+            } else {
+                applicable.clone()
+            };
+            for target in named {
                 warnings.push(write::invalid_name_warning(&file_name, &target.path));
             }
             continue;
         }
 
-        let lower = file_name.to_lowercase();
+        if route_inside {
+            let data = match client.firmware_bytes(record.id, &file_name).await {
+                Ok(data) => data,
+                Err(e) => {
+                    warnings.push(format!("Failed to download firmware {file_name}: {e}"));
+                    continue;
+                }
+            };
+            let members = write::zip_member_names(&data);
+            let mut any = false;
+            for target in targets {
+                let Some(keywords) = &target.keywords else {
+                    continue;
+                };
+                let wanted = members.iter().any(|m| {
+                    let m = m.to_lowercase();
+                    keywords.iter().any(|kw| m.contains(kw.as_str()))
+                });
+                if !wanted {
+                    // Looked inside and found nothing for this target: the
+                    // empty record tells the installed check there is
+                    // nothing left to put here.
+                    installs.push((target.path.clone(), file_name.clone(), Vec::new()));
+                    continue;
+                }
+                any = true;
+                if let Err(e) = std::fs::create_dir_all(&target.path) {
+                    warnings.push(format!(
+                        "Could not create firmware directory {}: {e}",
+                        target.path.display()
+                    ));
+                    continue;
+                }
+                match write::write_zip_members_matching(
+                    &file_name,
+                    &data,
+                    &target.path,
+                    keywords,
+                    opts,
+                ) {
+                    Ok(placed) => installs.push((target.path.clone(), file_name.clone(), placed)),
+                    Err(msg) => warnings.push(msg),
+                }
+            }
+            if !any {
+                tracing::warn!("firmware: nothing in {file_name} matched a target directory");
+            }
+            continue;
+        }
+
         let keep_archive = !opts.extract_zip_with_paths
             && lower.ends_with(".zip")
             && should_keep_zip(&file_name, targets, &applicable);
