@@ -477,22 +477,22 @@
     color: var(--text-h);
   }
 
+  /* A secondary button (D-UI convention): outlined, `--surface` on hover. */
   button.upload {
     flex: none;
     font: inherit;
     font-size: 13px;
     padding: 6px 14px;
     border-radius: var(--r-control);
-    border: 1px solid var(--primary);
+    border: 1px solid var(--border);
     background: transparent;
-    color: var(--primary);
+    color: var(--text);
     cursor: pointer;
     transition: background var(--m-fast) ease;
   }
 
   button.upload:hover:not(:disabled) {
-    background: var(--primary);
-    color: var(--on-primary);
+    background: var(--surface);
   }
 
   .shared-note {
@@ -672,6 +672,11 @@
     background: transparent;
     color: var(--text);
     cursor: pointer;
+    transition: background var(--m-fast) ease;
+  }
+
+  .record-actions button:hover:not(:disabled) {
+    background: var(--surface);
   }
 
   .record-actions button:disabled {

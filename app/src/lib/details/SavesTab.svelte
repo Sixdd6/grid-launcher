@@ -106,6 +106,12 @@
     transition: background var(--m-fast) ease;
   }
 
+  /* `--surface` over the track's own `--surface` doubles it, so the side
+     under the pointer reads in both themes. */
+  .switch button:not(.active):hover {
+    background: var(--surface);
+  }
+
   .switch button.active {
     background: var(--primary);
     color: var(--on-primary);

@@ -1263,12 +1263,14 @@
     transition: background var(--m-fast) ease;
   }
 
+  .firmware button:hover:not(:disabled),
   .ps3-firmware button:hover:not(:disabled),
   .row-actions button:hover:not(:disabled),
   .catalog-row button:hover:not(:disabled) {
     background: var(--primary-hover);
   }
 
+  .firmware button:disabled,
   .ps3-firmware button:disabled,
   .row-actions button:disabled,
   .catalog-row button:disabled {

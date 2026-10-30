@@ -112,6 +112,11 @@
     background: var(--surface);
     color: var(--text);
     cursor: pointer;
+    transition: color var(--m-fast) ease;
+  }
+
+  .arrows button:hover:not(:disabled) {
+    color: var(--primary);
   }
 
   .arrows button:disabled {
