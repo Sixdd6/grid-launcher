@@ -18,6 +18,11 @@ describe('rowMetrics', () => {
     expect(pitch).toBe(rowHeight + GRID_GAP_PX);
   });
 
+  it('follows the grid’s cell shape: square cells are as tall as they are wide', () => {
+    expect(rowMetrics(150, GRID_GAP_PX, 0, 1).rowHeight).toBe(150);
+    expect(rowMetrics(124, GRID_GAP_PX, 32, 0.62).rowHeight).toBe(200 + 32);
+  });
+
   it('has no label row when labels show on hover', () => {
     expect(rowMetrics(150, GRID_GAP_PX, labelRowPx('hover')).rowHeight).toBe(200);
   });

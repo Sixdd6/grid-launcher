@@ -1,6 +1,6 @@
 <script lang="ts" generics="T">
   import { untrack, type Snippet } from 'svelte';
-  import { columnsOf, gridTemplate, labelRowPx, parseTracks, type CardSize } from './cards/size';
+  import { CARD_CELL_ASPECT, columnsOf, gridTemplate, labelRowPx, parseTracks, type CardSize } from './cards/size';
   import type { CardLabels } from './cards/labels';
   import {
     BUFFER_ROWS,
@@ -20,6 +20,7 @@
     card,
     size,
     labels,
+    cellAspect = CARD_CELL_ASPECT,
     gridId,
     bufferRows = BUFFER_ROWS,
   }: {
@@ -31,6 +32,8 @@
     size: CardSize;
     /** The "Game labels" setting: it decides the label row's height. */
     labels: CardLabels;
+    /** The cells' width over height (`cards/shape.ts`). */
+    cellAspect?: number;
     gridId: string;
     bufferRows?: number;
   } = $props();
@@ -70,7 +73,7 @@
     const tracks = parseTracks(getComputedStyle(grid).gridTemplateColumns);
     if (tracks === null) return;
     trackCount = tracks.length;
-    metrics = rowMetrics(tracks[0], GRID_GAP_PX, labelRowPx(labels));
+    metrics = rowMetrics(tracks[0], GRID_GAP_PX, labelRowPx(labels), cellAspect);
     if (rowHeight !== metrics.rowHeight) rowHeight = metrics.rowHeight;
   }
 
@@ -149,6 +152,7 @@
     // the row height the same way.
     void size;
     void labels;
+    void cellAspect;
     untrack(() => {
       measureTracks();
       update();
@@ -210,7 +214,7 @@
   data-testid={gridId}
   class="grid"
   bind:this={el}
-  style="--template: {gridTemplate(size)}; --gap: {GRID_GAP_PX}px; --pad-top: {PAD_TOP_PX +
+  style="--template: {gridTemplate(size)}; --cell-aspect: {cellAspect}; --gap: {GRID_GAP_PX}px; --pad-top: {PAD_TOP_PX +
     shown.padTop}px; --pad-bottom: {PAD_BOTTOM_PX + shown.padBottom}px; --row-h: {rowHeight === null
     ? 'auto'
     : `${rowHeight}px`}"

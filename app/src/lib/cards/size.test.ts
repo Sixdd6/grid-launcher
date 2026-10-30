@@ -13,6 +13,7 @@ import {
   parseTracks,
   normalizeCardSize,
 } from './size';
+import { MAX_CELL_ASPECT, MIN_CELL_ASPECT } from './shape';
 
 describe('normalizeCardSize', () => {
   it('accepts the three stored spellings', () => {
@@ -112,6 +113,17 @@ describe('card hover geometry (E2E click safety)', () => {
       for (const labels of ['always', 'hover'] as const) {
         const barTop = cell - ACTION_BAR_HEIGHT_PX;
         expect(barTop).toBeGreaterThan(rootCentre(cell, labelRowPx(labels)));
+      }
+    }
+  });
+
+  it('keeps the bar clear for every cell shape a grid can take (cards/shape.ts)', () => {
+    for (const size of CARD_SIZES) {
+      for (const aspect of [MIN_CELL_ASPECT, CARD_CELL_ASPECT, MAX_CELL_ASPECT]) {
+        const cell = cardMinPx(size) / aspect;
+        for (const labels of ['always', 'hover'] as const) {
+          expect(cell - ACTION_BAR_HEIGHT_PX).toBeGreaterThan(rootCentre(cell, labelRowPx(labels)));
+        }
       }
     }
   });

@@ -41,15 +41,20 @@ export type WindowRange = {
 
 /**
  * A card's row height and pitch for a column `trackPx` wide. Matches the
- * card's own layout: a 3:4 cell, then its label row (`labelRowPx`: the
+ * card's own layout: its cell (`cellAspect`, 3:4 by default), then its label row (`labelRowPx`: the
  * "Always visible" label, or nothing for "Visible on hover").
  *
  * Rounded to whole px, and the grid lays its rows out at exactly this height
  * (`grid-auto-rows`). WebKit rounds a fractional row to 1/64 px, which over
  * the 800 rows of a 2500-game platform put the math 4px off the layout.
  */
-export function rowMetrics(trackPx: number, gap: number = GRID_GAP_PX, labelRow: number = 0): RowMetrics {
-  const rowHeight = Math.round(trackPx / CARD_CELL_ASPECT + labelRow);
+export function rowMetrics(
+  trackPx: number,
+  gap: number = GRID_GAP_PX,
+  labelRow: number = 0,
+  cellAspect: number = CARD_CELL_ASPECT,
+): RowMetrics {
+  const rowHeight = Math.round(trackPx / cellAspect + labelRow);
   return { rowHeight, pitch: rowHeight + gap };
 }
 

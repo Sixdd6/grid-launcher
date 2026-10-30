@@ -156,8 +156,11 @@ There are several main sections to the application with buttons across the top b
   stored under `[ui]` in `config.toml` as `theme`, `background_fade` (0 is off),
   `card_size_library`, `card_size_server` and `card_labels` (`always` or `hover`).
 - **Cards** (both grids) are just the cover, at its own shape: never cropped, with no
-  frame, fitted inside a uniform 3:4 cell and sitting on the cell's bottom edge, so rows
-  and labels line up whatever the mix of shapes. The cover has rounded corners and a soft
+  frame, fitted inside a cell and sitting on the cell's bottom edge, so rows and labels
+  line up whatever the mix of shapes. Every cell in a grid has the same shape: the median
+  shape of the grid's covers, measured from the first ones that load (3:4 until then,
+  from as tall as 0.6 to at most square), and kept for the session, so a platform of
+  square covers gets square cells and a platform of tall covers gets tall ones. The cover has rounded corners and a soft
   shadow. On hover or keyboard focus it lifts, and a bar at its bottom shows Play or
   Install, Cloud sync and Details. Badges sit on the cover's corners: an installed dot
   top-right, an `UPDATE` tag top-left, a cloud icon bottom-right when the platform has

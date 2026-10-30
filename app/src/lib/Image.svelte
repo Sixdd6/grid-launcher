@@ -8,12 +8,15 @@
     alt,
     placeholder = alt,
     onerror,
+    onmeasure,
     ...rest
   }: {
     url: string | null;
     alt: string;
     placeholder?: string;
     onerror?: () => void;
+    /** Called once the image has loaded, with its natural size. */
+    onmeasure?: (width: number, height: number) => void;
     [key: string]: unknown;
   } = $props();
   let src = $state<string | null>(null);
@@ -95,8 +98,10 @@
     };
   });
 
-  function handleImgLoad() {
+  function handleImgLoad(e: Event) {
     slot?.release();
+    const img = e.currentTarget as HTMLImageElement;
+    onmeasure?.(img.naturalWidth, img.naturalHeight);
   }
 
   function handleImgError() {

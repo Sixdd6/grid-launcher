@@ -25,6 +25,7 @@
     onCloud,
     onHoverStart,
     onHoverEnd,
+    onCoverMeasured,
   }: {
     testId: string;
     /** The card's position in the view's whole list, as `data-index`: the
@@ -53,6 +54,9 @@
     onCloud: () => void;
     onHoverStart: () => void;
     onHoverEnd: () => void;
+    /** The loaded cover's natural size, for the grid's cell shape
+     *  (`cards/shape.ts`). */
+    onCoverMeasured?: (width: number, height: number) => void;
   } = $props();
 
   let badges = $derived(cardBadges({ platform, installed, updateLabel, cloudPlatforms }));
@@ -87,7 +91,7 @@
 >
   <div class="cell">
     <div class="cover">
-      <Image url={coverUrl} alt={title} placeholder="No cover" />
+      <Image url={coverUrl} alt={title} placeholder="No cover" onmeasure={onCoverMeasured} />
 
       <!-- Top-left tags stack in one column so MISSING and UPDATE never cover
            each other (a missing game can still have a newer server version). -->
@@ -177,10 +181,12 @@
     z-index: 2;
   }
 
-  /* The 3:4 cell is a size container: the cover's image is capped at its
+  /* The cell is a size container: the cover's image is capped at its
      width and height (`cqw`/`cqh`), which fits any shape without cropping. */
+  /* The ratio comes from the grid (`--cell-aspect`, `cards/shape.ts`): the
+     median shape of its covers, 3:4 until enough have loaded. */
   .cell {
-    aspect-ratio: 3 / 4;
+    aspect-ratio: var(--cell-aspect, 3 / 4);
     container-type: size;
     display: flex;
     align-items: flex-end;

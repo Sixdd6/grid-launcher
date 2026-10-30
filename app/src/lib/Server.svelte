@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { cellAspectFor, recordCover } from './stores/coverShapes.svelte';
   import { untrack } from 'svelte';
   import {
     api,
@@ -100,6 +101,8 @@
   let libraryPathSaving = $state(false);
   let libraryPathError = $state<string | null>(null);
 
+  /** The key this platform's cover shapes are kept under (`coverShapes`). */
+  let shapeKey = $derived(`server:${activePlatform}`);
   let activePlatformRow = $derived(platforms.find((p) => p.id === activePlatform) ?? null);
   let activePlatformName = $derived(activePlatformRow ? platformLabel(activePlatformRow) : '');
   let visible = $derived(filterServerGames(games, search));
@@ -607,6 +610,7 @@
             bind:this={grid}
             gridId="server-grid"
             labels={uiSettings.cardLabels}
+            cellAspect={cellAspectFor(shapeKey)}
             size={uiSettings.cardSizeServer}
             items={visible}
             key={(game) => game.id}
@@ -624,6 +628,7 @@
                 {cloudPlatforms}
                 labels={uiSettings.cardLabels}
                 showPlatform={false}
+                onCoverMeasured={(w, h) => recordCover(shapeKey, w, h)}
                 focused={i === focusIndex && inputMode.directional}
                 onOpen={() => {
                   // A click moves the selection, so keyboard navigation
