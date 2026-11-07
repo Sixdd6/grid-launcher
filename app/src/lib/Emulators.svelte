@@ -63,7 +63,11 @@
   import {
     emulatorFirmwareRows,
     firmwareAction,
-    firmwarePlatforms,
+    firmwareRequests,
+    firmwareStartedToast,
+    notNeededTitle,
+    firmwareFinishedToast,
+    type FirmwareRequest,
     FIRMWARE_ACTION_LABELS,
   } from './emulators/firmware';
   import { installedToastText, updateConfirmText, upToDateText } from './emulators/update';
@@ -569,68 +573,82 @@
     };
   });
 
-  // Server firmware, listed under each emulator for the platforms it is the
-  // default for (`emulators/firmware.ts`). Status is read per platform when
-  // the platforms or defaults change; Install is fire-and-forget, and the
-  // backend's pass-finished event ends it and re-reads that platform.
-  let firmwareStatus = $state<Record<number, PlatformFirmwareStatus>>({});
-  let firmwarePending = $state<Record<number, true>>({});
-  /** Platforms whose Unavailable click is re-reading the server. */
-  let firmwareChecking = $state<Record<number, true>>({});
+  // Server firmware, listed under each emulator for every platform it
+  // supports (`emulators/firmware.ts`), keyed by emulator and platform
+  // (`firmwareKey`). Status is read per pair when the platforms, the
+  // emulators or their compatibility change; Install is fire-and-forget, and
+  // the backend's pass-finished event ends it and re-reads that platform.
+  let firmwareStatus = $state<Record<string, PlatformFirmwareStatus>>({});
+  let firmwarePending = $state<Record<string, true>>({});
+  /** Pairs whose Not needed click is re-reading the server. */
+  let firmwareChecking = $state<Record<string, true>>({});
 
-  /** Re-reads one platform's status; resolves to it, or `null` when the
-   *  server could not say (the line is then dropped rather than wrong). */
-  function refreshFirmwareStatus(p: Platform): Promise<PlatformFirmwareStatus | null> {
+  let firmwarePairs = $derived(
+    firmwareRequests(platforms, compatible, emulators.map((e) => e.name))
+  );
+
+  /** Re-reads one pair's status; resolves to it, or `null` when the server
+   *  could not say (the line is then dropped rather than wrong). */
+  function refreshFirmwareStatus(req: FirmwareRequest): Promise<PlatformFirmwareStatus | null> {
     return api
-      .platformFirmwareStatus(p.id, defaultEmulatorKey(p))
+      .platformFirmwareStatus(req.platform.id, defaultEmulatorKey(req.platform), req.emulator)
       .then((status) => {
-        firmwareStatus = { ...firmwareStatus, [p.id]: status };
+        firmwareStatus = { ...firmwareStatus, [req.key]: status };
         return status;
       })
       .catch(() => {
-        const { [p.id]: _gone, ...rest } = firmwareStatus;
+        const { [req.key]: _gone, ...rest } = firmwareStatus;
         firmwareStatus = rest;
         return null;
       });
   }
 
-  /** Unavailable, clicked: ask the server again, and install when it now
+  /** Not needed, clicked: ask the server again, and install when it now
    *  has something this emulator can use. */
-  async function recheckFirmware(platformId: number, platformName: string) {
-    const p = platforms.find((x) => x.id === platformId);
-    if (!p) return;
-    firmwareChecking = { ...firmwareChecking, [platformId]: true };
-    const status = await refreshFirmwareStatus(p);
-    const { [platformId]: _done, ...rest } = firmwareChecking;
+  async function recheckFirmware(key: string) {
+    const req = firmwarePairs.find((r) => r.key === key);
+    if (!req) return;
+    firmwareChecking = { ...firmwareChecking, [key]: true };
+    const status = await refreshFirmwareStatus(req);
+    const { [key]: _done, ...rest } = firmwareChecking;
     firmwareChecking = rest;
-    if (status?.available && !status.installed) installFirmware(platformId, platformName);
+    if (status?.available && !status.installed) installFirmware(key);
   }
 
   $effect(() => {
-    for (const p of firmwarePlatforms(platforms, defaults, emulators.map((e) => e.name))) {
-      refreshFirmwareStatus(p);
-    }
+    for (const req of firmwarePairs) refreshFirmwareStatus(req);
   });
 
   $effect(() => {
     const pending = listen<FirmwarePassFinished>(FIRMWARE_PASS_FINISHED_EVENT, (event) => {
-      const id = event.payload.platform_id;
-      const { [id]: _done, ...rest } = firmwarePending;
-      firmwarePending = rest;
-      const p = platforms.find((x) => x.id === id);
-      if (p) refreshFirmwareStatus(p);
+      const { platform_id: id, ok, failed } = event.payload;
+      for (const req of firmwarePairs.filter((r) => r.platform.id === id)) {
+        // Only an Install this view started says how it ended; a pass a game
+        // install or an emulator install ran stays quiet, as before.
+        if (firmwarePending[req.key] === true) {
+          const { [req.key]: _done, ...rest } = firmwarePending;
+          firmwarePending = rest;
+          const toast = firmwareFinishedToast(defaultEmulatorKey(req.platform), req.emulator, ok, failed);
+          pushToast(toast.text, toast.level);
+        }
+        refreshFirmwareStatus(req);
+      }
     });
     return () => {
       pending.then((unlisten) => unlisten());
     };
   });
 
-  function installFirmware(platformId: number, platformName: string) {
-    firmwarePending = { ...firmwarePending, [platformId]: true };
-    api.installFirmwareForPlatform(platformId, platformName).catch((err) => {
-      const { [platformId]: _failed, ...rest } = firmwarePending;
+  function installFirmware(key: string) {
+    const req = firmwarePairs.find((r) => r.key === key);
+    if (!req) return;
+    const name = defaultEmulatorKey(req.platform);
+    firmwarePending = { ...firmwarePending, [key]: true };
+    pushToast(firmwareStartedToast(name, req.emulator));
+    api.installFirmwareForPlatform(req.platform.id, name, req.emulator).catch((err) => {
+      const { [key]: _failed, ...rest } = firmwarePending;
       firmwarePending = rest;
-      pushToast(`Could not install ${platformName} firmware: ${errorMessage(err)}`, 'error');
+      pushToast(`Could not install ${name} firmware: ${errorMessage(err)}`, 'error');
     });
   }
 
@@ -792,11 +810,11 @@
                           {note.text}
                         </p>
                       {/each}
-                      {#each emulatorFirmwareRows(e.name, platforms, defaults, firmwareStatus) as fw (fw.platformId)}
+                      {#each emulatorFirmwareRows(e.name, platforms, compatible, defaults, firmwareStatus) as fw (fw.key)}
                         {@const action = firmwareAction(
                           fw,
-                          firmwarePending[fw.platformId] === true,
-                          firmwareChecking[fw.platformId] === true
+                          firmwarePending[fw.key] === true,
+                          firmwareChecking[fw.key] === true
                         )}
                         <div class="firmware" data-testid={`emulator-firmware-${sanitizeName(e.name)}-${fw.platformId}`}>
                           <p class="hint">{fw.label}</p>
@@ -818,9 +836,9 @@
                             <button
                               data-testid={`emulator-firmware-unavailable-${sanitizeName(e.name)}-${fw.platformId}`}
                               class="secondary"
-                              title="No firmware on the server for this emulator. Click to check again."
+                              title={notNeededTitle(e.name)}
                               disabled={action === 'checking'}
-                              onclick={() => recheckFirmware(fw.platformId, fw.platformName)}
+                              onclick={() => recheckFirmware(fw.key)}
                             >
                               {FIRMWARE_ACTION_LABELS[action]}
                             </button>
@@ -828,7 +846,7 @@
                             <button
                               data-testid={`emulator-firmware-install-${sanitizeName(e.name)}-${fw.platformId}`}
                               disabled={action === 'requested'}
-                              onclick={() => installFirmware(fw.platformId, fw.platformName)}
+                              onclick={() => installFirmware(fw.key)}
                             >
                               {FIRMWARE_ACTION_LABELS[action]}
                             </button>

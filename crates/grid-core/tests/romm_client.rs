@@ -163,6 +163,26 @@ async fn firmware_skips_items_without_an_integer_id() {
 }
 
 #[tokio::test]
+async fn firmware_leaves_out_files_the_server_says_are_gone() {
+    // RomM keeps a record for a file removed from its disk until the next
+    // scan; downloading it answers 404, so it is not offered at all.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/firmware"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 1, "file_name": "mcpx_1.0.bin", "missing_from_fs": false},
+            {"id": 2, "file_name": "xbox.zip", "missing_from_fs": true},
+            {"id": 3, "file_name": "no-flag.bin"}
+        ])))
+        .mount(&server)
+        .await;
+    let client = RommClient::new(&server.uri(), token_cred()).unwrap();
+    let firmware = client.firmware(43).await.unwrap();
+    let names: Vec<&str> = firmware.iter().map(|f| f.file_name.as_str()).collect();
+    assert_eq!(names, ["mcpx_1.0.bin", "no-flag.bin"]);
+}
+
+#[tokio::test]
 async fn firmware_non_array_body_yields_empty_vec() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

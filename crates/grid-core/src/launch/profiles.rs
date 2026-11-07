@@ -846,7 +846,21 @@ mod tests {
             profile.save_directories.is_empty() && profile.state_directories.is_empty(),
             "the Dolphin readers own save resolution; a profile list would bypass them"
         );
-        assert!(profile.firmware_directories.is_empty());
+        // The GameCube IPL, into each region folder Dolphin boots from (JAP
+        // is the older name for JPN, and Dolphin still makes it);
+        // the firmware writer keeps it out of the folders whose TV standard
+        // its header does not name.
+        let ipl = Some(vec!["ipl".to_string()]);
+        assert_eq!(
+            profile.firmware_directories,
+            ["User/GC/USA", "User/GC/JPN", "User/GC/JAP", "User/GC/EUR"]
+                .iter()
+                .map(|path| FirmwareDirSpec {
+                    path: path.to_string(),
+                    keywords: ipl.clone(),
+                })
+                .collect::<Vec<_>>()
+        );
         assert!(profile.legacy_args.is_empty());
     }
 

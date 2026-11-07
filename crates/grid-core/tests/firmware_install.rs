@@ -570,3 +570,79 @@ async fn a_download_matching_the_server_checksum_is_written() {
     assert_eq!(result, Vec::<String>::new());
     assert_eq!(fs::read(dir.path().join("scph5501.bin")).unwrap(), b"BIOS");
 }
+
+/// A GameCube IPL goes to the Dolphin region folders its header names: an
+/// NTSC dump to `USA` and `JPN`, never `EUR`, and a PAL dump only to `EUR`.
+/// The folder it skips still counts as done, so the line reads Installed.
+#[tokio::test]
+async fn a_gamecube_ipl_lands_only_in_the_region_folders_its_header_names() {
+    use grid_core::firmware::install_platform_firmware_recorded;
+    use grid_core::firmware::manifest::{firmware_installed, FirmwareManifest, MANIFEST_FILE};
+    use grid_core::romm::FirmwareRecord;
+
+    let header = |standard: &str| {
+        let mut data = format!(
+            "(C) 1999-2003 Nintendo.  All rights reserved.(C) 1999 ArtX Inc.  All rights reserved.{standard} Revision 1.2  "
+        )
+        .into_bytes();
+        data.resize(0x200, 0);
+        data
+    };
+    for (standard, wanted, skipped) in [
+        ("NTSC", &["USA", "JPN"][..], &["EUR"][..]),
+        ("PAL ", &["EUR"][..], &["USA", "JPN"][..]),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/firmware"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"id": 3, "file_name": "IPL.bin"}
+            ])))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/firmware/3/content/IPL.bin"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(header(standard)))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let gc = dir.path().join("User").join("GC");
+        let manifest = dir.path().join(MANIFEST_FILE);
+        let targets: Vec<FirmwareTarget> = ["USA", "JPN", "EUR"]
+            .iter()
+            .map(|region| routed(&gc.join(region), &["ipl"]))
+            .collect();
+        let result = install_platform_firmware_recorded(
+            &client(&server),
+            21,
+            &targets,
+            FirmwareOptions::default(),
+            Some(&manifest),
+        )
+        .await;
+
+        assert_eq!(result, Vec::<String>::new(), "{standard}");
+        for region in wanted {
+            assert!(
+                gc.join(region).join("IPL.bin").is_file(),
+                "{standard}: {region}"
+            );
+        }
+        for region in skipped {
+            assert!(
+                !gc.join(region).join("IPL.bin").exists(),
+                "{standard}: {region}"
+            );
+        }
+        let records = [FirmwareRecord {
+            id: 3,
+            file_name: "IPL.bin".into(),
+            ..Default::default()
+        }];
+        assert!(
+            firmware_installed(&records, &targets, &FirmwareManifest::load(&manifest)),
+            "{standard}"
+        );
+    }
+}

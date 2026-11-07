@@ -183,6 +183,13 @@ pub fn prepare_standalone_emulator_launch(
             &emulator_dir_placeholder(&executable),
         )?);
     }
+    if crate::autoconfig::is_xemu(entry, profiles) {
+        argv.extend(standalone_option_args(
+            &entry.args,
+            &emulator_dir_placeholder(&executable),
+            &["-config_path"],
+        )?);
+    }
     Ok((argv, working_dir))
 }
 
@@ -228,24 +235,35 @@ fn standalone_launcher_path(
     }
 }
 
-/// The user-directory arguments a ROM-less Dolphin launch keeps: the first
-/// `-u <value>`, `--user <value>`, or `--user=<value>` in `args`, with
-/// `%emu_dir%` filled from `emu_dir` exactly as a game launch fills it.
-/// Every other argument is dropped. A value that names `%emu_dir%` while
-/// `emu_dir` is blank fails with the game launch's
+/// The arguments a ROM-less launch keeps from `args`: the first occurrence
+/// of one of `options` with its value (`-u <value>`, or `--user=<value>`
+/// for a `--` option), with `%emu_dir%` filled from `emu_dir` exactly as a
+/// game launch fills it. Every other argument is dropped. A value that
+/// names `%emu_dir%` while `emu_dir` is blank fails with the game launch's
 /// `"Invalid launch arguments: <EMU_DIR_MISSING>"` message.
-fn standalone_dolphin_user_args(args: &str, emu_dir: &str) -> Result<Vec<String>, String> {
+///
+/// Dolphin keeps its user directory (`-u`/`--user`) and xemu its config file
+/// (`-config_path`): without them the emulator opens on a different
+/// settings folder from the one GRID set up and games launch with.
+fn standalone_option_args(
+    args: &str,
+    emu_dir: &str,
+    options: &[&str],
+) -> Result<Vec<String>, String> {
     let tokens = split_template(args).map_err(|e| format!("Invalid launch arguments: {e}"))?;
     let mut kept = Vec::new();
     let mut iter = tokens.into_iter();
     while let Some(token) = iter.next() {
-        if token == "-u" || token == "--user" {
+        if options.contains(&token.as_str()) {
             if let Some(value) = iter.next() {
                 kept = vec![token, value];
             }
             break;
         }
-        if token.starts_with("--user=") {
+        let joined = options
+            .iter()
+            .any(|option| option.starts_with("--") && token.starts_with(&format!("{option}=")));
+        if joined {
             kept = vec![token];
             break;
         }
@@ -259,6 +277,11 @@ fn standalone_dolphin_user_args(args: &str, emu_dir: &str) -> Result<Vec<String>
             .map_err(|e| format!("Invalid launch arguments: {e}"))?;
     }
     Ok(apply_placeholders(kept, &placeholders))
+}
+
+/// Dolphin's user-directory arguments ([`standalone_option_args`]).
+fn standalone_dolphin_user_args(args: &str, emu_dir: &str) -> Result<Vec<String>, String> {
+    standalone_option_args(args, emu_dir, &["-u", "--user"])
 }
 
 /// Spawns a standalone emulator and hands the caller its [`Child`] —
@@ -1181,6 +1204,32 @@ mod tests {
         assert_eq!(
             standalone_dolphin_user_args("-u /data/User -b", "").unwrap(),
             vec!["-u".to_string(), "/data/User".to_string()]
+        );
+    }
+
+    #[test]
+    fn standalone_xemu_launch_keeps_only_the_config_path() {
+        // On Linux xemu never looks for a config beside its AppImage, so a
+        // ROM-less launch must name GRID's file just as a game launch does.
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("xemu-0.8.139-x86_64.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let mut e = entry(
+            exe.to_str().unwrap(),
+            "-config_path \"%emu_dir%/xemu.toml\" -full-screen -dvd_path \"%rom%\"",
+        );
+        e.name = "Xemu (Xbox)".to_string();
+
+        let (argv, _) =
+            prepare_standalone_emulator_launch(&e.name.clone(), Some(&e), &[], load_profiles())
+                .unwrap();
+        assert_eq!(
+            argv,
+            vec![
+                exe.to_string_lossy().into_owned(),
+                "-config_path".to_string(),
+                format!("{}/xemu.toml", dir.path().display()),
+            ]
         );
     }
 

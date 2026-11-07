@@ -79,8 +79,8 @@ use tauri::{AppHandle, Emitter};
 pub const FIRMWARE_PASS_FINISHED_EVENT: &str = "firmware-pass-finished";
 
 /// The [`FIRMWARE_PASS_FINISHED_EVENT`] payload. Token secrecy: the platform
-/// id and a flag, nothing else — no path, no emulator name, no URL, and
-/// nothing derived from a credential.
+/// id, a flag and a count, nothing else — no path, no emulator name, no URL,
+/// and nothing derived from a credential.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct FirmwarePassFinished {
     pub platform_id: i64,
@@ -89,14 +89,25 @@ pub struct FirmwarePassFinished {
     /// D19-gated repeat). `false` when the pass could not run (no session,
     /// unreadable config) or grid-core returned warnings.
     pub ok: bool,
+    /// How many warnings the pass logged — one per file that could not be
+    /// downloaded or written. `0` with `ok` false means the pass never ran.
+    pub failed: u32,
 }
 
 /// Emits [`FIRMWARE_PASS_FINISHED_EVENT`]. A webview that has gone away is
 /// not an error: the pass itself already did whatever it was going to do.
 fn emit_pass_finished(app: &AppHandle, platform_id: i64, ok: bool) {
+    emit_pass_result(app, platform_id, ok, 0);
+}
+
+fn emit_pass_result(app: &AppHandle, platform_id: i64, ok: bool, failed: u32) {
     let _ = app.emit(
         FIRMWARE_PASS_FINISHED_EVENT,
-        FirmwarePassFinished { platform_id, ok },
+        FirmwarePassFinished {
+            platform_id,
+            ok,
+            failed,
+        },
     );
 }
 
@@ -270,6 +281,7 @@ impl FirmwareService {
         session: Arc<SessionManager>,
         platform: String,
         platform_id: i64,
+        emulator: Option<String>,
         trigger: FirmwareTrigger,
     ) {
         let Some(client) = session.client() else {
@@ -283,7 +295,8 @@ impl FirmwareService {
             return;
         };
         let profiles = load_profiles();
-        let Some(entry) = default_entry_for_platform(&config, &platform, profiles) else {
+        let Some(entry) = entry_for_platform(&config, &platform, emulator.as_deref(), profiles)
+        else {
             // Nothing to do rather than a failure: there is nowhere to put
             // firmware for this platform.
             emit_pass_finished(&app, platform_id, true);
@@ -316,12 +329,17 @@ impl FirmwareService {
             let ctx = GameFirmwareContext {
                 platform: &platform,
                 platform_id,
+                emulator: emulator.as_deref(),
                 config: &config,
                 profiles,
                 config_dir: &config_dir,
             };
             let warnings = install_for_game(&client, &ctx).await;
             let ok = warnings.is_empty();
+            let failed = warnings
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count() as u32;
             if !warnings.is_empty() {
                 // D14: warnings are logged, never surfaced as a dialog —
                 // the install already succeeded. Local paths and platform
@@ -332,7 +350,7 @@ impl FirmwareService {
             // warning is a per-file outcome, and re-downloading the whole
             // set on the next launch would not change it.
             service.mark_completed(&dir, platform_id);
-            emit_pass_finished(&app, platform_id, ok);
+            emit_pass_result(&app, platform_id, ok, failed);
         });
     }
 
@@ -363,7 +381,16 @@ impl FirmwareService {
         let Some(platform_id) = platform_id_for(&install.platform_ids(), &record.platform) else {
             return;
         };
-        self.spawn_for_platform(app, session, record.platform.clone(), platform_id, trigger);
+        // A game's firmware goes to the emulator that will launch it: the
+        // platform's default.
+        self.spawn_for_platform(
+            app,
+            session,
+            record.platform.clone(),
+            platform_id,
+            None,
+            trigger,
+        );
     }
 
     /// Installs the platform firmware a freshly installed emulator wants,
@@ -623,6 +650,20 @@ fn platform_id_for(ids: &std::collections::BTreeMap<String, i64>, platform: &str
 
 /// The default emulator entry for `platform`, or `None` when none is
 /// configured or the configured name matches no entry.
+/// The entry a firmware pass for `platform` installs into: `emulator` by
+/// exact name when the caller names one, else the platform's default.
+pub(crate) fn entry_for_platform<'a>(
+    config: &'a Config,
+    platform: &str,
+    emulator: Option<&str>,
+    profiles: &[grid_core::launch::profiles::EmulatorProfile],
+) -> Option<&'a EmulatorEntry> {
+    match emulator {
+        Some(name) => grid_core::launch::selection::emulator_entry_by_name(&config.emulators, name),
+        None => default_entry_for_platform(config, platform, profiles),
+    }
+}
+
 pub(crate) fn default_entry_for_platform<'a>(
     config: &'a Config,
     platform: &str,
@@ -680,15 +721,17 @@ mod tests {
         let json = serde_json::to_string(&FirmwarePassFinished {
             platform_id: 7,
             ok: true,
+            failed: 0,
         })
         .expect("payload serialises");
-        assert_eq!(json, r#"{"platform_id":7,"ok":true}"#);
+        assert_eq!(json, r#"{"platform_id":7,"ok":true,"failed":0}"#);
         let json = serde_json::to_string(&FirmwarePassFinished {
             platform_id: 19,
             ok: false,
+            failed: 1,
         })
         .expect("payload serialises");
-        assert_eq!(json, r#"{"platform_id":19,"ok":false}"#);
+        assert_eq!(json, r#"{"platform_id":19,"ok":false,"failed":1}"#);
     }
 
     #[test]

@@ -149,6 +149,13 @@ describe('firmware', () => {
       timeoutMsg: "DuckStation's row never listed the PlayStation firmware",
     });
     await install.click();
+    // The click says at once that the install started …
+    await browser.waitUntil(
+      async () =>
+        (await $(testId('toast-region')).isExisting()) &&
+        /Installing .* firmware for DuckStation/.test(await $(testId('toast-region')).getText()),
+      { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Install firmware never said it had started' },
+    );
     await browser.waitUntil(() => existsSync(bios), {
       timeout: FIRMWARE_TIMEOUT,
       timeoutMsg: `Install firmware never wrote ${bios}`,
@@ -160,6 +167,12 @@ describe('firmware', () => {
       timeoutMsg: 'the row never said the firmware was installed',
     });
     await expect(install).not.toExist();
+    // … and when it has finished.
+    await browser.waitUntil(
+      async () =>
+        /firmware installed for DuckStation/.test(await $(testId('toast-region')).getText()),
+      { timeout: FIRMWARE_TIMEOUT, timeoutMsg: 'Install firmware never said it had finished' },
+    );
   });
 
   it('fetches the PS3 PUP through its own drawer row when RPCS3 is added by hand', async () => {

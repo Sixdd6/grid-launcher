@@ -331,6 +331,12 @@
     "save_directories": [],
     "state_directories": [],
     "user_data": ["User"],
+    "firmware_directories": [
+      {"path": "User/GC/USA", "match": ["ipl"]},
+      {"path": "User/GC/JPN", "match": ["ipl"]},
+      {"path": "User/GC/JAP", "match": ["ipl"]},
+      {"path": "User/GC/EUR", "match": ["ipl"]}
+    ],
     "screenshot_directories": ["User/ScreenShots"]
   },
   {
@@ -394,7 +400,8 @@
       }
     },
     "name": "Xemu (Xbox)",
-    "args": "-full-screen -dvd_path \"%rom%\"",
+    "args": "-config_path \"%emu_dir%/xemu.toml\" -full-screen -dvd_path \"%rom%\"",
+    "legacy_args": ["-full-screen -dvd_path \"%rom%\""],
     "all_platforms": false,
     "platform_keywords": ["xbox"],
     "use_game_title_as_name": false,

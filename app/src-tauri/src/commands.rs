@@ -784,26 +784,33 @@ pub struct PlatformFirmwareStatus {
     pub file_count: u32,
     /// Whether the platform has a default emulator — i.e. somewhere for
     /// that firmware to be installed to. Without one there is nothing to
-    /// install into, so the chip offers no action.
+    /// install into, so the chip offers no action. With `emulator` named,
+    /// whether that entry exists; the field keeps its name for the chip,
+    /// which never names one.
     pub has_default_emulator: bool,
     /// Whether every server firmware file is already installed for the
-    /// platform's default emulator (`grid_core::firmware::manifest`), so the
+    /// emulator (the named one, else the platform's default;
+    /// `grid_core::firmware::manifest`), so the
     /// Emulators view says "Installed" rather than offering Install again.
     pub installed: bool,
-    /// Whether any server firmware file can land in the default emulator's
+    /// Whether any server firmware file can land in that emulator's
     /// folders (`grid_core::firmware::manifest::firmware_available`). When
     /// not, Install would place nothing, so the Emulators view says
     /// "Unavailable".
     pub available: bool,
 }
 
-/// `GET /api/firmware?platform_id=<id>` plus the local default-emulator
-/// check. Read-only: nothing is downloaded here.
+/// `GET /api/firmware?platform_id=<id>` plus the local check against
+/// `emulator` (by exact name), or the platform's default emulator when
+/// `emulator` is `None` — the Server chip's case. The Emulators view names
+/// the emulator, so an installed emulator gets its firmware whether or not
+/// it is the default. Read-only: nothing is downloaded here.
 #[tauri::command]
 pub async fn platform_firmware_status(
     state: State<'_, AppState>,
     platform_id: i64,
     platform: String,
+    emulator: Option<String>,
 ) -> Result<PlatformFirmwareStatus, String> {
     let records = match state.session.client() {
         // Offline: report "no firmware" rather than an error. The chip is
@@ -819,9 +826,13 @@ pub async fn platform_firmware_status(
             return (false, false, false);
         };
         let profiles = grid_core::launch::profiles::load_profiles();
-        let has_default =
-            crate::firmware_service::default_entry_for_platform(&config, &platform, profiles)
-                .is_some();
+        let has_default = crate::firmware_service::entry_for_platform(
+            &config,
+            &platform,
+            emulator.as_deref(),
+            profiles,
+        )
+        .is_some();
         if !has_default || records.is_empty() {
             return (has_default, false, false);
         }
@@ -833,6 +844,7 @@ pub async fn platform_firmware_status(
         let ctx = GameFirmwareContext {
             platform: &platform,
             platform_id,
+            emulator: emulator.as_deref(),
             config: &config,
             profiles,
             config_dir: &config_dir,
@@ -860,7 +872,9 @@ pub async fn platform_firmware_status(
     })
 }
 
-/// The firmware chip's Install action. Fire-and-forget, exactly like the
+/// The Install action of the firmware chip (`emulator` `None`: the default
+/// emulator) and of an Emulators-view firmware line (`emulator` named).
+/// Fire-and-forget, exactly like the
 /// per-game and per-emulator triggers: the pass runs in the background and
 /// logs its warnings. It never reports back through this command's return
 /// value — the pass announces its end with
@@ -872,6 +886,7 @@ pub fn install_firmware_for_platform(
     app: tauri::AppHandle,
     platform_id: i64,
     platform: String,
+    emulator: Option<String>,
 ) -> Result<(), String> {
     ensure_library_idle(&state)?;
     state.firmware.spawn_for_platform(
@@ -879,6 +894,7 @@ pub fn install_firmware_for_platform(
         state.session.clone(),
         platform,
         platform_id,
+        emulator,
         crate::firmware_service::FirmwareTrigger::Install,
     );
     Ok(())

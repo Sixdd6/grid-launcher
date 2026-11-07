@@ -2,13 +2,20 @@
 // firmware is installed so an emulator can run, so its Install lives with
 // the emulator, not with a game or a platform). Pure, like `defaults.ts`.
 //
-// RomM holds firmware per platform, and GRID installs a platform's firmware
-// for that platform's default emulator, so an emulator lists the platforms
-// it is the default for whose server firmware has files.
+// RomM holds firmware per platform. An emulator lists the platforms it
+// supports (the backend's `compatible_emulators` answer, the same list the
+// Platform defaults select offers) whose server firmware has files, whether
+// or not it is that platform's default: firmware is what lets the emulator
+// run, and a platform set to "(none)" still has its emulators installed.
+// Only the default emulator is told "Unavailable"; any other emulator lists
+// a platform only when the firmware can land in its folders, so a hand-added
+// entry with no profile (which "supports" every platform) lists nothing.
 import type { LaunchDefaults, Platform, PlatformFirmwareStatus } from '../api';
-import { defaultEmulatorKey } from './defaults';
+import { defaultEmulatorKey, isEmulatorsShelf, needsEmulator, savedDefaultFor } from './defaults';
 
 export type EmulatorFirmwareRow = {
+  /** [`firmwareKey`] for this emulator and platform. */
+  key: string;
   platformId: number;
   /** The platform's name as the firmware commands take it. */
   platformName: string;
@@ -19,38 +26,66 @@ export type EmulatorFirmwareRow = {
   available: boolean;
 };
 
-/** Platforms whose firmware status the Installed list needs: those with a
- *  default emulator that is configured. */
-export function firmwarePlatforms(
-  platforms: Platform[],
-  defaults: LaunchDefaults | null,
-  emulatorNames: string[]
-): Platform[] {
-  if (defaults === null) return [];
-  const names = new Set(emulatorNames);
-  return platforms.filter((p) => names.has(defaults.default_emulators[defaultEmulatorKey(p)] ?? ''));
+/** Where one emulator's firmware status for one platform is kept. */
+export function firmwareKey(emulatorName: string, platformId: number): string {
+  return `${platformId}:${emulatorName}`;
 }
 
-/** One line per platform this emulator is the default for whose server
- *  firmware has files, in platform order. */
+/** The platforms `emulatorName` supports that can hold firmware for it:
+ *  never a native platform or the Emulators shelf. `compatible` is keyed by
+ *  the platform's raw `name`. */
+function supportedPlatforms(
+  emulatorName: string,
+  platforms: Platform[],
+  compatible: Record<string, string[]>
+): Platform[] {
+  return platforms.filter(
+    (p) => needsEmulator(p) && !isEmulatorsShelf(p) && (compatible[p.name] ?? []).includes(emulatorName)
+  );
+}
+
+export type FirmwareRequest = { key: string; emulator: string; platform: Platform };
+
+/** Every emulator-and-platform pair whose firmware status the Installed
+ *  list needs, in emulator then platform order. */
+export function firmwareRequests(
+  platforms: Platform[],
+  compatible: Record<string, string[]>,
+  emulatorNames: string[]
+): FirmwareRequest[] {
+  return emulatorNames.flatMap((emulator) =>
+    supportedPlatforms(emulator, platforms, compatible).map((platform) => ({
+      key: firmwareKey(emulator, platform.id),
+      emulator,
+      platform,
+    }))
+  );
+}
+
+/** One line per platform this emulator supports whose server firmware has
+ *  files and either can land in its folders or is its to fail (it is the
+ *  platform's default), in platform order. */
 export function emulatorFirmwareRows(
   emulatorName: string,
   platforms: Platform[],
+  compatible: Record<string, string[]>,
   defaults: LaunchDefaults | null,
-  statuses: Record<number, PlatformFirmwareStatus>
+  statuses: Record<string, PlatformFirmwareStatus>
 ): EmulatorFirmwareRow[] {
-  if (defaults === null) return [];
   const rows: EmulatorFirmwareRow[] = [];
-  for (const p of platforms) {
-    const key = defaultEmulatorKey(p);
-    if (defaults.default_emulators[key] !== emulatorName) continue;
-    const status = statuses[p.id];
+  for (const p of supportedPlatforms(emulatorName, platforms, compatible)) {
+    const key = firmwareKey(emulatorName, p.id);
+    const status = statuses[key];
     const count = status?.file_count ?? 0;
     if (count <= 0) continue;
+    const name = defaultEmulatorKey(p);
+    const isDefault = savedDefaultFor(defaults?.default_emulators, name) === emulatorName;
+    if (!isDefault && status?.available !== true && status?.installed !== true) continue;
     rows.push({
+      key,
       platformId: p.id,
-      platformName: key,
-      label: `${key} firmware · ${count === 1 ? '1 file' : `${count} files`}`,
+      platformName: name,
+      label: `${name} firmware · ${count === 1 ? '1 file' : `${count} files`}`,
       installed: status?.installed === true,
       available: status?.available === true,
     });
@@ -60,7 +95,7 @@ export function emulatorFirmwareRows(
 
 /**
  * What a firmware line offers. `requested` while an install runs,
- * `checking` while a click on Unavailable re-reads the server, `installed`
+ * `checking` while a click on Not needed re-reads the server, `installed`
  * once every file is in place, `unavailable` when nothing on the server can
  * land in this emulator's folders (Install would place nothing), else
  * `install`.
@@ -79,5 +114,38 @@ export const FIRMWARE_ACTION_LABELS: Record<FirmwareAction, string> = {
   requested: 'Requested…',
   checking: 'Checking…',
   installed: 'Installed',
-  unavailable: 'Unavailable',
+  unavailable: 'Not needed',
 };
+
+/** The toast an Install click shows at once. */
+export function firmwareStartedToast(platformName: string, emulatorName: string): string {
+  return `Installing ${platformName} firmware for ${emulatorName}…`;
+}
+
+/**
+ * The toast that ends an Install click, from the backend's pass-finished
+ * event. `failed` counts the files the pass could not place (one warning
+ * each); `ok` false with nothing failed means the pass never ran.
+ */
+export function firmwareFinishedToast(
+  platformName: string,
+  emulatorName: string,
+  ok: boolean,
+  failed: number
+): { text: string; level: 'success' | 'error' } {
+  if (ok) return { text: `${platformName} firmware installed for ${emulatorName}`, level: 'success' };
+  if (failed > 0) {
+    const files = failed === 1 ? '1 file' : `${failed} files`;
+    return {
+      text: `${platformName} firmware for ${emulatorName}: ${files} could not be installed`,
+      level: 'error',
+    };
+  }
+  return { text: `Could not install ${platformName} firmware for ${emulatorName}`, level: 'error' };
+}
+
+/** The Not needed button's tooltip: none of the server's files for the
+ *  platform is one GRID knows this emulator uses. */
+export function notNeededTitle(emulatorName: string): string {
+  return `${emulatorName} doesn't use any of the server's files for this platform. Click to check the server again.`;
+}

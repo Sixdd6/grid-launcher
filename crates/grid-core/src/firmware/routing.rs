@@ -351,6 +351,11 @@ pub fn shape_for_cemu(firmware: Vec<FirmwareTarget>) -> Vec<FirmwareTarget> {
 pub struct GameFirmwareContext<'a> {
     pub platform: &'a str,
     pub platform_id: i64,
+    /// The emulator entry to install for, by exact name. `None` means the
+    /// platform's default emulator — what a game install or launch uses.
+    /// The Emulators view names the emulator, because firmware lives with
+    /// the emulator and need not wait for it to become the default.
+    pub emulator: Option<&'a str>,
     pub config: &'a Config,
     pub profiles: &'a [EmulatorProfile],
     pub config_dir: &'a Path,
@@ -390,7 +395,8 @@ impl FirmwarePlan<'_> {
 }
 
 /// The plan for `ctx.platform`, or `None` when there is nothing to do — a
-/// blank platform, no default emulator for it, no matching entry, a
+/// blank platform, no default emulator for it (when `ctx.emulator` names
+/// none), no matching entry, a
 /// RetroArch install with no configured core, or no targets at all
 /// (`_install_firmware_for_game_without_ui`, install_mixin.py:528-697).
 pub fn firmware_plan<'a>(ctx: &GameFirmwareContext<'a>) -> Option<FirmwarePlan<'a>> {
@@ -398,13 +404,16 @@ pub fn firmware_plan<'a>(ctx: &GameFirmwareContext<'a>) -> Option<FirmwarePlan<'
         return None;
     }
 
-    let emulator_name = default_emulator_name_for_platform(
-        &ctx.config.emulators,
-        &ctx.config.default_emulators,
-        ctx.platform,
-        ctx.profiles,
-        &installed_core_resolver,
-    );
+    let emulator_name = match ctx.emulator {
+        Some(name) => name.to_string(),
+        None => default_emulator_name_for_platform(
+            &ctx.config.emulators,
+            &ctx.config.default_emulators,
+            ctx.platform,
+            ctx.profiles,
+            &installed_core_resolver,
+        ),
+    };
     if emulator_name.trim().is_empty() {
         return None;
     }
@@ -1277,6 +1286,73 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_catalog_dolphin_routes_a_gamecube_ipl_to_its_region_folders() {
+        use crate::firmware::manifest::{firmware_available, FirmwareManifest};
+        use crate::romm::FirmwareRecord;
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("Dolphin (GameCube, Wii)");
+        std::fs::create_dir_all(dir.join("User")).unwrap();
+        let exe = dir.join("Dolphin_Emulator-2609a-anylinux-x86_64.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let mut config = game_config(temp.path(), &exe, "Dolphin (GameCube, Wii)");
+        config
+            .default_emulators
+            .insert("Nintendo GameCube".into(), "Dolphin (GameCube, Wii)".into());
+
+        let ctx = GameFirmwareContext {
+            platform: "Nintendo GameCube",
+            platform_id: 21,
+            emulator: None,
+            config: &config,
+            profiles: load_profiles(),
+            config_dir: temp.path(),
+        };
+        let plan = firmware_plan(&ctx).expect("Dolphin has somewhere to put an IPL");
+        let targets = plan.targets();
+        let usa = resolve_best_effort(&dir.join("User").join("GC").join("USA"));
+        assert!(targets.iter().any(|t| t.path == usa), "{targets:?}");
+        let records = [FirmwareRecord {
+            id: 1,
+            file_name: "IPL.bin".into(),
+            ..Default::default()
+        }];
+        assert!(firmware_available(
+            &records,
+            &targets,
+            &FirmwareManifest::default()
+        ));
+    }
+
+    #[test]
+    fn a_named_emulator_gets_a_plan_where_the_default_is_none() {
+        // The user chose "(none)" for Xbox; xemu is still installed and
+        // still needs its BIOS, so naming it routes to its folder.
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("Xemu");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("xemu-0.8.139-x86_64.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let mut config = game_config(temp.path(), &exe, "Xemu (Xbox)");
+        config
+            .default_emulators
+            .insert("Xbox".into(), crate::launch::selection::NO_EMULATOR.into());
+
+        let ctx = |emulator| GameFirmwareContext {
+            platform: "Xbox",
+            platform_id: 43,
+            emulator,
+            config: &config,
+            profiles: load_profiles(),
+            config_dir: temp.path(),
+        };
+        assert!(firmware_plan(&ctx(None)).is_none());
+        let plan = firmware_plan(&ctx(Some("Xemu (Xbox)"))).expect("a plan for xemu");
+        let folder = resolve_best_effort(&dir);
+        assert!(plan.targets().iter().any(|t| t.path == folder));
+        assert!(firmware_plan(&ctx(Some("Not Installed"))).is_none());
+    }
+
     #[tokio::test]
     async fn install_for_game_writes_firmware_into_the_profile_target() {
         let server = MockServer::start().await;
@@ -1303,6 +1379,7 @@ mod tests {
         let ctx = GameFirmwareContext {
             platform: "PlayStation",
             platform_id: 19,
+            emulator: None,
             config: &config,
             profiles: load_profiles(),
             config_dir: temp.path(),
@@ -1338,6 +1415,7 @@ mod tests {
             let ctx = GameFirmwareContext {
                 platform,
                 platform_id: 19,
+                emulator: None,
                 config: cfg,
                 profiles: load_profiles(),
                 config_dir: temp.path(),
@@ -1364,6 +1442,7 @@ mod tests {
         let ctx = GameFirmwareContext {
             platform: "Nintendo 64",
             platform_id: 3,
+            emulator: None,
             config: &config,
             profiles: load_profiles(),
             config_dir: temp.path(),

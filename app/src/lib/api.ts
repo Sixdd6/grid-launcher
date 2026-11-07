@@ -667,15 +667,17 @@ export type PlatformFirmwareStatus = {
   /** Every server file is already installed for the default emulator. */
   installed: boolean;
   /** Some server file can land in the default emulator's folders; when
-   *  not, Install would place nothing ("Unavailable"). */
+   *  not, Install would place nothing ("Not needed"). */
   available: boolean;
 };
 
 /// The `firmware-pass-finished` payload (`app/src-tauri/src/firmware_service.rs`'s
 /// `FirmwarePassFinished`). `ok` is false when the pass could not run (no
-/// session, unreadable config) or grid-core reported warnings. It carries a
-/// platform id and a flag only — never a path, an emulator name, or a URL.
-export type FirmwarePassFinished = { platform_id: number; ok: boolean };
+/// session, unreadable config) or grid-core reported warnings; `failed`
+/// counts those warnings (one per file), `0` when the pass never ran. It
+/// carries a platform id, a flag and a count only — never a path, an
+/// emulator name, or a URL.
+export type FirmwarePassFinished = { platform_id: number; ok: boolean; failed: number };
 
 /// Emitted once for every `installFirmwareForPlatform` call, when that call's
 /// background pass has ended — including when it ended with nothing to do.
@@ -951,10 +953,20 @@ export const api = {
     invoke<Rpcs3FirmwareStatus>('rpcs3_firmware_status', { emulatorName }),
   installPs3Firmware: (emulatorName: string) =>
     invoke<boolean>('install_ps3_firmware', { emulatorName }),
-  platformFirmwareStatus: (platformId: number, platform: string) =>
-    invoke<PlatformFirmwareStatus>('platform_firmware_status', { platformId, platform }),
-  installFirmwareForPlatform: (platformId: number, platform: string) =>
-    invoke<void>('install_firmware_for_platform', { platformId, platform }),
+  /** `emulator` names the entry to check; omitted, the platform's default emulator. */
+  platformFirmwareStatus: (platformId: number, platform: string, emulator?: string) =>
+    invoke<PlatformFirmwareStatus>('platform_firmware_status', {
+      platformId,
+      platform,
+      emulator: emulator ?? null,
+    }),
+  /** `emulator` names the entry to install into; omitted, the platform's default emulator. */
+  installFirmwareForPlatform: (platformId: number, platform: string, emulator?: string) =>
+    invoke<void>('install_firmware_for_platform', {
+      platformId,
+      platform,
+      emulator: emulator ?? null,
+    }),
   cancelDownloadForRom: (romId: number) => invoke<void>('cancel_download_for_rom', { romId }),
   listUpdates: () => invoke<UpdateRow[]>('list_updates'),
   updateGame: (romId: number) => invoke<void>('update_game', { romId }),

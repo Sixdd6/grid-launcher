@@ -318,6 +318,11 @@ pub struct FirmwareRecord {
     /// unstated. A download that hashes differently is rejected.
     #[serde(default)]
     pub md5_hash: String,
+    /// The server's own word that the file is gone from its disk. Such a
+    /// record cannot be downloaded (the content route answers 404), so
+    /// [`RommClient::firmware`] drops it.
+    #[serde(default)]
+    pub missing_from_fs: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
@@ -553,7 +558,9 @@ impl RommClient {
     /// leniently so one malformed/unexpected entry doesn't fail the whole
     /// list — only items with an integer `id` are kept. A non-array body
     /// (Python's `isinstance(firmware, list)` guard) yields an empty vec
-    /// rather than an error.
+    /// rather than an error. A record the server marks `missing_from_fs`
+    /// is left out: its bytes cannot be fetched, so it is neither counted
+    /// nor offered for install.
     pub async fn firmware(&self, platform_id: i64) -> Result<Vec<FirmwareRecord>, RommError> {
         let value: serde_json::Value = self
             .get_json("/api/firmware", &[("platform_id", platform_id.to_string())])
@@ -564,6 +571,7 @@ impl RommClient {
         Ok(items
             .iter()
             .filter_map(|item| serde_json::from_value::<FirmwareRecord>(item.clone()).ok())
+            .filter(|record| !record.missing_from_fs)
             .collect())
     }
 

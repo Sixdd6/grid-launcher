@@ -60,6 +60,46 @@ impl Default for FirmwareOptions {
     }
 }
 
+/// The TV standard a GameCube IPL dump states in its plain-text header
+/// (`"… NTSC Revision 1.2"`, `"… PAL  Revision 1.0"`, `"… MPAL Revision
+/// 1.1"`), or `None` when the header names none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IplStandard {
+    Ntsc,
+    Pal,
+}
+
+fn ipl_standard(data: &[u8]) -> Option<IplStandard> {
+    let header = String::from_utf8_lossy(&data[..data.len().min(0x100)]);
+    // MPAL (Brazil) boots NTSC-U discs, and contains "PAL": test it first.
+    if header.contains("NTSC") || header.contains("MPAL") {
+        Some(IplStandard::Ntsc)
+    } else if header.contains("PAL") {
+        Some(IplStandard::Pal)
+    } else {
+        None
+    }
+}
+
+/// Whether `IPL.bin` (`data`) belongs in `target`. Dolphin boots a game with
+/// the IPL in `User/GC/<region>/`, the region being the game's own (`USA`,
+/// `JPN`, or `JAP` on older setups, for NTSC; `EUR` for PAL), so an NTSC
+/// IPL goes to the NTSC folders and a PAL one to `EUR`. Any other file, any
+/// other folder, or a header naming no standard is always accepted.
+fn ipl_fits_target(file_name: &str, data: &[u8], target: &Path) -> bool {
+    if !file_name.eq_ignore_ascii_case("ipl.bin") {
+        return true;
+    }
+    let folder = target
+        .file_name()
+        .map(|name| name.to_string_lossy().to_ascii_uppercase())
+        .unwrap_or_default();
+    !matches!(
+        (folder.as_str(), ipl_standard(data)),
+        ("USA" | "JPN" | "JAP", Some(IplStandard::Pal)) | ("EUR", Some(IplStandard::Ntsc))
+    )
+}
+
 /// Returns the subset of `targets` that should receive `file_name`
 /// (`resolve_firmware_targets`, firmware_install.py:38-56): a plain target
 /// (`keywords: None`) accepts every file; a keyword target accepts the
@@ -287,6 +327,13 @@ pub async fn install_platform_firmware_recorded(
         }
 
         for target in &applicable {
+            if !ipl_fits_target(&file_name, &data, &target.path) {
+                // A GameCube IPL is routed to every region folder by name;
+                // its own header says which ones it belongs in. The empty
+                // record tells the installed check this folder is done.
+                installs.push((target.path.clone(), file_name.clone(), Vec::new()));
+                continue;
+            }
             if let Err(e) = std::fs::create_dir_all(&target.path) {
                 warnings.push(format!(
                     "Could not create firmware directory {}: {e}",
@@ -312,12 +359,32 @@ pub async fn install_platform_firmware_recorded(
 mod tests {
     use super::*;
 
+    #[test]
+    fn an_ipl_fits_the_region_folders_of_its_tv_standard() {
+        let ntsc = b"(C) 1999-2003 Nintendo.  All rights reserved.NTSC Revision 1.2  ";
+        let pal = b"(C) 1999-2001 Nintendo.  All rights reserved.PAL  Revision 1.0  ";
+        let mpal = b"(C) 1999-2001 Nintendo.  All rights reserved.MPAL Revision 1.1  ";
+        let gc = Path::new("/user/GC");
+        assert!(ipl_fits_target("IPL.bin", ntsc, &gc.join("USA")));
+        assert!(ipl_fits_target("ipl.bin", ntsc, &gc.join("JPN")));
+        assert!(ipl_fits_target("IPL.bin", ntsc, &gc.join("JAP")));
+        assert!(!ipl_fits_target("IPL.bin", ntsc, &gc.join("EUR")));
+        assert!(ipl_fits_target("IPL.bin", pal, &gc.join("EUR")));
+        assert!(!ipl_fits_target("IPL.bin", pal, &gc.join("USA")));
+        assert!(!ipl_fits_target("IPL.bin", mpal, &gc.join("EUR")));
+        // No standard in the header, another file, another folder: placed.
+        assert!(ipl_fits_target("IPL.bin", b"garbage", &gc.join("EUR")));
+        assert!(ipl_fits_target("scph5501.bin", pal, &gc.join("USA")));
+        assert!(ipl_fits_target("IPL.bin", pal, Path::new("/bios")));
+    }
+
     fn stated(size: u64, md5: &str) -> FirmwareRecord {
         FirmwareRecord {
             id: 1,
             file_name: "scph5501.bin".into(),
             file_size_bytes: size,
             md5_hash: md5.into(),
+            ..Default::default()
         }
     }
 
