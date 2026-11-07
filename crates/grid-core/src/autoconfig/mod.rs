@@ -370,7 +370,10 @@ pub fn is_shadps4(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
 /// pre-filling is not possible (doc 05 open question, ruled: follow the
 /// code).
 pub fn ra_capable(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
-    is_retroarch(entry, profiles) || is_pcsx2(entry, profiles) || is_ppsspp(entry, profiles)
+    is_retroarch(entry, profiles)
+        || is_pcsx2(entry, profiles)
+        || is_ppsspp(entry, profiles)
+        || is_dolphin(entry, profiles)
 }
 
 /// Spec deviation D2 (RA-keys-only fan-out) — no direct Python counterpart:
@@ -378,7 +381,7 @@ pub fn ra_capable(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
 /// `_ensure_emulator_sync_settings` for every registered emulator after a
 /// RetroAchievements login. Doing that here would re-apply every managed
 /// key (save directories, fullscreen, controller profiles, ...) just to
-/// deliver a credential pair, so this fan-out instead calls only the three
+/// deliver a credential pair, so this fan-out instead calls only the four
 /// narrow `ensure_ra_credentials` writers — one per [`ra_capable`] entry,
 /// in config order. `None` (from [`RaCredentials::usable`]) short-circuits
 /// to an empty vec before touching any entry: a blank pair writes nothing,
@@ -405,6 +408,10 @@ pub fn fan_out_ra_credentials(
         }
         if is_ppsspp(entry, profiles) {
             let result = ppsspp::ensure_ra_credentials(path, ra);
+            rows.push((entry.name.clone(), result.changed));
+        }
+        if is_dolphin(entry, profiles) {
+            let result = dolphin::ensure_ra_credentials(path, ra);
             rows.push((entry.name.clone(), result.changed));
         }
     }
@@ -684,6 +691,16 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
             "dolphin",
             dolphin::ensure_settings(path, ctx.fresh_install),
         );
+        // The RetroAchievements login, when the user has one (a blank pair
+        // writes nothing).
+        if let Some(ra) = ctx.ra.as_ref().and_then(RaCredentials::usable) {
+            record(
+                &mut report,
+                name,
+                "dolphin retroachievements",
+                dolphin::ensure_ra_credentials(path, ra),
+            );
+        }
     }
     if is_azahar(&subject, profiles) {
         record(
@@ -1999,12 +2016,11 @@ mod tests {
 
     // --- D2: ra_capable / fan_out_ra_credentials -----------------------------
 
-    /// `RetroArch`/`PCSX2`/`PPSSPP`-named entries are RA-capable; DuckStation
-    /// (suppression keys only — no credential parameters, doc 05 open
-    /// question, ruled: follow the code) and Dolphin (not RA-aware at all)
-    /// are not.
+    /// `RetroArch`/`PCSX2`/`PPSSPP`/`Dolphin`-named entries are RA-capable;
+    /// DuckStation (suppression keys only — no credential parameters, doc 05
+    /// open question, ruled: follow the code) is not.
     #[test]
-    fn ra_capable_excludes_duckstation_and_dolphin() {
+    fn ra_capable_excludes_duckstation() {
         assert!(ra_capable(
             &entry("RetroArch", "/opt/retroarch/retroarch"),
             &[]
@@ -2019,7 +2035,7 @@ mod tests {
             &entry("DuckStation", "/opt/duckstation/duckstation-qt.AppImage"),
             &[]
         ));
-        assert!(!ra_capable(
+        assert!(ra_capable(
             &entry("Dolphin", "/opt/dolphin/dolphin-emu"),
             &[]
         ));
@@ -2027,10 +2043,8 @@ mod tests {
 
     /// A config with a RetroArch, a PCSX2 and a Dolphin entry, each with a
     /// pre-existing config file carrying a sentinel unmanaged key: the
-    /// fan-out writes ONLY the RA credential keys into the two RA-capable
-    /// files, leaves every sentinel intact, and never touches the Dolphin
-    /// file (Dolphin is not RA-capable at all — it is not merely skipped for
-    /// blank credentials).
+    /// fan-out writes ONLY the RA credential keys, leaves every sentinel
+    /// intact, and touches no Dolphin file but `RetroAchievements.ini`.
     #[test]
     fn fan_out_writes_only_the_ra_keys() {
         let _lock = lock();
@@ -2055,7 +2069,9 @@ mod tests {
 
         let dolphin_exe = temp.path().join("Dolphin").join("dolphin-emu");
         touch(&dolphin_exe);
-        let dolphin_cfg = dolphin_exe.parent().unwrap().join("sentinel.ini");
+        let dolphin_config_dir = dolphin_exe.parent().unwrap().join("User").join("Config");
+        std::fs::create_dir_all(&dolphin_config_dir).unwrap();
+        let dolphin_cfg = dolphin_config_dir.join("Dolphin.ini");
         std::fs::write(&dolphin_cfg, "[Sentinel]\nUnmanaged = keep\n").unwrap();
         let dolphin_before = std::fs::read(&dolphin_cfg).unwrap();
 
@@ -2073,7 +2089,11 @@ mod tests {
 
         assert_eq!(
             rows,
-            vec![("RetroArch".to_string(), true), ("PCSX2".to_string(), true),]
+            vec![
+                ("RetroArch".to_string(), true),
+                ("PCSX2".to_string(), true),
+                ("Dolphin".to_string(), true),
+            ]
         );
 
         let ra_text = std::fs::read_to_string(&ra_cfg).unwrap();
@@ -2095,7 +2115,14 @@ mod tests {
         assert_eq!(
             std::fs::read(&dolphin_cfg).unwrap(),
             dolphin_before,
-            "Dolphin is not RA-capable; its file must be byte-identical"
+            "only RetroAchievements.ini is Dolphin's RA file"
+        );
+        let dolphin_ra =
+            std::fs::read_to_string(dolphin_config_dir.join("RetroAchievements.ini")).unwrap();
+        assert!(dolphin_ra.contains("Username = retro_user"), "{dolphin_ra}");
+        assert!(
+            dolphin_ra.contains("ApiToken = FAKE-RA-TOKEN-not-real"),
+            "{dolphin_ra}"
         );
     }
 

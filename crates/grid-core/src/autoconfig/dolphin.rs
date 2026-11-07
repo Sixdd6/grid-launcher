@@ -13,7 +13,7 @@ use std::sync::LazyLock;
 
 use regex::{Regex, RegexBuilder};
 
-use super::{paths, writers, EnsureResult};
+use super::{paths, writers, EnsureResult, RaCredentials};
 
 /// The `[GCPad1]` XInput default block, transcribed verbatim from
 /// dolphin.py:340-368: 27 lines, no leading newline, exactly one trailing
@@ -295,6 +295,52 @@ pub fn ensure_skip_ipl(emulator_path: &str) -> EnsureResult {
     }
 }
 
+/// Dolphin's RetroAchievements login: `[Achievements]` in
+/// `User/Config/RetroAchievements.ini` gets `Enabled`, `Username` and
+/// `ApiToken`. At start-up Dolphin logs in with the stored token
+/// (`AchievementManager::Init` → `rc_client_begin_login_with_token`), so no
+/// password is involved. `HardcoreEnabled = False` is written only while
+/// the file has no such key, matching the other emulators GRID sets up
+/// without overriding a later choice made in Dolphin.
+///
+/// The target is the first candidate whose folder exists — the portable
+/// `User/Config` beside the executable for a catalog install — else the
+/// first candidate. A no-op when either RA field is blank after trimming.
+pub fn ensure_ra_credentials(emulator_path: &str, ra: &RaCredentials) -> EnsureResult {
+    let username = ra.username().trim();
+    let token = ra.token().trim();
+    if username.is_empty() || token.is_empty() {
+        return EnsureResult::unchanged();
+    }
+    let candidates = ini_path_candidates(emulator_path, RA_INI);
+    let Some(selected) = candidates
+        .iter()
+        .find(|c| c.parent().is_some_and(Path::is_dir))
+        .or_else(|| candidates.first())
+        .cloned()
+    else {
+        return EnsureResult::unchanged();
+    };
+
+    match write_if_changed(&selected, |content| {
+        let mut desired = crate::desired![
+            ("Enabled", "True"),
+            ("Username", username),
+            ("ApiToken", token)
+        ];
+        if !writers::section_has_key(content, "Achievements", "HardcoreEnabled") {
+            desired.push(("HardcoreEnabled".to_string(), "False".to_string()));
+        }
+        writers::ini_overwrite_section(content, "Achievements", &desired)
+    }) {
+        Ok(changed) => EnsureResult::at(selected, changed),
+        Err(_) => EnsureResult::unchanged(),
+    }
+}
+
+/// Dolphin's RetroAchievements settings file (`RETROACHIEVEMENTS_CONFIG`).
+const RA_INI: &str = "RetroAchievements.ini";
+
 /// `ensure_dolphin_gcpad_config` (dolphin.py:371-406): appends the fixed
 /// `[GCPad1]` XInput block ([`DEFAULT_GCPAD_CONFIG`]) to `GCPadNew.ini` only
 /// when no `[GCPad1]` header exists yet.
@@ -345,6 +391,56 @@ pub fn ensure_gcpad_config(emulator_path: &str) -> EnsureResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ra_credentials_land_in_the_portable_retroachievements_ini() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path().join("User").join("Config");
+        std::fs::create_dir_all(&config).unwrap();
+        let exe = temp
+            .path()
+            .join("Dolphin_Emulator-2609a-anylinux-x86_64.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let ra = RaCredentials::new("player", "FAKE-RA-TOKEN-not-real");
+
+        let result = ensure_ra_credentials(exe.to_str().unwrap(), &ra);
+        let ini = config.join("RetroAchievements.ini");
+        assert!(result.changed);
+        assert_eq!(result.config_path.as_deref(), Some(ini.as_path()));
+        let text = std::fs::read_to_string(&ini).unwrap();
+        assert!(text.contains("[Achievements]"), "{text}");
+        assert!(text.contains("Enabled = True"), "{text}");
+        assert!(text.contains("Username = player"), "{text}");
+        assert!(text.contains("ApiToken = FAKE-RA-TOKEN-not-real"), "{text}");
+        assert!(text.contains("HardcoreEnabled = False"), "{text}");
+
+        // A second pass changes nothing; a hardcore choice made in Dolphin
+        // stays.
+        assert!(!ensure_ra_credentials(exe.to_str().unwrap(), &ra).changed);
+        std::fs::write(
+            &ini,
+            text.replace("HardcoreEnabled = False", "HardcoreEnabled = True"),
+        )
+        .unwrap();
+        ensure_ra_credentials(exe.to_str().unwrap(), &ra);
+        assert!(std::fs::read_to_string(&ini)
+            .unwrap()
+            .contains("HardcoreEnabled = True"));
+    }
+
+    #[test]
+    fn a_blank_ra_pair_writes_nothing() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("User").join("Config")).unwrap();
+        let exe = temp.path().join("dolphin-emu");
+        let result =
+            ensure_ra_credentials(exe.to_str().unwrap(), &RaCredentials::new("player", "  "));
+        assert!(!result.changed);
+        assert!(!temp
+            .path()
+            .join("User/Config/RetroAchievements.ini")
+            .exists());
+    }
     use crate::test_env::EnvGuard;
 
     fn make_exe(temp: &Path) -> (PathBuf, PathBuf) {
