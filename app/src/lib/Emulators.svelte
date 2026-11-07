@@ -36,6 +36,7 @@
   import {
     defaultEmulatorKey,
     needsEmulator,
+    defaultsPlatforms,
     NO_CORE_VALUE,
     NO_DEFAULT_VALUE,
     platformCoreSelect,
@@ -189,10 +190,14 @@
       .join(',')
   );
 
+  // The Platform defaults rows: the Emulators shelf holds emulator packages,
+  // not games, so it gets no row.
+  let defaultsRows = $derived(defaultsPlatforms(platforms));
+
   let counts = $derived<EmulatorPageCounts>({
     installed: emulators.length,
     catalog: catalog.length,
-    defaults: platforms.filter(needsEmulator).length,
+    defaults: defaultsRows.filter(needsEmulator).length,
     compat: compatTools.tools.length,
   });
 
@@ -964,11 +969,11 @@
         {#if compatibleError}
           <p class="error" role="alert">{compatibleError}</p>
         {/if}
-        {#if platforms.length === 0}
+        {#if defaultsRows.length === 0}
           <p class="muted">No platforms available.</p>
         {:else}
           <ul class="defaults-list">
-            {#each platforms as p (p.id)}
+            {#each defaultsRows as p (p.id)}
               {@const selectId = `default-emulator-${p.id}`}
               {@const choice = selectFor(defaultEmulatorKey(p), p.name)}
               {@const coreId = `default-core-${p.id}`}

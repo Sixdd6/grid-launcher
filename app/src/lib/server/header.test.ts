@@ -40,6 +40,10 @@ describe('showsEmulatorChip', () => {
     expect(showsEmulatorChip('Windows', '')).toBe(false);
     expect(showsEmulatorChip('Linux', '')).toBe(false);
   });
+  it('is hidden for the Emulators shelf', () => {
+    expect(showsEmulatorChip('Emulators', 'emulators')).toBe(false);
+    expect(showsEmulatorChip(' emulators ', '')).toBe(false);
+  });
   it('shows for anything else, including empty', () => {
     expect(showsEmulatorChip('Super Nintendo Entertainment System', '')).toBe(true);
     expect(showsEmulatorChip('', '')).toBe(true);

@@ -1,6 +1,7 @@
 // Pure helpers for the Emulators panel's "Per-platform defaults" select.
 // No store/API imports here so this stays trivially unit-testable.
 import type { LaunchDefaults, Platform } from '../api';
+import { isEmulatorsPlatform } from '../details/blocked';
 import { isNativeLaunchPlatform } from '../details/cloud';
 import { platformLabel } from '../server/platformLabel';
 
@@ -27,6 +28,22 @@ export function defaultEmulatorKey(p: Pick<Platform, 'display_name' | 'name' | '
  */
 export function needsEmulator(p: Pick<Platform, 'display_name' | 'name' | 'slug'>): boolean {
   return !isNativeLaunchPlatform(p.slug, platformLabel(p));
+}
+
+/**
+ * Whether `p` is RomM's Emulators shelf, by its raw name or its label. It
+ * holds emulator packages, not games, so it never has a default emulator —
+ * grid-core's `assignable_platforms` skips it for the same reason.
+ */
+export function isEmulatorsShelf(p: Pick<Platform, 'display_name' | 'name' | 'slug'>): boolean {
+  return isEmulatorsPlatform(p.name) || isEmulatorsPlatform(platformLabel(p));
+}
+
+/** The platforms the Platform defaults pane lists: every one but the Emulators shelf. */
+export function defaultsPlatforms<P extends Pick<Platform, 'display_name' | 'name' | 'slug'>>(
+  platforms: P[]
+): P[] {
+  return platforms.filter((p) => !isEmulatorsShelf(p));
 }
 
 /** The `<select>` value that means "no default emulator for this platform". */

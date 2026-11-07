@@ -2,6 +2,7 @@
 // firmware chip's label to this module.
 
 import type { PlatformFirmwareStatus } from '../api';
+import { isEmulatorsPlatform } from '../details/blocked';
 import { isNativeLaunchPlatform } from '../details/cloud';
 import { NO_EMULATOR_MARKER } from '../emulators/defaults';
 
@@ -30,10 +31,11 @@ export function emulatorChipLabel(name: string): string {
  * (design §6: the emulator chip is omitted for native platforms). A native
  * platform's games launch as host executables, so "No default emulator" was
  * never a true statement about them — the chip is not merely relabeled, it
- * does not appear.
+ * does not appear. Nor does it on the Emulators shelf, which holds emulator
+ * packages rather than games and never has a default emulator.
  */
 export function showsEmulatorChip(platformLabel: string, platformSlug: string): boolean {
-  return !isNativeLaunchPlatform(platformSlug, platformLabel);
+  return !isNativeLaunchPlatform(platformSlug, platformLabel) && !isEmulatorsPlatform(platformLabel);
 }
 
 /**

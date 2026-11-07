@@ -618,15 +618,21 @@ pub fn migrate_legacy_args_in_config(
     Ok(migrated)
 }
 
-/// `_backfill_missing_emulator_defaults` (emulator_ui_mixin.py:1790-1839).
+/// `_backfill_missing_emulator_defaults` (emulator_ui_mixin.py:1790-1839),
+/// narrowed to the entries the install system just installed.
 ///
-/// Re-runs the platform assignment for every registered emulator with a
-/// matching profile, each iteration building on the maps the previous one
-/// left behind, and writes both results back into `config`. Entries with a
-/// blank name or no matching profile are skipped. Returns `true` when either
-/// map ended up different from where it started — the caller saves only then.
-pub fn backfill_missing_defaults(
+/// Runs the platform assignment for each entry named in `entry_names` that
+/// has a matching profile, each iteration building on the maps the previous
+/// one left behind, and writes both results back into `config`. Every other
+/// entry is left alone: a platform default is set only by the install system
+/// (for what it installed) or by the user, never because an emulator was
+/// added by hand or because some other entry exists (user ruling
+/// 2026-11-07). Entries with a blank name or no matching profile are
+/// skipped. Returns `true` when either map ended up different from where it
+/// started — the caller saves only then.
+pub fn assign_install_defaults(
     config: &mut Config,
+    entry_names: &[String],
     profiles: &[EmulatorProfile],
     ctx: &DefaultsContext,
 ) -> bool {
@@ -634,6 +640,9 @@ pub fn backfill_missing_defaults(
     let original_core_defaults = config.retroarch_cores.clone();
 
     for entry in config.emulators.clone() {
+        if !entry_names.contains(&entry.name) {
+            continue;
+        }
         let entry_name = entry.name.trim();
         if entry_name.is_empty() {
             continue;
@@ -1642,7 +1651,7 @@ mod tests {
         assert_eq!(migrate_legacy_args(&mut emulators, profiles), 0);
     }
 
-    // --- backfill_missing_defaults ------------------------------------------
+    // --- assign_install_defaults --------------------------------------------
 
     fn ppsspp_profile() -> EmulatorProfile {
         EmulatorProfile {
@@ -1676,7 +1685,49 @@ mod tests {
             is_retroarch: &is_retroarch_name,
             storage_key: &same_key,
         };
-        backfill_missing_defaults(config, profiles, &ctx)
+        let every_entry: Vec<String> = config.emulators.iter().map(|e| e.name.clone()).collect();
+        assign_install_defaults(config, &every_entry, profiles, &ctx)
+    }
+
+    #[test]
+    fn install_defaults_ignore_entries_that_were_not_just_installed() {
+        // A hand-added PPSSPP sits beside the RetroArch the install system
+        // just finished. Only RetroArch may claim platforms.
+        let mut config = Config {
+            emulators: vec![
+                EmulatorEntry {
+                    name: "PPSSPP".into(),
+                    path: "/usr/bin/ppsspp".into(),
+                    ..Default::default()
+                },
+                EmulatorEntry {
+                    name: "RetroArch (Multi-System)".into(),
+                    path: "/x/retroarch".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let platforms = strings(&["PlayStation Portable"]);
+        let cores = |_: &str, _: &str| strings(&["ppsspp"]);
+        let ctx = DefaultsContext {
+            platforms: &platforms,
+            installed_cores: &cores,
+            is_retroarch: &is_retroarch_name,
+            storage_key: &same_key,
+        };
+        let changed = assign_install_defaults(
+            &mut config,
+            &strings(&["RetroArch (Multi-System)"]),
+            &[ppsspp_profile(), retroarch_profile()],
+            &ctx,
+        );
+
+        assert!(changed);
+        assert_eq!(
+            config.default_emulators,
+            map(&[("PlayStation Portable", "RetroArch (Multi-System)")])
+        );
     }
 
     #[test]

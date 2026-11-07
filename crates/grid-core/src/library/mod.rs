@@ -879,6 +879,10 @@ pub struct InstallService {
     /// `list_platforms` saw — the only way grid-core learns the platform
     /// list, since it holds no session of its own.
     known_platforms: RwLock<Vec<String>>,
+    /// Emulator entries a fresh install created while no platform list was
+    /// known yet, so their platform defaults are still to be assigned.
+    /// `list_platforms` drains them ([`Self::take_pending_defaults`]).
+    pending_defaults: Mutex<Vec<String>>,
     /// `None` until the app installs one; autoconfig then writes no
     /// RetroAchievements credentials.
     ra_provider: RwLock<Option<RaProvider>>,
@@ -948,6 +952,7 @@ impl InstallService {
             forge: OnceLock::new(),
             last_emit: Mutex::new(Instant::now()),
             known_platforms: RwLock::new(Vec::new()),
+            pending_defaults: Mutex::new(Vec::new()),
             ra_provider: RwLock::new(None),
             image_hook: RwLock::new(None),
             game_finalized_hook: RwLock::new(None),
@@ -979,6 +984,14 @@ impl InstallService {
     /// until the app has fetched them once.
     pub fn known_platforms(&self) -> Vec<String> {
         self.known_platforms.read().unwrap().clone()
+    }
+
+    /// The emulator entries a fresh install created before any platform
+    /// list was known, emptied by the call. The caller assigns their
+    /// platform defaults ([`autoconfig::assign_install_defaults`]) once it
+    /// has a list.
+    pub fn take_pending_defaults(&self) -> Vec<String> {
+        std::mem::take(&mut *self.pending_defaults.lock().unwrap())
     }
 
     /// Installs the RetroAchievements credential source the autoconfig hook
@@ -3562,7 +3575,10 @@ impl InstallService {
     ///
     /// `fresh_install` is [`Self::write_emulator_entry`]'s answer: `true`
     /// when this install CREATED the entry, `false` for an update or a
-    /// reinstall — the renderer seed runs only on the former.
+    /// reinstall — the renderer seed runs only on the former. A fresh
+    /// install also assigns the entry's platform defaults
+    /// ([`autoconfig::assign_install_defaults`]), or, with no platform list
+    /// known yet, queues the entry for `list_platforms` to assign later.
     ///
     /// Autoconfig NEVER fails an install. A config error, or any writer that
     /// reached nothing, appends ONE line to the finalize warning — exactly
@@ -3593,6 +3609,19 @@ impl InstallService {
             ),
             Ok(_) => {}
             Err(e) => append_warning(warning, &format!("emulator autoconfig: {e}")),
+        }
+        if !fresh_install {
+            return;
+        }
+        if platforms.is_empty() {
+            let mut pending = self.pending_defaults.lock().unwrap();
+            if !pending.iter().any(|name| name == entry_name) {
+                pending.push(entry_name.to_string());
+            }
+            return;
+        }
+        if let Err(e) = autoconfig::assign_install_defaults(&[entry_name.to_string()], &ctx) {
+            append_warning(warning, &format!("emulator defaults: {e}"));
         }
     }
 
@@ -6378,6 +6407,7 @@ mod tests {
 
         service.set_known_platforms(Vec::new());
         assert!(service.known_platforms().is_empty());
+        assert!(service.take_pending_defaults().is_empty());
     }
 
     // --- content job planning -----------------------------------------------

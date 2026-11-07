@@ -443,12 +443,12 @@ pub struct SyncContext<'a> {
     pub ps3_library_path: String,
     /// The RetroAchievements pair, when the user has one.
     pub ra: Option<RaCredentials>,
-    /// The autoprofile catalog entry matching and the defaults backfill both
+    /// The autoprofile catalog entry matching and the install defaults both
     /// resolve against.
     pub profiles: &'a [EmulatorProfile],
     /// `true` only for an entry that did not exist before this pass: a
     /// catalog install that created it, or a manual add. A reinstall, a
-    /// catalog update and a defaults backfill are `false`. The renderer seed
+    /// catalog update and a resync are `false`. The renderer seed
     /// (Vulkan on Cemu, Dolphin, DuckStation, PPSSPP, Azahar, xemu) runs only
     /// when this is `true`; nothing else reads it.
     pub fresh_install: bool,
@@ -553,8 +553,8 @@ fn record(report: &mut SyncReport, emulator: &str, writer: &str, result: EnsureR
     }
 }
 
-/// The D1 entry point: entry autoconfig, the defaults backfill, and the
-/// native `ensure_*` writers for ONE newly created emulator entry. Loads,
+/// The D1 entry point: entry autoconfig and the native `ensure_*` writers
+/// for ONE emulator entry. Loads,
 /// mutates and saves the config itself.
 ///
 /// Ports `_ensure_emulator_sync_settings` (emulator_ui_mixin.py:365-440)
@@ -565,7 +565,7 @@ fn record(report: &mut SyncReport, emulator: &str, writer: &str, result: EnsureR
 /// Order: load the config and find `entry_name` (an EXACT match — a miss
 /// returns an empty report and saves nothing); apply the matched profile's
 /// manual-entry defaults (autoconfig.py:228, a no-op when no profile
-/// matches); run [`entry::backfill_missing_defaults`] (D3); save ONCE, so a
+/// matches); save ONCE, so a
 /// writer failure cannot lose the entry work; then trim the entry's path and
 /// return immediately when it is blank (doc 05 invariant 1). The dispatch
 /// that follows is a FLAT SEQUENCE OF INDEPENDENT `if`s, not a chain, so an
@@ -607,37 +607,6 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
         );
     }
 
-    // D3: the defaults backfill runs at the same two points, right after the
-    // entry autoconfig. Both closures read a snapshot of the entry list taken
-    // after the layer-1 pass, so they see the entry as it will be saved.
-    let snapshot = config.emulators.clone();
-    let installed_cores = |platform: &str, emulator_name: &str| -> Vec<String> {
-        let Some(entry) = emulator_entry_by_name(&snapshot, emulator_name) else {
-            return Vec::new();
-        };
-        let slug = ctx
-            .platform_slugs
-            .get(platform)
-            .map(String::as_str)
-            .unwrap_or("");
-        installed_compatible_cores(platform, slug, entry)
-    };
-    let is_retroarch_name = |name: &str| -> bool {
-        matches_tokens_by_name(name, &["retroarch"], &snapshot, ctx.profiles)
-    };
-    let storage_key = |platform: &str| -> String {
-        ctx.platform_labels
-            .get(platform)
-            .cloned()
-            .unwrap_or_else(|| platform.to_string())
-    };
-    let defaults_ctx = entry::DefaultsContext {
-        platforms: ctx.platforms,
-        installed_cores: &installed_cores,
-        is_retroarch: &is_retroarch_name,
-        storage_key: &storage_key,
-    };
-    entry::backfill_missing_defaults(&mut config, ctx.profiles, &defaults_ctx);
     config.save(ctx.config_path)?;
 
     // The RomM username feeds ONLY RetroArch's netplay nickname
@@ -825,7 +794,7 @@ fn counterpart_path(
 ///   install from before that writer created them heals here).
 ///
 /// Deliberately NOT [`sync_new_emulator`]: this pass never applies profile
-/// defaults to the entry, never runs [`entry::backfill_missing_defaults`],
+/// defaults to the entry, never assigns platform defaults,
 /// and never saves config.toml — it only READS it (for the entry's path and
 /// the netplay nickname). That matches the reference, whose
 /// `_ensure_emulator_sync_settings` runs writers only, and it keeps a
@@ -883,26 +852,21 @@ pub fn sync_launch_settings(
     Ok(report)
 }
 
-/// The D3-only entry point: re-runs the defaults backfill
-/// ([`entry::backfill_missing_defaults`]) across every registered emulator,
-/// without the entry autoconfig layer or the `ensure_*` writers
-/// [`sync_new_emulator`] also runs.
+/// The install system's platform-default assignment (D3) for the entries it
+/// just installed: each named entry fills the platforms it supports that
+/// have no default yet, and a native emulator replaces a RetroArch default
+/// ([`entry::assign_install_defaults`]). No other entry is considered, so a
+/// hand-added emulator never gains a default from here.
 ///
-/// D1's own backfill call only fires on a new-entry add or install
-/// (`sync_new_emulator`'s two call sites). An emulator added before the
-/// app's first successful platform fetch gets no platform/core defaults at
-/// that time, and — since nothing else re-triggers the backfill — stays
-/// that way until the NEXT add or install. Calling this once
-/// `list_platforms` has a non-empty list closes that gap: same backfill,
-/// same [`entry::DefaultsContext`] wiring `sync_new_emulator` builds, just
-/// run over every entry instead of one just-added one.
-///
-/// Idempotent and cheap to call on every `list_platforms` response —
-/// [`entry::backfill_missing_defaults`] itself no-ops once nothing is
-/// missing, so a steady state costs one config load and zero saves. Saves
-/// only when the backfill actually changed something; the returned `bool`
-/// reports that. The only `Err` is a config load or save failure.
-pub fn backfill_all_defaults(ctx: &SyncContext) -> Result<bool, ConfigError> {
+/// The install service calls this after a FRESH catalog or server install,
+/// and `list_platforms` calls it for an install that finished before the
+/// first platform fetch (the service holds those names until then). Saves
+/// only when something changed; the returned `bool` reports that. The only
+/// `Err` is a config load or save failure.
+pub fn assign_install_defaults(
+    entry_names: &[String],
+    ctx: &SyncContext,
+) -> Result<bool, ConfigError> {
     let mut config = Config::load(ctx.config_path)?;
 
     let snapshot = config.emulators.clone();
@@ -932,7 +896,8 @@ pub fn backfill_all_defaults(ctx: &SyncContext) -> Result<bool, ConfigError> {
         is_retroarch: &is_retroarch_name,
         storage_key: &storage_key,
     };
-    let changed = entry::backfill_missing_defaults(&mut config, ctx.profiles, &defaults_ctx);
+    let changed =
+        entry::assign_install_defaults(&mut config, entry_names, ctx.profiles, &defaults_ctx);
     if changed {
         config.save(ctx.config_path)?;
     }
@@ -1516,7 +1481,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_runs_entry_autoconfig_then_backfill_then_writers() {
+    fn sync_runs_entry_autoconfig_then_writers_and_sets_no_default() {
         let _lock = lock();
         let temp = tempfile::tempdir().unwrap();
         let _env = isolated(temp.path());
@@ -1553,10 +1518,9 @@ mod tests {
 
         let saved = Config::load(&config_path).unwrap();
         assert_eq!(saved.emulators[0].save_paths, "~/pcsx2/saves");
-        assert_eq!(
-            saved.default_emulators.get("Sony PlayStation 2"),
-            Some(&"PCSX2".to_string())
-        );
+        // A platform default is the install system's or the user's to set,
+        // never a side effect of saving an entry (user ruling 2026-11-07).
+        assert!(saved.default_emulators.is_empty());
     }
 
     /// A path under a directory the process cannot write to: PCSX2 resolves
@@ -1940,24 +1904,23 @@ mod tests {
         assert!(!ini.contains("GFXBackend"), "{ini}");
     }
 
-    // --- backfill_all_defaults ------------------------------------------------
+    // --- assign_install_defaults ----------------------------------------------
 
-    /// The gap this fixes: an entry saved before any platform fetch has run
-    /// gets no platform/core defaults (`ctx.platforms` was `&[]` at save
-    /// time, so `sync_new_emulator`'s own backfill pass had nothing to
-    /// assign). A late-arriving platform list, fed through
-    /// `backfill_all_defaults` the way `list_platforms` now does, must fill
-    /// that gap without waiting for another add/install.
+    /// An installed entry claims the platforms it supports that have no
+    /// default, and a hand-added entry beside it claims nothing.
     #[test]
-    fn backfill_all_defaults_fills_a_defaults_less_entry_given_a_late_platform_list() {
+    fn assign_install_defaults_fills_only_the_named_entry() {
         let _lock = lock();
         let temp = tempfile::tempdir().unwrap();
         let _env = isolated(temp.path());
 
-        // Saved with no platform list available — exactly what a
-        // `sync_new_emulator` call made before the first `list_platforms`
-        // response leaves behind.
-        let config = config_with(temp.path(), vec![entry("PCSX2", "pcsx2.AppImage")]);
+        let config = config_with(
+            temp.path(),
+            vec![
+                entry("My PS2 Build", "/opt/ps2/pcsx2-custom"),
+                entry("PCSX2", "pcsx2.AppImage"),
+            ],
+        );
         let config_path = write_config(temp.path(), &config);
 
         let mut pcsx2 = profile("PCSX2", &["pcsx2*"]);
@@ -1975,7 +1938,9 @@ mod tests {
             profiles: &profiles,
             fresh_install: false,
         };
-        let changed = backfill_all_defaults(&ctx).unwrap();
+        // The hand-added entry is first and matches the profile too, so a
+        // pass over every entry would give it the platform.
+        let changed = assign_install_defaults(&["PCSX2".to_string()], &ctx).unwrap();
         assert!(changed);
 
         let saved = Config::load(&config_path).unwrap();
@@ -1990,7 +1955,7 @@ mod tests {
     /// `clear_blanks_the_username_and_writes_no_emulator_file` proves "no
     /// write happened" elsewhere in this crate.
     #[test]
-    fn backfill_all_defaults_no_ops_once_nothing_is_missing() {
+    fn assign_install_defaults_no_ops_once_nothing_is_missing() {
         let _lock = lock();
         let temp = tempfile::tempdir().unwrap();
         let _env = isolated(temp.path());
@@ -2013,16 +1978,23 @@ mod tests {
             profiles: &profiles,
             fresh_install: false,
         };
-        assert!(backfill_all_defaults(&ctx).unwrap(), "first call must fill");
+        let pcsx2_name = ["PCSX2".to_string()];
+        assert!(
+            assign_install_defaults(&pcsx2_name, &ctx).unwrap(),
+            "first call must fill"
+        );
 
         let before = std::fs::metadata(&config_path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
 
-        let changed = backfill_all_defaults(&ctx).unwrap();
+        let changed = assign_install_defaults(&pcsx2_name, &ctx).unwrap();
         assert!(!changed, "nothing left to fill on the second call");
 
         let after = std::fs::metadata(&config_path).unwrap().modified().unwrap();
-        assert_eq!(before, after, "a no-op backfill must not rewrite the file");
+        assert_eq!(
+            before, after,
+            "a no-op assignment must not rewrite the file"
+        );
     }
 
     // --- D2: ra_capable / fan_out_ra_credentials -----------------------------
@@ -2249,7 +2221,7 @@ mod tests {
     }
 
     #[test]
-    fn backfill_uses_the_platform_slug_for_core_resolution() {
+    fn install_defaults_use_the_platform_slug_for_core_resolution() {
         let temp = tempfile::tempdir().unwrap();
         let _guard = lock();
         let _env = isolated(temp.path());
@@ -2287,7 +2259,7 @@ mod tests {
             profiles: &profiles,
             fresh_install: false,
         };
-        assert!(backfill_all_defaults(&ctx).unwrap());
+        assert!(assign_install_defaults(&["RetroArch".to_string()], &ctx).unwrap());
 
         let saved = Config::load(&config_path).unwrap();
         assert_eq!(
