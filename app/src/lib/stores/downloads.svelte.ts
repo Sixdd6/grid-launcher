@@ -35,14 +35,33 @@ export const downloads = {
   },
 };
 
+/** Called with every snapshot the store applies; `first` marks the one
+ *  each `init` starts from (a baseline, not a change). */
+export type SnapshotListener = (entries: DownloadEntry[], first: boolean) => void;
+
+const listeners = new Set<SnapshotListener>();
+
+/** Subscribes to every applied snapshot (the notifications use it to see
+ *  each queue transition once). Returns the unsubscribe. */
+export function onSnapshot(listener: SnapshotListener): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+let first = true;
+
 function apply(snapshot: DownloadsSnapshot): void {
   state.entries = snapshot.entries;
   observe(sampler, snapshot.entries);
+  const wasFirst = first;
+  first = false;
+  for (const listener of listeners) listener(snapshot.entries, wasFirst);
 }
 
 export async function init(): Promise<UnlistenFn> {
   sampler = createSampler(performance.now());
   graphs = {};
+  first = true;
   // Listen BEFORE pulling the first snapshot. The other order lost every
   // change between the two: an install that finished in that gap left its
   // row "Downloading" until something else changed (first-run setup queues

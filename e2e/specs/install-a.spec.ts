@@ -9,6 +9,7 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -85,6 +86,10 @@ describe('install (a): connect, set library path, install', () => {
       timeoutMsg: 'the details overlay never opened for rom 101',
     });
     await $(testId('details-install')).click();
+    // The queue's own card, shown whichever view is open.
+    await waitForToast('Super Mario World added to download queue', {
+      timeoutMsg: 'no "added to download queue" card after clicking install',
+    });
 
     await showDownloads();
 
@@ -102,6 +107,9 @@ describe('install (a): connect, set library path, install', () => {
     await browser.waitUntil(async () => (await detail.getText()).startsWith('Completed'), {
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: 'the download never reached Completed',
+    });
+    await waitForToast('Super Mario World installed', {
+      timeoutMsg: 'no "installed" card once the install completed',
     });
 
     await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({

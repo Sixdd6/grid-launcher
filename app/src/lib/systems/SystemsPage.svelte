@@ -24,6 +24,7 @@
   } from '../api';
   import { downloads } from '../stores/downloads.svelte';
   import { pushToast } from '../stores/toasts.svelte';
+  import { expectQueued } from '../notifications/notifier';
   import { SKIPPED_TOAST_MS, skippedRemovalText } from '../uninstallSkips';
   import { emulatorTerminalSignature as terminalSignature } from '../emulators/installSignal';
   import { defaultEmulatorKey, NO_CORE_VALUE, platformCoreSelect } from '../emulators/defaults';
@@ -354,14 +355,15 @@
     for (const e of result.errors) pushToast(e, 'error');
   }
 
-  async function install(choices: SetupChoice[], what: string) {
+  // Each queued install announces itself ("Installing <name>…", one summary
+  // card for several) from the downloads queue (notifications/notifier.ts).
+  async function install(choices: SetupChoice[]) {
     if (choices.length === 0) return;
     const marks = Object.fromEntries(choices.map((c) => [c.platform, true as const]));
     busyRows = { ...busyRows, ...marks };
     try {
       const result = await api.installForSystems(choices);
       started(result);
-      if (result.queued.length > 0) pushToast(what);
       await Promise.all([refreshPending(), refreshDefaults()]);
     } catch (err) {
       pushToast(errorMessage(err), 'error');
@@ -374,25 +376,17 @@
 
   function installRecommended(row: Row) {
     if (row.recommended === null) return;
-    void install(
-      [{ platform: row.key, source_id: row.recommended.source_id }],
-      `Installing ${shortName(row.recommended.name)} for ${row.label}…`,
-    );
+    void install([{ platform: row.key, source_id: row.recommended.source_id }]);
   }
 
   function installAllRecommended() {
-    const choices = missing;
-    void install(choices, `Installing the recommended emulator for ${choices.length === 1 ? '1 system' : `${choices.length} systems`}…`);
+    void install(missing);
   }
 
   async function onPick(row: Row, value: string, select: HTMLSelectElement) {
     const pick = parsePick(value);
     if (pick.kind === 'install') {
-      const option = row.downloads.find((o) => o.source_id === pick.sourceId);
-      await install(
-        [{ platform: row.key, source_id: pick.sourceId }],
-        `Installing ${shortName(option?.name ?? pick.sourceId)} for ${row.label}…`,
-      );
+      await install([{ platform: row.key, source_id: pick.sourceId }]);
     } else {
       busyRows = { ...busyRows, [row.key]: true };
       try {
@@ -442,9 +436,10 @@
 
   async function updateEmulator(name: string) {
     updating = name;
+    // The queue entry then reads "Updating <name>…", not "Installing".
+    expectQueued(entryFor(name)?.source_id ?? '', { update: true });
     try {
       await api.updateEmulator(name);
-      pushToast(`Updating ${name}…`);
     } catch (err) {
       pushToast(errorMessage(err), 'error');
     } finally {

@@ -11,6 +11,7 @@ import {
   REAP_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { waitForToast } from '../helpers/toasts.js';
 import { editEmulator, findLine, groups, openRow, openSystems, pick, removeEmulator } from '../helpers/systems.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
@@ -370,12 +371,13 @@ describe('emulator-catalog', () => {
     await expect($(testId('sys-status-ps2'))).toHaveAttribute('data-status', 'update');
 
     await updateBtn.click();
+    await waitForToast(/^Updating .*…$/, { timeoutMsg: 'no "Updating" card for the emulator update' });
     // The completion toast is worded for an UPDATE, not a first install.
     await browser.waitUntil(
       async () =>
         (await $(testId('toast-region')).isExisting()) &&
         (await $(testId('toast-region')).getText()).includes(
-          `Updated emulator '${PCSX2_NAME}' from source.`,
+          `${PCSX2_NAME} updated`,
         ),
       {
         timeout: EMULATOR_INSTALL_TIMEOUT,

@@ -208,8 +208,15 @@ session exists and `Shell.svelte` afterwards.
   firmware, notes, form, compat tools, the install signal) and `EmulatorForm.svelte` as
   its add/edit settings sheet. `stores/emulatorUpdates.svelte.ts` caches the
   once-per-session emulator update check. `systems/events.ts` holds the app-lifetime
-  emulator notifications (install/update finished, a RetroArch pick with no core);
-  `Shell.svelte` registers them once, so each toasts once whichever views are mounted.
+  notice for a RetroArch pick with no core; `Shell.svelte` registers it once.
+- Notifications — `lib/notifications/`: `notices.ts` (pure) diffs successive downloads
+  snapshots into queued/installed/failed/cancelled events, words every download,
+  install and launch card, and coalesces a burst into one summary card;
+  `notifier.ts` wires it to the `downloads` and `sessions` stores (`onSnapshot`,
+  `onSessionsSnapshot`), the `emulator-installed` event, and the launch and install
+  calls (`launchGame`, `installGame`), and holds the per-entry wording hints
+  (`expectQueued`). `Shell.svelte` registers it once, so each event shows one card
+  whichever views are mounted.
 - `lib/icons.ts` — hand-authored 24×24 icon paths. The old app's `assets/svg/` files are
   deliberately not reused.
 

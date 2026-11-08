@@ -8,6 +8,7 @@ import {
   THROTTLED_DOWNLOAD_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -72,7 +73,7 @@ describe('downloads', () => {
     });
   }
 
-  async function install(cardTestId: string) {
+  async function install(cardTestId: string, title: string) {
     await $(testId('nav-server')).click();
     await $(testId('server-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
@@ -81,6 +82,9 @@ describe('downloads', () => {
     await $(testId(cardTestId)).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('details-install')).click();
+    await waitForToast(`${title} added to download queue`, {
+      timeoutMsg: `no "added to download queue" card for ${title}`,
+    });
     await $(testId('details-close')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
     await showDownloads();
@@ -101,7 +105,7 @@ describe('downloads', () => {
   });
 
   it('starts the first install downloading in Active and queues the second in Queued', async () => {
-    await install('game-card-301');
+    await install('game-card-301', 'Big Arcade Game');
     await $(testId('download-row-1')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'no download-row appeared for the first install',
@@ -118,7 +122,7 @@ describe('downloads', () => {
     // A base game carries no kind badge (design §8: "base none").
     expect(await $(testId('download-kind-1')).isExisting()).toBe(false);
 
-    await install('game-card-201');
+    await install('game-card-201', 'Pac-Man');
     await $(testId('download-row-2')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'no download-row appeared for the second install',
@@ -175,6 +179,7 @@ describe('downloads', () => {
         timeoutMsg: 'the cancelled download never showed the Cancelled status',
       },
     );
+    await waitForToast('Cancelled Big Arcade Game', { timeoutMsg: 'no "Cancelled" card after cancelling' });
     // Only the row's segment is asserted here, not the Completed count:
     // cancelling frees the download slot, and entry 2 (small, unthrottled
     // past the chunk gap) can reach Completed within a WebDriver round trip.
@@ -201,6 +206,7 @@ describe('downloads', () => {
         timeoutMsg: 'the retried download never reached Completed',
       },
     );
+    await waitForToast('Big Arcade Game installed', { timeoutMsg: 'no "installed" card for the retried download' });
     await expect(rowIn('completed', 3)).toExist();
   });
 

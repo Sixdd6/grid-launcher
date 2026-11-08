@@ -165,4 +165,22 @@ describe('downloads store start-up', () => {
     expect(downloads.entries[0].status).toBe('downloading');
     stop();
   });
+
+  it('tells subscribers which snapshot each init starts from', async () => {
+    const mock = wire([entry({ id: 3, status: 'queued' })]);
+    const { init, onSnapshot } = await import('./downloads.svelte');
+    const seen: [number, boolean][] = [];
+    const off = onSnapshot((entries, first) => seen.push([entries.length, first]));
+    const stop = await init();
+    mock.emit([]);
+    stop();
+    await init();
+    off();
+    mock.emit([entry({ id: 4 })]);
+    expect(seen).toEqual([
+      [1, true],
+      [0, false],
+      [1, true],
+    ]);
+  });
 });

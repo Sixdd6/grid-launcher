@@ -9,7 +9,7 @@ import {
   REAP_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
-import { waitForToast } from '../helpers/toasts.js';
+import { dismissToasts, waitForToast } from '../helpers/toasts.js';
 import { editEmulator, lineKey, openRow, openSystems, pick, saveSheet } from '../helpers/systems.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
@@ -120,10 +120,12 @@ describe('launch', () => {
     });
 
     await $(testId('details-play')).click();
+    await waitForToast('Launching Super Mario World…', { timeoutMsg: 'no "Launching" card after Play' });
     await $(testId('details-playing-chip')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'details-playing-chip never appeared after Play',
     });
+    await dismissToasts();
 
     await browser.waitUntil(() => existsSync(longRunnerArgv()), {
       timeout: TRANSITION_TIMEOUT,
@@ -211,12 +213,12 @@ describe('launch', () => {
 
     await openDetails();
     await $(testId('details-play')).click();
-    await $(testId('details-warning')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'details-warning never appeared for the instant-exit stub',
+    // A card, not a Details strip: a game launched from a Library or Server
+    // card has no Details open to show it in.
+    await waitForToast(/^Super Mario World — Process exited immediately \(code 3\)\./, {
+      timeoutMsg: 'no early-exit card for the instant-exit stub',
     });
-    await expect($(testId('details-warning'))).toHaveText('exited immediately', { containing: true });
-    await $(testId('details-warning-dismiss')).click();
+    await dismissToasts();
     await $(testId('details-close')).click();
   });
 
@@ -246,13 +248,10 @@ describe('launch', () => {
 
     await openDetails();
     await $(testId('details-play')).click();
-    await $(testId('details-error')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'details-error never appeared for the broken emulator path',
+    await waitForToast(/^Couldn't launch Super Mario World: Emulator executable not found:/, {
+      timeoutMsg: 'no launch-failure card for the broken emulator path',
     });
-    await expect($(testId('details-error'))).toHaveText('Emulator executable not found:', {
-      containing: true,
-    });
+    await dismissToasts();
     await $(testId('details-close')).click();
   });
 
@@ -272,18 +271,15 @@ describe('launch', () => {
 
     await openDetails();
     await $(testId('details-play')).click();
-    await $(testId('details-error')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'details-error never appeared for the unmapped RetroArch default',
-    });
     // The template layer's own validation error ("No RetroArch core is
     // configured...") is wrapped by prepare_emulator_launch (spawn.rs) as
     // "Invalid launch arguments: <e>" — pinned by spawn.rs's
     // an_argument_failure_is_wrapped unit test. Assert the full wrapped
     // string verbatim, not just the inner message.
-    await expect($(testId('details-error'))).toHaveText(
-      'Invalid launch arguments: No RetroArch core is configured for this platform. ' +
-        'Set one in Settings › Systems.',
+    await waitForToast(
+      "Couldn't launch Super Mario World: Invalid launch arguments: No RetroArch core is configured " +
+        'for this platform. Set one in Settings › Systems.',
+      { timeoutMsg: 'no launch-failure card for the unmapped RetroArch default' },
     );
   });
 });

@@ -9,6 +9,7 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -230,12 +231,16 @@ describe('updates', () => {
 
     const before = await newestRowId();
     await $(testId('details-update')).click();
+    await waitForToast('Update for Old Rom added to download queue', {
+      timeoutMsg: 'no "added to download queue" card for the update',
+    });
     const rowId = await waitForNewRow(before, "rom 801's update job");
     await waitCompleted(rowId, "rom 801's update");
     await expect($(testId(`download-kind-${rowId}`))).toHaveText('Update');
+    // The completion card, shown whichever view is open.
+    await waitForToast('Old Rom updated', { timeoutMsg: 'no "updated" card once the update completed' });
 
     await showLibrary();
-    await expect($(testId('details-update-toast'))).toHaveText("Updated 'Old Rom' successfully.");
 
     // The server copy is `newrom.zip`, so it extracts beside the seeded
     // `oldrom/` into its own `extraction_dir` (library/paths.rs).
@@ -278,6 +283,7 @@ describe('updates', () => {
     const rowId = await waitForNewRow(before, "rom 802's native update job");
     await waitCompleted(rowId, "rom 802's native update");
     await expect($(testId(`download-kind-${rowId}`))).toHaveText('Update');
+    await waitForToast('My Game updated', { timeoutMsg: 'no "updated" card once the native update completed' });
     await showLibrary();
 
     // The whole point of the native path: the archive holds

@@ -9,6 +9,7 @@
   import { compatTools, refresh as refreshCompatTools } from '../stores/compatTools.svelte';
   import { downloads } from '../stores/downloads.svelte';
   import { pushToast } from '../stores/toasts.svelte';
+  import { expectQueued } from '../notifications/notifier';
   import {
     compatToolTerminalSignature,
     umuActionLabel,
@@ -60,8 +61,10 @@
         pushToast(`Windows games now use ${tool?.label ?? value}`);
       } else {
         const entry = catalog.find((e) => e.source_id === source);
+        // The queue says "Installing <name>…"; its completion card says it
+        // became the Windows default.
+        expectQueued(source, { done: `${entry?.name ?? source} installed and used for Windows games` });
         await api.installCompatToolAsDefault(source);
-        pushToast(`Installing ${entry?.name ?? source}… Windows games use it once it is installed.`);
         await refreshCompatTools();
       }
     } catch (err) {

@@ -13,6 +13,7 @@
   import Details from './Details.svelte';
   import UmuInstallOffer from './UmuInstallOffer.svelte';
   import { isUmuMissing } from './launchError';
+  import { installGame, launchGame } from './notifications/notifier';
   import GameCard from './GameCard.svelte';
   import { coverPair } from './cards/cover';
   import CardGrid from './CardGrid.svelte';
@@ -78,8 +79,8 @@
   let folded = $state(false);
   let detailsGame = $state<GameSummary | null>(null);
   let detailsCloudMode = $state<CloudMode>('overview');
-  // Every inline failure the grid can produce: a refused install AND a
-  // refused launch, both from `primary()`. Shown in `server-error`.
+  // A refused launch that needs umu-launcher, from `primary()`: shown in
+  // `server-error` beside the install offer. Every other refusal is a card.
   let actionError = $state<string | null>(null);
   // The action error that offers the umu-launcher install (a Proton launch
   // with no umu-run); `null` for any other.
@@ -301,12 +302,15 @@
   async function primary(game: GameSummary) {
     actionError = null;
     try {
-      if (isInstalled(game, labelFor(game))) await api.launchGame(game.id);
-      else await api.installGame(game.id);
+      // Launching, queued and a refusal are all cards (notifier); the
+      // reason also shows inline only beside the umu-launcher install.
+      if (isInstalled(game, labelFor(game))) await launchGame(game.id, game.name);
+      else await installGame(game.id, game.name);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      actionError = message;
-      umuOfferFor = isUmuMissing(err) ? message : null;
+      const missing = isUmuMissing(err);
+      actionError = missing ? message : null;
+      umuOfferFor = missing ? message : null;
       if (message.includes('library folder')) showLibraryBanner = true;
     }
   }

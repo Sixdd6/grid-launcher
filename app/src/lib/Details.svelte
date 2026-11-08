@@ -33,6 +33,8 @@
   import { missingActions } from './library/missing';
   import { pickFolder } from './pickers';
   import { pushToast } from './stores/toasts.svelte';
+  import { installGame, launchGame, notify } from './notifications/notifier';
+  import { removedFromLibraryNotice, uninstalledNotice } from './notifications/notices';
   import { SKIPPED_TOAST_MS, skippedRemovalText } from './uninstallSkips';
   import { fullIndex, galleryItems, viewableIndex, viewableItems } from './details/media';
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
@@ -350,6 +352,7 @@
   async function removeFromLibrary() {
     if (removeTarget === null) return;
     await api.removeFromLibrary(removeTarget.title, removeTarget.platform);
+    notify(removedFromLibraryNotice(removeTarget.title));
     showRemoveConfirm = false;
     await refreshInstalled();
     onClose();
@@ -390,25 +393,10 @@
       : ''
   );
 
+  // The update's queued and "<title> updated" cards come from the downloads
+  // queue (notifications/notifier.ts), so they show with Details closed too.
   let confirmingUpdate = $state(false);
-  let updateToast = $state<string | null>(null);
   let updatePending = $state(false);
-
-  // Last seen status per update entry for this rom. Deliberately NOT `$state`.
-  const seenUpdateStatus = new Map<number, DownloadStatus>();
-
-  // Toast on completion, not on click.
-  $effect(() => {
-    for (const entry of downloads.entries) {
-      if (entry.rom_id !== subject.romId) continue;
-      if (entry.kind !== 'update' && entry.kind !== 'native_update') continue;
-      const previous = seenUpdateStatus.get(entry.id);
-      seenUpdateStatus.set(entry.id, entry.status);
-      if (previous !== undefined && previous !== 'completed' && entry.status === 'completed') {
-        updateToast = `Updated '${subject.name}' successfully.`;
-      }
-    }
-  });
 
   /** The kind the Saves tab shows; a card's "Cloud sync" opens on saves. */
   let cloudKind = $state<SaveType>(initialCloudMode === 'state' ? 'state' : 'save');
@@ -441,10 +429,10 @@
     error = null;
     pendingAction = 'install';
     try {
-      await api.installGame(subject.romId);
+      // The queued card and a refusal's error card are the notifier's.
+      await installGame(subject.romId, subject.name);
     } catch (err) {
       const message = errorMessage(err);
-      error = message;
       if (message.includes('library folder')) onLibraryPathUnset();
     } finally {
       pendingAction = null;
@@ -461,6 +449,7 @@
     pendingAction = 'uninstall';
     try {
       const report = await api.uninstallGame(subject.romId);
+      notify(uninstalledNotice(subject.name));
       pushToast(skippedRemovalText(report?.skipped), 'error', SKIPPED_TOAST_MS);
       await refreshInstalled();
       onClose();
@@ -522,10 +511,13 @@
     error = null;
     pendingAction = 'play';
     try {
-      await api.launchGame(subject.romId);
+      // "Launching <title>…" and a refusal are cards (notifier). The reason
+      // also shows here only beside the umu-launcher install it needs.
+      await launchGame(subject.romId, subject.name);
     } catch (err) {
-      error = errorMessage(err);
-      umuOfferFor = isUmuMissing(err) ? error : null;
+      const missing = isUmuMissing(err);
+      error = missing ? errorMessage(err) : null;
+      umuOfferFor = missing ? error : null;
     } finally {
       pendingAction = null;
     }
@@ -762,10 +754,6 @@
               </button>
             {/if}
           </div>
-
-          {#if updateToast}
-            <p data-testid="details-update-toast" class="hint" role="status">{updateToast}</p>
-          {/if}
         {/if}
 
         <p class="meta-line" data-testid="details-last-played">
@@ -849,14 +837,6 @@
         {#if error}
           <p data-testid="details-error" class="error" role="alert">{error}</p>
           {#if error === umuOfferFor}<UmuInstallOffer />{/if}
-        {/if}
-        {#if sessions.lastWarning}
-          <p data-testid="details-warning" class="error warning" role="alert">
-            {sessions.lastWarning}
-            <button data-testid="details-warning-dismiss" class="dismiss icon-btn" onclick={() => sessions.dismissWarning()} aria-label="Dismiss warning">
-              <Icon name="close" size={14} />
-            </button>
-          </p>
         {/if}
       </section>
     </div>

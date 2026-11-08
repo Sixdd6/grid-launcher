@@ -1,32 +1,7 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { api, type GameSession, type SessionsSnapshot } from '../api';
 
-const state = $state<{ sessions: GameSession[]; lastWarning: string | null }>({
-  sessions: [],
-  lastWarning: null,
-});
-
-/**
- * Pure snapshot-application logic (exported for unit tests). A snapshot
- * always REPLACES the current session list — it never merges — because the
- * backend snapshot is already the full, authoritative list.
- *
- * `lastWarning` is sticky: it is overwritten only when the incoming snapshot
- * itself carries a warning. A `null`-warning snapshot never clears a
- * previously captured warning, because back-to-back snapshots happen when
- * several games exit in the same tick, and a later warning-less snapshot
- * must not erase a warning a just-prior snapshot delivered. Use
- * `dismissWarning()` to clear it explicitly.
- */
-export function applySnapshot(
-  current: { sessions: GameSession[]; lastWarning: string | null },
-  snap: SessionsSnapshot,
-): { sessions: GameSession[]; lastWarning: string | null } {
-  return {
-    sessions: snap.sessions,
-    lastWarning: snap.warning !== null ? snap.warning : current.lastWarning,
-  };
-}
+const state = $state<{ sessions: GameSession[] }>({ sessions: [] });
 
 /** Pure lookup (exported for unit tests): the session for `romId`, if any. */
 export function findSession(sessions: GameSession[], romId: number): GameSession | undefined {
@@ -37,21 +12,28 @@ export const sessions = {
   get list() {
     return state.sessions;
   },
-  get lastWarning() {
-    return state.lastWarning;
-  },
   sessionFor(romId: number): GameSession | undefined {
     return findSession(state.sessions, romId);
   },
-  dismissWarning(): void {
-    state.lastWarning = null;
-  },
 };
 
+/** Called with the list before and the snapshot that replaced it. A snapshot
+ *  is the whole, authoritative list: it replaces, never merges. Its
+ *  one-shot `warning` (a game that exited inside its early-exit window) is
+ *  the notifications' to show (notifications/notifier.ts). */
+export type SessionsListener = (before: GameSession[], snap: SessionsSnapshot) => void;
+
+const listeners = new Set<SessionsListener>();
+
+export function onSessionsSnapshot(listener: SessionsListener): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 function apply(snap: SessionsSnapshot): void {
-  const next = applySnapshot(state, snap);
-  state.sessions = next.sessions;
-  state.lastWarning = next.lastWarning;
+  const before = state.sessions;
+  state.sessions = snap.sessions;
+  for (const listener of listeners) listener(before, snap);
 }
 
 export async function init(): Promise<UnlistenFn> {

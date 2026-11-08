@@ -9,6 +9,7 @@
   import ThemeToggle from './ThemeToggle.svelte';
   import { listen } from '@tauri-apps/api/event';
   import { initEmulatorEvents } from './systems/events';
+  import { initNotifications } from './notifications/notifier';
   import {
     api,
     CLOUD_RESTORE_NOTICE_EVENT,
@@ -125,6 +126,10 @@
   // Emulator install/update notices, app-lifetime rather than tied to
   // Settings › Systems being open, so each toasts once.
   $effect(() => initEmulatorEvents());
+
+  // The download, install and launch cards (queued, installed, failed,
+  // cancelled, launching, early exits): app-lifetime for the same reason.
+  $effect(() => initNotifications());
 
   // G1-Q: the pre-launch restore skipped save folders it could not match to
   // the game. It runs inside `launch_game`, with no panel open to report in.

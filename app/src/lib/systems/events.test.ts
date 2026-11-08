@@ -32,12 +32,10 @@ describe('initEmulatorEvents', () => {
     vi.doUnmock('@tauri-apps/api/event');
   });
 
-  it('toasts each install once and marks an update current', async () => {
+  it('toasts a coreless RetroArch pick as an error', async () => {
     const { initEmulatorEvents } = await import('./events');
     const { toasts } = await import('../stores/toasts.svelte');
     const stop = initEmulatorEvents();
-    handlers['emulator-installed']({ payload: { name: 'PCSX2', fresh: true } });
-    expect(toasts.list.map((t) => t.text)).toEqual(["Installed emulator 'PCSX2' from source."]);
     handlers['setup-defaults']({ payload: [{ outcome: 'core_missing', platform: 'SNES', emulator: 'RetroArch' }] });
     expect(toasts.list.at(-1)?.level).toBe('error');
     stop();

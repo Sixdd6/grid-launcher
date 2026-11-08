@@ -50,6 +50,36 @@ stack; a fifth drops the oldest. The first-run setup card sits at the top of the
 stack and counts down only once its installs are done. With reduced motion the bar
 stays still, but the cards still close on time.
 
+Every download, install and launch event shows a card once, whichever view started it
+and whichever view is open:
+
+- A game added to the download queue: "<Title> added to download queue" (an update:
+  "Update for <Title> added to download queue"; PS4/Xbox 360 extra content: "Extra
+  content for <Title> added to download queue"). Retrying a failed or cancelled download
+  queues it again.
+- The download finishing: "<Title> installed" ("<Title> updated" for an update), or an
+  error card "Couldn't install <Title>: <reason>" ("Couldn't update …"). Cancelling:
+  "Cancelled <Title>". A refused Install, where nothing was queued, is an error card
+  "Couldn't add <Title> to the download queue: <reason>".
+- An emulator or compat tool queued: "Installing <Name>…" ("Updating <Name>…" for an
+  emulator update); finished: "<Name> installed" or "<Name> updated" (a Proton picked as
+  the Windows default: "<Name> installed and used for Windows games"; umu-launcher:
+  "umu-launcher installed"); failed: "Couldn't install <Name>: <reason>"; cancelled:
+  "Cancelled <Name>". Removing an emulator: "<Name> removed".
+- Uninstalling a game: "<Title> uninstalled"; removing a library row: "<Title> removed
+  from the library".
+- Launching: "Launching <Title>…". A refused launch is an error card "Couldn't launch
+  <Title>: <reason>" (a Proton launch that needs umu-launcher also keeps the reason and
+  its Install button beside the Play button). A game that exits inside its first half
+  second is an error card "<Title> — Process exited immediately (…)".
+
+Firmware, library moves, cloud saves and the Windows default keep their own cards, and a
+library move's row and firmware rows in Downloads add none. Cards of one kind that arrive
+within 0.4 seconds of each other (never held more than 1.5 seconds) become one summary
+card, such as "5 games added to download queue", "Installing 3 emulators…" or "2 downloads
+failed — see Downloads". While the first-run setup card is up it counts its emulators, so
+no per-emulator queued, installed or failed cards are shown.
+
 # Main Sections
 There are several main sections to the application with buttons across the top bar to navigate between them:
 - Library

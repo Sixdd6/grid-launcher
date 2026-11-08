@@ -7,6 +7,7 @@ import {
   INSTALL_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -73,6 +74,9 @@ describe('install (b): relaunch, badge persists, then uninstall', () => {
       timeout: TRANSITION_TIMEOUT,
       reverse: true,
       timeoutMsg: 'the details overlay never closed after uninstalling',
+    });
+    await waitForToast('Super Mario World uninstalled', {
+      timeoutMsg: 'no "uninstalled" card after uninstalling',
     });
 
     await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({

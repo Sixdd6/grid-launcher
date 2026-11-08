@@ -1,8 +1,9 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { api, type InstalledGame } from './api';
+  import type { InstalledGame } from './api';
   import UmuInstallOffer from './UmuInstallOffer.svelte';
   import { isUmuMissing } from './launchError';
+  import { launchGame } from './notifications/notifier';
   import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
   import { updates } from './stores/updates.svelte';
   import { installedKey, visibleLibraryGames } from './library';
@@ -158,10 +159,13 @@
     if (row.rom_id === null) return;
     launchError = null;
     try {
-      await api.launchGame(row.rom_id);
+      // "Launching <title>…" and a refusal are cards (notifier); the reason
+      // also shows here only beside the umu-launcher install it needs.
+      await launchGame(row.rom_id, row.title);
     } catch (err) {
-      launchError = err instanceof Error ? err.message : String(err);
-      umuOfferFor = isUmuMissing(err) ? launchError : null;
+      const missing = isUmuMissing(err);
+      launchError = missing ? (err instanceof Error ? err.message : String(err)) : null;
+      umuOfferFor = missing ? launchError : null;
     }
   }
 

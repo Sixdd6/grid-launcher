@@ -9,6 +9,7 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -126,7 +127,9 @@ describe('Settings › Systems', () => {
 
   it('installs the recommended emulator with one click and makes it the system’s emulator', async () => {
     await $(testId('sys-install-dc')).click();
+    await waitForToast(/^Installing Redream.*…$/, { timeoutMsg: 'no "Installing" card for Redream' });
     await waitForConfig((c) => c.includes(`"${DC}" = "${REDREAM}"`), 'Redream never became Dreamcast’s emulator');
+    await waitForToast(`${REDREAM} installed`, { timeoutMsg: 'no "installed" card for Redream' });
     await waitForStatus('dc', 'ready');
     await expect($(testId('systems-install-recommended'))).toHaveText('Install recommended (2)');
   });
