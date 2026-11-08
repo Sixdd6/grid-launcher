@@ -8,7 +8,7 @@ function freshReset() {
   SY.fw = {}; SY.upd = {}; SY.winSet = false; SY.open = {}; SY.busy = {}; SY.menu = null; SY.sheet = null;
   SY.protons = ['Wine 10.0 (system)', 'Proton 9.0 (Steam)', 'Proton Experimental (Steam)']; SY.protonGet = ['GE-Proton10-17', 'Proton-CachyOS 10.0-20251031']; SY.proton = 'Wine 10.0 (system)';
   G.forEach(function (g) { g.installed = false; g.update = false; g.missing = false; g.cloud = false; });
-  S.view = 'server'; S.platform = 'DISCOVER'; S.setPane = 'systems'; S.libFilter = 'all'; S.detail = null; S.dl = null;
+  S.view = 'server'; S.platform = 'DISCOVER'; S.setPane = 'appearance'; S.libFilter = 'all'; S.detail = null; S.dl = null;
   FR.form = { url: '', user: '', secret: '', lib: '~/Games/GRID', token: false }; FR.busy = false; FR.ticked = {}; FR.choice = {}; FR.proton = false; FR.protonChoice = ''; FR.run = null;
   $('setup-card').hidden = true; $('scrim').hidden = true;
   DONE.length = 0; DLQ.length = 0;

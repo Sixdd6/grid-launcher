@@ -475,7 +475,7 @@ var G = DATA.games.map(function(g, i){ return Object.assign({ id: i, installed: 
 var PLAT = { PS: 'PlayStation', N64: 'Nintendo 64', SAT: 'Sega Saturn', GC: 'GameCube', SNES: 'Super Nintendo', PS2: 'PlayStation 2', LINUX: 'Linux', WIN: 'Windows' };
 var EMU = { PS: 'DuckStation', N64: 'RetroArch · Mupen64Plus-Next', SAT: 'Ymir (Sega Saturn)', GC: 'Dolphin', SNES: 'RetroArch · Snes9x', PS2: 'PCSX2', LINUX: 'none', WIN: 'none' };
 var VIEWS = ['library','server','downloads','settings'];
-var S = { view: 'settings', platform: 'DISCOVER', libFilter: 'all', q: { library: '', server: '' }, cardW: 160, labels: 'always', fade: 50, blur: 2, lastFade: 50, emuPane: 'installed', setPane: 'systems', detail: null, tab: 'overview', kind: 'save', dl: null, fw: { PS: 'installed', SAT: 'install', GC: 'unavailable' } };
+var S = { view: 'settings', platform: 'DISCOVER', libFilter: 'all', q: { library: '', server: '' }, cardW: 160, labels: 'always', fade: 50, blur: 2, lastFade: 50, emuPane: 'installed', setPane: 'appearance', detail: null, tab: 'overview', kind: 'save', dl: null, fw: { PS: 'installed', SAT: 'install', GC: 'unavailable' } };
 var $ = function(id){ return document.getElementById(id); };
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
 
@@ -965,7 +965,7 @@ function freshReset() {
   SY.fw = {}; SY.upd = {}; SY.winSet = false; SY.open = {}; SY.busy = {}; SY.menu = null; SY.sheet = null;
   SY.protons = ['Wine 10.0 (system)', 'Proton 9.0 (Steam)', 'Proton Experimental (Steam)']; SY.protonGet = ['GE-Proton10-17', 'Proton-CachyOS 10.0-20251031']; SY.proton = 'Wine 10.0 (system)';
   G.forEach(function (g) { g.installed = false; g.update = false; g.missing = false; g.cloud = false; });
-  S.view = 'server'; S.platform = 'DISCOVER'; S.setPane = 'systems'; S.libFilter = 'all'; S.detail = null; S.dl = null;
+  S.view = 'server'; S.platform = 'DISCOVER'; S.setPane = 'appearance'; S.libFilter = 'all'; S.detail = null; S.dl = null;
   FR.form = { url: '', user: '', secret: '', lib: '~/Games/GRID', token: false }; FR.busy = false; FR.ticked = {}; FR.choice = {}; FR.proton = false; FR.protonChoice = ''; FR.run = null;
   $('setup-card').hidden = true; $('scrim').hidden = true;
   DONE.length = 0; DLQ.length = 0;

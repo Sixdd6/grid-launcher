@@ -665,7 +665,6 @@ nxt = sub(nxt, '</style></head>', NEXT_CSS + '\n</style></head>')
 nxt = sub(nxt, '/* ---- details ---- */', NEXT_JS + '\n/* ---- details ---- */')
 nxt = sub(nxt, "var VIEWS = ['library','server','downloads','emulators','settings'];", "var VIEWS = ['library','server','downloads','settings'];")
 nxt = sub(nxt, "var S = { view: 'server',", "var S = { view: 'settings',")
-nxt = sub(nxt, "setPane: 'appearance'", "setPane: 'systems'")
 # Settings rail: Systems joins, and the panes run alphabetically.
 nxt = sub(nxt, "var panes = [['connection','Connection'],['library','Library'],['cloud','Cloud saves'],['ra','RetroAchievements'],['updates','Updates'],['appearance','Appearance']];",
           "var panes = [['appearance','Appearance'],['cloud','Cloud saves'],['connection','Connection'],['library','Library'],['ra','RetroAchievements'],['systems','Systems'],['updates','Updates']];")
