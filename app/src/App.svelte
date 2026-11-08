@@ -17,7 +17,8 @@
   import { initLibraryUnreachable, libraryUnreachable } from './lib/stores/libraryUnreachable.svelte';
   import LibraryUnreachableDialog from './lib/LibraryUnreachableDialog.svelte';
   import { initReplenishListener } from './lib/stores/installed.svelte';
-  import { initUiSettings } from './lib/stores/uiSettings.svelte';
+  import { initUiSettings, toggleTheme, uiSettings } from './lib/stores/uiSettings.svelte';
+  import ThemeToggle from './lib/ThemeToggle.svelte';
 
   let restored = false; // restore() must fire once on mount, not on every phase change
 
@@ -129,6 +130,18 @@
   <Shell />
 {:else if session.phase === 'none'}
   <Connect prefill={connectPrefill(session)} />
+{/if}
+
+<!-- The startup screens (Connect, first-run setup) carry the light / dark
+     toggle in the window's top-right corner; the shell moves it into its
+     top bar. -->
+{#if !libraryUnreachable.blocking && (session.phase === 'none' || session.phase === 'setup')}
+  <ThemeToggle
+    corner
+    testId="theme-toggle-start"
+    resolved={uiSettings.resolved}
+    onToggle={() => toggleTheme().catch(() => {})}
+  />
 {/if}
 
 <!-- Outside the phase branch: the startup Python-import notice is pushed

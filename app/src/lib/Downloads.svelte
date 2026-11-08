@@ -5,7 +5,6 @@
   import { actionFor, entryDetail, graphCaption, kindLabel, percent } from './downloads/format';
   import {
     groupBySegment,
-    LEGEND_TEXT,
     segmentEmptyText,
     segmentLabel,
     SEGMENTS,
@@ -89,7 +88,6 @@
   <header class="head">
     <div class="head-text">
       <h1>Downloads</h1>
-      <p data-testid="downloads-legend" class="legend">{LEGEND_TEXT}</p>
     </div>
     <div data-testid="downloads-graph-key" class="graph-key" aria-label="Graph colours">
       <span class="key-item"><span class="swatch net" aria-hidden="true"></span>Network</span>
@@ -193,12 +191,6 @@
 
   .head h1 {
     margin: 0 0 4px;
-  }
-
-  .legend {
-    margin: 0;
-    font-size: 12px;
-    color: var(--text-muted);
   }
 
   .graph-key {

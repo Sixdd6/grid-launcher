@@ -12,8 +12,11 @@ import {
   BLUR_DEFAULT,
   clampBlur,
   clampFade,
+  easesThemeSwitch,
   FADE_DEFAULT,
+  nextTheme,
   normalizeTheme,
+  THEME_EASE_WINDOW_MS,
   resolveTheme,
   themeAttribute,
   themeFromStorageValue,
@@ -177,16 +180,42 @@ export async function initUiSettings(): Promise<() => void> {
   return () => media.removeEventListener('change', onChange);
 }
 
+let themingTimer: ReturnType<typeof setTimeout> | undefined;
+
 /**
- * Applies immediately, then persists. The localStorage mirror is written
- * only once the save resolves, so a failed write leaves the hint agreeing
- * with `config.toml`.
+ * Puts `theming` on `<html>` for `THEME_EASE_WINDOW_MS`, so the colours ease
+ * across a user's switch (app.css) and nothing else ever animates them.
+ * Skipped under `prefers-reduced-motion`: the switch is instant.
+ */
+function easeThemeSwitch(): void {
+  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  const classes = document.documentElement.classList;
+  if (!easesThemeSwitch(reduced) || !classes) return;
+  classes.add('theming');
+  clearTimeout(themingTimer);
+  themingTimer = setTimeout(() => classes.remove('theming'), THEME_EASE_WINDOW_MS);
+}
+
+/**
+ * A user's theme switch, from the Appearance select or the light / dark
+ * toggle: eases the colours, applies immediately, then persists. The
+ * localStorage mirror is written only once the save resolves, so a failed
+ * write leaves the hint agreeing with `config.toml`.
  */
 export async function setTheme(choice: ThemeChoice): Promise<void> {
+  easeThemeSwitch();
   state.theme = choice;
   applyTheme(choice);
   await api.setUiSettings(payload());
   mirrorTheme(choice);
+}
+
+/**
+ * The light / dark toggle: switches to the other mode as an explicit choice,
+ * so Settings › Appearance › Theme reads the same afterwards.
+ */
+export function toggleTheme(): Promise<void> {
+  return setTheme(nextTheme(resolveTheme(state.theme, state.prefersDark)));
 }
 
 /** Slider drag: updates the live preview without touching the config. */

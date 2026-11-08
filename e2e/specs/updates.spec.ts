@@ -341,6 +341,22 @@ describe('updates', () => {
     await waitForConfigLine('theme = "dark"');
   });
 
+  // ProposedApp README, "Light / dark toggle": the top-bar toggle switches
+  // the theme and sets Appearance › Theme to match, so config.toml follows.
+  it('switches the theme from the top-bar toggle and sets the Appearance choice', async () => {
+    const toggle = $(testId('shell-topbar')).$(testId('theme-toggle'));
+    await expect(toggle).toHaveAttribute('aria-label', 'Switch to light mode');
+    await toggle.click();
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(() => document.documentElement.dataset.theme ?? null)) === 'light',
+      { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the toggle never switched <html> to light' },
+    );
+    await expect($(testId('theme-select'))).toHaveValue('light');
+    await expect(toggle).toHaveAttribute('aria-label', 'Switch to dark mode');
+    await waitForConfigLine('theme = "light"');
+  });
+
   // Design §3/§10: the blur sigma is baked into the cached variant's file
   // name, so the slider commits on release only. This checks the surface and
   // the round trip; `theme.test.ts` / `uiSettings.test.ts` own the clamping.

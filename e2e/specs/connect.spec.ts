@@ -40,6 +40,20 @@ describe('connect', () => {
     await expect($(testId('connect-submit'))).toExist();
   });
 
+  // ProposedApp README, "Light / dark toggle": the startup screens carry it
+  // in the window's top-right corner; the shell moves it into the top bar.
+  it('shows the light / dark toggle in the corner of the connect screen', async () => {
+    const toggle = $(testId('theme-toggle-start'));
+    await expect(toggle).toBeDisplayed();
+    await expect(toggle).toHaveAttribute('aria-label', expect.stringMatching(/^Switch to (dark|light) mode$/));
+    const { right, top } = await browser.execute((sel: string) => {
+      const r = document.querySelector(sel)!.getBoundingClientRect();
+      return { right: window.innerWidth - r.right, top: r.top };
+    }, testId('theme-toggle-start'));
+    expect(Math.round(right)).toBe(16);
+    expect(Math.round(top)).toBe(16);
+  });
+
   it('connects with the fixture token and shows the library', async () => {
     await $(testId('connect-server-url')).setValue(mockUrl());
     await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
@@ -51,6 +65,8 @@ describe('connect', () => {
     });
     await expect($(testId('platform-btn-2'))).toExist();
     await expect($(testId('connect-submit'))).not.toExist();
+    await expect($(testId('theme-toggle-start'))).not.toExist();
+    await expect($(testId('shell-topbar')).$(testId('theme-toggle'))).toBeDisplayed();
   });
 
   it('keeps the token out of the DOM', async () => {

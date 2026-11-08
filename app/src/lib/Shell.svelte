@@ -8,6 +8,7 @@
   import BackgroundArt from './BackgroundArt.svelte';
   import Icon from './Icon.svelte';
   import Settings from './Settings.svelte';
+  import ThemeToggle from './ThemeToggle.svelte';
   import { listen } from '@tauri-apps/api/event';
   import {
     api,
@@ -22,6 +23,7 @@
   import { seedLastViewed } from './stores/lastViewed.svelte';
   import { noteInput, notePointerAt } from './stores/inputMode.svelte';
   import { pushToast } from './stores/toasts.svelte';
+  import { toggleTheme, uiSettings } from './stores/uiSettings.svelte';
   import { chipLabel, hostOf, initialView, VIEWS, viewForDigit, viewLabel, type View } from './shell';
   // The same guard the grid views use for Ctrl+F: an accelerator must stay
   // out of the way while focus sits in a text-entry control (where
@@ -176,6 +178,9 @@
         Update
       </button>
     {/if}
+    <!-- A failed save is not worth an error here: the theme is already
+         applied, the same trade the Appearance select makes. -->
+    <ThemeToggle resolved={uiSettings.resolved} onToggle={() => toggleTheme().catch(() => {})} />
     <span class="status-dot" class:online={session.connected} aria-hidden="true"></span>
     <button
       data-testid="session-chip"

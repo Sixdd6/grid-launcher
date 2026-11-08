@@ -11,10 +11,6 @@ import {
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
-/** Verbatim from design §8; `segments.ts` carries the same string. */
-const LEGEND =
-  'Active: downloading or installing · Queued: waiting for a slot · Completed: finished, failed, or cancelled';
-
 /**
  * Stage `downloads`: this group's mock server is started with
  * `--throttle-ms 100` (see rewrite/scripts/e2e.sh's mock_args_for_group),
@@ -95,8 +91,8 @@ describe('downloads', () => {
     return $(testId(`downloads-seg-${segment}`)).$(testId(`download-row-${id}`));
   }
 
-  it('renders the three segments, their counts and the legend before anything runs', async () => {
-    await expect($(testId('downloads-legend'))).toHaveText(LEGEND);
+  it('renders the three segments and their counts, with no legend line, before anything runs', async () => {
+    await expect($(testId('downloads-legend'))).not.toExist();
     for (const seg of ['active', 'queued', 'completed'] as const) {
       await expect($(testId(`downloads-seg-${seg}`))).toExist();
       await expect($(testId(`downloads-seg-count-${seg}`))).toHaveText('0');

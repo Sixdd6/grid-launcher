@@ -12,6 +12,11 @@ import {
   resolveTheme,
   themeAttribute,
   themeFromStorageValue,
+  easesThemeSwitch,
+  nextTheme,
+  THEME_EASE_WINDOW_MS,
+  themeToggleIcon,
+  themeToggleLabel,
 } from './theme';
 
 describe('normalizeTheme', () => {
@@ -111,5 +116,32 @@ describe('themeFromStorageValue', () => {
     expect(themeFromStorageValue('')).toBeNull();
     expect(themeFromStorageValue('system')).toBeNull();
     expect(themeFromStorageValue('Dark')).toBeNull();
+  });
+});
+
+describe('the light / dark toggle', () => {
+  it('switches to the other mode', () => {
+    expect(nextTheme('light')).toBe('dark');
+    expect(nextTheme('dark')).toBe('light');
+  });
+
+  it('names the switch it makes', () => {
+    expect(themeToggleLabel('light')).toBe('Switch to dark mode');
+    expect(themeToggleLabel('dark')).toBe('Switch to light mode');
+  });
+
+  it('shows the current mode: sun in light, moon in dark', () => {
+    expect(themeToggleIcon('light')).toBe('sun');
+    expect(themeToggleIcon('dark')).toBe('moon');
+  });
+
+  it('eases the switch unless reduced motion is asked for', () => {
+    expect(easesThemeSwitch(false)).toBe(true);
+    expect(easesThemeSwitch(true)).toBe(false);
+  });
+
+  it('holds the easing class a little past the 240ms transition', () => {
+    expect(THEME_EASE_WINDOW_MS).toBeGreaterThan(240);
+    expect(THEME_EASE_WINDOW_MS).toBeLessThan(500);
   });
 });

@@ -159,6 +159,80 @@ describe('setTheme', () => {
   });
 });
 
+describe('toggleTheme', () => {
+  function fakeClassList() {
+    const set = new Set<string>();
+    return {
+      set,
+      add: (c: string) => void set.add(c),
+      remove: (c: string) => void set.delete(c),
+    };
+  }
+
+  async function loadStore(opts: { theme: string; prefersDark: boolean; reducedMotion: boolean }) {
+    const dataset: Record<string, string> = {};
+    const classList = fakeClassList();
+    vi.stubGlobal('localStorage', fakeStorage());
+    vi.stubGlobal('document', { documentElement: { dataset, classList } });
+    vi.stubGlobal('window', {
+      matchMedia: (q: string) => fakeMedia(q.includes('reduced-motion') ? opts.reducedMotion : opts.prefersDark),
+    });
+    const setUiSettings = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('../api', () => ({
+      api: {
+        getUiSettings: () =>
+          Promise.resolve({ theme: opts.theme, background_fade: 50, card_size_library: 'medium', card_size_server: 'medium' }),
+        setUiSettings,
+      },
+    }));
+    const store = await import('./uiSettings.svelte');
+    await store.initUiSettings();
+    return { ...store, dataset, classList, setUiSettings };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('switches a followed dark system theme to an explicit light one and saves it', async () => {
+    const { toggleTheme, uiSettings, dataset, setUiSettings } = await loadStore({
+      theme: 'system',
+      prefersDark: true,
+      reducedMotion: false,
+    });
+    await toggleTheme();
+    expect(uiSettings.theme).toBe('light');
+    expect(dataset.theme).toBe('light');
+    expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ theme: 'light' }));
+  });
+
+  it('switches light to dark', async () => {
+    const { toggleTheme, uiSettings } = await loadStore({ theme: 'light', prefersDark: true, reducedMotion: false });
+    await toggleTheme();
+    expect(uiSettings.theme).toBe('dark');
+  });
+
+  it('eases the colours only for the switch window', async () => {
+    vi.useFakeTimers();
+    const { toggleTheme, classList } = await loadStore({ theme: 'light', prefersDark: false, reducedMotion: false });
+    await toggleTheme();
+    expect(classList.set.has('theming')).toBe(true);
+    vi.advanceTimersByTime(320);
+    expect(classList.set.has('theming')).toBe(false);
+  });
+
+  it('switches instantly under reduced motion', async () => {
+    const { toggleTheme, classList, uiSettings } = await loadStore({
+      theme: 'light',
+      prefersDark: false,
+      reducedMotion: true,
+    });
+    await toggleTheme();
+    expect(uiSettings.theme).toBe('dark');
+    expect(classList.set.has('theming')).toBe(false);
+  });
+});
+
 describe('setBackgroundEnabled', () => {
   async function loadStore(fade: number) {
     vi.stubGlobal('localStorage', fakeStorage());

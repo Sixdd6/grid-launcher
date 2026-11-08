@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { DownloadEntry, DownloadStatus } from '../api';
 import {
   groupBySegment,
-  LEGEND_TEXT,
   segmentEmptyText,
   segmentLabel,
   segmentOf,
@@ -33,12 +32,6 @@ function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
 describe('segments', () => {
   it('lists the three segments in design §8 order', () => {
     expect(SEGMENTS).toEqual(['active', 'queued', 'completed']);
-  });
-
-  it('carries the legend line verbatim', () => {
-    expect(LEGEND_TEXT).toBe(
-      'Active: downloading or installing · Queued: waiting for a slot · Completed: finished, failed, or cancelled',
-    );
   });
 
   it('maps every status to exactly one segment', () => {

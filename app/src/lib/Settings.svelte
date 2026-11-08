@@ -6,6 +6,7 @@
   // at 1100px (D-UI-7).
   import RailPane, { type RailPaneEntry } from './RailPane.svelte';
   import {
+    DEFAULT_SETTINGS_PAGE,
     SETTINGS_PAGES,
     settingsPageLabel,
     settingsRailEntries,
@@ -20,7 +21,7 @@
 
   let { active = true }: { active?: boolean } = $props();
 
-  let page = $state<SettingsPage>('connection');
+  let page = $state<SettingsPage>(DEFAULT_SETTINGS_PAGE);
 
   /**
    * Programmatic page selection, for callers that route straight to a page
@@ -51,7 +52,9 @@
       <section data-testid={`settings-page-${p}`} class="pane" hidden={page !== p} aria-label={settingsPageLabel(p)}>
         <div class="view-content pane-inner">
           <h2>{settingsPageLabel(p)}</h2>
-          {#if p === 'connection'}
+          {#if p === 'appearance'}
+            <AppearancePage />
+          {:else if p === 'connection'}
             <!-- Page-level activation, unlike the other panes: the edit form
                  holds a plain secret, so leaving this page must close it. -->
             <ConnectionPage active={active && page === 'connection'} />
@@ -68,8 +71,6 @@
             <RetroAchievementsPage active={active && page === 'retroachievements'} />
           {:else if p === 'updates'}
             <UpdatesPage {active} />
-          {:else}
-            <AppearancePage />
           {/if}
         </div>
       </section>

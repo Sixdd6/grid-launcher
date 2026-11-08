@@ -1,5 +1,6 @@
 // Design §8: "Segments Active (live), Queued, Completed (terminal,
-// dismissable), each with a count; a legend line beside them". The view
+// dismissable), each with a count". No legend line: the three section titles
+// say enough (ProposedApp README, "Downloads"). The view
 // renders all three stacked in this order (see the plan's "Deliberate
 // deviations": a filter control would make rows vanish mid-transition and
 // break every spec that waits on `download-detail-<id>`).
@@ -8,10 +9,6 @@ import type { DownloadEntry, DownloadStatus } from '../api';
 export type Segment = 'active' | 'queued' | 'completed';
 
 export const SEGMENTS: readonly Segment[] = ['active', 'queued', 'completed'];
-
-/** Verbatim from design §8. */
-export const LEGEND_TEXT =
-  'Active: downloading or installing · Queued: waiting for a slot · Completed: finished, failed, or cancelled';
 
 export function segmentOf(status: DownloadStatus): Segment {
   switch (status) {

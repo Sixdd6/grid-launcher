@@ -86,3 +86,38 @@ export const THEME_STORAGE_KEY = 'grid.ui.theme';
 export function themeFromStorageValue(raw: string | null): ResolvedTheme | null {
   return raw === 'dark' || raw === 'light' ? raw : null;
 }
+
+/*
+ * The light / dark toggle (ProposedApp README, "Light / dark toggle"). The
+ * button shows the mode the window is in now and its label names the switch.
+ * A click sets an explicit theme, so Settings › Appearance › Theme reads the
+ * same; "Follow system" stays a choice there.
+ */
+
+/** The theme a toggle click switches to. */
+export function nextTheme(resolved: ResolvedTheme): ResolvedTheme {
+  return resolved === 'dark' ? 'light' : 'dark';
+}
+
+/** The toggle's accessible name and tooltip: the switch it makes. */
+export function themeToggleLabel(resolved: ResolvedTheme): string {
+  return `Switch to ${nextTheme(resolved)} mode`;
+}
+
+/** The icon the toggle shows: the current mode, sun in light, moon in dark. */
+export function themeToggleIcon(resolved: ResolvedTheme): 'sun' | 'moon' {
+  return resolved === 'dark' ? 'moon' : 'sun';
+}
+
+/**
+ * How long `<html class="theming">` stays on after a switch, so every colour
+ * eases across (app.css, 240ms) instead of snapping. A little longer than the
+ * transition so the last frame lands before the class goes; the class is
+ * scoped to this window so no other change ever animates its colours.
+ */
+export const THEME_EASE_WINDOW_MS = 320;
+
+/** Whether a theme switch eases its colours: never under reduced motion. */
+export function easesThemeSwitch(prefersReducedMotion: boolean): boolean {
+  return !prefersReducedMotion;
+}

@@ -5,9 +5,17 @@ It is built in Rust with Tauri 2 and a Svelte 5 frontend, and ships as a Windows
 # Top Bar
 The top bar is 58px tall: the GRID logo and wordmark on the left, a centred pill
 group with the five views (Library, Server, Downloads, Emulators, Settings) in that
-order, and on the right a connection status dot, the server menu (Reconnect,
-Disconnect, Open RomM in browser) and the app-update badge when a release notice is
-stored. `Ctrl+1`..`Ctrl+5` switch views from the keyboard.
+order, and on the right the app-update badge when a release notice is stored, the
+light / dark toggle, a connection status dot and the server menu (Reconnect,
+Disconnect, Open RomM in browser). `Ctrl+1`..`Ctrl+5` switch views from the keyboard.
+
+**Light / dark toggle.** A 28×28 icon button showing the current mode — a sun in light,
+a moon in dark — whose label names the switch ("Switch to dark mode"). On the startup
+screens (Connect and first-run setup) it sits in the window's top-right corner, 16px in;
+in the main window it is in the top bar, left of the connection dot and username. A
+click switches the theme and sets Settings › Appearance › Theme to match ("Follow
+system" stays a choice there). The icon spins in (300ms) and the colours ease across
+(240ms) only during the switch; with reduced motion both are instant.
 
 Views stay mounted and switch with the `hidden` attribute, so scroll positions and
 selections survive a switch. Behind the content sits blurred background art — the
@@ -78,9 +86,8 @@ There are several main sections to the application with buttons across the top b
 - **Discover** (ON HOLD since 2026-09-09 by user decision; not part of the current app — kept here as the reference if it is revived as a redesign) contains collapsible, cached recommendation sections built from the server library — Short But Fun, New on Server, Highly Rated (All-Time), Recommended for You, Browse by Genre, and Your Watchlist — with genre/platform filters and a manual refresh. Sections load in the background and fall back to the cached view when the server is unreachable.
 - **Downloads** is a full view, capped at 1100px and centred, with three stacked
   segments in this order — Active (downloading, installing, cancelling), Queued, and
-  Completed (finished, failed, or cancelled) — each with a count, under the legend
-  "Active: downloading or installing · Queued: waiting for a slot · Completed: finished,
-  failed, or cancelled". Each row shows the title, a kind badge (none for a base game;
+  Completed (finished, failed, or cancelled) — each with a count; the three section
+  titles say enough, so there is no legend line. Each row shows the title, a kind badge (none for a base game;
   Update, Content, Emulator, Compat tool, or Firmware otherwise), the platform, the
   status/progress line, a progress bar, a 120×38 sparkline panel of the last 60 seconds
   (network in the primary colour, disk in teal, with the rate and ETA under it), and the
@@ -112,7 +119,9 @@ There are several main sections to the application with buttons across the top b
   failure never fails the Proton install. Each
   emulator entry includes a name, executable path, launch arguments, save strategy,
   ignore rules, and optional custom save/state directories.
-- **Settings** is a rail of six panes: **Connection** (server URL, user, whether a
+- **Settings** is a rail of six panes in alphabetical order — Appearance, Cloud saves,
+  Connection, Library, RetroAchievements, Updates — and opens on the first, Appearance.
+  The panes: **Connection** (server URL, user, whether a
   credential is stored in the OS keyring and whether the session is verified, Reconnect,
   Disconnect), **Library** (the library folder and Change…: the new folder is typed or
   picked with Browse…, and is refused when it is not a full path, is the current folder,
@@ -157,7 +166,8 @@ There are several main sections to the application with buttons across the top b
   ran, the release notice with its Open release and Dismiss buttons, and the note that
   the launcher only ever checks — it never downloads or installs an update), and
   **Appearance**.
-- **Appearance** (under Settings) chooses the theme — follow the OS, dark, or light —
+- **Appearance** (under Settings) chooses the theme — follow the OS, dark, or light;
+  the light / dark toggle sets dark or light here too —
   turns the background art on or off, sets its fade from 0 to 100 percent with a live
   preview behind the pane (0 shows the art at full strength; each step fades it toward
   the window background; 100 is fully faded, which turns the art off, so nothing is

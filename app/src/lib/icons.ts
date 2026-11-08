@@ -56,6 +56,20 @@ export const ICONS = {
    *  card's "Details" control. */
   more: 'M7.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0zM13.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0zM19.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0z',
 
+  /**
+   * Outline sun: a 4-radius disc on (12, 12) and eight 2-unit rays starting
+   * 5.25 units out (2.75–4.75 on the axes). The light/dark toggle in light
+   * mode. From `docs/design/prototype/icons.json`.
+   */
+  sun: 'M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM12 2.75v2M12 19.25v2M2.75 12h2M19.25 12h2M5.46 5.46l1.41 1.41M17.13 17.13l1.41 1.41M5.46 18.54l1.41-1.41M17.13 6.87l1.41-1.41',
+
+  /**
+   * Outline crescent: two 7.6-radius arcs meeting at (19.5, 14.6) and
+   * (9.4, 4.5). The light/dark toggle in dark mode. From
+   * `docs/design/prototype/icons.json`.
+   */
+  moon: 'M19.5 14.6A7.6 7.6 0 0 1 9.4 4.5a7.6 7.6 0 1 0 10.1 10.1z',
+
   /** The brandmark: four 6×6 cells with a 4-unit gutter, spanning 4–20. */
   grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
 } as const;
