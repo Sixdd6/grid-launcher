@@ -40,6 +40,16 @@ function discAction(g) {
   if (DLQ.indexOf(g.id) >= 0) return 'Queued';
   return 'Install';
 }
+/* Screenshot shape per game (the prototype's: by era, with a few modern
+   exceptions), and whether the game has a clear logo. */
+var SHOT = { SNES: [8, 7], N64: [4, 3], PS: [4, 3], SAT: [4, 3], PS2: [4, 3], GC: [4, 3], WIN: [16, 9], LINUX: [16, 9] };
+var SHOT_OVERRIDE = { 'Orbit Bloom': [16, 9], 'Signal Fires': [16, 9], 'Grey Meridian': [21, 9], 'Paper Orbit': [16, 10] };
+var LOGO_PLATFORMS = ['WIN', 'LINUX', 'PS2', 'GC'], LOGO_TITLES = ['Cinder Peaks', 'Coral Static'];
+function shotRatio(g) { return SHOT_OVERRIDE[g.t] || SHOT[g.p] || [16, 9]; }
+function hasLogo(g) { return LOGO_PLATFORMS.indexOf(g.p) >= 0 || LOGO_TITLES.indexOf(g.t) >= 0; }
+/* Stand-in clear logo: styled text in one of three looks. A real one is a
+   transparent image, usually light, so it sits on the art, not the panel. */
+function clearLogo(g) { return '<div class="ra-logo logo-' + 'abc'.charAt(g.id % 3) + '" role="img" aria-label="' + syEsc(g.t) + '">' + esc(g.t) + '</div>'; }
 function discArt(g, extra) { return '<div class="g-art" style="background:' + g.c + (extra || '') + '"><span>' + esc(g.t) + '</span></div>'; }
 
 function renderDiscover() {
@@ -111,14 +121,21 @@ function raGo(i, auto, first) {
   var bar = hl.querySelector('.ra-bar'), nb = bar.cloneNode(); bar.replaceWith(nb);   // restart the 10 s fill
   lst.scrollTo({ top: Math.max(0, row.offsetTop - (lst.clientHeight - row.offsetHeight) / 2), behavior: first ? 'auto' : 'smooth' });
   var next = DISC.layer === 'a' ? 'b' : 'a', shot = $('ra-' + next);
-  shot.innerHTML = '<div class="ra-art" style="background:' + g.c + '"><span></span><i></i></div>';
+  /* The frame is 16:9; a screenshot of another shape is fitted inside it,
+     uncropped, over a blurred, darkened copy of itself. */
+  var r = shotRatio(g), wide = r[0] / r[1] >= 16 / 9;
+  shot.innerHTML = '<div class="ra-fill" style="background:' + g.c + '"><span></span><i></i></div>' +
+    '<div class="ra-pic ' + (wide ? 'wide' : 'tall') + '" style="aspect-ratio:' + r[0] + ' / ' + r[1] + '"><div class="ra-art" style="background:' + g.c + '"><span></span><i></i></div></div>' +
+    (hasLogo(g) ? '<div class="ra-logo-wrap">' + clearLogo(g) + '</div>' : '');
+  shot.dataset.ratio = r[0] + ':' + r[1];
   if (first) { $('ra-a').classList.remove('on'); $('ra-b').classList.remove('on'); }
   shot.classList.add('on'); $('ra-' + DISC.layer).classList.remove('on'); DISC.layer = next;
   raCaption();
 }
 function raCaption() {
   var g = DISC.recent && DISC.recent[DISC.ra], c = $('ra-caption'); if (!g || !c) return;
-  c.innerHTML = '<div><b>' + esc(g.t) + '</b><span class="meta2">' + PLAT[g.p] + ' · ' + addedAgo(g.added) + '</span></div>' +
+  /* With a clear logo on the screenshot, the caption leaves the title out. */
+  c.innerHTML = '<div>' + (hasLogo(g) ? '' : '<b>' + esc(g.t) + '</b>') + '<span class="meta2">' + PLAT[g.p] + ' · ' + addedAgo(g.added) + '</span></div>' +
     '<div class="form-actions"><button class="g-btn" data-disc-act="' + g.id + '">' + discAction(g) + '</button></div>';
 }
 

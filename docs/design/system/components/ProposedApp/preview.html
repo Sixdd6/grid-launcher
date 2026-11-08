@@ -325,6 +325,21 @@
   @keyframes ra-fill { to { transform: scaleX(1); } }
   @media (prefers-reduced-motion: reduce) { .cf-item, .ra-hl, .ra-layer { transition: none; } }
 
+  /* Off-ratio screenshots: fitted in the 16:9 frame over a blurred copy. */
+  .ra-fill { position: absolute; inset: -12%; filter: blur(26px) brightness(.55) saturate(1.15); transform: scale(1.1); }
+  .ra-fill span { position: absolute; left: 8%; bottom: 14%; width: 46%; height: 34%; border-radius: 10px; background: rgba(255,255,255,.14); }
+  .ra-fill i { position: absolute; right: 10%; top: 16%; width: 26%; aspect-ratio: 1; border-radius: 50%; background: rgba(255,255,255,.18); }
+  .ra-pic { position: absolute; inset: 0; margin: auto; overflow: hidden; box-shadow: 0 0 24px rgba(0,0,0,.35); }
+  .ra-pic.tall { height: 100%; width: auto; }
+  .ra-pic.wide { width: 100%; height: auto; }
+  /* Clear logo: bottom-left on the art, over a soft fade so a light logo
+     reads on any screenshot. */
+  .ra-logo-wrap { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 20px 16px; background: linear-gradient(to top, rgba(0,0,0,.6), rgba(0,0,0,0)); pointer-events: none; }
+  .ra-logo { max-width: 55%; line-height: 1; color: #fff; overflow-wrap: anywhere; }
+  .logo-a { font: italic 700 34px/1 Georgia, 'Times New Roman', serif; color: #f6d77a; text-shadow: 0 2px 0 #6b4a0e, 0 4px 12px rgba(0,0,0,.6); }
+  .logo-b { font: 900 30px/0.95 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em; -webkit-text-stroke: 1px rgba(0,0,0,.6); text-shadow: 3px 3px 0 #553e98, 0 4px 14px rgba(0,0,0,.6); }
+  .logo-c { font: 800 32px/1 system-ui, sans-serif; letter-spacing: -.01em; color: #eafcff; text-shadow: 0 0 1px #0b3b46, 0 3px 0 #0b3b46, 0 5px 14px rgba(0,0,0,.55); }
+
 </style></head>
 <body>
 <div class="app" id="app">
@@ -1170,6 +1185,16 @@ function discAction(g) {
   if (DLQ.indexOf(g.id) >= 0) return 'Queued';
   return 'Install';
 }
+/* Screenshot shape per game (the prototype's: by era, with a few modern
+   exceptions), and whether the game has a clear logo. */
+var SHOT = { SNES: [8, 7], N64: [4, 3], PS: [4, 3], SAT: [4, 3], PS2: [4, 3], GC: [4, 3], WIN: [16, 9], LINUX: [16, 9] };
+var SHOT_OVERRIDE = { 'Orbit Bloom': [16, 9], 'Signal Fires': [16, 9], 'Grey Meridian': [21, 9], 'Paper Orbit': [16, 10] };
+var LOGO_PLATFORMS = ['WIN', 'LINUX', 'PS2', 'GC'], LOGO_TITLES = ['Cinder Peaks', 'Coral Static'];
+function shotRatio(g) { return SHOT_OVERRIDE[g.t] || SHOT[g.p] || [16, 9]; }
+function hasLogo(g) { return LOGO_PLATFORMS.indexOf(g.p) >= 0 || LOGO_TITLES.indexOf(g.t) >= 0; }
+/* Stand-in clear logo: styled text in one of three looks. A real one is a
+   transparent image, usually light, so it sits on the art, not the panel. */
+function clearLogo(g) { return '<div class="ra-logo logo-' + 'abc'.charAt(g.id % 3) + '" role="img" aria-label="' + syEsc(g.t) + '">' + esc(g.t) + '</div>'; }
 function discArt(g, extra) { return '<div class="g-art" style="background:' + g.c + (extra || '') + '"><span>' + esc(g.t) + '</span></div>'; }
 
 function renderDiscover() {
@@ -1241,14 +1266,21 @@ function raGo(i, auto, first) {
   var bar = hl.querySelector('.ra-bar'), nb = bar.cloneNode(); bar.replaceWith(nb);   // restart the 10 s fill
   lst.scrollTo({ top: Math.max(0, row.offsetTop - (lst.clientHeight - row.offsetHeight) / 2), behavior: first ? 'auto' : 'smooth' });
   var next = DISC.layer === 'a' ? 'b' : 'a', shot = $('ra-' + next);
-  shot.innerHTML = '<div class="ra-art" style="background:' + g.c + '"><span></span><i></i></div>';
+  /* The frame is 16:9; a screenshot of another shape is fitted inside it,
+     uncropped, over a blurred, darkened copy of itself. */
+  var r = shotRatio(g), wide = r[0] / r[1] >= 16 / 9;
+  shot.innerHTML = '<div class="ra-fill" style="background:' + g.c + '"><span></span><i></i></div>' +
+    '<div class="ra-pic ' + (wide ? 'wide' : 'tall') + '" style="aspect-ratio:' + r[0] + ' / ' + r[1] + '"><div class="ra-art" style="background:' + g.c + '"><span></span><i></i></div></div>' +
+    (hasLogo(g) ? '<div class="ra-logo-wrap">' + clearLogo(g) + '</div>' : '');
+  shot.dataset.ratio = r[0] + ':' + r[1];
   if (first) { $('ra-a').classList.remove('on'); $('ra-b').classList.remove('on'); }
   shot.classList.add('on'); $('ra-' + DISC.layer).classList.remove('on'); DISC.layer = next;
   raCaption();
 }
 function raCaption() {
   var g = DISC.recent && DISC.recent[DISC.ra], c = $('ra-caption'); if (!g || !c) return;
-  c.innerHTML = '<div><b>' + esc(g.t) + '</b><span class="meta2">' + PLAT[g.p] + ' · ' + addedAgo(g.added) + '</span></div>' +
+  /* With a clear logo on the screenshot, the caption leaves the title out. */
+  c.innerHTML = '<div>' + (hasLogo(g) ? '' : '<b>' + esc(g.t) + '</b>') + '<span class="meta2">' + PLAT[g.p] + ' · ' + addedAgo(g.added) + '</span></div>' +
     '<div class="form-actions"><button class="g-btn" data-disc-act="' + g.id + '">' + discAction(g) + '</button></div>';
 }
 
@@ -1285,6 +1317,8 @@ renderServer = function () {
 };
 
 /* ---- details ---- */
+/* Both grids' Size selects show the one card size. */
+function syncSize(){ document.querySelectorAll('[data-size-select]').forEach(function(s){ s.value = String(S.cardW); }); }
 function openDetails(g, tab){
   S.detail = g; S.tab = tab || 'overview'; S.lastViewed = g.id; paintArt(g);
   $('scrim').hidden = false; renderDetails(); $('dialog').focus({ preventScroll: true });
@@ -1296,7 +1330,7 @@ function renderDetails(){
   else if (g.installed) acts = '<button class="g-btn" data-d="play">Play</button>'+(g.update?'<button class="g-btn secondary">Update to v1.2</button>':'')+'<button class="g-btn secondary" data-d="uninstall">Uninstall</button>';
   else acts = '<button class="g-btn" data-d="install">'+(S.dl && S.dl.id===g.id?'Installing…':'Install')+'</button>';
   $('d-left').innerHTML = '<div class="g-cover" style="box-shadow:var(--shadow-lift);max-height:320px"><div class="g-art" style="background:'+g.c+';font-size:20px"><span>'+esc(g.t)+'</span></div></div>'+acts+
-    '<p class="g-meta-line">'+(g.installed?'Last played 2 days ago':'Never played')+'</p><p class="g-meta-line">'+EMU[g.p]+'</p>';
+    '<p class="g-meta-line">'+(g.installed?'Last played 2 days ago':'Never played')+'</p><p class="g-meta-line">'+(g.p==='LINUX' ? 'Runs natively' : g.p==='WIN' ? 'Runs through Proton' : EMU[g.p]==='none' ? 'No emulator set up' : EMU[g.p])+'</p>';
   $('d-head').innerHTML = '<h2>'+esc(g.t)+'</h2><p class="g-header-line">'+PLAT[g.p]+' · 1998 · Action · <span class="g-rating"><span data-icon="star" data-size="14"></span>8.'+(g.id%9)+'</span></p><div class="row" style="display:flex;gap:6px">'+(S.playing===g.id?'<span class="g-chip playing">Playing</span>':'')+'<span class="g-chip">Identified</span>'+(g.installed?'<span class="g-chip">v1.1</span>':'')+'</div>';
   var tabs = [['overview','Overview'],['media','Media'],['saves','Saves'],['achievements','Achievements']];
   $('d-tabs').innerHTML = tabs.map(function(t){ return '<button role="tab" data-tab="'+t[0]+'" class="'+(S.tab===t[0]?'active':'')+'" aria-selected="'+(S.tab===t[0])+'">'+t[1]+'</button>'; }).join('');

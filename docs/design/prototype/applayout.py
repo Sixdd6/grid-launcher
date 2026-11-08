@@ -543,6 +543,8 @@ function openLibChange(step) {
 function closeLibChange() { $('libscrim').hidden = true; }
 
 /* ---- details ---- */
+/* Both grids' Size selects show the one card size. */
+function syncSize(){ document.querySelectorAll('[data-size-select]').forEach(function(s){ s.value = String(S.cardW); }); }
 function openDetails(g, tab){
   S.detail = g; S.tab = tab || 'overview'; S.lastViewed = g.id; paintArt(g);
   $('scrim').hidden = false; renderDetails(); $('dialog').focus({ preventScroll: true });
@@ -554,7 +556,7 @@ function renderDetails(){
   else if (g.installed) acts = '<button class="g-btn" data-d="play">Play</button>'+(g.update?'<button class="g-btn secondary">Update to v1.2</button>':'')+'<button class="g-btn secondary" data-d="uninstall">Uninstall</button>';
   else acts = '<button class="g-btn" data-d="install">'+(S.dl && S.dl.id===g.id?'Installing…':'Install')+'</button>';
   $('d-left').innerHTML = '<div class="g-cover" style="box-shadow:var(--shadow-lift);max-height:320px"><div class="g-art" style="background:'+g.c+';font-size:20px"><span>'+esc(g.t)+'</span></div></div>'+acts+
-    '<p class="g-meta-line">'+(g.installed?'Last played 2 days ago':'Never played')+'</p><p class="g-meta-line">'+EMU[g.p]+'</p>';
+    '<p class="g-meta-line">'+(g.installed?'Last played 2 days ago':'Never played')+'</p><p class="g-meta-line">'+(g.p==='LINUX' ? 'Runs natively' : g.p==='WIN' ? 'Runs through Proton' : EMU[g.p]==='none' ? 'No emulator set up' : EMU[g.p])+'</p>';
   $('d-head').innerHTML = '<h2>'+esc(g.t)+'</h2><p class="g-header-line">'+PLAT[g.p]+' · 1998 · Action · <span class="g-rating"><span data-icon="star" data-size="14"></span>8.'+(g.id%9)+'</span></p><div class="row" style="display:flex;gap:6px">'+(S.playing===g.id?'<span class="g-chip playing">Playing</span>':'')+'<span class="g-chip">Identified</span>'+(g.installed?'<span class="g-chip">v1.1</span>':'')+'</div>';
   var tabs = [['overview','Overview'],['media','Media'],['saves','Saves'],['achievements','Achievements']];
   $('d-tabs').innerHTML = tabs.map(function(t){ return '<button role="tab" data-tab="'+t[0]+'" class="'+(S.tab===t[0]?'active':'')+'" aria-selected="'+(S.tab===t[0])+'">'+t[1]+'</button>'; }).join('');
