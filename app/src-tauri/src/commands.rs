@@ -1474,7 +1474,7 @@ pub async fn launch_emulator(
             sync_emulator_settings(&name, install.as_ref());
         }
         let child = spawn_standalone_emulator(&argv, &working_dir)?;
-        Ok(wait_for_early_exit(child, &argv))
+        Ok(wait_for_early_exit(child, &name, &argv))
     })
     .await
     .map_err(|e| format!("launch_emulator did not finish: {e}"))?

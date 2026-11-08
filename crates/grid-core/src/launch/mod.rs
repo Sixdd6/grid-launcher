@@ -41,7 +41,9 @@ use selection::{
     installed_core_resolver, mapping_value_for_platform,
 };
 use sessions::SessionStore;
-use spawn::{clean_env, prepare_emulator_launch, process_exited_early_message};
+use spawn::{
+    clean_env, early_exit_message, prepare_emulator_launch, StderrCapture, STDERR_EOF_WAIT,
+};
 use template::{host_os, retroarch_core_argument_path, Placeholders};
 
 pub use platform_slugs::{set_platform_slugs, slug_for_platform};
@@ -131,10 +133,10 @@ pub struct LaunchService {
     /// order is always this gate first, the session store second — never the
     /// reverse — and no listener is ever called while it is held.
     reap_gate: Mutex<()>,
-    /// Sessions still inside their early-exit window, mapped to the argv to
-    /// quote if they die there. An entry is added at spawn and taken out by
-    /// whichever event comes first: the session being reaped (which
-    /// emits the warning), the session's own 500 ms check finding it still
+    /// Sessions still inside their early-exit window, mapped to what to say
+    /// if they die there ([`EarlyExitWatch`]). An entry is added at spawn and
+    /// taken out by whichever event comes first: the session being reaped
+    /// (which emits the warning), the session's own 500 ms check finding it still
     /// alive (the window is over — a later exit is a normal quit), or a
     /// [`Self::stop`] for it (the user asked; that is not a failure).
     ///
@@ -143,7 +145,7 @@ pub struct LaunchService {
     /// *sibling's* check running while this session is young — can be the one
     /// that finds the dead child, and the warning has to survive whichever it
     /// is. Bounded by the number of launches in flight.
-    early_exit_watch: Mutex<HashMap<u64, Vec<String>>>,
+    early_exit_watch: Mutex<HashMap<u64, EarlyExitWatch>>,
     /// Closed while a library move runs. A launch holds a ticket from it
     /// until its session is registered, so a move that closes the gate and
     /// waits for the tickets sees every game that got past it.
@@ -356,8 +358,14 @@ impl LaunchService {
 
         let title = game.title.clone();
         let watched_argv = argv.clone();
-        let child = spawn_child(argv, working_dir, extra_env).await?;
+        let mut child = spawn_child(argv, working_dir, extra_env).await?;
         let pid = child.id();
+        let stderr = StderrCapture::start(&mut child);
+        let watch = EarlyExitWatch {
+            name: emulator_name.clone(),
+            argv: watched_argv,
+            stderr,
+        };
 
         let started_at_ms = sessions::unix_now_ms();
         let session = GameSession {
@@ -388,7 +396,7 @@ impl LaunchService {
         self.early_exit_watch
             .lock()
             .unwrap()
-            .insert(session.id, watched_argv);
+            .insert(session.id, watch);
 
         self.emit(None);
         self.schedule_early_exit_check(session.id);
@@ -519,17 +527,27 @@ impl LaunchService {
         if exited.is_empty() {
             return;
         }
-        let warnings: Vec<String> = {
+        let died_early: Vec<(EarlyExitWatch, Option<ExitStatus>)> = {
             let mut watch = self.early_exit_watch.lock().unwrap();
             exited
                 .iter()
                 .filter_map(|(session, status)| {
-                    watch
-                        .remove(&session.id)
-                        .map(|argv| process_exited_early_message(*status, &argv))
+                    watch.remove(&session.id).map(|entry| (entry, *status))
                 })
                 .collect()
         };
+        // Built with the watch lock released: reading a dead child's stderr
+        // may wait briefly for the pipe to close.
+        let warnings: Vec<String> = died_early
+            .into_iter()
+            .map(|(entry, status)| {
+                let stderr = entry
+                    .stderr
+                    .map(|capture| capture.text(STDERR_EOF_WAIT))
+                    .unwrap_or_default();
+                early_exit_message(&entry.name, status, &entry.argv, &stderr)
+            })
+            .collect();
         if warnings.is_empty() {
             self.emit(None);
         } else {
@@ -561,6 +579,17 @@ impl LaunchService {
         snapshot.warning = warning;
         listener(snapshot);
     }
+}
+
+/// A session inside its early-exit window: what to say if it dies there.
+struct EarlyExitWatch {
+    /// The emulator entry's name (or the native compat-tool label).
+    name: String,
+    /// The command line, quoted by the generic message.
+    argv: Vec<String>,
+    /// The start of the child's stderr, for the missing-library check and
+    /// the output excerpt.
+    stderr: Option<StderrCapture>,
 }
 
 // --- resolution -------------------------------------------------------------
@@ -608,9 +637,9 @@ fn resolve_launch(game: &InstalledGame, config: &Config) -> Result<LaunchPlan, L
     // placeholder and the path the existence check runs on, so a recorded
     // `~/...` archive path can never pass validation and then reach the
     // emulator as a literal tilde.
-    let rom_path = expand_home(&resolve_rom_path(game, &expand_home(&config.library_path)))
-        .to_string_lossy()
-        .into_owned();
+    let rom_path = resolve_rom_path(game, &expand_home(&config.library_path))
+        .map_err(LaunchError::Validation)?;
+    let rom_path = expand_home(&rom_path).to_string_lossy().into_owned();
 
     // The RetroArch gate decides both halves: no core placeholder value for a
     // non-RetroArch emulator, and no `-L` post-pass either.
@@ -675,7 +704,10 @@ async fn spawn_child(
             .current_dir(&working_dir)
             .env_clear()
             .envs(clean_env())
-            .envs(extra_env);
+            .envs(extra_env)
+            // Drained by a [`StderrCapture`] that passes every byte on to
+            // GRID's own stderr; the early-exit message reads its start.
+            .stderr(std::process::Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

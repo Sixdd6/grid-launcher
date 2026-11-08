@@ -332,6 +332,75 @@ async fn an_instant_exit_removes_the_session_and_warns() {
 }
 
 #[tokio::test]
+async fn an_emulator_missing_a_shared_library_says_which_one() {
+    let h = Harness::new();
+    let exe = h.stub(
+        "needs-lib",
+        "echo \"$0: error while loading shared libraries: libSDL2_net-2.0.so.0: cannot open \
+         shared object file: No such file or directory\" >&2\nexit 127",
+    );
+    h.write_config(
+        vec![entry("Stub (Super Nintendo)", &exe, "%rom%")],
+        &[("SNES", "Stub (Super Nintendo)")],
+    );
+    h.install_game(7, "Chrono", "SNES");
+
+    let service = h.service();
+    let recorder = Recorder::attach(&service);
+    let _session = service.launch(7).await.unwrap();
+
+    let gone = wait_until(|| service.snapshot().sessions.is_empty()).await;
+    assert!(gone, "the exited session was never removed");
+    assert_eq!(
+        recorder.warnings(),
+        vec![
+            "Stub couldn't start: libSDL2_net-2.0.so.0 is missing. Install it with your \
+             system's package manager (often named SDL2_net)."
+                .to_string()
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_rom_set_extracted_by_an_older_install_is_refused_with_a_reinstall_hint() {
+    let h = Harness::new();
+    let exe = h.stub("supermodel", "sleep 30");
+    h.write_config(
+        vec![entry("Supermodel", &exe, "%rom%")],
+        &[("Sega Model 3", "Supermodel")],
+    );
+    let extracted = h
+        .library
+        .join("games")
+        .join("Sega Model 3")
+        .join("dayto2pe");
+    fs::create_dir_all(&extracted).unwrap();
+    let chip = extracted.join("epr-20985.bin");
+    fs::write(&chip, b"chip").unwrap();
+    h.registry
+        .upsert(&InstalledGame {
+            title: "Daytona USA 2: Power Edition".to_string(),
+            platform: "Sega Model 3".to_string(),
+            rom_id: Some(7),
+            rom_file_name: "dayto2pe.zip".to_string(),
+            extracted_dir: extracted.to_string_lossy().into_owned(),
+            extracted_path: chip.to_string_lossy().into_owned(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let service = h.service();
+    match service.launch(7).await {
+        Err(LaunchError::Validation(message)) => {
+            assert!(message.contains("Sega Model 3"), "{message}");
+            assert!(message.contains("install it again"), "{message}");
+        }
+        other => panic!("expected a validation error, got {other:?}"),
+    }
+    assert!(service.snapshot().sessions.is_empty());
+}
+
+#[tokio::test]
 async fn a_siblings_check_still_reports_this_games_early_exit() {
     // Regression guard: the reap that observes an early exit is not always
     // that session's own check. A long-running game starts first, a second

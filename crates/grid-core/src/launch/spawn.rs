@@ -5,8 +5,11 @@
 //! `docs/porting/04-emulator-launch.md` §8.
 
 use std::collections::HashMap;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ExitStatus};
+use std::process::{Child, ExitStatus, Stdio};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::config::EmulatorEntry;
 use crate::launch::profiles::{EmulatorProfile, StandaloneLauncher};
@@ -303,7 +306,10 @@ pub fn spawn_standalone_emulator(argv: &[String], working_dir: &Path) -> Result<
         .args(&argv[1..])
         .current_dir(working_dir)
         .env_clear()
-        .envs(clean_env());
+        .envs(clean_env())
+        // Read by `wait_for_early_exit` ([`StderrCapture`]), which passes
+        // every byte on to GRID's own stderr.
+        .stderr(Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -320,24 +326,198 @@ pub fn spawn_standalone_emulator(argv: &[String], working_dir: &Path) -> Result<
 /// gone by the end of it — Python's `QTimer.singleShot(500, …)` around
 /// `_warn_if_process_exited_early` (emulator_ui_mixin.py:1662), run inline
 /// because this path has no event loop to defer onto and its caller is
-/// already on the blocking pool.
+/// already on the blocking pool. `name` is the emulator entry's name, for
+/// [`early_exit_message`].
 ///
 /// A child still running when the window closes is handed to a detached
 /// thread that blocks in `wait()` purely so the process is reaped when the
 /// emulator eventually exits — the same arrangement (and the same reason) as
 /// [`crate::firmware::rpcs3::spawn_rpcs3_installfw`]. There is no session
 /// row for a ROM-less launch, so nothing else is watching it.
-pub fn wait_for_early_exit(mut child: Child, argv: &[String]) -> Option<String> {
+pub fn wait_for_early_exit(mut child: Child, name: &str, argv: &[String]) -> Option<String> {
+    let capture = StderrCapture::start(&mut child);
     std::thread::sleep(super::EARLY_EXIT_DELAY);
     // A `try_wait` error means no status was ever available; treat the child
     // as running and let the reaper thread deal with it.
     if let Ok(Some(status)) = child.try_wait() {
-        return Some(process_exited_early_message(Some(status), argv));
+        let stderr = capture
+            .map(|capture| capture.text(STDERR_EOF_WAIT))
+            .unwrap_or_default();
+        return Some(early_exit_message(name, Some(status), argv, &stderr));
     }
     std::thread::spawn(move || {
         let _ = child.wait();
     });
     None
+}
+
+/// How much of a child's stderr [`StderrCapture`] keeps, in bytes. The
+/// early-exit message only quotes the first few lines.
+const STDERR_CAPTURE_BYTES: usize = 4096;
+
+/// How long an early-exit report waits for the dead child's stderr to reach
+/// end of file, so its last lines are not lost to the reader thread's
+/// scheduling. Bounded: a grandchild holding the pipe open must not hold
+/// up the report.
+pub(crate) const STDERR_EOF_WAIT: Duration = Duration::from_millis(250);
+
+/// The first [`STDERR_CAPTURE_BYTES`] of a child's stderr, kept for the
+/// early-exit message. A reader thread drains the pipe for the child's whole
+/// life and writes every byte on to GRID's own stderr, exactly where the
+/// output went when the child inherited it, so a long-running emulator never
+/// blocks on a full pipe. The captured text is never logged.
+#[derive(Clone)]
+pub struct StderrCapture {
+    shared: Arc<(Mutex<CaptureState>, Condvar)>,
+}
+
+#[derive(Default)]
+struct CaptureState {
+    head: Vec<u8>,
+    done: bool,
+}
+
+impl StderrCapture {
+    /// Takes `child`'s piped stderr and starts draining it. `None` when the
+    /// child's stderr was not piped.
+    pub fn start(child: &mut Child) -> Option<Self> {
+        let mut pipe = child.stderr.take()?;
+        let shared = Arc::new((Mutex::new(CaptureState::default()), Condvar::new()));
+        let writer = shared.clone();
+        std::thread::spawn(move || {
+            let mut buffer = [0u8; 8192];
+            loop {
+                match pipe.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let chunk = &buffer[..n];
+                        {
+                            let mut state = writer.0.lock().unwrap();
+                            let room = STDERR_CAPTURE_BYTES.saturating_sub(state.head.len());
+                            state.head.extend_from_slice(&chunk[..room.min(n)]);
+                        }
+                        // GRID's own stderr may be closed (a desktop launch);
+                        // the pipe is drained either way.
+                        let _ = std::io::stderr().write_all(chunk);
+                    }
+                }
+            }
+            writer.0.lock().unwrap().done = true;
+            writer.1.notify_all();
+        });
+        Some(Self { shared })
+    }
+
+    /// The captured text (lossy UTF-8), after waiting up to `wait` for the
+    /// pipe to reach end of file.
+    pub fn text(&self, wait: Duration) -> String {
+        let (lock, done) = &*self.shared;
+        let deadline = Instant::now() + wait;
+        let mut state = lock.lock().unwrap();
+        while !state.done {
+            let now = Instant::now();
+            if now >= deadline {
+                break;
+            }
+            state = done.wait_timeout(state, deadline - now).unwrap().0;
+        }
+        String::from_utf8_lossy(&state.head).into_owned()
+    }
+}
+
+/// The library named in the dynamic loader's "error while loading shared
+/// libraries: <lib>: cannot open shared object file" line, when `stderr`
+/// has one. That is how a Linux program missing a system library fails,
+/// with exit code 127, before its own code runs.
+pub fn missing_shared_library(stderr: &str) -> Option<String> {
+    const MARKER: &str = "error while loading shared libraries:";
+    let rest = &stderr[stderr.find(MARKER)? + MARKER.len()..];
+    let library = rest.split([':', '\n']).next()?.trim();
+    (!library.is_empty() && !library.contains(char::is_whitespace)).then(|| library.to_string())
+}
+
+/// The package name a distribution usually gives `library`: the file name
+/// without its `lib` prefix, `.so` suffix and trailing dotted version
+/// (`libSDL2_net-2.0.so.0` → `SDL2_net`). Only a hint; names vary.
+pub fn library_package_hint(library: &str) -> String {
+    let base = library.split(".so").next().unwrap_or(library);
+    let base = base
+        .strip_prefix("lib")
+        .filter(|rest| !rest.is_empty())
+        .unwrap_or(base);
+    match base.rsplit_once('-') {
+        Some((head, version))
+            if !head.is_empty()
+                && version.contains('.')
+                && version.chars().all(|c| c.is_ascii_digit() || c == '.') =>
+        {
+            head.to_string()
+        }
+        _ => base.to_string(),
+    }
+}
+
+/// The name an early-exit message gives the program: the emulator entry's
+/// name without a trailing parenthetical ("Supermodel (Sega Model 3)" →
+/// "Supermodel"), else the executable's file name.
+fn program_label(name: &str, argv: &[String]) -> String {
+    let name = name.trim();
+    let short = match name.rfind(" (") {
+        Some(at) if name.ends_with(')') => name[..at].trim(),
+        _ => name,
+    };
+    if !short.is_empty() && short != "native" {
+        return short.to_string();
+    }
+    argv.first()
+        .and_then(|program| Path::new(program).file_name())
+        .map(|file| file.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "The program".to_string())
+}
+
+/// The first lines of `stderr` worth quoting: up to five non-blank lines,
+/// each trimmed and cut at 200 characters.
+pub fn stderr_excerpt(stderr: &str) -> String {
+    stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(5)
+        .map(|line| match line.char_indices().nth(200) {
+            Some((at, _)) => format!("{}…", &line[..at]),
+            None => line.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// What to tell the user about a program (`name`, the emulator entry or
+/// compat-tool label) that died inside its early-exit window, given the
+/// start of its stderr. A missing shared library gets a plain explanation
+/// and the package to install; anything else gets
+/// [`process_exited_early_message`] plus a short excerpt of the output, when
+/// there was any.
+pub fn early_exit_message(
+    name: &str,
+    status: Option<ExitStatus>,
+    argv: &[String],
+    stderr: &str,
+) -> String {
+    if let Some(library) = missing_shared_library(stderr) {
+        return format!(
+            "{} couldn't start: {library} is missing. Install it with your system's package \
+             manager (often named {}).",
+            program_label(name, argv),
+            library_package_hint(&library)
+        );
+    }
+    let mut message = process_exited_early_message(status, argv);
+    let excerpt = stderr_excerpt(stderr);
+    if !excerpt.is_empty() {
+        message.push_str("\nOutput:\n");
+        message.push_str(&excerpt);
+    }
+    message
 }
 
 /// The message for a process that died inside its early-exit window, shared
@@ -1284,7 +1464,7 @@ mod tests {
         let argv = vec![exe.to_string_lossy().into_owned()];
         let child = spawn_standalone_emulator(&argv, dir.path()).unwrap();
         assert_eq!(
-            wait_for_early_exit(child, &argv),
+            wait_for_early_exit(child, "Stub", &argv),
             Some(format!(
                 "Process exited immediately (code 3).\nCommand:\n{}",
                 exe.display()
@@ -1301,11 +1481,127 @@ mod tests {
         let argv = vec![exe.to_string_lossy().into_owned()];
         let child = spawn_standalone_emulator(&argv, dir.path()).unwrap();
         let started = std::time::Instant::now();
-        assert_eq!(wait_for_early_exit(child, &argv), None);
+        assert_eq!(wait_for_early_exit(child, "Stub", &argv), None);
         // It waited for the window, not for the process.
         assert!(
             started.elapsed() < std::time::Duration::from_millis(1500),
             "wait_for_early_exit blocked until the child exited"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_early_exit_explains_a_missing_shared_library() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = shell_stub(
+            dir.path(),
+            "supermodel",
+            "echo \"$0: error while loading shared libraries: libSDL2_net-2.0.so.0: \
+             cannot open shared object file: No such file or directory\" >&2\nexit 127",
+        );
+
+        // Run through `/bin/sh` rather than exec'd: a script written moments
+        // ago can still be open for writing in a sibling test's fork
+        // ("Text file busy").
+        let argv = vec!["/bin/sh".to_string(), exe.to_string_lossy().into_owned()];
+        let child = spawn_standalone_emulator(&argv, dir.path()).unwrap();
+        assert_eq!(
+            wait_for_early_exit(child, "Supermodel (Sega Model 3)", &argv).as_deref(),
+            Some(
+                "Supermodel couldn't start: libSDL2_net-2.0.so.0 is missing. Install it with \
+                 your system's package manager (often named SDL2_net)."
+            )
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_early_exit_quotes_the_start_of_stderr() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = shell_stub(
+            dir.path(),
+            "noisy.sh",
+            "echo 'first line' >&2\necho >&2\necho 'second line' >&2\nexit 2",
+        );
+
+        // Run through `/bin/sh` rather than exec'd: a script written moments
+        // ago can still be open for writing in a sibling test's fork
+        // ("Text file busy").
+        let argv = vec!["/bin/sh".to_string(), exe.to_string_lossy().into_owned()];
+        let child = spawn_standalone_emulator(&argv, dir.path()).unwrap();
+        assert_eq!(
+            wait_for_early_exit(child, "Stub", &argv),
+            Some(format!(
+                "Process exited immediately (code 2).\nCommand:\n/bin/sh {}\nOutput:\nfirst line\nsecond line",
+                exe.display()
+            ))
+        );
+    }
+
+    #[test]
+    fn missing_shared_library_reads_the_loader_line() {
+        assert_eq!(
+            missing_shared_library(
+                "/emu/supermodel: error while loading shared libraries: libSDL2_net-2.0.so.0: \
+                 cannot open shared object file: No such file or directory\n"
+            )
+            .as_deref(),
+            Some("libSDL2_net-2.0.so.0")
+        );
+        assert_eq!(
+            missing_shared_library("x: error while loading shared libraries: libfoo.so.1\n")
+                .as_deref(),
+            Some("libfoo.so.1")
+        );
+        assert_eq!(missing_shared_library(""), None);
+        assert_eq!(missing_shared_library("Segmentation fault"), None);
+        assert_eq!(
+            missing_shared_library("error while loading shared libraries: : nope"),
+            None
+        );
+    }
+
+    #[test]
+    fn library_package_hint_strips_prefix_suffix_and_version() {
+        assert_eq!(library_package_hint("libSDL2_net-2.0.so.0"), "SDL2_net");
+        assert_eq!(library_package_hint("libSDL2-2.0.so.0"), "SDL2");
+        assert_eq!(library_package_hint("libGLU.so.1"), "GLU");
+        assert_eq!(library_package_hint("libssl.so.1.1"), "ssl");
+        assert_eq!(library_package_hint("libgtk-3.so.0"), "gtk-3");
+        assert_eq!(library_package_hint("lib.so"), "lib");
+    }
+
+    #[test]
+    fn program_label_drops_the_platform_parenthetical() {
+        let argv = vec!["/emu/bin/supermodel".to_string()];
+        assert_eq!(
+            program_label("Supermodel (Sega Model 3)", &argv),
+            "Supermodel"
+        );
+        assert_eq!(program_label("Dolphin", &argv), "Dolphin");
+        assert_eq!(program_label("", &argv), "supermodel");
+        assert_eq!(program_label("native", &argv), "supermodel");
+        assert_eq!(program_label("", &[]), "The program");
+    }
+
+    #[test]
+    fn stderr_excerpt_keeps_five_trimmed_lines_and_cuts_long_ones() {
+        let long = "x".repeat(250);
+        let stderr = format!("  a  \n\nb\nc\nd\n{long}\nf\n");
+        let excerpt = stderr_excerpt(&stderr);
+        let lines: Vec<&str> = excerpt.lines().collect();
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines[0], "a");
+        assert_eq!(lines[4], format!("{}…", "x".repeat(200)));
+        assert_eq!(stderr_excerpt(" \n \n"), "");
+    }
+
+    #[test]
+    fn early_exit_message_without_output_is_the_plain_message() {
+        let argv = vec!["/emu/run".to_string()];
+        assert_eq!(
+            early_exit_message("Emu", None, &argv, ""),
+            process_exited_early_message(None, &argv)
         );
     }
 

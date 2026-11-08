@@ -71,7 +71,13 @@ and whichever view is open:
 - Launching: "Launching <Title>…". A refused launch is an error card "Couldn't launch
   <Title>: <reason>" (a Proton launch that needs umu-launcher also keeps the reason and
   its Install button beside the Play button). A game that exits inside its first half
-  second is an error card "<Title> — Process exited immediately (…)".
+  second is an error card "<Title> — Process exited immediately (…)", followed by the
+  command and the first few lines the program wrote to its error output, when it wrote
+  any. When that output shows a system library is missing (Linux: "error while loading
+  shared libraries"), the card instead reads "<Title> — <Emulator> couldn't start:
+  <library> is missing. Install it with your system's package manager (often named
+  <package>)." Opening an emulator from Settings › Systems uses the same wording in its
+  toast.
 
 Firmware, library moves, cloud saves and the Windows default keep their own cards, and a
 library move's row and firmware rows in Downloads add none. Cards of one kind that arrive
@@ -668,6 +674,7 @@ When uploading saves or states, the app should attempt to attach the most recent
 # Additional Platform-Specific Behavior
 - RetroArch support should include installed core detection and per-platform core assignment.
 - RetroArch firmware auto-install supports: BIOS files routed to `system/` with optional subdirectory, `.opt` core option files routed to `config/<corename>/`, MAME-format zip archives preserved intact, path-preserving zip extraction for archives with internal directory structure, and saves-directory placement for cores that require it. All routing is driven by per-core metadata in `retroarch-core-list.json`.
+- ROM-set platforms keep their archive: the zip is the game, so it is never extracted and the emulator is given the zip. These are Arcade/MAME/FBNeo, Sega Model 2 and Model 3, Sega NAOMI and NAOMI 2, Sammy Atomiswave, Neo Geo MVS/AES, and Capcom CPS-1/2/3, matched by RomM slug (`arcade`, `model2`, `model3`, `naomi`, `naomi2`, `atomiswave`, `neogeomvs`, `neogeoaes`, `cps1`, `cps2`, `cps3`) or by platform name. Neo Geo CD and Neo Geo Pocket are not ROM sets and install as usual. DOS games also launch from their zip. A game on one of these platforms that an older GRID unpacked on install, with only the unpacked folder left, does not launch: the launch fails with "This game's zip was unpacked when it was installed, but <Platform> games launch from the zip itself. Uninstall the game and install it again." GRID never re-zips the folder; if the zip is still on disk, the game launches from it.
 - RPCS3 / PS3 handling should support the game-launch requirements needed by that emulator setup.
 - Theme selection should support `system`, `dark`, and `light` modes and apply consistently across the app UI.
 - Settings should include an option to enable debug prints and a shortcut to open the config folder.
