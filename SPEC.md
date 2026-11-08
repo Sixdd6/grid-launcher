@@ -131,6 +131,14 @@ There are several main sections to the application with buttons across the top b
     at (or focusing inside) the section pauses it; clicking a row jumps to it; clicking
     the screenshot or the highlighted row opens Details. There are no Details buttons.
     The timer runs under reduced motion too, where the glide, crossfade and bar are off.
+  - **Platform filters** run across the top of Recently added: All, then one pill per
+    platform with games among the server's newest additions (the 50 newest, less the
+    coverflow's games), ordered by each platform's most recent addition. The row hides
+    when only one platform is there. Clicking a pill narrows the list to that platform's
+    newest additions, up to 8 (fetched from the server for that platform, still leaving
+    out the coverflow's games) and starts the rotation at the first row; clicking the
+    pressed pill again, or All, clears it. One at a time. The previous list stays until
+    the new one arrives; each platform's list is fetched once per feed load.
   - **Screenshots of another shape** (8:7, 4:3, 21:9…) are fitted inside the 16:9 frame,
     uncropped, over a blurred, darkened, enlarged copy of the same picture. A game with
     no screenshot shows its fanart, else its cover, fitted the same way.

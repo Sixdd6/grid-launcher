@@ -82,6 +82,16 @@ export type DiscoverFeed = {
   new_releases: GameSummary[];
   /** Newest on the server, without the coverflow's games, at most 8. */
   recently_added: GameSummary[];
+  /** Recently added's platform filters: the platforms among the newest
+   *  additions (less the coverflow's games), most recent addition first. */
+  recent_platforms: RecentPlatform[];
+};
+
+/** `grid_core::romm::discover::RecentPlatform`: one Recently added filter. */
+export type RecentPlatform = {
+  id: number;
+  /** The platform's label (`Platform::label`). */
+  label: string;
 };
 
 export type RomFile = {
@@ -788,6 +798,10 @@ export const api = {
   getRomDetail: (romId: number) => invoke<RomDetail>('get_rom_detail', { romId }),
   /** Server › Discover's New releases and Recently added. */
   discoverFeed: () => invoke<DiscoverFeed>('discover_feed'),
+  /** Recently added narrowed to one platform, leaving out `exclude` (the
+   *  coverflow's games); at most 8, newest first. */
+  discoverRecentlyAdded: (platformId: number, exclude: number[]) =>
+    invoke<GameSummary[]>('discover_recently_added', { platformId, exclude }),
   /** The dominant shade `[r, g, b]` of the screenshot at `url` (computed in
    *  Rust: an `asset://` image taints a canvas in WebKitGTK). */
   imageDominantShade: (url: string) => invoke<[number, number, number]>('image_dominant_shade', { url }),

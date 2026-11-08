@@ -620,6 +620,7 @@ pub fn run() {
             commands::list_platforms,
             commands::list_games,
             commands::discover::discover_feed,
+            commands::discover::discover_recently_added,
             commands::discover::image_dominant_shade,
             commands::get_rom_detail,
             commands::get_achievements,

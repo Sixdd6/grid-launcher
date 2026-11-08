@@ -1,4 +1,5 @@
-//! Server › Discover: the feed (New releases and Recently added) and the
+//! Server › Discover: the feed (New releases, Recently added and its
+//! platform filters), Recently added narrowed to one platform, and the
 //! dominant shade a generated logo is coloured from. Thin wrappers — the
 //! preferred platforms, the date window and the exclusions live in
 //! `grid_core::romm::discover`, the shade in `grid_core::images::shade`.
@@ -7,8 +8,8 @@ use grid_core::config::Config;
 use grid_core::images::shade::ensure_dominant_shade;
 use grid_core::images::urls::{filter_to_server_host, resolve_image_url};
 use grid_core::romm::discover::{
-    new_releases, preferred_platform_ids, recently_added, HostOs, NEW_RELEASES_MAX,
-    RECENTLY_ADDED_MAX,
+    new_releases, preferred_platform_ids, recent_platforms, recently_added, recently_added_on,
+    HostOs, RecentPlatform, NEW_RELEASES_MAX, RECENTLY_ADDED_MAX,
 };
 use grid_core::romm::GameSummary;
 use serde::Serialize;
@@ -22,7 +23,9 @@ use super::{err, AppState};
 const NEW_RELEASES_PAGE: usize = 200;
 
 /// How many newest games the added-date page asks for: enough to fill
-/// Recently added after every New releases game is left out of it.
+/// Recently added after every New releases game is left out of it. The
+/// platform filters come from this page too, and a filtered list asks for
+/// one page of this size on its platform.
 const RECENTLY_ADDED_PAGE: usize = NEW_RELEASES_MAX + RECENTLY_ADDED_MAX + 17;
 
 /// [`discover_feed`]'s answer.
@@ -32,6 +35,9 @@ pub struct DiscoverFeed {
     pub new_releases: Vec<GameSummary>,
     /// Newest on the server first, without the coverflow's games.
     pub recently_added: Vec<GameSummary>,
+    /// Recently added's platform filters: the platforms among the newest
+    /// additions (less the coverflow's games), most recent addition first.
+    pub recent_platforms: Vec<RecentPlatform>,
 }
 
 /// The Discover feed: the preferred platforms from the saved defaults, then
@@ -65,9 +71,28 @@ pub async fn discover_feed(state: State<'_, AppState>) -> Result<DiscoverFeed, S
     let new_releases = new_releases(releases, &preferred, chrono::Utc::now());
     let shown: Vec<i64> = new_releases.iter().map(|g| g.id).collect();
     Ok(DiscoverFeed {
+        recent_platforms: recent_platforms(&added, &platforms, &shown),
         recently_added: recently_added(added, &shown),
         new_releases,
     })
+}
+
+/// Recently added narrowed to one platform: that platform's newest games
+/// (one `/api/roms` page by added date), leaving out `exclude` (the
+/// coverflow's games), at most [`RECENTLY_ADDED_MAX`]. Asked for only when
+/// a platform filter is clicked.
+#[tauri::command]
+pub async fn discover_recently_added(
+    state: State<'_, AppState>,
+    platform_id: i64,
+    exclude: Vec<i64>,
+) -> Result<Vec<GameSummary>, String> {
+    let client = state.session.client().ok_or("not connected")?;
+    let games = client
+        .recent_games("created_at", &[platform_id], RECENTLY_ADDED_PAGE)
+        .await
+        .map_err(err)?;
+    Ok(recently_added_on(games, platform_id, &exclude))
 }
 
 /// The dominant shade `[r, g, b]` of the screenshot at `url`, for a

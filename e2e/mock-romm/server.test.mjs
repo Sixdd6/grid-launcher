@@ -194,6 +194,18 @@ test("GET /api/roms orders by created_at and first_release_date, ignoring an unk
   });
 });
 
+test("GET /api/roms orders one platform's games when platform_ids and order_by are both given", async () => {
+  await withServer(async ({ url }) => {
+    const get = (q) =>
+      fetch(`${url}/api/roms?limit=50&${q}`, { headers: authHeader() })
+        .then((r) => r.json())
+        .then((b) => b.items.map((i) => i.id));
+    assert.deepEqual(await get("platform_ids=1&order_by=created_at&order_dir=desc"), [101, 102, 103]);
+    assert.deepEqual(await get("platform_ids=1&order_by=created_at&order_dir=asc"), [103, 102, 101]);
+    assert.deepEqual(await get("platform_ids=2&order_by=created_at&order_dir=desc"), [201, 301]);
+  });
+});
+
 test("orderRoms leaves the pool alone for an unknown field", () => {
   const pool = [{ id: 1 }, { id: 2 }];
   assert.equal(orderRoms(pool, "name", "desc"), pool);

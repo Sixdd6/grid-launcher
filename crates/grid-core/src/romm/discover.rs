@@ -5,6 +5,9 @@
 //!   at most [`NEW_RELEASES_MAX`].
 //! - **Recently added:** the newest games on the server by `created_at`,
 //!   leaving out the New releases games, at most [`RECENTLY_ADDED_MAX`].
+//! - **Recently added's platform filters:** the platforms among those newest
+//!   games ([`recent_platforms`]), most recent addition first; one of them
+//!   narrows the list to that platform ([`recently_added_on`]).
 //!
 //! Both always filter and sort here, whatever order the server sent: RomM
 //! ignores an `order_by` it does not know and answers in its default order
@@ -179,6 +182,66 @@ pub fn recently_added(games: Vec<GameSummary>, exclude: &[i64]) -> Vec<GameSumma
         .collect()
 }
 
+/// One platform filter of Recently added: a platform with games among the
+/// server's newest additions.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RecentPlatform {
+    pub id: i64,
+    /// The platform's label ([`Platform::label`]), else the games' own
+    /// `platform_display_name`.
+    pub label: String,
+}
+
+/// The platforms Recently added can be narrowed to: every platform with a
+/// game in `games` (the newest additions) once `exclude` (the New releases
+/// games) and games without a readable `created_at` are left out, ordered
+/// by each platform's most recent addition. So every filter has at least one
+/// game to show. A platform missing from `platforms` keeps the game's own
+/// `platform_display_name`.
+pub fn recent_platforms(
+    games: &[GameSummary],
+    platforms: &[Platform],
+    exclude: &[i64],
+) -> Vec<RecentPlatform> {
+    let exclude: HashSet<i64> = exclude.iter().copied().collect();
+    let mut dated: Vec<(i64, &GameSummary)> = games
+        .iter()
+        .filter(|g| !exclude.contains(&g.id))
+        .filter_map(|g| created_at_seconds(&g.created_at).map(|at| (at, g)))
+        .collect();
+    dated.sort_by(|(a_at, a), (b_at, b)| b_at.cmp(a_at).then_with(|| b.id.cmp(&a.id)));
+    let mut seen = HashSet::new();
+    dated
+        .into_iter()
+        .filter(|(_, g)| seen.insert(g.platform_id))
+        .map(|(_, g)| RecentPlatform {
+            id: g.platform_id,
+            label: platforms
+                .iter()
+                .find(|p| p.id == g.platform_id)
+                .map(|p| p.label().to_string())
+                .unwrap_or_else(|| g.platform_display_name.clone()),
+        })
+        .collect()
+}
+
+/// Recently added narrowed to `platform_id`: [`recently_added`] over the
+/// games on that platform only (the server's `platform_ids` filter is not
+/// trusted alone either).
+pub fn recently_added_on(
+    games: Vec<GameSummary>,
+    platform_id: i64,
+    exclude: &[i64],
+) -> Vec<GameSummary> {
+    recently_added(
+        games
+            .into_iter()
+            .filter(|g| g.platform_id == platform_id)
+            .collect(),
+        exclude,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,6 +342,63 @@ mod tests {
             .collect();
         let out = recently_added(games, &[]);
         assert_eq!(ids(&out), vec![19, 18, 17, 16, 15, 14, 13, 12]);
+    }
+
+    #[test]
+    fn recent_platforms_follow_the_newest_addition_and_skip_the_coverflow() {
+        let platforms = vec![
+            platform(1, "Super Nintendo Entertainment System", "snes"),
+            platform(2, "Arcade", "arcade"),
+            platform(3, "Nintendo 64", "n64"),
+        ];
+        let mut stray = game(9, 7, None, "2026-10-01T00:00:00+00:00");
+        stray.platform_display_name = "Stray".to_string();
+        let games = vec![
+            game(1, 1, None, "2026-11-01T00:00:00+00:00"),
+            game(2, 2, None, "2026-11-03T00:00:00+00:00"),
+            game(3, 1, None, "2026-11-05T00:00:00+00:00"),
+            game(4, 3, None, "2026-11-07T00:00:00+00:00"), // in the coverflow
+            game(5, 3, None, ""),                          // undated
+            stray,
+        ];
+        let got = recent_platforms(&games, &platforms, &[4]);
+        assert_eq!(
+            got,
+            vec![
+                RecentPlatform {
+                    id: 1,
+                    label: "Super Nintendo Entertainment System".to_string()
+                },
+                RecentPlatform {
+                    id: 2,
+                    label: "Arcade".to_string()
+                },
+                RecentPlatform {
+                    id: 7,
+                    label: "Stray".to_string()
+                },
+            ]
+        );
+        assert!(recent_platforms(&[], &platforms, &[]).is_empty());
+    }
+
+    #[test]
+    fn recently_added_on_keeps_one_platform_without_the_coverflow() {
+        let games: Vec<_> = (0..20)
+            .map(|i| {
+                game(
+                    i,
+                    1 + i % 2,
+                    None,
+                    &format!("2026-10-{:02}T00:00:00+00:00", i + 1),
+                )
+            })
+            .collect();
+        // Platform 2 holds the odd ids; 19 is in the coverflow.
+        assert_eq!(
+            ids(&recently_added_on(games, 2, &[19])),
+            vec![17, 15, 13, 11, 9, 7, 5, 3]
+        );
     }
 
     #[test]

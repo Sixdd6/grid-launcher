@@ -15,12 +15,15 @@
 
   let {
     games,
+    resetKey = '',
     labelFor,
     actionFor,
     onOpen,
     onAction,
   }: {
     games: GameSummary[];
+    /** A change starts the list at its first row (a platform filter). */
+    resetKey?: string;
     labelFor: (game: GameSummary) => string;
     actionFor: (game: GameSummary) => DiscoverAction;
     onOpen: (game: GameSummary) => void;
@@ -45,11 +48,15 @@
 
   $effect(() => () => rotation.stop());
 
-  // A new list (a reload) keeps the row when it is still there.
+  // A new list (a reload) keeps the row when it is still there; a new
+  // `resetKey` (another platform filter) starts at the first row.
+  let lastKey: string | null = null;
   $effect(() => {
     const list = games;
+    const key = resetKey;
     untrack(() => {
-      if (index > list.length - 1) index = 0;
+      if (key !== lastKey || index > list.length - 1) index = 0;
+      lastKey = key;
       const game = list[wrapIndex(index, list.length)] ?? null;
       layers = [game, null];
       front = 0;

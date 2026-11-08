@@ -33,6 +33,7 @@ async function screenshot(name: string): Promise<void> {
  *         505 Mid Year       released 100 days ago, added 300 days ago
  *   Arcade 601 Arcade Fresh  released 5 days ago,   added 5 days ago
  *         602 Arcade Logo    released years ago,    added 6 days ago (server logo)
+ *   N64    no games, so never a Recently added filter
  *
  * The run starts with no default emulator and no Linux platform, so New
  * releases is empty; giving SNES a default fills it with 501, 502, 505.
@@ -47,6 +48,32 @@ describe('discover', () => {
         ),
       prefix,
     );
+  }
+
+  /** The platform filter pills' test id suffixes, in order (`all` first). */
+  async function pills(): Promise<string[]> {
+    return browser.execute(() =>
+      Array.from(document.querySelectorAll('[data-testid^="discover-filter-"]')).map((el) =>
+        (el as HTMLElement).dataset.testid!.replace('discover-filter-', ''),
+      ),
+    );
+  }
+
+  /** The pills pressed (`aria-pressed="true"`). */
+  async function pressed(): Promise<string[]> {
+    return browser.execute(() =>
+      Array.from(document.querySelectorAll('[data-testid^="discover-filter-"][aria-pressed="true"]')).map((el) =>
+        (el as HTMLElement).dataset.testid!.replace('discover-filter-', ''),
+      ),
+    );
+  }
+
+  /** Waits until Recently added lists exactly `ids`, in order. */
+  async function waitRows(ids: number[], why: string) {
+    await browser.waitUntil(async () => JSON.stringify(await idsOf('discover-recent-row-')) === JSON.stringify(ids), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: `${why}: Recently added lists ${JSON.stringify(await idsOf('discover-recent-row-'))}, not ${JSON.stringify(ids)}`,
+    });
   }
 
   async function centreCover(): Promise<number | null> {
@@ -132,6 +159,33 @@ describe('discover', () => {
     );
   });
 
+  it('filters Recently added by the platforms with recent additions', async () => {
+    // SNES's newest addition is newer than Arcade's; N64 has no games.
+    await $(testId('discover-filters')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    expect(await pills()).toEqual(['all', '1', '2']);
+    expect(await pressed()).toEqual(['all']);
+    await expect($(testId('discover-filter-1'))).toHaveText(SNES);
+
+    await $(testId('discover-filter-2')).click();
+    await waitRows([601, 602], 'the Arcade filter');
+    expect(await pressed()).toEqual(['2']);
+    // A new filter starts the rotation at its first row.
+    await expect($(testId('discover-recent-row-601'))).toHaveAttribute('data-active', 'true');
+
+    // The pressed pill again clears the filter.
+    await $(testId('discover-filter-2')).click();
+    await waitRows([501, 502, 503, 504, 601, 602, 505], 'clearing with the pressed pill');
+    expect(await pressed()).toEqual(['all']);
+
+    await $(testId('discover-filter-1')).click();
+    await waitRows([501, 502, 503, 504, 505], 'the SNES filter');
+    expect(await pressed()).toEqual(['1']);
+    await screenshot('0-filtered');
+    await $(testId('discover-filter-all')).click();
+    await waitRows([501, 502, 503, 504, 601, 602, 505], 'clearing with All');
+    expect(await pressed()).toEqual(['all']);
+  });
+
   it('fills New releases from the preferred platforms, newest release first', async () => {
     setSnesDefault();
     // Discover reads the defaults each time it comes to the front.
@@ -158,6 +212,12 @@ describe('discover', () => {
         timeoutMsg: `Recently added still lists coverflow games: ${JSON.stringify(await idsOf('discover-recent-row-'))}`,
       },
     );
+    // A platform filter leaves them out too.
+    expect(await pills()).toEqual(['all', '1', '2']);
+    await $(testId('discover-filter-1')).click();
+    await waitRows([503, 504], 'the SNES filter beside the coverflow');
+    await $(testId('discover-filter-1')).click();
+    await waitRows([503, 504, 601, 602], 'clearing the SNES filter');
   });
 
   it('moves the coverflow with ← / →, a side-cover click, and opens Details with Enter', async () => {

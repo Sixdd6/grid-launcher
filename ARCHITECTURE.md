@@ -88,7 +88,7 @@ Modules as declared in `src/lib.rs`:
   check `openapi.json` before changing any of it. `RommClient::recent_games` is one
   `/api/roms` page by `order_by`; `romm::discover` holds Server › Discover's pure rules
   (the preferred platforms, the New releases window and limit, Recently added without
-  the coverflow's games), which always re-filter and re-sort because the server ignores
+  the coverflow's games, and its platform filters), which always re-filter and re-sort because the server ignores
   an unknown `order_by`.
 - `secrets` — `Credential`, the `SecretStore`/`RaTokenStore` traits, and `KeyringStore`,
   the OS keyring implementation. Secrets are `SecretString` values that cannot be
@@ -125,7 +125,9 @@ The shell owns *when* things run; grid-core owns *what* they do.
   (`grid_core::launch::compat::request_compat_default`) that the compat-tools hook
   applies when the install lands. `commands/discover.rs` owns `discover_feed` (the
   preferred platforms from the saved defaults, two `recent_games` pages, filtered by
-  `romm::discover`) and `image_dominant_shade` (`ensure_image`'s host filter, then
+  `romm::discover`, plus Recently added's platform filters), `discover_recently_added`
+  (Recently added on one platform, asked for when a filter is clicked) and
+  `image_dominant_shade` (`ensure_image`'s host filter, then
   `images::shade`).
 - Services — `cloud_service.rs` (sync caches, auto-restore before launch, auto-upload
   after exit), `firmware_service.rs` (the background firmware triggers and their
@@ -180,7 +182,8 @@ session exists and `Shell.svelte` afterwards.
   `Discover.svelte` mounted by `Server.svelte` in place of the folding header and grid,
   with `Coverflow`, `RecentlyAdded`, `Shot` and `GameLogo`; the pure halves are
   `feed.ts` — action label, dates, coverflow geometry, the picture and logo colours —
-  and `rotation.ts`, Recently added's pausable 10 s timer). Server still owns Details
+  `rotation.ts`, Recently added's pausable 10 s timer, and `filters.ts`, its platform
+  filter pills). Server still owns Details
   and the install/launch flow; Discover calls back into it. `shell.ts` holds the view list (its order is the
   `Ctrl+1`..`Ctrl+4` accelerators) and the session-phase mapping. Emulators live in
   Settings › Systems; `Shell.svelte` routes the Server header's chips there with
