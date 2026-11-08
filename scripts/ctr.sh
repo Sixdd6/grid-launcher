@@ -11,7 +11,7 @@
 #                                     (default version 0.0.0-dev) into ctr-out/
 #   scripts/ctr.sh packages [ver]     build the release job's .deb and .rpm into ctr-out/
 #   scripts/ctr.sh clean [--all]      remove this checkout's target and node_modules volumes
-#                                     (--all: also the shared cargo and npm cache volumes)
+#                                     (--all: also the shared cargo, npm and tool cache volumes)
 #
 # Two images, each matching the CI job it stands in for (.github/workflows/build.yml):
 # Ubuntu 24.04 for the gate, e2e, run and shell (the check and e2e jobs), and Debian 13
@@ -62,6 +62,8 @@ locked() {
 CACHE_PREFIX=grid-launcher
 VOL_PREFIX=${CTR_VOL_PREFIX:-grid-launcher-$(printf %s "$repo" | sha256sum | cut -c1-8)}
 TARGET_VOLUME=$VOL_PREFIX-target
+# Extra podman arguments for one command (appimage adds its tool cache).
+EXTRA_ARGS=()
 
 # A newer base image and no layer cache, so a rebuild is also a security refresh
 # (the image's apt packages and the latest Node/Rust releases).
@@ -91,6 +93,7 @@ podman_args() {
     -e npm_config_cache=/cache/npm -e CARGO_TERM_COLOR=always
     -e "CARGO_BUILD_JOBS=$JOBS" -e "RUST_TEST_THREADS=$JOBS"
     -w /work)
+  args+=("${EXTRA_ARGS[@]}")
   # Pass the e2e runner's switches through (E2E_SKIP_BUILD, E2E_KEEP, ...).
   local v
   while IFS= read -r v; do args+=(-e "$v"); done < <(compgen -e | grep '^E2E_' || true)
@@ -146,11 +149,17 @@ case "${1:-}" in
     mkdir -p ctr-out
     IMAGE=$IMAGE_REPO:$RELEASE_TAG
     TARGET_VOLUME=$VOL_PREFIX-release-target
+    # Tauri downloads its bundling tools (linuxdeploy, its plugins, AppRun; about 40 MB)
+    # into $XDG_CACHE_HOME/tauri on every run of a fresh container. Keep them in a shared
+    # volume so a GitHub outage only breaks the first build. Only tauri/ is kept: the
+    # script below empties everything else in it.
+    EXTRA_ARGS=(-v "$CACHE_PREFIX-xdg-cache:/cache/xdg" -e XDG_CACHE_HOME=/cache/xdg)
     # The release job's steps (build-linux in build.yml): build, then repack with
     # appimagetool to embed the update information. Same tool, version and digest as
     # there; keep the two in step.
     in_ctr bash -c 'set -euo pipefail
       version=$1
+      trap '\''find /cache/xdg -mindepth 1 -maxdepth 1 ! -name tauri -exec rm -rf {} +'\'' EXIT
       (cd app && npm ci --no-audit --no-fund && npx tauri build --bundles appimage --config "{\"version\":\"$version\"}")
       tool=target/tools/appimagetool-1.9.1
       if [ ! -x "$tool" ]; then
@@ -192,7 +201,7 @@ case "${1:-}" in
   clean)
     for v in target release-target app-node_modules e2e-node_modules; do podman volume rm -f "$VOL_PREFIX-$v" >/dev/null; done
     if [ "${2:-}" = "--all" ]; then
-      for v in cargo-registry cargo-git npm; do podman volume rm -f "$CACHE_PREFIX-$v" >/dev/null; done
+      for v in cargo-registry cargo-git npm xdg-cache; do podman volume rm -f "$CACHE_PREFIX-$v" >/dev/null; done
     fi
     echo "volumes removed" ;;
   *) echo "usage: $0 {build|run <cmd...>|shell|gate|e2e [groups...]|appimage [version]|packages [version]|clean [--all]}" >&2; exit 2 ;;

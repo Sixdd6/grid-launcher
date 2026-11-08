@@ -79,7 +79,8 @@ checkout (the Debian 13 image has its own `target/` volume), so a container buil
 with a host build in the same tree. `appimage` builds, then repacks with the same
 checksum-pinned `appimagetool` and update information as the release job, so its output
 is named and laid out like a released AppImage. The cargo
-and npm caches are shared volumes. Commit from the host; the container only builds and
+and npm caches are shared volumes, and so are Tauri's AppImage bundling tools (about 40 MB,
+in `grid-launcher-xdg-cache`), so `appimage` downloads them from GitHub only once. Commit from the host; the container only builds and
 tests.
 
 ## Develop
