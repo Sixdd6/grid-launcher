@@ -15,6 +15,8 @@
   import { isUmuMissing } from './launchError';
   import GameCard from './GameCard.svelte';
   import CardGrid from './CardGrid.svelte';
+  import FoldingHeader from './FoldingHeader.svelte';
+  import { serverSearchPlaceholder } from './views/fold';
   import RailPane, { type RailPaneEntry } from './RailPane.svelte';
   import { fromSummary } from './details/subject';
   import type { CloudMode } from './details/cloud';
@@ -62,6 +64,8 @@
   let focusIndex = $state(0);
   let grid = $state<ReturnType<typeof CardGrid> | null>(null);
   let searchEl = $state<HTMLInputElement | null>(null);
+  let scrollEl = $state<HTMLElement | null>(null);
+  let folded = $state(false);
   let detailsGame = $state<GameSummary | null>(null);
   let detailsCloudMode = $state<CloudMode>('overview');
   // Every inline failure the grid can produce: a refused install AND a
@@ -495,57 +499,61 @@
       />
 
       <div class="body">
-        <div class="head panel scrolls">
-        <header data-testid="server-platform-header" class="platform-header">
-          <h2>{activePlatformName}</h2>
-          {#if !gamesLoading}
-            <p data-testid="server-platform-counts" class="counts">
-              {platformCountsLine(activePlatformRow?.rom_count ?? 0, installedCount)}
-            </p>
-          {/if}
-          <div class="chips">
-            {#if firmwareTarget}
-              <button
-                data-testid="server-firmware-chip"
-                class="chip link"
-                title="Install firmware from Emulators"
-                onclick={() => onOpenEmulators(firmwareTarget)}
-              >
-                {firmwareChipLabel(firmware)}
-              </button>
-            {:else}
-              <span data-testid="server-firmware-chip" class="chip">{firmwareChipLabel(firmware)}</span>
-            {/if}
-            {#if showsEmulatorChip(activePlatformName, activePlatformRow?.slug ?? '')}
-              <button data-testid="server-emulator-chip" class="chip link" onclick={() => onOpenEmulators('defaults')}>
-                {emulatorChipLabel(defaultEmulator)}
-              </button>
-            {/if}
-          </div>
-        </header>
+        <FoldingHeader testId="server-head" scroller={scrollEl} resetKey={activePlatform} bind:folded>
+          {#snippet title()}
+            <header data-testid="server-platform-header" class="platform-header">
+              <h2>{activePlatformName}</h2>
+              {#if !gamesLoading}
+                <p data-testid="server-platform-counts" class="counts">
+                  {platformCountsLine(activePlatformRow?.rom_count ?? 0, installedCount)}
+                </p>
+              {/if}
+              <div class="chips">
+                {#if firmwareTarget}
+                  <button
+                    data-testid="server-firmware-chip"
+                    class="chip link"
+                    title="Install firmware from Emulators"
+                    onclick={() => onOpenEmulators(firmwareTarget)}
+                  >
+                    {firmwareChipLabel(firmware)}
+                  </button>
+                {:else}
+                  <span data-testid="server-firmware-chip" class="chip">{firmwareChipLabel(firmware)}</span>
+                {/if}
+                {#if showsEmulatorChip(activePlatformName, activePlatformRow?.slug ?? '')}
+                  <button data-testid="server-emulator-chip" class="chip link" onclick={() => onOpenEmulators('defaults')}>
+                    {emulatorChipLabel(defaultEmulator)}
+                  </button>
+                {/if}
+              </div>
+            </header>
+          {/snippet}
+          {#snippet toolbar()}
+            <div class="toolbar">
+              <input
+                data-testid="server-search"
+                class="search"
+                type="search"
+                placeholder={serverSearchPlaceholder(folded, activePlatformName)}
+                aria-label="Search this platform"
+                bind:this={searchEl}
+                bind:value={search}
+                onkeydown={onSearchKey}
+              />
+              <label class="control">
+                <span>Size</span>
+                <select data-testid="server-size" value={uiSettings.cardSizeServer} onchange={onSizeChange}>
+                  {#each CARD_SIZES as option (option)}
+                    <option value={option}>{cardSizeLabel(option)}</option>
+                  {/each}
+                </select>
+              </label>
+            </div>
+          {/snippet}
+        </FoldingHeader>
 
-        <div class="toolbar">
-          <input
-            data-testid="server-search"
-            class="search"
-            type="search"
-            placeholder="Search title, platform or genre"
-            aria-label="Search this platform"
-            bind:this={searchEl}
-            bind:value={search}
-            onkeydown={onSearchKey}
-          />
-          <label class="control">
-            <span>Size</span>
-            <select data-testid="server-size" value={uiSettings.cardSizeServer} onchange={onSizeChange}>
-              {#each CARD_SIZES as option (option)}
-                <option value={option}>{cardSizeLabel(option)}</option>
-              {/each}
-            </select>
-          </label>
-        </div>
-        </div>
-
+        <div class="scroller" bind:this={scrollEl}>
         {#if actionError}
           <p data-testid="server-error" class="error panel" role="alert">{actionError}</p>
           {#if actionError === umuOfferFor}<UmuInstallOffer />{/if}
@@ -603,6 +611,7 @@
             {/snippet}
           </CardGrid>
         {/if}
+        </div>
       </div>
     </div>
   {/if}
@@ -635,25 +644,33 @@
     min-height: 0;
   }
 
-  /* Scrolls itself so the platform rail beside it stays put — same reasoning
-     as `Library.svelte`'s `.body`. */
+  /* The header floats over the top of the scroller (`FoldingHeader`); the
+     scroller beside it scrolls, so the platform rail stays put — same
+     reasoning as `Library.svelte`'s. */
   .body {
+    position: relative;
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
+    overflow: hidden;
   }
 
-  /* The header, chips and toolbar are one panel: they belong together, and
-     their text never sits on the art. */
-  .head {
-    flex: none;
-    padding: 14px 16px;
+  /* Reserves the header's unfolded height above the first card, so folding
+     never moves one. `scroll-padding-top` keeps a card the keyboard brings
+     into view clear of the folded bar. The window swaps cards on its own, so
+     the browser's scroll anchoring would fight it. */
+  .scroller {
+    flex: 1 1 auto;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    overflow-y: auto;
+    overflow-anchor: none;
+    box-sizing: border-box;
+    padding-top: var(--head-h, 116px);
+    scroll-padding-top: var(--head-clear, 64px);
   }
 
   .platform-header {

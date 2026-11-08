@@ -59,7 +59,8 @@ There are several main sections to the application with buttons across the top b
 
 - **Library** contains a 220px filter rail — All games, Recent (played in the last 30
   days), Updates, then each installed platform, every entry with a count — beside a
-  toolbar (search by title, sort by Recently played / Recently installed / Title /
+  header (a title row with the rail entry's name and its game count, "12 games", over a
+  toolbar: search by title, sort by Recently played / Recently installed / Title /
   Platform, card size Small / Medium / Large) and one grid of cover cards. Each rail
   entry has its own empty state. Clicking a card opens the details sub view; the hover
   Play launches directly. The card size is remembered as `ui.card_size_library`.
@@ -94,6 +95,21 @@ There are several main sections to the application with buttons across the top b
   Install for a game that is not installed and Play for one that is. The card size is
   remembered as `ui.card_size_server`. Downloads and installs are queued and handled in
   the background.
+- **Server and Library headers fold while you scroll** (one shared behaviour). Past 32px
+  of scroll the title row (title, counts, chips) folds up into the toolbar row, leaving
+  the search field and Size (and Library's Sort) pinned to the top of the main panel;
+  back within 8px of the top it unfolds (the gap stops flicker). The header floats over
+  the grid, which reserves its unfolded height, so folding never moves a card. The fold
+  takes 260ms (ease-out): the title row's height closes while it rises 8px and fades,
+  the chips a beat ahead; the padding tightens from 14px to 8px; the bar turns to the
+  opaque overlay surface with a soft shadow and a stronger edge. Unfolding reverses it,
+  the title fading in a moment late; reduced motion makes it instant. While folded the
+  search placeholder carries the hidden title's context: "Search PlayStation…" in
+  Server; in Library "Search your library…", "Search recent games…", "Search games with
+  updates…" or "Search <platform>…" (unfolded they read "Search title, platform or
+  genre" and "Search installed games"). Switching platform or rail entry starts the grid
+  at the top, unfolded. Arrow-key movement keeps the selected card clear of the folded
+  bar, and moving into the first row scrolls back to the top.
 - **Discover** (ON HOLD since 2026-09-09 by user decision; not part of the current app — kept here as the reference if it is revived as a redesign) contains collapsible, cached recommendation sections built from the server library — Short But Fun, New on Server, Highly Rated (All-Time), Recommended for You, Browse by Genre, and Your Watchlist — with genre/platform filters and a manual refresh. Sections load in the background and fall back to the cached view when the server is unreachable.
 - **Downloads** is a full view, capped at 1100px and centred, with three stacked
   segments in this order — Active (downloading, installing, cancelling), Queued, and

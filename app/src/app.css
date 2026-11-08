@@ -94,6 +94,9 @@
   /* A theme switch: the colours ease across, the toggle's icon spins in. */
   --m-theme: 240ms;
   --m-spin: 300ms;
+  /* The Server and Library headers folding into their toolbar row. */
+  --m-fold: 260ms;
+  --ease-fold: cubic-bezier(0.2, 0.7, 0.2, 1);
 
   /* Shell metrics (design §3) */
   --topbar-h: 58px;

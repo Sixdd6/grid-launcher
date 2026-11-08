@@ -321,7 +321,7 @@ describe('large platform: performance probe (measurement only)', () => {
       ],
       [
         'art at full opacity, art and scroller layers',
-        '[data-testid="background-art"]{will-change:transform}[data-testid="background-art"] .layer.visible{opacity:1!important}[data-testid="server-section"] .body{will-change:transform}',
+        '[data-testid="background-art"]{will-change:transform}[data-testid="background-art"] .layer.visible{opacity:1!important}[data-testid="server-section"] .scroller{will-change:transform}',
       ],
     ];
     const art = await browser.execute(() =>

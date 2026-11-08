@@ -17,6 +17,8 @@
   import type { CloudMode } from './details/cloud';
   import GameCard from './GameCard.svelte';
   import CardGrid from './CardGrid.svelte';
+  import FoldingHeader from './FoldingHeader.svelte';
+  import { gameCountLine, librarySearchPlaceholder } from './views/fold';
   import RailPane, { type RailPaneEntry } from './RailPane.svelte';
   import Details from './Details.svelte';
   import { chordBlocked, chordContext, shouldFocusSearch } from './views/searchKeys';
@@ -35,6 +37,8 @@
   let focusIndex = $state(0);
   let grid = $state<ReturnType<typeof CardGrid> | null>(null);
   let searchEl = $state<HTMLInputElement | null>(null);
+  let scrollEl = $state<HTMLElement | null>(null);
+  let folded = $state(false);
   let subject = $state<DetailsSubject | null>(null);
   let detailsCloudMode = $state<CloudMode>('overview');
   let launchError = $state<string | null>(null);
@@ -341,35 +345,46 @@
   />
 
   <div class="body">
-    <div class="toolbar panel scrolls">
-      <input
-        data-testid="library-search"
-        class="search"
-        type="search"
-        placeholder="Search installed games"
-        aria-label="Search installed games"
-        bind:this={searchEl}
-        bind:value={search}
-        onkeydown={onSearchKey}
-      />
-      <label class="control">
-        <span>Sort</span>
-        <select data-testid="library-sort" value={sort} onchange={onSortChange}>
-          {#each LIBRARY_SORTS as option (option)}
-            <option value={option}>{sortLabel(option)}</option>
-          {/each}
-        </select>
-      </label>
-      <label class="control">
-        <span>Size</span>
-        <select data-testid="library-size" value={uiSettings.cardSizeLibrary} onchange={onSizeChange}>
-          {#each CARD_SIZES as option (option)}
-            <option value={option}>{cardSizeLabel(option)}</option>
-          {/each}
-        </select>
-      </label>
-    </div>
+    <FoldingHeader testId="library-head" scroller={scrollEl} resetKey={selected.key} bind:folded>
+      {#snippet title()}
+        <header data-testid="library-header" class="title-row">
+          <h2 data-testid="library-title">{selected.label}</h2>
+          <p data-testid="library-count" class="counts">{gameCountLine(rows.length)}</p>
+        </header>
+      {/snippet}
+      {#snippet toolbar()}
+        <div class="toolbar">
+          <input
+            data-testid="library-search"
+            class="search"
+            type="search"
+            placeholder={librarySearchPlaceholder(folded, selected.key, selected.label)}
+            aria-label="Search installed games"
+            bind:this={searchEl}
+            bind:value={search}
+            onkeydown={onSearchKey}
+          />
+          <label class="control">
+            <span>Sort</span>
+            <select data-testid="library-sort" value={sort} onchange={onSortChange}>
+              {#each LIBRARY_SORTS as option (option)}
+                <option value={option}>{sortLabel(option)}</option>
+              {/each}
+            </select>
+          </label>
+          <label class="control">
+            <span>Size</span>
+            <select data-testid="library-size" value={uiSettings.cardSizeLibrary} onchange={onSizeChange}>
+              {#each CARD_SIZES as option (option)}
+                <option value={option}>{cardSizeLabel(option)}</option>
+              {/each}
+            </select>
+          </label>
+        </div>
+      {/snippet}
+    </FoldingHeader>
 
+    <div class="scroller" bind:this={scrollEl}>
     {#if launchError}
       <p data-testid="library-launch-error" class="error panel" role="alert">{launchError}</p>
       {#if launchError === umuOfferFor}<UmuInstallOffer />{/if}
@@ -421,6 +436,7 @@
         {/snippet}
       </CardGrid>
     {/if}
+    </div>
   </div>
 </section>
 
@@ -444,25 +460,61 @@
     min-height: 0;
   }
 
-  /* The column scrolls, not the shell: the rail beside it is a sibling, so
-     scrolling here leaves it in place. `scrollIntoView` on a focused card
-     walks to this box for the same reason. */
+  /* The scroller scrolls, not the shell: the rail beside it is a sibling,
+     so scrolling here leaves it in place. `scrollIntoView` on a focused card
+     walks to that box for the same reason. The header floats over its top
+     (`FoldingHeader`). */
   .body {
+    position: relative;
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
+    overflow: hidden;
   }
 
-  /* The toolbar is a panel: its labels and fields never sit on the art. */
+  /* Reserves the header's unfolded height above the first card, so folding
+     never moves one. `scroll-padding-top` keeps a card the keyboard brings
+     into view clear of the folded bar. The window swaps cards on its own, so
+     the browser's scroll anchoring would fight it. */
+  .scroller {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-anchor: none;
+    box-sizing: border-box;
+    padding-top: var(--head-h, 116px);
+    scroll-padding-top: var(--head-clear, 64px);
+  }
+
+  /* The title row matches the Server header's. */
+  .title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 14px;
+  }
+
+  .title-row h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-h);
+  }
+
+  .counts {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
   .toolbar {
-    flex: none;
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 12px 16px;
   }
 
   .search {

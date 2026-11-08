@@ -147,14 +147,23 @@
     const grid = el;
     const rect = layout.rects[index];
     if (!grid || !rect) return;
+    // The first row goes all the way back to the top, where the view's
+    // folding header opens out again over the space reserved for it.
+    if (rect.y === 0 && scroller) {
+      scroller.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     if (index >= shown.start && index < shown.end) {
+      // The scroller's `scroll-padding-top` keeps the card clear of the
+      // header floating over it.
       grid.children[index - shown.start]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       return;
     }
     const gridTop = grid.getBoundingClientRect().top + PAD_TOP_PX;
     const viewTop = scroller ? scroller.getBoundingClientRect().top : 0;
     const current = scroller ? scroller.scrollTop : window.scrollY;
-    const top = Math.max(0, current + (gridTop - viewTop) + rect.y - 24);
+    const clear = scroller ? parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0 : 0;
+    const top = Math.max(0, current + (gridTop - viewTop) + rect.y - Math.max(24, clear));
     if (scroller) scroller.scrollTop = top;
     else window.scrollTo(0, top);
     measure();

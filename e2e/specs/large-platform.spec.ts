@@ -170,6 +170,83 @@ describe('large platform: windowed grid, bounded cover loading', () => {
     expect(await $(testId(`game-card-${FIRST_ID}`)).isExisting()).toBe(false);
   });
 
+  it('folds the header while scrolling, without moving a card', async () => {
+    await scrollGrid({ to: 0 });
+    const head = $(testId('server-head'));
+    await browser.waitUntil(async () => (await head.getAttribute('data-folded')) === 'false', {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the header was folded at the top of the grid',
+    });
+    expect(await $(testId('server-search')).getAttribute('placeholder')).toBe('Search title, platform or genre');
+
+    /** A card's top within the scrolled content, independent of the scroll. */
+    const cardOffset = (id: number) =>
+      browser.execute((sel: string) => {
+        const card = document.querySelector(sel) as HTMLElement;
+        let sc: HTMLElement | null = card.parentElement;
+        while (sc && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
+        return card.getBoundingClientRect().top - sc!.getBoundingClientRect().top + sc!.scrollTop;
+      }, testId(`game-card-${id}`));
+    const before = await cardOffset(FIRST_ID);
+
+    // Past 32px it folds; the platform's name moves into the placeholder.
+    await scrollGrid({ to: 120 });
+    await browser.waitUntil(async () => (await head.getAttribute('data-folded')) === 'true', {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the header never folded past 32px of scroll',
+    });
+    const placeholder = await $(testId('server-search')).getAttribute('placeholder');
+    expect(placeholder).toMatch(/^Search .+…$/);
+    expect(placeholder).not.toBe('Search title, platform or genre');
+    await browser.pause(400); // the 260ms fold
+    expect(Math.abs((await cardOffset(FIRST_ID)) - before)).toBeLessThanOrEqual(1);
+
+    // Between the thresholds it stays folded; within 8px of the top it opens.
+    await scrollGrid({ to: 20 });
+    expect(await head.getAttribute('data-folded')).toBe('true');
+    await scrollGrid({ to: 0 });
+    await browser.waitUntil(async () => (await head.getAttribute('data-folded')) === 'false', {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the header never unfolded back at the top',
+    });
+    await browser.pause(400);
+    expect(Math.abs((await cardOffset(FIRST_ID)) - before)).toBeLessThanOrEqual(1);
+  });
+
+  it('keeps the card the arrow keys select clear of the folded header', async () => {
+    await scrollGrid({ to: 0 });
+    // Into the grid: the first arrow press selects, then six rows down.
+    await browser.execute(() => (document.activeElement as HTMLElement | null)?.blur());
+    for (let i = 0; i < 7; i++) {
+      await browser.keys('ArrowDown');
+      await browser.pause(120);
+    }
+    await browser.pause(800); // the smooth scroll
+    expect(await $(testId('server-head')).getAttribute('data-folded')).toBe('true');
+    const clear = await browser.execute(
+      (headSel: string, gridSel: string) => {
+        const card = document.querySelector(`${gridSel} > .focused`) as HTMLElement | null;
+        if (!card) return null;
+        const head = (document.querySelector(headSel) as HTMLElement).getBoundingClientRect();
+        return card.getBoundingClientRect().top - head.bottom;
+      },
+      testId('server-head'),
+      testId('server-grid'),
+    );
+    expect(clear).not.toBeNull();
+    expect(clear!).toBeGreaterThanOrEqual(0);
+
+    // Back up to the first row: the grid returns to the top and unfolds.
+    for (let i = 0; i < 7; i++) {
+      await browser.keys('ArrowUp');
+      await browser.pause(120);
+    }
+    await browser.waitUntil(async () => (await $(testId('server-head')).getAttribute('data-folded')) === 'false', {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the header never unfolded after moving back to the first row',
+    });
+  });
+
   it('shows a cover it has loaded at once when its card comes back', async () => {
     await scrollGrid({ to: 0 });
     // The card mounted again as a new element, but the file is remembered:
