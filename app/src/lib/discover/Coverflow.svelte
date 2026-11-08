@@ -3,6 +3,12 @@
   // tilt 52° back, recede and dim, each with a soft reflection. Arrows, a
   // click on a side cover, or ← / → move it (450ms glide); a click on the
   // centre cover, or Enter, opens Details.
+  //
+  // Each item is one flat layer under the stage's perspective: no
+  // preserve-3d, no animated filter and no -webkit-box-reflect, which
+  // WebKitGTK's compositor drew flat, dropped or flickered mid-glide. The
+  // reflection is a flipped copy of the cover faded by a mask, and the dimming
+  // is a dark shade whose opacity eases.
   import type { GameSummary } from '../api';
   import Icon from '../Icon.svelte';
   import Image from '../Image.svelte';
@@ -91,6 +97,13 @@
       >
         <div class="cf-cover">
           <Image url={game.path_cover_large || game.path_cover_small} alt={game.name} placeholder={game.name} class="cf-img" />
+          <span class="cf-shade"></span>
+        </div>
+        <div class="cf-reflection" aria-hidden="true">
+          <div class="cf-mirror">
+            <Image url={game.path_cover_large || game.path_cover_small} alt="" placeholder="" class="cf-img" />
+            <span class="cf-shade"></span>
+          </div>
         </div>
       </div>
     {/each}
@@ -141,14 +154,17 @@
     outline-offset: 2px;
   }
 
-  /* Clipped left and right only: the reflections run down under the
-     caption and fade out there. */
+  /* The stage runs on below the coverflow so the reflections can fade out
+     under the caption, and clips everything past the sides. A plain
+     overflow clip on a flat parent: the items are single 3D-transformed
+     layers, so nothing here flattens or splits them. It takes no clicks
+     itself (it overlaps the caption); the covers do. */
   .cf-stage {
     position: absolute;
-    inset: 0;
+    inset: 0 0 -110px;
     perspective: 1100px;
-    overflow-x: clip;
-    overflow-y: visible;
+    overflow: hidden;
+    pointer-events: none;
   }
 
   .cf-item {
@@ -158,16 +174,12 @@
     width: 200px;
     margin-left: -100px;
     cursor: pointer;
-    transform-style: preserve-3d;
+    pointer-events: auto;
+    will-change: transform;
+    backface-visibility: hidden;
     transition:
       transform var(--m-glide, 450ms) cubic-bezier(0.2, 0.7, 0.2, 1),
-      opacity var(--m-glide, 450ms) ease,
-      filter var(--m-glide, 450ms) ease;
-    filter: brightness(0.62) saturate(0.85);
-  }
-
-  .cf-item.center {
-    filter: none;
+      opacity var(--m-glide, 450ms) ease;
   }
 
   .cf-item.gone {
@@ -183,7 +195,6 @@
     background: var(--surface-2);
     box-shadow: var(--shadow-card);
     transition: transform 150ms ease;
-    -webkit-box-reflect: below 6px linear-gradient(transparent 46%, rgba(255, 255, 255, 0.24));
   }
 
   .cf-item.center .cf-cover {
@@ -194,11 +205,51 @@
     transform: translateY(-4px);
   }
 
-  .cf-cover :global(.cf-img) {
+  .cf-cover :global(.cf-img),
+  .cf-mirror :global(.cf-img) {
     display: block;
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  /* The side covers' dimming (the old brightness(0.62)), on the cover and
+     its reflection alike; the centre's shade fades out as it arrives. Its
+     colour eases, not its opacity: an opacity transition gets its own
+     compositing layer, and one inside the masked reflection is the kind of
+     layer WebKitGTK drops mid-glide. A colour repaints inside the item. */
+  .cf-shade {
+    position: absolute;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.38);
+    transition: background-color var(--m-glide, 450ms) ease;
+  }
+
+  .cf-item.center .cf-shade {
+    background-color: rgba(0, 0, 0, 0);
+  }
+
+  /* The reflection: 6px under the cover, as tall as it, strongest at the
+     cover's edge and gone before halfway. The mask sits on this unflipped
+     box so the gradient runs top to bottom; the copy inside is flipped. */
+  .cf-reflection {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    width: 100%;
+    aspect-ratio: 3 / 4;
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.1) 22%, transparent 42%);
+    mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.1) 22%, transparent 42%);
+  }
+
+  .cf-mirror {
+    position: relative;
+    height: 100%;
+    border-radius: var(--r-card);
+    overflow: hidden;
+    background: var(--surface-2);
+    transform: scaleY(-1);
   }
 
   .cf-arrow {
@@ -274,7 +325,8 @@
 
   @media (prefers-reduced-motion: reduce) {
     .cf-item,
-    .cf-cover {
+    .cf-cover,
+    .cf-shade {
       transition: none;
     }
   }
