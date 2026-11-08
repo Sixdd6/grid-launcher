@@ -673,6 +673,7 @@ nxt = sub(nxt, "$('srv-emu').textContent = 'Emulator: ' + EMU[S.platform];", "$(
 nxt = sub(nxt, '<button class="g-chip-outline" data-go="emulators">Firmware: 3 files · installed</button>', '<button class="g-chip-outline" data-go="emulators" id="srv-fw">Firmware: 3 files · installed</button>')
 nxt = sub(nxt, "/^[1-5]$/.test(e.key)", "/^[1-4]$/.test(e.key)")
 FRESH_JS = open(os.path.join(HERE, 'fresh.js')).read()
+nxt = sub(nxt, '      <p class="g-panel legend">Active: downloading or installing · Queued: waiting for a slot · Completed: finished, failed, or cancelled</p>\n', '')
 SH_JS = open(os.path.join(HERE, 'serverhead.js')).read()
 SH_CSS = open(os.path.join(HERE, 'serverhead.css')).read()
 nxt = sub(nxt, '</style></head>', SH_CSS + '\n</style></head>')
