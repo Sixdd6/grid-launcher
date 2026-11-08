@@ -22,6 +22,10 @@
 //                                                       → release JSON (with digest)
 //   /github.com/Open-Wine-Components/umu-launcher/releases/download/…zipapp.tar
 //                                                       → the zipapp tar stub
+//   /api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest
+//                                                       → release JSON
+//   /github.com/GloriousEggroll/proton-ge-custom/releases/download/…tar.gz
+//                                                       → the GE-Proton tar.gz stub
 //
 // Plus one control route, mirroring the RomM mock's `POST /__e2e__/offline`:
 //   POST /__e2e__/pcsx2-release/updated → from here on, PCSX2's
@@ -173,6 +177,45 @@ export const UMU_TAR_BYTES = buildTar([
 ]);
 export const UMU_DIGEST = `sha256:${createHash("sha256").update(UMU_TAR_BYTES).digest("hex")}`;
 
+/**
+ * GE-Proton's release, for first-run setup's Windows row (a compat-tool
+ * install from the catalog, grid-core `InstallService::install_compat_tool`).
+ * The asset name matches the catalog's linux pattern `GE-Proton*[0-9].tar.gz`;
+ * the tarball holds `<tag>/proton` the way the upstream one does, which is
+ * what `launch::compat::find_proton_dir` looks for.
+ */
+export const GE_PROTON_TAG = "GE-Proton10-99";
+export const GE_PROTON_ASSET_NAME = `${GE_PROTON_TAG}.tar.gz`;
+export const GE_PROTON_RELEASE_PATH =
+  "/api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest";
+export const GE_PROTON_DOWNLOAD_URL = `https://github.com/GloriousEggroll/proton-ge-custom/releases/download/${GE_PROTON_TAG}/${GE_PROTON_ASSET_NAME}`;
+export const GE_PROTON_DOWNLOAD_PATH = `/github.com/GloriousEggroll/proton-ge-custom/releases/download/${GE_PROTON_TAG}/${GE_PROTON_ASSET_NAME}`;
+export const GE_PROTON_TAR_GZ_BYTES = buildTarGz([
+  {
+    name: `${GE_PROTON_TAG}/proton`,
+    data: Buffer.from("#!/usr/bin/env python3\n# grid-launcher e2e mock forge stub: proton\n", "utf8"),
+    mode: 0o755,
+  },
+]);
+
+/** The GitHub "latest release" payload for GE-Proton. */
+export function geProtonRelease() {
+  return {
+    tag_name: GE_PROTON_TAG,
+    name: GE_PROTON_TAG,
+    draft: false,
+    prerelease: false,
+    assets: [
+      {
+        name: GE_PROTON_ASSET_NAME,
+        browser_download_url: GE_PROTON_DOWNLOAD_URL,
+        size: GE_PROTON_TAR_GZ_BYTES.length,
+        state: "uploaded",
+      },
+    ],
+  };
+}
+
 /** The GitHub "latest release" payload for umu-launcher. */
 export function umuRelease() {
   return {
@@ -323,6 +366,16 @@ function handleRequest(req, res, state) {
 
   if (req.method === "GET" && pathname === UMU_DOWNLOAD_PATH) {
     sendBuffer(res, 200, "application/x-tar", UMU_TAR_BYTES);
+    return;
+  }
+
+  if (req.method === "GET" && pathname === GE_PROTON_RELEASE_PATH) {
+    sendJson(res, 200, geProtonRelease());
+    return;
+  }
+
+  if (req.method === "GET" && pathname === GE_PROTON_DOWNLOAD_PATH) {
+    sendBuffer(res, 200, "application/gzip", GE_PROTON_TAR_GZ_BYTES);
     return;
   }
 

@@ -2,7 +2,7 @@
   import Connect from './lib/Connect.svelte';
   import { connectPrefill } from './lib/connectPrefill';
   import Shell from './lib/Shell.svelte';
-  import PlatformSetup from './lib/setup/PlatformSetup.svelte';
+  import ChooseSystems from './lib/setup/ChooseSystems.svelte';
   import Toast from './lib/Toast.svelte';
   import SetupProgress from './lib/setup/SetupProgress.svelte';
   import { session, restore, listenUnauthorized, finishSetup } from './lib/stores/session.svelte';
@@ -122,9 +122,9 @@
 {#if libraryUnreachable.blocking}
   <LibraryUnreachableDialog />
 {:else if session.phase === 'setup'}
-  <PlatformSetup
-    onDone={(started) => {
-      if (started !== null) startSetupRun(started);
+  <ChooseSystems
+    onDone={(started, names) => {
+      if (started !== null) startSetupRun(started, names);
       finishSetup();
     }}
   />

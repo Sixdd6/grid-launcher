@@ -221,9 +221,193 @@ pub fn clear_pending_compat_default(config: &mut Config) {
     config.setup.pending_compat.clear();
 }
 
+/// First-run setup's Windows row (Linux): the default Proton version the
+/// user picked. `Installed` is a tool already on the computer, by the path
+/// [`CompatTool::path`] gives (what `default_compat_tool` stores);
+/// `Download` is a compat-tool catalog entry, by its `source_id`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SetupCompatChoice {
+    Installed { path: String },
+    Download { source_id: String },
+}
+
+/// What [`apply_setup_compat_choice`] leaves to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetupCompatPlan {
+    /// The default is this path now: nothing to install.
+    Set(String),
+    /// Queue this catalog install; it becomes the default when it lands
+    /// (the pending compat default, [`request_compat_default`]).
+    Install(String),
+}
+
+/// Applies setup's Proton pick to `config`. An installed tool is the
+/// default at once (and drops any download still waiting); a download is
+/// remembered as the pending compat default, or is the default at once when
+/// GRID already has it. A download must be one of `catalog`'s `source_id`s
+/// and an installed pick must name a path: anything else is refused before
+/// `config` changes.
+pub fn apply_setup_compat_choice(
+    config: &mut Config,
+    choice: &SetupCompatChoice,
+    catalog: &[String],
+) -> Result<SetupCompatPlan, String> {
+    match choice {
+        SetupCompatChoice::Installed { path } => {
+            let path = path.trim();
+            if path.is_empty() {
+                return Err("Choose a Proton version for Windows games.".to_string());
+            }
+            config.default_compat_tool = path.to_string();
+            clear_pending_compat_default(config);
+            Ok(SetupCompatPlan::Set(path.to_string()))
+        }
+        SetupCompatChoice::Download { source_id } => {
+            let wanted = source_id.trim();
+            let known = catalog
+                .iter()
+                .find(|id| id.trim().eq_ignore_ascii_case(wanted))
+                .ok_or_else(|| "That Proton version is not one GRID can download.".to_string())?;
+            let known = known.trim().to_string();
+            Ok(match request_compat_default(config, &known) {
+                Some(path) => SetupCompatPlan::Set(path),
+                None => SetupCompatPlan::Install(known),
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- setup's Proton pick --------------------------------------------------
+
+    fn catalog() -> Vec<String> {
+        vec![
+            "GloriousEggroll/proton-ge-custom".to_string(),
+            "CachyOS/proton-cachyos".to_string(),
+        ]
+    }
+
+    #[test]
+    fn setup_compat_choice_reads_both_kinds() {
+        let installed: SetupCompatChoice =
+            serde_json::from_str(r#"{"kind":"installed","path":"wine"}"#).unwrap();
+        assert_eq!(
+            installed,
+            SetupCompatChoice::Installed {
+                path: "wine".to_string()
+            }
+        );
+        let download: SetupCompatChoice = serde_json::from_str(
+            r#"{"kind":"download","source_id":"GloriousEggroll/proton-ge-custom"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            download,
+            SetupCompatChoice::Download {
+                source_id: "GloriousEggroll/proton-ge-custom".to_string()
+            }
+        );
+        assert!(serde_json::from_str::<SetupCompatChoice>(r#"{"kind":"other"}"#).is_err());
+    }
+
+    #[test]
+    fn setup_installed_pick_is_the_default_now() {
+        let mut config = Config::default();
+        request_compat_default(&mut config, "GloriousEggroll/proton-ge-custom");
+        let plan = apply_setup_compat_choice(
+            &mut config,
+            &SetupCompatChoice::Installed {
+                path: "/home/me/.steam/root/compatibilitytools.d/Proton 9.0".to_string(),
+            },
+            &catalog(),
+        );
+        assert_eq!(
+            plan,
+            Ok(SetupCompatPlan::Set(
+                "/home/me/.steam/root/compatibilitytools.d/Proton 9.0".to_string()
+            ))
+        );
+        assert_eq!(
+            config.default_compat_tool,
+            "/home/me/.steam/root/compatibilitytools.d/Proton 9.0"
+        );
+        assert!(config.setup.pending_compat.is_empty());
+    }
+
+    #[test]
+    fn setup_download_pick_queues_and_waits() {
+        let mut config = Config::default();
+        let plan = apply_setup_compat_choice(
+            &mut config,
+            &SetupCompatChoice::Download {
+                source_id: "gloriouseggroll/proton-ge-custom".to_string(),
+            },
+            &catalog(),
+        );
+        assert_eq!(
+            plan,
+            Ok(SetupCompatPlan::Install(
+                "GloriousEggroll/proton-ge-custom".to_string()
+            ))
+        );
+        assert!(config.default_compat_tool.is_empty());
+        assert_eq!(
+            config.setup.pending_compat,
+            "GloriousEggroll/proton-ge-custom"
+        );
+    }
+
+    #[test]
+    fn setup_download_pick_already_installed_is_the_default_now() {
+        let mut config = Config::default();
+        config
+            .compat_tool_installs
+            .push(ge_install("/lib/compat/GE-Proton10-17"));
+        let plan = apply_setup_compat_choice(
+            &mut config,
+            &SetupCompatChoice::Download {
+                source_id: "GloriousEggroll/proton-ge-custom".to_string(),
+            },
+            &catalog(),
+        );
+        assert_eq!(
+            plan,
+            Ok(SetupCompatPlan::Set(
+                "/lib/compat/GE-Proton10-17".to_string()
+            ))
+        );
+        assert_eq!(config.default_compat_tool, "/lib/compat/GE-Proton10-17");
+    }
+
+    #[test]
+    fn setup_refuses_an_unknown_download_or_a_blank_path_untouched() {
+        let mut config = Config {
+            default_compat_tool: "wine".to_string(),
+            ..Config::default()
+        };
+        assert!(apply_setup_compat_choice(
+            &mut config,
+            &SetupCompatChoice::Download {
+                source_id: "someone/else".to_string()
+            },
+            &catalog(),
+        )
+        .is_err());
+        assert!(apply_setup_compat_choice(
+            &mut config,
+            &SetupCompatChoice::Installed {
+                path: "  ".to_string()
+            },
+            &catalog(),
+        )
+        .is_err());
+        assert_eq!(config.default_compat_tool, "wine");
+        assert!(config.setup.pending_compat.is_empty());
+    }
 
     // --- pending compat default ---------------------------------------------
 

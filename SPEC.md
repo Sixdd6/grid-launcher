@@ -325,13 +325,15 @@ On first launch, or when required configuration is missing, the Connect screen a
 The Connect button stays disabled until every shown field is filled. The library folder
 can be changed later under Settings › Library.
 
-**Choose your platforms.** After the first successful connect of a fresh install (setup
-never finished or skipped, no emulator configured, no game installed), a platform picker
-comes before the shell. It lists the server's platforms that need an emulator (native PC
-platforms and the "Emulators" platform are left out) with their ROM counts, in
-alphabetical order, none ticked:
-- Ticking a platform pre-selects GRID's recommended emulator for it; a select offers the
-  other compatible emulators installable on this system. The recommendation is the
+**Choose your systems.** After the first successful connect of a fresh install (setup
+never finished or skipped, no emulator configured, no game installed), Choose your systems
+comes before the shell. It shows the same rows as Settings › Systems: the server's systems
+that need an emulator (native PC platforms and the "Emulators" platform are left out) with
+their game counts, in alphabetical order, each with a tick box, none ticked:
+- Ticking a system pre-selects GRID's recommended emulator for it; its picker offers the
+  other compatible emulators installable on this system, grouped **Installed** and
+  **Download** like Settings › Systems, the recommended one first and marked. The
+  recommendation is the
   platform's standalone emulator (an ordered list per platform in
   `platform-emulators.json`, then keyword matching); RetroArch is recommended only for a
   platform no standalone emulator serves (NES, SNES, Game Boy, Arcade…), and is offered
@@ -351,21 +353,37 @@ alphabetical order, none ticked:
   `emulators/<Name>` and registers with its source (`romm:<folder>/<emulator>`) and
   version; the platform's default goes to its entry whatever name it gets (e.g. "Pico-8
   (server)").
-- A platform nothing installable serves shows "No emulator available" and cannot be
-  ticked; one whose recommended emulator is already configured shows "Installed".
-- **Install N emulators** (N counts emulators, not platforms) queues one catalog install
-  per chosen emulator and opens the app at once. A card at the top of the notification stack follows the
-  installs ("Setting up 3 emulators · 1 done"), with Retry for a failed one, and ends
-  with how many platforms are ready. Once nothing is still installing, its Dismiss
-  counts down and the card closes itself after 10 seconds, like every notification.
+- A system nothing installable serves shows "No emulator available" and cannot be
+  ticked; an unticked one whose recommended emulator is already configured shows
+  "Installed".
+- **Windows** (not on a Windows computer) picks the default Proton version for Windows
+  games. Ticked, its picker lists **Installed** (system Wine, Proton installed by Steam,
+  GRID's own downloads) and **Download** (the versions GRID can fetch, GE-Proton first,
+  recommended and pre-selected). An installed version becomes the default at once; a
+  download is installed with the emulators and becomes the default when it lands (a
+  failed one that is retried still does).
+- The main button counts the installs, a Proton download included: **Install 3
+  emulators** (each emulator once, however many systems share it). It reads **Continue**
+  when only an installed Proton version was picked, **Use selected emulators** when
+  everything ticked is already installed, and is disabled ("Install emulators") while
+  nothing is ticked.
+- Installing opens the app at once (on Server). A card at the top of the notification
+  stack follows the installs, Proton included: "Setting up 3 installs · 1 done", then
+  "3 installs done" and "3 systems are ready to play." (Windows counts once its Proton
+  version is the default). Its bar has one segment per install: filled when done, a
+  moving fill while installing, empty while waiting, red when it failed; pointing at a
+  segment names the install and its state. A failed install has Retry. Once nothing is
+  still installing, its Dismiss counts down and the card closes itself after 10 seconds,
+  like every notification.
 - As each emulator installs, every platform it was chosen for gets it as its default
   emulator, replacing an automatic default but never an explicit "(none)". A RetroArch
   choice becomes the default only when a compatible core is actually installed; otherwise
   the platform is left without a default and the card says so. A chosen default waits
   for its own emulator, so a failed install that is retried still gets it.
-- **Skip for now** opens the app with nothing installed. Either way the picker is not
-  shown again; changes later happen in Settings › Systems, whose **Install recommended
-  (N)** replaces reopening it. The picker's footnote says so.
+- **Skip for now** opens the app with nothing installed. Either way Choose your systems
+  is not shown again; changes later happen in Settings › Systems, whose **Install
+  recommended (N)** replaces reopening it. Its footnote says so. **Disconnect** returns to
+  Connect; it does not bring Choose your systems back once setup was finished or skipped.
 
 If the server rejects the stored credential (HTTP 401), at startup or during a session, the app returns to this screen. The server URL (and username, for a password) is filled in, the credential field is empty, and a line explains why ("The server rejected your token. Enter a new one."). The stored credential stays in the OS keyring until a new connect succeeds. When the server is unreachable or denies permission (HTTP 403), the app stays open and shows "Not connected" with Retry.
 

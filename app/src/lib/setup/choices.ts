@@ -1,6 +1,10 @@
-// The first-run platform picker's selection model (`PlatformSetup.svelte`),
-// kept pure so it can be tested without mounting the screen.
-import type { PlatformSetup, SetupChoice, SetupOption } from '../api';
+// First-run setup's Choose your systems (`ChooseSystems.svelte`): the
+// selection model, kept pure so it can be tested without mounting the
+// screen. The rows are Settings › Systems' rows (`systems/SystemRow.svelte`
+// in tick mode); the Windows row's choices are `systems/proton.ts`'s.
+import type { PlatformSetup, SetupChoice, SetupCompatChoice, SetupOption } from '../api';
+import type { PickerOption } from '../systems/rows';
+import { protonInstallSource, type ProtonPicker } from '../systems/proton';
 
 /** Ticked platforms: display label → the chosen option's `source_id`. */
 export type Selection = Readonly<Record<string, string>>;
@@ -57,13 +61,74 @@ export function toInstall(rows: readonly PlatformSetup[], selection: Selection):
   return [...out.values()];
 }
 
-/** The primary button: "Install 3 emulators", "Install 1 emulator", "Use
+/** Everything the main button installs: the distinct emulators plus a
+ *  Proton download (`proton` is the Windows row's value, `null` unticked). */
+export function installCount(rows: readonly PlatformSetup[], selection: Selection, proton: string | null): number {
+  const protonDownload = proton !== null && protonInstallSource(proton) !== null ? 1 : 0;
+  return toInstall(rows, selection).length + protonDownload;
+}
+
+export type ButtonInput = {
+  /** [`installCount`]. */
+  installs: number;
+  /** Ticked systems, Windows not included. */
+  ticked: number;
+  /** The Windows row's value, `null` while unticked. */
+  proton: string | null;
+};
+
+/** Whether the main button does anything: a system or Windows is ticked. */
+export function canStart(input: ButtonInput): boolean {
+  return input.ticked > 0 || (input.proton !== null && input.proton !== '');
+}
+
+/** The main button: "Install 3 emulators" (a Proton download counts as
+ *  one), "Continue" when only an installed Proton version was picked, "Use
  *  selected emulators" when everything ticked is already installed, and
  *  "Install emulators" (disabled) while nothing is ticked. */
-export function primaryLabel(installCount: number, tickedCount: number): string {
-  if (tickedCount === 0) return 'Install emulators';
-  if (installCount === 0) return 'Use selected emulators';
-  return `Install ${installCount} emulator${installCount === 1 ? '' : 's'}`;
+export function primaryLabel(input: ButtonInput): string {
+  if (input.installs > 0) return `Install ${input.installs} emulator${input.installs === 1 ? '' : 's'}`;
+  if (!canStart(input)) return 'Install emulators';
+  if (input.ticked === 0) return 'Continue';
+  return 'Use selected emulators';
+}
+
+const REC = ' (recommended)';
+
+/** A ticked system's picker, grouped like Settings › Systems': Installed
+ *  (configured already) and Download, each recommended first. Values are
+ *  the options' `source_id`s, what [`pick`] takes. */
+export function choosePicker(row: PlatformSetup): { installed: PickerOption[]; download: PickerOption[] } {
+  const ordered = [...row.options].sort(
+    (a, b) => Number(b.source_id === row.recommended) - Number(a.source_id === row.recommended),
+  );
+  const line = (o: SetupOption): PickerOption => {
+    const recommended = o.source_id === row.recommended;
+    const label = optionLabel({ ...o, installed: false }, row.core);
+    return { value: o.source_id, label: recommended ? label + REC : label, recommended };
+  };
+  return {
+    installed: ordered.filter((o) => o.installed).map(line),
+    download: ordered.filter((o) => !o.installed).map(line),
+  };
+}
+
+/** The Windows row's value once ticked: the recommended download (GE-Proton)
+ *  when GRID can fetch it, else the current default, else the first
+ *  installed tool, else the first download. `null` when nothing is offered:
+ *  the row can't be ticked. */
+export function protonPreselect(picker: ProtonPicker): string | null {
+  const recommended = picker.download.find((o) => o.recommended);
+  if (recommended) return recommended.value;
+  if (!picker.unset) return picker.selected;
+  return picker.installed[0]?.value ?? picker.download[0]?.value ?? null;
+}
+
+/** What `startPlatformSetup` is sent for the Windows row. */
+export function compatChoice(proton: string | null): SetupCompatChoice | null {
+  if (proton === null || proton === '') return null;
+  const source = protonInstallSource(proton);
+  return source === null ? { kind: 'installed', path: proton } : { kind: 'download', source_id: source };
 }
 
 /** An option's line in the select. RetroArch names the core it will use; a

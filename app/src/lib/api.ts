@@ -482,7 +482,17 @@ export type SetupStarted = {
   applied: SetupOutcome[];
   /** Installs that could not be queued. */
   errors: string[];
+  /** The Proton version queued for Windows games (also in `queued`). */
+  compat_queued: string | null;
+  /** The Proton pick is the default already. */
+  compat_set: boolean;
 };
+
+/** First-run setup's Windows row (grid-core `launch::compat::SetupCompatChoice`):
+ *  a tool on the computer by its path, or a catalog download by source id. */
+export type SetupCompatChoice =
+  | { kind: 'installed'; path: string }
+  | { kind: 'download'; source_id: string };
 
 /** Event: setup defaults applied after an emulator installed. */
 export const SETUP_DEFAULTS_EVENT = 'setup-defaults';
@@ -882,8 +892,8 @@ export const api = {
   setupPlatformOptions: () => invoke<PlatformSetup[]>('setup_platform_options'),
   setupStatus: () => invoke<SetupStatus>('setup_status'),
   skipPlatformSetup: () => invoke<void>('skip_platform_setup'),
-  startPlatformSetup: (choices: SetupChoice[]) =>
-    invoke<SetupStarted>('start_platform_setup', { choices }),
+  startPlatformSetup: (choices: SetupChoice[], compat: SetupCompatChoice | null = null) =>
+    invoke<SetupStarted>('start_platform_setup', { choices, compat }),
   /** Settings › Systems: installs the picked emulator per system and makes
    *  it that system's emulator when the install finishes (setup's pending
    *  defaults). Replaces an explicit "(none)" on the chosen systems. */

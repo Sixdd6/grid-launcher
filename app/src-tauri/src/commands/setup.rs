@@ -5,6 +5,10 @@ use std::path::Path;
 use grid_core::autoconfig::installed_compatible_cores;
 use grid_core::cloud::scope::is_emulators_platform;
 use grid_core::config::Config;
+use grid_core::launch::catalog::compat_tool_catalog_entries;
+use grid_core::launch::compat::{
+    apply_setup_compat_choice, clear_pending_compat_default, SetupCompatChoice, SetupCompatPlan,
+};
 use grid_core::launch::profiles::load_profiles;
 use grid_core::launch::setup::{
     apply_pending_defaults, forget_explicit_none, newest_server_build, plan_setup, platform_setup,
@@ -189,6 +193,12 @@ pub struct SetupStarted {
     pub applied: Vec<PendingOutcome>,
     /// Installs that could not be queued, as user-facing lines.
     pub errors: Vec<String>,
+    /// The Proton version queued for Windows games (also in `queued`): it
+    /// becomes the default when its install lands. `None` when none was.
+    pub compat_queued: Option<String>,
+    /// The Proton pick is the default already (an installed tool, or a
+    /// download GRID already had).
+    pub compat_set: bool,
 }
 
 /// Starts setup: checks `choices` against what [`setup_platform_options`]
@@ -197,13 +207,18 @@ pub struct SetupStarted {
 /// catalog install per remaining emulator. The pending defaults are saved
 /// BEFORE anything is queued, so even an install that finishes at once finds
 /// them (the emulator-installed hook applies them: [`apply_after_install`]).
+///
+/// `compat` is the Windows row's Proton pick (Linux): an installed tool is
+/// the default at once; a catalog download is queued with the others (it
+/// counts in `queued`) and becomes the default when it lands.
 #[tauri::command]
 pub async fn start_platform_setup(
     state: State<'_, AppState>,
     choices: Vec<SetupChoice>,
+    compat: Option<SetupCompatChoice>,
 ) -> Result<SetupStarted, String> {
     ensure_library_idle(&state)?;
-    queue_setup(&state, &choices, SetupSource::FirstRun).await
+    queue_setup(&state, &choices, compat.as_ref(), SetupSource::FirstRun).await
 }
 
 /// Settings › Systems: installs the emulator the user picked for each
@@ -219,7 +234,7 @@ pub async fn install_for_systems(
     choices: Vec<SetupChoice>,
 ) -> Result<SetupStarted, String> {
     ensure_library_idle(&state)?;
-    queue_setup(&state, &choices, SetupSource::Systems).await
+    queue_setup(&state, &choices, None, SetupSource::Systems).await
 }
 
 /// Who asked for the installs: first-run setup also marks setup finished;
@@ -234,6 +249,7 @@ enum SetupSource {
 async fn queue_setup(
     state: &State<'_, AppState>,
     choices: &[SetupChoice],
+    compat: Option<&SetupCompatChoice>,
     source: SetupSource,
 ) -> Result<SetupStarted, String> {
     let rows = setup_platform_options(state.clone()).await?;
@@ -250,6 +266,19 @@ async fn queue_setup(
             forget_explicit_none(&mut config, plan.pending.keys().map(String::as_str))
         }
     }
+    // Checked (and applied) before anything is saved: a refused pick leaves
+    // the config as it was. Saved before the install is queued, like the
+    // emulators' pending defaults, so even an instant install finds it.
+    let compat_plan = match compat {
+        Some(choice) => {
+            let catalog: Vec<String> = compat_tool_catalog_entries(load_profiles())
+                .into_iter()
+                .map(|e| e.source_id)
+                .collect();
+            Some(apply_setup_compat_choice(&mut config, choice, &catalog)?)
+        }
+        None => None,
+    };
     config.setup.pending.extend(plan.pending);
     let mut applied = Vec::new();
     for name in &plan.already_installed {
@@ -291,10 +320,32 @@ async fn queue_setup(
             }
         }
     }
+    let mut compat_queued = None;
+    let compat_set = matches!(compat_plan, Some(SetupCompatPlan::Set(_)));
+    if let Some(SetupCompatPlan::Install(source_id)) = compat_plan {
+        match install.install_compat_tool(source_id.clone()).await {
+            Ok(()) => {
+                queued.push(source_id.clone());
+                compat_queued = Some(source_id);
+            }
+            Err(e) => {
+                errors.push(e.to_string());
+                // Nothing was queued: nothing should become the default later.
+                if let Ok(mut config) = Config::load(&path) {
+                    clear_pending_compat_default(&mut config);
+                    if let Err(e) = config.save(&path) {
+                        tracing::warn!("the waiting compat default was not cleared: {e}");
+                    }
+                }
+            }
+        }
+    }
     Ok(SetupStarted {
         queued,
         applied,
         errors,
+        compat_queued,
+        compat_set,
     })
 }
 

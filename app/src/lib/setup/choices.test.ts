@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import type { PlatformSetup, SetupOption } from '../api';
-import { choices, optionLabel, pick, primaryLabel, rowState, sortRows, toggle, toInstall } from './choices';
+import type { CatalogEntry, CompatTool, PlatformSetup, SetupOption } from '../api';
+import { protonPicker } from '../systems/proton';
+import {
+  canStart,
+  choices,
+  choosePicker,
+  compatChoice,
+  installCount,
+  optionLabel,
+  pick,
+  primaryLabel,
+  protonPreselect,
+  rowState,
+  sortRows,
+  toggle,
+  toInstall,
+} from './choices';
 
 const opt = (source_id: string, name: string, kind: SetupOption['kind'] = 'standalone', installed = false): SetupOption => ({
   source_id,
@@ -80,15 +95,38 @@ describe('toInstall and the button', () => {
     s = toggle(s, nes);
     s = toggle(s, ps2);
     expect(toInstall([ps2, snes, nes], s).map((o) => o.name)).toEqual(['PCSX2 (Playstation 2)', 'RetroArch (Multi-System)']);
-    expect(primaryLabel(2, 3)).toBe('Install 2 emulators');
-    expect(primaryLabel(1, 1)).toBe('Install 1 emulator');
-    expect(primaryLabel(0, 0)).toBe('Install emulators');
+    expect(installCount([ps2, snes, nes], s, null)).toBe(2);
+    expect(primaryLabel({ installs: 2, ticked: 3, proton: null })).toBe('Install 2 emulators');
+    expect(primaryLabel({ installs: 1, ticked: 1, proton: null })).toBe('Install 1 emulator');
+  });
+
+  it('is disabled while nothing is ticked', () => {
+    const none = { installs: 0, ticked: 0, proton: null };
+    expect(canStart(none)).toBe(false);
+    expect(primaryLabel(none)).toBe('Install emulators');
   });
 
   it('downloads nothing for an emulator already configured', () => {
     const installedPs2 = row('PS2', 1, [opt('PCSX2/pcsx2', 'PCSX2', 'standalone', true)]);
     expect(toInstall([installedPs2], toggle({}, installedPs2))).toEqual([]);
-    expect(primaryLabel(0, 1)).toBe('Use selected emulators');
+    expect(primaryLabel({ installs: 0, ticked: 1, proton: null })).toBe('Use selected emulators');
+    expect(primaryLabel({ installs: 0, ticked: 1, proton: 'wine' })).toBe('Use selected emulators');
+  });
+
+  it('counts a Proton download with the emulators', () => {
+    const s = toggle(toggle({}, snes), ps2);
+    const proton = 'install:GloriousEggroll/proton-ge-custom';
+    expect(installCount([ps2, snes], s, proton)).toBe(3);
+    expect(primaryLabel({ installs: 3, ticked: 2, proton })).toBe('Install 3 emulators');
+    expect(installCount([ps2], {}, proton)).toBe(1);
+    expect(primaryLabel({ installs: 1, ticked: 0, proton })).toBe('Install 1 emulator');
+  });
+
+  it('reads Continue when only an installed Proton version was picked', () => {
+    expect(installCount([ps2], {}, '/usr/bin/wine')).toBe(0);
+    const input = { installs: 0, ticked: 0, proton: '/usr/bin/wine' };
+    expect(canStart(input)).toBe(true);
+    expect(primaryLabel(input)).toBe('Continue');
   });
 
   it('sends one choice per ticked platform', () => {
@@ -110,5 +148,55 @@ describe('optionLabel', () => {
     expect(optionLabel(pcsx2, null)).toBe('PCSX2');
     expect(optionLabel(retroarch, 'snes9x')).toBe('RetroArch · snes9x core');
     expect(optionLabel(opt('a/b', 'Dolphin (GameCube, Wii)', 'standalone', true), null)).toBe('Dolphin (installed)');
+  });
+});
+
+describe('choosePicker', () => {
+  it('groups Installed and Download, the recommended one first and marked', () => {
+    const server = opt('romm:ps2/pcsx2', 'PCSX2 (Playstation 2)', 'server');
+    const dolphin = opt('a/dolphin', 'Dolphin', 'standalone', true);
+    const r = { ...row('PlayStation 2', 3, [dolphin, server, pcsx2], 'pcsx2'), recommended: 'PCSX2/pcsx2' };
+    expect(choosePicker(r)).toEqual({
+      installed: [{ value: 'a/dolphin', label: 'Dolphin', recommended: false }],
+      download: [
+        { value: 'PCSX2/pcsx2', label: 'PCSX2 (recommended)', recommended: true },
+        { value: 'romm:ps2/pcsx2', label: 'PCSX2 1.0 · from your server', recommended: false },
+      ],
+    });
+  });
+});
+
+describe('the Windows row', () => {
+  const wine: CompatTool = { name: 'Wine 10.0', kind: 'wine', path: '/usr/bin/wine', source: 'system' };
+  const ge: CatalogEntry = {
+    name: 'GE-Proton',
+    source_id: 'GloriousEggroll/proton-ge-custom',
+    provider: 'github-release',
+    tag: 'latest',
+    installed: false,
+  } as CatalogEntry;
+  const cachy = { ...ge, name: 'Proton-CachyOS', source_id: 'CachyOS/proton-cachyos' } as CatalogEntry;
+
+  it('pre-selects the GE-Proton download', () => {
+    expect(protonPreselect(protonPicker([wine], [cachy, ge], ''))).toBe('install:GloriousEggroll/proton-ge-custom');
+  });
+
+  it('falls back to the current default, then the first installed tool', () => {
+    expect(protonPreselect(protonPicker([wine], [{ ...ge, installed: true }], '/usr/bin/wine'))).toBe('/usr/bin/wine');
+    expect(protonPreselect(protonPicker([wine], [], ''))).toBe('/usr/bin/wine');
+    expect(protonPreselect(protonPicker([], [cachy], ''))).toBe('install:CachyOS/proton-cachyos');
+  });
+
+  it('cannot be ticked when nothing is offered', () => {
+    expect(protonPreselect(protonPicker([], [], ''))).toBeNull();
+  });
+
+  it('sends an installed tool by path, a download by source id, and nothing unticked', () => {
+    expect(compatChoice('/usr/bin/wine')).toEqual({ kind: 'installed', path: '/usr/bin/wine' });
+    expect(compatChoice('install:GloriousEggroll/proton-ge-custom')).toEqual({
+      kind: 'download',
+      source_id: 'GloriousEggroll/proton-ge-custom',
+    });
+    expect(compatChoice(null)).toBeNull();
   });
 });

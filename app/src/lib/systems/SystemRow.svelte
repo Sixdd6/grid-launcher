@@ -2,6 +2,11 @@
   // One Settings › Systems row: the system's name and game count (a toggle
   // that opens the row), its picker, and its status pill. The body is the
   // caller's. A system with no emulator is always open, with a warning edge.
+  //
+  // Tick mode (`tick` set): first-run setup's Choose your systems. The name
+  // is a tick box instead of the open toggle, the picker shows only once
+  // ticked, `note` stands in for it on a row that can't be ticked, and there
+  // is no status pill.
   import type { Snippet } from 'svelte';
   import Icon from '../Icon.svelte';
   import { STATUS_LABELS, type PickerOption, type SystemStatus } from './rows';
@@ -20,9 +25,11 @@
     installed,
     download,
     pickerDisabled = false,
-    status,
+    status = null,
     statusText = null,
-    onToggle,
+    tick = null,
+    note = null,
+    onToggle = () => {},
     onPick,
     body,
   }: {
@@ -41,10 +48,15 @@
     installed: PickerOption[];
     download: PickerOption[];
     pickerDisabled?: boolean;
-    status: SystemStatus;
+    /** `null` shows no status pill (tick mode). */
+    status?: SystemStatus | null;
     /** Overrides the status pill's text (e.g. "Installing firmware…"). */
     statusText?: string | null;
-    onToggle: () => void;
+    /** Tick mode: the row's tick box. */
+    tick?: { checked: boolean; disabled: boolean; onTick: () => void } | null;
+    /** Shown instead of the picker (tick mode: "No emulator available"). */
+    note?: string | null;
+    onToggle?: () => void;
     /** Called with the picked value and the select, which the caller puts
      *  back to the real value when the pick starts an install. */
     onPick: (value: string, select: HTMLSelectElement) => void;
@@ -60,53 +72,81 @@
   };
 </script>
 
-<li class="sysrow" class:attention class:open data-testid={`sys-row-${testKey}`}>
+<li
+  class="sysrow"
+  class:attention
+  class:open
+  class:tickable={tick !== null}
+  class:ticked={tick?.checked ?? false}
+  class:off={tick !== null && tick.disabled && !tick.checked}
+  data-testid={`sys-row-${testKey}`}
+>
   <div class="sys-head">
-    <button
-      class="sys-toggle"
-      data-testid={`sys-toggle-${testKey}`}
-      aria-expanded={open}
-      disabled={!canToggle}
-      onclick={onToggle}
-    >
-      <span class="chev"><Icon name="chevronRight" size={14} /></span>
-      <b>{label}</b>
-      <span class="muted-s">{meta}</span>
-    </button>
-    <select
-      class="sys-pick"
-      data-testid={`sys-pick-${testKey}`}
-      aria-label={pickerLabel}
-      value={selected}
-      disabled={pickerDisabled}
-      onchange={(e) => onPick(e.currentTarget.value, e.currentTarget)}
-    >
-      {#if placeholder !== null}
-        <option value="" disabled>{placeholder}</option>
-      {/if}
-      {#if noneLabel !== null}
-        <option value="">{noneLabel}</option>
-      {/if}
-      {#if installed.length > 0}
-        <optgroup label="Installed" data-testid={`sys-pick-installed-${testKey}`}>
-          {#each installed as o (o.value)}
-            <option value={o.value}>{o.label}</option>
-          {/each}
-        </optgroup>
-      {/if}
-      {#if download.length > 0}
-        <optgroup label="Download" data-testid={`sys-pick-download-${testKey}`}>
-          {#each download as o (o.value)}
-            <option value={o.value}>{o.label}</option>
-          {/each}
-        </optgroup>
-      {/if}
-    </select>
-    <span class={`pill-s ${tone[status]}`} data-testid={`sys-status-${testKey}`} data-status={status}>
-      {#if status === 'ready'}<Icon name="check" size={12} />{/if}
-      {#if tone[status] === 'warn'}!{/if}
-      {statusText ?? STATUS_LABELS[status]}
-    </span>
+    {#if tick !== null}
+      <label class="sys-tick">
+        <input
+          type="checkbox"
+          data-testid={`sys-tick-${testKey}`}
+          checked={tick.checked}
+          disabled={tick.disabled}
+          onchange={tick.onTick}
+        />
+        <b>{label}</b>
+        <span class="muted-s">{meta}</span>
+      </label>
+    {:else}
+      <button
+        class="sys-toggle"
+        data-testid={`sys-toggle-${testKey}`}
+        aria-expanded={open}
+        disabled={!canToggle}
+        onclick={onToggle}
+      >
+        <span class="chev"><Icon name="chevronRight" size={14} /></span>
+        <b>{label}</b>
+        <span class="muted-s">{meta}</span>
+      </button>
+    {/if}
+    {#if note !== null}
+      <span class="muted-s sys-note" data-testid={`sys-note-${testKey}`}>{note}</span>
+    {:else if tick === null || tick.checked}
+      <select
+        class="sys-pick"
+        data-testid={`sys-pick-${testKey}`}
+        aria-label={pickerLabel}
+        value={selected}
+        disabled={pickerDisabled}
+        onchange={(e) => onPick(e.currentTarget.value, e.currentTarget)}
+      >
+        {#if placeholder !== null}
+          <option value="" disabled>{placeholder}</option>
+        {/if}
+        {#if noneLabel !== null}
+          <option value="">{noneLabel}</option>
+        {/if}
+        {#if installed.length > 0}
+          <optgroup label="Installed" data-testid={`sys-pick-installed-${testKey}`}>
+            {#each installed as o (o.value)}
+              <option value={o.value}>{o.label}</option>
+            {/each}
+          </optgroup>
+        {/if}
+        {#if download.length > 0}
+          <optgroup label="Download" data-testid={`sys-pick-download-${testKey}`}>
+            {#each download as o (o.value)}
+              <option value={o.value}>{o.label}</option>
+            {/each}
+          </optgroup>
+        {/if}
+      </select>
+    {/if}
+    {#if status !== null}
+      <span class={`pill-s ${tone[status]}`} data-testid={`sys-status-${testKey}`} data-status={status}>
+        {#if status === 'ready'}<Icon name="check" size={12} />{/if}
+        {#if tone[status] === 'warn'}!{/if}
+        {statusText ?? STATUS_LABELS[status]}
+      </span>
+    {/if}
   </div>
   {#if open && body}
     <div class="sys-body">
@@ -132,6 +172,60 @@
     align-items: center;
     gap: 12px;
     padding: 8px 12px 8px 6px;
+  }
+
+  /* Tick mode: name and picker only; a ticked row is marked. */
+  .sysrow.tickable .sys-head {
+    grid-template-columns: minmax(0, 1fr) minmax(160px, 280px);
+    min-height: 36px;
+    padding: 8px 12px;
+  }
+
+  .sysrow.ticked {
+    border-color: var(--primary);
+    background: var(--selected);
+  }
+
+  .sysrow.off {
+    opacity: 0.7;
+  }
+
+  .sys-tick {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+    cursor: pointer;
+  }
+
+  .sysrow.off .sys-tick {
+    cursor: default;
+  }
+
+  .sys-tick input {
+    align-self: center;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    flex: none;
+    accent-color: var(--primary);
+  }
+
+  .sys-tick b {
+    color: var(--text-h);
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sys-tick input:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+  }
+
+  .sys-note {
+    justify-self: start;
   }
 
   .sys-toggle {

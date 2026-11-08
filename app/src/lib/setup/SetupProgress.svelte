@@ -4,20 +4,22 @@
   import { dismissSetupRun, setupRun } from '../stores/setupRun.svelte';
   import { CountdownTimer, holdWhileEngaged } from '../countdown';
   import { TOAST_DURATION_MS } from '../stores/toasts.svelte';
-  import { assignedCount, cardCountsDown, headline, outcomeNotes, summarize } from './progress';
+  import { cardCountsDown, headline, outcomeNotes, readyCount, readyText, segments, summarize } from './progress';
 
   // The first-run setup's progress in the shell (plan step 3, "Into the
   // app"): the first card in the notification stack (Toast.svelte, which
   // App.svelte hands this to). The installs themselves are ordinary
   // Downloads rows; this only follows them. Like every card it closes itself,
-  // but its countdown only starts once the installs are done.
+  // but its countdown only starts once the installs are done. Its bar has one
+  // segment per install (Proton included): filled when done, a moving fill
+  // while installing, empty while waiting; pointing at one names it.
   let { onOpenDownloads }: { onOpenDownloads: () => void } = $props();
 
   let progress = $derived(summarize(setupRun.queued, downloads.entries));
   let notes = $derived(outcomeNotes(setupRun.outcomes));
   let finished = $derived(cardCountsDown(progress));
-  let assigned = $derived(assignedCount(setupRun.outcomes));
-  let percent = $derived(progress.total === 0 ? 100 : Math.round((progress.done / progress.total) * 100));
+  let segs = $derived(segments(setupRun.queued, downloads.entries, setupRun.names));
+  let ready = $derived(readyCount(setupRun.outcomes, setupRun.compat, segs));
   let retryError = $state<string | null>(null);
   let countsDown = $derived(setupRun.active && finished);
 
@@ -59,12 +61,26 @@
   <aside class="note-card" data-testid="setup-progress" aria-live="polite" use:holdWhileEngaged={onHold}>
     <p class="note-title" data-testid="setup-progress-title">{headline(progress)}</p>
     {#if progress.total > 0}
-      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={percent}>
-        <span style={`width: ${percent}%`}></span>
+      <div
+        class="segbar"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax={progress.total}
+        aria-valuenow={progress.done}
+        aria-label={`${progress.done} of ${progress.total} installs done`}
+      >
+        {#each segs as seg (seg.sourceId)}
+          <span
+            class={`seg ${seg.state}`}
+            title={seg.title}
+            data-testid={`setup-seg-${seg.sourceId}`}
+            data-state={seg.state}
+          ><b></b></span>
+        {/each}
       </div>
     {/if}
-    {#if finished && assigned > 0}
-      <p class="line">{assigned} {assigned === 1 ? 'platform is' : 'platforms are'} ready to play.</p>
+    {#if finished && ready > 0}
+      <p class="line" data-testid="setup-progress-ready">{readyText(ready)}</p>
     {/if}
     {#each progress.failed as entry (entry.id)}
       <p class="line failed" data-testid={`setup-failed-${entry.source_id}`}>
@@ -98,18 +114,65 @@
 <style>
   /* The card itself (.note-card, .note-btn, the Dismiss countdown) is the
      shared notification style in app.css; Toast.svelte positions the stack. */
-  .bar {
+  /* One segment per install: done is a solid fill, the one installing a
+     moving fill, waiting ones empty, a failed one red. */
+  .segbar {
+    display: flex;
+    gap: 3px;
+  }
+
+  .seg {
+    position: relative;
+    flex: 1 1 0;
     height: 4px;
     border-radius: var(--r-pill);
     background: var(--surface);
     overflow: hidden;
   }
 
-  .bar span {
-    display: block;
-    height: 100%;
+  .seg b {
+    position: absolute;
+    inset: 0;
+    transform: scaleX(0);
+    transform-origin: left center;
     background: var(--primary);
-    transition: width var(--m-base) ease;
+  }
+
+  .seg.done b {
+    transform: scaleX(1);
+    transition: transform var(--m-base) ease;
+  }
+
+  .seg.running b {
+    transform: scaleX(1);
+    opacity: 0.45;
+    background: linear-gradient(90deg, transparent 0, var(--primary) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: seg-run 1.2s linear infinite;
+  }
+
+  .seg.failed {
+    background: var(--danger);
+  }
+
+  @keyframes seg-run {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: -100% 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .seg.running b {
+      animation: none;
+      background: var(--primary);
+    }
+
+    .seg.done b {
+      transition: none;
+    }
   }
 
   .line {

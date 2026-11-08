@@ -19,6 +19,11 @@ import { createHash } from "node:crypto";
 import {
   ARGV_FILE_ENV,
   AUTH_MARKER,
+  GE_PROTON_ASSET_NAME,
+  GE_PROTON_DOWNLOAD_PATH,
+  GE_PROTON_DOWNLOAD_URL,
+  GE_PROTON_RELEASE_PATH,
+  GE_PROTON_TAG,
   GRID_LAUNCHER_RELEASE_PATH,
   GRID_LAUNCHER_RELEASE_URL,
   GRID_LAUNCHER_TAG,
@@ -283,5 +288,26 @@ test("serves umu-launcher's zipapp release with a digest of the served bytes", a
     // A plain (uncompressed) ustar archive whose first member is umu/umu-run.
     assert.equal(bytes.subarray(0, 11).toString("utf8"), "umu/umu-run");
     assert.equal(bytes.subarray(257, 262).toString("ascii"), "ustar");
+  });
+});
+
+// --- GE-Proton -----------------------------------------------------------------
+
+test("serves a GE-Proton release whose tarball holds <tag>/proton", async () => {
+  await withForge(async ({ url }) => {
+    const release = await (await fetch(`${url}${GE_PROTON_RELEASE_PATH}`)).json();
+    assert.equal(release.tag_name, GE_PROTON_TAG);
+    const [asset] = release.assets;
+    assert.equal(asset.name, GE_PROTON_ASSET_NAME);
+    // The catalog's linux asset pattern: GE-Proton*[0-9].tar.gz
+    assert.match(asset.name, /^GE-Proton.*[0-9]\.tar\.gz$/);
+    assert.equal(asset.browser_download_url, GE_PROTON_DOWNLOAD_URL);
+
+    const response = await fetch(`${url}${GE_PROTON_DOWNLOAD_PATH}`);
+    assert.equal(response.status, 200);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    assert.equal(bytes.length, asset.size);
+    const tar = zlib.gunzipSync(bytes);
+    assert.equal(tar.subarray(0, `${GE_PROTON_TAG}/proton`.length).toString("utf8"), `${GE_PROTON_TAG}/proton`);
   });
 });

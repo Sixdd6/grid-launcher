@@ -11,7 +11,13 @@ const state = $state<{
   queued: string[];
   errors: string[];
   outcomes: SetupOutcome[];
-}>({ active: false, queued: [], errors: [], outcomes: [] });
+  /** Each queued install's name, as the chooser showed it. */
+  names: Record<string, string>;
+  /** The Proton install queued for Windows games, if any. */
+  compatQueued: string | null;
+  /** The Proton pick was the default at once. */
+  compatSet: boolean;
+}>({ active: false, queued: [], errors: [], outcomes: [], names: {}, compatQueued: null, compatSet: false });
 
 export const setupRun = {
   get active() {
@@ -26,13 +32,23 @@ export const setupRun = {
   get outcomes() {
     return state.outcomes;
   },
+  get names() {
+    return state.names;
+  },
+  get compat() {
+    return { queued: state.compatQueued, set: state.compatSet };
+  },
 };
 
-/** Called with `startPlatformSetup`'s answer as the picker hands over. */
-export function startSetupRun(started: SetupStarted): void {
+/** Called with `startPlatformSetup`'s answer as the chooser hands over,
+ *  with the name it showed for each install. */
+export function startSetupRun(started: SetupStarted, names: Record<string, string> = {}): void {
   state.queued = started.queued;
   state.errors = started.errors;
   state.outcomes = started.applied;
+  state.names = names;
+  state.compatQueued = started.compat_queued;
+  state.compatSet = started.compat_set;
   state.active =
     started.queued.length > 0 ||
     started.errors.length > 0 ||
