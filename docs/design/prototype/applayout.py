@@ -36,6 +36,19 @@ EXTRA = [
   ("Iron Lullaby", "hsl(15 35% 34%)", "WIN", "2024-12-11", "2026-09-30"),
   ("Low Tide Radio", "hsl(185 40% 34%)", "WIN", "2023-05-25", "2026-11-03"),
   ("Pale Summit", "hsl(210 25% 46%)", "WIN", "2022-02-17", "2026-04-14"),
+  # 2026 releases, so New releases (last six months) has something to show.
+  ("Night Ferry", "hsl(250 40% 30%)", "LINUX", "2026-11-04", "2026-11-05"),
+  ("Copperline", "hsl(25 55% 36%)", "WIN", "2026-10-30", "2026-11-01"),
+  ("Wren Hollow", "hsl(120 30% 30%)", "LINUX", "2026-10-15", "2026-10-18"),
+  ("Static Bloom", "hsl(315 45% 38%)", "WIN", "2026-10-02", "2026-10-06"),
+  ("Pocket Monsoon", "hsl(190 50% 34%)", "SNES", "2026-09-27", "2026-10-01"),
+  ("Glassjaw", "hsl(0 45% 36%)", "WIN", "2026-09-03", "2026-09-10"),
+  ("Lowland Signal", "hsl(90 30% 32%)", "LINUX", "2026-08-12", "2026-08-20"),
+  ("Tinroof Rally", "hsl(40 60% 38%)", "N64", "2026-07-25", "2026-08-02"),
+  ("Ashgrove", "hsl(15 25% 30%)", "WIN", "2026-07-09", "2026-07-15"),
+  ("Mirrorlake", "hsl(200 45% 42%)", "LINUX", "2026-06-18", "2026-06-25"),
+  ("Fable Engine", "hsl(275 35% 34%)", "WIN", "2026-05-29", "2026-06-04"),
+  ("Old Moon Arcade", "hsl(55 45% 34%)", "LINUX", "2026-04-20", "2026-05-02"),
 ]
 data = {
   "games": [

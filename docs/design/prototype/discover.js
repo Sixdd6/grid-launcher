@@ -13,10 +13,14 @@ function prefPlatforms() {
   out.push('LINUX');
   return out;
 }
+/* New releases: games on the preferred platforms released in the last six
+   months, newest first, at most 25. */
+var NEW_MONTHS = 6, NEW_MAX = 25;
+function monthsBefore(day, months) { var d = new Date(day + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - months); return d.toISOString().slice(0, 10); }
 function discNew() {
-  var pref = prefPlatforms();
-  return G.filter(function (g) { return pref.indexOf(g.p) >= 0; })
-    .sort(function (a, b) { return b.rel.localeCompare(a.rel); }).slice(0, 12);
+  var pref = prefPlatforms(), since = monthsBefore(TODAY, NEW_MONTHS);
+  return G.filter(function (g) { return pref.indexOf(g.p) >= 0 && g.rel >= since && g.rel <= TODAY; })
+    .sort(function (a, b) { return b.rel.localeCompare(a.rel); }).slice(0, NEW_MAX);
 }
 function discRecent(newest) {
   var ids = newest.map(function (g) { return g.id; });
@@ -63,14 +67,14 @@ function renderDiscover() {
       '<div class="cf-stage">' + newest.map(function (g, i) { return '<div class="cf-item" data-cf-i="' + i + '"><div class="cf-cover">' + discArt(g) + '</div></div>'; }).join('') + '</div>' +
       '<button class="g-icon-btn cf-arrow next" aria-label="Next" data-cf-next><span data-icon="chevronRight" data-size="20"></span></button></div>' +
       '<div class="cf-caption" id="cf-caption"></div>'
-      : '<p class="note">Pick the systems you play in Settings › Systems to see their newest games here.</p>';
+      : '<p class="note">Nothing released in the last six months for your systems. Add systems in Settings › Systems to see more.</p>';
     var ra = recent.length ? '<div class="ra">' +
       '<div class="ra-main"><div class="ra-shot" data-ra-open role="button" tabindex="0" aria-label="Open details"><div class="ra-layer" id="ra-a"></div><div class="ra-layer" id="ra-b"></div></div><div class="ra-caption" id="ra-caption"></div></div>' +
       '<div class="ra-side"><div class="ra-list" id="ra-list"><div class="ra-hl" id="ra-hl"><span class="ra-bar"></span></div>' +
       recent.map(function (g, i) { return '<button class="ra-row" data-ra-i="' + i + '"><span class="ra-cover">' + discArt(g) + '</span><span class="ra-text"><b>' + esc(g.t) + '</b><span>' + PLAT[g.p] + '</span></span></button>'; }).join('') +
       '</div></div></div>'
       : '<p class="note">Nothing new on your server yet.</p>';
-    el.innerHTML = '<section class="g-panel disc-sec"><header class="disc-head"><h2>New releases</h2><p class="lede">The newest games for your systems.</p></header>' + cf + '</section>' +
+    el.innerHTML = '<section class="g-panel disc-sec"><header class="disc-head"><h2>New releases</h2><p class="lede">Released in the last six months for your systems.</p></header>' + cf + '</section>' +
       '<section class="g-panel disc-sec"><header class="disc-head"><h2>Recently added</h2><p class="lede">New on your server.</p></header>' + ra + '</section>';
     gIcons(el);
     el.onclick = discClick;
