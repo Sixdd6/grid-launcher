@@ -751,6 +751,12 @@ mod tests {
     }
 
     #[test]
+    fn switch_2_recommends_lichii() {
+        let row = one("Nintendo Switch 2", "switch-2", "linux");
+        assert_eq!(recommended_name(&row), Some("Lichii (Nintendo Switch 2)"));
+    }
+
+    #[test]
     fn ps5_recommends_kytyps5() {
         let row = one("PlayStation 5", "ps5", "linux");
         assert_eq!(recommended_name(&row), Some("KytyPS5 (Playstation 5)"));

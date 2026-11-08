@@ -8,6 +8,7 @@
     "psvita": ["Vita3K (Playstation Vita)"],
     "ps4": ["ShadPS4 (Playstation 4)"],
     "ps4--1": ["ShadPS4 (Playstation 4)"],
+    "switch-2": ["Lichii (Nintendo Switch 2)", "Eglantine (Nintendo Switch 2)"],
     "ps5": ["KytyPS5 (Playstation 5)"],
     "ngc": ["Dolphin (GameCube, Wii)"],
     "wii": ["Dolphin (GameCube, Wii)"],
