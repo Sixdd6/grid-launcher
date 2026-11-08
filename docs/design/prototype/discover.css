@@ -27,7 +27,11 @@
      highlight frame glides to the active game every 10 s. */
   .ra { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 16px; }
   .ra-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-  .ra-shot { position: relative; aspect-ratio: 16 / 9; border-radius: var(--r-row); overflow: hidden; box-shadow: var(--shadow-card); background: var(--field); }
+  .ra-shot { position: relative; aspect-ratio: 16 / 9; border-radius: var(--r-row); overflow: hidden; box-shadow: var(--shadow-card); background: var(--field); cursor: pointer; transition: transform 150ms ease, box-shadow 150ms ease; }
+  .ra-shot:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+  .ra-shot:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .cf-item.center:hover .cf-cover { transform: translateY(-4px); }
+  .cf-cover { transition: transform 150ms ease; }
   .ra-layer { position: absolute; inset: 0; opacity: 0; transition: opacity 600ms ease; }
   .ra-layer.on { opacity: 1; }
   .ra-art { position: absolute; inset: 0; }

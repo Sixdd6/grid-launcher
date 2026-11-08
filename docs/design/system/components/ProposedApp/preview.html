@@ -293,7 +293,11 @@
      highlight frame glides to the active game every 10 s. */
   .ra { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 16px; }
   .ra-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-  .ra-shot { position: relative; aspect-ratio: 16 / 9; border-radius: var(--r-row); overflow: hidden; box-shadow: var(--shadow-card); background: var(--field); }
+  .ra-shot { position: relative; aspect-ratio: 16 / 9; border-radius: var(--r-row); overflow: hidden; box-shadow: var(--shadow-card); background: var(--field); cursor: pointer; transition: transform 150ms ease, box-shadow 150ms ease; }
+  .ra-shot:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+  .ra-shot:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .cf-item.center:hover .cf-cover { transform: translateY(-4px); }
+  .cf-cover { transition: transform 150ms ease; }
   .ra-layer { position: absolute; inset: 0; opacity: 0; transition: opacity 600ms ease; }
   .ra-layer.on { opacity: 1; }
   .ra-art { position: absolute; inset: 0; }
@@ -1171,7 +1175,7 @@ function renderDiscover() {
       '<div class="cf-caption" id="cf-caption"></div>'
       : '<p class="note">Pick the systems you play in Settings › Systems to see their newest games here.</p>';
     var ra = recent.length ? '<div class="ra">' +
-      '<div class="ra-main"><div class="ra-shot"><div class="ra-layer" id="ra-a"></div><div class="ra-layer" id="ra-b"></div></div><div class="ra-caption" id="ra-caption"></div></div>' +
+      '<div class="ra-main"><div class="ra-shot" data-ra-open role="button" tabindex="0" aria-label="Open details"><div class="ra-layer" id="ra-a"></div><div class="ra-layer" id="ra-b"></div></div><div class="ra-caption" id="ra-caption"></div></div>' +
       '<div class="ra-side"><div class="ra-list" id="ra-list"><div class="ra-hl" id="ra-hl"><span class="ra-bar"></span></div>' +
       recent.map(function (g, i) { return '<button class="ra-row" data-ra-i="' + i + '"><span class="ra-cover">' + discArt(g) + '</span><span class="ra-text"><b>' + esc(g.t) + '</b><span>' + PLAT[g.p] + '</span></span></button>'; }).join('') +
       '</div></div></div>'
@@ -1181,7 +1185,9 @@ function renderDiscover() {
     gIcons(el);
     el.onclick = discClick;
     var stage = el.querySelector('.cf');
-    if (stage) stage.onkeydown = function (e) { if (e.key === 'ArrowLeft') { e.preventDefault(); cfGo(DISC.cf - 1); } if (e.key === 'ArrowRight') { e.preventDefault(); cfGo(DISC.cf + 1); } };
+    var shot = el.querySelector('[data-ra-open]');
+    if (shot) shot.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetails(DISC.recent[DISC.ra]); } };
+    if (stage) stage.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); openDetails(DISC.newest[DISC.cf]); return; } if (e.key === 'ArrowLeft') { e.preventDefault(); cfGo(DISC.cf - 1); } if (e.key === 'ArrowRight') { e.preventDefault(); cfGo(DISC.cf + 1); } };
     var hl = $('ra-hl'); if (hl) hl.addEventListener('animationend', function () { raGo(DISC.ra + 1, true); });
     DISC.layer = 'a';
     cfLayout(); raGo(DISC.ra, false, true);
@@ -1209,7 +1215,7 @@ function cfLayout() {
 function cfCaption() {
   var g = DISC.newest && DISC.newest[DISC.cf], c = $('cf-caption'); if (!g || !c) return;
   c.innerHTML = '<b>' + esc(g.t) + '</b><span class="meta2">' + PLAT[g.p] + ' · Released ' + fmtDate(g.rel) + '</span>' +
-    '<div class="form-actions"><button class="g-btn" data-disc-act="' + g.id + '">' + discAction(g) + '</button><button class="g-btn secondary" data-disc-details="' + g.id + '">Details</button></div>';
+    '<div class="form-actions"><button class="g-btn" data-disc-act="' + g.id + '">' + discAction(g) + '</button></div>';
 }
 function cfGo(i) { DISC.cf = Math.max(0, Math.min(i, DISC.newest.length - 1)); cfLayout(); }
 
@@ -1233,7 +1239,7 @@ function raGo(i, auto, first) {
 function raCaption() {
   var g = DISC.recent && DISC.recent[DISC.ra], c = $('ra-caption'); if (!g || !c) return;
   c.innerHTML = '<div><b>' + esc(g.t) + '</b><span class="meta2">' + PLAT[g.p] + ' · ' + addedAgo(g.added) + '</span></div>' +
-    '<div class="form-actions"><button class="g-btn" data-disc-act="' + g.id + '">' + discAction(g) + '</button><button class="g-btn secondary" data-disc-details="' + g.id + '">Details</button></div>';
+    '<div class="form-actions"><button class="g-btn" data-disc-act="' + g.id + '">' + discAction(g) + '</button></div>';
 }
 
 function discClick(e) {
@@ -1241,8 +1247,10 @@ function discClick(e) {
   if (t.closest('[data-cf-prev]')) { cfGo(DISC.cf - 1); return; }
   if (t.closest('[data-cf-next]')) { cfGo(DISC.cf + 1); return; }
   if ((b = t.closest('[data-cf-i]'))) { var i = +b.getAttribute('data-cf-i'); if (i === DISC.cf) openDetails(DISC.newest[i]); else cfGo(i); return; }
-  if ((b = t.closest('[data-ra-i]'))) { raGo(+b.getAttribute('data-ra-i')); return; }
-  if ((b = t.closest('[data-disc-details]'))) { openDetails(G[+b.getAttribute('data-disc-details')]); return; }
+  /* A game opens its Details when clicked: the centre cover, the screenshot,
+     or the highlighted row; a click on another row selects it first. */
+  if ((b = t.closest('[data-ra-i]'))) { var k = +b.getAttribute('data-ra-i'); if (k === DISC.ra) openDetails(DISC.recent[k]); else raGo(k); return; }
+  if (t.closest('[data-ra-open]')) { openDetails(DISC.recent[DISC.ra]); return; }
   if ((b = t.closest('[data-disc-act]'))) {
     var g = G[+b.getAttribute('data-disc-act')];
     if (g.missing) openDetails(g); else if (g.installed) { S.playing = g.id; toast('Launching ' + g.t + '…'); } else startInstall(g);
