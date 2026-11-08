@@ -702,9 +702,17 @@ nxt = sub(nxt, 'function toast(msg){', 'function centredToastUnused(msg){')
 FRESH_CSS = open(os.path.join(HERE, 'fresh.css')).read()
 nxt = sub(nxt, '</style></head>', FRESH_CSS + '\n</style></head>')
 DISC_JS = open(os.path.join(HERE, 'discover.js')).read()
+TT_JS = open(os.path.join(HERE, 'themetoggle.js')).read()
+TT_CSS = open(os.path.join(HERE, 'themetoggle.css')).read()
+nxt = sub(nxt, '</style></head>', TT_CSS + '\n</style></head>')
+nxt = sub(nxt, """    <div class="g-session">
+      <span class="g-status-dot online" aria-hidden="true"></span>""", """    <div class="g-session">
+      <button class="g-icon-btn theme-toggle" data-theme-toggle aria-label="Switch to dark mode"></button>
+      <span class="g-status-dot online" aria-hidden="true"></span>""")
+nxt = sub(nxt, '  <div class="g-scrim" id="scrim" hidden>', '  <button class="g-icon-btn theme-toggle theme-start" id="theme-start" data-theme-toggle aria-label="Switch to dark mode" hidden></button>\n  <div class="g-scrim" id="scrim" hidden>')
 DISC_CSS = open(os.path.join(HERE, 'discover.css')).read()
 nxt = sub(nxt, '</style></head>', DISC_CSS + '\n</style></head>')
-nxt = sub(nxt, '/* ---- details ---- */', FRESH_JS + '\n' + SH_JS + '\n' + DISC_JS + '\n/* ---- details ---- */')
+nxt = sub(nxt, '/* ---- details ---- */', FRESH_JS + '\n' + SH_JS + '\n' + DISC_JS + '\n' + TT_JS + '\n/* ---- details ---- */')
 nxt = sub(nxt, "var S = { view: 'settings', platform: 'PS',", "var S = { view: 'settings', platform: 'DISCOVER',")
 nxt = sub(nxt, '  <div class="toasts" id="toasts" aria-live="polite"></div>', '  <div class="notes" id="notes" aria-live="polite"><aside class="note-card setup-card" id="setup-card" hidden></aside></div>\n  <div class="fresh" id="fresh" hidden></div>')
 nxt = sub(nxt, "paintArt(G[0]); renderAll(); gIcons();", "freshReset(); paintArt(null); $('art').style.opacity = 0; renderAll(); gIcons(); freshShow('connect');")

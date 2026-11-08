@@ -1,0 +1,10 @@
+  /* Light / dark toggle */
+  .theme-toggle { color: var(--text-h); }
+  .theme-start { position: absolute; top: 16px; right: 16px; z-index: 101; }
+  .theme-start[hidden] { display: none; }
+  .tt-icon { display: grid; place-items: center; }
+  .tt-icon.spin { animation: tt-spin 300ms cubic-bezier(.2,.7,.2,1); }
+  @keyframes tt-spin { from { opacity: 0; transform: rotate(-90deg) scale(.6); } to { opacity: 1; transform: none; } }
+  /* While the theme changes, colours ease across instead of snapping. */
+  html.theming, html.theming *, html.theming *::before, html.theming *::after { transition: background-color 240ms ease, color 240ms ease, border-color 240ms ease, fill 240ms ease, box-shadow 240ms ease !important; }
+  @media (prefers-reduced-motion: reduce) { .tt-icon.spin { animation: none; } }

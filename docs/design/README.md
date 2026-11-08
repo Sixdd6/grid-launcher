@@ -37,6 +37,8 @@ python3 -I docs/design/prototype/applayout.py docs/design/system/components
 - `serverhead.js`, `serverhead.css` — the folding Server and Library headers.
 - `discover.js`, `discover.css` — Server › Discover: the New releases coverflow and
   the auto-advancing Recently added list.
+- `themetoggle.js`, `themetoggle.css` — the light / dark toggle.
+- `icons.json` — icon paths: the app's (`app/src/lib/icons.ts`) plus proposed ones.
 
 To view a card locally, it needs the design system's `tokens.css`, which the
 published page generates from `tokens.json`; open it on the published page instead.
