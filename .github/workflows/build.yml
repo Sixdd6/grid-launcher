@@ -191,6 +191,28 @@ jobs:
         working-directory: app
         run: npm ci
 
+      # Tauri downloads its bundling tools from GitHub releases once, with no
+      # retry, and a GitHub 504 fails the build (v0.9.11). Fetch the same files
+      # into its tool folder with retries first; Tauri then finds them and skips
+      # its own download. Names and URLs follow tauri-bundler for
+      # @tauri-apps/cli 2.12.4 (linux/appimage/linuxdeploy.rs); a newer CLI that
+      # wants other files simply downloads them itself. The AppImage runtime
+      # (moving `continuous` tag, as before) is handed to linuxdeploy's plugin
+      # and to appimagetool so neither downloads it again.
+      - name: Pre-download Tauri's AppImage tools (with retries)
+        run: |
+          set -euo pipefail
+          get() { curl -fsSL --retry 6 --retry-delay 10 --retry-all-errors -o "$1" "$2"; }
+          tools="${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
+          mkdir -p "$tools" "$RUNNER_TEMP/appimage-runtime"
+          rel=https://github.com/tauri-apps/binary-releases/releases/download
+          get "$tools/AppRun-x86_64" "$rel/apprun-old/AppRun-x86_64"
+          get "$tools/linuxdeploy-07333c6-x86_64.AppImage" "$rel/linuxdeploy-07333c6/linuxdeploy-x86_64.AppImage"
+          chmod +x "$tools/AppRun-x86_64" "$tools/linuxdeploy-07333c6-x86_64.AppImage"
+          runtime="$RUNNER_TEMP/appimage-runtime/runtime-x86_64"
+          get "$runtime" https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
+          echo "LDAI_RUNTIME_FILE=$runtime" >> "$GITHUB_ENV"
+
       - name: Build the AppImage
         working-directory: app
         env:
@@ -216,14 +238,14 @@ jobs:
           # uploads the release assets, so it runs no tool that a moving tag
           # (`continuous`) could swap out. The digest is the release asset's
           # published sha256.
-          wget -q -O appimagetool \
+          curl -fsSL --retry 6 --retry-delay 10 --retry-all-errors -o appimagetool \
             "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
           echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  appimagetool" | sha256sum -c -
           chmod +x appimagetool
           mkdir -p "$GITHUB_WORKSPACE/dist"
           OUTPUT_NAME="grid-launcher-${VERSION}-x86_64.AppImage"
           UPDATE_INFO="gh-releases-zsync|Sixdd6|grid-launcher|latest|grid-launcher-*-x86_64.AppImage.zsync"
-          ./appimagetool --appimage-extract-and-run -u "$UPDATE_INFO" \
+          ./appimagetool --appimage-extract-and-run --runtime-file "$LDAI_RUNTIME_FILE" -u "$UPDATE_INFO" \
             squashfs-root "$GITHUB_WORKSPACE/dist/$OUTPUT_NAME"
           # appimagetool may write the .zsync into the working directory;
           # the upload steps expect it in dist/ next to the AppImage.
@@ -346,6 +368,28 @@ jobs:
       - name: Install frontend dependencies
         working-directory: app
         run: npm ci
+
+      # Same reason as the AppImage job's pre-download (a GitHub 504 on
+      # nsis-3.13.zip failed v0.9.11's installer). Layout and SHA-1s follow
+      # tauri-bundler for @tauri-apps/cli 2.12.4 (windows/nsis/mod.rs): the zip
+      # unpacked to <cache>/tauri/NSIS, plus nsis_tauri_utils.dll in its
+      # plugins. A newer CLI that wants other versions sees the hash mismatch and
+      # downloads them itself.
+      - name: Pre-download Tauri's NSIS tools (with retries)
+        run: |
+          set -euo pipefail
+          get() { curl -fsSL --retry 6 --retry-delay 10 --retry-all-errors -o "$1" "$2"; }
+          tools="$(cygpath -u "$LOCALAPPDATA")/tauri"
+          mkdir -p "$tools"
+          get "$RUNNER_TEMP/nsis.zip" https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.13/nsis-3.13.zip
+          echo "db14f8af2ea346b786c6ae19343f61aaf5e09b8e  $RUNNER_TEMP/nsis.zip" | sha1sum -c -
+          rm -rf "$tools/NSIS" "$tools/nsis-3.13"
+          unzip -q "$RUNNER_TEMP/nsis.zip" -d "$tools"
+          mv "$tools/nsis-3.13" "$tools/NSIS"
+          dll="$tools/NSIS/Plugins/x86-unicode/additional/nsis_tauri_utils.dll"
+          mkdir -p "$(dirname "$dll")"
+          get "$dll" https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.3/nsis_tauri_utils.dll
+          echo "75197fee3c6a814fe035788d1c34ead39349b860  $dll" | sha1sum -c -
 
       - name: Build the NSIS installer
         working-directory: app
