@@ -884,6 +884,13 @@ export const api = {
   skipPlatformSetup: () => invoke<void>('skip_platform_setup'),
   startPlatformSetup: (choices: SetupChoice[]) =>
     invoke<SetupStarted>('start_platform_setup', { choices }),
+  /** Settings › Systems: installs the picked emulator per system and makes
+   *  it that system's emulator when the install finishes (setup's pending
+   *  defaults). Replaces an explicit "(none)" on the chosen systems. */
+  installForSystems: (choices: SetupChoice[]) =>
+    invoke<SetupStarted>('install_for_systems', { choices }),
+  /** Opens the folder holding the named emulator's program. */
+  showEmulatorFolder: (name: string) => invoke<void>('show_emulator_folder', { name }),
   installEmulator: (sourceId: string) => invoke<void>('install_emulator', { sourceId }),
   /**
    * The row's "Update from Source" check. Runs one release request against
@@ -947,6 +954,10 @@ export const api = {
   setDefaultCompatTool: (value: string) => invoke<void>('set_default_compat_tool', { value }),
   listCompatToolCatalog: () => invoke<CatalogEntry[]>('list_compat_tool_catalog'),
   installCompatTool: (sourceId: string) => invoke<void>('install_compat_tool', { sourceId }),
+  /** Settings › Systems › Windows: installs the compat tool and makes it the
+   *  default once its install finishes (at once when already installed). */
+  installCompatToolAsDefault: (sourceId: string) =>
+    invoke<void>('install_compat_tool_as_default', { sourceId }),
   /** Queues GRID's own umu-launcher (Linux only); a reinstall resolves the newest release. */
   installUmuLauncher: () => invoke<void>('install_umu_launcher'),
   rpcs3FirmwareStatus: (emulatorName: string) =>

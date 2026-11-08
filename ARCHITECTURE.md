@@ -108,8 +108,17 @@ The shell owns *when* things run; grid-core owns *what* they do.
   `relocate::recover` (finishes a Commit) → gates handed to the services → `.setup()`,
   which resumes a Copy or Cleanup in the background.
 - `commands.rs` (+ `commands/cloud.rs`, `commands/specials.rs`, `commands/updates.rs`,
-  `commands/logging.rs`) — the `#[tauri::command]` surface. Thin wrappers: they build a
-  context, call a service or grid-core, and map the result to a serializable DTO.
+  `commands/logging.rs`, `commands/setup.rs`) — the `#[tauri::command]` surface. Thin
+  wrappers: they build a context, call a service or grid-core, and map the result to a
+  serializable DTO. `commands/setup.rs` owns first-run setup and Settings › Systems'
+  installs: `start_platform_setup` and `install_for_systems` share one body
+  (`queue_setup`: plan, save the waiting defaults, queue), so a Systems pick and a
+  first-run pick become the system's default the same way, through the
+  emulator-installed hook's `apply_after_install`. `show_emulator_folder` (commands.rs)
+  opens an entry's program folder by name; `install_compat_tool_as_default`
+  (specials.rs) records a waiting compat-tool default
+  (`grid_core::launch::compat::request_compat_default`) that the compat-tools hook
+  applies when the install lands.
 - Services — `cloud_service.rs` (sync caches, auto-restore before launch, auto-upload
   after exit), `firmware_service.rs` (the background firmware triggers and their
   one-job-per-pass guard), `update_service.rs` (when the library is re-checked for server
@@ -134,7 +143,8 @@ The shell owns *when* things run; grid-core owns *what* they do.
 
 **Hooks pattern.** grid-core services expose setters — `InstallService`'s
 `set_game_finalized_hook`, `set_emulator_installed_hook`, `set_image_hook`,
-`set_compat_tools_hook`, and `LaunchService::add_session_finished_hook` (a list: cloud
+`set_compat_tools_hook` (it also applies a waiting compat-tool default), and
+`LaunchService::add_session_finished_hook` (a list: cloud
 auto-upload and play activity each add a listener). `lib.rs`
 installs closures on them at startup, and each closure body stays trivial: it hands the
 work to an app-layer service. That is how a finished install can trigger a firmware pass,
@@ -157,11 +167,12 @@ session exists and `Shell.svelte` afterwards.
   `inputMode`, `lastViewed`, `compatTools`, `pythonImport`, `libraryMove` (the 9b move status and its toasts),
   `libraryUnreachable` (while it says unreachable, `App.svelte` shows only
   `LibraryUnreachableDialog.svelte`, whose pure half is `lib/libraryUnreachable.ts`).
-- Views — `Library.svelte`, `Server.svelte`, `Downloads.svelte`, `Emulators.svelte`,
-  `Settings.svelte`, plus `Details.svelte` as a sub-view. `shell.ts` holds the view list
+- Views — `Library.svelte`, `Server.svelte`, `Downloads.svelte`, `Emulators.svelte`
+  (until Settings › Systems replaces it), `Settings.svelte`, plus `Details.svelte` as a
+  sub-view. `shell.ts` holds the view list
   and the session-phase mapping.
 - Feature folders — `lib/details/`, `lib/downloads/`, `lib/emulators/`, `lib/settings/`,
-  `lib/library/`, `lib/server/`, `lib/cards/`, `lib/focus/`. Each pairs a `.svelte`
+  `lib/systems/`, `lib/library/`, `lib/server/`, `lib/cards/`, `lib/focus/`. Each pairs a `.svelte`
   component with a pure `.ts` module holding the logic, and a `.test.ts` beside it. Put
   new logic in the pure module: that is what vitest can reach.
 - Card grids — both card grids (Server, and Library for every rail section) are
@@ -171,6 +182,16 @@ session exists and `Shell.svelte` afterwards.
   the scroll target for an unrendered card). `lib/imageLoad.ts` bounds the cover loads
   and remembers each url's file, so a card that mounts again shows its cover at once;
   `lib/visibleWarm.ts` warms background art by each card's `data-index`.
+- Settings › Systems — `lib/systems/SystemsPage.svelte` (the page, mounted by
+  `Settings.svelte`) with `SystemRow`, `EmulatorBlock`, `RowMenu` and `WindowsRow`; the
+  pure halves are `rows.ts` (the row model from `setup_platform_options`, the picker
+  groups, status, Install recommended, Other emulators), `menuPlacement.ts` (the ⋯
+  menu's `placeMenu`) and `proton.ts` (the Windows row's picker). It reuses
+  `lib/emulators/*.ts` (defaults, firmware, notes) and `EmulatorForm.svelte` as its
+  settings sheet (`variant="sheet"`). `stores/emulatorUpdates.svelte.ts` caches the
+  once-per-session emulator update check. `systems/events.ts` holds the app-lifetime
+  emulator notifications (install/update finished, a RetroArch pick with no core);
+  `Shell.svelte` registers them once, so each toasts once whichever views are mounted.
 - `lib/icons.ts` — hand-authored 24×24 icon paths. The old app's `assets/svg/` files are
   deliberately not reused.
 

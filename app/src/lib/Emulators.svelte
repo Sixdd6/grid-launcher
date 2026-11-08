@@ -8,11 +8,9 @@
   import { listen } from '@tauri-apps/api/event';
   import {
     api,
-    EMULATOR_INSTALLED_EVENT,
     FIRMWARE_PASS_FINISHED_EVENT,
     SETUP_DEFAULTS_EVENT,
     type CatalogEntry,
-    type EmulatorInstalledEvent,
     type EmulatorEntry,
     type EmulatorFacts,
     type FirmwarePassFinished,
@@ -70,7 +68,7 @@
     type FirmwareRequest,
     FIRMWARE_ACTION_LABELS,
   } from './emulators/firmware';
-  import { installedToastText, updateConfirmText, upToDateText } from './emulators/update';
+  import { updateConfirmText, upToDateText } from './emulators/update';
 
   // Mounted for the whole session now that Emulators is a view, so the
   // refresh below is gated on being the visible view: navigating away and
@@ -652,17 +650,8 @@
     });
   }
 
-  // The completion toast for an install OR an update, worded by the backend's
-  // `fresh` flag. Mounted once for the session: the install runs in the
-  // background, so the view it started from may be long gone by then.
-  $effect(() => {
-    const pending = listen<EmulatorInstalledEvent>(EMULATOR_INSTALLED_EVENT, (event) => {
-      pushToast(installedToastText(event.payload.name, event.payload.fresh));
-    });
-    return () => {
-      pending.then((unlisten) => unlisten());
-    };
-  });
+  // The install/update completion toast is app-lifetime and shared with
+  // Settings › Systems: Shell.svelte registers it (`systems/events.ts`).
 
   // Set for the row whose launch is in flight, so its button disables and
   // says "Launching…" — the click spawns a process, then holds for the

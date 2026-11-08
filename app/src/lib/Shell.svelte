@@ -9,6 +9,7 @@
   import Settings from './Settings.svelte';
   import ThemeToggle from './ThemeToggle.svelte';
   import { listen } from '@tauri-apps/api/event';
+  import { initEmulatorEvents } from './systems/events';
   import {
     api,
     CLOUD_RESTORE_NOTICE_EVENT,
@@ -122,6 +123,10 @@
       void unlisten.then((off) => off());
     };
   });
+
+  // Emulator install/update notices, app-lifetime and shared by Settings ›
+  // Systems and the Emulators view, so each toasts once.
+  $effect(() => initEmulatorEvents());
 
   // G1-Q: the pre-launch restore skipped save folders it could not match to
   // the game. It runs inside `launch_game`, with no panel open to report in.

@@ -1,6 +1,6 @@
 <script lang="ts">
   // The Settings view (design §10, D-UI-5): a 220px category rail and one
-  // pane per page. All six panes stay mounted and switch with `hidden`,
+  // pane per page. All seven panes stay mounted and switch with `hidden`,
   // the same rule the shell applies to views, so an in-flight save or a
   // typed-but-unsaved field survives a rail click. Each pane's column caps
   // at 1100px (D-UI-7).
@@ -18,6 +18,7 @@
   import RetroAchievementsPage from './settings/RetroAchievementsPage.svelte';
   import UpdatesPage from './settings/UpdatesPage.svelte';
   import AppearancePage from './settings/AppearancePage.svelte';
+  import SystemsPage from './systems/SystemsPage.svelte';
 
   let { active = true }: { active?: boolean } = $props();
 
@@ -69,6 +70,10 @@
                  form holds a plain-typed password, so leaving this page must
                  clear it. -->
             <RetroAchievementsPage active={active && page === 'retroachievements'} />
+          {:else if p === 'systems'}
+            <!-- Page-level activation: its fetches (and the once-per-session
+                 update check) run only while it is in front. -->
+            <SystemsPage active={active && page === 'systems'} />
           {:else if p === 'updates'}
             <UpdatesPage {active} />
           {/if}

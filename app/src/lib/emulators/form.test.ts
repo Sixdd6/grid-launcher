@@ -137,3 +137,32 @@ describe('addedEmulatorToast', () => {
     expect(addedEmulatorToast('  Dolphin  ')).toBe("Added emulator 'Dolphin'.");
   });
 });
+
+describe('the settings sheet', () => {
+  it('words every save strategy', async () => {
+    const { SAVE_STRATEGIES, SAVE_STRATEGY_LABELS } = await import('./form');
+    expect(SAVE_STRATEGIES.map((s) => SAVE_STRATEGY_LABELS[s])).toEqual([
+      'Find out automatically',
+      'One file per game',
+      'A folder per game',
+    ]);
+  });
+
+  it('fills the name and launch options from "Which emulator is it?"', async () => {
+    const { applyWhichEmulator } = await import('./form');
+    const duck = { name: 'DuckStation', args: '-fullscreen "%rom%"' };
+    const dolphin = { name: 'Dolphin', args: '-b -e "%rom%"' };
+    const first = applyWhichEmulator(duck, { name: '', args: '' }, null);
+    expect(first).toEqual(duck);
+    // Switching profiles replaces what the last pick filled…
+    expect(applyWhichEmulator(dolphin, first, first)).toEqual(dolphin);
+    // …but never options the user typed.
+    expect(applyWhichEmulator(dolphin, { name: 'DuckStation', args: '-x' }, first)).toEqual({
+      name: 'Dolphin',
+      args: '-x',
+    });
+    // Something else clears what a pick filled and keeps what was typed.
+    expect(applyWhichEmulator(null, first, first)).toEqual({ name: '', args: '' });
+    expect(applyWhichEmulator(null, { name: 'Mine', args: '-y' }, first)).toEqual({ name: 'Mine', args: '-y' });
+  });
+});

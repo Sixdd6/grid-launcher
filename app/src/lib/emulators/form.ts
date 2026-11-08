@@ -105,3 +105,36 @@ export function entryPatch(
 export function addedEmulatorToast(name: string): string {
   return `Added emulator '${name.trim()}'.`;
 }
+
+/** The settings sheet's wording for the three save strategies (Settings ›
+ *  Systems, "Cloud saves (advanced)"). */
+export const SAVE_STRATEGY_LABELS: Record<SaveStrategy, string> = {
+  auto: 'Find out automatically',
+  single_file: 'One file per game',
+  folder: 'A folder per game',
+};
+
+/** The sheet's "Which emulator is it?" value for an emulator GRID has no
+ *  profile for. */
+export const SOMETHING_ELSE = '';
+
+/**
+ * The fields a "Which emulator is it?" pick fills: the profile's name, and
+ * its launch options unless the user already typed their own (anything other
+ * than what the previous pick filled in).
+ */
+export function applyWhichEmulator(
+  profile: { name: string; args: string } | null,
+  current: { name: string; args: string },
+  previous: { name: string; args: string } | null,
+): { name: string; args: string } {
+  if (profile === null) {
+    // Something else: clear what a previous pick filled, keep what was typed.
+    return {
+      name: previous !== null && current.name === previous.name ? '' : current.name,
+      args: previous !== null && current.args === previous.args ? '' : current.args,
+    };
+  }
+  const argsUntouched = current.args.trim() === '' || (previous !== null && current.args === previous.args);
+  return { name: profile.name, args: argsUntouched ? profile.args : current.args };
+}

@@ -154,8 +154,9 @@ There are several main sections to the application with buttons across the top b
   failure never fails the Proton install. Each
   emulator entry includes a name, executable path, launch arguments, save strategy,
   ignore rules, and optional custom save/state directories.
-- **Settings** is a rail of six panes in alphabetical order — Appearance, Cloud saves,
-  Connection, Library, RetroAchievements, Updates — and opens on the first, Appearance.
+- **Settings** is a rail of seven panes in alphabetical order — Appearance, Cloud saves,
+  Connection, Library, RetroAchievements, Systems, Updates — and opens on the first,
+  Appearance.
   The panes: **Connection** (server URL, user, whether a
   credential is stored in the OS keyring and whether the session is verified, Reconnect,
   Disconnect), **Library** (the library folder and Change…: the new folder is typed or
@@ -197,10 +198,72 @@ There are several main sections to the application with buttons across the top b
   on the server account — the username only, never the token — when it differs from the
   server's, so the Achievements tab can show progress, and asks the server to refresh that
   progress; if the server update fails the local save still stands and a short notice
-  says so; the server-side name is never cleared), **Updates** (the running version, when the startup check
+  says so; the server-side name is never cleared), **Systems** (see Settings › Systems
+  below), **Updates** (the running version, when the startup check
   ran, the release notice with its Open release and Dismiss buttons, and the note that
   the launcher only ever checks — it never downloads or installs an update), and
   **Appearance**.
+- **Settings › Systems** holds every emulator choice, install, update and the Windows
+  (Proton) setup. It sits beside the Emulators view for now; the Emulators view goes
+  once Systems covers everything it does.
+  - **One row per system on the server** (never a native platform or the Emulators
+    shelf), each with an emulator picker and a status: Ready, Update available, Firmware
+    needed, Installing… or No emulator. Systems with no emulator come first, open, with
+    a warning edge, the reason ("Games for this system can't start yet. PCSX2 is
+    recommended.") and one-click Install of the recommended emulator; a system no
+    installable emulator plays says so and points to Add an emulator manually. The rest
+    follow alphabetically. The emulator shown is the one a launch would use: the
+    system's default, else the first installed emulator that plays it, never one after
+    an explicit None.
+  - **The picker is the installer.** **Installed** lists the installed emulators that play
+    the system; **Download** lists the rest GRID can install for it (the same options as
+    first-run setup, server builds included), the recommended one first; the recommended
+    one is marked "(recommended)" in either group. Picking an Installed emulator makes it
+    the system's default; picking a Download one installs it and makes it the system's
+    emulator when the install finishes — the first-run setup's waiting defaults, so a
+    failed install that is retried still gets it, and a RetroArch pick becomes the
+    default only when a core is on disk (a notice says so otherwise). The pick is the
+    user's own: it replaces an explicit None, and setting a default by hand drops an
+    install still waiting for that system. **None** stores the explicit "(none)".
+  - **Install recommended (N)** in the header installs the recommended emulator for every
+    system that has none (N counts systems), and hides when nothing is missing. **Check
+    for updates** sits beside it.
+  - **Opening a row** shows its emulator: the version ("· up to date" once checked),
+    Update to <version> (only when one is out), Open (the emulator on its own, to change
+    its settings) and a ⋯ menu with Settings…, Show program folder and Remove (two
+    clicks: "Remove <name>? Games and saves stay"). The menu opens below the button,
+    right-aligned, when it fits; near the bottom edge it opens beside the button (left,
+    else right), shifted up to stay 8px inside the window. It never covers its button or
+    opens upward over it, and it closes when the list scrolls, on Escape or on a click
+    elsewhere. Below are the RetroArch core select, the system's firmware line ("PlayStation
+    firmware · 3 files · from your server" with Install, Installing… while the pass runs,
+    then Installed; the started and finished notices as before), the PS3 firmware package
+    line for RPCS3, and the Setup tips. An emulator used by several systems shows on each
+    and says which others it plays.
+  - **Update availability** is checked once per session, the first time Systems opens
+    (one release request per emulator installed from a source, one at a time), and kept
+    for the session; it never re-runs on a scroll or a re-render. Check for updates asks
+    again. A finished update marks the emulator current.
+  - **Windows** (Linux only, always shown) is a system row whose picker is the default
+    Proton version: **Installed** lists system Wine, Proton installed by Steam and GRID's
+    own downloads; **Download** lists the catalog's compat tools not yet installed,
+    GE-Proton first and marked recommended ("Install GE-Proton (latest, recommended)" —
+    the catalog's release, with no extra forge request to learn its tag). Picking a
+    Download entry installs it and makes it the default when its install finishes (kept
+    until then, so a retry still gets it; picking an installed one drops it). Its status
+    is Installing… while that download runs, Ready once a default is set. Opening it shows
+    the Proton launcher (umu-run) line with Install / Reinstall and the first-launch note.
+  - **Add an emulator manually** sits in the header, for an emulator GRID doesn't install;
+    its form opens under the header. The settings sheet is the same for adding and
+    editing (Settings… in the ⋯ menu): "Which emulator is it?" (the emulators GRID knows,
+    or Something else with a name; add only), Program (with Browse…), Launch options
+    ("%rom% is replaced by the game file") and, under "Cloud saves (advanced)", how the
+    emulator stores saves, save and save state folders, and files and file types not to
+    upload. A manual add never sets a system's default; only an install the user asked
+    for, the automatic install defaults, or the user's own pick do. (An emulator GRID has
+    no profile for plays every system, so a launch can still fall back to it.)
+  - **Other emulators** at the bottom lists the installed emulators no system uses, each
+    with its emulator line and the systems it could play.
 - **Appearance** (under Settings) chooses the theme — follow the OS, dark, or light;
   the light / dark toggle sets dark or light here too —
   turns the background art on or off, sets its fade from 0 to 100 percent with a live

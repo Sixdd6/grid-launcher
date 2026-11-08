@@ -8,11 +8,14 @@
   import { pickFile } from '../pickers';
   import {
     addedEmulatorToast,
+    applyWhichEmulator,
     ARGS_LABEL,
     emulatorFormValues,
     entryPatch,
     normalizeSaveStrategy,
     SAVE_STRATEGIES,
+    SAVE_STRATEGY_LABELS,
+    SOMETHING_ELSE,
   } from './form';
   import { pushToast } from '../stores/toasts.svelte';
 
@@ -22,12 +25,18 @@
     profiles,
     onSaved,
     onCancel,
+    variant = 'classic',
   }: {
     mode: 'add' | 'edit';
     entry?: EmulatorEntry | null;
     profiles: ProfileSummary[];
     onSaved: () => void;
     onCancel: () => void;
+    /** `sheet`: Settings › Systems' settings sheet ("Which emulator is it?",
+     *  Program, Launch options, the cloud fields folded under "Cloud saves
+     *  (advanced)"). `classic`: the Emulators view's form. Same fields and
+     *  the same save either way. */
+    variant?: 'classic' | 'sheet';
   } = $props();
 
   // Seeded from `entry` once, on purpose: the fields are then the user's to
@@ -99,6 +108,20 @@
     }
   }
 
+  // The sheet's "Which emulator is it?": a profile fills the name and its
+  // launch options; Something else asks for a name.
+  let whichValue = $state(SOMETHING_ELSE);
+  let whichFilled = $state<{ name: string; args: string } | null>(null);
+
+  function onWhichChange(value: string) {
+    whichValue = value;
+    const profile = profiles.find((p) => p.name === value) ?? null;
+    const next = applyWhichEmulator(profile, { name: formName, args: formArgs }, whichFilled);
+    formName = next.name;
+    formArgs = next.args;
+    whichFilled = profile === null ? null : next;
+  }
+
   async function save() {
     // `originalName` is what `save_emulator` uses to find-and-replace a
     // renamed entry; blank means "insert". The fields the form does not
@@ -135,6 +158,97 @@
   }
 </script>
 
+{#snippet actions()}
+  {#if formError}<p data-testid="emu-form-error" class="error" role="alert">{formError}</p>{/if}
+  <div class="form-actions">
+    <button data-testid="emu-form-save" type="submit" disabled={formPending}>{formPending ? 'Saving…' : 'Save'}</button>
+    <button data-testid="emu-form-cancel" type="button" onclick={onCancel} disabled={formPending}>Cancel</button>
+  </div>
+{/snippet}
+
+{#if variant === 'sheet'}
+<form
+  data-testid="emu-form"
+  onsubmit={(e) => {
+    e.preventDefault();
+    save();
+  }}
+>
+  {#if mode === 'add'}
+    <label>
+      Which emulator is it?
+      <select
+        data-testid="emu-form-which"
+        value={whichValue}
+        onchange={(e) => onWhichChange((e.currentTarget as HTMLSelectElement).value)}
+      >
+        {#each profiles as profile (profile.name)}
+          <option value={profile.name}>{profile.name}</option>
+        {/each}
+        <option value={SOMETHING_ELSE}>Something else</option>
+      </select>
+      <span class="help">GRID fills in the rest for emulators it knows.</span>
+    </label>
+    {#if whichValue === SOMETHING_ELSE}
+      <label>
+        Name
+        <input data-testid="emu-form-name" bind:value={formName} required />
+      </label>
+    {/if}
+  {/if}
+  <label>
+    Program
+    <span class="path-row">
+      <input
+        data-testid="emu-form-path"
+        bind:value={formPath}
+        placeholder="Choose the emulator's program file"
+        onblur={autoFillFromPath}
+        onkeydown={onPathKeydown}
+      />
+      <button data-testid="emu-form-path-browse" type="button" disabled={formPending} onclick={browseEmulatorPath}>
+        Browse…
+      </button>
+    </span>
+  </label>
+  <label>
+    Launch options
+    <input data-testid="emu-form-args" bind:value={formArgs} />
+    <span class="help">%rom% is replaced by the game file.</span>
+  </label>
+  <details class="advanced">
+    <summary data-testid="emu-form-advanced">Cloud saves (advanced)</summary>
+    <div class="advanced-fields">
+      <label>
+        How this emulator stores saves
+        <select data-testid="emu-form-save-strategy" bind:value={formSaveStrategy}>
+          {#each SAVE_STRATEGIES as strategy (strategy)}
+            <option value={strategy}>{SAVE_STRATEGY_LABELS[strategy]}</option>
+          {/each}
+        </select>
+      </label>
+      <label>
+        Save folders
+        <input data-testid="emu-form-save-paths" bind:value={formSavePaths} placeholder="memcards; saves" />
+        <span class="help">Separate folders with ;</span>
+      </label>
+      <label>
+        Save state folders
+        <input data-testid="emu-form-state-paths" bind:value={formStatePaths} placeholder="savestates" />
+      </label>
+      <label>
+        Don't upload these files
+        <input data-testid="emu-form-ignore-files" bind:value={formIgnoreFiles} placeholder="settings.ini" />
+      </label>
+      <label>
+        Don't upload these file types
+        <input data-testid="emu-form-ignore-extensions" bind:value={formIgnoreExtensions} placeholder=".log; .tmp" />
+      </label>
+    </div>
+  </details>
+  {@render actions()}
+</form>
+{:else}
 <form
   data-testid="emu-form"
   onsubmit={(e) => {
@@ -192,12 +306,9 @@
     State Dirs (; separated)
     <input data-testid="emu-form-state-paths" bind:value={formStatePaths} />
   </label>
-  {#if formError}<p data-testid="emu-form-error" class="error" role="alert">{formError}</p>{/if}
-  <div class="form-actions">
-    <button data-testid="emu-form-save" type="submit" disabled={formPending}>{formPending ? 'Saving…' : 'Save'}</button>
-    <button data-testid="emu-form-cancel" type="button" onclick={onCancel} disabled={formPending}>Cancel</button>
-  </div>
+  {@render actions()}
 </form>
+{/if}
 
 <style>
   form {
@@ -279,6 +390,30 @@
     margin: 0;
     color: var(--danger);
     font-size: 13px;
+  }
+
+  .help {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .advanced summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 2px 0;
+  }
+
+  .advanced summary:hover,
+  .advanced[open] summary {
+    color: var(--text-h);
+  }
+
+  .advanced-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 10px;
   }
 
   .form-actions {

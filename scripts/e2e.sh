@@ -100,6 +100,12 @@ STAGE_GROUPS=(
   # from the mock forge (PCSX2, Redream). Its own fixtures: PS2, Dreamcast, a
   # platform with no emulator (Zeebo) and one only RetroArch serves (SNES).
   "first-run-setup:specs/first-run-setup.spec.ts"
+  # Settings › Systems on a fresh profile: the first-run-setup fixtures and
+  # mock forge without the picker — row order, picker groups, one-click and
+  # Download-pick installs, None and Installed picks, the update check, the
+  # ⋯ menu near the bottom edge, two-click Remove, Install recommended (N)
+  # and a manual add that sets no default.
+  "systems:specs/systems.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -466,7 +472,7 @@ mock_args_for_group() {
     # from e2e/fixtures so the shared set — and every assertion the other
     # groups and mock-romm/server.test.mjs make about it — stays untouched.
     emulator-catalog) printf -- '--fixtures-dir fixtures-emulator-catalog' ;;
-    first-run-setup) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
+    first-run-setup|systems) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
     # An "Emulators" platform with one package (rom 801) that zips the mock
     # forge's PCSX2 AppImage stub, plus a PS2 platform for the defaults.
     server-emulator) printf -- '--fixtures-dir fixtures-server-emulator' ;;
@@ -510,7 +516,7 @@ mock_args_for_group() {
 # `Sixdd6/grid-launcher`'s latest release through the same ForgeClient, so
 # the same redirect points it at the mock forge's release route.
 group_needs_forge() {
-  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" ]]
+  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" ]]
 }
 
 # The `launch` group's data dir is pre-seeded (Ruling A, task-7-brief.md):

@@ -14,6 +14,7 @@ describe('settings rail', () => {
       'connection',
       'library',
       'retroachievements',
+      'systems',
       'updates',
     ]);
     const labels = SETTINGS_PAGES.map(settingsPageLabel);
@@ -30,6 +31,7 @@ describe('settings rail', () => {
     expect(settingsPageLabel('library')).toBe('Library');
     expect(settingsPageLabel('cloud-saves')).toBe('Cloud saves');
     expect(settingsPageLabel('retroachievements')).toBe('RetroAchievements');
+    expect(settingsPageLabel('systems')).toBe('Systems');
     expect(settingsPageLabel('updates')).toBe('Updates');
     expect(settingsPageLabel('appearance')).toBe('Appearance');
   });
@@ -44,9 +46,10 @@ describe('settingsRailEntries', () => {
       'settings-nav-connection',
       'settings-nav-library',
       'settings-nav-retroachievements',
+      'settings-nav-systems',
       'settings-nav-updates',
     ]);
-    expect(entries.map((e) => e.selected)).toEqual([false, false, false, false, false, true]);
+    expect(entries.map((e) => e.selected)).toEqual([false, false, false, false, false, false, true]);
     expect(entries[0].heading).toBe('SETTINGS');
     expect(entries.slice(1).every((e) => e.heading === undefined)).toBe(true);
   });
