@@ -7,8 +7,8 @@ use grid_core::cloud::scope::is_emulators_platform;
 use grid_core::config::Config;
 use grid_core::launch::profiles::load_profiles;
 use grid_core::launch::setup::{
-    apply_pending_defaults, newest_server_build, plan_setup, platform_setup, recommendations,
-    PendingOutcome, PlatformSetup, ServerPackage, SetupChoice,
+    apply_pending_defaults, forget_explicit_none, newest_server_build, plan_setup, platform_setup,
+    recommendations, PendingOutcome, PlatformSetup, ServerPackage, SetupChoice,
 };
 use grid_core::launch::source::HOST_PLATFORM;
 use grid_core::library::{server_emulator_source_id, ServerEmulatorRequest};
@@ -203,16 +203,54 @@ pub async fn start_platform_setup(
     choices: Vec<SetupChoice>,
 ) -> Result<SetupStarted, String> {
     ensure_library_idle(&state)?;
+    queue_setup(&state, &choices, SetupSource::FirstRun).await
+}
+
+/// Settings › Systems: installs the emulator the user picked for each
+/// system (the picker's Download group, a row's Install, or Install
+/// recommended) and makes it that system's emulator when its install
+/// finishes — first-run setup's pending defaults, so a failed install that
+/// is retried still gets it. The pick is the user's own choice, so it
+/// replaces an explicit "(none)" they had set before. An emulator that is
+/// already configured becomes the default at once.
+#[tauri::command]
+pub async fn install_for_systems(
+    state: State<'_, AppState>,
+    choices: Vec<SetupChoice>,
+) -> Result<SetupStarted, String> {
+    ensure_library_idle(&state)?;
+    queue_setup(&state, &choices, SetupSource::Systems).await
+}
+
+/// Who asked for the installs: first-run setup also marks setup finished;
+/// Settings › Systems replaces an explicit "(none)" on the chosen systems.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SetupSource {
+    FirstRun,
+    Systems,
+}
+
+/// The shared body of [`start_platform_setup`] and [`install_for_systems`].
+async fn queue_setup(
+    state: &State<'_, AppState>,
+    choices: &[SetupChoice],
+    source: SetupSource,
+) -> Result<SetupStarted, String> {
     let rows = setup_platform_options(state.clone()).await?;
-    let plan = plan_setup(&rows, &choices)?;
+    let plan = plan_setup(&rows, choices)?;
 
     let path = Config::default_path();
     let mut config = Config::load(&path).map_err(err)?;
     if config.library_path.trim().is_empty() {
         return Err("Choose a library folder before installing emulators.".to_string());
     }
+    match source {
+        SetupSource::FirstRun => config.setup.completed = true,
+        SetupSource::Systems => {
+            forget_explicit_none(&mut config, plan.pending.keys().map(String::as_str))
+        }
+    }
     config.setup.pending.extend(plan.pending);
-    config.setup.completed = true;
     let mut applied = Vec::new();
     for name in &plan.already_installed {
         applied.extend(apply_pending_defaults(

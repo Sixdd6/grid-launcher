@@ -19,7 +19,9 @@ use grid_core::firmware::rpcs3::{rpcs3_pup_path, spawn_rpcs3_installfw};
 use grid_core::launch::catalog::{
     compat_tool_catalog_entries, mark_compat_installed, CatalogEntry,
 };
-use grid_core::launch::compat::{discover, which_on_path, CompatTool};
+use grid_core::launch::compat::{
+    clear_pending_compat_default, discover, request_compat_default, which_on_path, CompatTool,
+};
 use grid_core::launch::profiles::load_profiles;
 use grid_core::launch::selection::emulator_entry_by_name;
 use grid_core::launch::template::host_os;
@@ -336,6 +338,9 @@ pub async fn set_default_compat_tool(app: tauri::AppHandle, value: String) -> Re
     tokio::task::spawn_blocking(move || {
         crate::config_write::modify_config(&Config::default_path(), |config| {
             config.default_compat_tool = value;
+            // The user picked a tool on the computer: a download still
+            // waiting to become the default is no longer wanted.
+            clear_pending_compat_default(config);
             Ok(())
         })
     })
@@ -367,6 +372,62 @@ pub async fn install_compat_tool(
     ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?;
     install.install_compat_tool(source_id).await.map_err(err)
+}
+
+/// Settings › Systems › Windows, a Download pick: installs the compat tool
+/// and makes it the default Proton version when the install finishes (the
+/// compat-tools hook applies it, `launch::compat::apply_pending_compat_default`),
+/// or at once when GRID already has it. The pick is remembered until its
+/// install lands, so a retried install still gets it.
+#[tauri::command]
+pub async fn install_compat_tool_as_default(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    source_id: String,
+) -> Result<(), String> {
+    ensure_library_idle(&state)?;
+    let install = state.install.as_ref().map_err(Clone::clone)?;
+    let requested = source_id.clone();
+    let applied = tokio::task::spawn_blocking(move || {
+        crate::config_write::modify_config(&Config::default_path(), |config| {
+            Ok(request_compat_default(config, &requested))
+        })
+    })
+    .await
+    .map_err(|e| format!("install_compat_tool_as_default did not finish: {e}"))??;
+    if applied.is_some() {
+        let _ = app.emit(COMPAT_TOOLS_CHANGED_EVENT, ());
+        return Ok(());
+    }
+    if let Err(e) = install.install_compat_tool(source_id).await {
+        // Nothing was queued: nothing should become the default later.
+        let _ = tokio::task::spawn_blocking(|| {
+            crate::config_write::modify_config(&Config::default_path(), |config| {
+                clear_pending_compat_default(config);
+                Ok(())
+            })
+        })
+        .await;
+        return Err(err(e));
+    }
+    Ok(())
+}
+
+/// The compat-tools hook's half of [`install_compat_tool_as_default`]: makes
+/// the waiting compat tool the default once its install has recorded itself.
+/// Blocking; a config that cannot be read or written leaves things as they
+/// were.
+pub fn apply_compat_default_after_install(config_path: &Path) {
+    let result = crate::config_write::modify_config(config_path, |config| {
+        Ok(grid_core::launch::compat::apply_pending_compat_default(
+            config,
+        ))
+    });
+    match result {
+        Ok(Some(_)) => tracing::info!("the installed compat tool is now the default"),
+        Ok(None) => {}
+        Err(e) => tracing::warn!("the compat tool default was not saved: {e}"),
+    }
 }
 
 /// Queues GRID's own umu-launcher (Emulators › Compat tools, and the

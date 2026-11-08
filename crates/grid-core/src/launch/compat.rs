@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::{data_dir_override, CompatToolInstall};
+use crate::config::{data_dir_override, CompatToolInstall, Config};
 
 /// One compat tool offered to the user (§10 "Compat tool (runtime list
 /// entry)"). Serialized straight to the frontend by a later task's
@@ -181,9 +181,139 @@ pub fn discover(
     tools
 }
 
+/// Settings › Systems › Windows, a Download pick: remembers `source_id` as
+/// the compat tool to make the default once it is installed, then applies it
+/// at once when GRID already has that tool ([`apply_pending_compat_default`]).
+/// `Some(path)` means the default is set now and nothing needs installing;
+/// `None` means the caller queues the install, and the install's record
+/// applies it when it lands. The user picked it, so it replaces whatever
+/// default was there.
+pub fn request_compat_default(config: &mut Config, source_id: &str) -> Option<String> {
+    config.setup.pending_compat = source_id.trim().to_string();
+    apply_pending_compat_default(config)
+}
+
+/// Makes the pending compat tool ([`request_compat_default`]) the default
+/// once a managed install with its `source_id` is recorded, and clears the
+/// pending choice. Returns the path now stored in `default_compat_tool`, or
+/// `None` when nothing is pending or its install has not landed yet (the
+/// choice is kept, so a retried install still gets it).
+pub fn apply_pending_compat_default(config: &mut Config) -> Option<String> {
+    let wanted = config.setup.pending_compat.trim().to_lowercase();
+    if wanted.is_empty() {
+        return None;
+    }
+    let path = config
+        .compat_tool_installs
+        .iter()
+        .find(|install| {
+            install.source_id.trim().to_lowercase() == wanted && !install.path.trim().is_empty()
+        })
+        .map(|install| install.path.clone())?;
+    config.default_compat_tool = path.clone();
+    config.setup.pending_compat.clear();
+    Some(path)
+}
+
+/// The user picked a compat tool that is already on the computer: any
+/// download still waiting to become the default is no longer wanted.
+pub fn clear_pending_compat_default(config: &mut Config) {
+    config.setup.pending_compat.clear();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- pending compat default ---------------------------------------------
+
+    fn ge_install(path: &str) -> CompatToolInstall {
+        CompatToolInstall {
+            name: "GE-Proton10-17".to_string(),
+            path: path.to_string(),
+            source_id: "GloriousEggroll/proton-ge-custom".to_string(),
+            release_tag: "GE-Proton10-17".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_download_pick_waits_for_its_install() {
+        let mut config = Config {
+            default_compat_tool: "wine".to_string(),
+            ..Config::default()
+        };
+        assert_eq!(
+            request_compat_default(&mut config, "GloriousEggroll/proton-ge-custom"),
+            None
+        );
+        assert_eq!(config.default_compat_tool, "wine");
+        assert_eq!(
+            config.setup.pending_compat,
+            "GloriousEggroll/proton-ge-custom"
+        );
+    }
+
+    #[test]
+    fn the_install_landing_makes_it_the_default_and_clears_the_choice() {
+        let mut config = Config::default();
+        request_compat_default(&mut config, "GloriousEggroll/proton-ge-custom");
+        config
+            .compat_tool_installs
+            .push(ge_install("/lib/compat/GE-Proton10-17"));
+        assert_eq!(
+            apply_pending_compat_default(&mut config).as_deref(),
+            Some("/lib/compat/GE-Proton10-17")
+        );
+        assert_eq!(config.default_compat_tool, "/lib/compat/GE-Proton10-17");
+        assert!(config.setup.pending_compat.is_empty());
+        // Applied once: a later install of something else changes nothing.
+        config.default_compat_tool = "wine".to_string();
+        assert_eq!(apply_pending_compat_default(&mut config), None);
+        assert_eq!(config.default_compat_tool, "wine");
+    }
+
+    #[test]
+    fn another_tools_install_leaves_the_choice_waiting() {
+        let mut config = Config::default();
+        request_compat_default(&mut config, "GloriousEggroll/proton-ge-custom");
+        config.compat_tool_installs.push(CompatToolInstall {
+            name: "proton-cachyos".to_string(),
+            path: "/lib/compat/cachyos".to_string(),
+            source_id: "CachyOS/proton-cachyos".to_string(),
+            release_tag: String::new(),
+        });
+        assert_eq!(apply_pending_compat_default(&mut config), None);
+        assert!(config.default_compat_tool.is_empty());
+        assert_eq!(
+            config.setup.pending_compat,
+            "GloriousEggroll/proton-ge-custom"
+        );
+    }
+
+    #[test]
+    fn a_tool_already_installed_is_the_default_at_once() {
+        let mut config = Config::default();
+        config
+            .compat_tool_installs
+            .push(ge_install("/lib/compat/GE-Proton10-17"));
+        assert_eq!(
+            request_compat_default(&mut config, "gloriouseggroll/proton-ge-custom").as_deref(),
+            Some("/lib/compat/GE-Proton10-17")
+        );
+        assert!(config.setup.pending_compat.is_empty());
+    }
+
+    #[test]
+    fn picking_an_installed_tool_drops_the_waiting_download() {
+        let mut config = Config::default();
+        request_compat_default(&mut config, "GloriousEggroll/proton-ge-custom");
+        clear_pending_compat_default(&mut config);
+        config
+            .compat_tool_installs
+            .push(ge_install("/lib/compat/GE-Proton10-17"));
+        assert_eq!(apply_pending_compat_default(&mut config), None);
+        assert!(config.default_compat_tool.is_empty());
+    }
 
     fn managed(name: &str, path: &str) -> CompatToolInstall {
         CompatToolInstall {

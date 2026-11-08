@@ -543,6 +543,10 @@ pub fn run() {
                 // flight to return the new list on.
                 let handle = app.handle().clone();
                 install.set_compat_tools_hook(Arc::new(move || {
+                    // Settings › Systems › Windows: a compat tool picked to
+                    // download becomes the default once its record exists,
+                    // before the picker is told to re-read.
+                    commands::specials::apply_compat_default_after_install(&Config::default_path());
                     let _ = handle.emit(commands::specials::COMPAT_TOOLS_CHANGED_EVENT, ());
                 }));
             }
@@ -646,6 +650,7 @@ pub fn run() {
             commands::set_ui_settings,
             commands::open_server_page,
             commands::open_config_folder,
+            commands::show_emulator_folder,
             commands::platform_firmware_status,
             commands::install_firmware_for_platform,
             commands::launch_game,
@@ -693,6 +698,7 @@ pub fn run() {
             commands::specials::set_default_compat_tool,
             commands::specials::list_compat_tool_catalog,
             commands::specials::install_compat_tool,
+            commands::specials::install_compat_tool_as_default,
             commands::specials::install_umu_launcher,
             commands::specials::rpcs3_firmware_status,
             commands::specials::install_ps3_firmware,
@@ -712,6 +718,7 @@ pub fn run() {
             commands::setup::setup_status,
             commands::setup::skip_platform_setup,
             commands::setup::start_platform_setup,
+            commands::setup::install_for_systems,
             commands::relink::link_installed_row,
             commands::relink::remove_from_library,
             commands::relink::locate_installed_row,

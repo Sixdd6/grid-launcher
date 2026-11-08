@@ -776,6 +776,42 @@ pub async fn open_config_folder(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Could not open config folder: {e}"))
 }
 
+/// Settings › Systems › an emulator's ⋯ › Show program folder: opens the
+/// folder holding the configured emulator's program in the file manager.
+/// Takes the entry's name, never a path, so the frontend cannot choose what
+/// gets opened.
+#[tauri::command]
+pub async fn show_emulator_folder(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    let dir = tokio::task::spawn_blocking(move || {
+        let config = Config::load(&Config::default_path()).map_err(err)?;
+        let entry = emulator_entry_by_name(&config.emulators, &name)
+            .ok_or_else(|| format!("{name} is not configured."))?;
+        program_folder(&expand_user(entry.path.trim()))
+            .ok_or_else(|| format!("The program folder for {name} was not found."))
+    })
+    .await
+    .map_err(|e| format!("show_emulator_folder did not finish: {e}"))??;
+    app.opener()
+        .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| format!("Could not open the program folder: {e}"))
+}
+
+/// The folder to show for an emulator's program: the program's own folder,
+/// or the path itself when it is a folder (a macOS `.app`, say). `None` when
+/// neither is on disk.
+fn program_folder(program: &Path) -> Option<PathBuf> {
+    if program.as_os_str().is_empty() {
+        return None;
+    }
+    if program.is_dir() {
+        return Some(program.to_path_buf());
+    }
+    program
+        .parent()
+        .filter(|dir| dir.is_dir())
+        .map(Path::to_path_buf)
+}
+
 /// What the Server platform header's firmware chip needs (design §6).
 /// Deliberately two plain flags rather than a rendered sentence: the chip's
 /// wording is the frontend's (`lib/server/header.ts`), and a count is what
@@ -1685,6 +1721,9 @@ pub async fn set_default_emulator(
             // the default, and the recorded core all see the same config.
             check_default_emulator_supported(config, &platform, &name, &slug, profiles)?;
             apply_set_default_emulator(config, &platform, &name);
+            // The user's own choice: an install still waiting to become
+            // this platform's default (Settings › Systems) must not replace it.
+            grid_core::launch::setup::drop_pending_default(config, &platform);
             apply_record_retroarch_core(config, profiles, &platform, &slug, &name);
             apply_clear_retroarch_core_when_not_retroarch(config, &platform, &name, profiles);
             Ok(())
@@ -3539,5 +3578,33 @@ mod launch_error_tests {
         let busy = LaunchCommandError::from("The library is being moved.".to_string());
         assert_eq!(busy.code, "");
         assert_eq!(busy.message, "The library is being moved.");
+    }
+}
+
+#[cfg(test)]
+mod program_folder_tests {
+    use super::program_folder;
+
+    #[test]
+    fn a_program_shows_its_own_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let program = temp.path().join("pcsx2.AppImage");
+        std::fs::write(&program, b"").unwrap();
+        assert_eq!(program_folder(&program), Some(temp.path().to_path_buf()));
+    }
+
+    #[test]
+    fn a_folder_program_shows_itself() {
+        let temp = tempfile::tempdir().unwrap();
+        let bundle = temp.path().join("Dolphin.app");
+        std::fs::create_dir(&bundle).unwrap();
+        assert_eq!(program_folder(&bundle), Some(bundle));
+    }
+
+    #[test]
+    fn nothing_on_disk_shows_nothing() {
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(program_folder(&temp.path().join("gone/emu")), None);
+        assert_eq!(program_folder(std::path::Path::new("")), None);
     }
 }

@@ -195,6 +195,7 @@ mod tests {
                 include_str!("specials.rs"),
                 &[
                     "install_compat_tool",
+                    "install_compat_tool_as_default",
                     "install_umu_launcher",
                     "install_ps3_firmware",
                 ],
@@ -219,6 +220,11 @@ mod tests {
                 ],
             ),
             ("updates.rs", include_str!("updates.rs"), &["update_game"]),
+            (
+                "setup.rs",
+                include_str!("setup.rs"),
+                &["start_platform_setup", "install_for_systems"],
+            ),
         ];
         for (file, source, names) in sources {
             for name in *names {

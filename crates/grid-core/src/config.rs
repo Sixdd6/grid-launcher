@@ -208,6 +208,13 @@ pub struct SetupState {
     /// written while empty, so a finished setup leaves no empty table.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub pending: BTreeMap<String, PendingDefault>,
+    /// The catalog `source_id` of a compat tool the user picked to download
+    /// as the default for Windows games (Settings › Systems › Windows). It
+    /// becomes `default_compat_tool` once that install records itself, and
+    /// stays until then, so a failed install that is retried still gets it
+    /// (`launch::compat::apply_pending_compat_default`). Blank when none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub pending_compat: String,
 }
 
 /// One default first-run setup is waiting to apply.

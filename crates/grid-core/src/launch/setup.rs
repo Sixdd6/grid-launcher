@@ -593,11 +593,83 @@ pub fn apply_pending_defaults(
     outcomes
 }
 
+/// Settings › Systems: the user picked an emulator to install for each of
+/// `labels`. That pick replaces an explicit "(none)" they had chosen before
+/// (which [`apply_pending_defaults`] would otherwise keep), so the marker is
+/// removed now; a "(none)" chosen again while the install runs still wins.
+/// Platform keys match case-insensitively, like every defaults reader.
+pub fn forget_explicit_none<'a>(config: &mut Config, labels: impl IntoIterator<Item = &'a str>) {
+    for label in labels {
+        let folded = label.trim().to_lowercase();
+        config
+            .default_emulators
+            .retain(|key, value| key.to_lowercase() != folded || value.trim() != NO_EMULATOR);
+    }
+}
+
+/// The user set `label`'s default themselves: a default still waiting on an
+/// emulator's install for that platform is no longer wanted, so it can never
+/// replace the choice when that install lands.
+pub fn drop_pending_default(config: &mut Config, label: &str) {
+    let folded = label.trim().to_lowercase();
+    config
+        .setup
+        .pending
+        .retain(|key, _| key.to_lowercase() != folded);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::EmulatorEntry;
     use crate::launch::profiles::load_profiles;
+
+    // --- Settings › Systems picks -------------------------------------------
+
+    fn pending_for(emulator: &str) -> PendingDefault {
+        PendingDefault {
+            emulator: emulator.to_string(),
+            name: String::new(),
+            slug: String::new(),
+            retroarch: false,
+            server_source: None,
+        }
+    }
+
+    #[test]
+    fn a_systems_install_pick_replaces_an_explicit_none() {
+        let mut config = Config::default();
+        config
+            .default_emulators
+            .insert("PlayStation 2".to_string(), NO_EMULATOR.to_string());
+        config
+            .default_emulators
+            .insert("Dreamcast".to_string(), "Redream".to_string());
+        config
+            .default_emulators
+            .insert("Saturn".to_string(), NO_EMULATOR.to_string());
+        forget_explicit_none(&mut config, ["playstation 2", "Dreamcast"]);
+        assert!(!config.default_emulators.contains_key("PlayStation 2"));
+        // A real default and an untouched platform's "(none)" stay.
+        assert_eq!(config.default_emulators["Dreamcast"], "Redream");
+        assert_eq!(config.default_emulators["Saturn"], NO_EMULATOR);
+    }
+
+    #[test]
+    fn setting_a_default_drops_the_install_waiting_for_that_platform() {
+        let mut config = Config::default();
+        config
+            .setup
+            .pending
+            .insert("PlayStation 2".to_string(), pending_for("PCSX2"));
+        config
+            .setup
+            .pending
+            .insert("Dreamcast".to_string(), pending_for("Redream"));
+        drop_pending_default(&mut config, "playstation 2");
+        assert!(!config.setup.pending.contains_key("PlayStation 2"));
+        assert!(config.setup.pending.contains_key("Dreamcast"));
+    }
 
     fn platform(name: &str, slug: &str, rom_count: i64) -> Platform {
         Platform {
