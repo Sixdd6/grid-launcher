@@ -564,7 +564,10 @@ pub fn resolved_sync_directory_paths(
             all_paths = apply_override(all_paths, overrides);
         }
 
-        if key_is_save && autoconfig::is_eden(entry, matched_profiles) {
+        if key_is_save
+            && (autoconfig::is_eden(entry, matched_profiles)
+                || autoconfig::is_eden_fork(entry, matched_profiles))
+        {
             let overrides = readers::eden_save_path_overrides(&entry.path, &args_vec);
             all_paths = apply_override(all_paths, overrides);
         }

@@ -306,6 +306,14 @@ pub fn is_dolphin(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
     emulator_matches_tokens(entry, &["dolphin"], profiles)
 }
 
+/// An Eden fork GRID catalogs: Eglantine or Lichii (Switch 2). They share
+/// Eden's portable `user` layout, `qt-config.ini` and save tree, but run
+/// their games without keys or firmware, so the Eden keys/firmware notes
+/// ([`is_eden`]) never apply to them.
+pub fn is_eden_fork(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
+    emulator_matches_tokens(entry, &["eglantine", "lichii"], profiles)
+}
+
 /// `_is_azahar_emulator_name` (cloud_mixin.py:1369).
 pub fn is_azahar(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
     emulator_matches_tokens(entry, &["azahar"], profiles)
@@ -712,6 +720,14 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
     }
     if is_eden(&subject, profiles) {
         record(&mut report, name, "eden", eden::ensure_settings(path));
+    }
+    if is_eden_fork(&subject, profiles) {
+        record(
+            &mut report,
+            name,
+            "eden fork",
+            eden::ensure_fork_settings(path),
+        );
     }
     if is_rpcs3(&subject, profiles) {
         record(

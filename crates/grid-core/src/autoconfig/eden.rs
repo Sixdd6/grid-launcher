@@ -117,7 +117,23 @@ pub fn ensure_settings(emulator_path: &str) -> EnsureResult {
         .find(|c| c.exists())
         .cloned()
         .unwrap_or_else(|| candidates[0].clone());
+    write_settings(selected)
+}
 
+/// [`ensure_settings`] for an Eden fork (Eglantine, Lichii): the same keys,
+/// always written to the portable `<exe dir>/user/config/qt-config.ini`.
+/// A fork never falls back to a global `qt-config.ini`: Lichii keeps Eden's
+/// own global folder, so that fallback would rewrite Eden's settings.
+pub fn ensure_fork_settings(emulator_path: &str) -> EnsureResult {
+    maybe_create_user_dir(emulator_path);
+    match config_path_candidates(emulator_path).into_iter().next() {
+        Some(portable) => write_settings(portable),
+        None => EnsureResult::unchanged(),
+    }
+}
+
+/// Writes GRID's managed `qt-config.ini` keys to `selected`.
+fn write_settings(selected: PathBuf) -> EnsureResult {
     match write_if_changed(&selected, |content| {
         let (content, c1) = writers::eden_annotated_section(
             content,
@@ -159,6 +175,38 @@ pub fn ensure_settings(emulator_path: &str) -> EnsureResult {
 mod tests {
     use super::*;
     use crate::test_env::EnvGuard;
+
+    #[test]
+    fn a_fork_writes_only_its_own_portable_config() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated_env(temp.path());
+        // Eden's global config already exists, as on a machine that has
+        // run Eden: a fork must leave it alone.
+        let global = temp
+            .path()
+            .join("xdg-config")
+            .join("eden")
+            .join("qt-config.ini");
+        std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+        std::fs::write(&global, "[UI]\nfullscreen=false\n").unwrap();
+        let dir = temp.path().join("Lichii");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("lichii-linux-x86_64-pgo.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+
+        let result = ensure_fork_settings(exe.to_str().unwrap());
+        let portable = dir.join("user").join("config").join("qt-config.ini");
+        assert!(result.changed);
+        assert_eq!(result.config_path.as_deref(), Some(portable.as_path()));
+        assert!(std::fs::read_to_string(&portable)
+            .unwrap()
+            .contains("fullscreen = true"));
+        assert_eq!(
+            std::fs::read_to_string(&global).unwrap(),
+            "[UI]\nfullscreen=false\n"
+        );
+    }
 
     fn make_exe(temp: &Path) -> (PathBuf, PathBuf) {
         let dir = temp.join("Eden");

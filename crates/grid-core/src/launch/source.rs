@@ -171,6 +171,18 @@ pub fn allow_prerelease(source: &SourceMap) -> bool {
     truthy(source.get("allow_prerelease"))
 }
 
+/// The tag prefix an unpinned release must carry (`release_tag_prefix`),
+/// lower-cased; `""` when the source sets none. Eglantine publishes every
+/// build as a prerelease and mixes daily builds with branch builds, a broken
+/// release candidate and an unrelated FFmpeg package, so its source asks for
+/// `daily-` tags only. Applied by [`select_release`] to the `/releases` list
+/// an `allow_prerelease` source reads; a pinned `release_tag` ignores it.
+pub fn release_tag_prefix(source: &SourceMap) -> String {
+    str_field(source, "release_tag_prefix")
+        .trim()
+        .to_lowercase()
+}
+
 fn string_array(items: &[String]) -> Value {
     Value::Array(items.iter().cloned().map(Value::String).collect())
 }
@@ -246,6 +258,15 @@ pub fn normalize_source(raw: &Value) -> Result<SourceMap, SourceError> {
         "allow_prerelease".to_string(),
         Value::Bool(allow_prerelease),
     );
+    if let Some(Value::String(prefix)) = obj.get("release_tag_prefix") {
+        let prefix = prefix.trim();
+        if !prefix.is_empty() {
+            normalized.insert(
+                "release_tag_prefix".to_string(),
+                Value::String(prefix.to_string()),
+            );
+        }
+    }
     normalized.insert(
         "asset_patterns".to_string(),
         string_array(&include_patterns),
@@ -423,6 +444,7 @@ pub fn select_release<'a>(
         release_tag = String::new();
     }
     let allow_prerelease = truthy(source.get("allow_prerelease"));
+    let tag_prefix = release_tag_prefix(source);
 
     let mut selected: Option<&Map<String, Value>> = None;
     for release in &extracted {
@@ -434,6 +456,12 @@ pub fn select_release<'a>(
         }
         let candidate_tag = str_field(release, "tag_name");
         if !release_tag.is_empty() && candidate_tag.to_lowercase() != release_tag.to_lowercase() {
+            continue;
+        }
+        if release_tag.is_empty()
+            && !tag_prefix.is_empty()
+            && !candidate_tag.to_lowercase().starts_with(&tag_prefix)
+        {
             continue;
         }
         selected = Some(release);
@@ -1300,6 +1328,51 @@ mod tests {
         ]);
         let release = select_release(&source, &releases).unwrap();
         assert_eq!(release.get("tag_name").and_then(Value::as_str), Some("v2"));
+    }
+
+    #[test]
+    fn select_release_takes_the_newest_release_with_the_tag_prefix() {
+        // Eglantine's list, newest first: a branch build, an FFmpeg package
+        // and the broken release candidate all come before a daily build.
+        let source = map_of(json!({
+            "owner": "Djihads80", "repo": "Eglantine", "release_tag": "",
+            "allow_prerelease": true, "release_tag_prefix": "daily-"
+        }));
+        let releases = json!([
+            {"prerelease": true, "tag_name": "branch-nx2-experimental-efb9fb18"},
+            {"prerelease": true, "tag_name": "9.0.2-av1-mingw-1"},
+            {"prerelease": true, "tag_name": "Daily-20261107"},
+            {"prerelease": true, "tag_name": "daily-20261106"},
+            {"prerelease": true, "tag_name": "v0.1.0-rc1"}
+        ]);
+        let release = select_release(&source, &releases).unwrap();
+        assert_eq!(
+            release.get("tag_name").and_then(Value::as_str),
+            Some("Daily-20261107")
+        );
+
+        // A pinned tag is taken as asked, prefix or not.
+        let mut pinned = source.clone();
+        pinned.insert("release_tag".into(), json!("v0.1.0-rc1"));
+        let release = select_release(&pinned, &releases).unwrap();
+        assert_eq!(
+            release.get("tag_name").and_then(Value::as_str),
+            Some("v0.1.0-rc1")
+        );
+    }
+
+    #[test]
+    fn normalize_source_keeps_a_release_tag_prefix() {
+        let normalized = normalize_source(&json!({
+            "provider": "github-release", "owner": "o", "repo": "r",
+            "allow_prerelease": true, "release_tag_prefix": "  daily- "
+        }))
+        .unwrap();
+        assert_eq!(release_tag_prefix(&normalized), "daily-");
+        let plain =
+            normalize_source(&json!({"provider": "github", "owner": "o", "repo": "r"})).unwrap();
+        assert!(!plain.contains_key("release_tag_prefix"));
+        assert_eq!(release_tag_prefix(&plain), "");
     }
 
     #[test]

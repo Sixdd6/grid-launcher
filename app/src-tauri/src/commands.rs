@@ -24,7 +24,9 @@ use grid_core::launch::selection::{
     compatible_emulator_names_for_platform, emulator_entry_by_name, emulator_supports_platform,
     entry_is_retroarch, mapping_value_for_platform, slug_core_resolver, NO_EMULATOR,
 };
-use grid_core::launch::source::{allow_prerelease, resolve_source, str_field, SourceMap};
+use grid_core::launch::source::{
+    allow_prerelease, release_tag_prefix, resolve_source, str_field, SourceMap,
+};
 use grid_core::launch::spawn::{
     prepare_standalone_emulator_launch, spawn_standalone_emulator, wait_for_early_exit,
 };
@@ -2049,7 +2051,9 @@ async fn run_emulator_update_check(name: String) -> Result<VersionCheck, String>
             &str_field(&source, "repo"),
             &str_field(&source, "base_url"),
             &str_field(&source, "release_tag"),
-            allow_prerelease(&source),
+            allow_prerelease(&source)
+                .then(|| release_tag_prefix(&source))
+                .as_deref(),
         )
         .await
         .map_err(|e| e.0)?;

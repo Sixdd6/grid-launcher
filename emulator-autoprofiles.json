@@ -447,6 +447,62 @@
     ]
   },
   {
+    "match_tokens": ["eglantine.exe", "eglantine-linux-x86_64*.AppImage", "eglantine*.appimage"],
+    "source": {
+      "provider": "github-release",
+      "owner": "Djihads80",
+      "repo": "Eglantine",
+      "release_tag": "latest",
+      "allow_prerelease": true,
+      "release_tag_prefix": "daily-",
+      "asset_patterns": ["eglantine-windows-x86_64-pgo.zip", "eglantine-windows-x86_64.zip"],
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": ["eglantine-linux-x86_64-pgo.AppImage", "eglantine-linux-x86_64.AppImage"]
+        }
+      }
+    },
+    "name": "Eglantine (Nintendo Switch 2)",
+    "args": "-f -g \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["switch 2", "nintendo switch 2"],
+    "use_game_title_as_name": false,
+    "save_strategy": "folder",
+    "save_directories": [
+      "user/nand/user/save/0000000000000000"
+    ],
+    "state_directories": [],
+    "user_data": ["user"],
+    "screenshot_directories": ["user/screenshots"]
+  },
+  {
+    "match_tokens": ["lichii.exe", "lichii-linux-x86_64*.AppImage", "lichii*.appimage"],
+    "source": {
+      "provider": "github-release",
+      "owner": "zortos293",
+      "repo": "Lichii",
+      "release_tag": "latest",
+      "asset_patterns": ["lichii-windows-x86_64-pgo.zip", "lichii-windows-x86_64.zip"],
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": ["lichii-linux-x86_64-pgo.AppImage", "lichii-linux-x86_64.AppImage"]
+        }
+      }
+    },
+    "name": "Lichii (Nintendo Switch 2)",
+    "args": "-f -g \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["switch 2", "nintendo switch 2"],
+    "use_game_title_as_name": false,
+    "save_strategy": "folder",
+    "save_directories": [
+      "user/nand/user/save/0000000000000000"
+    ],
+    "state_directories": [],
+    "user_data": ["user"],
+    "screenshot_directories": ["user/screenshots"]
+  },
+  {
     "match_tokens": ["fbneo.exe"],
     "name": "FBNeo (Arcade)",
     "args": "\"%rom%\"",

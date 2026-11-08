@@ -150,7 +150,9 @@ impl ForgeClient {
     /// `/releases/latest` — unless `allow_prerelease` is set, which sends
     /// an unpinned check to the `/releases` list instead (see
     /// [`release_endpoint`]) and picks the release out of that array with
-    /// [`select_release`].
+    /// [`select_release`]. `prereleases` is `None` for a source that does not
+    /// allow them, else `Some(release_tag_prefix)` — `""` for no prefix —
+    /// so only tags starting with that prefix are kept.
     ///
     /// A `direct` source has no release API: it answers `"direct"` without
     /// making a request at all, which the caller renders as "unknown".
@@ -162,8 +164,10 @@ impl ForgeClient {
         repo: &str,
         base_url: &str,
         configured_tag: &str,
-        allow_prerelease: bool,
+        prereleases: Option<&str>,
     ) -> Result<String, SourceError> {
+        let allow_prerelease = prereleases.is_some();
+        let tag_prefix = prereleases.unwrap_or("");
         if provider == "direct" {
             return Ok("direct".to_string());
         }
@@ -187,7 +191,7 @@ impl ForgeClient {
         // out of it is `select_release`'s job. Without the flag a list is
         // still an unsupported shape, exactly as before.
         if payload.is_array() && allow_prerelease {
-            let list_source = list_check_source(owner, repo);
+            let list_source = list_check_source(owner, repo, tag_prefix);
             let release = select_release(&list_source, &payload)?;
             let tag_name = str_field(release, "tag_name");
             if tag_name.is_empty() {
@@ -542,13 +546,20 @@ const UNSUPPORTED_PAYLOAD_SHAPE: &str = "Source release API returned an unsuppor
 /// The minimal [`SourceMap`] [`ForgeClient::check_release_tag`] hands
 /// [`select_release`] when the check reads a `/releases` LIST: no tag pin
 /// (the check is unpinned by definition here) and prereleases allowed.
-/// `owner`/`repo` only appear in `select_release`'s error text.
-fn list_check_source(owner: &str, repo: &str) -> SourceMap {
+/// `owner`/`repo` only appear in `select_release`'s error text; a
+/// non-blank `tag_prefix` is the source's `release_tag_prefix`.
+fn list_check_source(owner: &str, repo: &str, tag_prefix: &str) -> SourceMap {
     let mut source = SourceMap::new();
     source.insert("owner".to_string(), Value::String(owner.to_string()));
     source.insert("repo".to_string(), Value::String(repo.to_string()));
     source.insert("release_tag".to_string(), Value::String(String::new()));
     source.insert("allow_prerelease".to_string(), Value::Bool(true));
+    if !tag_prefix.trim().is_empty() {
+        source.insert(
+            "release_tag_prefix".to_string(),
+            Value::String(tag_prefix.to_string()),
+        );
+    }
     source
 }
 const NO_TAG_NAME: &str = "Source release API response did not include tag_name.";
@@ -1384,7 +1395,7 @@ mod tests {
                 "widget",
                 &mock_server.uri(),
                 "latest",
-                false,
+                None,
             )
             .await
             .unwrap();
@@ -1402,7 +1413,7 @@ mod tests {
 
         let client = ForgeClient::new().unwrap();
         let tag = client
-            .check_release_tag("gitea", "acme", "widget", &mock_server.uri(), "v2.0", false)
+            .check_release_tag("gitea", "acme", "widget", &mock_server.uri(), "v2.0", None)
             .await
             .unwrap();
         assert_eq!(tag, "v2.0");
@@ -1430,7 +1441,7 @@ mod tests {
                 "widget",
                 &mock_server.uri(),
                 "latest",
-                false,
+                None,
             )
             .await
             .unwrap_err();
@@ -1453,7 +1464,7 @@ mod tests {
                 "widget",
                 &mock_server.uri(),
                 "latest",
-                false,
+                None,
             )
             .await
             .unwrap_err();
@@ -1479,7 +1490,7 @@ mod tests {
                 "widget",
                 &mock_server.uri(),
                 "latest",
-                false,
+                None,
             )
             .await
             .unwrap_err();
@@ -1515,7 +1526,7 @@ mod tests {
                 "widget",
                 &mock_server.uri(),
                 "latest",
-                true,
+                Some(""),
             )
             .await
             .unwrap();
@@ -1523,11 +1534,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn check_release_tag_keeps_only_tags_with_the_source_prefix() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/acme/widget/releases"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {"tag_name": "branch-nx2-experimental-efb9fb18", "prerelease": true},
+                {"tag_name": "daily-20261107", "prerelease": true},
+                {"tag_name": "daily-20261106", "prerelease": true}
+            ])))
+            .mount(&mock_server)
+            .await;
+
+        let client = ForgeClient::new().unwrap();
+        let tag = client
+            .check_release_tag(
+                "gitea",
+                "acme",
+                "widget",
+                &mock_server.uri(),
+                "latest",
+                Some("daily-"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(tag, "daily-20261107");
+    }
+
+    #[tokio::test]
     async fn check_release_tag_answers_direct_without_any_request() {
         let mock_server = MockServer::start().await;
         let client = ForgeClient::new().unwrap();
         let tag = client
-            .check_release_tag("direct", "", "", &mock_server.uri(), "nightly", false)
+            .check_release_tag("direct", "", "", &mock_server.uri(), "nightly", None)
             .await
             .unwrap();
         assert_eq!(tag, "direct");
