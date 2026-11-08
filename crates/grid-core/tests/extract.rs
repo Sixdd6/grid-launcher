@@ -642,7 +642,7 @@ fn extract_7z_entry_with_setuid_mode_strips_setuid_bit() {
     assert_eq!(mode, 0o755, "setuid bit must be stripped, got {mode:o}");
 }
 
-// --- should_extract / is_arcade_platform (behavioral smoke test; the full
+// --- should_extract / keeps_romset_archive (behavioral smoke test; the full
 // table lives as a unit test inside extract.rs) --------------------------------
 
 #[test]
@@ -658,6 +658,8 @@ fn should_extract_follows_the_python_table() {
         ("Windows", "game.exe", true),
         ("Windows", "game.iso", true),
         ("Arcade", "game.zip", false),
+        ("Sega Model 3", "dayto2pe.zip", false),
+        ("Neo Geo CD", "game.zip", true),
         ("DOS", "game.zip", false),
         ("MS-DOS", "game.7z", false),
         ("PlayStation 3", "game.rar", true),

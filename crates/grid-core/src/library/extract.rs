@@ -15,17 +15,72 @@ use super::LibraryError;
 
 // --- Platform predicates and extraction decision --------------------------
 
-/// Whether `platform` names an arcade-style platform, whose archives are the
-/// ROM itself and must never be extracted.
-pub fn is_arcade_platform(platform: &str) -> bool {
-    let lower = platform.to_lowercase();
-    ["arcade", "mame", "fbneo", "final burn"]
+/// Whether a game on this platform is a MAME-style ROM set: the archive is
+/// the ROM itself, so it is never extracted and the launch hands the
+/// emulator the archive.
+///
+/// True for arcade-style platforms (any name or slug containing `arcade`,
+/// `mame`, `fbneo` or `final burn`) and for the arcade boards whose
+/// emulators load the set as a zip: Sega Model 2 and Model 3, Sega NAOMI and
+/// NAOMI 2, Sammy Atomiswave, Neo Geo MVS/AES, and Capcom CPS-1/2/3. Neo Geo
+/// CD (disc images) and Neo Geo Pocket (cartridge dumps) are not ROM sets.
+///
+/// Both the RomM slug (`model3`, `naomi2`, `neogeomvs`, `cps2`, …) and the
+/// display name ("Sega Model 3", "Neo Geo AES", "CP System II", …) are read,
+/// so a custom-named platform keeps the rule through its slug. Pass `""`
+/// where no slug is known.
+pub fn keeps_romset_archive(platform_slug: &str, platform: &str) -> bool {
+    names_romset_platform(platform_slug) || names_romset_platform(platform)
+}
+
+/// The name half of [`keeps_romset_archive`], applied to a slug or a name.
+fn names_romset_platform(label: &str) -> bool {
+    let lower = label.to_lowercase();
+    if ["arcade", "mame", "fbneo", "final burn"]
         .iter()
         .any(|needle| lower.contains(needle))
+    {
+        return true;
+    }
+
+    let normalized: String = lower
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { ' ' })
+        .collect();
+    let tokens: Vec<&str> = normalized.split_whitespace().collect();
+    let compact: String = tokens.concat();
+    // `word` followed by one of `nexts` as its own token ("model 3"), or the
+    // two run together as one token ("model3").
+    let pair = |word: &str, nexts: &[&str]| {
+        tokens
+            .windows(2)
+            .any(|w| w[0] == word && nexts.contains(&w[1]))
+            || nexts
+                .iter()
+                .any(|next| tokens.contains(&format!("{word}{next}").as_str()))
+    };
+
+    // Sega Model 2 / Model 3.
+    if pair("model", &["2", "3"]) {
+        return true;
+    }
+    // Sega NAOMI / NAOMI 2, Sammy Atomiswave.
+    if tokens.iter().any(|t| *t == "naomi" || *t == "naomi2") || compact.contains("atomiswave") {
+        return true;
+    }
+    // Neo Geo MVS / AES, but not the CD console or the Pocket handhelds.
+    if compact.contains("neogeo") && !compact.contains("neogeocd") && !compact.contains("pocket") {
+        return true;
+    }
+    // Capcom CPS-1/2/3 ("CPS2", "CPS-3", "CP System II", "Capcom Play System").
+    tokens.contains(&"cps")
+        || pair("cps", &["1", "2", "3", "i", "ii", "iii"])
+        || compact.contains("cpsystem")
+        || compact.contains("capcomplaysystem")
 }
 
 /// Suffixes (without the dot, lowercase) that this engine knows how to
-/// extract, for any platform that is neither native, arcade, nor
+/// extract, for any platform that is neither native, a ROM set, nor
 /// PlayStation 3.
 const EXTRACTABLE_SUFFIXES: &[&str] = &["7z", "zip", "rar", "tar", "gz", "bz2", "xz"];
 
@@ -35,8 +90,10 @@ const PS3_SUFFIXES: &[&str] = &["zip", "7z", "rar", "tar", "gz", "bz2", "xz"];
 
 /// Whether `archive` should be extracted for `platform`, mirroring the
 /// Python `should_extract` table (`docs/porting/03-library-install.md`):
-/// a native (Windows) platform's archive is always extracted; an arcade
-/// platform's archive is never extracted (the archive is the ROM itself),
+/// a native (Windows) platform's archive is always extracted; a ROM-set
+/// platform's archive ([`keeps_romset_archive`]: arcade, Model 2/3, NAOMI,
+/// Atomiswave, Neo Geo MVS/AES, CPS) is never extracted (the archive is the
+/// ROM itself),
 /// and neither is a DOS archive (the DOSBox cores mount the zip directly);
 /// a PlayStation 3 archive is extracted only when its suffix is one of
 /// `PS3_SUFFIXES`; every other platform's archive is extracted only when
@@ -48,7 +105,7 @@ pub fn should_extract(platform_slug: &str, platform: &str, archive: &Path) -> bo
     if is_native_platform(platform_slug, platform) {
         return true;
     }
-    if is_arcade_platform(platform) || is_dos_platform(platform) {
+    if keeps_romset_archive(platform_slug, platform) || is_dos_platform(platform) {
         return false;
     }
     let Some(suffix) = lowercase_suffix(archive) else {
@@ -851,10 +908,10 @@ mod tests {
         ));
     }
 
-    // --- is_arcade_platform -------------------------------------------------
+    // --- keeps_romset_archive ------------------------------------------------
 
     #[test]
-    fn is_arcade_platform_matches_known_substrings() {
+    fn keeps_romset_archive_matches_arcade_names() {
         for platform in [
             "Arcade",
             "MAME",
@@ -862,14 +919,102 @@ mod tests {
             "Final Burn Neo",
             "arcade cabinet",
         ] {
-            assert!(is_arcade_platform(platform), "{platform} should be arcade");
+            assert!(
+                keeps_romset_archive("", platform),
+                "{platform} should keep its archive"
+            );
         }
     }
 
     #[test]
-    fn is_arcade_platform_false_for_non_arcade() {
-        assert!(!is_arcade_platform("Sony PlayStation"));
-        assert!(!is_arcade_platform("DOS"));
+    fn keeps_romset_archive_matches_rom_set_boards_by_name() {
+        for platform in [
+            "Sega Model 2",
+            "Sega Model 3",
+            "Model 3",
+            "Sega NAOMI",
+            "Sega NAOMI 2",
+            "Naomi2",
+            "Atomiswave",
+            "Sammy Atomiswave",
+            "Neo Geo MVS",
+            "Neo Geo AES",
+            "Neo-Geo",
+            "SNK Neo Geo",
+            "Capcom CPS-1",
+            "CPS2",
+            "Capcom CPS 3",
+            "CP System II",
+            "Capcom CP System III",
+            "Capcom Play System",
+        ] {
+            assert!(
+                keeps_romset_archive("", platform),
+                "{platform} should keep its archive"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_romset_archive_matches_rom_set_boards_by_slug() {
+        for slug in [
+            "arcade",
+            "model2",
+            "model3",
+            "sega-model-3",
+            "naomi",
+            "naomi2",
+            "atomiswave",
+            "neogeoaes",
+            "neogeomvs",
+            "cps1",
+            "cps2",
+            "cps3",
+        ] {
+            assert!(
+                keeps_romset_archive(slug, "My Custom Name"),
+                "slug {slug} should keep its archive"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_romset_archive_is_false_for_other_platforms() {
+        for (slug, platform) in [
+            ("psx", "Sony PlayStation"),
+            ("dos", "DOS"),
+            ("neo-geo-cd", "Neo Geo CD"),
+            ("", "NeoGeo CD"),
+            ("neo-geo-pocket", "Neo Geo Pocket"),
+            ("neo-geo-pocket-color", "Neo Geo Pocket Color"),
+            ("dc", "Sega Dreamcast"),
+            ("saturn", "Sega Saturn"),
+            ("genesis", "Sega Mega Drive/Genesis"),
+            ("snes", "SNES"),
+            ("", "Model 1000"),
+            ("", ""),
+        ] {
+            assert!(
+                !keeps_romset_archive(slug, platform),
+                "{slug}/{platform} must not keep its archive"
+            );
+        }
+    }
+
+    #[test]
+    fn should_extract_keeps_rom_set_zips_whole() {
+        for platform in ["Sega Model 3", "Sega NAOMI", "Neo Geo MVS", "CPS2"] {
+            assert!(
+                !should_extract("", platform, Path::new("dayto2pe.zip")),
+                "{platform} must keep its zip"
+            );
+        }
+        assert!(!should_extract("model3", "Custom", Path::new("game.zip")));
+        assert!(should_extract(
+            "neo-geo-cd",
+            "Neo Geo CD",
+            Path::new("game.zip")
+        ));
     }
 
     // --- DOS: the archive is the ROM ------------------------------------------
