@@ -11,6 +11,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 html[data-theme='dark'] { color-scheme: dark; }
+/* A select's fill is see-through (--field), so its open list would fall back
+   to the browser's light menu under the theme's text colour: white on white
+   in dark. The list takes the opaque overlay surface instead. */
+select option, select optgroup { background-color: var(--overlay); color: var(--text-h); }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 ::placeholder { color: var(--text-muted); opacity: 1; }
 
