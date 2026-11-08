@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { DownloadEntry, EmulatorEntry, LaunchDefaults, Platform, PlatformSetup, SetupOption } from '../api';
+import type { CompanionLink, DownloadEntry, EmulatorEntry, LaunchDefaults, Platform, PlatformSetup, SetupOption } from '../api';
 import {
   alsoPlays,
   alsoPlaysText,
   buildSystemRows,
   canPlay,
+  companionParent,
+  companionsOf,
   installRecommendedLabel,
   isInstalling,
   liveEmulatorSources,
   missingRecommended,
+  missingCompanionText,
   missingText,
   NONE_VALUE,
   otherEmulatorNote,
@@ -18,6 +21,7 @@ import {
   statusOf,
   systemFirmwareRequests,
   testKeyOf,
+  updateAvailable,
   versionText,
 } from './rows';
 
@@ -201,6 +205,66 @@ describe('emulators across systems', () => {
 
   it('asks for firmware only for each system and its own emulator', () => {
     expect(systemFirmwareRequests(rows).map((r) => r.key)).toEqual(['2:RetroArch', '1:RetroArch', '3:RetroArch']);
+  });
+});
+
+describe('companions', () => {
+  const SHAD = 'ShadPS4 (Playstation 4)';
+  const QT = 'ShadPS4 Qt Launcher';
+  const link = (parent: string | null, companion: string | null): CompanionLink => ({
+    parent_profile: SHAD,
+    parent_entry: parent,
+    companion_profile: QT,
+    companion_entry: companion,
+    companion_source_id: 'shadps4-emu/shadps4-qtlauncher',
+  });
+  const ps4 = setup('PlayStation 4', 'Sony PlayStation 4', []);
+  const entry = (name: string): EmulatorEntry => ({ name, path: `/emu/${name}`, args: '' });
+  const withShad = buildSystemRows([ps4], platforms, defaults({}), { 'Sony PlayStation 4': [SHAD] });
+  const withNone = buildSystemRows([ps4], platforms, defaults({}), {});
+
+  it('lists a companion under its parent emulator, installed or not', () => {
+    expect(companionsOf(SHAD, [link(SHAD, QT)])).toEqual([
+      { profile: QT, entry: QT, sourceId: 'shadps4-emu/shadps4-qtlauncher' },
+    ]);
+    expect(companionsOf(SHAD, [link(SHAD, null)])).toEqual([
+      { profile: QT, entry: null, sourceId: 'shadps4-emu/shadps4-qtlauncher' },
+    ]);
+    expect(companionsOf('PCSX2', [link(SHAD, QT)])).toEqual([]);
+    expect(companionsOf('', [link(null, QT)])).toEqual([]);
+  });
+
+  it('keeps a companion of a system’s emulator out of Other emulators', () => {
+    expect(withShad[0].emulator).toBe(SHAD);
+    const others = otherEmulators([entry(SHAD), entry(QT), entry('Dolphin')], withShad, [link(SHAD, QT)]);
+    expect(others.map((e) => e.name)).toEqual(['Dolphin']);
+  });
+
+  it('leaves the companion under Other emulators, saying whose it is, when no system uses its parent', () => {
+    const lone = otherEmulators([entry(QT)], withNone, [link(null, QT)]);
+    expect(lone.map((e) => e.name)).toEqual([QT]);
+    expect(otherEmulatorNote(canPlay(QT, withNone), companionParent(QT, [link(null, QT)]))).toBe(
+      `Companion to ${SHAD}.`,
+    );
+    const both = otherEmulators([entry(SHAD), entry(QT)], withNone, [link(SHAD, QT)]);
+    expect(both.map((e) => e.name)).toEqual([SHAD, QT]);
+    expect(companionParent(QT, [link('My ShadPS4', QT)])).toBe('My ShadPS4');
+    expect(companionParent('Dolphin', [link(SHAD, QT)])).toBeNull();
+  });
+
+  it('counts a companion update as an update for the system', () => {
+    const has = (names: string[]) => (n: string) => names.includes(n);
+    expect(updateAvailable(SHAD, [link(SHAD, QT)], has([QT]))).toBe(true);
+    expect(updateAvailable(SHAD, [link(SHAD, QT)], has([SHAD]))).toBe(true);
+    expect(updateAvailable(SHAD, [link(SHAD, QT)], has([]))).toBe(false);
+    expect(updateAvailable(SHAD, [link(SHAD, null)], has([QT]))).toBe(false);
+    expect(updateAvailable('', [link(SHAD, QT)], has([QT]))).toBe(false);
+  });
+
+  it('explains a missing companion', () => {
+    expect(missingCompanionText({ profile: QT }, SHAD)).toBe(
+      `${QT} is not installed. Installing or updating ShadPS4 adds it too.`,
+    );
   });
 });
 

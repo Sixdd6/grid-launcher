@@ -120,7 +120,9 @@ The shell owns *when* things run; grid-core owns *what* they do.
   (`queue_setup`: plan, save the waiting defaults, queue), so a Systems pick and a
   first-run pick become the system's default the same way, through the
   emulator-installed hook's `apply_after_install`. `show_emulator_folder` (commands.rs)
-  opens an entry's program folder by name; `install_compat_tool_as_default`
+  opens an entry's program folder by name; `emulator_companions` (commands.rs) answers
+  grid-core's `launch::catalog::companion_links` (each profile's `companions` paired
+  with the installed entries that resolve to either side) for Settings › Systems; `install_compat_tool_as_default`
   (specials.rs) records a waiting compat-tool default
   (`grid_core::launch::compat::request_compat_default`) that the compat-tools hook
   applies when the install lands. `commands/discover.rs` owns `discover_feed` (the
@@ -202,7 +204,8 @@ session exists and `Shell.svelte` afterwards.
 - Settings › Systems — `lib/systems/SystemsPage.svelte` (the page, mounted by
   `Settings.svelte`) with `SystemRow`, `EmulatorBlock`, `RowMenu` and `WindowsRow`; the
   pure halves are `rows.ts` (the row model from `setup_platform_options`, the picker
-  groups, status, Install recommended, Other emulators), `menuPlacement.ts` (the ⋯
+  groups, status, Install recommended, Other emulators, companions under their
+  emulator's line), `menuPlacement.ts` (the ⋯
   menu's `placeMenu`) and `proton.ts` (the Windows row's picker). `reveal(system)` opens
   one system's row and scrolls to it. It reuses `lib/emulators/*.ts` (defaults,
   firmware, notes, form, compat tools, the install signal) and `EmulatorForm.svelte` as

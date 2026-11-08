@@ -40,6 +40,17 @@ import {
   REDREAM_DOWNLOAD_URL,
   REDREAM_MEMBER_NAME,
   REDREAM_PAGE_PATH,
+  QT_LAUNCHER_ASSET_NAME,
+  QT_LAUNCHER_DOWNLOAD_PATH,
+  QT_LAUNCHER_RELEASES_PATH,
+  QT_LAUNCHER_TAG,
+  QT_LAUNCHER_UPDATED_DOWNLOAD_PATH,
+  QT_LAUNCHER_UPDATED_TAG,
+  QT_LAUNCHER_ZIP_BYTES,
+  SHADPS4_ASSET_NAME,
+  SHADPS4_DOWNLOAD_PATH,
+  SHADPS4_RELEASE_PATH,
+  SHADPS4_ZIP_BYTES,
   startMockForge,
   UMU_ASSET_NAME,
   UMU_DIGEST,
@@ -105,6 +116,30 @@ test("serves GRID Launcher's own latest release for the self-update check", asyn
     assert.ok(body.html_url.startsWith("https://github.com/Sixdd6/grid-launcher/releases/"));
     // Nothing is downloaded for a self-update: the check is check-only.
     assert.deepEqual(body.assets, []);
+  });
+});
+
+test("serves shadPS4 and its Qt launcher, whose list grows a newer prerelease", async () => {
+  await withForge(async ({ url }) => {
+    const shad = await (await fetch(`${url}${SHADPS4_RELEASE_PATH}`)).json();
+    // The catalog's linux asset_patterns globs.
+    assert.match(shad.assets[0].name, /^shadps4-linux-sdl-.*\.zip$/);
+    assert.equal(shad.assets[0].name, SHADPS4_ASSET_NAME);
+    const zip = Buffer.from(await (await fetch(`${url}${SHADPS4_DOWNLOAD_PATH}`)).arrayBuffer());
+    assert.deepEqual(zip, SHADPS4_ZIP_BYTES);
+
+    const list = await (await fetch(`${url}${QT_LAUNCHER_RELEASES_PATH}`)).json();
+    assert.equal(list.length, 1);
+    assert.equal(list[0].tag_name, QT_LAUNCHER_TAG);
+    assert.match(list[0].assets[0].name, /^shadPS4QtLauncher-linux-qt-.*\.zip$/);
+    assert.equal(list[0].assets[0].name, QT_LAUNCHER_ASSET_NAME);
+    const qt = Buffer.from(await (await fetch(`${url}${QT_LAUNCHER_DOWNLOAD_PATH}`)).arrayBuffer());
+    assert.deepEqual(qt, QT_LAUNCHER_ZIP_BYTES);
+
+    await fetch(`${url}/__e2e__/qtlauncher-release/updated`, { method: "POST" });
+    const updated = await (await fetch(`${url}${QT_LAUNCHER_RELEASES_PATH}`)).json();
+    assert.equal(updated[0].tag_name, QT_LAUNCHER_UPDATED_TAG);
+    assert.equal((await fetch(`${url}${QT_LAUNCHER_UPDATED_DOWNLOAD_PATH}`)).status, 200);
   });
 });
 

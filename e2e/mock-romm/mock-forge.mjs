@@ -26,11 +26,19 @@
 //                                                       → release JSON
 //   /github.com/GloriousEggroll/proton-ge-custom/releases/download/…tar.gz
 //                                                       → the GE-Proton tar.gz stub
+//   /api.github.com/repos/shadps4-emu/shadPS4/releases/latest → release JSON
+//   /github.com/shadps4-emu/shadPS4/releases/download/…zip    → the shadPS4 zip stub
+//   /api.github.com/repos/shadps4-emu/shadps4-qtlauncher/releases
+//                                                       → release LIST (prereleases allowed)
+//   /github.com/shadps4-emu/shadps4-qtlauncher/releases/download/…zip
+//                                                       → the Qt launcher zip stub
 //
-// Plus one control route, mirroring the RomM mock's `POST /__e2e__/offline`:
+// Plus control routes, mirroring the RomM mock's `POST /__e2e__/offline`:
 //   POST /__e2e__/pcsx2-release/updated → from here on, PCSX2's
 //   `releases/latest` reports a NEWER tag, so the emulator-catalog spec can
 //   exercise "Update from Source" against a real second release.
+//   POST /__e2e__/qtlauncher-release/updated → the same for the ShadPS4 Qt
+//   launcher's release list (the systems spec's companion update).
 //
 // Two rules this server exists to enforce at runtime:
 //   * NO credential ever reaches a forge. Any request carrying an
@@ -53,7 +61,7 @@ import { fileURLToPath } from "node:url";
 import { appendFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 
-import { buildTar, buildTarGz } from "./archives.mjs";
+import { buildTar, buildTarGz, buildZip } from "./archives.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -198,6 +206,75 @@ export const GE_PROTON_TAR_GZ_BYTES = buildTarGz([
   },
 ]);
 
+/**
+ * shadPS4 and its Qt launcher, for Settings › Systems' companion case: the
+ * ShadPS4 profile names the launcher in `companions`, so installing one
+ * installs both (grid-core `InstallService::admit_companions`). Each zip
+ * holds one AppImage stub, matching the catalog's linux `asset_patterns`;
+ * the `.AppImage` suffix is what makes it the launchable file. The launcher
+ * allows prereleases, so its check and resolve ask the `/releases` LIST.
+ */
+export const SHADPS4_TAG = "v0.99.0-e2e";
+export const SHADPS4_ASSET_NAME = "shadps4-linux-sdl-e2e.zip";
+export const SHADPS4_RELEASE_PATH = "/api.github.com/repos/shadps4-emu/shadPS4/releases/latest";
+export const SHADPS4_DOWNLOAD_URL = `https://github.com/shadps4-emu/shadPS4/releases/download/${SHADPS4_TAG}/${SHADPS4_ASSET_NAME}`;
+export const SHADPS4_DOWNLOAD_PATH = `/github.com/shadps4-emu/shadPS4/releases/download/${SHADPS4_TAG}/${SHADPS4_ASSET_NAME}`;
+export const SHADPS4_ZIP_BYTES = buildZip([
+  { name: "Shadps4-sdl.AppImage", data: stubEmulatorScript("shadps4") },
+]);
+
+export const QT_LAUNCHER_TAG = "v1.0.0-e2e";
+export const QT_LAUNCHER_UPDATED_TAG = "v1.0.1-e2e";
+export const QT_LAUNCHER_ASSET_NAME = "shadPS4QtLauncher-linux-qt-e2e.zip";
+export const QT_LAUNCHER_RELEASES_PATH =
+  "/api.github.com/repos/shadps4-emu/shadps4-qtlauncher/releases";
+const qtLauncherDownload = (tag) =>
+  `/shadps4-emu/shadps4-qtlauncher/releases/download/${tag}/${QT_LAUNCHER_ASSET_NAME}`;
+export const QT_LAUNCHER_DOWNLOAD_PATH = `/github.com${qtLauncherDownload(QT_LAUNCHER_TAG)}`;
+export const QT_LAUNCHER_UPDATED_DOWNLOAD_PATH = `/github.com${qtLauncherDownload(QT_LAUNCHER_UPDATED_TAG)}`;
+export const QT_LAUNCHER_ZIP_BYTES = buildZip([
+  { name: "shadPS4QtLauncher-qt.AppImage", data: stubEmulatorScript("shadps4 qt launcher") },
+]);
+
+/** The GitHub "latest release" payload for shadPS4. */
+export function shadps4Release() {
+  return {
+    tag_name: SHADPS4_TAG,
+    name: `shadPS4 ${SHADPS4_TAG}`,
+    draft: false,
+    prerelease: false,
+    assets: [
+      {
+        name: SHADPS4_ASSET_NAME,
+        browser_download_url: SHADPS4_DOWNLOAD_URL,
+        size: SHADPS4_ZIP_BYTES.length,
+        state: "uploaded",
+      },
+    ],
+  };
+}
+
+/** The Qt launcher's release LIST, newest first. `updated` puts a newer
+ *  prerelease on top. */
+export function qtLauncherReleases(updated = false) {
+  const release = (tag, prerelease) => ({
+    tag_name: tag,
+    name: `shadPS4 Qt Launcher ${tag}`,
+    draft: false,
+    prerelease,
+    assets: [
+      {
+        name: QT_LAUNCHER_ASSET_NAME,
+        browser_download_url: `https://github.com${qtLauncherDownload(tag)}`,
+        size: QT_LAUNCHER_ZIP_BYTES.length,
+        state: "uploaded",
+      },
+    ],
+  });
+  const current = release(QT_LAUNCHER_TAG, false);
+  return updated ? [release(QT_LAUNCHER_UPDATED_TAG, true), current] : [current];
+}
+
 /** The GitHub "latest release" payload for GE-Proton. */
 export function geProtonRelease() {
   return {
@@ -334,6 +411,35 @@ function handleRequest(req, res, state) {
     return;
   }
 
+  if (req.method === "POST" && pathname === "/__e2e__/qtlauncher-release/updated") {
+    state.qtLauncherUpdated = true;
+    sendJson(res, 200, { tag: QT_LAUNCHER_UPDATED_TAG });
+    return;
+  }
+
+  if (req.method === "GET" && pathname === SHADPS4_RELEASE_PATH) {
+    sendJson(res, 200, shadps4Release());
+    return;
+  }
+
+  if (req.method === "GET" && pathname === SHADPS4_DOWNLOAD_PATH) {
+    sendBuffer(res, 200, "application/zip", SHADPS4_ZIP_BYTES);
+    return;
+  }
+
+  if (req.method === "GET" && pathname === QT_LAUNCHER_RELEASES_PATH) {
+    sendJson(res, 200, qtLauncherReleases(state.qtLauncherUpdated));
+    return;
+  }
+
+  if (
+    req.method === "GET" &&
+    (pathname === QT_LAUNCHER_DOWNLOAD_PATH || pathname === QT_LAUNCHER_UPDATED_DOWNLOAD_PATH)
+  ) {
+    sendBuffer(res, 200, "application/zip", QT_LAUNCHER_ZIP_BYTES);
+    return;
+  }
+
   if (req.method === "GET" && pathname === PCSX2_RELEASE_PATH) {
     sendJson(res, 200, pcsx2Release(state.pcsx2Updated));
     return;
@@ -400,6 +506,8 @@ export async function startMockForge({ port = 0, logPath = DEFAULT_LOG_PATH } = 
   const state = {
     /** Flipped by the control route: PCSX2's latest release is bumped. */
     pcsx2Updated: false,
+    /** Flipped by the control route: a newer Qt launcher prerelease is out. */
+    qtLauncherUpdated: false,
     log(entry) {
       requestLog.push(entry);
       if (!logPath) return;

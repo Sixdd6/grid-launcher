@@ -305,6 +305,15 @@ There are several main sections to the application with buttons across the top b
     visit. With neither, the server firmware line offers the download. GRID does not
     download the package for an RPCS3 that already has firmware installed. An emulator used by several systems shows on each
     and says which others it plays.
+  - **Companions.** An emulator whose catalog profile names companions (ShadPS4 and its
+    Qt launcher, today the only one) shows each under its own line, marked "Companion":
+    the companion's version, Update to <version> when one is out, Open and the same ⋯
+    menu. An update for a companion makes the row "Update available". Installing or
+    updating the emulator also installs a missing companion, so a companion that is
+    still missing (removed, or a manual add) shows "<companion> is not installed" with
+    a one-click Install, Installing… while its Downloads row runs. Installed entries are
+    matched to profiles the way launches match them (the profile name, then the
+    program's file name), not by display name alone.
   - **Update availability** is checked once per session, the first time Systems opens
     (one release request per emulator installed from a source, one at a time), and kept
     for the session; it never re-runs on a scroll or a re-render. Check for updates asks
@@ -337,7 +346,10 @@ There are several main sections to the application with buttons across the top b
     for, the automatic install defaults, or the user's own pick do. (An emulator GRID has
     no profile for plays every system, so a launch can still fall back to it.)
   - **Other emulators** at the bottom lists the installed emulators no system uses, each
-    with its emulator line and the systems it could play.
+    with its emulator line and the systems it could play. A companion of a system's
+    emulator is never here; one whose emulator no system uses (or that is installed on
+    its own) stays here and says what it belongs to ("Companion to ShadPS4 (Playstation
+    4).") instead of "Not used by any system on your server."
 - **Appearance** (under Settings) chooses the theme — follow the OS, dark, or light;
   the light / dark toggle sets dark or light here too —
   turns the background art on or off, sets its fade from 0 to 100 percent with a live

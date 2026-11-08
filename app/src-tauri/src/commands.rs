@@ -15,7 +15,9 @@ use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
 use grid_core::config::{Config, ConfigError, EmulatorEntry, UiSettings};
 use grid_core::images::urls::{filter_to_server_host, resolve_image_url, server_resolver};
 use grid_core::import_python::ImportReport;
-use grid_core::launch::catalog::{catalog_entries, find_profile, mark_installed, CatalogEntry};
+use grid_core::launch::catalog::{
+    catalog_entries, companion_links, find_profile, mark_installed, CatalogEntry, CompanionLink,
+};
 use grid_core::launch::emu_install::install_manual_archive;
 use grid_core::launch::forge::{version_check_outcome, ForgeClient, VersionCheck};
 use grid_core::launch::profiles::{
@@ -1160,6 +1162,21 @@ pub async fn emulator_facts(name: String) -> Result<EmulatorFacts, String> {
     })
     .await
     .map_err(|e| format!("emulator_facts did not finish: {e}"))?
+}
+
+/// `emulator_companions`: every `companions` pairing (ShadPS4 and its Qt
+/// launcher) with the installed entries that resolve to each side, so
+/// Settings › Systems can show a companion under its parent's emulator and
+/// offer Install for a missing one ([`companion_links`]). Names and catalog
+/// ids only, never a path.
+#[tauri::command]
+pub async fn emulator_companions() -> Result<Vec<CompanionLink>, String> {
+    tokio::task::spawn_blocking(|| {
+        let config = Config::load(&Config::default_path()).map_err(err)?;
+        Ok(companion_links(&config.emulators, load_profiles()))
+    })
+    .await
+    .map_err(|e| format!("emulator_companions did not finish: {e}"))?
 }
 
 /// The owned halves of an [`autoconfig::SyncContext`], which borrows all

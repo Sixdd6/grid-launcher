@@ -11,6 +11,7 @@
     api,
     FIRMWARE_PASS_FINISHED_EVENT,
     SETUP_DEFAULTS_EVENT,
+    type CompanionLink,
     type EmulatorEntry,
     type EmulatorFacts,
     type FirmwarePassFinished,
@@ -60,10 +61,13 @@
     alsoPlaysText,
     buildSystemRows,
     canPlay,
+    companionParent,
+    companionsOf,
     gamesText,
     installRecommendedLabel,
     isInstalling,
     liveEmulatorSources,
+    missingCompanionText,
     missingRecommended,
     missingText,
     otherEmulatorNote,
@@ -74,7 +78,9 @@
     statusOf,
     systemFirmwareRequests,
     testKeyOf,
+    updateAvailable,
     versionText,
+    type Companion,
     type SystemRow as Row,
   } from './rows';
 
@@ -87,6 +93,8 @@
   let setupRows = $state<PlatformSetup[]>([]);
   let defaults = $state<LaunchDefaults | null>(null);
   let emulators = $state<EmulatorEntry[]>([]);
+  /** Each `companions` pairing (ShadPS4 and its Qt launcher) as installed. */
+  let companions = $state<CompanionLink[]>([]);
   let compatible = $state<Record<string, string[]>>({});
   let coreOptions = $state<Record<string, string[]>>({});
   let pendingLabels = $state<string[]>([]);
@@ -100,7 +108,7 @@
   let live = $derived(liveEmulatorSources(downloads.entries));
   let installingRow = $derived((row: Row) => isInstalling(row, pendingLabels, live));
   let missing = $derived(missingRecommended(rows, installingRow));
-  let others = $derived(otherEmulators(emulators, rows));
+  let others = $derived(otherEmulators(emulators, rows, companions));
   let windowsGames = $derived(
     platforms
       .filter((p) => isWindowsPlatform(p.slug, platformLabel(p)))
@@ -113,7 +121,14 @@
 
   async function refreshEmulators() {
     try {
-      emulators = await api.listEmulators();
+      // Best effort for the pairings: without them companions just show
+      // as Other emulators.
+      const [list, links] = await Promise.all([
+        api.listEmulators(),
+        api.emulatorCompanions().catch((): CompanionLink[] => []),
+      ]);
+      emulators = list;
+      companions = links;
     } catch (err) {
       loadError = errorMessage(err);
     }
@@ -387,7 +402,7 @@
       emulator: row.emulator,
       installing: installingRow(row) || busyRows[row.key] === true,
       firmware: action,
-      updateAvailable: row.emulator !== '' && emulatorUpdates.hasUpdate(row.emulator),
+      updateAvailable: updateAvailable(row.emulator, companions, (name) => emulatorUpdates.hasUpdate(name)),
     });
     const text = status === 'installing' && action === 'requested' && !installingRow(row) ? 'Installing firmware…' : null;
     return { status, text };
@@ -489,6 +504,24 @@
     }
   }
 
+  // A missing companion's Install (installing or updating its parent adds
+  // it too). Keyed by `source_id`, like the Downloads rows it waits on.
+  let companionBusy = $state<Record<string, true>>({});
+
+  async function installCompanion(c: Companion) {
+    if (c.sourceId === null) return;
+    const id = c.sourceId;
+    companionBusy = { ...companionBusy, [id]: true };
+    try {
+      await api.installEmulator(id);
+    } catch (err) {
+      pushToast(errorMessage(err), 'error');
+    } finally {
+      const { [id]: _done, ...rest } = companionBusy;
+      companionBusy = rest;
+    }
+  }
+
   let checking = $derived(emulatorUpdates.running);
 
   async function checkForUpdates() {
@@ -566,6 +599,50 @@
     onOpen={() => openEmulator(name)}
     onMore={(anchor) => toggleMenu(where, name, anchor)}
   />
+{/snippet}
+
+{#snippet companionLines(row: Row)}
+  {#each companionsOf(row.emulator, companions) as c (c.profile)}
+    {@const where = `companion:${row.key}:${c.profile}`}
+    {@const ckey = testKeyOf(`companion-${row.key}-${c.profile}`)}
+    <div class="companion" data-testid={`sys-companion-${ckey}`}>
+      {#if c.entry !== null}
+        {@const name = c.entry}
+        {@const check = emulatorUpdates.check(name)}
+        <EmulatorBlock
+          {name}
+          testKey={ckey}
+          kicker="Companion"
+          version={versionText(entryFor(name), check)}
+          updateTo={check && emulatorUpdates.hasUpdate(name) ? check.available_display : null}
+          updating={updating === name}
+          launching={launching === name}
+          menuOpen={menu?.where === where}
+          onUpdate={() => updateEmulator(name)}
+          onOpen={() => openEmulator(name)}
+          onMore={(anchor) => toggleMenu(where, name, anchor)}
+        />
+      {:else}
+        {@const busy = c.sourceId !== null && (companionBusy[c.sourceId] === true || live.has(c.sourceId))}
+        <div class="fix sub">
+          <span data-testid={`sys-companion-missing-${ckey}`}>
+            <span class="kicker">Companion</span>
+            {busy ? `Installing ${c.profile}…` : missingCompanionText(c, row.emulator)}
+          </span>
+          {#if c.sourceId !== null}
+            <button
+              class="small-btn primary"
+              data-testid={`sys-companion-install-${ckey}`}
+              disabled={busy}
+              onclick={() => void installCompanion(c)}
+            >
+              {busy ? 'Installing…' : 'Install'}
+            </button>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {/each}
 {/snippet}
 
 {#snippet tips(name: string, key: string)}
@@ -694,6 +771,7 @@
               {/if}
             {:else}
               {@render emulatorLine(row.emulator, row.key, row.key)}
+              {@render companionLines(row)}
               {#if core.visible}
                 <label class="dfield">
                   <span>Core</span>
@@ -761,7 +839,9 @@
             <li class="sysrow" data-testid={`sys-other-${testKeyOf(entry.name)}`}>
               <div class="other-body">
                 {@render emulatorLine(entry.name, `other-${entry.name}`, null)}
-                <p class="meta2">{otherEmulatorNote(canPlay(entry.name, rows))}</p>
+                <p class="meta2" data-testid={`sys-other-note-${testKeyOf(entry.name)}`}>
+                  {otherEmulatorNote(canPlay(entry.name, rows), companionParent(entry.name, companions))}
+                </p>
                 {@render ps3Firmware(entry.name, key)}
                 {@render tips(entry.name, key)}
               </div>
@@ -921,6 +1001,22 @@
 
   .fix > span {
     flex: 1 1 200px;
+  }
+
+  /* A missing companion: indented under its parent's line, like the
+     companion's own line (EmulatorBlock's .sub). */
+  .fix.sub {
+    padding-left: 12px;
+    border-left: 2px solid var(--line);
+  }
+
+  .kicker {
+    margin-right: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-muted);
   }
 
   .check-row {

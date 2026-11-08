@@ -661,6 +661,7 @@ pub fn run() {
             commands::list_sessions,
             commands::list_emulators,
             commands::emulator_facts,
+            commands::emulator_companions,
             commands::save_emulator,
             commands::delete_emulator,
             commands::launch_emulator,

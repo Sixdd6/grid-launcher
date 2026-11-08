@@ -72,12 +72,25 @@ const PS2 = 'Sony PlayStation 2';
 const DC = 'Sega Dreamcast';
 const PCSX2 = 'PCSX2 (Playstation 2)';
 const REDREAM = 'Redream (Sega Dreamcast)';
+const PS4 = 'Sony PlayStation 4';
+const SHADPS4 = 'ShadPS4 (Playstation 4)';
+const QT_LAUNCHER = 'ShadPS4 Qt Launcher';
+
+/** The page's test-key rule (`systems/rows.ts` `testKeyOf`). */
+const keyOf = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+/** The Qt launcher's companion block under the PS4 row. */
+const QT_KEY = keyOf(`companion-${PS4}-${QT_LAUNCHER}`);
 
 /**
  * Stage `systems`: Settings › Systems on a fresh profile, against the
- * first-run-setup fixtures (PS2 and Dreamcast, whose emulators the mock forge
- * serves; SNES, which only RetroArch serves and the mock forge cannot; Zeebo,
- * which nothing installable serves) and the mock forge.
+ * systems fixtures (PS2, Dreamcast and PS4, whose emulators the mock forge
+ * serves — ShadPS4 with its Qt launcher companion; SNES, which only
+ * RetroArch serves and the mock forge cannot; Zeebo, which nothing
+ * installable serves) and the mock forge.
  */
 describe('Settings › Systems', () => {
   before(async () => {
@@ -97,18 +110,18 @@ describe('Settings › Systems', () => {
   });
 
   it('lists one row per system, those with no emulator first, then Windows', async () => {
-    await browser.waitUntil(async () => (await rowOrder()).length === 5, {
+    await browser.waitUntil(async () => (await rowOrder()).length === 6, {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the system rows never appeared',
     });
     // The Emulators shelf holds emulators, not games: never a row.
-    expect(await rowOrder()).toEqual(['dc', 'ps2', 'snes', 'zeebo', 'windows']);
-    for (const key of ['dc', 'ps2', 'snes', 'zeebo']) expect(await statusOf(key)).toBe('none');
+    expect(await rowOrder()).toEqual(['dc', 'ps2', 'ps4', 'snes', 'zeebo', 'windows']);
+    for (const key of ['dc', 'ps2', 'ps4', 'snes', 'zeebo']) expect(await statusOf(key)).toBe('none');
     // Open, with the reason; Zeebo points to Add an emulator manually.
     await expect($(testId('sys-missing-zeebo'))).toHaveText(expect.stringContaining('Add an emulator manually'));
     await expect($(testId('sys-install-zeebo'))).not.toExist();
     await expect($(testId('sys-install-ps2'))).toHaveText('Install PCSX2');
-    await expect($(testId('systems-install-recommended'))).toHaveText('Install recommended (3)');
+    await expect($(testId('systems-install-recommended'))).toHaveText('Install recommended (4)');
   });
 
   it('groups the picker into Installed and Download, recommended first', async () => {
@@ -131,7 +144,7 @@ describe('Settings › Systems', () => {
     await waitForConfig((c) => c.includes(`"${DC}" = "${REDREAM}"`), 'Redream never became Dreamcast’s emulator');
     await waitForToast(`${REDREAM} installed`, { timeoutMsg: 'no "installed" card for Redream' });
     await waitForStatus('dc', 'ready');
-    await expect($(testId('systems-install-recommended'))).toHaveText('Install recommended (2)');
+    await expect($(testId('systems-install-recommended'))).toHaveText('Install recommended (3)');
   });
 
   it('a Download pick installs the emulator and makes it the system’s emulator', async () => {
@@ -140,7 +153,7 @@ describe('Settings › Systems', () => {
     await waitForStatus('ps2', 'ready');
     expect((await groups('ps2')).Installed).toEqual([`use:${PCSX2}=${PCSX2} (recommended)`]);
     // Systems with an emulator move below the ones without.
-    expect(await rowOrder()).toEqual(['snes', 'zeebo', 'dc', 'ps2', 'windows']);
+    expect(await rowOrder()).toEqual(['ps4', 'snes', 'zeebo', 'dc', 'ps2', 'windows']);
   });
 
   it('None keeps the explicit-none marker, and an Installed pick sets the default', async () => {
@@ -158,6 +171,41 @@ describe('Settings › Systems', () => {
     await waitForStatus('ps2', 'update', TRANSITION_TIMEOUT * 2);
     await $(testId('sys-update-sony-playstation-2')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await expect($(testId('sys-update-sony-playstation-2'))).toHaveText(expect.stringContaining('Update to'));
+  });
+
+  it('installs ShadPS4 with its Qt launcher and shows the launcher as part of the PS4 emulator', async () => {
+    await expect($(testId('sys-install-ps4'))).toHaveText('Install ShadPS4');
+    await $(testId('sys-install-ps4')).click();
+    // Installing ShadPS4 queues its companion behind it.
+    await waitForConfig(
+      (c) => c.includes(`"${PS4}" = "${SHADPS4}"`) && c.includes(`name = "${QT_LAUNCHER}"`),
+      'ShadPS4 and its Qt launcher were never both installed',
+    );
+    await waitForStatus('ps4', 'ready');
+    await $(testId('sys-toggle-ps4')).click();
+    const line = keyOf(PS4);
+    await expect($(testId(`sys-emu-name-${line}`))).toHaveText(SHADPS4);
+    await $(testId(`sys-companion-${QT_KEY}`)).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the Qt launcher never showed under ShadPS4',
+    });
+    await expect($(testId(`sys-emu-kicker-${QT_KEY}`))).toHaveText(expect.stringMatching(/companion/i));
+    await expect($(testId(`sys-emu-name-${QT_KEY}`))).toHaveText(QT_LAUNCHER);
+    await expect($(testId(`sys-open-${QT_KEY}`))).toBeDisplayed();
+    await expect($(testId(`sys-more-${QT_KEY}`))).toBeDisplayed();
+    await expect($(testId(`sys-companion-install-${QT_KEY}`))).not.toExist();
+    // Never under Other emulators claiming no system uses it.
+    await expect($(testId(`sys-other-${keyOf(QT_LAUNCHER)}`))).not.toExist();
+  });
+
+  it('a Qt launcher update reads as an update for the PS4 row', async () => {
+    await fetch(`${forgeUrl()}/__e2e__/qtlauncher-release/updated`, { method: 'POST' });
+    await $(testId('systems-check-updates')).click();
+    await waitForStatus('ps4', 'update', TRANSITION_TIMEOUT * 2);
+    await $(testId(`sys-update-${QT_KEY}`)).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId(`sys-update-${QT_KEY}`))).toHaveText(expect.stringContaining('Update to'));
+    // ShadPS4 itself is current: only the launcher offers an update.
+    await expect($(testId(`sys-update-${keyOf(PS4)}`))).not.toExist();
   });
 
   it('opens the ⋯ menu beside its button near the bottom edge, and closes it on scroll', async () => {

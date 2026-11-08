@@ -1,0 +1,38 @@
+{
+  "505": {
+    "id": 505,
+    "name": "ps2",
+    "fs_name_no_ext": "ps2",
+    "platform_id": 5,
+    "platform_display_name": "Emulators",
+    "fs_name": "ps2",
+    "summary": "A server Emulators-platform folder packaged to docs/server-emulator-packages.md: PCSX2 builds for Linux (two versions) and Windows.",
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 5051,
+        "file_name": "PCSX2 (v1.6.0) (arch-linux-x64).zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      },
+      {
+        "id": 5052,
+        "file_name": "PCSX2 (v2.0.2) (arch-linux-x64).zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      },
+      {
+        "id": 5053,
+        "file_name": "PCSX2 (v2.0.2) (arch-windows-x64).zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  }
+}

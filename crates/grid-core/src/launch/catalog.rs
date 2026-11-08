@@ -19,9 +19,9 @@ use std::collections::HashSet;
 
 use serde_json::{Map, Value};
 
-use crate::config::Config;
+use crate::config::{Config, EmulatorEntry};
 
-use super::profiles::EmulatorProfile;
+use super::profiles::{profile_for_entry, EmulatorProfile};
 use super::source::HOST_PLATFORM;
 
 /// One row of the "install from catalog" listing.
@@ -290,10 +290,105 @@ pub fn find_compat_profile<'a>(
     find_profile_filtered(profiles, source_id, true)
 }
 
+/// One `companions` pairing as the installed entries stand: a profile that
+/// names a companion (`parent_profile`, e.g. "ShadPS4 (Playstation 4)") and
+/// that companion profile ("ShadPS4 Qt Launcher"), each with the installed
+/// entry that resolves to it, if any. Settings › Systems shows a companion
+/// as part of its parent's emulator line, and offers Install for a missing
+/// one through `companion_source_id`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CompanionLink {
+    pub parent_profile: String,
+    /// The installed entry that resolves to the parent profile, or `None`
+    /// when only the companion is installed.
+    pub parent_entry: Option<String>,
+    pub companion_profile: String,
+    /// The first installed entry that resolves to the companion profile.
+    pub companion_entry: Option<String>,
+    /// The companion's catalog `owner/repo` on this host, what
+    /// `install_emulator` takes; `None` when it has no catalog row here.
+    pub companion_source_id: Option<String>,
+}
+
+/// Whether `entry` is an install of `profile`: the profile it resolves to
+/// by [`profile_for_entry`] (name, then executable tokens) — the same match
+/// the autoconfig and launch code pair companions by — or, for an entry
+/// that resolves to no profile at all, the catalog `source_id` it was
+/// installed from.
+fn entry_is_profile(
+    entry: &EmulatorEntry,
+    profile: &EmulatorProfile,
+    profiles: &[EmulatorProfile],
+) -> bool {
+    if entry.name.trim().is_empty() {
+        return false;
+    }
+    match profile_for_entry(&entry.name, &entry.path, profiles) {
+        Some(resolved) => resolved.name == profile.name,
+        None => {
+            let source_id = entry.source_id.trim();
+            !source_id.is_empty()
+                && catalog_row(profile, HOST_PLATFORM)
+                    .is_some_and(|row| row.source_id.eq_ignore_ascii_case(source_id))
+        }
+    }
+}
+
+/// Every `companions` pairing at least one side of which is installed: one
+/// link per installed parent entry (each with the companion's entry, or
+/// `None` when it is missing), else one link with no parent entry when
+/// only the companion is installed. Profile order, then config order.
+/// Compat-tool profiles and a companion name that names no profile are
+/// skipped.
+pub fn companion_links(
+    emulators: &[EmulatorEntry],
+    profiles: &[EmulatorProfile],
+) -> Vec<CompanionLink> {
+    let mut links = Vec::new();
+    for parent in profiles
+        .iter()
+        .filter(|p| !p.is_compat_tool && !p.companions.is_empty())
+    {
+        for wanted in &parent.companions {
+            let Some(companion) = profiles
+                .iter()
+                .find(|p| !p.is_compat_tool && p.name == *wanted)
+            else {
+                continue;
+            };
+            let companion_entry = emulators
+                .iter()
+                .find(|e| entry_is_profile(e, companion, profiles))
+                .map(|e| e.name.clone());
+            let companion_source_id =
+                catalog_row(companion, HOST_PLATFORM).map(|row| row.source_id);
+            let link = |parent_entry: Option<String>| CompanionLink {
+                parent_profile: parent.name.clone(),
+                parent_entry,
+                companion_profile: companion.name.clone(),
+                companion_entry: companion_entry.clone(),
+                companion_source_id: companion_source_id.clone(),
+            };
+            let parents: Vec<&EmulatorEntry> = emulators
+                .iter()
+                .filter(|e| entry_is_profile(e, parent, profiles))
+                .collect();
+            if parents.is_empty() {
+                if companion_entry.is_some() {
+                    links.push(link(None));
+                }
+            } else {
+                links.extend(parents.into_iter().map(|e| link(Some(e.name.clone()))));
+            }
+        }
+    }
+    links
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{CompatToolInstall, EmulatorEntry};
+    use crate::config::CompatToolInstall;
     use crate::launch::profiles::load_profiles;
     use serde_json::json;
 
@@ -811,5 +906,110 @@ mod tests {
         let config = config_with_compat(vec![compat_install("Bar", "x/y")]);
         mark_compat_installed(&mut entries, &config);
         assert!(!entries[0].installed);
+    }
+
+    // --- companion_links ------------------------------------------------------
+
+    const SHADPS4: &str = "ShadPS4 (Playstation 4)";
+    const QT: &str = "ShadPS4 Qt Launcher";
+
+    fn installed(name: &str, path: &str, source_id: &str) -> EmulatorEntry {
+        EmulatorEntry {
+            path: path.to_string(),
+            ..emu(name, source_id)
+        }
+    }
+
+    #[test]
+    fn companion_links_pair_installed_shadps4_with_its_qt_launcher() {
+        let emulators = vec![
+            installed(
+                SHADPS4,
+                "/emu/shadps4/Shadps4-sdl.AppImage",
+                "shadps4-emu/shadPS4",
+            ),
+            installed(
+                QT,
+                "/emu/qt/shadPS4QtLauncher-qt.AppImage",
+                "shadps4-emu/shadps4-qtlauncher",
+            ),
+        ];
+        let links = companion_links(&emulators, load_profiles());
+        assert_eq!(
+            links,
+            vec![CompanionLink {
+                parent_profile: SHADPS4.into(),
+                parent_entry: Some(SHADPS4.into()),
+                companion_profile: QT.into(),
+                companion_entry: Some(QT.into()),
+                companion_source_id: Some("shadps4-emu/shadps4-qtlauncher".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn companion_links_resolve_renamed_entries_by_their_executables() {
+        // Neither name is a profile name: the executable tokens decide, and
+        // the launcher's `shadPS4QtLauncher` never reads as shadPS4 itself.
+        let emulators = vec![
+            installed("My launcher", "/emu/qt/shadPS4QtLauncher-qt.AppImage", ""),
+            installed("PS4", "/emu/shadps4/shadPS4", ""),
+        ];
+        let links = companion_links(&emulators, load_profiles());
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].parent_entry.as_deref(), Some("PS4"));
+        assert_eq!(links[0].companion_entry.as_deref(), Some("My launcher"));
+    }
+
+    #[test]
+    fn companion_links_report_a_missing_companion_with_its_install_source() {
+        let emulators = vec![installed(SHADPS4, "/emu/shadps4/shadPS4", "")];
+        let links = companion_links(&emulators, load_profiles());
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].companion_entry, None);
+        assert_eq!(
+            links[0].companion_source_id.as_deref(),
+            Some("shadps4-emu/shadps4-qtlauncher")
+        );
+    }
+
+    #[test]
+    fn companion_links_keep_a_lone_companion_without_a_parent_entry() {
+        let emulators = vec![installed(QT, "/emu/qt/shadPS4QtLauncher-qt.AppImage", "")];
+        let links = companion_links(&emulators, load_profiles());
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].parent_profile, SHADPS4);
+        assert_eq!(links[0].parent_entry, None);
+        assert_eq!(links[0].companion_entry.as_deref(), Some(QT));
+    }
+
+    #[test]
+    fn companion_links_are_empty_when_neither_side_is_installed() {
+        let emulators = vec![installed(
+            "PCSX2 (Playstation 2)",
+            "/emu/pcsx2.AppImage",
+            "",
+        )];
+        assert!(companion_links(&emulators, load_profiles()).is_empty());
+    }
+
+    #[test]
+    fn companion_links_fall_back_to_the_source_id_for_an_unmatched_entry() {
+        let mut parent = profile("Parent Emu", false, None);
+        parent.companions = vec!["Helper".into()];
+        let helper = profile(
+            "Helper",
+            false,
+            Some(json!({"provider": "github", "owner": "o", "repo": "helper"})),
+        );
+        let profiles = vec![parent, helper];
+        let emulators = vec![
+            installed("Parent Emu", "/x/parent", ""),
+            installed("Something else", "/x/unrelated", "o/helper"),
+        ];
+        let links = companion_links(&emulators, &profiles);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].companion_entry.as_deref(), Some("Something else"));
+        assert_eq!(links[0].companion_source_id.as_deref(), Some("o/helper"));
     }
 }

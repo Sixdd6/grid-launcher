@@ -11,6 +11,7 @@
 // use (`platformDefaultSelect`: the saved default, else the first
 // compatible one, never one after an explicit "(none)").
 import type {
+  CompanionLink,
   DownloadEntry,
   EmulatorEntry,
   LaunchDefaults,
@@ -228,10 +229,21 @@ export function alsoPlaysText(labels: readonly string[]): string {
   return labels.length === 0 ? '' : `Also plays ${labels.join(', ')}`;
 }
 
-/** Installed emulators no system uses: the "Other emulators" list. */
-export function otherEmulators(emulators: readonly EmulatorEntry[], rows: readonly SystemRow[]): EmulatorEntry[] {
+/** Installed emulators no system uses: the "Other emulators" list. A
+ *  companion whose parent is some system's emulator is shown under that
+ *  system's row instead, so it is never here. */
+export function otherEmulators(
+  emulators: readonly EmulatorEntry[],
+  rows: readonly SystemRow[],
+  links: readonly CompanionLink[] = [],
+): EmulatorEntry[] {
   const used = new Set(rows.map((r) => r.emulator).filter((n) => n !== ''));
-  return emulators.filter((e) => !used.has(e.name));
+  const shown = new Set(
+    links
+      .filter((l) => l.companion_entry !== null && l.parent_entry !== null && used.has(l.parent_entry))
+      .map((l) => l.companion_entry!),
+  );
+  return emulators.filter((e) => !used.has(e.name) && !shown.has(e.name));
 }
 
 /** The systems `name` could play, by label. */
@@ -239,11 +251,60 @@ export function canPlay(name: string, rows: readonly SystemRow[]): string[] {
   return rows.filter((r) => r.installed.includes(name)).map((r) => r.label);
 }
 
-/** The line under an emulator no system uses. */
-export function otherEmulatorNote(labels: readonly string[]): string {
+/** The line under an emulator no system uses. A companion says what it
+ *  belongs to (`companionOf`, from `companionParent`) instead. */
+export function otherEmulatorNote(labels: readonly string[], companionOf: string | null = null): string {
+  if (companionOf !== null) return `Companion to ${companionOf}.`;
   return labels.length === 0
     ? 'Not used by any system on your server.'
     : `Not used by any system. It can play ${labels.join(', ')}.`;
+}
+
+// --- Companions ----------------------------------------------------------------
+
+/** One companion under an emulator's line (ShadPS4's Qt launcher). */
+export type Companion = {
+  /** The companion's profile name: its label while it is not installed. */
+  profile: string;
+  /** Its installed entry, or `null` when it is missing. */
+  entry: string | null;
+  /** What Install takes; `null` when GRID can't install it here. */
+  sourceId: string | null;
+};
+
+/** The companions shown under `emulator`'s line, one per companion profile. */
+export function companionsOf(emulator: string, links: readonly CompanionLink[]): Companion[] {
+  if (emulator === '') return [];
+  const out: Companion[] = [];
+  for (const l of links) {
+    if (l.parent_entry !== emulator || out.some((c) => c.profile === l.companion_profile)) continue;
+    out.push({ profile: l.companion_profile, entry: l.companion_entry, sourceId: l.companion_source_id });
+  }
+  return out;
+}
+
+/** What an installed companion belongs to, for its Other emulators note:
+ *  its parent's installed entry, else the parent profile; `null` when
+ *  `name` is nobody's companion. */
+export function companionParent(name: string, links: readonly CompanionLink[]): string | null {
+  const link = links.find((l) => l.companion_entry === name);
+  return link ? (link.parent_entry ?? link.parent_profile) : null;
+}
+
+/** Whether a newer build is out for `emulator` or any installed companion
+ *  of it: either reads as "Update available" on the system's row. */
+export function updateAvailable(
+  emulator: string,
+  links: readonly CompanionLink[],
+  hasUpdate: (name: string) => boolean,
+): boolean {
+  if (emulator === '') return false;
+  return hasUpdate(emulator) || companionsOf(emulator, links).some((c) => c.entry !== null && hasUpdate(c.entry));
+}
+
+/** The line for a companion that is not installed. */
+export function missingCompanionText(companion: Pick<Companion, 'profile'>, emulator: string): string {
+  return `${companion.profile} is not installed. Installing or updating ${shortName(emulator)} adds it too.`;
 }
 
 /** The firmware status reads the Systems page needs: each system's own

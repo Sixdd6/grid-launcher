@@ -1,12 +1,14 @@
 <script lang="ts">
   // The emulator line of an open Systems row (or an Other emulators entry):
   // name, version, which other systems it plays, Update (only when one is
-  // out), Open, and the ⋯ button that opens its menu.
+  // out), Open, and the ⋯ button that opens its menu. A companion (ShadPS4's
+  // Qt launcher) uses the same line under its parent's, with a `kicker`.
   import Icon from '../Icon.svelte';
 
   let {
     name,
     testKey,
+    kicker = null,
     version,
     updateTo = null,
     note = '',
@@ -19,6 +21,9 @@
   }: {
     name: string;
     testKey: string;
+    /** A small label before the name ("Companion"), which also indents the
+     *  line under its parent's. */
+    kicker?: string | null;
     /** "v2.0.2 · up to date", or just the version when unchecked. */
     version: string;
     /** The newer version's label, when an update is out. */
@@ -36,8 +41,9 @@
   let moreEl = $state<HTMLElement | null>(null);
 </script>
 
-<div class="emu-line" data-testid={`sys-emu-${testKey}`}>
+<div class="emu-line" class:sub={kicker !== null} data-testid={`sys-emu-${testKey}`}>
   <span class="emu-text">
+    {#if kicker !== null}<span class="kicker" data-testid={`sys-emu-kicker-${testKey}`}>{kicker}</span>{/if}
     <b data-testid={`sys-emu-name-${testKey}`}>{name}</b>
     {#if version}<span class="muted-s" data-testid={`sys-emu-version-${testKey}`}>{version}</span>{/if}
     {#if note}<span class="muted-s" data-testid={`sys-emu-also-${testKey}`}>· {note}</span>{/if}
@@ -76,6 +82,20 @@
     display: flex;
     align-items: center;
     gap: 12px;
+  }
+
+  /* A companion: indented under its parent's line, joined by a rule. */
+  .emu-line.sub {
+    padding-left: 12px;
+    border-left: 2px solid var(--line);
+  }
+
+  .kicker {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-muted);
   }
 
   .emu-text {

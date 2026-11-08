@@ -103,11 +103,12 @@ STAGE_GROUPS=(
   # from the mock forge (PCSX2, Redream). Its own fixtures: PS2, Dreamcast, a
   # platform with no emulator (Zeebo) and one only RetroArch serves (SNES).
   "first-run-setup:specs/first-run-setup.spec.ts"
-  # Settings › Systems on a fresh profile: the first-run-setup fixtures and
-  # mock forge without the picker — row order, picker groups, one-click and
-  # Download-pick installs, None and Installed picks, the update check, the
-  # ⋯ menu near the bottom edge, two-click Remove, Install recommended (N)
-  # and a manual add that sets no default.
+  # Settings › Systems on a fresh profile: the first-run-setup fixtures plus
+  # PS4 (fixtures-systems) and mock forge without the picker — row order,
+  # picker groups, one-click and Download-pick installs, None and Installed
+  # picks, the update check, ShadPS4 with its Qt launcher companion, the ⋯
+  # menu near the bottom edge, two-click Remove, Install recommended (N) and
+  # a manual add that sets no default.
   "systems:specs/systems.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
@@ -479,7 +480,10 @@ mock_args_for_group() {
     # from e2e/fixtures so the shared set — and every assertion the other
     # groups and mock-romm/server.test.mjs make about it — stays untouched.
     emulator-catalog) printf -- '--fixtures-dir fixtures-emulator-catalog' ;;
-    first-run-setup|systems|settings-screens) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
+    first-run-setup|settings-screens) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
+    # The first-run-setup set plus a "Sony PlayStation 4", whose ShadPS4
+    # installs with its Qt launcher companion from the mock forge.
+    systems) printf -- '--fixtures-dir fixtures-systems' ;;
     discover) printf -- '--fixtures-dir fixtures-discover' ;;
     # An "Emulators" platform with one package (rom 801) that zips the mock
     # forge's PCSX2 AppImage stub, plus a PS2 platform for the defaults.

@@ -680,6 +680,19 @@ export type CompatTool = { name: string; kind: string; path: string; source: str
 /// "nothing to advise" answer — see `app/src-tauri/src/commands.rs`.
 export type EmulatorFacts = { eden_keys_present: boolean; eden_firmware_present: boolean };
 
+/// One `companions` pairing (grid-core `launch::catalog::CompanionLink`):
+/// a profile that names a companion (ShadPS4) and the companion (its Qt
+/// launcher), each with the installed entry that resolves to it, if any.
+/// `companion_source_id` is what `installEmulator` takes; `null` when the
+/// companion has no catalog row on this computer.
+export type CompanionLink = {
+  parent_profile: string;
+  parent_entry: string | null;
+  companion_profile: string;
+  companion_entry: string | null;
+  companion_source_id: string | null;
+};
+
 /// The umu-run a Proton launch would use (grid-core `launch::umu::UmuRunStatus`).
 /// `source` is `'system'` (on PATH), `'managed'` (GRID's own download, with
 /// its `release_tag`) or `'missing'`. `source_id` is the Downloads row
@@ -900,6 +913,7 @@ export const api = {
   listSessions: () => invoke<SessionsSnapshot>('list_sessions'),
   listEmulators: () => invoke<EmulatorEntry[]>('list_emulators'),
   emulatorFacts: (name: string) => invoke<EmulatorFacts>('emulator_facts', { name }),
+  emulatorCompanions: () => invoke<CompanionLink[]>('emulator_companions'),
   saveEmulator: (originalName: string, entry: EmulatorEntry) =>
     invoke<void>('save_emulator', { originalName, entry }),
   deleteEmulator: (name: string) => invoke<UninstallReport>('delete_emulator', { name }),
