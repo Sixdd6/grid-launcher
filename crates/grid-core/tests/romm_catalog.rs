@@ -201,3 +201,34 @@ async fn games_keep_paging_when_the_platform_grew() {
     let games = client(&server.uri()).games(7).await.unwrap();
     assert_eq!(games.len(), 410);
 }
+
+/// Server › Discover's page: newest first by the given field, with a limit,
+/// the platform filter repeated per id, and the side payloads turned off.
+#[tokio::test]
+async fn recent_games_asks_for_one_ordered_page() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/roms"))
+        .and(query_param("order_by", "first_release_date"))
+        .and(query_param("order_dir", "desc"))
+        .and(query_param("limit", "30"))
+        .and(query_param("platform_ids", "7"))
+        .and(query_param("with_rom_id_index", "false"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "items": [{
+                "id": 1, "name": "New", "platform_id": 7,
+                "created_at": "2026-11-06T07:42:09+00:00",
+                "metadatum": {"first_release_date": 1_762_000_000_000_i64}
+            }]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let games = client(&server.uri())
+        .recent_games("first_release_date", &[7], 30)
+        .await
+        .unwrap();
+    assert_eq!(games.len(), 1);
+    assert_eq!(games[0].first_release_date, Some(1_762_000_000));
+    assert_eq!(games[0].created_at, "2026-11-06T07:42:09+00:00");
+}

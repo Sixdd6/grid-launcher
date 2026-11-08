@@ -256,6 +256,7 @@ mod tests {
             fanart_urls: Vec::new(),
             platform_display_name: String::new(),
             genres: Vec::new(),
+            ..Default::default()
         }
     }
 

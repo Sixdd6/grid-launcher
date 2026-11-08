@@ -5,6 +5,7 @@
 pub mod background;
 pub mod cache;
 pub mod replenish;
+pub mod shade;
 pub mod sweep;
 pub mod urls;
 pub mod video;

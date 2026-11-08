@@ -619,6 +619,8 @@ pub fn run() {
             commands::disconnect,
             commands::list_platforms,
             commands::list_games,
+            commands::discover::discover_feed,
+            commands::discover::image_dominant_shade,
             commands::get_rom_detail,
             commands::get_achievements,
             commands::ensure_image,

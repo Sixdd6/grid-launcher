@@ -1,5 +1,6 @@
 pub mod achievements;
 mod cloud;
+pub mod discover;
 mod error;
 mod play_sessions;
 pub use achievements::{AchievementsView, RaUsernameSync};
@@ -325,7 +326,7 @@ pub struct FirmwareRecord {
     pub missing_from_fs: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, serde::Serialize)]
 pub struct GameSummary {
     pub id: i64,
     pub name: String,
@@ -355,6 +356,44 @@ pub struct GameSummary {
     /// empty — the provider blocks' genres (see `genres_from_payload`).
     #[serde(default)]
     pub genres: Vec<String>,
+    /// When the game reached the server (`created_at`), verbatim ISO 8601
+    /// (e.g. `2026-11-06T07:42:09+00:00`); `""` when the payload has none.
+    /// Server › Discover's Recently added sorts and dates by it.
+    #[serde(default)]
+    pub created_at: String,
+    /// The game's first release date in **seconds** since the epoch
+    /// (`metadatum.first_release_date`, which RomM sends in milliseconds; see
+    /// [`release_date_seconds`]). `None` when the server has no date.
+    #[serde(default)]
+    pub first_release_date: Option<i64>,
+    /// The game's clear logo (ScreenScraper's `ss_metadata.logo_path`, else
+    /// `logo_url`), resolved and host-filtered like the screenshot URLs;
+    /// `""` when the server has none on its own host.
+    #[serde(default)]
+    pub logo_url: String,
+}
+
+/// `metadatum.first_release_date` of a list payload, in seconds. Lenient: a
+/// missing block, a null or a non-number is `None`; a float is truncated.
+fn release_date_from_payload(payload: &serde_json::Value) -> Option<i64> {
+    let raw = payload.get("metadatum")?.get("first_release_date")?;
+    let value = raw.as_i64().or_else(|| raw.as_f64().map(|f| f as i64))?;
+    Some(release_date_seconds(value))
+}
+
+/// The game's clear logo: `ss_metadata.logo_path` (served from the server's
+/// own resources), else `ss_metadata.logo_url`, each through `resolver`. A
+/// URL on another host resolves to `""` and the next one is tried.
+fn logo_url_from_payload(payload: &serde_json::Value, resolver: &dyn Fn(&str) -> String) -> String {
+    let Some(block) = payload.get("ss_metadata") else {
+        return String::new();
+    };
+    ["logo_path", "logo_url"]
+        .iter()
+        .filter_map(|key| block.get(*key).and_then(|v| v.as_str()))
+        .map(resolver)
+        .find(|url| !url.is_empty())
+        .unwrap_or_default()
 }
 
 /// Genres of a `SimpleRomSchema` entry. RomM's merged `metadatum.genres` wins.
@@ -420,6 +459,8 @@ struct RawGameSummary {
     cover_large_path: Option<String>,
     #[serde(default)]
     platform_display_name: Option<String>,
+    #[serde(default)]
+    created_at: Option<String>,
     /// Every field not named above — the screenshot and fanart sources
     /// (`merged_screenshots`, `ss_metadata`, `gamelist_metadata`, …) and the
     /// genre sources (`metadatum`, provider blocks) are read from here,
@@ -451,6 +492,9 @@ impl RawGameSummary {
             fanart_urls: crate::images::urls::fanart_urls_from_payload(&extra, &resolver),
             platform_display_name: self.platform_display_name.unwrap_or_default(),
             genres: genres_from_payload(&extra),
+            created_at: self.created_at.unwrap_or_default(),
+            first_release_date: release_date_from_payload(&extra),
+            logo_url: logo_url_from_payload(&extra, &resolver),
         }
     }
 }
@@ -543,6 +587,38 @@ impl RommClient {
             ],
         )
         .await
+    }
+
+    /// One `/api/roms` page ordered by `order_by` (`created_at`,
+    /// `first_release_date`), newest first, at most `limit` games, limited to
+    /// `platform_ids` when any are given. Server › Discover's feed.
+    ///
+    /// The order is a hint only: RomM silently ignores an `order_by` it does
+    /// not know (200, default order), so callers sort and filter the result
+    /// themselves (`romm::discover`).
+    pub async fn recent_games(
+        &self,
+        order_by: &str,
+        platform_ids: &[i64],
+        limit: usize,
+    ) -> Result<Vec<GameSummary>, RommError> {
+        let mut query: Vec<(&str, String)> = vec![
+            ("order_by", order_by.to_string()),
+            ("order_dir", "desc".to_string()),
+            ("limit", limit.max(1).to_string()),
+            ("offset", "0".to_string()),
+            ("with_char_index", "false".to_string()),
+            ("with_filter_values", "false".to_string()),
+            ("with_rom_id_index", "false".to_string()),
+            ("with_total", "false".to_string()),
+        ];
+        query.extend(
+            platform_ids
+                .iter()
+                .map(|id| ("platform_ids", id.to_string())),
+        );
+        let page: Paged<RawGameSummary> = self.get_json("/api/roms", &query).await?;
+        Ok(self.summaries(page.items))
     }
 
     fn summaries(&self, items: Vec<RawGameSummary>) -> Vec<GameSummary> {
@@ -996,6 +1072,43 @@ mod summary_tests {
         assert!(summary.screenshot_urls.is_empty());
         assert!(summary.fanart_urls.is_empty());
         assert_eq!(summary.cover_large_path, None);
+    }
+
+    #[test]
+    fn a_summary_carries_created_at_release_seconds_and_logo() {
+        let summary = parse(serde_json::json!({
+            "id": 104,
+            "name": "Doom",
+            "platform_id": 5,
+            "created_at": "2026-11-06T07:42:09+00:00",
+            "metadatum": { "first_release_date": 755_222_400_000_i64 },
+            "ss_metadata": {
+                "logo_path": "roms/104/logo.png",
+                "logo_url": "https://www.screenscraper.fr/logo.png"
+            }
+        }));
+        assert_eq!(summary.created_at, "2026-11-06T07:42:09+00:00");
+        assert_eq!(summary.first_release_date, Some(755_222_400));
+        assert_eq!(
+            summary.logo_url,
+            "https://romm.example/assets/romm/resources/roms/104/logo.png"
+        );
+    }
+
+    /// Only an off-host `logo_url` is offered: the host filter drops it, so
+    /// the game has no logo rather than one `ensure_image` would refuse.
+    #[test]
+    fn an_off_host_logo_is_dropped_and_missing_fields_are_empty() {
+        let summary = parse(serde_json::json!({
+            "id": 105,
+            "name": "Quake",
+            "platform_id": 5,
+            "metadatum": { "first_release_date": null },
+            "ss_metadata": { "logo_url": "https://www.screenscraper.fr/logo.png" }
+        }));
+        assert_eq!(summary.logo_url, "");
+        assert_eq!(summary.first_release_date, None);
+        assert_eq!(summary.created_at, "");
     }
 
     #[test]

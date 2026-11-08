@@ -1,4 +1,5 @@
 pub mod cloud;
+pub mod discover;
 pub mod library_move;
 pub mod library_path;
 pub mod logging;
