@@ -1,5 +1,5 @@
   /* Fresh startup (Connect, Choose your systems) and the setup card */
-  .fresh { position: absolute; inset: 0; z-index: 40; background: var(--bg); overflow-y: auto; display: flex; justify-content: center; }
+  .fresh { position: absolute; inset: 0; z-index: 100; background: var(--bg); overflow-y: auto; display: flex; justify-content: center; }
   .fresh[hidden] { display: none; }
   .fr-card { width: min(360px, 100%); margin: auto; padding: 32px 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; }
   .fr-card.wide { width: min(720px, 100%); }

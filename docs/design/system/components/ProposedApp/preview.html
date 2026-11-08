@@ -217,7 +217,7 @@
   @media (prefers-reduced-motion: reduce) { .shead, .shead * { transition: none !important; } }
 
   /* Fresh startup (Connect, Choose your systems) and the setup card */
-  .fresh { position: absolute; inset: 0; z-index: 40; background: var(--bg); overflow-y: auto; display: flex; justify-content: center; }
+  .fresh { position: absolute; inset: 0; z-index: 100; background: var(--bg); overflow-y: auto; display: flex; justify-content: center; }
   .fresh[hidden] { display: none; }
   .fr-card { width: min(360px, 100%); margin: auto; padding: 32px 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; }
   .fr-card.wide { width: min(720px, 100%); }
@@ -273,7 +273,9 @@
 
   /* New releases: a coverflow. Centre cover flat and lit; neighbours tilt
      52° back, recede and dim; a soft reflection under each. */
-  .cf { position: relative; height: 330px; outline: none; border-radius: var(--r-row); }
+  /* isolation: the covers' and arrows' z-index rank only inside the coverflow,
+     never against the app's overlays. */
+  .cf { position: relative; height: 330px; outline: none; border-radius: var(--r-row); isolation: isolate; }
   .cf:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .cf-stage { position: absolute; inset: 0; perspective: 1100px; overflow: hidden; }
   .cf-item { position: absolute; left: 50%; top: 14px; width: 200px; margin-left: -100px; cursor: pointer; transform-style: preserve-3d;
