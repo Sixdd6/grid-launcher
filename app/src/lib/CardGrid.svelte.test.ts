@@ -18,7 +18,7 @@ const card = createRawSnippet((item: () => Item, index: () => number) => ({
 function grid(count: number): string {
   const items = Array.from({ length: count }, (_, i) => ({ id: 100 + i }));
   return render(CardGrid<Item>, {
-    props: { items, key: (item: Item) => item.id, cover: () => null, card, size: 'medium', labels: 'always', display: 'rows', gridId: 'test-grid' },
+    props: { items, key: (item: Item) => item.id, cover: () => ({ small: null, large: null }), card, size: 'medium', labels: 'always', display: 'rows', gridId: 'test-grid' },
   }).body;
 }
 

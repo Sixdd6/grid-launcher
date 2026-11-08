@@ -7,6 +7,9 @@
   import { ACTION_BAR_HEIGHT_PX, LABEL_GAP_PX, LABEL_HEIGHT_PX, labelRowPx } from './cards/size';
   import type { Rect } from './cards/layout';
   import { recordShape } from './stores/coverShapes.svelte';
+  import { pixelRatio } from './stores/pixelRatio.svelte';
+  import { imagePaths } from './imageLoad';
+  import { coverFallback, pickCover, type CoverPair } from './cards/cover';
 
   let {
     testId,
@@ -14,7 +17,7 @@
     badgeId,
     title,
     platform,
-    coverUrl,
+    cover,
     installed,
     missing = false,
     updateLabel,
@@ -37,7 +40,9 @@
     badgeId: string | number;
     title: string;
     platform: string;
-    coverUrl: string | null;
+    /** Both of the game's covers: the card shows the one its drawn size
+     *  needs (`cards/cover.ts`). */
+    cover: CoverPair;
     installed: boolean;
     /** 9c: an installed game whose files are not on disk (Library only). */
     missing?: boolean;
@@ -60,6 +65,14 @@
     onHoverStart: () => void;
     onHoverEnd: () => void;
   } = $props();
+
+  /** The cover this card's drawn width needs. */
+  let chosen = $derived(
+    pickCover(cover, rect.w, pixelRatio.current, cover.large !== null && imagePaths.get(cover.large) !== undefined)
+  );
+  /** A cover that failed to load: the card falls back to the other size. */
+  let failed = $state<string | null>(null);
+  let coverUrl = $derived(failed !== null && failed === chosen ? coverFallback(cover, chosen) : chosen);
 
   let badges = $derived(cardBadges({ platform, installed, updateLabel, cloudPlatforms }));
 
@@ -92,7 +105,15 @@
   style="--x: {rect.x}px; --y: {rect.y}px; --w: {rect.w}px; --cover-h: {rect.h}px; --card-h: {rect.h + labelRowPx(labels)}px; --label-h: {LABEL_HEIGHT_PX}px; --label-gap: {LABEL_GAP_PX}px; --bar-h: {ACTION_BAR_HEIGHT_PX}px"
 >
     <div class="cover">
-      <Image url={coverUrl} alt={title} placeholder="No cover" onmeasure={(w, h) => recordShape(coverUrl, w, h)} />
+      <Image
+        url={coverUrl}
+        alt={title}
+        placeholder="No cover"
+        onerror={() => {
+          if (coverUrl === chosen) failed = chosen;
+        }}
+        onmeasure={(w, h) => recordShape(coverUrl, w, h)}
+      />
 
       <!-- Top-left tags stack in one column so MISSING and UPDATE never cover
            each other (a missing game can still have a newer server version). -->

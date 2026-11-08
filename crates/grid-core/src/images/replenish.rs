@@ -1,7 +1,7 @@
 //! Replenish (doc 07 "Replenishment of missing covers", D6): after a
 //! successful connect, back-fill image fields for rows that lack them and
-//! fetch missing small-cover files. Sequential, never fails; errors skip
-//! the item.
+//! fetch missing grid-cover files (the large cover, else the small one: see
+//! [`grid_cover_url`]). Sequential, never fails; errors skip the item.
 
 use super::background::{background_variant_ext, ensure_background_variant};
 use super::cache::{image_key, ImageCache};
@@ -43,11 +43,19 @@ pub struct ReplenishReport {
     pub skipped: usize,
 }
 
-fn small_cover_url(row: &InstalledGame, base_url: &str) -> String {
-    filter_to_server_host(
-        &resolve_image_url(&row.cover_small_path, base_url),
-        base_url,
-    )
+/// The cover the Library grid shows for a row: the large one, else the
+/// small one when the server has no large cover (or it is on another host).
+/// The grid draws its cards wider than RomM's ~200px small cover on any HiDPI
+/// display, and for wide art at any size (`app/src/lib/cards/cover.ts`), so
+/// the large cover is the one worth having on disk. A narrow card on a 1x
+/// display shows the small cover, and the grid fetches that on demand:
+/// fetching both sizes for every row would double the pass.
+pub fn grid_cover_url(cover_small_path: &str, cover_large_path: &str, base_url: &str) -> String {
+    let large = filter_to_server_host(&resolve_image_url(cover_large_path, base_url), base_url);
+    if !large.is_empty() {
+        return large;
+    }
+    filter_to_server_host(&resolve_image_url(cover_small_path, base_url), base_url)
 }
 
 /// The URL the background art would show for `row`: its first fanart, else
@@ -118,7 +126,7 @@ pub fn plan(
             items.push(ReplenishItem::NeedsFields { rom_id });
             continue;
         }
-        let url = small_cover_url(row, base_url);
+        let url = grid_cover_url(&row.cover_small_path, &row.cover_large_path, base_url);
         if !url.is_empty() && cache.find_existing(&image_key(&url)).is_none() {
             items.push(ReplenishItem::NeedsFile { rom_id, url });
         }
@@ -174,10 +182,8 @@ pub async fn run(
                         continue;
                     }
                 }
-                let url = filter_to_server_host(
-                    &resolve_image_url(&fields.cover_small_path, base_url),
-                    base_url,
-                );
+                let url =
+                    grid_cover_url(&fields.cover_small_path, &fields.cover_large_path, base_url);
                 if !url.is_empty() {
                     match cache.ensure(Some(client), &url).await {
                         Ok(_) => report.fetched_files += 1,

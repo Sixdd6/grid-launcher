@@ -47,8 +47,8 @@ async fn plan_classifies_rows() {
     let dir = tempfile::tempdir().unwrap();
     let cache = ImageCache::new(dir.path().to_path_buf());
     let base = "https://h";
-    // rom 3 already has its file on disk
-    let key = image_key("https://h/assets/3.png");
+    // rom 3 already has its grid cover (the large one) on disk
+    let key = image_key("https://h/assets/3l.png");
     std::fs::write(dir.path().join(format!("{key}.png")), b"\x89PNG\r\n\x1a\n").unwrap();
     let rows = vec![
         row(Some(1), "", "", ""),
@@ -56,6 +56,8 @@ async fn plan_classifies_rows() {
         row(Some(3), "/assets/3.png", "/assets/3l.png", ""),
         row(None, "", "", ""),
         row(Some(5), "https://other/5.png", "", ""), // foreign host: no fetch target
+        // a large cover on a foreign host: the small one is the grid cover
+        row(Some(6), "/assets/6.png", "https://other/6l.png", ""),
     ];
     assert_eq!(
         plan(&rows, &cache, base, 12),
@@ -64,6 +66,10 @@ async fn plan_classifies_rows() {
             ReplenishItem::NeedsFile {
                 rom_id: 2,
                 url: "https://h/assets/2.png".into()
+            },
+            ReplenishItem::NeedsFile {
+                rom_id: 6,
+                url: "https://h/assets/6.png".into()
             },
             // rom 3 is the only row with a background source (its large
             // cover), and variants are planned after every other item.
@@ -99,15 +105,15 @@ async fn plan_puts_variants_last_and_prefers_fanart_then_screenshots() {
         vec![
             ReplenishItem::NeedsFile {
                 rom_id: 1,
-                url: "https://h/assets/1.png".into()
+                url: "https://h/assets/1l.png".into()
             },
             ReplenishItem::NeedsFile {
                 rom_id: 2,
-                url: "https://h/assets/2.png".into()
+                url: "https://h/assets/2l.png".into()
             },
             ReplenishItem::NeedsFile {
                 rom_id: 3,
-                url: "https://h/assets/3.png".into()
+                url: "https://h/assets/3l.png".into()
             },
             ReplenishItem::NeedsVariant {
                 rom_id: 1,
@@ -131,9 +137,8 @@ async fn plan_skips_a_row_whose_variant_already_exists() {
     let dir = tempfile::tempdir().unwrap();
     let cache = ImageCache::new(dir.path().to_path_buf());
     let base = "https://h";
-    let small = image_key("https://h/assets/4.png");
-    std::fs::write(dir.path().join(format!("{small}.png")), PNG_MAGIC).unwrap();
     let large = image_key("https://h/assets/4l.png");
+    std::fs::write(dir.path().join(format!("{large}.png")), PNG_MAGIC).unwrap();
     std::fs::write(dir.path().join(format!("{large}.bg12.jpg")), b"jpeg").unwrap();
 
     assert_eq!(
@@ -160,7 +165,7 @@ async fn run_backfills_fields_fetches_files_and_counts_skips() {
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path("/assets/1.png"))
+        .and(path("/assets/1l.png"))
         .respond_with(ResponseTemplate::new(200).set_body_bytes(PNG_MAGIC))
         .mount(&server)
         .await;
@@ -203,8 +208,9 @@ async fn run_backfills_fields_fetches_files_and_counts_skips() {
         r1.screenshot_urls,
         format!("{}/assets/roms/1/screenshots/a.png", server.uri())
     );
+    // The backfilled row's grid cover is its large one.
     assert!(cache
-        .find_existing(&image_key(&format!("{}/assets/1.png", server.uri())))
+        .find_existing(&image_key(&format!("{}/assets/1l.png", server.uri())))
         .is_some());
 }
 
@@ -328,9 +334,8 @@ async fn plan_still_needs_a_variant_when_only_another_sigma_is_on_disk() {
     let dir = tempfile::tempdir().unwrap();
     let cache = ImageCache::new(dir.path().to_path_buf());
     let base = "https://h";
-    let small = image_key("https://h/assets/9.png");
-    std::fs::write(dir.path().join(format!("{small}.png")), PNG_MAGIC).unwrap();
     let large = image_key("https://h/assets/9l.png");
+    std::fs::write(dir.path().join(format!("{large}.png")), PNG_MAGIC).unwrap();
     std::fs::write(dir.path().join(format!("{large}.bg20.jpg")), b"jpeg").unwrap();
 
     assert_eq!(
@@ -393,7 +398,7 @@ async fn plan_leaves_a_row_at_the_current_images_version() {
         vec![
             ReplenishItem::NeedsFile {
                 rom_id: 2,
-                url: "https://h/assets/2.png".into()
+                url: "https://h/assets/2l.png".into()
             },
             ReplenishItem::NeedsVariant {
                 rom_id: 2,
@@ -425,7 +430,7 @@ async fn plan_leaves_a_stamped_row_on_a_server_served_under_a_sub_path() {
         vec![
             ReplenishItem::NeedsFile {
                 rom_id: 3,
-                url: "https://h/romm/assets/3.png".into()
+                url: "https://h/romm/assets/3l.png".into()
             },
             ReplenishItem::NeedsVariant {
                 rom_id: 3,

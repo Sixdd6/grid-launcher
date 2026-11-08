@@ -123,7 +123,8 @@
 {#if status === 'ready' && src}
   <!-- A decode failure drops back to the placeholder before telling the
        caller: without clearing `src` first, a caller that passes no
-       `onerror` (the Library and Server cards) is left with the browser's
+       `onerror`, or one whose fallback also fails (the Library and Server
+       cards try the other cover size), is left with the browser's
        broken-image glyph in the card. -->
   <!-- Eager, not lazy: with `loading="lazy"` every cover was fetched and
        decoded as it scrolled in, and the FIRST scroll through a freshly

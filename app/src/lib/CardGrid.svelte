@@ -15,6 +15,7 @@
     type Rect,
   } from './cards/layout';
   import { shapeOf } from './stores/coverShapes.svelte';
+  import type { CoverPair } from './cards/cover';
   import { scrollParent } from './visibleWarm';
 
   let {
@@ -30,8 +31,10 @@
     /** The view's whole list. Only the cards near the visible part render. */
     items: readonly T[];
     key: (item: T) => string | number;
-    /** The item's cover URL: its shape decides the card's size. */
-    cover: (item: T) => string | null;
+    /** The item's covers: their shape decides the card's size. Both sizes
+     *  of one cover have the same shape, and the card may show either
+     *  (`cards/cover.ts`), so whichever has been seen is used. */
+    cover: (item: T) => CoverPair;
     /** One card, given its item, its index in `items`, and its cover's
      *  rectangle (`cards/layout.ts`). The card positions itself by it. */
     card: Snippet<[T, number, Rect]>;
@@ -60,7 +63,12 @@
   let band = $state.raw<{ top: number; bottom: number } | null>(null);
 
   let labelRow = $derived(labelRowPx(labels));
-  let shapes = $derived(items.map((item) => shapeOf(cover(item))));
+  let shapes = $derived(
+    items.map((item) => {
+      const pair = cover(item);
+      return shapeOf(pair.large) ?? shapeOf(pair.small);
+    })
+  );
   let layout: Layout = $derived.by(() => {
     const w = width ?? FALLBACK_WIDTH;
     return display === 'columns'

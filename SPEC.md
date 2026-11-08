@@ -334,6 +334,10 @@ There are several main sections to the application with buttons across the top b
   top-right, an `UPDATE` tag top-left, a cloud icon bottom-right when the platform has
   cloud sync configured, and, in the Library only (the one grid that mixes platforms), a
   short platform name bottom-left. The details sub view shows the whole cover too.
+  A card shows the server's large cover, falling back to the small one when there is no
+  large one or it fails to load. Only a card drawn at most 200 device pixels wide (a
+  portrait Small or Medium card on a 1x display) shows the small cover, which is about
+  that wide.
   `Ctrl+F` focuses the current view's search box.
 
 ## Emulator Configuration

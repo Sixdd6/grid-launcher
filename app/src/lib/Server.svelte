@@ -14,6 +14,7 @@
   import UmuInstallOffer from './UmuInstallOffer.svelte';
   import { isUmuMissing } from './launchError';
   import GameCard from './GameCard.svelte';
+  import { coverPair } from './cards/cover';
   import CardGrid from './CardGrid.svelte';
   import FoldingHeader from './FoldingHeader.svelte';
   import Discover from './discover/Discover.svelte';
@@ -643,7 +644,7 @@
             gridId="server-grid"
             labels={uiSettings.cardLabels}
             display={uiSettings.cardDisplay}
-            cover={(game) => game.path_cover_small}
+            cover={(game) => coverPair(game.path_cover_small, game.path_cover_large)}
             size={uiSettings.cardSizeServer}
             items={visible}
             key={(game) => game.id}
@@ -655,7 +656,7 @@
                 badgeId={game.id}
                 title={game.name}
                 platform={activePlatformName}
-                coverUrl={game.path_cover_small}
+                cover={coverPair(game.path_cover_small, game.path_cover_large)}
                 installed={isInstalled(game, activePlatformName)}
                 updateLabel={updates.labelFor(game.id)}
                 {cloudPlatforms}

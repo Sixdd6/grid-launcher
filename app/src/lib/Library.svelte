@@ -16,6 +16,7 @@
   import { fromInstalled, type DetailsSubject } from './details/subject';
   import type { CloudMode } from './details/cloud';
   import GameCard from './GameCard.svelte';
+  import { coverPair } from './cards/cover';
   import CardGrid from './CardGrid.svelte';
   import FoldingHeader from './FoldingHeader.svelte';
   import { gameCountLine, librarySearchPlaceholder } from './views/fold';
@@ -400,7 +401,7 @@
         gridId="library-grid"
         labels={uiSettings.cardLabels}
         display={uiSettings.cardDisplay}
-        cover={(row) => row.cover_small_path || null}
+        cover={(row) => coverPair(row.cover_small_path, row.cover_large_path)}
         size={uiSettings.cardSizeLibrary}
         items={rows}
         key={installedKey}
@@ -412,7 +413,7 @@
             badgeId={row.rom_id ?? `x-${i}`}
             title={row.title}
             platform={row.platform}
-            coverUrl={row.cover_small_path || null}
+            cover={coverPair(row.cover_small_path, row.cover_large_path)}
             installed={true}
             missing={isMissing(row)}
             updateLabel={updates.labelFor(row.rom_id)}

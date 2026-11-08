@@ -12,7 +12,7 @@ function card(missing: boolean | undefined) {
       badgeId: 7,
       title: 'Mario',
       platform: 'SNES',
-      coverUrl: null,
+      cover: { small: null, large: null },
       installed: true,
       ...(missing === undefined ? {} : { missing }),
       updateLabel: null,

@@ -30,7 +30,7 @@ async function waitForLoadedImage(selector: string, timeout: number, label: stri
  * seeded rom 102 row (migrated v1 -> v2 on this same open, with empty image
  * columns until now) get replenished: `retry_connect` only spawns the
  * replenish job on a SUCCESSFUL retry, which fetches rom 102's detail and
- * its small cover.
+ * its grid cover (the large one, else — as for rom 102 — the small one).
  */
 describe('images (b): offline startup, cached cover, retry, replenish', () => {
   before(async () => {
@@ -109,7 +109,7 @@ describe('images (b): offline startup, cached cover, retry, replenish', () => {
     // The migrated-then-replenished seeded row (rom 102): its cover only
     // appears once the post-retry replenish job has fetched rom 102's
     // detail (finding empty image columns from the v1->v2 migration) and
-    // then its small cover file — a detail fetch plus a cover fetch, so
+    // then its cover file (rom 102 has only a small one) — a detail fetch plus a cover fetch, so
     // this gets the more generous install-scale timeout.
     await waitForLoadedImage(
       `${testId('library-card-102')} img:not(.backdrop)`,
