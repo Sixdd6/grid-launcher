@@ -1,4 +1,4 @@
-// Pure helpers for the Emulators panel's RetroAchievements block
+// Pure helpers for Settings › RetroAchievements
 // (task-12-brief.md). No store/API imports here so this stays trivially
 // unit-testable.
 import type { RaFanOutRow, RaStatus, RaUsernameSync } from '../api';

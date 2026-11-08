@@ -80,14 +80,19 @@ describe('library and server chrome', () => {
     await expect($(testId('server-emulator-chip'))).toBeDisplayed();
   });
 
-  it('routes the default-emulator chip to Emulators › Platform defaults (design §6)', async () => {
+  it('routes the default-emulator chip to the system’s row in Settings › Systems', async () => {
     await $(testId('server-emulator-chip')).click();
-    await $(testId('emulators-view')).waitForDisplayed({
+    await $(testId('settings-page-systems')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the emulators view never opened from the chip',
+      timeoutMsg: 'Settings › Systems never opened from the chip',
     });
-    await expect($(testId('emu-page-defaults'))).toBeDisplayed();
-    await expect($(testId('default-select-1'))).toBeDisplayed();
+    // Opened on platform 1's row (SNES), its picker in view.
+    await $(testId('sys-pick-snes')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await browser.waitUntil(
+      async () => ((await $(testId('sys-row-snes')).getAttribute('class')) ?? '').split(/\s+/).includes('open'),
+      { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the chip did not open the SNES row' },
+    );
+    await expect($(testId('sys-row-snes'))).toBeDisplayedInViewport();
 
     await $(testId('nav-server')).click();
     await $(testId('server-view')).waitForDisplayed({
@@ -161,6 +166,29 @@ describe('library and server chrome', () => {
       () => document.activeElement?.getAttribute('data-testid') ?? '',
     );
     expect(libraryFocused).toBe('library-search');
+  });
+
+  it('Ctrl+1..4 switch between the four views, and there is no fifth', async () => {
+    const views = await browser.execute(() =>
+      Array.from(document.querySelectorAll('[data-testid="shell-topbar"] nav [data-testid^="nav-"]')).map(
+        (b) => (b as HTMLElement).dataset.testid,
+      ),
+    );
+    expect(views).toEqual(['nav-library', 'nav-server', 'nav-downloads', 'nav-settings']);
+    // Focus off any text field: the accelerators stand aside for one.
+    await browser.execute(() => (document.activeElement as HTMLElement | null)?.blur());
+    const shown = async (view: string) => $(testId(`${view}-view`)).isDisplayed();
+    await browser.keys(['Control', '4']);
+    await browser.waitUntil(() => shown('settings'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Ctrl+4 never opened Settings' });
+    await browser.keys(['Control', '3']);
+    await browser.waitUntil(() => shown('downloads'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Ctrl+3 never opened Downloads' });
+    await browser.keys(['Control', '5']);
+    await browser.pause(300);
+    expect(await shown('downloads')).toBe(true);
+    await browser.keys(['Control', '2']);
+    await browser.waitUntil(() => shown('server'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Ctrl+2 never opened Server' });
+    await browser.keys(['Control', '1']);
+    await browser.waitUntil(() => shown('library'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Ctrl+1 never opened Library' });
   });
 
   it('shows the Library rail with its three fixed entries and their counts', async () => {

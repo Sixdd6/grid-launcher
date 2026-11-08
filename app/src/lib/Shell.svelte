@@ -3,7 +3,6 @@
   import Server from './Server.svelte';
   import Downloads from './Downloads.svelte';
   import DownloadsFooter from './DownloadsFooter.svelte';
-  import Emulators from './Emulators.svelte';
   import BackgroundArt from './BackgroundArt.svelte';
   import Icon from './Icon.svelte';
   import Settings from './Settings.svelte';
@@ -33,11 +32,10 @@
 
   // Set once when the shell first mounts (R2): Server when the restored/just
   // -connected session is online, Library when it came up offline. Switching
-  // views afterward is a user action — a pill, Ctrl+1..5, or `show()`.
+  // views afterward is a user action — a pill, Ctrl+1..4, or `show()`.
   let view = $state<View>(initialView(session.connected));
 
   let settings = $state<ReturnType<typeof Settings> | null>(null);
-  let emulators = $state<ReturnType<typeof Emulators> | null>(null);
   let serverMenuOpen = $state(false);
   let sessionEl = $state<HTMLElement | null>(null);
 
@@ -46,7 +44,7 @@
     view = next;
   }
 
-  // Ctrl+1..5 (design §3). Alt/Shift are excluded so this never steals a
+  // Ctrl+1..4 (design §3). Alt/Shift are excluded so this never steals a
   // window-manager or text-editing chord; Meta is accepted alongside Ctrl so
   // the same accelerator works on macOS.
   function onKeydown(e: KeyboardEvent) {
@@ -124,8 +122,8 @@
     };
   });
 
-  // Emulator install/update notices, app-lifetime and shared by Settings ›
-  // Systems and the Emulators view, so each toasts once.
+  // Emulator install/update notices, app-lifetime rather than tied to
+  // Settings › Systems being open, so each toasts once.
   $effect(() => initEmulatorEvents());
 
   // G1-Q: the pre-launch restore skipped save folders it could not match to
@@ -228,7 +226,7 @@
   <p data-testid="session-error" class="error-line">{session.lastError}</p>
 {/if}
 
-<!-- All five views stay mounted and switch with `hidden` (design §3), so
+<!-- All four views stay mounted and switch with `hidden` (design §3), so
      selections and in-flight fetches survive a switch. Scroll offsets do
      not: each view scrolls inside its own container, and a `display: none`
      subtree drops its scroll position. -->
@@ -238,19 +236,16 @@
 <div data-testid="server-view" class="view" hidden={view !== 'server'}>
   <Server
     active={view === 'server'}
-    onOpenEmulators={(page) => {
-      // Design §6: the default-emulator chip links to Emulators › Platform
-      // defaults, the firmware chip to Installed, where firmware installs.
-      view = 'emulators';
-      emulators?.show(page);
+    onOpenSystems={(system) => {
+      // The emulator and firmware chips open Settings › Systems on the
+      // platform's row, opened (ProposedApp README).
+      view = 'settings';
+      settings?.show('systems', { system });
     }}
   />
 </div>
 <div data-testid="downloads-view" class="view scrolls" hidden={view !== 'downloads'}>
   <Downloads />
-</div>
-<div class="view" hidden={view !== 'emulators'}>
-  <Emulators active={view === 'emulators'} bind:this={emulators} />
 </div>
 <div data-testid="settings-view" class="view" hidden={view !== 'settings'}>
   <Settings active={view === 'settings'} bind:this={settings} />

@@ -92,7 +92,7 @@ pub struct EmulatorProfile {
     /// `ProfileSummary` shape must not change.
     #[serde(skip_serializing)]
     pub user_data: Vec<String>,
-    /// The emulator's own launcher app, which the Emulators panel opens in
+    /// The emulator's own launcher app, which Settings › Systems opens in
     /// place of the emulator binary (game launches never read it).
     /// `skip_serializing` for the same reason as `companions`: the IPC
     /// `ProfileSummary` shape must not change.

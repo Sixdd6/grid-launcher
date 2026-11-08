@@ -6,7 +6,6 @@ import {
   firmwareFinishedToast,
   firmwareKey,
   firmwareStartedToast,
-  firmwareRequests,
   type EmulatorFirmwareRow,
 } from './firmware';
 
@@ -36,23 +35,6 @@ const defaults: LaunchDefaults = {
   retroarch_cores: {},
   launch_args: '',
 };
-
-describe('firmwareRequests', () => {
-  it('pairs each emulator with every platform it supports', () => {
-    expect(
-      firmwareRequests(platforms, compatible, ['DuckStation', 'RetroArch', 'Xemu (Xbox)']).map((r) => r.key)
-    ).toEqual([firmwareKey('DuckStation', 1), firmwareKey('RetroArch', 1), firmwareKey('Xemu (Xbox)', 3)]);
-  });
-
-  it('never asks for the Emulators shelf or a native platform', () => {
-    const ids = firmwareRequests(platforms, compatible, ['Xemu (Xbox)']).map((r) => r.platform.id);
-    expect(ids).toEqual([3]);
-  });
-
-  it('is empty before compatibility loads', () => {
-    expect(firmwareRequests(platforms, {}, ['DuckStation'])).toEqual([]);
-  });
-});
 
 describe('emulatorFirmwareRows', () => {
   const status = (file_count: number, installed = false, available = true) => ({

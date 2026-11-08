@@ -20,7 +20,6 @@
   import RailPane, { type RailPaneEntry } from './RailPane.svelte';
   import { fromSummary } from './details/subject';
   import type { CloudMode } from './details/cloud';
-  import type { EmulatorPage } from './emulators/pages';
   import { moveFocus, type NavDirection } from './focus/grid';
   import { isInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
   import { updates } from './stores/updates.svelte';
@@ -39,7 +38,7 @@
   import {
     emulatorChipLabel,
     firmwareChipLabel,
-    firmwareChipTarget,
+    firmwareChipLinks,
     platformCountsLine,
     showsChips,
     type FirmwareChipState,
@@ -51,8 +50,13 @@
 
   let {
     active,
-    onOpenEmulators = () => {},
-  }: { active: boolean; onOpenEmulators?: (page: EmulatorPage) => void } = $props();
+    onOpenSystems = () => {},
+  }: {
+    active: boolean;
+    /** The emulator and firmware chips open Settings › Systems on this
+     *  platform's row (its display label, the key its default is stored under). */
+    onOpenSystems?: (system: string) => void;
+  } = $props();
 
   let platforms = $state<Platform[]>([]);
   // `$state.raw`: a platform can hold thousands of games and the list is only
@@ -78,10 +82,9 @@
   // Platform name -> default emulator name, for the header's emulator chip.
   let defaultEmulators = $state<Record<string, string>>({});
   let firmware = $state<FirmwareChipState>(null);
-  // Where the firmware chip leads: Emulators › Installed, where firmware is
-  // installed (user ruling 2026-10-30), or Platform defaults when the
-  // platform has no default emulator to install it for.
-  let firmwareTarget = $derived(firmwareChipTarget(firmware));
+  // The firmware chip is a link (to the platform's row in Settings ›
+  // Systems, where firmware installs) only when the server has firmware.
+  let firmwareLinks = $derived(firmwareChipLinks(firmware));
   // The game list belongs to the previous platform until `listGames`
   // answers. The counts line and the empty message would both state
   // something false about the new platform in that gap, so neither renders.
@@ -133,7 +136,7 @@
     loadLaunchDefaults();
   });
 
-  // The emulator chip sends the user to the Emulators view to change the very
+  // The emulator chip sends the user to Settings › Systems to change the very
   // mapping it displays, so re-read the defaults every time this view comes
   // back to the front. The cloud badges derive from the same call.
   $effect(() => {
@@ -185,7 +188,7 @@
       });
   }
 
-  // A firmware install started from Emulators announces its end; the chip
+  // A firmware install started from Settings › Systems announces its end; the chip
   // re-reads the platform on screen.
   $effect(() => {
     let unlisten: UnlistenFn | null = null;
@@ -513,19 +516,19 @@
               {/if}
               {#if chipsShown}
                 <div class="chips">
-                  {#if firmwareTarget}
+                  {#if firmwareLinks}
                     <button
                       data-testid="server-firmware-chip"
                       class="chip link"
-                      title="Install firmware from Emulators"
-                      onclick={() => onOpenEmulators(firmwareTarget)}
+                      title="Install firmware in Settings › Systems"
+                      onclick={() => onOpenSystems(activePlatformName)}
                     >
                       {firmwareChipLabel(firmware)}
                     </button>
                   {:else}
                     <span data-testid="server-firmware-chip" class="chip">{firmwareChipLabel(firmware)}</span>
                   {/if}
-                  <button data-testid="server-emulator-chip" class="chip link" onclick={() => onOpenEmulators('defaults')}>
+                  <button data-testid="server-emulator-chip" class="chip link" onclick={() => onOpenSystems(activePlatformName)}>
                     {emulatorChipLabel(defaultEmulator)}
                   </button>
                 </div>

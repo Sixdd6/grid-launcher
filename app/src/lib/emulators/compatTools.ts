@@ -1,54 +1,16 @@
-// Pure helpers for the Emulators panel's CompatTools section (task-17-brief.md):
-// grouping compat tools by kind/source, their radio-row label, the
-// Windows-host guard, and (fix round 1) the catalog's terminal-signature /
-// live-source-id tracking. No store/API imports here so this stays trivially
-// unit-testable — CompatTools.svelte owns the fetching/wiring.
-import type { CompatTool, DownloadEntry, UmuRunStatus } from '../api';
-
-export type CompatGroup = { title: 'Wine' | 'Proton (system)' | 'Managed'; tools: CompatTool[] };
-
-/**
- * Groups `tools` into up to three sections, in a fixed display order, with
- * empty groups omitted:
- *  - `kind === 'wine'` → "Wine" (any source — system wine builds are the only
- *    ones the app expects to see here)
- *  - `kind === 'proton' && source === 'steam'` → "Proton (system)"
- *  - everything else (in practice `kind === 'proton'` from a managed
- *    install) → "Managed"
- */
-export function groupCompatTools(tools: CompatTool[]): CompatGroup[] {
-  const wine = tools.filter((t) => t.kind === 'wine');
-  const protonSystem = tools.filter((t) => t.kind === 'proton' && t.source === 'steam');
-  const managed = tools.filter((t) => t.kind !== 'wine' && !(t.kind === 'proton' && t.source === 'steam'));
-
-  const groups: CompatGroup[] = [];
-  if (wine.length > 0) groups.push({ title: 'Wine', tools: wine });
-  if (protonSystem.length > 0) groups.push({ title: 'Proton (system)', tools: protonSystem });
-  if (managed.length > 0) groups.push({ title: 'Managed', tools: managed });
-  return groups;
-}
-
-/**
- * The default-tool radio row's label. The backend already names the system
- * wine entry "Wine (system)" (see `CompatTool.name` in api.ts) — this
- * function does not re-derive that suffix for wine, it only appends
- * " (system)" itself for a steam-sourced tool. Every other case (managed
- * installs, and wine) reads as "<name> — <path>".
- */
-export function compatToolLabel(tool: CompatTool): string {
-  if (tool.source === 'steam') {
-    return `${tool.name} (system) — ${tool.path}`;
-  }
-  return `${tool.name} — ${tool.path}`;
-}
+// Pure compat-tool helpers for Settings › Systems' Windows row
+// (`systems/WindowsRow.svelte`) and the launch error's umu-launcher offer:
+// the Proton catalog's terminal signature, the umu-run line, and the
+// Windows-host guard. No store/API imports, so vitest owns the rules.
+import type { DownloadEntry, UmuRunStatus } from '../api';
 
 const TERMINAL_STATUSES: DownloadEntry['status'][] = ['completed', 'failed', 'cancelled'];
 const LIVE_STATUSES: DownloadEntry['status'][] = ['queued', 'downloading', 'installing', 'cancelling'];
 
 /**
  * Signature of every `compat_tool`-kind drawer entry that has reached a
- * terminal status — mirrors `emulatorTerminalSignature` in Emulators.svelte
- * (task-7-brief.md), scoped to `kind === 'compat_tool'` instead of
+ * terminal status — mirrors `emulatorTerminalSignature`
+ * (`installSignal.ts`), scoped to `kind === 'compat_tool'` instead of
  * `job === 'emulator'`. Read inside a `$effect` (approximate on purpose,
  * same as the emulator catalog: any terminal compat_tool entry is signal
  * enough, not just the one just installed) so a fresh terminal entry — an
@@ -64,20 +26,6 @@ export function compatToolTerminalSignature(entries: DownloadEntry[]): string {
 }
 
 /**
- * The `source_id`s of every `compat_tool`-kind drawer entry that is still
- * live (queued/downloading/installing/cancelling). CompatTools.svelte uses
- * this to keep a catalog row's Install button disabled for the whole
- * background install — not just while the initial `installCompatTool` call
- * itself is in flight — so a duplicate click during the install is
- * impossible (fix round 1 finding).
- */
-export function liveCompatToolSourceIds(entries: DownloadEntry[]): Set<string> {
-  return new Set(
-    entries.filter((e) => e.kind === 'compat_tool' && LIVE_STATUSES.includes(e.status)).map((e) => e.source_id)
-  );
-}
-
-/**
  * The Downloads row `source_id` a managed umu-launcher install runs under
  * (grid-core `launch::umu::UMU_SOURCE_ID`). `UmuRunStatus.source_id`
  * carries the same value; the launch-error offer has no status in hand, so
@@ -86,7 +34,7 @@ export function liveCompatToolSourceIds(entries: DownloadEntry[]): Set<string> {
 export const UMU_SOURCE_ID = 'Open-Wine-Components/umu-launcher';
 
 /**
- * The Compat tools pane's umu-run status line: the system copy and its
+ * The Windows row's umu-run status line: the system copy and its
  * path, GRID's own copy and its release, or nothing installed.
  */
 export function umuStatusLabel(status: UmuRunStatus): string {
@@ -113,13 +61,13 @@ export function umuActionLabel(status: UmuRunStatus): 'Install' | 'Reinstall' | 
 
 /** Whether a umu-launcher Downloads row is live (queued through cancelling). */
 export function umuInstallBusy(entries: DownloadEntry[], sourceId: string = UMU_SOURCE_ID): boolean {
-  return liveCompatToolSourceIds(entries).has(sourceId);
+  return entries.some((e) => e.kind === 'compat_tool' && e.source_id === sourceId && LIVE_STATUSES.includes(e.status));
 }
 
 // Re-exported rather than redefined: `isWindowsHost` already exists in
 // details/actions.ts (task-16-brief.md) for the same purpose (reading
 // `navigator.platform`, not the server's platform name). Exporting it from
-// here too lets CompatTools.svelte and Emulators.svelte import the
-// Windows-host guard alongside the other compat-tool helpers without a
-// second implementation to keep in sync.
+// here too lets Settings › Systems import the Windows-host guard alongside
+// the other compat-tool helpers without a second implementation to keep in
+// sync.
 export { isWindowsHost } from '../details/actions';

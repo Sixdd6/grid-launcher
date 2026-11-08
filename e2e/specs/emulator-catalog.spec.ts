@@ -11,6 +11,7 @@ import {
   REAP_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { editEmulator, findLine, groups, openRow, openSystems, pick, removeEmulator } from '../helpers/systems.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -29,7 +30,9 @@ const EMULATOR_INSTALL_TIMEOUT = 15_000;
 
 /**
  * Stage `emulator-catalog`: installing emulators from the embedded
- * autoprofile catalog, end to end, against `mock-romm/mock-forge.mjs`.
+ * autoprofile catalog through Settings › Systems' pickers (a Download pick
+ * installs the emulator and makes it the system's), end to end, against
+ * `mock-romm/mock-forge.mjs`.
  *
  * The app is built with the `e2e` cargo feature, so
  * `GRID_LAUNCHER_E2E_FORGE_BASE` (exported by e2e.sh as E2E_FORGE_URL and
@@ -54,9 +57,11 @@ const EMULATOR_INSTALL_TIMEOUT = 15_000;
  * made that platform's default and actually launched.
  *
  * The fixture's platform list carries a second platform, "Nintendo GameCube"
- * (id 2), purely as the negative case for the per-platform default selector:
- * PCSX2's `platform_keywords` (["playstation 2", "ps2"]) do not match it, so
- * `compatible_emulators` must leave PCSX2 out of that platform's options.
+ * (id 2), purely as the negative case for the system pickers: PCSX2's
+ * `platform_keywords` (["playstation 2", "ps2"]) do not match it, so
+ * `compatible_emulators` must leave PCSX2 out of that system's Installed
+ * group. A third, "Sega Dreamcast" (id 3, no games), is the system whose
+ * picker offers Redream.
  *
  * The group also covers post-install autoconfig (doc 05 milestone-5
  * deviations, D1): right after the PCSX2 install lands, `sync_new_emulator`
@@ -69,16 +74,11 @@ const EMULATOR_INSTALL_TIMEOUT = 15_000;
  */
 describe('emulator-catalog', () => {
   const PLATFORM = 'Sony PlayStation 2';
-  /** The per-platform default selects, by fixture platform id. */
-  const PS2_SELECT = 'default-select-1';
-  const GAMECUBE_SELECT = 'default-select-2';
   const PCSX2_NAME = 'PCSX2 (Playstation 2)';
-  const PCSX2_ROW = 'emulator-row-pcsx2-(playstation-2)';
+  const PCSX2_SOURCE = 'PCSX2/pcsx2';
   const PCSX2_ASSET = 'pcsx2-v9.9-e2e-linux-appimage-x64-Qt.AppImage';
   const REDREAM_NAME = 'Redream (Sega Dreamcast)';
-  const REDREAM_ROW = 'emulator-row-redream-(sega-dreamcast)';
-  /** Row/delete testids sanitize a name the same way Emulators.svelte does (see emulators.spec.ts). */
-  const sanitize = (name: string) => name.toLowerCase().replace(/\s+/g, '-');
+  const REDREAM_SOURCE = 'inolen/redream';
 
   const romPath = () =>
     path.join(dataDir(), 'library', 'games', PLATFORM, 'Gran Turismo 3', 'game.iso');
@@ -126,88 +126,38 @@ describe('emulator-catalog', () => {
     );
   }
 
-  async function openEmulators() {
-    await $(testId('nav-emulators')).click();
-    await $(testId('emulators-view')).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the emulators view never rendered',
-    });
-  }
-
-  async function closeEmulators() {
+  async function closeSystems() {
     await $(testId('nav-server')).click();
-    await $(testId('emulators-view')).waitForDisplayed({
+    await $(testId('settings-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,
-      timeoutMsg: 'the emulators view never went away',
+      timeoutMsg: 'the settings view never went away',
     });
   }
 
-  /**
-   * Design §9: the view is a rail of four panes and only the selected one
-   * is displayed. Every pane stays mounted, so a `waitForExist` on a hidden
-   * element passes — but a click or `getText` needs the pane in front.
-   */
-  async function showPage(page: 'installed' | 'catalog' | 'defaults' | 'compat') {
-    await $(testId(`emu-nav-${page}`)).click();
-    await $(testId(`emu-page-${page}`)).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: `the ${page} pane never came forward`,
-    });
+  /** The picker's option values in one of its groups (`[]` when absent). */
+  async function group(slug: string, label: 'Installed' | 'Download'): Promise<string[]> {
+    return ((await groups(slug))[label] ?? []).map((o) => o.split('=')[0]);
   }
 
-  /** The Add from catalog pane, on its Catalog tab (design §9). */
-  async function openCatalog() {
-    await showPage('catalog');
-    await $(testId('emu-add-tab-install')).click();
-    await $(testId('emu-catalog-search')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the catalog pane never rendered its search box',
-    });
-  }
-
-  /** See launch.spec.ts: a protocol click on an <option> fires no `change`. */
-  async function selectValue(testIdName: string, value: string) {
-    await browser.execute(
-      (selector, val) => {
-        const el = document.querySelector(selector) as HTMLSelectElement | null;
-        if (!el) throw new Error(`no element matched ${selector}`);
-        el.value = val;
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      },
-      testId(testIdName),
-      value,
-    );
-  }
-
-  /** The `<option>` values one per-platform default select currently offers. */
-  async function optionValues(testIdName: string): Promise<string[]> {
-    return browser.execute((selector) => {
-      const el = document.querySelector(selector) as HTMLSelectElement | null;
-      if (!el) throw new Error(`no element matched ${selector}`);
-      return Array.from(el.options).map((o) => o.value);
-    }, testId(testIdName));
-  }
-
-  /** The same select's option LABELS (a disabled select renders no text). */
-  async function optionTexts(testIdName: string): Promise<string[]> {
-    return browser.execute((selector) => {
-      const el = document.querySelector(selector) as HTMLSelectElement | null;
-      if (!el) throw new Error(`no element matched ${selector}`);
-      return Array.from(el.options).map((o) => o.text);
-    }, testId(testIdName));
-  }
-
-  async function setSearch(value: string) {
-    await $(testId('emu-catalog-search')).setValue(value);
+  /** Reads the open settings sheet's Program and Launch options, then closes it. */
+  async function sheetFields(name: string): Promise<{ path: string; args: string }> {
+    await editEmulator(await findLine(name));
+    const fields = {
+      path: String(await $(testId('emu-form-path')).getValue()),
+      args: String(await $(testId('emu-form-args')).getValue()),
+    };
+    await $(testId('emu-form-cancel')).click();
+    await $(testId('systems-sheet')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+    return fields;
   }
 
   /**
    * Waits for one Downloads-view row to reach `Completed`.
    *
-   * The five views no longer stack (design §3), so this switches to the
-   * Downloads view to read the row and hands the Emulators view back to the
-   * caller, which is the view every call site is working in.
+   * The views no longer stack (design §3), so this switches to the
+   * Downloads view to read the row and hands Settings › Systems back to the
+   * caller, which is where every call site is working.
    */
   async function waitForCompleted(entryId: number) {
     await $(testId('nav-downloads')).click();
@@ -226,7 +176,7 @@ describe('emulator-catalog', () => {
         timeoutMsg: `emulator install ${entryId} never completed`,
       },
     );
-    await openEmulators();
+    await openSystems();
   }
 
   before(async () => {
@@ -244,7 +194,7 @@ describe('emulator-catalog', () => {
 
     // Prove the Downloads pill reaches its view once, up front; every
     // install below is asserted through `waitForCompleted`, which switches
-    // to that view and back to the Emulators one.
+    // to that view and back to Settings › Systems.
     await $(testId('nav-downloads')).click();
     await $(testId('downloads-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
@@ -252,76 +202,49 @@ describe('emulator-catalog', () => {
     });
   });
 
-  it('lists catalog entries on the Install tab and narrows them by search', async () => {
-    await openEmulators();
-    await openCatalog();
-
-    await expect($(testId('emu-add-tab-install'))).toHaveAttribute('aria-selected', 'true');
-    await expect($(testId('emu-add-tab-manual'))).toExist();
-    await expect($(testId('emu-catalog-install-PCSX2-pcsx2'))).toExist();
-    await expect($(testId('emu-catalog-install-inolen-redream'))).toExist();
-
-    await setSearch('pcsx2');
-    await $(testId('emu-catalog-install-inolen-redream')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      reverse: true,
-      timeoutMsg: 'searching for "pcsx2" left the Redream row visible',
-    });
-    await expect($(testId('emu-catalog-install-PCSX2-pcsx2'))).toExist();
-
-    await setSearch('');
-    await $(testId('emu-catalog-install-inolen-redream')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'clearing the search never restored the full catalog',
-    });
+  it('offers each catalog emulator in its system’s picker, recommended first', async () => {
+    await openSystems();
+    const ps2 = await groups('ps2');
+    expect(ps2.Installed).toBeUndefined();
+    expect(ps2.Download[0]).toBe(`install:${PCSX2_SOURCE}=Install PCSX2 (recommended)`);
+    expect(await group('dc', 'Download')).toContain(`install:${REDREAM_SOURCE}`);
+    // PCSX2 plays PlayStation 2 only.
+    expect(await group('gc', 'Download')).not.toContain(`install:${PCSX2_SOURCE}`);
   });
 
-  it('installs PCSX2 from the catalog and marks it installed', async () => {
-    await $(testId('emu-catalog-install-PCSX2-pcsx2')).click();
+  it('installs PCSX2 from the PS2 picker and makes it PS2’s emulator', async () => {
+    await pick('ps2', `install:${PCSX2_SOURCE}`);
     await waitForCompleted(1);
 
-    // The catalog re-reads itself when an emulator job reaches a terminal
-    // status, so the row flips to a disabled "Installed" button in place.
-    await $(testId('emu-catalog-installed-PCSX2-pcsx2')).waitForExist({
+    // The page re-reads itself when an emulator job reaches a terminal
+    // status, so the picker moves PCSX2 from Download to Installed in place.
+    await browser.waitUntil(async () => (await group('ps2', 'Installed')).includes(`use:${PCSX2_NAME}`), {
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the PCSX2 catalog row never flipped to Installed',
+      timeoutMsg: 'the PS2 picker never listed PCSX2 under Installed',
     });
-    await expect($(testId('emu-catalog-installed-PCSX2-pcsx2'))).toBeDisabled();
-    await expect($(testId('emu-catalog-install-PCSX2-pcsx2'))).not.toExist();
+    expect(await group('ps2', 'Download')).not.toContain(`install:${PCSX2_SOURCE}`);
 
     // The AppImage is kept as-is (never extracted), under an install
     // directory named for the profile (layout v1 drops the tag from the
     // directory), and the config entry carries the profile's args verbatim.
     expect(existsSync(pcsx2Path())).toBe(true);
     await waitForConfigLine(pcsx2Path());
-
-    // Without closing the panel: the completed install refreshes the emulator
-    // list and the per-platform defaults in place, and the selector offers
-    // PCSX2 only where its profile supports the platform.
-    // The defaults pane stays mounted behind the catalog (its selects are
-    // readable while hidden), but the disabled-state assertion below reads
-    // rendered text, so bring it forward.
-    await showPage('defaults');
-    await browser.waitUntil(async () => (await optionValues(PS2_SELECT)).includes(PCSX2_NAME), {
+    // A picker install makes it the system's emulator once it lands.
+    await waitForConfigLine(`"${PLATFORM}" = "${PCSX2_NAME}"`);
+    await browser.waitUntil(async () => (await $(testId('sys-status-ps2')).getAttribute('data-status')) === 'ready', {
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the PlayStation 2 default select never offered the freshly installed PCSX2',
+      timeoutMsg: 'PS2 never showed Ready after the install',
     });
-    expect(await optionValues(GAMECUBE_SELECT)).not.toContain(PCSX2_NAME);
-    // Nothing else is installed yet, so GameCube has no compatible emulator.
-    await expect($(testId(GAMECUBE_SELECT))).toBeDisabled();
-    expect(await optionTexts(GAMECUBE_SELECT)).toEqual(['No compatible emulator']);
 
-    // The terminal-status effect already re-read the list; the row's text
-    // is only readable once its pane is in front.
-    await showPage('installed');
-    await $(testId(PCSX2_ROW)).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the installed PCSX2 entry never appeared in the emulator list',
-    });
-    const rowText = await $(testId(PCSX2_ROW)).getText();
-    expect(rowText).toContain(PCSX2_NAME);
-    expect(rowText).toContain(pcsx2Path());
-    expect(rowText).toContain('-portable -fullscreen -batch "%rom%"');
+    // GameCube is offered PCSX2 nowhere: nothing installed plays it, so it
+    // still has no emulator.
+    expect(await group('gc', 'Installed')).toEqual([]);
+    expect(JSON.stringify(await groups('gc'))).not.toContain(PCSX2_NAME);
+    await expect($(testId('sys-status-gc'))).toHaveAttribute('data-status', 'none');
+
+    const fields = await sheetFields(PCSX2_NAME);
+    expect(fields.path).toBe(pcsx2Path());
+    expect(fields.args).toBe('-portable -fullscreen -batch "%rom%"');
   });
 
   it('autoconfigures the freshly installed PCSX2 (managed PCSX2.ini keys under PCSX2/)', async () => {
@@ -363,15 +286,13 @@ describe('emulator-catalog', () => {
     );
   });
 
-  it('plays the seeded PS2 game with the installed PCSX2 as the platform default', async () => {
-    await showPage('defaults');
-    await selectValue(PS2_SELECT, PCSX2_NAME);
+  it('plays the seeded PS2 game with the installed PCSX2 as the system’s emulator', async () => {
     await waitForConfigLine(`"${PLATFORM}" = "${PCSX2_NAME}"`);
-    await closeEmulators();
+    await closeSystems();
 
     await $(testId('server-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server view never came back after closing the emulators panel',
+      timeoutMsg: 'the server view never came back after leaving Settings',
     });
     await $(testId('platform-btn-1')).click();
     await $(testId('game-card-401')).waitForExist({ timeout: TRANSITION_TIMEOUT });
@@ -405,27 +326,15 @@ describe('emulator-catalog', () => {
   });
 
   it('installs Redream by scraping its download page and extracting the tar.gz', async () => {
-    await openEmulators();
-    await openCatalog();
-    await setSearch('redream');
-    await $(testId('emu-catalog-install-inolen-redream')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the Redream catalog row never rendered',
-    });
-
-    await $(testId('emu-catalog-install-inolen-redream')).click();
+    await openSystems();
+    await pick('dc', `install:${REDREAM_SOURCE}`);
     await waitForCompleted(2);
-    await $(testId('emu-catalog-installed-inolen-redream')).waitForExist({
+    await browser.waitUntil(async () => (await group('dc', 'Installed')).includes(`use:${REDREAM_NAME}`), {
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the Redream catalog row never flipped to Installed',
+      timeoutMsg: 'the Dreamcast picker never listed Redream under Installed',
     });
 
-    await showPage('installed');
-    await $(testId(REDREAM_ROW)).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the installed Redream entry never appeared in the emulator list',
-    });
-    expect(await $(testId(REDREAM_ROW)).getText()).toContain(redreamPath());
+    expect((await sheetFields(REDREAM_NAME)).path).toBe(redreamPath());
     expect(existsSync(redreamPath())).toBe(true);
     // The recorded executable is the bare, executable-bit tar member: the
     // extraction kept the bit, which is what made it selectable at all.
@@ -434,12 +343,13 @@ describe('emulator-catalog', () => {
     expect(existsSync(path.join(emulatorsDir(), REDREAM_NAME, `${REDREAM_NAME}-nightly.gz`))).toBe(
       false,
     );
-    await closeEmulators();
+    await closeSystems();
   });
 
   it('checks PCSX2 for a newer release and updates it in place', async () => {
-    await openEmulators();
-    await showPage('installed');
+    await openSystems();
+    await openRow('ps2');
+    const line = await findLine(PCSX2_NAME);
 
     // From here on the mock forge serves a NEWER PCSX2 release than the one
     // installed above, with the same asset name and different bytes.
@@ -447,21 +357,17 @@ describe('emulator-catalog', () => {
     expect(bump.status).toBe(200);
     const logBeforeCheck = readForgeLog();
 
-    // The check runs ON CLICK (never on view open), and its answer becomes
-    // the confirmation the second click accepts — the same two-click confirm
-    // the Delete button uses.
-    const updateBtn = $(testId(`emulator-update-${sanitize(PCSX2_NAME)}`));
-    await updateBtn.click();
-    const prompt = $(testId(`emulator-update-prompt-${sanitize(PCSX2_NAME)}`));
-    await prompt.waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the version check never produced an update confirmation',
+    // The check runs once a session on its own, and again on Check for
+    // updates; its answer puts Update beside the emulator.
+    await $(testId('systems-check-updates')).click();
+    const updateBtn = $(testId(`sys-update-${line}`));
+    await updateBtn.waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT * 2,
+      timeoutMsg: 'the version check never offered an update',
     });
-    const promptText = await prompt.getText();
-    expect(promptText).toContain(`Update ${PCSX2_NAME}?`);
-    expect(promptText).toContain('Installed: v9.9-e2e');
-    expect(promptText).toContain('Available: v9.9.1-e2e');
-    await expect(updateBtn).toHaveText('Confirm update');
+    await expect(updateBtn).toHaveText(expect.stringContaining('v9.9.1-e2e'));
+    await expect($(testId(`sys-emu-version-${line}`))).toHaveText(expect.stringContaining('v9.9-e2e'));
+    await expect($(testId('sys-status-ps2'))).toHaveAttribute('data-status', 'update');
 
     await updateBtn.click();
     // The completion toast is worded for an UPDATE, not a first install.
@@ -477,6 +383,13 @@ describe('emulator-catalog', () => {
       },
     );
     await waitForCompleted(3);
+    // Current now: Update goes, and the version says so.
+    await openRow('ps2');
+    await $(testId(`sys-update-${line}`)).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'Update stayed offered after the update finished',
+    });
     // The update is one drawer row of its own, and nothing else: an update
     // reports `fresh == false`, which suppresses the firmware pass.
     await expect($(testId('download-row-4'))).not.toExist();
@@ -528,65 +441,45 @@ describe('emulator-catalog', () => {
     expect(readFileSync(redreamPath(), 'utf-8')).toContain('mock forge stub: redream');
   });
 
-  it('reverts the catalog row to installable once the installed PCSX2 is deleted', async () => {
-    // Last case in the group (not right after the install), since the two
-    // tests above still need PCSX2 configured: the platform-default select
-    // and the launch it drives. The previous case leaves the shell on the
-    // Library view, so bring Emulators forward first.
-    await openEmulators();
-    await showPage('installed');
-    const deleteBtn = $(testId(`emulator-delete-${sanitize(PCSX2_NAME)}`));
-    await deleteBtn.click();
-    await expect(deleteBtn).toHaveText('Confirm delete');
-    await deleteBtn.click();
-    await $(testId(PCSX2_ROW)).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      reverse: true,
-      timeoutMsg: 'the deleted PCSX2 row was still there after the second click',
-    });
+  it('offers PCSX2 as a download again once the installed PCSX2 is removed', async () => {
+    // Last case in the group (not right after the install), since the cases
+    // above still need PCSX2 configured: the system's emulator and the launch
+    // it drives. The previous case leaves the shell on Downloads.
+    await openSystems();
+    await removeEmulator(await findLine(PCSX2_NAME), PCSX2_NAME);
 
-    // Deleting an emulator removes its installed files, not just the config
-    // entry. The removal runs BEFORE the config write, so the row check
-    // above has already waited for it; poll anyway, since the row can
-    // disappear from a re-render the write triggers.
+    // Removing an emulator removes its installed files, not just the config
+    // entry. The removal runs BEFORE the config write; poll anyway, since
+    // the line can disappear from a re-render the write triggers.
     await browser.waitUntil(() => !existsSync(pcsx2Dir()), {
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: `the PCSX2 install directory survived the delete: ${pcsx2Dir()}`,
+      timeoutMsg: `the PCSX2 install directory survived the removal: ${pcsx2Dir()}`,
     });
     // A different install must not be touched.
     expect(existsSync(redreamPath())).toBe(true);
 
-    // The catalog pane must follow the config, not wait for another install
-    // job to reach a terminal status (the bug this case guards against).
-    await openCatalog();
-    // The Redream case above leaves "redream" in the search box, which
-    // filters PCSX2 out of the list; clear it before looking for the row.
-    await setSearch('');
-    try {
-      await $(testId('emu-catalog-install-PCSX2-pcsx2')).waitForExist({
+    // The picker must follow the config, not wait for another install job
+    // to reach a terminal status.
+    await browser
+      .waitUntil(async () => (await group('ps2', 'Download')).includes(`install:${PCSX2_SOURCE}`), {
         timeout: TRANSITION_TIMEOUT,
-        timeoutMsg: 'the PCSX2 catalog row never went back to Install after deleting it',
+      })
+      .catch(async () => {
+        throw new Error(
+          `the PS2 picker never offered PCSX2 as a download again after removing it: ${JSON.stringify(await groups('ps2'))}`,
+        );
       });
-    } catch (err) {
-      // Diagnostic: what the catalog pane actually shows, so a failure
-      // distinguishes "backend still says installed" from "refresh errored".
-      const pane = await browser.execute(() => {
-        const el = document.querySelector('[data-testid="emu-page-catalog"]');
-        return el ? (el as HTMLElement).innerText.slice(0, 600) : '(no catalog pane)';
-      });
-      throw new Error(`${(err as Error).message}\n--- catalog pane ---\n${pane}`);
-    }
-    await expect($(testId('emu-catalog-installed-PCSX2-pcsx2'))).not.toExist();
+    expect(await group('ps2', 'Installed')).not.toContain(`use:${PCSX2_NAME}`);
   });
 
-  it("installs GRID's own umu-launcher from the Compat tools pane", async () => {
-    // The previous case leaves Emulators in front on the catalog pane.
-    await openEmulators();
-    await showPage('compat');
-    const status = $(testId('compat-umu-status'));
+  it("installs GRID's own umu-launcher from the Windows row", async () => {
+    // The previous case leaves Settings › Systems in front.
+    await openSystems();
+    await openRow('windows');
+    const status = $(testId('compat-umu-status-systems'));
     await status.waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the Compat tools pane never showed its umu-run line',
+      timeoutMsg: 'the Windows row never showed its umu-run line',
     });
     const before = await status.getText();
     if (before.includes('system')) {
@@ -595,13 +488,13 @@ describe('emulator-catalog', () => {
       console.log(`emulator-catalog: skipping the umu-launcher install, the host has one (${before})`);
       return;
     }
-    expect(before).toBe('umu-run: not installed');
+    expect(before).toBe('Proton launcher · umu-run: not installed');
 
-    const install = $(testId('compat-umu-install'));
+    const install = $(testId('sys-umu-install'));
     expect(await install.getText()).toBe('Install');
     await install.click();
 
-    await browser.waitUntil(async () => (await status.getText()) === 'umu-run: GRID-managed 1.4.4-e2e', {
+    await browser.waitUntil(async () => (await status.getText()) === 'Proton launcher · umu-run: GRID-managed 1.4.4-e2e', {
       timeout: EMULATOR_INSTALL_TIMEOUT,
       timeoutMsg: 'the umu-run line never reported the GRID-managed copy',
     });

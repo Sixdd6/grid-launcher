@@ -256,7 +256,7 @@ pub fn emulator_dir_placeholder(executable: &Path) -> String {
 pub fn validate_placeholders(template: &str, ph: &Placeholders) -> Result<(), String> {
     if template.contains("%core%") && ph.core.trim().is_empty() {
         return Err(
-            "No RetroArch core is configured for this platform. Set one in Emulators > Defaults."
+            "No RetroArch core is configured for this platform. Set one in Settings › Systems."
                 .to_string(),
         );
     }
@@ -515,7 +515,7 @@ mod tests {
         let err = validate_placeholders("-L %core% %rom%", &ph).unwrap_err();
         assert_eq!(
             err,
-            "No RetroArch core is configured for this platform. Set one in Emulators > Defaults."
+            "No RetroArch core is configured for this platform. Set one in Settings › Systems."
         );
     }
 
@@ -717,7 +717,7 @@ mod tests {
         let err = build_args("-L %core% %rom%", "", &ph).unwrap_err();
         assert_eq!(
             err,
-            "No RetroArch core is configured for this platform. Set one in Emulators > Defaults."
+            "No RetroArch core is configured for this platform. Set one in Settings › Systems."
         );
     }
 

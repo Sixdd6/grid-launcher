@@ -12,7 +12,7 @@ use super::profiles::{platform_matches_keywords, profile_for_entry, EmulatorProf
 
 /// The reserved `default_emulators` value meaning "this platform has NO
 /// emulator, and that choice is remembered". Written when the user picks
-/// "(none)" in the Emulators panel. It is deliberately not a legal emulator
+/// "(none)" in Settings › Systems. It is deliberately not a legal emulator
 /// name (`<` and `>` are not produced by any autoprofile), so it can never
 /// collide with a real entry. Removing the key instead would let
 /// `autoconfig::backfill_all_defaults` re-fill it on the next
@@ -268,7 +268,7 @@ pub fn install_block_reason(
     }
     format!(
         "No available emulator is configured for platform '{trimmed}'. \
-         Add/configure one in Emulators before installing this game."
+         Add/configure one in Settings › Systems before installing this game."
     )
 }
 
@@ -750,7 +750,7 @@ mod tests {
         assert_eq!(
             install_block_reason("", "SNES", &[], &[], &no_cores),
             "No available emulator is configured for platform 'SNES'. \
-             Add/configure one in Emulators before installing this game."
+             Add/configure one in Settings › Systems before installing this game."
         );
     }
 

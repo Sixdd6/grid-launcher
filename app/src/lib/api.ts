@@ -653,7 +653,7 @@ export type UmuRunStatus = { source: 'system' | 'managed' | 'missing'; path: str
 export type CompatToolsDto = { tools: CompatTool[]; default_tool: string; umu_run: UmuRunStatus };
 
 /// `pup_path` is the `PS3UPDAT.PUP` beside the RPCS3 executable, or `null`
-/// when that install has none. The Emulators panel shows the firmware note
+/// when that install has none. Settings › Systems shows the firmware note
 /// and its Install Firmware button only when `pup_path` is set: the button
 /// hands the already-downloaded PUP to RPCS3 (Python parity — the download
 /// itself is the background firmware job's work, not this button's).

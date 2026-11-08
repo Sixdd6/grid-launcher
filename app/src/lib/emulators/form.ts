@@ -9,9 +9,6 @@ export const SAVE_STRATEGIES = ['auto', 'single_file', 'folder'] as const;
 
 export type SaveStrategy = (typeof SAVE_STRATEGIES)[number];
 
-/** The Arguments row's label, verbatim from dialogs.py:362. */
-export const ARGS_LABEL = 'Arguments (%rom%, %core%, %ps3_launch_target%)';
-
 export type EmulatorFormValues = {
   name: string;
   path: string;

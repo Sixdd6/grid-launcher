@@ -221,7 +221,7 @@ async fn upload_precondition_messages_fire_in_order() {
     .await;
     assert_eq!(
         texts(&report.messages),
-        vec!["No save directories were found for emulator 'Dummy'. Configure them in Emulators."]
+        vec!["No save directories were found for emulator 'Dummy'. Configure them in Settings › Systems."]
     );
 
     // 5. (state wording)
@@ -240,7 +240,7 @@ async fn upload_precondition_messages_fire_in_order() {
     .await;
     assert_eq!(
         texts(&report.messages),
-        vec!["No state directories were found for emulator 'RPCS3'. Configure them in Emulators."]
+        vec!["No state directories were found for emulator 'RPCS3'. Configure them in Settings › Systems."]
     );
 
     // 6. RPCS3 + state.
@@ -2192,7 +2192,7 @@ fn restore_enabled_refuses_an_unconfigured_record_emulator() {
     assert!(!enabled);
     assert_eq!(
         text,
-        "Configure emulator 'SomeUnknownEmu' in Emulators to restore this entry."
+        "Configure emulator 'SomeUnknownEmu' in Settings › Systems to restore this entry."
     );
 }
 

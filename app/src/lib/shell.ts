@@ -1,8 +1,9 @@
 import type { AuthKind, RestoreOutcome, SessionUnauthorized } from './api';
 
-/** The five first-class views, in pill order (design §3). The index in this
- *  array is also the `Ctrl+<n>` accelerator. */
-export const VIEWS = ['library', 'server', 'downloads', 'emulators', 'settings'] as const;
+/** The four first-class views, in pill order (design §3; the Emulators view
+ *  became Settings › Systems). The index in this array is also the
+ *  `Ctrl+<n>` accelerator. */
+export const VIEWS = ['library', 'server', 'downloads', 'settings'] as const;
 export type View = (typeof VIEWS)[number];
 /** `setup`: connected, showing the first-run platform picker before the shell. */
 export type SessionPhase = 'loading' | 'none' | 'setup' | 'shell';
@@ -60,7 +61,7 @@ export function viewLabel(view: View): string {
 
 /**
  * The view a `Ctrl+<key>` accelerator selects, or `null` when the key is
- * not one of `1`..`5`. Takes the raw `KeyboardEvent.key` so the caller does
+ * not one of `1`..`4`. Takes the raw `KeyboardEvent.key` so the caller does
  * no parsing of its own; a multi-character key (`"F1"`, `"11"`) never
  * matches because the lookup is by exact string.
  */

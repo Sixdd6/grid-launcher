@@ -16,5 +16,14 @@
       "platform_id": 2,
       "path_cover_small": null
     }
+  ],
+  "3": [
+    {
+      "id": 403,
+      "name": "Crazy Taxi",
+      "fs_name_no_ext": "Crazy Taxi",
+      "platform_id": 3,
+      "path_cover_small": null
+    }
   ]
 }

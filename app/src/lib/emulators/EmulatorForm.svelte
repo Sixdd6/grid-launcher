@@ -1,15 +1,15 @@
 <script lang="ts">
-  // The manual add / edit form (design §9). One component, two hosts: the
-  // Installed pane renders it as the edit sheet, the catalog pane as its
-  // Manual tab. The fields seed from `entry` on mount only — a parent that
-  // changes which entry is edited wraps this in `{#key entry.name}`.
+  // Settings › Systems' settings sheet (ProposedApp README: "The settings
+  // sheet is the same for adding and editing"): "Which emulator is it?"
+  // when adding, Name, Program, Launch options, and the cloud fields folded
+  // under "Cloud saves (advanced)". The fields seed from `entry` on mount
+  // only — a parent that changes which entry is edited wraps this in
+  // `{#key entry.name}`.
   import { api, type EmulatorEntry, type ProfileSummary } from '../api';
-  import { matchProfileByName, shouldAutoFillFromName } from './catalog';
   import { pickFile } from '../pickers';
   import {
     addedEmulatorToast,
     applyWhichEmulator,
-    ARGS_LABEL,
     emulatorFormValues,
     entryPatch,
     normalizeSaveStrategy,
@@ -25,18 +25,12 @@
     profiles,
     onSaved,
     onCancel,
-    variant = 'classic',
   }: {
     mode: 'add' | 'edit';
     entry?: EmulatorEntry | null;
     profiles: ProfileSummary[];
     onSaved: () => void;
     onCancel: () => void;
-    /** `sheet`: Settings › Systems' settings sheet ("Which emulator is it?",
-     *  Program, Launch options, the cloud fields folded under "Cloud saves
-     *  (advanced)"). `classic`: the Emulators view's form. Same fields and
-     *  the same save either way. */
-    variant?: 'classic' | 'sheet';
   } = $props();
 
   // Seeded from `entry` once, on purpose: the fields are then the user's to
@@ -54,7 +48,6 @@
   let formStatePaths = $state(seed.statePaths);
   let formError = $state<string | null>(null);
   let formPending = $state(false);
-  let autofillMatch = $state<ProfileSummary | null>(null);
 
   function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -72,22 +65,6 @@
       }
     } catch {
       // Best-effort autofill only — leave the form as typed on failure.
-    }
-  }
-
-  // Manual-add auto-fill from the typed NAME (task-7-brief.md): add mode
-  // only, and only when path and args are both still empty, so it never
-  // clobbers a manually typed or path-derived value and never touches an
-  // entry being edited. Fires on blur/input of the name field.
-  function autoFillFromName() {
-    if (!shouldAutoFillFromName(mode, formPath, formArgs)) {
-      autofillMatch = null;
-      return;
-    }
-    const match = matchProfileByName(formName, profiles);
-    autofillMatch = match;
-    if (match) {
-      formArgs = match.args;
     }
   }
 
@@ -166,7 +143,6 @@
   </div>
 {/snippet}
 
-{#if variant === 'sheet'}
 <form
   data-testid="emu-form"
   onsubmit={(e) => {
@@ -189,12 +165,15 @@
       </select>
       <span class="help">GRID fills in the rest for emulators it knows.</span>
     </label>
-    {#if whichValue === SOMETHING_ELSE}
-      <label>
-        Name
-        <input data-testid="emu-form-name" bind:value={formName} required />
-      </label>
-    {/if}
+  {/if}
+  <!-- Adding: asked only for Something else (a known emulator brings its
+       name). Editing: always, so an entry can be renamed — the save finds
+       and replaces it by its old name, in place. -->
+  {#if mode === 'edit' || whichValue === SOMETHING_ELSE}
+    <label>
+      Name
+      <input data-testid="emu-form-name" bind:value={formName} required />
+    </label>
   {/if}
   <label>
     Program
@@ -248,67 +227,6 @@
   </details>
   {@render actions()}
 </form>
-{:else}
-<form
-  data-testid="emu-form"
-  onsubmit={(e) => {
-    e.preventDefault();
-    save();
-  }}
->
-  <label>
-    Name
-    <input
-      data-testid="emu-form-name"
-      bind:value={formName}
-      onblur={autoFillFromName}
-      oninput={autoFillFromName}
-      required
-    />
-  </label>
-  {#if autofillMatch}
-    <p data-testid="emu-autofill-hint" class="hint">Matched profile: {autofillMatch.name}</p>
-  {/if}
-  <label>
-    Executable path
-    <span class="path-row">
-      <input data-testid="emu-form-path" bind:value={formPath} onblur={autoFillFromPath} onkeydown={onPathKeydown} />
-      <button data-testid="emu-form-path-browse" type="button" disabled={formPending} onclick={browseEmulatorPath}>
-        Browse…
-      </button>
-    </span>
-  </label>
-  <label>
-    <span data-testid="emu-form-args-label">{ARGS_LABEL}</span>
-    <input data-testid="emu-form-args" bind:value={formArgs} />
-  </label>
-  <label>
-    Save Strategy
-    <select data-testid="emu-form-save-strategy" bind:value={formSaveStrategy}>
-      {#each SAVE_STRATEGIES as strategy (strategy)}
-        <option value={strategy}>{strategy}</option>
-      {/each}
-    </select>
-  </label>
-  <label>
-    Ignore Files (; separated)
-    <input data-testid="emu-form-ignore-files" bind:value={formIgnoreFiles} />
-  </label>
-  <label>
-    Ignore Extensions (; separated)
-    <input data-testid="emu-form-ignore-extensions" bind:value={formIgnoreExtensions} />
-  </label>
-  <label>
-    Save Dirs (; separated)
-    <input data-testid="emu-form-save-paths" bind:value={formSavePaths} />
-  </label>
-  <label>
-    State Dirs (; separated)
-    <input data-testid="emu-form-state-paths" bind:value={formStatePaths} />
-  </label>
-  {@render actions()}
-</form>
-{/if}
 
 <style>
   form {
@@ -378,12 +296,6 @@
   .path-row button:disabled {
     opacity: 0.6;
     cursor: default;
-  }
-
-  .hint {
-    margin: -4px 0 0;
-    font-size: 12px;
-    color: var(--text-muted);
   }
 
   .error {

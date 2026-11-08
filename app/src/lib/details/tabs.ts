@@ -4,7 +4,7 @@
 // reopening the popup but not survive a restart.
 
 // No Files tab (user ruling 2026-10-30): its size, version and content lines
-// are Overview facts, and firmware installs from Emulators › Installed.
+// are Overview facts, and firmware installs from Settings › Systems.
 export type DetailsTab = 'overview' | 'media' | 'saves' | 'achievements';
 
 export const DETAILS_TABS: readonly DetailsTab[] = [

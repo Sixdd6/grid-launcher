@@ -281,7 +281,7 @@ pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>,
         // (`launch::selection::installed_core_resolver`), never the server's
         // raw platform `name` — so no name fallback belongs here. Without
         // this those paths would fall back to fuzzy name matching and
-        // disagree with the Emulators panel about which platforms RetroArch
+        // disagree with Settings › Systems about which platforms RetroArch
         // supports.
         grid_core::launch::set_platform_slugs(platform_slugs_by_label(&platforms));
 
@@ -829,18 +829,18 @@ pub struct PlatformFirmwareStatus {
     /// Whether every server firmware file is already installed for the
     /// emulator (the named one, else the platform's default;
     /// `grid_core::firmware::manifest`), so the
-    /// Emulators view says "Installed" rather than offering Install again.
+    /// Settings › Systems says "Installed" rather than offering Install again.
     pub installed: bool,
     /// Whether any server firmware file can land in that emulator's
     /// folders (`grid_core::firmware::manifest::firmware_available`). When
-    /// not, Install would place nothing, so the Emulators view says
+    /// not, Install would place nothing, so Settings › Systems says
     /// "Unavailable".
     pub available: bool,
 }
 
 /// `GET /api/firmware?platform_id=<id>` plus the local check against
 /// `emulator` (by exact name), or the platform's default emulator when
-/// `emulator` is `None` — the Server chip's case. The Emulators view names
+/// `emulator` is `None` — the Server chip's case. Settings › Systems names
 /// the emulator, so an installed emulator gets its firmware whether or not
 /// it is the default. Read-only: nothing is downloaded here.
 #[tauri::command]
@@ -1112,7 +1112,7 @@ pub async fn list_emulators() -> Result<Vec<EmulatorEntry>, String> {
     .map_err(|e| format!("list_emulators did not finish: {e}"))?
 }
 
-/// The per-entry file probes the Emulators pane's Eden advisory notes read
+/// The per-entry file probes Settings › Systems' Eden advisory notes read
 /// (emulator_ui_mixin.py:729-748). Booleans only — never a path, so a
 /// user's directory layout stays out of the IPC payload.
 #[derive(Debug, Serialize)]
@@ -1418,7 +1418,7 @@ pub async fn delete_emulator(
 
 /// Opens a configured emulator with no ROM, so the user can set its controls
 /// up (`_launch_emulator_at_index`, emulator_ui_mixin.py:1635-1665). Every
-/// failure is a plain, path-only message the Emulators view shows as a toast.
+/// failure is a plain, path-only message Settings › Systems shows as a toast.
 ///
 /// A RetroArch entry gets its settings sync first (:1653), in the
 /// reference's order: validate, sync, spawn.
@@ -1450,7 +1450,7 @@ pub async fn launch_emulator(
     .map_err(|e| format!("launch_emulator did not finish: {e}"))?
 }
 
-/// One platform the Emulators panel is asking about: the NAME every config
+/// One platform Settings › Systems is asking about: the NAME every config
 /// map is keyed by, plus the server SLUG that drives slug-first core
 /// resolution (D-RC-2). Both sides use exactly these two field names — see
 /// `PlatformRef` in `app/src/lib/api.ts`.
@@ -1614,7 +1614,7 @@ fn apply_clear_retroarch_core_when_not_retroarch(
 /// Each request carries the platform's server SLUG as well as its name, so
 /// the RetroArch support gate resolves cores slug-first (D-RC-2).
 ///
-/// The Emulators panel calls this to build its per-platform default
+/// Settings › Systems calls this to build its per-platform default
 /// selector, which offers only compatible emulators — matching Python's
 /// `_on_default_platform_changed` (emulator_ui_mixin.py:598).
 #[tauri::command]
@@ -2010,8 +2010,9 @@ fn update_source_for(name: &str) -> Result<(String, SourceMap), String> {
     Ok((installed, source))
 }
 
-/// The Emulators view's `Update from Source` check, run ON CLICK and never
-/// cached (`SourceVersionCheckWorker`, workers.py:439-510): one release
+/// The emulator update check (`SourceVersionCheckWorker`,
+/// workers.py:439-510); Settings › Systems runs it once a session and on
+/// Check for updates, and caches the answer itself. One release
 /// request against the entry's own source, compared with the tag on disk.
 #[tauri::command]
 pub async fn check_emulator_update(

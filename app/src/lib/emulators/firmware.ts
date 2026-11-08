@@ -1,10 +1,10 @@
-// Server firmware on the Emulators › Installed list (user ruling 2026-10-30:
-// firmware is installed so an emulator can run, so its Install lives with
-// the emulator, not with a game or a platform). Pure, like `defaults.ts`.
+// Server firmware under an emulator in Settings › Systems (user ruling
+// 2026-10-30: firmware is installed so an emulator can run, so its Install
+// lives with the emulator, not with a game). Pure, like `defaults.ts`.
 //
 // RomM holds firmware per platform. An emulator lists the platforms it
-// supports (the backend's `compatible_emulators` answer, the same list the
-// Platform defaults select offers) whose server firmware has files, whether
+// supports (the backend's `compatible_emulators` answer, the same list a
+// system's picker offers) whose server firmware has files, whether
 // or not it is that platform's default: firmware is what lets the emulator
 // run, and a platform set to "(none)" still has its emulators installed.
 // Only the default emulator is told "Unavailable"; any other emulator lists
@@ -45,22 +45,6 @@ function supportedPlatforms(
 }
 
 export type FirmwareRequest = { key: string; emulator: string; platform: Platform };
-
-/** Every emulator-and-platform pair whose firmware status the Installed
- *  list needs, in emulator then platform order. */
-export function firmwareRequests(
-  platforms: Platform[],
-  compatible: Record<string, string[]>,
-  emulatorNames: string[]
-): FirmwareRequest[] {
-  return emulatorNames.flatMap((emulator) =>
-    supportedPlatforms(emulator, platforms, compatible).map((platform) => ({
-      key: firmwareKey(emulator, platform.id),
-      emulator,
-      platform,
-    }))
-  );
-}
 
 /** One line per platform this emulator supports whose server firmware has
  *  files and either can land in its folders or is its to fail (it is the
@@ -109,14 +93,6 @@ export function firmwareAction(row: EmulatorFirmwareRow, requested: boolean, che
   return row.installed ? 'installed' : 'install';
 }
 
-export const FIRMWARE_ACTION_LABELS: Record<FirmwareAction, string> = {
-  install: 'Install firmware',
-  requested: 'Requested…',
-  checking: 'Checking…',
-  installed: 'Installed',
-  unavailable: 'Not needed',
-};
-
 /** The toast an Install click shows at once. */
 export function firmwareStartedToast(platformName: string, emulatorName: string): string {
   return `Installing ${platformName} firmware for ${emulatorName}…`;
@@ -142,10 +118,4 @@ export function firmwareFinishedToast(
     };
   }
   return { text: `Could not install ${platformName} firmware for ${emulatorName}`, level: 'error' };
-}
-
-/** The Not needed button's tooltip: none of the server's files for the
- *  platform is one GRID knows this emulator uses. */
-export function notNeededTitle(emulatorName: string): string {
-  return `${emulatorName} doesn't use any of the server's files for this platform. Click to check the server again.`;
 }

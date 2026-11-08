@@ -1,7 +1,7 @@
 <script lang="ts">
   // The "Install umu-launcher" action under a Proton launch error
   // (`isUmuMissing`, launchError.ts) in Library, Server and Details. It
-  // queues the same install as Emulators › Compat tools; the install runs
+  // queues the same install as Settings › Systems › Windows; the install runs
   // as its own Downloads row, so the user launches again once it finishes.
   import { api } from './api';
   import { downloads } from './stores/downloads.svelte';

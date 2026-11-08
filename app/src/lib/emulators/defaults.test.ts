@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { LaunchDefaults } from '../api';
 import {
   defaultEmulatorKey,
-  defaultsPlatforms,
   isEmulatorsShelf,
   isRetroarchName,
   needsEmulator,
@@ -23,20 +22,6 @@ describe('defaultEmulatorKey', () => {
 
   it('falls back to name for a platform without a display_name (older server)', () => {
     expect(defaultEmulatorKey({ display_name: '', name: 'SNES', slug: 'snes' })).toBe('SNES');
-  });
-});
-
-describe('defaultsPlatforms', () => {
-  it('leaves out the Emulators shelf, by raw name or label', () => {
-    const rows = [
-      { display_name: '', name: 'SNES', slug: 'snes' },
-      { display_name: '', name: 'Emulators', slug: 'emulators' },
-      { display_name: 'Emulators', name: 'Tools', slug: 'tools' },
-      { display_name: 'Windows 9x', name: 'Windows', slug: 'win9x' },
-    ];
-    expect(defaultsPlatforms(rows).map((p) => p.name)).toEqual(['SNES', 'Windows']);
-    expect(isEmulatorsShelf({ display_name: '', name: ' EMULATORS ', slug: '' })).toBe(true);
-    expect(isEmulatorsShelf({ display_name: '', name: 'Emulator Hacks', slug: '' })).toBe(false);
   });
 });
 

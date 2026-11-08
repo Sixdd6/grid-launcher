@@ -180,7 +180,7 @@ describe('ui screens: the main views for a design review', () => {
   it('the other views, dark, fade 70', async () => {
     await appearance('dark', 70);
     await shot('settings-dark-fade70');
-    for (const view of ['library', 'emulators', 'downloads']) {
+    for (const view of ['library', 'downloads']) {
       const nav = await $(testId(`nav-${view}`));
       if (!(await nav.isExisting())) continue;
       await nav.click();

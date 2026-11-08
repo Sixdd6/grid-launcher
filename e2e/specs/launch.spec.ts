@@ -10,6 +10,7 @@ import {
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
 import { waitForToast } from '../helpers/toasts.js';
+import { editEmulator, lineKey, openRow, openSystems, pick, saveSheet } from '../helpers/systems.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -30,9 +31,9 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  *   mapped in `retroarch_cores`.
  *
  * Every flow below switches which of these is the platform's default, or
- * edits one's path, through the Emulators UI rather than by seeding a
- * second stage — simpler, and it doubles as coverage of the defaults-select
- * and edit flows against a real launch, not just the config file (see
+ * edits one's path, through Settings › Systems rather than by seeding a
+ * second stage — simpler, and it doubles as coverage of the picker and the
+ * settings sheet against a real launch, not just the config file (see
  * emulators.spec.ts for those in isolation). Each mutation is followed by a
  * config.toml read-back (`waitForConfigLine`) before the next Play, since
  * `resolve_launch` reads the file fresh on every launch and the UI gives no
@@ -67,33 +68,14 @@ describe('launch', () => {
     });
   }
 
-  async function openEmulators() {
-    await $(testId('nav-emulators')).click();
-    await $(testId('emulators-view')).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the emulators view never rendered',
-    });
-  }
+  const SNES_LINE = lineKey(PLATFORM);
 
-  async function closeEmulators() {
+  async function closeSystems() {
     await $(testId('nav-server')).click();
-    await $(testId('emulators-view')).waitForDisplayed({
+    await $(testId('settings-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,
-      timeoutMsg: 'the emulators view never went away',
-    });
-  }
-
-  /**
-   * Design §9: the view is a rail of four panes and only the selected one
-   * is displayed. Every pane stays mounted, so a `waitForExist` on a hidden
-   * element passes — but a click or `getText` needs the pane in front.
-   */
-  async function showPage(page: 'installed' | 'catalog' | 'defaults' | 'compat') {
-    await $(testId(`emu-nav-${page}`)).click();
-    await $(testId(`emu-page-${page}`)).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: `the ${page} pane never came forward`,
+      timeoutMsg: 'the settings view never went away',
     });
   }
 
@@ -101,8 +83,7 @@ describe('launch', () => {
    * Sets a native `<select>`'s value and dispatches `change` directly. A
    * WebDriver-protocol click on the underlying `<option>` (what
    * `selectByAttribute` does) does not reliably fire a `change` event on
-   * this embedded WebKitGTK driver — confirmed by config.toml never picking
-   * up the new default when this test used `selectByAttribute` instead.
+   * this embedded WebKitGTK driver.
    */
   async function selectValue(testIdName: string, value: string) {
     await browser.execute(
@@ -223,11 +204,10 @@ describe('launch', () => {
   });
 
   it('shows "exited immediately" after switching the default to the instant-exit stub', async () => {
-    await openEmulators();
-    await showPage('defaults');
-    await selectValue('default-select-1', 'InstantExit');
+    await openSystems();
+    await pick('snes', 'use:InstantExit');
     await waitForConfigLine(`"${PLATFORM}" = "InstantExit"`);
-    await closeEmulators();
+    await closeSystems();
 
     await openDetails();
     await $(testId('details-play')).click();
@@ -240,29 +220,29 @@ describe('launch', () => {
     await $(testId('details-close')).click();
   });
 
-  it('toasts the early exit when the instant-exit stub is launched from Emulators', async () => {
+  it('toasts the early exit when the instant-exit stub is opened from Settings › Systems', async () => {
     // The ROM-less "open the emulator so I can configure it" launch: same
     // 500 ms check as the Play path above, reported as a toast instead of
     // the Details strip.
-    await openEmulators();
-    await showPage('installed');
-    await $(testId('emulator-launch-instantexit')).click();
+    await openSystems();
+    await openRow('snes');
+    await expect($(testId(`sys-emu-name-${SNES_LINE}`))).toHaveText('InstantExit');
+    await $(testId(`sys-open-${SNES_LINE}`)).click();
     await waitForToast(/Process exited immediately \(code 3\)\./, {
-      timeoutMsg: 'no toast appeared after launching the instant-exit stub',
+      timeoutMsg: 'no toast appeared after opening the instant-exit stub',
     });
-    await closeEmulators();
+    await closeSystems();
   });
 
   it('shows the verbatim "Emulator executable not found:" error when the default\'s path is broken', async () => {
-    await openEmulators();
-    await showPage('installed');
-    await $(testId('emulator-edit-instantexit')).click();
-    await $(testId('emu-edit-sheet')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('emu-form-path')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await openSystems();
+    await openRow('snes');
+    await editEmulator(SNES_LINE);
+    await expect($(testId('emu-form-name'))).toHaveValue('InstantExit');
     await $(testId('emu-form-path')).setValue('/nonexistent/no-such-emulator');
-    await $(testId('emu-form-save')).click();
+    await saveSheet();
     await waitForConfigLine('/nonexistent/no-such-emulator');
-    await closeEmulators();
+    await closeSystems();
 
     await openDetails();
     await $(testId('details-play')).click();
@@ -277,8 +257,8 @@ describe('launch', () => {
   });
 
   it('shows the verbatim "No RetroArch core is configured" error for a coreless RetroArch default', async () => {
-    // Seeded through config.toml rather than the UI (design §4): the
-    // Emulators panel now records a core whenever RetroArch is picked
+    // Seeded through config.toml rather than the UI (design §4): Settings ›
+    // Systems records a core whenever RetroArch is picked
     // (D-RC-4), so the UI can no longer produce this state. Rewriting only
     // the default_emulators line preserves the InstantExit path edit the
     // previous test made. The default going into this test is "InstantExit"
@@ -303,7 +283,7 @@ describe('launch', () => {
     // string verbatim, not just the inner message.
     await expect($(testId('details-error'))).toHaveText(
       'Invalid launch arguments: No RetroArch core is configured for this platform. ' +
-        'Set one in Emulators > Defaults.',
+        'Set one in Settings › Systems.',
     );
   });
 });

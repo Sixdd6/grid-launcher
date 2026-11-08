@@ -15,8 +15,8 @@ function assign(next: ShellSession) {
  * A connected session goes to the first-run platform picker instead of the
  * shell when setup is needed (a fresh install: `setup_status`). Offline, or
  * when the check itself fails, it goes straight to the shell: the picker
- * needs the server's platforms, and Emulators › Set up platforms… is always
- * there later.
+ * needs the server's platforms, and Settings › Systems is always there
+ * later.
  */
 async function withSetupCheck(next: ShellSession): Promise<ShellSession> {
   if (next.phase !== 'shell' || !next.connected) return next;

@@ -4,8 +4,8 @@ const TERMINAL_STATUSES: DownloadEntry['status'][] = ['completed', 'failed', 'ca
 
 /**
  * Signature of every emulator install that has reached a terminal status.
- * The Emulators view reads it inside its `$effect`s: a new terminal entry
- * re-reads the entry list, the defaults and the catalog. Approximate on
+ * Settings › Systems reads it inside an `$effect`: a new terminal entry
+ * re-reads the entry list and the defaults. Approximate on
  * purpose (task-7-brief.md): any terminal emulator entry is signal enough.
  *
  * Two rows count: a catalog install (`job === 'emulator'`) and a server

@@ -88,7 +88,7 @@ impl FirmwareManifest {
 
 /// Adds one pass's placed files to the manifest at `path`. A save failure
 /// is logged, not returned: the firmware itself is installed, and the list
-/// only decides what the Emulators view says about it.
+/// only decides what Settings › Systems says about it.
 pub(crate) fn record_installs(path: &Path, installs: Vec<(PathBuf, String, Vec<PathBuf>)>) {
     if installs.is_empty() {
         return;
@@ -159,7 +159,7 @@ pub fn firmware_installed(
 /// whose name routes there, or a zip whose name routes nowhere but that no
 /// install has looked inside yet (it may hold what a target asks for) or
 /// that an install found something in. `false` means Install would place
-/// nothing for this emulator, so the Emulators view says "Unavailable".
+/// nothing for this emulator, so Settings › Systems says "Unavailable".
 pub fn firmware_available(
     records: &[FirmwareRecord],
     targets: &[FirmwareTarget],

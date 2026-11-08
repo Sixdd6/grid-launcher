@@ -16,7 +16,7 @@ export function platformCountsLine(romCount: number, installedCount: number): st
  * The default-emulator chip's text.
  *
  * `get_launch_defaults` hands back `config.default_emulators` unfiltered, so
- * the name can be the reserved `<none>` marker the Emulators panel writes for
+ * the name can be the reserved `<none>` marker Settings › Systems writes for
  * its "(none)" choice. A remembered "no emulator" reads the same as an absent
  * one here: the chip states a fact, it does not edit the mapping.
  */
@@ -64,12 +64,10 @@ export function firmwareChipLabel(status: FirmwareChipState): string {
 }
 
 /**
- * Where the firmware chip links: Emulators › Installed, where each emulator
- * lists its platforms' server firmware with Install (user ruling 2026-10-30),
- * or Platform defaults when the platform has no default emulator to install
- * it for. `null` (a plain chip) when the server has no firmware for it.
+ * Whether the firmware chip is a link: it opens Settings › Systems on the
+ * platform's row, where the firmware installs (or, with no emulator yet,
+ * where one is picked). A plain chip when the server has no firmware for it.
  */
-export function firmwareChipTarget(status: FirmwareChipState): 'installed' | 'defaults' | null {
-  if (status === null || status === 'unavailable' || status.file_count === 0) return null;
-  return status.has_default_emulator ? 'installed' : 'defaults';
+export function firmwareChipLinks(status: FirmwareChipState): boolean {
+  return !(status === null || status === 'unavailable' || status.file_count === 0);
 }

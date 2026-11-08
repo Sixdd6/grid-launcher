@@ -1,7 +1,7 @@
 <script lang="ts">
   // Settings › Cloud saves (design §10: "current cloud settings form"), moved
   // out of Emulators.svelte (task-19-brief.md). The refresh is gated on the
-  // Settings view being visible, as the Emulators view gated it before.
+  // Settings view being visible.
   import { api, type CloudSettings } from '../api';
 
   let { active = true }: { active?: boolean } = $props();

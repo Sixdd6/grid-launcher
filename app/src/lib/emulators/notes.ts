@@ -10,8 +10,8 @@
 // autoprofile `match_tokens` lookup — is not available here: the frontend's
 // `ProfileSummary` carries only `{ name, args }` (api.ts:153), no token
 // list. Every catalog install names its entry after its profile, so the
-// substring test covers them; the same simplification is already in
-// Emulators.svelte's `isRpcs3`.
+// substring test covers them; Settings › Systems' RPCS3 firmware check makes
+// the same simplification.
 //
 // The reference's dynamic Eden notes (prod.keys and Switch firmware
 // presence, emulator_ui_mixin.py:729-748) live in `dynamicEmulatorNotes`

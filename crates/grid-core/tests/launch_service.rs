@@ -622,7 +622,7 @@ async fn no_configured_emulator_is_reported_verbatim() {
     let error = service.launch(7).await.unwrap_err();
     assert_eq!(
         validation_message(error),
-        "No emulator is configured. Add one in Emulators settings."
+        "No emulator is configured. Add one in Settings › Systems."
     );
 }
 
@@ -686,7 +686,7 @@ async fn a_retroarch_relative_core_is_rewritten_to_an_absolute_path() {
 }
 
 /// F7 / D-RC-2: the launch path must reach the same verdict as the
-/// Emulators panel for a platform whose slug the fuzzy compatibility map
+/// Settings › Systems for a platform whose slug the fuzzy compatibility map
 /// does NOT recognise. "PlayStation 2" scores below the fuzzy threshold, so
 /// before the slug registry existed the launch gate found no compatible
 /// core, dropped RetroArch, and a saved `PlayStation 2 = RetroArch/pcsx2`

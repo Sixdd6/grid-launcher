@@ -95,7 +95,7 @@
   );
 
   // Which platforms have a default emulator, for the cards' cloud badge
-  // (see `cloudPlatformSet`). One call per mount; the Emulators view is
+  // (see `cloudPlatformSet`). One call per mount; Settings › Systems is
   // where defaults change, and switching back re-runs this effect.
   $effect(() => {
     if (!active) return;

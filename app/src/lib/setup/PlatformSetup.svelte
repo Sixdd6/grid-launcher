@@ -17,13 +17,9 @@
   // emulator-setup.md): the server's platforms that need an emulator, none
   // ticked; ticking one pre-selects GRID's recommendation. `onDone` hands the
   // app on to the shell — with what was started, or `null` when skipped.
-  // `later`: opened again from Emulators › Platform defaults. The secondary
-  // button closes the picker without recording anything, and the lede says
-  // what it does to platforms that already have an emulator.
-  let {
-    onDone,
-    mode = 'first-run',
-  }: { onDone: (started: SetupStarted | null) => void; mode?: 'first-run' | 'later' } = $props();
+  // Later changes happen in Settings › Systems (its Install recommended
+  // replaced reopening this picker).
+  let { onDone }: { onDone: (started: SetupStarted | null) => void } = $props();
 
   let rows = $state.raw<PlatformSetup[] | null>(null);
   let loadError = $state<string | null>(null);
@@ -60,10 +56,6 @@
   }
 
   async function skip() {
-    if (mode === 'later') {
-      onDone(null);
-      return;
-    }
     busy = true;
     try {
       await api.skipPlatformSetup();
@@ -80,12 +72,8 @@
 <section class="setup" data-testid="setup-view">
   <header>
     <span class="mark"><Icon name="grid" size={28} /></span>
-    <h1>{mode === 'later' ? 'Set up platforms' : 'Choose your platforms'}</h1>
-    <p class="lede">
-      {mode === 'later'
-        ? 'Tick platforms to install their emulator. A ticked platform gets the emulator you pick as its default.'
-        : 'Tick the platforms you play. GRID installs an emulator for each and sets it up.'}
-    </p>
+    <h1>Choose your platforms</h1>
+    <p class="lede">Tick the platforms you play. GRID installs an emulator for each and sets it up.</p>
   </header>
 
   {#if loadError !== null}
@@ -139,15 +127,13 @@
     {#if startError}<p class="error" role="alert" data-testid="setup-error">{startError}</p>{/if}
     <div class="row-actions">
       <button class="secondary" data-testid="setup-skip" disabled={busy} onclick={skip}>
-        {mode === 'later' ? 'Cancel' : 'Skip for now'}
+        Skip for now
       </button>
       <button class="primary" data-testid="setup-install" disabled={busy || tickedCount === 0} onclick={install}>
         {busy ? 'Starting…' : primaryLabel(pending.length, tickedCount)}
       </button>
     </div>
-    {#if mode === 'first-run'}
-      <p class="muted small">You can change these later in Emulators › Platform defaults.</p>
-    {/if}
+    <p class="muted small">You can change these later in Settings › Systems.</p>
   </footer>
 </section>
 

@@ -38,7 +38,7 @@ pub enum NativeCommandError {
 
 /// The [`NativeCommandError::UmuMissing`] text the user reads.
 pub const UMU_MISSING_MESSAGE: &str = "umu-run is not installed. Proton games run through \
-     umu-launcher: install it from Emulators › Compat tools, or install your distribution's \
+     umu-launcher: install it from Settings › Systems › Windows, or install your distribution's \
      umu-launcher package.";
 
 impl std::fmt::Display for NativeCommandError {
@@ -436,7 +436,7 @@ mod tests {
         let error = build_native_command(&g, dir.path(), "", "linux", &no_which).unwrap_err();
         assert_eq!(error, NativeCommandError::UmuMissing);
         assert_eq!(error.to_string(), UMU_MISSING_MESSAGE);
-        assert!(error.to_string().contains("Emulators › Compat tools"));
+        assert!(error.to_string().contains("Settings › Systems › Windows"));
     }
 
     // --- WINEPREFIX ----------------------------------------------------------

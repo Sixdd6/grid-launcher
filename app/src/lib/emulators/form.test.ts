@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { EmulatorEntry } from '../api';
 import {
   addedEmulatorToast,
-  ARGS_LABEL,
   emulatorFormValues,
   entryPatch,
   normalizeSaveStrategy,
@@ -12,12 +11,6 @@ import {
 describe('SAVE_STRATEGIES', () => {
   it('is the reference dialog list, in order', () => {
     expect([...SAVE_STRATEGIES]).toEqual(['auto', 'single_file', 'folder']);
-  });
-});
-
-describe('ARGS_LABEL', () => {
-  it('is the reference label verbatim', () => {
-    expect(ARGS_LABEL).toBe('Arguments (%rom%, %core%, %ps3_launch_target%)');
   });
 });
 

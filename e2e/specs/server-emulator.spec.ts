@@ -9,6 +9,7 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { editEmulator, findLine, lineKey, openSystems, removeEmulator } from '../helpers/systems.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -16,8 +17,9 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  * Stage `server-emulator` (plan B7 / Q3): a ROM on the server's "Emulators"
  * platform is an emulator build. Installing it from the Server view
  * downloads and extracts it like a game (under `games/Emulators/<stem>`),
- * then registers it as an emulator entry, configures it, and shows it under
- * Emulators › Installed. Deleting the entry uninstalls the package.
+ * then registers it as an emulator entry, configures it, and shows it as
+ * PS2's emulator in Settings › Systems. Removing the entry uninstalls the
+ * package.
  *
  * The fixture set (`e2e/fixtures-server-emulator`) carries platform 1
  * "Emulators" with rom 801, whose `pcsx2-server.zip` holds the mock forge's
@@ -28,8 +30,6 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  */
 describe('server-emulator', () => {
   const PCSX2_NAME = 'PCSX2 (Playstation 2)';
-  const PCSX2_ROW = 'emulator-row-pcsx2-(playstation-2)';
-  const PCSX2_DELETE = 'emulator-delete-pcsx2-(playstation-2)';
   const APPIMAGE = 'pcsx2-v9.9-e2e-linux-appimage-x64-Qt.AppImage';
 
   const library = () => path.join(dataDir(), 'library');
@@ -39,19 +39,11 @@ describe('server-emulator', () => {
    *  user-data link into `saves/<Profile>/`, and the writer writes through it. */
   const savedIni = () => path.join(library(), 'saves', PCSX2_NAME, 'inis', 'PCSX2.ini');
 
-  async function show(view: 'server' | 'downloads' | 'emulators') {
+  async function show(view: 'server' | 'downloads') {
     await $(testId(`nav-${view}`)).click();
     await $(testId(`${view}-view`)).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: `the ${view} view never opened`,
-    });
-  }
-
-  async function showInstalledPane() {
-    await $(testId('emu-nav-installed')).click();
-    await $(testId('emu-page-installed')).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the Installed pane never came forward',
     });
   }
 
@@ -107,17 +99,16 @@ describe('server-emulator', () => {
     expect(statSync(exePath()).mode & 0o111).not.toBe(0);
   });
 
-  it('registers the package as the matched profile under Emulators › Installed', async () => {
-    await show('emulators');
-    await showInstalledPane();
-    await $(testId(PCSX2_ROW)).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server package never appeared under Emulators › Installed',
-    });
-    const rowText = await $(testId(PCSX2_ROW)).getText();
-    expect(rowText).toContain(PCSX2_NAME);
-    expect(rowText).toContain(exePath());
-    expect(rowText).toContain('-portable -fullscreen -batch "%rom%"');
+  it('registers the package as the matched profile, shown in Settings › Systems', async () => {
+    await openSystems();
+    // PS2's emulator: the PS2 row shows it.
+    expect(await findLine(PCSX2_NAME)).toBe(lineKey('Sony PlayStation 2'));
+    await editEmulator(await findLine(PCSX2_NAME));
+    await expect($(testId('emu-form-name'))).toHaveValue(PCSX2_NAME);
+    await expect($(testId('emu-form-path'))).toHaveValue(exePath());
+    await expect($(testId('emu-form-args'))).toHaveValue('-portable -fullscreen -batch "%rom%"');
+    await $(testId('emu-form-cancel')).click();
+    await $(testId('systems-sheet')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
   });
 
   it('configures it like a catalog install: platform default and PCSX2.ini through the saves link', async () => {
@@ -137,16 +128,8 @@ describe('server-emulator', () => {
     expect(ini).toContain('SetupWizardIncomplete = false');
   });
 
-  it('deleting the emulator uninstalls the package and keeps its saves', async () => {
-    const deleteBtn = $(testId(PCSX2_DELETE));
-    await deleteBtn.click();
-    await expect(deleteBtn).toHaveText('Confirm delete');
-    await deleteBtn.click();
-    await $(testId(PCSX2_ROW)).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      reverse: true,
-      timeoutMsg: 'the PCSX2 row was still there after the delete',
-    });
+  it('removing the emulator uninstalls the package and keeps its saves', async () => {
+    await removeEmulator(await findLine(PCSX2_NAME), PCSX2_NAME);
 
     expect(existsSync(packageDir())).toBe(false);
     expect(configText()).not.toContain(PCSX2_NAME);

@@ -1,5 +1,5 @@
-// App-lifetime emulator notifications, shared by every view that installs
-// emulators (Settings › Systems and, until it goes, the Emulators view).
+// App-lifetime emulator notifications for every emulator install (Settings ›
+// Systems, first-run setup, a server package installed from Server).
 // Registered once by Shell.svelte, which is mounted exactly once and never
 // hidden, so each event toasts once however many views are mounted.
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';

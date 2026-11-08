@@ -160,7 +160,7 @@ const NO_EMULATOR_EXECUTABLE: &str = "No launchable emulator executable was foun
 /// executable for this system. The package and its row stay installed.
 const NO_SERVER_EMULATOR_EXECUTABLE: &str =
     "No launchable emulator executable for this system was \
-     found in the package. Add it under Emulators › Add from catalog › Manual.";
+     found in the package. Add it in Settings › Systems › Add an emulator manually.";
 
 /// The verbatim messages the update/DLC flows show. Worded as the
 /// reference does (`install_mixin.py:364-383`,
@@ -2167,7 +2167,7 @@ impl InstallService {
     /// path the guard kept on disk across them.
     ///
     /// Ports `_uninstall_emulator_files` (install_mixin.py:1117-1138): the
-    /// Emulators view's delete takes the server package with the entry.
+    /// Settings › Systems's delete takes the server package with the entry.
     /// No configured library means nothing managed can exist: 0 rows. Every
     /// row is attempted; the failures come back as one error.
     pub fn uninstall_server_emulator_rows(

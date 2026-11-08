@@ -353,7 +353,7 @@ pub struct GameFirmwareContext<'a> {
     pub platform_id: i64,
     /// The emulator entry to install for, by exact name. `None` means the
     /// platform's default emulator — what a game install or launch uses.
-    /// The Emulators view names the emulator, because firmware lives with
+    /// Settings › Systems names the emulator, because firmware lives with
     /// the emulator and need not wait for it to become the default.
     pub emulator: Option<&'a str>,
     pub config: &'a Config,

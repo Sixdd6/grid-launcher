@@ -109,7 +109,7 @@ pub fn locate(
     managed.map(|path| (path.to_path_buf(), UmuSource::Managed))
 }
 
-/// The Compat tools pane's umu-run line. Serialized straight to the
+/// The Windows row's umu-run line. Serialized straight to the
 /// frontend, so the field names are part of the IPC contract.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct UmuRunStatus {

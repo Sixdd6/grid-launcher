@@ -22,10 +22,11 @@
  *
  * Trigger 2 — a hand-added RPCS3 entry (`spawn_ps3_firmware`, reached from
  * `commands::save_emulator`): the RPCS3 stub file is written here, but NO
- * config entry for it. firmware.spec.ts adds that entry through the
- * Emulators panel, which is the only thing that fires this trigger. The stub
- * records its argv to `<data>/rpcs3-argv.log` and exits, so the spec can
- * prove the `Install PS3 Firmware` button really ran `rpcs3 --installfw`.
+ * config entry for it. firmware.spec.ts adds that entry with Settings ›
+ * Systems' Add an emulator manually, which is the only thing that fires this
+ * trigger. The stub records its argv to `<data>/rpcs3-argv.log` and exits, so
+ * the spec can prove the PS3 firmware Install button really ran
+ * `rpcs3 --installfw`.
  *
  * `xdg-config/` is a hermeticity guard, as in ps3-install-seed.mjs: it keeps
  * every RPCS3 reader probe (`$RPCS3_CONFIG_DIR`, `$XDG_CONFIG_HOME/rpcs3`)

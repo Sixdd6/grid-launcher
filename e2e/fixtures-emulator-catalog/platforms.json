@@ -10,5 +10,11 @@
     "name": "Nintendo GameCube",
     "slug": "gc",
     "rom_count": 1
+  },
+  {
+    "id": 3,
+    "name": "Sega Dreamcast",
+    "slug": "dc",
+    "rom_count": 1
   }
 ]

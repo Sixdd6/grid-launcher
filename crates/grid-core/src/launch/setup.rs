@@ -181,7 +181,7 @@ fn server_builds<'a>(
 
 /// The newest build on the server for the emulator a server install's
 /// `source_id` names (`romm:<folder>/<emulator>`), as the request that
-/// installs it: what Emulators › Installed compares with the version on disk,
+/// installs it: what Settings › Systems compares with the version on disk,
 /// and what its Update installs. `None` when that folder no longer has a build
 /// of the emulator for this system.
 pub fn newest_server_build(

@@ -72,7 +72,7 @@ pub struct DefaultsContext<'a> {
     pub is_retroarch: &'a dyn Fn(&str) -> bool,
     /// Server platform `name` -> the key `default_emulators` and
     /// `retroarch_cores` are stored under: the platform's display label,
-    /// which is what the Emulators panel, launch and firmware read. Matching
+    /// which is what Settings › Systems, launch and firmware read. Matching
     /// (keywords, cores) stays on the raw `name` in `platforms`; only reads
     /// and writes of the two maps go through this. Production maps a
     /// custom-named platform to its label; tests pass the identity.

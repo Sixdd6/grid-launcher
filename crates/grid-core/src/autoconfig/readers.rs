@@ -5272,7 +5272,7 @@ mod tests {
         assert_eq!(overrides, vec![resolve_best_effort(&save_root)]);
     }
 
-    // The two advisory probes the Emulators pane's Eden notes read
+    // The two advisory probes Settings › Systems' Eden notes read
     // (eden.py:372-391). Portable layout only — neither probe consults the
     // XDG/AppData roots `eden_user_root_candidates` builds.
 

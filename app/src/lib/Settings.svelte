@@ -24,12 +24,16 @@
 
   let page = $state<SettingsPage>(DEFAULT_SETTINGS_PAGE);
 
+  let systemsPage = $state<ReturnType<typeof SystemsPage> | null>(null);
+
   /**
    * Programmatic page selection, for callers that route straight to a page
-   * — the top bar's update badge opens Settings on `updates` (design §3).
+   * — the top bar's update badge opens Settings on `updates` (design §3),
+   * the Server header's chips open `systems` on one system's row.
    */
-  export function show(next: SettingsPage) {
+  export function show(next: SettingsPage, opts: { system?: string } = {}) {
     page = next;
+    if (next === 'systems' && opts.system) systemsPage?.reveal(opts.system);
   }
 
   let railRows = $derived(
@@ -73,7 +77,7 @@
           {:else if p === 'systems'}
             <!-- Page-level activation: its fetches (and the once-per-session
                  update check) run only while it is in front. -->
-            <SystemsPage active={active && page === 'systems'} />
+            <SystemsPage active={active && page === 'systems'} bind:this={systemsPage} />
           {:else if p === 'updates'}
             <UpdatesPage {active} />
           {/if}
@@ -92,8 +96,11 @@
     min-height: 0;
   }
 
-  /* Definite-height flex column so the pane below can scroll itself — see
-     the same note in `Emulators.svelte`. */
+  /* A definite-height flex column, not a plain block: the pane below scrolls
+     itself, and it can only do that if this box stops growing with its
+     content. Left auto-height, the pane's height resolved to its own content,
+     the section grew past the window and the document scrolled — taking the
+     rail with it. */
   .panes {
     flex: 1 1 auto;
     min-width: 0;

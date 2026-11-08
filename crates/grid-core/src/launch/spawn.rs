@@ -21,7 +21,7 @@ use super::template::{
 /// launch, applying the validation chain in the reference order:
 ///
 /// 1. blank `emulator_name` → "No emulator is configured. Add one in
-///    Emulators settings."
+///    Settings › Systems."
 /// 2. no `entry` → "Default emulator '<name>' was not found."
 /// 3. blank `entry.path` → "Emulator '<name>' has no executable path
 ///    configured."
@@ -51,7 +51,7 @@ pub fn prepare_emulator_launch(
 ) -> Result<(Vec<String>, PathBuf), String> {
     let name = emulator_name.trim();
     if name.is_empty() {
-        return Err("No emulator is configured. Add one in Emulators settings.".to_string());
+        return Err("No emulator is configured. Add one in Settings › Systems.".to_string());
     }
 
     let Some(entry) = entry else {
@@ -829,7 +829,7 @@ mod tests {
             prepare_emulator_launch("  ", None, "", &placeholders("", ""), "", false).unwrap_err();
         assert_eq!(
             error,
-            "No emulator is configured. Add one in Emulators settings."
+            "No emulator is configured. Add one in Settings › Systems."
         );
     }
 
@@ -923,7 +923,7 @@ mod tests {
         assert_eq!(
             error,
             "Invalid launch arguments: No RetroArch core is configured for this platform. \
-             Set one in Emulators > Defaults."
+             Set one in Settings › Systems."
         );
     }
 

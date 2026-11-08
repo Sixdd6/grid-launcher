@@ -3,11 +3,10 @@
   // server" to "Add an emulator manually"): every emulator choice, install,
   // update and the Windows (Proton) setup in one page. One row per server
   // system with an emulator picker that is also the installer and a status;
-  // systems with no emulator come first, open. The data is what the
-  // Emulators view reads today (`emulators/*.ts` holds the shared rules);
-  // the row model is `rows.ts`.
+  // systems with no emulator come first, open. `emulators/*.ts` holds the
+  // shared emulator rules; the row model is `rows.ts`.
   import { listen } from '@tauri-apps/api/event';
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import {
     api,
     FIRMWARE_PASS_FINISHED_EVENT,
@@ -192,10 +191,19 @@
       .catch(() => {});
   });
 
-  // The Eden notes' file probes and the RPCS3 firmware package check.
+  // The Eden notes' file probes and the RPCS3 firmware package check, re-read
+  // when the entry list changes and when a firmware download completes (the
+  // background PS3 firmware fetch may just have put a PS3UPDAT.PUP in place).
   let emulatorNames = $derived(emulators.map((e) => e.name).join('\n'));
+  let firmwareCompleted = $derived(
+    downloads.entries
+      .filter((e) => e.kind === 'firmware' && e.status === 'completed')
+      .map((e) => e.id)
+      .join(','),
+  );
   $effect(() => {
     void emulatorNames;
+    void firmwareCompleted;
     if (!active) return;
     const names = untrack(() => emulators.map((e) => e.name));
     void Promise.all(
@@ -302,6 +310,32 @@
   function isOpen(row: Row): boolean {
     return row.emulator === '' || openRows[row.key] === true;
   }
+
+  // The Server header's chips: open this page on one system's row, opened
+  // and scrolled into view. Held until the rows have loaded.
+  let revealKey = $state<string | null>(null);
+  let listEl = $state<HTMLElement | null>(null);
+
+  /** Opens `system`'s row (its display label, or its server name) and
+   *  scrolls it into view once the page has its rows. */
+  export function reveal(system: string) {
+    revealKey = system;
+  }
+
+  $effect(() => {
+    const want = revealKey;
+    if (want === null || !active || !loaded) return;
+    const row = rows.find((r) => r.key === want || r.name === want);
+    if (!row) return;
+    untrack(() => {
+      revealKey = null;
+      openRows = { ...openRows, [row.key]: true };
+      const key = testKeyOf(row.slug || row.label);
+      void tick().then(() => {
+        listEl?.querySelector(`[data-testid="sys-row-${key}"]`)?.scrollIntoView({ block: 'start' });
+      });
+    });
+  });
 
   function rowStatus(row: Row) {
     const fw = firmwareLine(row);
@@ -518,6 +552,7 @@
       <span class="grow">PS3 firmware downloaded — click Install to activate it.</span>
       <button
         class="small-btn primary"
+        data-testid={`sys-ps3-firmware-install-${key}`}
         onclick={() =>
           api
             .installPs3Firmware(name)
@@ -568,7 +603,6 @@
       </div>
       {#key sheet.mode === 'edit' ? sheet.entry.name : ''}
         <EmulatorForm
-          variant="sheet"
           mode={sheet.mode}
           entry={sheet.mode === 'edit' ? sheet.entry : null}
           {profiles}
@@ -584,7 +618,7 @@
   {#if !loaded}
     <p class="muted">Loading…</p>
   {:else}
-    <ul class="sys-list" data-testid="systems-list">
+    <ul class="sys-list" data-testid="systems-list" bind:this={listEl}>
       {#each rows as row (row.key)}
         {@const key = testKeyOf(row.slug || row.label)}
         {@const groups = pickerGroups(row)}

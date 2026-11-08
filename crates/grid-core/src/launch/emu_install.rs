@@ -27,7 +27,7 @@ use crate::library::user_data_links::{ensure_user_data_links, user_data_root};
 
 /// `_extract_emulator_archive`'s message when extraction finished but no
 /// launchable file turned up (emulator_ui_mixin.py:1394). Verbatim — the
-/// Emulators view shows it unchanged.
+/// Settings › Systems shows it unchanged.
 pub const NO_LAUNCHABLE_AFTER_EXTRACT: &str = "Archive extraction finished, but no launchable \
      executable was detected. Open Config to set the executable path manually.";
 

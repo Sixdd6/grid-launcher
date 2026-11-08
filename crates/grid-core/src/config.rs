@@ -199,7 +199,7 @@ pub enum ConfigError {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetupState {
     /// The platform picker was finished or skipped; it is not shown again on
-    /// its own (Emulators › Set up platforms… still opens it).
+    /// its own (Settings › Systems carries on from it).
     #[serde(default)]
     pub completed: bool,
     /// Platform label → the default setup will apply once that platform's

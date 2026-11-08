@@ -191,7 +191,7 @@ pub async fn install_platform_firmware(
 
 /// [`install_platform_firmware`], also recording in the manifest at
 /// `manifest` ([`manifest::MANIFEST_FILE`]) which files each server file put
-/// in place, so the Emulators view can tell installed firmware apart.
+/// in place, so Settings › Systems can tell installed firmware apart.
 pub async fn install_platform_firmware_recorded(
     client: &RommClient,
     platform_id: i64,

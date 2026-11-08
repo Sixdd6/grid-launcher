@@ -1,4 +1,5 @@
-// Pure helpers for the Emulators panel's "Per-platform defaults" select.
+// Pure helpers for each platform's default emulator and RetroArch core
+// (Settings › Systems' picker and core select, the Server header's chip).
 // No store/API imports here so this stays trivially unit-testable.
 import type { LaunchDefaults, Platform } from '../api';
 import { isEmulatorsPlatform } from '../details/blocked';
@@ -9,7 +10,7 @@ import { platformLabel } from '../server/platformLabel';
  * The key `default_emulators` (and `retroarch_cores`) is written and read
  * under for `p` — RomM's display label, not the raw `name`. This is what the
  * launch/firmware backend and the Server header's emulator chip already key
- * by (round 9 review finding 1: the Emulators panel used to persist under
+ * by (round 9 review finding 1: the defaults picker used to persist under
  * `p.name`, so a default set for a custom-named platform was silently never
  * applied at launch). Platform *compatibility* lookups
  * (`compatible_emulators`/`retroarch_core_options`, keyed by `PlatformRef`)
@@ -20,11 +21,9 @@ export function defaultEmulatorKey(p: Pick<Platform, 'display_name' | 'name' | '
 }
 
 /**
- * Whether the Emulators panel's Defaults pane offers `p` an emulator select
- * at all (design §9). A native launch platform's games run as host
- * executables — native by its slug first, then its label (user bug
- * 2026-10-10) — so it never needs a default emulator — the row states that
- * fact instead of offering a choice.
+ * Whether `p` needs an emulator at all (design §9). A native launch
+ * platform's games run as host executables — native by its slug first, then
+ * its label (user bug 2026-10-10) — so it never needs a default emulator.
  */
 export function needsEmulator(p: Pick<Platform, 'display_name' | 'name' | 'slug'>): boolean {
   return !isNativeLaunchPlatform(p.slug, platformLabel(p));
@@ -37,13 +36,6 @@ export function needsEmulator(p: Pick<Platform, 'display_name' | 'name' | 'slug'
  */
 export function isEmulatorsShelf(p: Pick<Platform, 'display_name' | 'name' | 'slug'>): boolean {
   return isEmulatorsPlatform(p.name) || isEmulatorsPlatform(platformLabel(p));
-}
-
-/** The platforms the Platform defaults pane lists: every one but the Emulators shelf. */
-export function defaultsPlatforms<P extends Pick<Platform, 'display_name' | 'name' | 'slug'>>(
-  platforms: P[]
-): P[] {
-  return platforms.filter((p) => !isEmulatorsShelf(p));
 }
 
 /** The `<select>` value that means "no default emulator for this platform". */
@@ -74,7 +66,7 @@ export type PlatformDefaultSelect = {
  * varies, so a verbatim index can miss a default that is really there.
  *
  * Takes the map rather than the whole `LaunchDefaults` so every reader of
- * `default_emulators` — the Emulators panel's select and the Server header's
+ * `default_emulators` — Settings › Systems' picker and the Server header's
  * emulator chip — folds the same way.
  */
 export function savedDefaultFor(

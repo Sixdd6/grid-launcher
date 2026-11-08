@@ -129,7 +129,7 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     for (const name of ['overview', 'media', 'saves']) {
       await expect($(testId(`details-tab-${name}`))).toExist();
     }
-    // No Files tab: its facts are on Overview, firmware is on Emulators.
+    // No Files tab: its facts are on Overview, firmware is in Settings › Systems.
     await expect($(testId('details-tab-files'))).not.toExist();
     await expect($(testId('details-description'))).toHaveText('A classic platformer.');
     await expect($(testId('details-meta-players'))).toHaveText('1');

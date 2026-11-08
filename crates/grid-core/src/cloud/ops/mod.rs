@@ -1175,7 +1175,7 @@ pub fn restore_enabled_for_record(
     if !record_emulator.is_empty() && emulator_entry.is_none() {
         return (
             false,
-            format!("Configure emulator '{record_emulator}' in Emulators to restore this entry."),
+            format!("Configure emulator '{record_emulator}' in Settings › Systems to restore this entry."),
         );
     }
     if emulator_entry.is_none() {
@@ -1248,7 +1248,7 @@ pub(crate) const RESTORE_SUCCESS: &str = "Cloud save restored successfully.";
 
 pub(crate) fn no_directories_message(save_type: SaveType, emulator_name: &str) -> String {
     format!(
-        "No {} directories were found for emulator '{}'. Configure them in Emulators.",
+        "No {} directories were found for emulator '{}'. Configure them in Settings › Systems.",
         kind_label(save_type),
         emulator_name
     )

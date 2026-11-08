@@ -60,19 +60,17 @@ describe('initialView / viewLabel / viewForDigit / chipLabel / hostOf', () => {
     expect(viewLabel('library')).toBe('Library');
     expect(viewLabel('server')).toBe('Server');
     expect(viewLabel('downloads')).toBe('Downloads');
-    expect(viewLabel('emulators')).toBe('Emulators');
     expect(viewLabel('settings')).toBe('Settings');
   });
   it('maps Ctrl+1..5 onto the pill order (design §3)', () => {
     expect(viewForDigit('1')).toBe('library');
     expect(viewForDigit('2')).toBe('server');
     expect(viewForDigit('3')).toBe('downloads');
-    expect(viewForDigit('4')).toBe('emulators');
-    expect(viewForDigit('5')).toBe('settings');
+    expect(viewForDigit('4')).toBe('settings');
   });
   it('ignores every other key, including 0, 6 and non-digits', () => {
     expect(viewForDigit('0')).toBeNull();
-    expect(viewForDigit('6')).toBeNull();
+    expect(viewForDigit('5')).toBeNull();
     expect(viewForDigit('f')).toBeNull();
     expect(viewForDigit('')).toBeNull();
     expect(viewForDigit('11')).toBeNull();

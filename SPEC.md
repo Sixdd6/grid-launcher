@@ -4,10 +4,12 @@ It is built in Rust with Tauri 2 and a Svelte 5 frontend, and ships as a Windows
 
 # Top Bar
 The top bar is 58px tall: the GRID logo and wordmark on the left, a centred pill
-group with the five views (Library, Server, Downloads, Emulators, Settings) in that
-order, and on the right the app-update badge when a release notice is stored, the
-light / dark toggle, a connection status dot and the server menu (Reconnect,
-Disconnect, Open RomM in browser). `Ctrl+1`..`Ctrl+5` switch views from the keyboard.
+group with the four views (Library, Server, Downloads, Settings) in that order, and on
+the right the app-update badge when a release notice is stored, the light / dark
+toggle, a connection status dot and the server menu (Reconnect, Disconnect, Open RomM
+in browser). `Ctrl+1`..`Ctrl+4` switch views from the keyboard (not while a text field
+has focus or a dialog is open). Emulators are set up in Settings › Systems; there is
+no Emulators view.
 
 **Light / dark toggle.** A 28×28 icon button showing the current mode — a sun in light,
 a moon in dark — whose label names the switch ("Switch to dark mode"). On the startup
@@ -54,8 +56,7 @@ There are several main sections to the application with buttons across the top b
 - Server
 - Discover (ON HOLD — not built; see below)
 - Downloads
-- Emulators
-- Settings
+- Settings (emulators are set up in its Systems pane)
 
 - **Library** contains a 220px filter rail — All games, Recent (played in the last 30
   days), Updates, then each installed platform, every entry with a count — beside a
@@ -98,9 +99,10 @@ There are several main sections to the application with buttons across the top b
   default emulator" until the platform has a default emulator, then "Firmware: 3 files",
   then "Firmware: 3 files · installed" ("No server firmware" when the server has none,
   "Firmware: checking…" / "Firmware: unavailable" while the status is loading or was
-  refused). It links to Emulators › Installed when the server offers firmware, or to
-  Platform defaults when the platform has no default emulator. The emulator chip names
-  the default emulator ("No default emulator" when none) and links to the Emulators view.
+  refused). When the server offers firmware it is a link; so is the emulator chip, which
+  names the default emulator ("No default emulator" when none). Both open Settings ›
+  Systems scrolled to that platform's row, opened, where the firmware installs and the
+  emulator is picked.
   Native platforms (games native to this OS, and Windows games run through Proton) and
   the Emulators shelf show neither chip, and their firmware status is never fetched.
 - **Server and Library headers fold while you scroll** (one shared behaviour). Past 32px
@@ -128,32 +130,6 @@ There are several main sections to the application with buttons across the top b
   (network in the primary colour, disk in teal, with the rate and ETA under it), and the
   action for its state: Cancel, Retry and Dismiss, or Dismiss. A live firmware row offers
   no action. The Completed segment keeps the last 50 entries.
-- **Emulators** is a rail of four category panes, each capped at 1100px and centred:
-  **Installed** lists every configured emulator (name, path, arguments) with Edit and
-  Delete — Edit opens the manual form as a sheet beside the list — and, for an RPCS3
-  entry with a downloaded PS3 firmware package, the note and the Install PS3 Firmware
-  button. Under each emulator, one line per platform it is the default emulator for
-  whose server firmware has files ("PlayStation firmware · 3 files") with Install
-  firmware, which reads "Requested…" until the background pass ends. Each server file
-  is checked against the size and MD5 the server lists before it is written. The line
-  says "✓ Installed" once every file is in place, and "Unavailable" when nothing on the
-  server can land in that emulator's folders (Install would place nothing); clicking
-  Unavailable asks the server again and installs if it now has something; **Add from
-  catalog** has a search box, one row per catalog entry with its
-  provider and an Install / Installed button, and a Manual tab for the hand-typed form
-  (name, executable path, arguments, with the profile auto-fill); **Platform defaults**
-  has **Set up platforms…** (the first-run platform picker, see First Run Setup) and
-  shows one card per server platform with the emulator select (only compatible
-  emulators, plus "(none)") and, for a RetroArch default, the core select; **Compat
-  tools** (Linux only) is the wine/proton default picker and its install catalog, plus a
-  umu-run line: which umu-run a Proton launch uses ("system" with its path, "GRID-managed"
-  with its release, or "not installed"), with Install (none installed) or Reinstall (GRID's
-  copy; fetches the newest release), busy while its Downloads row runs, and a note that the
-  first Proton launch downloads the Steam Linux Runtime (about 200 MB). Installing a Proton
-  tool while no umu-run is available also queues umu-launcher as its own Downloads row; its
-  failure never fails the Proton install. Each
-  emulator entry includes a name, executable path, launch arguments, save strategy,
-  ignore rules, and optional custom save/state directories.
 - **Settings** is a rail of seven panes in alphabetical order — Appearance, Cloud saves,
   Connection, Library, RetroAchievements, Systems, Updates — and opens on the first,
   Appearance.
@@ -204,8 +180,9 @@ There are several main sections to the application with buttons across the top b
   the launcher only ever checks — it never downloads or installs an update), and
   **Appearance**.
 - **Settings › Systems** holds every emulator choice, install, update and the Windows
-  (Proton) setup. It sits beside the Emulators view for now; the Emulators view goes
-  once Systems covers everything it does.
+  (Proton) setup (it replaced the Emulators view). Every emulator entry has a name,
+  program path, launch arguments, save strategy, ignore rules and optional custom
+  save/state directories.
   - **One row per system on the server** (never a native platform or the Emulators
     shelf), each with an emulator picker and a status: Ready, Update available, Firmware
     needed, Installing… or No emulator. Systems with no emulator come first, open, with
@@ -237,8 +214,12 @@ There are several main sections to the application with buttons across the top b
     opens upward over it, and it closes when the list scrolls, on Escape or on a click
     elsewhere. Below are the RetroArch core select, the system's firmware line ("PlayStation
     firmware · 3 files · from your server" with Install, Installing… while the pass runs,
-    then Installed; the started and finished notices as before), the PS3 firmware package
-    line for RPCS3, and the Setup tips. An emulator used by several systems shows on each
+    then Installed; each server file is checked against the size and MD5 the server lists
+    before it is written; "Installing PlayStation firmware for DuckStation…" when it
+    starts and "PlayStation firmware installed for DuckStation" when it ends), the PS3
+    firmware package line for RPCS3 (shown once the background PS3 firmware download has
+    put a package beside RPCS3; Install hands it to RPCS3's own installer), and the Setup
+    tips. An emulator used by several systems shows on each
     and says which others it plays.
   - **Update availability** is checked once per session, the first time Systems opens
     (one release request per emulator installed from a source, one at a time), and kept
@@ -252,11 +233,20 @@ There are several main sections to the application with buttons across the top b
     Download entry installs it and makes it the default when its install finishes (kept
     until then, so a retry still gets it; picking an installed one drops it). Its status
     is Installing… while that download runs, Ready once a default is set. Opening it shows
-    the Proton launcher (umu-run) line with Install / Reinstall and the first-launch note.
+    the Proton launcher (umu-run) line — which umu-run a Proton launch uses ("system"
+    with its path, "GRID-managed" with its release, or "not installed") — with Install
+    (none installed) or Reinstall (GRID's copy; fetches the newest release), busy while
+    its Downloads row runs, and the note that the first Windows game launched downloads
+    the Steam Linux Runtime (about 200 MB). Installing a Proton tool while no umu-run is
+    available also queues umu-launcher as its own Downloads row; its failure never fails
+    the Proton install.
   - **Add an emulator manually** sits in the header, for an emulator GRID doesn't install;
     its form opens under the header. The settings sheet is the same for adding and
     editing (Settings… in the ⋯ menu): "Which emulator is it?" (the emulators GRID knows,
-    or Something else with a name; add only), Program (with Browse…), Launch options
+    or Something else with a name; add only), Name (Something else when adding; always
+    when editing, so an entry can be renamed in place), Program (with Browse…; a path
+    that matches a known emulator fills in the name and launch options when both are
+    still empty), Launch options
     ("%rom% is replaced by the game file") and, under "Cloud saves (advanced)", how the
     emulator stores saves, save and save state folders, and files and file types not to
     upload. A manual add never sets a system's default; only an install the user asked
@@ -319,8 +309,8 @@ There are several main sections to the application with buttons across the top b
   name works), and GRID sets `[System] InternalBackupRAMPerGame = true` in `Ymir.toml`
   (add-only) so each game keeps its own save, `backup/games/bup-int-<title> [<serial>].bin`,
   which cloud sync handles per game. First-run setup recommends Ymir for Sega Saturn.
-- Installing a folder from the server's "Emulators" platform that follows the packaging standard (`docs/server-emulator-packages.md`) installs each emulator in it that GRID knows, from just its newest build for this system, the same way first-run setup does: under `emulators/<Name>`, registered with its server source and version. Emulators › Installed's **Update** for such an entry compares that version with the newest build for this system in the same folder (number by number, so 2.0.10 is newer than 2.0.9; a pre-release such as 0.2.7a6 or 2.0.0-rc.1 is older than its release, and a lone letter such as 0.2.5g is a later fix) and installs it over the same entry. A package that does not follow the standard installs as below.
-- A package installed from the server's "Emulators" platform is registered as an emulator. It is downloaded and extracted under `games/Emulators/<package>` like a game, and its hidden library row is kept. GRID then picks the executable for this system (`.exe` on Windows; an AppImage, `.sh` or executable file on Linux) and matches it to a bundled emulator profile. A match gives the profile's name and arguments; no match gives the ROM title and `%rom%`. When another emulator entry already has that name, the package is added as "<Name> (server)", so a catalog entry and its update source stay unchanged. The profile's user-data folders are linked into `saves/`, the emulator is configured and gets default platforms like a catalog install, and its Downloads row shows the Emulator badge. Reinstalling the package updates the same entry and keeps the user's arguments. Deleting the emulator under Emulators › Installed also uninstalls its server package.
+- Installing a folder from the server's "Emulators" platform that follows the packaging standard (`docs/server-emulator-packages.md`) installs each emulator in it that GRID knows, from just its newest build for this system, the same way first-run setup does: under `emulators/<Name>`, registered with its server source and version. Settings › Systems' update check and **Update** for such an entry compare that version with the newest build for this system in the same folder (number by number, so 2.0.10 is newer than 2.0.9; a pre-release such as 0.2.7a6 or 2.0.0-rc.1 is older than its release, and a lone letter such as 0.2.5g is a later fix) and installs it over the same entry. A package that does not follow the standard installs as below.
+- A package installed from the server's "Emulators" platform is registered as an emulator. It is downloaded and extracted under `games/Emulators/<package>` like a game, and its hidden library row is kept. GRID then picks the executable for this system (`.exe` on Windows; an AppImage, `.sh` or executable file on Linux) and matches it to a bundled emulator profile. A match gives the profile's name and arguments; no match gives the ROM title and `%rom%`. When another emulator entry already has that name, the package is added as "<Name> (server)", so a catalog entry and its update source stay unchanged. The profile's user-data folders are linked into `saves/`, the emulator is configured and gets default platforms like a catalog install, and its Downloads row shows the Emulator badge. Reinstalling the package updates the same entry and keeps the user's arguments. Removing the emulator in Settings › Systems also uninstalls its server package.
 
 ## Sub Views
 
@@ -374,8 +364,8 @@ alphabetical order, none ticked:
   the platform is left without a default and the card says so. A chosen default waits
   for its own emulator, so a failed install that is retried still gets it.
 - **Skip for now** opens the app with nothing installed. Either way the picker is not
-  shown again on its own; **Emulators › Platform defaults › Set up platforms…** opens it
-  any time (Cancel closes it).
+  shown again; changes later happen in Settings › Systems, whose **Install recommended
+  (N)** replaces reopening it. The picker's footnote says so.
 
 If the server rejects the stored credential (HTTP 401), at startup or during a session, the app returns to this screen. The server URL (and username, for a password) is filled in, the credential field is empty, and a line explains why ("The server rejected your token. Enter a new one."). The stored credential stays in the OS keyring until a new connect succeeds. When the server is unreachable or denies permission (HTTP 403), the app stays open and shows "Not connected" with Retry.
 
@@ -423,7 +413,7 @@ flags and the version, then up to four tabs:
   own files' total; Version (PC platforms only) is the installed version, with the
   server's beside it when they differ ("v1.0.0 · server v1.1.0"); Content counts the PS4
   update / Xbox 360 DLC files the server holds ("1 update · 2 DLC"). Screenshots are on
-  the Media tab only. There is no Files tab: firmware installs from Emulators › Installed.
+  the Media tab only. There is no Files tab: firmware installs from Settings › Systems.
 - **Media** — two horizontally scrolling rows, each with its count and arrows when it
   overflows: Screenshots (every screenshot, at its own shape) and Videos (the trailer and
   any server-hosted video). A row with nothing in it is left out. Clicking a tile opens a

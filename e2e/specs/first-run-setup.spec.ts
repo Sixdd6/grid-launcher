@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { APP_START_TIMEOUT, configPath, dataDir, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { groups, openSystems } from '../helpers/systems.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -177,16 +178,14 @@ describe('first-run setup: pick platforms, install their emulators', () => {
 
   });
 
-  it('opens the picker again from Emulators › Platform defaults', async () => {
-    await $(testId('nav-emulators')).click();
-    await $(testId('emu-nav-defaults')).click();
-    await $(testId('emu-setup-platforms')).click();
-    await $(testId('emu-setup-dialog')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('setup-installed-ps2')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'PCSX2 never showed as installed in the reopened picker',
-    });
-    await $(testId('setup-skip')).click();
-    await expect($(testId('emu-setup-dialog'))).not.toExist();
+  it('carries on in Settings › Systems, where Install recommended replaces the picker', async () => {
+    await openSystems();
+    await expect($(testId('sys-status-ps2'))).toHaveAttribute('data-status', 'ready');
+    await expect($(testId('sys-status-dc'))).toHaveAttribute('data-status', 'ready');
+    // The server's PCSX2 build is installed: the picker lists it under Installed.
+    expect(((await groups('ps2')).Installed ?? []).some((o) => o.startsWith('use:PCSX2 (Playstation 2)'))).toBe(true);
+    // SNES (RetroArch) still has no emulator; Zeebo has nothing installable.
+    await expect($(testId('systems-install-recommended'))).toHaveText('Install recommended (1)');
+    await expect($(testId('setup-view'))).not.toExist();
   });
 });

@@ -167,10 +167,11 @@ session exists and `Shell.svelte` afterwards.
   `inputMode`, `lastViewed`, `compatTools`, `pythonImport`, `libraryMove` (the 9b move status and its toasts),
   `libraryUnreachable` (while it says unreachable, `App.svelte` shows only
   `LibraryUnreachableDialog.svelte`, whose pure half is `lib/libraryUnreachable.ts`).
-- Views — `Library.svelte`, `Server.svelte`, `Downloads.svelte`, `Emulators.svelte`
-  (until Settings › Systems replaces it), `Settings.svelte`, plus `Details.svelte` as a
-  sub-view. `shell.ts` holds the view list
-  and the session-phase mapping.
+- Views — `Library.svelte`, `Server.svelte`, `Downloads.svelte`, `Settings.svelte`, plus
+  `Details.svelte` as a sub-view. `shell.ts` holds the view list (its order is the
+  `Ctrl+1`..`Ctrl+4` accelerators) and the session-phase mapping. Emulators live in
+  Settings › Systems; `Shell.svelte` routes the Server header's chips there with
+  `Settings.show('systems', { system })`.
 - Feature folders — `lib/details/`, `lib/downloads/`, `lib/emulators/`, `lib/settings/`,
   `lib/systems/`, `lib/library/`, `lib/server/`, `lib/cards/`, `lib/focus/`. Each pairs a `.svelte`
   component with a pure `.ts` module holding the logic, and a `.test.ts` beside it. Put
@@ -186,9 +187,10 @@ session exists and `Shell.svelte` afterwards.
   `Settings.svelte`) with `SystemRow`, `EmulatorBlock`, `RowMenu` and `WindowsRow`; the
   pure halves are `rows.ts` (the row model from `setup_platform_options`, the picker
   groups, status, Install recommended, Other emulators), `menuPlacement.ts` (the ⋯
-  menu's `placeMenu`) and `proton.ts` (the Windows row's picker). It reuses
-  `lib/emulators/*.ts` (defaults, firmware, notes) and `EmulatorForm.svelte` as its
-  settings sheet (`variant="sheet"`). `stores/emulatorUpdates.svelte.ts` caches the
+  menu's `placeMenu`) and `proton.ts` (the Windows row's picker). `reveal(system)` opens
+  one system's row and scrolls to it. It reuses `lib/emulators/*.ts` (defaults,
+  firmware, notes, form, compat tools, the install signal) and `EmulatorForm.svelte` as
+  its add/edit settings sheet. `stores/emulatorUpdates.svelte.ts` caches the
   once-per-session emulator update check. `systems/events.ts` holds the app-lifetime
   emulator notifications (install/update finished, a RetroArch pick with no core);
   `Shell.svelte` registers them once, so each toasts once whichever views are mounted.

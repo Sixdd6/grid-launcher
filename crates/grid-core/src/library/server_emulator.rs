@@ -3,7 +3,7 @@
 //! A ROM on the server's Emulators platform is an emulator build. It is
 //! downloaded and extracted like any other game (under
 //! `games/Emulators/<stem>`, with its hidden registry row), and then
-//! registered as an emulator so it shows under Emulators › Installed and is
+//! registered as an emulator so it shows under Settings › Systems and is
 //! configured like a catalog install. Ports `_auto_configure_installed_emulator`
 //! (grid-launcher.py:3622-3664) and the parts of
 //! `auto_configure_emulator_settings` (emulator/autoconfig.py:472-575) that

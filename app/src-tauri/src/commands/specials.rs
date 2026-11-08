@@ -430,7 +430,7 @@ pub fn apply_compat_default_after_install(config_path: &Path) {
     }
 }
 
-/// Queues GRID's own umu-launcher (Emulators › Compat tools, and the
+/// Queues GRID's own umu-launcher (Settings › Systems › Windows, and the
 /// "Install umu-launcher" offer under a Proton launch error). Its Downloads
 /// row is a `compat_tool` one; a finished install fires
 /// `compat-tools-changed` through the compat-tools hook.

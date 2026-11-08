@@ -46,7 +46,7 @@ pub async fn setup_platform_options(
 }
 
 /// The newest build on the server for an installed server emulator
-/// (`source_id` = `romm:<folder>/<emulator>`): Emulators › Installed's update
+/// (`source_id` = `romm:<folder>/<emulator>`): Settings › Systems' update
 /// check and its Update read this.
 pub(crate) async fn server_emulator_update(
     state: &State<'_, AppState>,
