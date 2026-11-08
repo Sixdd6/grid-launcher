@@ -72,6 +72,8 @@
      reads on any screenshot. */
   .ra-logo-wrap { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 20px 16px; background: linear-gradient(to top, rgba(0,0,0,.6), rgba(0,0,0,0)); pointer-events: none; }
   .ra-logo { max-width: 55%; line-height: 1; color: #fff; overflow-wrap: anywhere; }
-  .logo-a { font: italic 700 34px/1 Georgia, 'Times New Roman', serif; color: #f6d77a; text-shadow: 0 2px 0 #6b4a0e, 0 4px 12px rgba(0,0,0,.6); }
-  .logo-b { font: 900 30px/0.95 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em; -webkit-text-stroke: 1px rgba(0,0,0,.6); text-shadow: 3px 3px 0 #553e98, 0 4px 14px rgba(0,0,0,.6); }
-  .logo-c { font: 800 32px/1 system-ui, sans-serif; letter-spacing: -.01em; color: #eafcff; text-shadow: 0 0 1px #0b3b46, 0 3px 0 #0b3b46, 0 5px 14px rgba(0,0,0,.55); }
+  /* --lf: letters, --ls: outline and shadow. A server logo stand-in keeps the
+     defaults; a generated logo sets both from the screenshot's dominant shade. */
+  .logo-a { font: italic 700 34px/1 Georgia, 'Times New Roman', serif; color: var(--lf, #f6d77a); text-shadow: 0 2px 0 var(--ls, #6b4a0e), 0 4px 12px rgba(0,0,0,.6); }
+  .logo-b { font: 900 30px/0.95 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em; color: var(--lf, #fff); -webkit-text-stroke: 1px rgba(0,0,0,.6); text-shadow: 3px 3px 0 var(--ls, #553e98), 0 4px 14px rgba(0,0,0,.6); }
+  .logo-c { font: 800 32px/1 system-ui, sans-serif; letter-spacing: -.01em; color: var(--lf, #eafcff); text-shadow: 0 0 1px var(--ls, #0b3b46), 0 3px 0 var(--ls, #0b3b46), 0 5px 14px rgba(0,0,0,.55); }

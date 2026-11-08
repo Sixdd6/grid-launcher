@@ -338,9 +338,11 @@
      reads on any screenshot. */
   .ra-logo-wrap { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 20px 16px; background: linear-gradient(to top, rgba(0,0,0,.6), rgba(0,0,0,0)); pointer-events: none; }
   .ra-logo { max-width: 55%; line-height: 1; color: #fff; overflow-wrap: anywhere; }
-  .logo-a { font: italic 700 34px/1 Georgia, 'Times New Roman', serif; color: #f6d77a; text-shadow: 0 2px 0 #6b4a0e, 0 4px 12px rgba(0,0,0,.6); }
-  .logo-b { font: 900 30px/0.95 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em; -webkit-text-stroke: 1px rgba(0,0,0,.6); text-shadow: 3px 3px 0 #553e98, 0 4px 14px rgba(0,0,0,.6); }
-  .logo-c { font: 800 32px/1 system-ui, sans-serif; letter-spacing: -.01em; color: #eafcff; text-shadow: 0 0 1px #0b3b46, 0 3px 0 #0b3b46, 0 5px 14px rgba(0,0,0,.55); }
+  /* --lf: letters, --ls: outline and shadow. A server logo stand-in keeps the
+     defaults; a generated logo sets both from the screenshot's dominant shade. */
+  .logo-a { font: italic 700 34px/1 Georgia, 'Times New Roman', serif; color: var(--lf, #f6d77a); text-shadow: 0 2px 0 var(--ls, #6b4a0e), 0 4px 12px rgba(0,0,0,.6); }
+  .logo-b { font: 900 30px/0.95 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em; color: var(--lf, #fff); -webkit-text-stroke: 1px rgba(0,0,0,.6); text-shadow: 3px 3px 0 var(--ls, #553e98), 0 4px 14px rgba(0,0,0,.6); }
+  .logo-c { font: 800 32px/1 system-ui, sans-serif; letter-spacing: -.01em; color: var(--lf, #eafcff); text-shadow: 0 0 1px var(--ls, #0b3b46), 0 3px 0 var(--ls, #0b3b46), 0 5px 14px rgba(0,0,0,.55); }
 
 </style></head>
 <body>
@@ -1198,9 +1200,47 @@ var SHOT_OVERRIDE = { 'Orbit Bloom': [16, 9], 'Signal Fires': [16, 9], 'Grey Mer
 var LOGO_PLATFORMS = ['WIN', 'LINUX', 'PS2', 'GC'], LOGO_TITLES = ['Cinder Peaks', 'Coral Static'];
 function shotRatio(g) { return SHOT_OVERRIDE[g.t] || SHOT[g.p] || [16, 9]; }
 function hasLogo(g) { return LOGO_PLATFORMS.indexOf(g.p) >= 0 || LOGO_TITLES.indexOf(g.t) >= 0; }
-/* Stand-in clear logo: styled text in one of three looks. A real one is a
-   transparent image, usually light, so it sits on the art, not the panel. */
-function clearLogo(g) { return '<div class="ra-logo logo-' + 'abc'.charAt(g.id % 3) + '" role="img" aria-label="' + syEsc(g.t) + '">' + esc(g.t) + '</div>'; }
+/* Every game gets a logo on its screenshot. A server clear logo is a
+   transparent image (here a styled-text stand-in in fixed colours). Without
+   one, GRID draws the title in one of the same three styles, coloured from the
+   screenshot: a light tint of its dominant shade for the letters and a deep
+   shade of it for the outline and shadow, so it matches the art and reads. */
+function clearLogo(g) {
+  var style = 'abc'.charAt(g.id % 3), vars = '';
+  if (!hasLogo(g)) {
+    var hsl = rgbToHsl(dominantShade(g));
+    vars = ' data-generated style="--lf:hsl(' + hsl[0] + ' ' + Math.min(hsl[1], 70) + '% 88%);--ls:hsl(' + hsl[0] + ' ' + Math.min(hsl[1], 60) + '% 16%)"';
+  }
+  return '<div class="ra-logo logo-' + style + '" role="img" aria-label="' + syEsc(g.t) + '"' + vars + '>' + esc(g.t) + '</div>';
+}
+
+/* The screenshot's dominant shade: sample its own pixels (never the blurred
+   fill around an off-ratio shot), group them into 4-bit-per-channel buckets,
+   take the most common bucket and average its pixels. The prototype draws its
+   placeholder screenshot to a small canvas first; the app samples the image. */
+var SHADE_CACHE = {};
+function dominantShade(g) {
+  if (SHADE_CACHE[g.id]) return SHADE_CACHE[g.id];
+  var r = shotRatio(g), w = 64, h = Math.round(64 * r[1] / r[0]);
+  var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  var x = cv.getContext('2d');
+  x.fillStyle = g.c; x.fillRect(0, 0, w, h);
+  x.fillStyle = 'rgba(255,255,255,.14)'; x.fillRect(w * .08, h * .52, w * .46, h * .34);
+  x.fillStyle = 'rgba(255,255,255,.18)'; x.beginPath(); x.arc(w * .77, h * .16 + w * .13, w * .13, 0, Math.PI * 2); x.fill();
+  var px = x.getImageData(0, 0, w, h).data, buckets = {}, best = null;
+  for (var i = 0; i < px.length; i += 4) {
+    var k = (px[i] >> 4) << 8 | (px[i + 1] >> 4) << 4 | (px[i + 2] >> 4), b = buckets[k] || (buckets[k] = [0, 0, 0, 0]);
+    b[0]++; b[1] += px[i]; b[2] += px[i + 1]; b[3] += px[i + 2];
+    if (!best || b[0] > best[0]) best = b;
+  }
+  return (SHADE_CACHE[g.id] = [Math.round(best[1] / best[0]), Math.round(best[2] / best[0]), Math.round(best[3] / best[0])]);
+}
+function rgbToHsl(c) {
+  var r = c[0] / 255, gg = c[1] / 255, b = c[2] / 255, mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), l = (mx + mn) / 2, h = 0, s = 0;
+  if (mx !== mn) { var d = mx - mn; s = l > .5 ? d / (2 - mx - mn) : d / (mx + mn);
+    h = mx === r ? (gg - b) / d + (gg < b ? 6 : 0) : mx === gg ? (b - r) / d + 2 : (r - gg) / d + 4; h *= 60; }
+  return [Math.round(h), Math.round(s * 100), Math.round(l * 100)];
+}
 function discArt(g, extra) { return '<div class="g-art" style="background:' + g.c + (extra || '') + '"><span>' + esc(g.t) + '</span></div>'; }
 
 function renderDiscover() {
@@ -1277,7 +1317,7 @@ function raGo(i, auto, first) {
   var r = shotRatio(g), wide = r[0] / r[1] >= 16 / 9;
   shot.innerHTML = '<div class="ra-fill" style="background:' + g.c + '"><span></span><i></i></div>' +
     '<div class="ra-pic ' + (wide ? 'wide' : 'tall') + '" style="aspect-ratio:' + r[0] + ' / ' + r[1] + '"><div class="ra-art" style="background:' + g.c + '"><span></span><i></i></div></div>' +
-    (hasLogo(g) ? '<div class="ra-logo-wrap">' + clearLogo(g) + '</div>' : '');
+    '<div class="ra-logo-wrap">' + clearLogo(g) + '</div>';
   shot.dataset.ratio = r[0] + ':' + r[1];
   if (first) { $('ra-a').classList.remove('on'); $('ra-b').classList.remove('on'); }
   shot.classList.add('on'); $('ra-' + DISC.layer).classList.remove('on'); DISC.layer = next;
@@ -1285,8 +1325,8 @@ function raGo(i, auto, first) {
 }
 function raCaption() {
   var g = DISC.recent && DISC.recent[DISC.ra], c = $('ra-caption'); if (!g || !c) return;
-  /* With a clear logo on the screenshot, the caption leaves the title out. */
-  c.innerHTML = '<div>' + (hasLogo(g) ? '' : '<b>' + esc(g.t) + '</b>') + '<span class="meta2">' + PLAT[g.p] + ' · ' + addedAgo(g.added) + '</span></div>' +
+  /* The title is the logo on the screenshot; the caption has the rest. */
+  c.innerHTML = '<div><span class="meta2">' + PLAT[g.p] + ' · ' + addedAgo(g.added) + '</span></div>' +
     '<div class="form-actions"><button class="g-btn" data-disc-act="' + g.id + '">' + discAction(g) + '</button></div>';
 }
 
