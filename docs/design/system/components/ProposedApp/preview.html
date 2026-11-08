@@ -676,7 +676,7 @@ S.ra = { user: '', set: false };
 S.connEdit = false; S.updateNotice = true;
 
 function renderSettings(){
-  var panes = [['connection','Connection'],['library','Library'],['systems','Systems'],['cloud','Cloud saves'],['ra','RetroAchievements'],['updates','Updates'],['appearance','Appearance']];
+  var panes = [['appearance','Appearance'],['cloud','Cloud saves'],['connection','Connection'],['library','Library'],['ra','RetroAchievements'],['systems','Systems'],['updates','Updates']];
   rail('set-rail', panes.map(function(p){ return { key: p[0], label: p[1], sel: S.setPane === p[0] }; }), function(k){ S.setPane = k; S.connEdit = false; renderSettings(); });
   var el = $('set-pane'), h;
   if (S.setPane === 'systems') { renderSystems(el); return; }

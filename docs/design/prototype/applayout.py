@@ -666,7 +666,9 @@ nxt = sub(nxt, '/* ---- details ---- */', NEXT_JS + '\n/* ---- details ---- */')
 nxt = sub(nxt, "var VIEWS = ['library','server','downloads','emulators','settings'];", "var VIEWS = ['library','server','downloads','settings'];")
 nxt = sub(nxt, "var S = { view: 'server',", "var S = { view: 'settings',")
 nxt = sub(nxt, "setPane: 'appearance'", "setPane: 'systems'")
-nxt = sub(nxt, "['library','Library'],['cloud','Cloud saves']", "['library','Library'],['systems','Systems'],['cloud','Cloud saves']")
+# Settings rail: Systems joins, and the panes run alphabetically.
+nxt = sub(nxt, "var panes = [['connection','Connection'],['library','Library'],['cloud','Cloud saves'],['ra','RetroAchievements'],['updates','Updates'],['appearance','Appearance']];",
+          "var panes = [['appearance','Appearance'],['cloud','Cloud saves'],['connection','Connection'],['library','Library'],['ra','RetroAchievements'],['systems','Systems'],['updates','Updates']];")
 nxt = sub(nxt, "  var el = $('set-pane'), h;\n", "  var el = $('set-pane'), h;\n  if (S.setPane === 'systems') { renderSystems(el); return; }\n")
 nxt = sub(nxt, "S.view = go.getAttribute('data-go'); if (S.view==='emulators') S.emuPane='installed';", "S.view = go.getAttribute('data-go'); if (S.view==='emulators') { S.view='settings'; S.setPane='systems'; }")
 nxt = sub(nxt, "$('srv-emu').textContent = 'Emulator: ' + EMU[S.platform];", "$('srv-emu').textContent = EMU[S.platform]==='none' ? 'No default emulator' : 'Emulator: ' + EMU[S.platform]; var fwN = { PS: 3, SAT: 2 }[S.platform], fwS = SY.fw[S.platform]; $('srv-fw').textContent = !fwN ? 'No server firmware' : (EMU[S.platform]==='none' ? 'Firmware: ' + fwN + ' files — no default emulator' : fwS==='installed' ? 'Firmware: ' + fwN + ' files · installed' : 'Firmware: ' + fwN + ' files');")
