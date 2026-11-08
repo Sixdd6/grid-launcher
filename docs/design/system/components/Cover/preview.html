@@ -1,0 +1,59 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GRID Launcher</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text-h); font-family: var(--font-sans); overflow: hidden; }
+  .cover { position: relative; width: 960px; height: 288px; overflow: hidden; }
+  .art { position: absolute; top: 0; left: 480px; width: 480px; height: 288px; overflow: hidden; }
+  .art svg { display: block; }
+  .t { rx: var(--r-card); }
+  .primary { fill: var(--primary); }
+  .ink { fill: var(--text-h); }
+  .soft { fill: var(--secondary); }
+  .warm { fill: var(--accent-warm); }
+  .cell { fill: var(--border); }
+  .dot { fill: var(--success); }
+  .words { position: absolute; left: 32px; bottom: 32px; max-width: 440px; }
+  .name { margin: 0; font-size: 88px; line-height: .95; font-weight: 600; letter-spacing: .02em; color: var(--text-h); }
+  .tag { margin: 12px 0 0 2px; font-size: 14px; line-height: 20px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="cover">
+  <div class="art" aria-hidden="true">
+    <svg viewBox="0 0 480 288" width="480" height="288">
+      <!--
+        blocks      primary 156×204 (two cells wide, two tall: the brand hue leads) · text-h 156×96 (the ink) · secondary 72×96 (the tint) · accent-warm 72×96 once · success 9px dot once (the installed mark) — about 40% of 960×288
+        arrangement a modular grid of portrait 3:4 cells (72×96) like the cover grid, bleeding off the top and right edges; big blocks are merged cells, as wide covers span two columns
+        pattern     tiles cut by the radius scale, from "Covers are shown whole, at their own shape" and the four-cell grid brandmark: the remaining cells in border
+        scales      cell 72×96 (3:4), gutter 12 between cells, corners r-card (10px), dot 9px as on a card
+      -->
+      <rect class="cell t" x="12" y="-30" width="72" height="96"/>
+      <rect class="primary t" x="96" y="-30" width="156" height="204"/>
+      <rect class="cell t" x="264" y="-30" width="72" height="96"/>
+      <rect class="soft t" x="348" y="-30" width="72" height="96"/>
+      <rect class="cell t" x="432" y="-30" width="72" height="96"/>
+
+      <rect class="soft t" x="12" y="78" width="72" height="96"/>
+      <rect class="ink t" x="264" y="78" width="156" height="96"/>
+      <rect class="cell t" x="432" y="78" width="72" height="96"/>
+
+      <rect class="cell t" x="12" y="186" width="72" height="96"/>
+      <rect class="cell t" x="96" y="186" width="72" height="96"/>
+      <rect class="warm t" x="180" y="186" width="72" height="96"/>
+      <rect class="cell t" x="264" y="186" width="156" height="96"/>
+      <rect class="primary t" x="432" y="186" width="72" height="96"/>
+      <circle class="dot" cx="236" cy="200" r="4.5"/>
+    </svg>
+  </div>
+  <div class="words">
+    <h1 class="name">GRID<br>Launcher</h1>
+    <p class="tag">Your RomM library on the desktop. The art is the canvas.</p>
+  </div>
+</div>
+</body>
+</html>

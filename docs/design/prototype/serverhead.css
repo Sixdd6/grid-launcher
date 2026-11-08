@@ -1,0 +1,18 @@
+  /* Collapsing Server header */
+  .sbody { position: relative; overflow: hidden; }
+  .sscroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-anchor: none; padding-top: var(--head-h, 116px); box-sizing: border-box; }
+  .shead { position: absolute; top: 0; left: 0; right: var(--sb, 0px); z-index: 3;
+    transition: padding 260ms cubic-bezier(.2,.7,.2,1), gap 260ms cubic-bezier(.2,.7,.2,1), background-color 260ms ease, box-shadow 260ms ease, border-color 260ms ease; }
+  /* Folded, the bar floats over the cards: it becomes the overlay level
+     (opaque), so no cover shows through the search field. */
+  .shead.folded { padding-top: 8px; padding-bottom: 8px; gap: 0; background: var(--overlay); border-color: var(--line-strong); box-shadow: 0 10px 24px rgba(10, 10, 30, 0.22); }
+  .shead-fold { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 260ms cubic-bezier(.2,.7,.2,1); }
+  .shead.folded .shead-fold { grid-template-rows: 0fr; }
+  .shead-fold-in { min-height: 0; overflow: hidden; }
+  /* The title row lifts and fades as it folds; the chips go a beat earlier.
+     Unfolding, the row waits a moment so it appears into the space opening. */
+  .shead-fold-in > header { transition: opacity 180ms ease 60ms, transform 260ms cubic-bezier(.2,.7,.2,1); }
+  .shead .g-chips { transition: opacity 140ms ease 80ms; }
+  .shead.folded .shead-fold-in > header { opacity: 0; transform: translateY(-8px); transition: opacity 160ms ease, transform 260ms cubic-bezier(.2,.7,.2,1); }
+  .shead.folded .g-chips { opacity: 0; transition: opacity 100ms ease; }
+  @media (prefers-reduced-motion: reduce) { .shead, .shead * { transition: none !important; } }

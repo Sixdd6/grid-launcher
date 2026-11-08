@@ -1,0 +1,1 @@
+The app's icon set from `app/src/lib/icons.ts`: one 24×24 grid, 1.5-unit round stroke; `star`, `play` and `more` are filled. In the app they paint with `currentColor`; these files are drawn in `text` (#111117). Use 20px in icon buttons, 14–15px inline.

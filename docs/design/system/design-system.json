@@ -1,0 +1,129 @@
+{
+ "v": 3,
+ "layout": "files",
+ "createdOnFiles": {
+  "v": 1,
+  "at": "2026-11-08T01:19:15Z"
+ },
+ "title": "GRID Launcher",
+ "namespace": "GRID",
+ "libraries": [],
+ "sections": {},
+ "groups": [
+  "Logos",
+  "Icons"
+ ],
+ "assetGroups": {
+  "Logos": {
+   "name": "Logos",
+   "tile": "l",
+   "order": [
+    "grid-app-icon.png"
+   ],
+   "files": {
+    "grid-app-icon.png": {
+     "name": "grid-app-icon.png",
+     "blob": "de668f84a069af6609a161ca83e8e0c5",
+     "size": 34064,
+     "type": "image/png"
+    }
+   }
+  },
+  "Icons": {
+   "name": "Icons",
+   "tile": "s",
+   "order": [
+    "grid",
+    "close",
+    "chevronLeft",
+    "chevronRight",
+    "check",
+    "arrowLeft",
+    "cloud",
+    "star",
+    "download",
+    "play",
+    "more"
+   ],
+   "files": {
+    "grid.svg": {
+     "name": "grid.svg",
+     "blob": "9b584ac9f7d9bbad5dbba970e55a7305",
+     "size": 247,
+     "type": "image/svg+xml"
+    },
+    "close.svg": {
+     "name": "close.svg",
+     "blob": "30bcecf57d6970ab4ae6cc26d39c7087",
+     "size": 217,
+     "type": "image/svg+xml"
+    },
+    "chevronLeft.svg": {
+     "name": "chevronLeft.svg",
+     "blob": "da928e984170b156f2ad7bedff2b3742",
+     "size": 215,
+     "type": "image/svg+xml"
+    },
+    "chevronRight.svg": {
+     "name": "chevronRight.svg",
+     "blob": "ec82180b146c120e319410b7f60576f6",
+     "size": 211,
+     "type": "image/svg+xml"
+    },
+    "check.svg": {
+     "name": "check.svg",
+     "blob": "2b2d43cf9b82615f736ab64ff5f7c05c",
+     "size": 213,
+     "type": "image/svg+xml"
+    },
+    "arrowLeft.svg": {
+     "name": "arrowLeft.svg",
+     "blob": "cdb7eb31f70a3f0a49080422a8575d85",
+     "size": 231,
+     "type": "image/svg+xml"
+    },
+    "cloud.svg": {
+     "name": "cloud.svg",
+     "blob": "bba5dec2539b1b5d8c66b68c258ad922",
+     "size": 270,
+     "type": "image/svg+xml"
+    },
+    "star.svg": {
+     "name": "star.svg",
+     "blob": "0510a92d3a0c4816e2dfbcabf6ddea60",
+     "size": 234,
+     "type": "image/svg+xml"
+    },
+    "download.svg": {
+     "name": "download.svg",
+     "blob": "4f1598f5bc40e813bbb3487bd3dffe97",
+     "size": 289,
+     "type": "image/svg+xml"
+    },
+    "play.svg": {
+     "name": "play.svg",
+     "blob": "8a417904e5e53db68a70c2f9f86640b3",
+     "size": 155,
+     "type": "image/svg+xml"
+    },
+    "more.svg": {
+     "name": "more.svg",
+     "blob": "e0b4192a8887a13fc59ff5ab602de887",
+     "size": 277,
+     "type": "image/svg+xml"
+    }
+   }
+  }
+ },
+ "blobs": {},
+ "docs": {
+  "readme": "project/README.md",
+  "sections": []
+ },
+ "lastChange": {
+  "by": "Sixdd6",
+  "at": "2026-11-08T01:19:15Z",
+  "via": "GitHub \u00b7 Sixdd6/grid-launcher@4075dc4",
+  "note": "First sync from app.css and the Svelte components, with a clickable app layout prototype"
+ }
+}

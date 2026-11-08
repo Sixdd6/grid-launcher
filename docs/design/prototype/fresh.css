@@ -1,0 +1,47 @@
+  /* Fresh startup (Connect, Choose your systems) and the setup card */
+  .fresh { position: absolute; inset: 0; z-index: 40; background: var(--bg); overflow-y: auto; display: flex; justify-content: center; }
+  .fresh[hidden] { display: none; }
+  .fr-card { width: min(360px, 100%); margin: auto; padding: 32px 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; }
+  .fr-card.wide { width: min(720px, 100%); }
+  .fr-card label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
+  .fr-card label.check { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+  .fr-card .g-btn:disabled { opacity: .6; cursor: default; }
+  .fr-head { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+  .fr-head h1 { margin: 0; font-size: 22px; font-weight: 600; color: var(--text-h); }
+  .fr-head .lede { margin: 0; }
+  .help.center { text-align: center; }
+  .fr-row { display: grid; grid-template-columns: minmax(0, 1fr) 280px; align-items: center; gap: 12px; padding: 8px 12px; min-height: 36px; }
+  .fr-row.ticked { border-color: var(--primary); background: var(--selected); }
+  .fr-row.off { opacity: .7; }
+  .fr-pick { flex-direction: row !important; align-items: baseline !important; gap: 10px !important; cursor: pointer; }
+  .fr-pick input { align-self: center; accent-color: var(--primary); }
+  .fr-pick b { color: var(--text-h); font-size: 14px; }
+  .fr-foot { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+  /* The one notification: a card in a stack at the bottom right, above the
+     download strip and over dialogs. */
+  .notes { position: absolute; right: 24px; bottom: calc(var(--footer-h) + 24px); z-index: 30; width: min(340px, calc(100% - 48px)); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+  .note-card { pointer-events: auto; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; box-sizing: border-box; border-radius: var(--r-row); border: 1px solid var(--border); background: var(--surface-2); box-shadow: 0 12px 32px rgba(0,0,0,.35); animation: note-in 220ms ease; transition: opacity 180ms ease, transform 180ms ease; }
+  .note-card[hidden] { display: none; }
+  .note-card.leaving { opacity: 0; transform: translateX(12px); }
+  .note-card .title { margin: 0; font-weight: 600; color: var(--text-h); overflow-wrap: anywhere; }
+  .note-card.error .title { color: var(--danger); }
+  .note-card .line { margin: 0; font-size: 13px; color: var(--text); }
+  .note-card .form-actions { justify-content: flex-end; }
+  .note-card .bar { height: 4px; border-radius: var(--r-pill); background: var(--surface); overflow: hidden; margin: 0; }
+  .note-card .bar b { display: block; height: 100%; background: var(--primary); transition: width 220ms ease; }
+  @keyframes note-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  /* Dismiss carries the auto-dismiss countdown: a bar along its bottom edge
+     that runs down over 10 s. Pointing at the card pauses it. */
+  .note-dismiss { position: relative; overflow: hidden; }
+  .note-dismiss .cd { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--primary); transform-origin: left center; animation: note-cd linear forwards; }
+  .note-card:hover .cd, .note-card:focus-within .cd { animation-play-state: paused; }
+  @keyframes note-cd { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+  /* The setup card's bar: one segment per install. Done is a solid fill,
+     the one installing a moving fill, waiting ones empty. */
+  .segbar { display: flex; gap: 3px; }
+  .setup-seg { flex: 1 1 0; height: 4px; border-radius: var(--r-pill); background: var(--field); overflow: hidden; position: relative; }
+  .setup-seg b { position: absolute; inset: 0; transform: scaleX(0); transform-origin: left center; background: var(--primary); }
+  .setup-seg.done b { transform: scaleX(1); transition: transform 220ms ease; }
+  .setup-seg.running b { transform: scaleX(1); opacity: .45; background: linear-gradient(90deg, transparent 0, var(--primary) 50%, transparent 100%); background-size: 200% 100%; animation: seg-run 1.2s linear infinite; }
+  .setup-seg.failed { background: var(--danger); }
+  @keyframes seg-run { from { background-position: 100% 0; } to { background-position: -100% 0; } }

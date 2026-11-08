@@ -1,0 +1,51 @@
+<!-- @dsCard group="Overlays" height=560 width=1040 -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Details</title>
+<style>
+  body { padding: 16px; background: var(--bg); }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .col { display: flex; flex-direction: column; gap: 10px; }
+  .cap { font-size: 11px; color: var(--text-muted); margin: 0 0 6px; }
+
+  .g-art::before { content:''; position:absolute; right:-18%; top:12%; width:70%; aspect-ratio:1; border-radius:50%; background:rgba(255,255,255,.12); }
+  .g-art::after { content:''; position:absolute; left:10%; top:8%; width:34%; height:6px; border-radius:3px; background:rgba(255,255,255,.35); }
+  .g-art { padding-bottom: 34px; }
+  .g-art span { position:relative; text-shadow:0 1px 2px rgba(0,0,0,.35); }
+
+</style></head>
+<body>
+
+<div class="g-dialog" role="dialog" aria-label="Starfall Circuit" style="height:520px">
+  <button class="g-icon-btn g-dialog-close" aria-label="Close"><span data-icon="close" data-size="20"></span></button>
+  <div class="g-details">
+    <aside class="g-details-left">
+      <div class="g-cover" style="box-shadow:var(--shadow-lift)"><div class="g-art" style="background:hsl(258 45% 38%);font-size:20px"><span>Starfall Circuit</span></div></div>
+      <button class="g-btn">Play</button>
+      <button class="g-btn secondary">Uninstall</button>
+      <p class="g-meta-line">Last played 2 days ago</p>
+      <p class="g-meta-line">DuckStation</p>
+    </aside>
+    <section class="g-details-right">
+      <header class="g-details-head">
+        <h2>Starfall Circuit</h2>
+        <p class="g-header-line">PlayStation · 1998 · Racing · <span class="g-rating"><span data-icon="star" data-size="14"></span>8.4</span></p>
+        <div class="row" style="gap:6px"><span class="g-chip">Identified</span><span class="g-chip">v1.1</span></div>
+      </header>
+      <div class="g-tabs" role="tablist"><button class="active">Overview</button><button>Media</button><button>Saves</button><button>Achievements</button></div>
+      <div class="g-description"><p>A courier pilot races a failing orbital ring, one district at a time, before the lights go out for good.</p></div>
+    </section>
+  </div>
+</div>
+<script>
+(function(){
+var I={"close": "M6 6l12 12M18 6L6 18", "chevronLeft": "M15.5 5L8.5 12l7 7", "check": "M5 12.5l5 5L19 7", "chevronRight": "M8.5 5l7 7-7 7", "arrowLeft": "M19.5 12H4.5M11 5.5L4.5 12l6.5 6.5", "cloud": "M6.2 17h10a4 4 0 0 0 0-8h-.6A5.2 5.2 0 0 0 6.4 10.6 3.3 3.3 0 0 0 6.2 17z", "star": "M12 4.4L13.88 9.81L19.61 9.93L15.04 13.39L16.7 18.87L12 15.6L7.3 18.87L8.96 13.39L4.39 9.93L10.12 9.81Z", "download": "M12 3.5V14M7.5 9.5L12 14L16.5 9.5M4.5 17v2a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-2", "play": "M7.5 4.5L19 12L7.5 19.5Z", "more": "M7.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0zM13.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0zM19.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0z", "grid": "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"}, F=['star','play','more'];
+window.gIcon=function(n,s){s=s||14;var f=F.indexOf(n)>=0;
+return '<svg class="g-icon" viewBox="0 0 24 24" width="'+s+'" height="'+s+'" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'+I[n]+'" fill="'+(f?'currentColor':'none')+'" stroke="'+(f?'none':'currentColor')+'"/></svg>';};
+window.gIcons=function(root){(root||document).querySelectorAll('[data-icon]').forEach(function(el){el.innerHTML=gIcon(el.getAttribute('data-icon'),+el.getAttribute('data-size')||14);});};
+gIcons();
+})();
+</script>
+
+</body>
+</html>
