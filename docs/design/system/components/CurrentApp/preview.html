@@ -14,6 +14,7 @@
 
   .view { flex: 1 1 auto; min-height: 0; position: relative; box-sizing: border-box; padding: var(--gutter); overflow-y: auto; }
   .view[hidden] { display: none; }
+  .rail-divider { border: 0; border-top: 1px solid var(--line); margin: 6px 8px; }
   .columns { display: flex; align-items: stretch; gap: var(--gutter); height: 100%; min-height: 0; }
   .body { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--card-w, 160px), 1fr)); gap: 18px 14px; padding: var(--gutter) 2px 40px; }
@@ -242,10 +243,10 @@ gIcons();
 </script>
 <script>
 (function(){
-var DATA = {"games": [{"t": "Starfall Circuit", "c": "hsl(258 45% 38%)", "p": "PS"}, {"t": "Lantern Vale", "c": "hsl(32 70% 42%)", "p": "N64"}, {"t": "Ironclad Drift", "c": "hsl(205 55% 34%)", "p": "SAT"}, {"t": "Moss & Marrow", "c": "hsl(140 35% 30%)", "p": "GC"}, {"t": "Pixel Harbor", "c": "hsl(350 55% 42%)", "p": "SNES"}, {"t": "Cinder Peaks", "c": "hsl(15 60% 40%)", "p": "PS"}, {"t": "Echo Garden", "c": "hsl(175 45% 30%)", "p": "N64"}, {"t": "Velvet Static", "c": "hsl(290 35% 36%)", "p": "PS2"}, {"t": "Tidewalker", "c": "hsl(195 60% 32%)", "p": "GC"}, {"t": "Brass Comet", "c": "hsl(45 65% 36%)", "p": "SAT"}, {"t": "Hollow Signal", "c": "hsl(220 30% 28%)", "p": "PS"}, {"t": "Kite Season", "c": "hsl(95 40% 34%)", "p": "SNES"}, {"t": "Neon Orchard", "c": "hsl(320 50% 40%)", "p": "PS2"}, {"t": "Glass Monsoon", "c": "hsl(185 35% 38%)", "p": "N64"}, {"t": "Quiet Engine", "c": "hsl(0 0% 30%)", "p": "SAT"}, {"t": "Ember Choir", "c": "hsl(8 65% 38%)", "p": "GC"}]};
+var DATA = {"games": [{"t": "Starfall Circuit", "c": "hsl(258 45% 38%)", "p": "PS", "rel": "1998-03-14", "added": "2026-10-02"}, {"t": "Lantern Vale", "c": "hsl(32 70% 42%)", "p": "N64", "rel": "1999-11-05", "added": "2026-09-21"}, {"t": "Ironclad Drift", "c": "hsl(205 55% 34%)", "p": "SAT", "rel": "1997-06-27", "added": "2026-10-30"}, {"t": "Moss & Marrow", "c": "hsl(140 35% 30%)", "p": "GC", "rel": "2003-04-18", "added": "2026-11-05"}, {"t": "Pixel Harbor", "c": "hsl(350 55% 42%)", "p": "SNES", "rel": "1995-08-11", "added": "2026-08-14"}, {"t": "Cinder Peaks", "c": "hsl(15 60% 40%)", "p": "PS", "rel": "2000-02-24", "added": "2026-11-06"}, {"t": "Echo Garden", "c": "hsl(175 45% 30%)", "p": "N64", "rel": "2001-01-19", "added": "2026-10-28"}, {"t": "Velvet Static", "c": "hsl(290 35% 36%)", "p": "PS2", "rel": "2006-09-07", "added": "2026-11-03"}, {"t": "Tidewalker", "c": "hsl(195 60% 32%)", "p": "GC", "rel": "2004-12-02", "added": "2026-10-12"}, {"t": "Brass Comet", "c": "hsl(45 65% 36%)", "p": "SAT", "rel": "1998-10-22", "added": "2026-07-30"}, {"t": "Hollow Signal", "c": "hsl(220 30% 28%)", "p": "PS", "rel": "1999-05-13", "added": "2026-11-04"}, {"t": "Kite Season", "c": "hsl(95 40% 34%)", "p": "SNES", "rel": "1996-03-29", "added": "2026-10-19"}, {"t": "Neon Orchard", "c": "hsl(320 50% 40%)", "p": "PS2", "rel": "2005-07-21", "added": "2026-09-09"}, {"t": "Glass Monsoon", "c": "hsl(185 35% 38%)", "p": "N64", "rel": "2000-10-10", "added": "2026-11-01"}, {"t": "Quiet Engine", "c": "hsl(0 0% 30%)", "p": "SAT", "rel": "1997-12-04", "added": "2026-10-25"}, {"t": "Ember Choir", "c": "hsl(8 65% 38%)", "p": "GC", "rel": "2005-03-31", "added": "2026-11-07"}, {"t": "Lumen Drift", "c": "hsl(265 55% 42%)", "p": "LINUX", "rel": "2026-10-24", "added": "2026-10-26"}, {"t": "Paper Orbit", "c": "hsl(28 70% 44%)", "p": "LINUX", "rel": "2026-09-12", "added": "2026-09-15"}, {"t": "Kestrel Run", "c": "hsl(160 45% 32%)", "p": "LINUX", "rel": "2026-06-30", "added": "2026-11-02"}, {"t": "Saltmarsh", "c": "hsl(200 35% 36%)", "p": "LINUX", "rel": "2025-11-02", "added": "2026-08-03"}, {"t": "Quiet Atlas", "c": "hsl(340 40% 38%)", "p": "LINUX", "rel": "2025-03-15", "added": "2026-06-11"}, {"t": "Rook & Ribbon", "c": "hsl(48 60% 38%)", "p": "LINUX", "rel": "2024-08-08", "added": "2026-05-20"}, {"t": "Coral Static", "c": "hsl(10 55% 40%)", "p": "PS", "rel": "2000-11-16", "added": "2026-10-31"}, {"t": "Signal Fires", "c": "hsl(230 45% 40%)", "p": "PS2", "rel": "2007-03-08", "added": "2026-10-29"}, {"t": "Orbit Bloom", "c": "hsl(300 40% 40%)", "p": "GC", "rel": "2006-06-15", "added": "2026-11-06"}]};
 var G = DATA.games.map(function(g, i){ return Object.assign({ id: i, installed: [0,1,2,4,6,9,12].indexOf(i) >= 0, update: i === 1, missing: i === 9, cloud: [0,4,6].indexOf(i) >= 0 }, g); });
-var PLAT = { PS: 'PlayStation', N64: 'Nintendo 64', SAT: 'Sega Saturn', GC: 'GameCube', SNES: 'Super Nintendo', PS2: 'PlayStation 2' };
-var EMU = { PS: 'DuckStation', N64: 'RetroArch · Mupen64Plus-Next', SAT: 'Ymir (Sega Saturn)', GC: 'Dolphin', SNES: 'RetroArch · Snes9x', PS2: 'PCSX2' };
+var PLAT = { PS: 'PlayStation', N64: 'Nintendo 64', SAT: 'Sega Saturn', GC: 'GameCube', SNES: 'Super Nintendo', PS2: 'PlayStation 2', LINUX: 'Linux' };
+var EMU = { PS: 'DuckStation', N64: 'RetroArch · Mupen64Plus-Next', SAT: 'Ymir (Sega Saturn)', GC: 'Dolphin', SNES: 'RetroArch · Snes9x', PS2: 'PCSX2', LINUX: 'none' };
 var VIEWS = ['library','server','downloads','emulators','settings'];
 var S = { view: 'server', platform: 'PS', libFilter: 'all', q: { library: '', server: '' }, cardW: 160, labels: 'always', fade: 50, blur: 2, lastFade: 50, emuPane: 'installed', setPane: 'appearance', detail: null, tab: 'overview', kind: 'save', dl: null, fw: { PS: 'installed', SAT: 'install', GC: 'unavailable' } };
 var $ = function(id){ return document.getElementById(id); };
@@ -269,7 +270,7 @@ function renderPills(){
 /* ---- rails ---- */
 function rail(id, rows, onPick){
   $(id).innerHTML = rows.map(function(r){
-    return (r.heading ? '<span class="g-rail-heading">'+r.heading+'</span>' : '') + '<button class="g-rail-item'+(r.sel?' active':'')+'" data-key="'+r.key+'"'+(r.sel?' aria-current="page"':'')+'><span class="g-rail-label">'+esc(r.label)+'</span>'+(r.count!==undefined?'<span class="g-rail-count">'+r.count+'</span>':'')+'</button>';
+    return (r.heading ? '<span class="g-rail-heading">'+r.heading+'</span>' : '') + '<button class="g-rail-item'+(r.sel?' active':'')+'" data-key="'+r.key+'"'+(r.sel?' aria-current="page"':'')+'><span class="g-rail-label">'+esc(r.label)+'</span>'+(r.count!==undefined?'<span class="g-rail-count">'+r.count+'</span>':'')+'</button>'+(r.divider?'<hr class="rail-divider">':'');
   }).join('');
   $(id).onclick = function(e){ var b = e.target.closest('[data-key]'); if (b) onPick(b.getAttribute('data-key')); };
 }
@@ -301,6 +302,8 @@ function renderServer(){
   $('srv-title').textContent = PLAT[S.platform];
   $('srv-count').textContent = (inPlat.length * 8) + ' games · ' + inPlat.filter(function(g){return g.installed;}).length + ' installed';
   $('srv-emu').textContent = 'Emulator: ' + EMU[S.platform];
+  /* A native platform runs without an emulator: no emulator or firmware chips. */
+  document.querySelector('[data-view=server] .g-chips').hidden = S.platform === 'LINUX';
   var shown = inPlat.concat(G.filter(function(g){ return g.p !== S.platform; }).slice(0, 10)).filter(function(g){ return match(g, S.q.server); });
   fillGrid('srv-grid', shown, false, S.q.server.trim() ? 'No games match “'+S.q.server.trim()+'”' : 'This platform has no games');
 }

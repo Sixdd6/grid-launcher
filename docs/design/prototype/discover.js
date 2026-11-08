@@ -1,0 +1,149 @@
+/* ==== Server › Discover: the first rail item and the default view.
+   New releases (a coverflow of the newest games on the preferred platforms)
+   and Recently added (newest on the server, minus the coverflow's games). ==== */
+var DISC = { cf: 0, ra: 0, sig: '' };
+var TODAY = '2026-11-07';
+
+/* Preferred platforms: every system with an emulator, plus the games native
+   to this computer (Linux here), which need nothing installed. */
+function prefPlatforms() {
+  var out = Object.keys(SY.pick).filter(function (k) { return SY.pick[k] && PLAT[k]; });
+  out.push('LINUX');
+  return out;
+}
+function discNew() {
+  var pref = prefPlatforms();
+  return G.filter(function (g) { return pref.indexOf(g.p) >= 0; })
+    .sort(function (a, b) { return b.rel.localeCompare(a.rel); }).slice(0, 12);
+}
+function discRecent(newest) {
+  var ids = newest.map(function (g) { return g.id; });
+  return G.filter(function (g) { return ids.indexOf(g.id) < 0; })
+    .sort(function (a, b) { return b.added.localeCompare(a.added); }).slice(0, 8);
+}
+var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function fmtDate(d) { var p = d.split('-'); return (+p[2]) + ' ' + MONTHS[+p[1] - 1] + ' ' + p[0]; }
+function addedAgo(d) {
+  var days = Math.round((Date.parse(TODAY) - Date.parse(d)) / 86400000);
+  if (days <= 0) return 'Added today';
+  if (days === 1) return 'Added yesterday';
+  if (days < 14) return 'Added ' + days + ' days ago';
+  if (days < 60) return 'Added ' + Math.round(days / 7) + ' weeks ago';
+  return 'Added ' + fmtDate(d);
+}
+function discAction(g) {
+  if (g.missing) return 'Details';
+  if (g.installed) return 'Play';
+  if (S.dl && S.dl.id === g.id) return 'Installing…';
+  if (DLQ.indexOf(g.id) >= 0) return 'Queued';
+  return 'Install';
+}
+function discArt(g, extra) { return '<div class="g-art" style="background:' + g.c + (extra || '') + '"><span>' + esc(g.t) + '</span></div>'; }
+
+function renderDiscover() {
+  var el = $('discover'), newest = discNew(), recent = discRecent(newest);
+  var sig = newest.map(function (g) { return g.id; }).join(',') + '|' + recent.map(function (g) { return g.id; }).join(',');
+  if (sig !== DISC.sig || !el.firstChild) {
+    DISC.sig = sig; DISC.cf = Math.min(DISC.cf, Math.max(newest.length - 1, 0)); DISC.ra = Math.min(DISC.ra, Math.max(recent.length - 1, 0));
+    DISC.newest = newest; DISC.recent = recent;
+    var cf = newest.length ? '<div class="cf" tabindex="0" aria-label="New releases" aria-roledescription="carousel">' +
+      '<button class="g-icon-btn cf-arrow prev" aria-label="Previous" data-cf-prev><span data-icon="chevronLeft" data-size="20"></span></button>' +
+      '<div class="cf-stage">' + newest.map(function (g, i) { return '<div class="cf-item" data-cf-i="' + i + '"><div class="cf-cover">' + discArt(g) + '</div></div>'; }).join('') + '</div>' +
+      '<button class="g-icon-btn cf-arrow next" aria-label="Next" data-cf-next><span data-icon="chevronRight" data-size="20"></span></button></div>' +
+      '<div class="cf-caption" id="cf-caption"></div>'
+      : '<p class="note">Pick the systems you play in Settings › Systems to see their newest games here.</p>';
+    var ra = recent.length ? '<div class="ra">' +
+      '<div class="ra-main"><div class="ra-shot"><div class="ra-layer" id="ra-a"></div><div class="ra-layer" id="ra-b"></div></div><div class="ra-caption" id="ra-caption"></div></div>' +
+      '<div class="ra-side"><div class="ra-list" id="ra-list"><div class="ra-hl" id="ra-hl"><span class="ra-bar"></span></div>' +
+      recent.map(function (g, i) { return '<button class="ra-row" data-ra-i="' + i + '"><span class="ra-cover">' + discArt(g) + '</span><span class="ra-text"><b>' + esc(g.t) + '</b><span>' + PLAT[g.p] + '</span></span></button>'; }).join('') +
+      '</div></div></div>'
+      : '<p class="note">Nothing new on your server yet.</p>';
+    el.innerHTML = '<section class="g-panel disc-sec"><header class="disc-head"><h2>New releases</h2><p class="lede">The newest games for your systems.</p></header>' + cf + '</section>' +
+      '<section class="g-panel disc-sec"><header class="disc-head"><h2>Recently added</h2><p class="lede">New on your server.</p></header>' + ra + '</section>';
+    gIcons(el);
+    el.onclick = discClick;
+    var stage = el.querySelector('.cf');
+    if (stage) stage.onkeydown = function (e) { if (e.key === 'ArrowLeft') { e.preventDefault(); cfGo(DISC.cf - 1); } if (e.key === 'ArrowRight') { e.preventDefault(); cfGo(DISC.cf + 1); } };
+    var hl = $('ra-hl'); if (hl) hl.addEventListener('animationend', function () { raGo(DISC.ra + 1, true); });
+    DISC.layer = 'a';
+    cfLayout(); raGo(DISC.ra, false, true);
+  } else { cfCaption(); raCaption(); }
+}
+
+/* Coverflow: the centre cover flat and large; the rest tilt back and recede
+   in 3D, fading with distance. Only transforms change, so moves glide. */
+function cfLayout() {
+  var items = document.querySelectorAll('#discover .cf-item');
+  items.forEach(function (it, i) {
+    var d = i - DISC.cf, a = Math.abs(d), s = d < 0 ? -1 : 1;
+    var t = d === 0 ? 'translateX(0) translateZ(0) rotateY(0deg)'
+      : 'translateX(' + s * (150 + (a - 1) * 66) + 'px) translateZ(' + (-140 - (a - 1) * 40) + 'px) rotateY(' + (-s * 52) + 'deg)';
+    it.style.transform = t;
+    it.style.zIndex = 50 - a;
+    it.style.opacity = a > 4 ? 0 : 1;
+    it.classList.toggle('center', d === 0);
+    it.setAttribute('aria-hidden', a > 4 ? 'true' : 'false');
+  });
+  var p = document.querySelector('[data-cf-prev]'), n = document.querySelector('[data-cf-next]');
+  if (p) p.disabled = DISC.cf === 0; if (n) n.disabled = DISC.cf >= DISC.newest.length - 1;
+  cfCaption();
+}
+function cfCaption() {
+  var g = DISC.newest && DISC.newest[DISC.cf], c = $('cf-caption'); if (!g || !c) return;
+  c.innerHTML = '<b>' + esc(g.t) + '</b><span class="meta2">' + PLAT[g.p] + ' · Released ' + fmtDate(g.rel) + '</span>' +
+    '<div class="form-actions"><button class="g-btn" data-disc-act="' + g.id + '">' + discAction(g) + '</button><button class="g-btn secondary" data-disc-details="' + g.id + '">Details</button></div>';
+}
+function cfGo(i) { DISC.cf = Math.max(0, Math.min(i, DISC.newest.length - 1)); cfLayout(); }
+
+/* Recently added: the highlight frame glides to the active row; its bar fills
+   over 10 s and, when it ends, moves on. Hover pauses the bar (CSS). */
+function raGo(i, auto, first) {
+  var list = DISC.recent; if (!list || !list.length) return;
+  DISC.ra = ((i % list.length) + list.length) % list.length;
+  var g = list[DISC.ra], rows = document.querySelectorAll('#discover .ra-row'), row = rows[DISC.ra], hl = $('ra-hl'), lst = $('ra-list');
+  rows.forEach(function (r, k) { r.classList.toggle('active', k === DISC.ra); r.setAttribute('aria-current', k === DISC.ra ? 'true' : 'false'); });
+  hl.style.height = row.offsetHeight + 'px';
+  hl.style.transform = 'translateY(' + row.offsetTop + 'px)';
+  var bar = hl.querySelector('.ra-bar'), nb = bar.cloneNode(); bar.replaceWith(nb);   // restart the 10 s fill
+  lst.scrollTo({ top: Math.max(0, row.offsetTop - (lst.clientHeight - row.offsetHeight) / 2), behavior: first ? 'auto' : 'smooth' });
+  var next = DISC.layer === 'a' ? 'b' : 'a', shot = $('ra-' + next);
+  shot.innerHTML = '<div class="ra-art" style="background:' + g.c + '"><span></span><i></i></div>';
+  if (first) { $('ra-a').classList.remove('on'); $('ra-b').classList.remove('on'); }
+  shot.classList.add('on'); $('ra-' + DISC.layer).classList.remove('on'); DISC.layer = next;
+  raCaption();
+}
+function raCaption() {
+  var g = DISC.recent && DISC.recent[DISC.ra], c = $('ra-caption'); if (!g || !c) return;
+  c.innerHTML = '<div><b>' + esc(g.t) + '</b><span class="meta2">' + PLAT[g.p] + ' · ' + addedAgo(g.added) + '</span></div>' +
+    '<div class="form-actions"><button class="g-btn" data-disc-act="' + g.id + '">' + discAction(g) + '</button><button class="g-btn secondary" data-disc-details="' + g.id + '">Details</button></div>';
+}
+
+function discClick(e) {
+  var t = e.target, b;
+  if (t.closest('[data-cf-prev]')) { cfGo(DISC.cf - 1); return; }
+  if (t.closest('[data-cf-next]')) { cfGo(DISC.cf + 1); return; }
+  if ((b = t.closest('[data-cf-i]'))) { var i = +b.getAttribute('data-cf-i'); if (i === DISC.cf) openDetails(DISC.newest[i]); else cfGo(i); return; }
+  if ((b = t.closest('[data-ra-i]'))) { raGo(+b.getAttribute('data-ra-i')); return; }
+  if ((b = t.closest('[data-disc-details]'))) { openDetails(G[+b.getAttribute('data-disc-details')]); return; }
+  if ((b = t.closest('[data-disc-act]'))) {
+    var g = G[+b.getAttribute('data-disc-act')];
+    if (g.missing) openDetails(g); else if (g.installed) { S.playing = g.id; toast('Launching ' + g.t + '…'); } else startInstall(g);
+    return;
+  }
+}
+
+/* Discover is the first Server rail row, with a divider under it, and the
+   default selection. */
+function srvRail() {
+  var plats = Object.keys(PLAT).sort(function (a, b) { return PLAT[a].localeCompare(PLAT[b]); });
+  rail('srv-rail', [{ key: 'DISCOVER', label: 'Discover', sel: S.platform === 'DISCOVER', divider: true }].concat(
+    plats.map(function (p) { return { key: p, label: PLAT[p], count: G.filter(function (g) { return g.p === p; }).length * 8, sel: S.platform === p }; })),
+    function (k) { S.platform = k; renderServer(); });
+}
+var discRenderServer = renderServer;
+renderServer = function () {
+  var on = S.platform === 'DISCOVER';
+  $('srv-head').hidden = on; $('srv-scroll').hidden = on; $('discover').hidden = !on;
+  if (on) { srvRail(); renderDiscover(); return; }
+  discRenderServer(); srvRail();
+};

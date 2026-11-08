@@ -14,6 +14,7 @@
 
   .view { flex: 1 1 auto; min-height: 0; position: relative; box-sizing: border-box; padding: var(--gutter); overflow-y: auto; }
   .view[hidden] { display: none; }
+  .rail-divider { border: 0; border-top: 1px solid var(--line); margin: 6px 8px; }
   .columns { display: flex; align-items: stretch; gap: var(--gutter); height: 100%; min-height: 0; }
   .body { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--card-w, 160px), 1fr)); gap: 18px 14px; padding: var(--gutter) 2px 40px; }
@@ -263,6 +264,61 @@
   .setup-seg.failed { background: var(--danger); }
   @keyframes seg-run { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 
+  /* Server › Discover */
+  .discover { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--gutter); padding-bottom: 24px; }
+  .discover[hidden], .shead[hidden], .sscroll[hidden] { display: none; }
+  .disc-sec { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .disc-head h2 { margin: 0; font-size: 18px; font-weight: 600; color: var(--text-h); }
+  .disc-head .lede { margin: 2px 0 0; }
+
+  /* New releases: a coverflow. Centre cover flat and lit; neighbours tilt
+     52° back, recede and dim; a soft reflection under each. */
+  .cf { position: relative; height: 330px; outline: none; border-radius: var(--r-row); }
+  .cf:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .cf-stage { position: absolute; inset: 0; perspective: 1100px; overflow: hidden; }
+  .cf-item { position: absolute; left: 50%; top: 14px; width: 200px; margin-left: -100px; cursor: pointer; transform-style: preserve-3d;
+    transition: transform 450ms cubic-bezier(.2,.7,.2,1), opacity 450ms ease, filter 450ms ease; filter: brightness(.62) saturate(.85); }
+  .cf-item.center { filter: none; }
+  .cf-cover { position: relative; aspect-ratio: 3 / 4; border-radius: var(--r-card); overflow: hidden; box-shadow: var(--shadow-card);
+    -webkit-box-reflect: below 6px linear-gradient(transparent 72%, rgba(255, 255, 255, 0.2)); }
+  .cf-item.center .cf-cover { box-shadow: var(--shadow-lift); }
+  .cf-arrow { position: absolute; top: 50%; margin-top: -24px; z-index: 60; width: 36px; height: 48px; background: var(--overlay); box-shadow: var(--shadow-lift); }
+  .cf-arrow.prev { left: 8px; } .cf-arrow.next { right: 8px; }
+  .cf-arrow:disabled { opacity: .35; cursor: default; }
+  .cf-caption { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
+  .cf-caption b, .ra-caption b { color: var(--text-h); font-size: 18px; }
+  .cf-caption .form-actions { margin-top: 6px; }
+
+  /* Recently added: a screenshot, and a column of small covers whose
+     highlight frame glides to the active game every 10 s. */
+  .ra { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 16px; }
+  .ra-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .ra-shot { position: relative; aspect-ratio: 16 / 9; border-radius: var(--r-row); overflow: hidden; box-shadow: var(--shadow-card); background: var(--field); }
+  .ra-layer { position: absolute; inset: 0; opacity: 0; transition: opacity 600ms ease; }
+  .ra-layer.on { opacity: 1; }
+  .ra-art { position: absolute; inset: 0; }
+  .ra-art span { position: absolute; left: 8%; bottom: 14%; width: 46%; height: 34%; border-radius: 10px; background: rgba(255,255,255,.14); }
+  .ra-art i { position: absolute; right: 10%; top: 16%; width: 26%; aspect-ratio: 1; border-radius: 50%; background: rgba(255,255,255,.18); }
+  .ra-caption { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .ra-caption > div:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .ra-side { position: relative; }
+  .ra-list { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 0 2px; scrollbar-width: thin; }
+  .ra-row { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; padding: 6px; border: none; border-radius: var(--r-row); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; flex: none; }
+  .ra-row:hover:not(.active) { background: var(--surface); }
+  .ra-cover { position: relative; flex: none; width: 46px; aspect-ratio: 3 / 4; border-radius: 6px; overflow: hidden; box-shadow: var(--shadow-card); }
+  .ra-cover .g-art { padding: 0; font-size: 0; }
+  .ra-cover .g-art::after { display: none; }
+  .ra-text { display: flex; flex-direction: column; min-width: 0; }
+  .ra-text b { color: var(--text-h); font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ra-text span { color: var(--text-muted); font-size: 11px; }
+  .ra-row.active .ra-text b { color: var(--text-h); }
+  .ra-hl { position: absolute; left: 2px; right: 2px; top: 0; z-index: 0; border-radius: var(--r-row); background: var(--selected); box-shadow: inset 0 0 0 2px var(--primary); overflow: hidden; pointer-events: none;
+    transition: transform 450ms cubic-bezier(.2,.7,.2,1), height 450ms cubic-bezier(.2,.7,.2,1); }
+  .ra-bar { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--primary); transform: scaleX(0); transform-origin: left center; animation: ra-fill 10s linear forwards; }
+  .ra:hover .ra-bar, .ra:focus-within .ra-bar { animation-play-state: paused; }
+  @keyframes ra-fill { to { transform: scaleX(1); } }
+  @media (prefers-reduced-motion: reduce) { .cf-item, .ra-hl, .ra-layer { transition: none; } }
+
 </style></head>
 <body>
 <div class="app" id="app">
@@ -312,6 +368,7 @@
           </div>
         </div>
         <div class="sscroll" id="srv-scroll"><div class="grid" id="srv-grid"></div></div>
+        <div class="discover" id="discover" hidden></div>
       </div>
     </div>
   </div>
@@ -376,12 +433,12 @@ gIcons();
 </script>
 <script>
 (function(){
-var DATA = {"games": [{"t": "Starfall Circuit", "c": "hsl(258 45% 38%)", "p": "PS"}, {"t": "Lantern Vale", "c": "hsl(32 70% 42%)", "p": "N64"}, {"t": "Ironclad Drift", "c": "hsl(205 55% 34%)", "p": "SAT"}, {"t": "Moss & Marrow", "c": "hsl(140 35% 30%)", "p": "GC"}, {"t": "Pixel Harbor", "c": "hsl(350 55% 42%)", "p": "SNES"}, {"t": "Cinder Peaks", "c": "hsl(15 60% 40%)", "p": "PS"}, {"t": "Echo Garden", "c": "hsl(175 45% 30%)", "p": "N64"}, {"t": "Velvet Static", "c": "hsl(290 35% 36%)", "p": "PS2"}, {"t": "Tidewalker", "c": "hsl(195 60% 32%)", "p": "GC"}, {"t": "Brass Comet", "c": "hsl(45 65% 36%)", "p": "SAT"}, {"t": "Hollow Signal", "c": "hsl(220 30% 28%)", "p": "PS"}, {"t": "Kite Season", "c": "hsl(95 40% 34%)", "p": "SNES"}, {"t": "Neon Orchard", "c": "hsl(320 50% 40%)", "p": "PS2"}, {"t": "Glass Monsoon", "c": "hsl(185 35% 38%)", "p": "N64"}, {"t": "Quiet Engine", "c": "hsl(0 0% 30%)", "p": "SAT"}, {"t": "Ember Choir", "c": "hsl(8 65% 38%)", "p": "GC"}]};
+var DATA = {"games": [{"t": "Starfall Circuit", "c": "hsl(258 45% 38%)", "p": "PS", "rel": "1998-03-14", "added": "2026-10-02"}, {"t": "Lantern Vale", "c": "hsl(32 70% 42%)", "p": "N64", "rel": "1999-11-05", "added": "2026-09-21"}, {"t": "Ironclad Drift", "c": "hsl(205 55% 34%)", "p": "SAT", "rel": "1997-06-27", "added": "2026-10-30"}, {"t": "Moss & Marrow", "c": "hsl(140 35% 30%)", "p": "GC", "rel": "2003-04-18", "added": "2026-11-05"}, {"t": "Pixel Harbor", "c": "hsl(350 55% 42%)", "p": "SNES", "rel": "1995-08-11", "added": "2026-08-14"}, {"t": "Cinder Peaks", "c": "hsl(15 60% 40%)", "p": "PS", "rel": "2000-02-24", "added": "2026-11-06"}, {"t": "Echo Garden", "c": "hsl(175 45% 30%)", "p": "N64", "rel": "2001-01-19", "added": "2026-10-28"}, {"t": "Velvet Static", "c": "hsl(290 35% 36%)", "p": "PS2", "rel": "2006-09-07", "added": "2026-11-03"}, {"t": "Tidewalker", "c": "hsl(195 60% 32%)", "p": "GC", "rel": "2004-12-02", "added": "2026-10-12"}, {"t": "Brass Comet", "c": "hsl(45 65% 36%)", "p": "SAT", "rel": "1998-10-22", "added": "2026-07-30"}, {"t": "Hollow Signal", "c": "hsl(220 30% 28%)", "p": "PS", "rel": "1999-05-13", "added": "2026-11-04"}, {"t": "Kite Season", "c": "hsl(95 40% 34%)", "p": "SNES", "rel": "1996-03-29", "added": "2026-10-19"}, {"t": "Neon Orchard", "c": "hsl(320 50% 40%)", "p": "PS2", "rel": "2005-07-21", "added": "2026-09-09"}, {"t": "Glass Monsoon", "c": "hsl(185 35% 38%)", "p": "N64", "rel": "2000-10-10", "added": "2026-11-01"}, {"t": "Quiet Engine", "c": "hsl(0 0% 30%)", "p": "SAT", "rel": "1997-12-04", "added": "2026-10-25"}, {"t": "Ember Choir", "c": "hsl(8 65% 38%)", "p": "GC", "rel": "2005-03-31", "added": "2026-11-07"}, {"t": "Lumen Drift", "c": "hsl(265 55% 42%)", "p": "LINUX", "rel": "2026-10-24", "added": "2026-10-26"}, {"t": "Paper Orbit", "c": "hsl(28 70% 44%)", "p": "LINUX", "rel": "2026-09-12", "added": "2026-09-15"}, {"t": "Kestrel Run", "c": "hsl(160 45% 32%)", "p": "LINUX", "rel": "2026-06-30", "added": "2026-11-02"}, {"t": "Saltmarsh", "c": "hsl(200 35% 36%)", "p": "LINUX", "rel": "2025-11-02", "added": "2026-08-03"}, {"t": "Quiet Atlas", "c": "hsl(340 40% 38%)", "p": "LINUX", "rel": "2025-03-15", "added": "2026-06-11"}, {"t": "Rook & Ribbon", "c": "hsl(48 60% 38%)", "p": "LINUX", "rel": "2024-08-08", "added": "2026-05-20"}, {"t": "Coral Static", "c": "hsl(10 55% 40%)", "p": "PS", "rel": "2000-11-16", "added": "2026-10-31"}, {"t": "Signal Fires", "c": "hsl(230 45% 40%)", "p": "PS2", "rel": "2007-03-08", "added": "2026-10-29"}, {"t": "Orbit Bloom", "c": "hsl(300 40% 40%)", "p": "GC", "rel": "2006-06-15", "added": "2026-11-06"}]};
 var G = DATA.games.map(function(g, i){ return Object.assign({ id: i, installed: [0,1,2,4,6,9,12].indexOf(i) >= 0, update: i === 1, missing: i === 9, cloud: [0,4,6].indexOf(i) >= 0 }, g); });
-var PLAT = { PS: 'PlayStation', N64: 'Nintendo 64', SAT: 'Sega Saturn', GC: 'GameCube', SNES: 'Super Nintendo', PS2: 'PlayStation 2' };
-var EMU = { PS: 'DuckStation', N64: 'RetroArch · Mupen64Plus-Next', SAT: 'Ymir (Sega Saturn)', GC: 'Dolphin', SNES: 'RetroArch · Snes9x', PS2: 'PCSX2' };
+var PLAT = { PS: 'PlayStation', N64: 'Nintendo 64', SAT: 'Sega Saturn', GC: 'GameCube', SNES: 'Super Nintendo', PS2: 'PlayStation 2', LINUX: 'Linux' };
+var EMU = { PS: 'DuckStation', N64: 'RetroArch · Mupen64Plus-Next', SAT: 'Ymir (Sega Saturn)', GC: 'Dolphin', SNES: 'RetroArch · Snes9x', PS2: 'PCSX2', LINUX: 'none' };
 var VIEWS = ['library','server','downloads','settings'];
-var S = { view: 'settings', platform: 'PS', libFilter: 'all', q: { library: '', server: '' }, cardW: 160, labels: 'always', fade: 50, blur: 2, lastFade: 50, emuPane: 'installed', setPane: 'systems', detail: null, tab: 'overview', kind: 'save', dl: null, fw: { PS: 'installed', SAT: 'install', GC: 'unavailable' } };
+var S = { view: 'settings', platform: 'DISCOVER', libFilter: 'all', q: { library: '', server: '' }, cardW: 160, labels: 'always', fade: 50, blur: 2, lastFade: 50, emuPane: 'installed', setPane: 'systems', detail: null, tab: 'overview', kind: 'save', dl: null, fw: { PS: 'installed', SAT: 'install', GC: 'unavailable' } };
 var $ = function(id){ return document.getElementById(id); };
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
 
@@ -403,7 +460,7 @@ function renderPills(){
 /* ---- rails ---- */
 function rail(id, rows, onPick){
   $(id).innerHTML = rows.map(function(r){
-    return (r.heading ? '<span class="g-rail-heading">'+r.heading+'</span>' : '') + '<button class="g-rail-item'+(r.sel?' active':'')+'" data-key="'+r.key+'"'+(r.sel?' aria-current="page"':'')+'><span class="g-rail-label">'+esc(r.label)+'</span>'+(r.count!==undefined?'<span class="g-rail-count">'+r.count+'</span>':'')+'</button>';
+    return (r.heading ? '<span class="g-rail-heading">'+r.heading+'</span>' : '') + '<button class="g-rail-item'+(r.sel?' active':'')+'" data-key="'+r.key+'"'+(r.sel?' aria-current="page"':'')+'><span class="g-rail-label">'+esc(r.label)+'</span>'+(r.count!==undefined?'<span class="g-rail-count">'+r.count+'</span>':'')+'</button>'+(r.divider?'<hr class="rail-divider">':'');
   }).join('');
   $(id).onclick = function(e){ var b = e.target.closest('[data-key]'); if (b) onPick(b.getAttribute('data-key')); };
 }
@@ -435,6 +492,8 @@ function renderServer(){
   $('srv-title').textContent = PLAT[S.platform];
   $('srv-count').textContent = (inPlat.length * 8) + ' games · ' + inPlat.filter(function(g){return g.installed;}).length + ' installed';
   $('srv-emu').textContent = EMU[S.platform]==='none' ? 'No default emulator' : 'Emulator: ' + EMU[S.platform]; var fwN = { PS: 3, SAT: 2 }[S.platform], fwS = SY.fw[S.platform]; $('srv-fw').textContent = !fwN ? 'No server firmware' : (EMU[S.platform]==='none' ? 'Firmware: ' + fwN + ' files — no default emulator' : fwS==='installed' ? 'Firmware: ' + fwN + ' files · installed' : 'Firmware: ' + fwN + ' files');
+  /* A native platform runs without an emulator: no emulator or firmware chips. */
+  document.querySelector('[data-view=server] .g-chips').hidden = S.platform === 'LINUX';
   var shown = inPlat.concat(G.filter(function(g){ return g.p !== S.platform; }).slice(0, 10)).filter(function(g){ return match(g, S.q.server); });
   fillGrid('srv-grid', shown, false, S.q.server.trim() ? 'No games match “'+S.q.server.trim()+'”' : 'This platform has no games');
 }
@@ -864,7 +923,7 @@ function freshReset() {
   SY.fw = {}; SY.upd = {}; SY.open = {}; SY.busy = {}; SY.menu = null; SY.sheet = null;
   SY.protons = ['Wine 10.0 (system)', 'Proton 9.0 (Steam)', 'Proton Experimental (Steam)']; SY.protonGet = ['GE-Proton10-17', 'Proton-CachyOS 10.0-20251031']; SY.proton = 'Wine 10.0 (system)';
   G.forEach(function (g) { g.installed = false; g.update = false; g.missing = false; g.cloud = false; });
-  S.view = 'server'; S.setPane = 'systems'; S.libFilter = 'all'; S.detail = null; S.dl = null;
+  S.view = 'server'; S.platform = 'DISCOVER'; S.setPane = 'systems'; S.libFilter = 'all'; S.detail = null; S.dl = null;
   FR.form = { url: '', user: '', secret: '', lib: '~/Games/GRID', token: false }; FR.busy = false; FR.ticked = {}; FR.choice = {}; FR.proton = false; FR.protonChoice = ''; FR.run = null;
   $('setup-card').hidden = true; $('scrim').hidden = true;
   DONE.length = 0; DLQ.length = 0;
@@ -1056,6 +1115,156 @@ var foldRenderServer = renderServer;
 renderServer = function () { foldRenderServer(); SRV_FOLD.sync(); };
 var foldRenderLibrary = renderLibrary;
 renderLibrary = function () { foldRenderLibrary(); LIB_FOLD.sync(); };
+
+/* ==== Server › Discover: the first rail item and the default view.
+   New releases (a coverflow of the newest games on the preferred platforms)
+   and Recently added (newest on the server, minus the coverflow's games). ==== */
+var DISC = { cf: 0, ra: 0, sig: '' };
+var TODAY = '2026-11-07';
+
+/* Preferred platforms: every system with an emulator, plus the games native
+   to this computer (Linux here), which need nothing installed. */
+function prefPlatforms() {
+  var out = Object.keys(SY.pick).filter(function (k) { return SY.pick[k] && PLAT[k]; });
+  out.push('LINUX');
+  return out;
+}
+function discNew() {
+  var pref = prefPlatforms();
+  return G.filter(function (g) { return pref.indexOf(g.p) >= 0; })
+    .sort(function (a, b) { return b.rel.localeCompare(a.rel); }).slice(0, 12);
+}
+function discRecent(newest) {
+  var ids = newest.map(function (g) { return g.id; });
+  return G.filter(function (g) { return ids.indexOf(g.id) < 0; })
+    .sort(function (a, b) { return b.added.localeCompare(a.added); }).slice(0, 8);
+}
+var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function fmtDate(d) { var p = d.split('-'); return (+p[2]) + ' ' + MONTHS[+p[1] - 1] + ' ' + p[0]; }
+function addedAgo(d) {
+  var days = Math.round((Date.parse(TODAY) - Date.parse(d)) / 86400000);
+  if (days <= 0) return 'Added today';
+  if (days === 1) return 'Added yesterday';
+  if (days < 14) return 'Added ' + days + ' days ago';
+  if (days < 60) return 'Added ' + Math.round(days / 7) + ' weeks ago';
+  return 'Added ' + fmtDate(d);
+}
+function discAction(g) {
+  if (g.missing) return 'Details';
+  if (g.installed) return 'Play';
+  if (S.dl && S.dl.id === g.id) return 'Installing…';
+  if (DLQ.indexOf(g.id) >= 0) return 'Queued';
+  return 'Install';
+}
+function discArt(g, extra) { return '<div class="g-art" style="background:' + g.c + (extra || '') + '"><span>' + esc(g.t) + '</span></div>'; }
+
+function renderDiscover() {
+  var el = $('discover'), newest = discNew(), recent = discRecent(newest);
+  var sig = newest.map(function (g) { return g.id; }).join(',') + '|' + recent.map(function (g) { return g.id; }).join(',');
+  if (sig !== DISC.sig || !el.firstChild) {
+    DISC.sig = sig; DISC.cf = Math.min(DISC.cf, Math.max(newest.length - 1, 0)); DISC.ra = Math.min(DISC.ra, Math.max(recent.length - 1, 0));
+    DISC.newest = newest; DISC.recent = recent;
+    var cf = newest.length ? '<div class="cf" tabindex="0" aria-label="New releases" aria-roledescription="carousel">' +
+      '<button class="g-icon-btn cf-arrow prev" aria-label="Previous" data-cf-prev><span data-icon="chevronLeft" data-size="20"></span></button>' +
+      '<div class="cf-stage">' + newest.map(function (g, i) { return '<div class="cf-item" data-cf-i="' + i + '"><div class="cf-cover">' + discArt(g) + '</div></div>'; }).join('') + '</div>' +
+      '<button class="g-icon-btn cf-arrow next" aria-label="Next" data-cf-next><span data-icon="chevronRight" data-size="20"></span></button></div>' +
+      '<div class="cf-caption" id="cf-caption"></div>'
+      : '<p class="note">Pick the systems you play in Settings › Systems to see their newest games here.</p>';
+    var ra = recent.length ? '<div class="ra">' +
+      '<div class="ra-main"><div class="ra-shot"><div class="ra-layer" id="ra-a"></div><div class="ra-layer" id="ra-b"></div></div><div class="ra-caption" id="ra-caption"></div></div>' +
+      '<div class="ra-side"><div class="ra-list" id="ra-list"><div class="ra-hl" id="ra-hl"><span class="ra-bar"></span></div>' +
+      recent.map(function (g, i) { return '<button class="ra-row" data-ra-i="' + i + '"><span class="ra-cover">' + discArt(g) + '</span><span class="ra-text"><b>' + esc(g.t) + '</b><span>' + PLAT[g.p] + '</span></span></button>'; }).join('') +
+      '</div></div></div>'
+      : '<p class="note">Nothing new on your server yet.</p>';
+    el.innerHTML = '<section class="g-panel disc-sec"><header class="disc-head"><h2>New releases</h2><p class="lede">The newest games for your systems.</p></header>' + cf + '</section>' +
+      '<section class="g-panel disc-sec"><header class="disc-head"><h2>Recently added</h2><p class="lede">New on your server.</p></header>' + ra + '</section>';
+    gIcons(el);
+    el.onclick = discClick;
+    var stage = el.querySelector('.cf');
+    if (stage) stage.onkeydown = function (e) { if (e.key === 'ArrowLeft') { e.preventDefault(); cfGo(DISC.cf - 1); } if (e.key === 'ArrowRight') { e.preventDefault(); cfGo(DISC.cf + 1); } };
+    var hl = $('ra-hl'); if (hl) hl.addEventListener('animationend', function () { raGo(DISC.ra + 1, true); });
+    DISC.layer = 'a';
+    cfLayout(); raGo(DISC.ra, false, true);
+  } else { cfCaption(); raCaption(); }
+}
+
+/* Coverflow: the centre cover flat and large; the rest tilt back and recede
+   in 3D, fading with distance. Only transforms change, so moves glide. */
+function cfLayout() {
+  var items = document.querySelectorAll('#discover .cf-item');
+  items.forEach(function (it, i) {
+    var d = i - DISC.cf, a = Math.abs(d), s = d < 0 ? -1 : 1;
+    var t = d === 0 ? 'translateX(0) translateZ(0) rotateY(0deg)'
+      : 'translateX(' + s * (150 + (a - 1) * 66) + 'px) translateZ(' + (-140 - (a - 1) * 40) + 'px) rotateY(' + (-s * 52) + 'deg)';
+    it.style.transform = t;
+    it.style.zIndex = 50 - a;
+    it.style.opacity = a > 4 ? 0 : 1;
+    it.classList.toggle('center', d === 0);
+    it.setAttribute('aria-hidden', a > 4 ? 'true' : 'false');
+  });
+  var p = document.querySelector('[data-cf-prev]'), n = document.querySelector('[data-cf-next]');
+  if (p) p.disabled = DISC.cf === 0; if (n) n.disabled = DISC.cf >= DISC.newest.length - 1;
+  cfCaption();
+}
+function cfCaption() {
+  var g = DISC.newest && DISC.newest[DISC.cf], c = $('cf-caption'); if (!g || !c) return;
+  c.innerHTML = '<b>' + esc(g.t) + '</b><span class="meta2">' + PLAT[g.p] + ' · Released ' + fmtDate(g.rel) + '</span>' +
+    '<div class="form-actions"><button class="g-btn" data-disc-act="' + g.id + '">' + discAction(g) + '</button><button class="g-btn secondary" data-disc-details="' + g.id + '">Details</button></div>';
+}
+function cfGo(i) { DISC.cf = Math.max(0, Math.min(i, DISC.newest.length - 1)); cfLayout(); }
+
+/* Recently added: the highlight frame glides to the active row; its bar fills
+   over 10 s and, when it ends, moves on. Hover pauses the bar (CSS). */
+function raGo(i, auto, first) {
+  var list = DISC.recent; if (!list || !list.length) return;
+  DISC.ra = ((i % list.length) + list.length) % list.length;
+  var g = list[DISC.ra], rows = document.querySelectorAll('#discover .ra-row'), row = rows[DISC.ra], hl = $('ra-hl'), lst = $('ra-list');
+  rows.forEach(function (r, k) { r.classList.toggle('active', k === DISC.ra); r.setAttribute('aria-current', k === DISC.ra ? 'true' : 'false'); });
+  hl.style.height = row.offsetHeight + 'px';
+  hl.style.transform = 'translateY(' + row.offsetTop + 'px)';
+  var bar = hl.querySelector('.ra-bar'), nb = bar.cloneNode(); bar.replaceWith(nb);   // restart the 10 s fill
+  lst.scrollTo({ top: Math.max(0, row.offsetTop - (lst.clientHeight - row.offsetHeight) / 2), behavior: first ? 'auto' : 'smooth' });
+  var next = DISC.layer === 'a' ? 'b' : 'a', shot = $('ra-' + next);
+  shot.innerHTML = '<div class="ra-art" style="background:' + g.c + '"><span></span><i></i></div>';
+  if (first) { $('ra-a').classList.remove('on'); $('ra-b').classList.remove('on'); }
+  shot.classList.add('on'); $('ra-' + DISC.layer).classList.remove('on'); DISC.layer = next;
+  raCaption();
+}
+function raCaption() {
+  var g = DISC.recent && DISC.recent[DISC.ra], c = $('ra-caption'); if (!g || !c) return;
+  c.innerHTML = '<div><b>' + esc(g.t) + '</b><span class="meta2">' + PLAT[g.p] + ' · ' + addedAgo(g.added) + '</span></div>' +
+    '<div class="form-actions"><button class="g-btn" data-disc-act="' + g.id + '">' + discAction(g) + '</button><button class="g-btn secondary" data-disc-details="' + g.id + '">Details</button></div>';
+}
+
+function discClick(e) {
+  var t = e.target, b;
+  if (t.closest('[data-cf-prev]')) { cfGo(DISC.cf - 1); return; }
+  if (t.closest('[data-cf-next]')) { cfGo(DISC.cf + 1); return; }
+  if ((b = t.closest('[data-cf-i]'))) { var i = +b.getAttribute('data-cf-i'); if (i === DISC.cf) openDetails(DISC.newest[i]); else cfGo(i); return; }
+  if ((b = t.closest('[data-ra-i]'))) { raGo(+b.getAttribute('data-ra-i')); return; }
+  if ((b = t.closest('[data-disc-details]'))) { openDetails(G[+b.getAttribute('data-disc-details')]); return; }
+  if ((b = t.closest('[data-disc-act]'))) {
+    var g = G[+b.getAttribute('data-disc-act')];
+    if (g.missing) openDetails(g); else if (g.installed) { S.playing = g.id; toast('Launching ' + g.t + '…'); } else startInstall(g);
+    return;
+  }
+}
+
+/* Discover is the first Server rail row, with a divider under it, and the
+   default selection. */
+function srvRail() {
+  var plats = Object.keys(PLAT).sort(function (a, b) { return PLAT[a].localeCompare(PLAT[b]); });
+  rail('srv-rail', [{ key: 'DISCOVER', label: 'Discover', sel: S.platform === 'DISCOVER', divider: true }].concat(
+    plats.map(function (p) { return { key: p, label: PLAT[p], count: G.filter(function (g) { return g.p === p; }).length * 8, sel: S.platform === p }; })),
+    function (k) { S.platform = k; renderServer(); });
+}
+var discRenderServer = renderServer;
+renderServer = function () {
+  var on = S.platform === 'DISCOVER';
+  $('srv-head').hidden = on; $('srv-scroll').hidden = on; $('discover').hidden = !on;
+  if (on) { srvRail(); renderDiscover(); return; }
+  discRenderServer(); srvRail();
+};
 
 /* ---- details ---- */
 function openDetails(g, tab){

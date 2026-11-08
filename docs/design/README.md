@@ -35,6 +35,8 @@ python3 -I docs/design/prototype/applayout.py docs/design/system/components
 - `fresh.js`, `fresh.css` — Proposed app's first run (Connect, Choose your
   systems), the setup card and the bottom-right notification cards.
 - `serverhead.js`, `serverhead.css` — the folding Server and Library headers.
+- `discover.js`, `discover.css` — Server › Discover: the New releases coverflow and
+  the auto-advancing Recently added list.
 
 To view a card locally, it needs the design system's `tokens.css`, which the
 published page generates from `tokens.json`; open it on the published page instead.

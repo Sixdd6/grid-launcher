@@ -7,10 +7,34 @@ spec = importlib.util.spec_from_file_location('gen', os.path.join(os.path.dirnam
 sys.argv = [sys.argv[0], OUT]
 gen = importlib.util.module_from_spec(spec); spec.loader.exec_module(gen)
 
+# Placeholder games. "rel" is the release date and "added" the day it reached
+# the server (RomM: metadata release date, created_at), both made up; Discover
+# sorts by them. LINUX games are native on a Linux computer.
+REL = {
+  "Starfall Circuit": ("1998-03-14", "2026-10-02"), "Lantern Vale": ("1999-11-05", "2026-09-21"),
+  "Ironclad Drift": ("1997-06-27", "2026-10-30"), "Moss & Marrow": ("2003-04-18", "2026-11-05"),
+  "Pixel Harbor": ("1995-08-11", "2026-08-14"), "Cinder Peaks": ("2000-02-24", "2026-11-06"),
+  "Echo Garden": ("2001-01-19", "2026-10-28"), "Velvet Static": ("2006-09-07", "2026-11-03"),
+  "Tidewalker": ("2004-12-02", "2026-10-12"), "Brass Comet": ("1998-10-22", "2026-07-30"),
+  "Hollow Signal": ("1999-05-13", "2026-11-04"), "Kite Season": ("1996-03-29", "2026-10-19"),
+  "Neon Orchard": ("2005-07-21", "2026-09-09"), "Glass Monsoon": ("2000-10-10", "2026-11-01"),
+  "Quiet Engine": ("1997-12-04", "2026-10-25"), "Ember Choir": ("2005-03-31", "2026-11-07"),
+}
+EXTRA = [
+  ("Lumen Drift", "hsl(265 55% 42%)", "LINUX", "2026-10-24", "2026-10-26"),
+  ("Paper Orbit", "hsl(28 70% 44%)", "LINUX", "2026-09-12", "2026-09-15"),
+  ("Kestrel Run", "hsl(160 45% 32%)", "LINUX", "2026-06-30", "2026-11-02"),
+  ("Saltmarsh", "hsl(200 35% 36%)", "LINUX", "2025-11-02", "2026-08-03"),
+  ("Quiet Atlas", "hsl(340 40% 38%)", "LINUX", "2025-03-15", "2026-06-11"),
+  ("Rook & Ribbon", "hsl(48 60% 38%)", "LINUX", "2024-08-08", "2026-05-20"),
+  ("Coral Static", "hsl(10 55% 40%)", "PS", "2000-11-16", "2026-10-31"),
+  ("Signal Fires", "hsl(230 45% 40%)", "PS2", "2007-03-08", "2026-10-29"),
+  ("Orbit Bloom", "hsl(300 40% 40%)", "GC", "2006-06-15", "2026-11-06"),
+]
 data = {
   "games": [
-    {"t": t, "c": c, "p": p} for (t, c, p) in gen.GAMES
-  ],
+    {"t": t, "c": c, "p": p, "rel": REL[t][0], "added": REL[t][1]} for (t, c, p) in gen.GAMES
+  ] + [{"t": t, "c": c, "p": p, "rel": r, "added": a} for (t, c, p, r, a) in EXTRA],
 }
 
 HTML = r"""<!-- @dsCard group="Prototype" height=800 width=1280 subtitle="The app as it is today, clickable: every view, rail pane, Details and dialogs" -->
@@ -29,6 +53,7 @@ HTML = r"""<!-- @dsCard group="Prototype" height=800 width=1280 subtitle="The ap
 
   .view { flex: 1 1 auto; min-height: 0; position: relative; box-sizing: border-box; padding: var(--gutter); overflow-y: auto; }
   .view[hidden] { display: none; }
+  .rail-divider { border: 0; border-top: 1px solid var(--line); margin: 6px 8px; }
   .columns { display: flex; align-items: stretch; gap: var(--gutter); height: 100%; min-height: 0; }
   .body { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--card-w, 160px), 1fr)); gap: 18px 14px; padding: var(--gutter) 2px 40px; }
@@ -246,8 +271,8 @@ __ICON_JS__
 (function(){
 var DATA = __DATA__;
 var G = DATA.games.map(function(g, i){ return Object.assign({ id: i, installed: [0,1,2,4,6,9,12].indexOf(i) >= 0, update: i === 1, missing: i === 9, cloud: [0,4,6].indexOf(i) >= 0 }, g); });
-var PLAT = { PS: 'PlayStation', N64: 'Nintendo 64', SAT: 'Sega Saturn', GC: 'GameCube', SNES: 'Super Nintendo', PS2: 'PlayStation 2' };
-var EMU = { PS: 'DuckStation', N64: 'RetroArch · Mupen64Plus-Next', SAT: 'Ymir (Sega Saturn)', GC: 'Dolphin', SNES: 'RetroArch · Snes9x', PS2: 'PCSX2' };
+var PLAT = { PS: 'PlayStation', N64: 'Nintendo 64', SAT: 'Sega Saturn', GC: 'GameCube', SNES: 'Super Nintendo', PS2: 'PlayStation 2', LINUX: 'Linux' };
+var EMU = { PS: 'DuckStation', N64: 'RetroArch · Mupen64Plus-Next', SAT: 'Ymir (Sega Saturn)', GC: 'Dolphin', SNES: 'RetroArch · Snes9x', PS2: 'PCSX2', LINUX: 'none' };
 var VIEWS = ['library','server','downloads','emulators','settings'];
 var S = { view: 'server', platform: 'PS', libFilter: 'all', q: { library: '', server: '' }, cardW: 160, labels: 'always', fade: 50, blur: 2, lastFade: 50, emuPane: 'installed', setPane: 'appearance', detail: null, tab: 'overview', kind: 'save', dl: null, fw: { PS: 'installed', SAT: 'install', GC: 'unavailable' } };
 var $ = function(id){ return document.getElementById(id); };
@@ -271,7 +296,7 @@ function renderPills(){
 /* ---- rails ---- */
 function rail(id, rows, onPick){
   $(id).innerHTML = rows.map(function(r){
-    return (r.heading ? '<span class="g-rail-heading">'+r.heading+'</span>' : '') + '<button class="g-rail-item'+(r.sel?' active':'')+'" data-key="'+r.key+'"'+(r.sel?' aria-current="page"':'')+'><span class="g-rail-label">'+esc(r.label)+'</span>'+(r.count!==undefined?'<span class="g-rail-count">'+r.count+'</span>':'')+'</button>';
+    return (r.heading ? '<span class="g-rail-heading">'+r.heading+'</span>' : '') + '<button class="g-rail-item'+(r.sel?' active':'')+'" data-key="'+r.key+'"'+(r.sel?' aria-current="page"':'')+'><span class="g-rail-label">'+esc(r.label)+'</span>'+(r.count!==undefined?'<span class="g-rail-count">'+r.count+'</span>':'')+'</button>'+(r.divider?'<hr class="rail-divider">':'');
   }).join('');
   $(id).onclick = function(e){ var b = e.target.closest('[data-key]'); if (b) onPick(b.getAttribute('data-key')); };
 }
@@ -303,6 +328,8 @@ function renderServer(){
   $('srv-title').textContent = PLAT[S.platform];
   $('srv-count').textContent = (inPlat.length * 8) + ' games · ' + inPlat.filter(function(g){return g.installed;}).length + ' installed';
   $('srv-emu').textContent = 'Emulator: ' + EMU[S.platform];
+  /* A native platform runs without an emulator: no emulator or firmware chips. */
+  document.querySelector('[data-view=server] .g-chips').hidden = S.platform === 'LINUX';
   var shown = inPlat.concat(G.filter(function(g){ return g.p !== S.platform; }).slice(0, 10)).filter(function(g){ return match(g, S.q.server); });
   fillGrid('srv-grid', shown, false, S.q.server.trim() ? 'No games match “'+S.q.server.trim()+'”' : 'This platform has no games');
 }
@@ -640,7 +667,7 @@ nxt = sub(nxt, """          </header>
             <input class="g-search" type="search" placeholder="Search title, platform or genre" aria-label="Search this platform" data-search="server">""", """          </header></div></div>
           <div class="g-toolbar">
             <input class="g-search" type="search" placeholder="Search title, platform or genre" aria-label="Search this platform" data-search="server">""")
-nxt = sub(nxt, """        <div class="grid" id="srv-grid"></div>""", """        <div class="sscroll" id="srv-scroll"><div class="grid" id="srv-grid"></div></div>""")
+nxt = sub(nxt, """        <div class="grid" id="srv-grid"></div>""", """        <div class="sscroll" id="srv-scroll"><div class="grid" id="srv-grid"></div></div>\n        <div class="discover" id="discover" hidden></div>""")
 nxt = sub(nxt, """      <div class="body">
         <div class="g-panel g-head">
           <header class="g-platform-header"><h2 id="lib-title">All games</h2><p class="g-counts" id="lib-count"></p></header>
@@ -652,7 +679,11 @@ nxt = sub(nxt, """        <div class="grid" id="lib-grid"></div>""", """        
 nxt = sub(nxt, 'function toast(msg){', 'function centredToastUnused(msg){')
 FRESH_CSS = open(os.path.join(HERE, 'fresh.css')).read()
 nxt = sub(nxt, '</style></head>', FRESH_CSS + '\n</style></head>')
-nxt = sub(nxt, '/* ---- details ---- */', FRESH_JS + '\n' + SH_JS + '\n/* ---- details ---- */')
+DISC_JS = open(os.path.join(HERE, 'discover.js')).read()
+DISC_CSS = open(os.path.join(HERE, 'discover.css')).read()
+nxt = sub(nxt, '</style></head>', DISC_CSS + '\n</style></head>')
+nxt = sub(nxt, '/* ---- details ---- */', FRESH_JS + '\n' + SH_JS + '\n' + DISC_JS + '\n/* ---- details ---- */')
+nxt = sub(nxt, "var S = { view: 'settings', platform: 'PS',", "var S = { view: 'settings', platform: 'DISCOVER',")
 nxt = sub(nxt, '  <div class="toasts" id="toasts" aria-live="polite"></div>', '  <div class="notes" id="notes" aria-live="polite"><aside class="note-card setup-card" id="setup-card" hidden></aside></div>\n  <div class="fresh" id="fresh" hidden></div>')
 nxt = sub(nxt, "paintArt(G[0]); renderAll(); gIcons();", "freshReset(); paintArt(null); $('art').style.opacity = 0; renderAll(); gIcons(); freshShow('connect');")
 nxt = sub(nxt, 'subtitle="Proposed: emulators and Windows setup in one Systems tab under Settings"', 'subtitle="Proposed: starts as a new user; emulators and Windows setup in one Systems tab under Settings"')
