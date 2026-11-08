@@ -9,6 +9,7 @@ import {
   REAP_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -167,11 +168,9 @@ describe('cloud-saves', () => {
     // who has scrolled the panel away still learns the result. rom 601 has
     // exactly one local save file (cloud-saves-seed.mjs), so the text is the
     // Info branch of `upload_completion_message` (transfer.rs:897-900).
-    await $(testId('toast')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
+    await waitForToast('SaveSyncManual — Uploaded 1 save files.', {
       timeoutMsg: 'no toast appeared after the manual upload',
     });
-    await expect($(testId('toast'))).toHaveText('SaveSyncManual — Uploaded 1 save files.');
 
     await browser.waitUntil(
       async () => (await mockRequests()).length > before,
@@ -260,11 +259,9 @@ describe('cloud-saves', () => {
     // above returns as soon as the POST reaches the mock, and the event is
     // emitted on the same task right after that POST resolves, so the toast
     // is still inside its 4 s window here.
-    await $(testId('toast')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
+    await waitForToast('SaveSyncLaunch — Uploaded 1 save files.', {
       timeoutMsg: 'no toast appeared after the auto upload on exit',
     });
-    await expect($(testId('toast'))).toHaveText('SaveSyncLaunch — Uploaded 1 save files.');
 
     const uploads = (await mockRequests())
       .slice(before)

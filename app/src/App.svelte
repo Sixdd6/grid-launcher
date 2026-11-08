@@ -4,8 +4,9 @@
   import Shell from './lib/Shell.svelte';
   import PlatformSetup from './lib/setup/PlatformSetup.svelte';
   import Toast from './lib/Toast.svelte';
+  import SetupProgress from './lib/setup/SetupProgress.svelte';
   import { session, restore, listenUnauthorized, finishSetup } from './lib/stores/session.svelte';
-  import { initSetupRun, startSetupRun } from './lib/stores/setupRun.svelte';
+  import { initSetupRun, setupRun, startSetupRun } from './lib/stores/setupRun.svelte';
   import { init as initDownloads } from './lib/stores/downloads.svelte';
   import { init as initSessions } from './lib/stores/sessions.svelte';
   import { init as initCompatTools } from './lib/stores/compatTools.svelte';
@@ -20,6 +21,7 @@
   import { initUiSettings, toggleTheme, uiSettings } from './lib/stores/uiSettings.svelte';
   import ThemeToggle from './lib/ThemeToggle.svelte';
 
+  let shell = $state<ReturnType<typeof Shell> | null>(null);
   let restored = false; // restore() must fire once on mount, not on every phase change
 
   // Declared before the restore effect below, and reading no reactive state,
@@ -127,7 +129,7 @@
     }}
   />
 {:else if session.phase === 'shell'}
-  <Shell />
+  <Shell bind:this={shell} />
 {:else if session.phase === 'none'}
   <Connect prefill={connectPrefill(session)} />
 {/if}
@@ -144,8 +146,14 @@
   />
 {/if}
 
+<!-- The first-run setup card leads the notification stack while the shell
+     is up; its Open Downloads switches the shell's view. -->
+{#snippet setupCard()}
+  <SetupProgress onOpenDownloads={() => shell?.show('downloads')} />
+{/snippet}
+
 <!-- Outside the phase branch: the startup Python-import notice is pushed
      before any session exists, and the user it was written for sees the
      Connect form, not the shell. `position: fixed` global chrome, so it
      needs no layout slot of its own. -->
-<Toast />
+<Toast lead={session.phase === 'shell' && setupRun.active ? setupCard : undefined} />

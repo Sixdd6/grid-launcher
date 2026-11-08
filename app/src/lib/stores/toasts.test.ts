@@ -2,15 +2,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   appendToast,
   dismissToast,
+  pauseToast,
   pushToast,
   removeToast,
+  resumeToast,
+  setPaused,
   toasts,
   TOAST_DURATION_MS,
   TOAST_LIMIT,
   type Toast,
 } from './toasts.svelte';
 
-const toast = (id: number, text: string): Toast => ({ id, text, level: 'success' });
+const toast = (id: number, text: string): Toast => ({
+  id,
+  text,
+  level: 'success',
+  durationMs: TOAST_DURATION_MS,
+  paused: false,
+});
 
 describe('appendToast', () => {
   it('appends to the end so the newest toast is last', () => {
@@ -54,6 +63,28 @@ describe('removeToast', () => {
   });
 });
 
+describe('setPaused', () => {
+  it('flags only the matching card', () => {
+    const list = setPaused([toast(1, 'a'), toast(2, 'b')], 2, true);
+    expect(list.map((t) => t.paused)).toEqual([false, true]);
+  });
+
+  it('keeps an unchanged card as the same object', () => {
+    const before = [toast(1, 'a')];
+    expect(setPaused(before, 1, false)[0]).toBe(before[0]);
+  });
+});
+
+describe('the stack', () => {
+  it('holds four cards, and a fifth drops the oldest', () => {
+    expect(TOAST_LIMIT).toBe(4);
+  });
+
+  it('cards last ten seconds by default', () => {
+    expect(TOAST_DURATION_MS).toBe(10_000);
+  });
+});
+
 describe('pushToast duration', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -77,6 +108,44 @@ describe('pushToast duration', () => {
     vi.advanceTimersByTime(TOAST_DURATION_MS);
     expect(toasts.list.map((t) => t.text)).toEqual(['one-time upgrade notice']);
     vi.advanceTimersByTime(20000 - TOAST_DURATION_MS);
+    expect(toasts.list).toEqual([]);
+  });
+
+  it('records the duration on the card for its countdown bar', () => {
+    pushToast('long', 'success', 20000);
+    expect(toasts.list[0].durationMs).toBe(20000);
+  });
+
+  it('holds the countdown while paused and finishes the rest on resume', () => {
+    const id = pushToast('pointed at')!;
+    vi.advanceTimersByTime(6_000);
+    pauseToast(id);
+    expect(toasts.list[0].paused).toBe(true);
+    vi.advanceTimersByTime(60_000);
+    expect(toasts.list.map((t) => t.text)).toEqual(['pointed at']);
+    resumeToast(id);
+    expect(toasts.list[0].paused).toBe(false);
+    vi.advanceTimersByTime(3_999);
+    expect(toasts.list).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(toasts.list).toEqual([]);
+  });
+
+  it('drops the oldest of five, and the rest still close on time', () => {
+    for (let i = 1; i <= 5; i += 1) pushToast(`t${i}`);
+    expect(toasts.list.map((t) => t.text)).toEqual(['t2', 't3', 't4', 't5']);
+    vi.advanceTimersByTime(TOAST_DURATION_MS);
+    expect(toasts.list).toEqual([]);
+  });
+
+  it('a card dismissed by hand does not come back or close another', () => {
+    const first = pushToast('first')!;
+    vi.advanceTimersByTime(5_000);
+    dismissToast(first);
+    pushToast('second');
+    vi.advanceTimersByTime(5_000);
+    expect(toasts.list.map((t) => t.text)).toEqual(['second']);
+    vi.advanceTimersByTime(5_000);
     expect(toasts.list).toEqual([]);
   });
 });

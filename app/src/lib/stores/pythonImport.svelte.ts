@@ -6,7 +6,7 @@ import { importToastText } from '../pythonImport';
 import { pushToast } from './toasts.svelte';
 
 /** The notice is a one-time instruction to re-enter two tokens, so it stays
- *  up far longer than a routine 4 s toast. */
+ *  up far longer than a routine 10 s card. */
 export const IMPORT_TOAST_DURATION_MS = 20000;
 
 let shown = false;

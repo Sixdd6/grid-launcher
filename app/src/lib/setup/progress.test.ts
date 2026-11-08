@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DownloadEntry, SetupOutcome } from '../api';
-import { assignedCount, headline, outcomeNotes, summarize } from './progress';
+import { assignedCount, cardCountsDown, headline, outcomeNotes, summarize } from './progress';
 
 function row(id: number, source_id: string, status: DownloadEntry['status'], job: DownloadEntry['job'] = 'emulator'): DownloadEntry {
   return { id, source_id, status, job } as DownloadEntry;
@@ -64,5 +64,21 @@ describe('outcomes', () => {
 
   it('counts the platforms that got their emulator', () => {
     expect(assignedCount(outcomes)).toBe(1);
+  });
+});
+
+describe('cardCountsDown', () => {
+  const failed = { id: 9 } as DownloadEntry;
+
+  it('holds while anything is still installing', () => {
+    expect(cardCountsDown({ total: 2, done: 1, running: 1, failed: [] })).toBe(false);
+  });
+
+  it('counts down once every install is done', () => {
+    expect(cardCountsDown({ total: 2, done: 2, running: 0, failed: [] })).toBe(true);
+  });
+
+  it('counts down once nothing is running, even with a failure', () => {
+    expect(cardCountsDown({ total: 2, done: 1, running: 0, failed: [failed] })).toBe(true);
   });
 });

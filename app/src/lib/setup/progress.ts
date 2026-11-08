@@ -50,6 +50,15 @@ export function headline(p: SetupProgress): string {
   return `${p.total} ${noun} installed`;
 }
 
+/**
+ * Whether the setup card's auto-dismiss countdown runs: only once nothing is
+ * still installing, whatever the outcome. Until then it stays put however
+ * long the installs take.
+ */
+export function cardCountsDown(p: SetupProgress): boolean {
+  return p.running === 0;
+}
+
 /** One line per platform the setup could not finish, for the summary. */
 export function outcomeNotes(outcomes: readonly SetupOutcome[]): string[] {
   return outcomes.flatMap((o) =>

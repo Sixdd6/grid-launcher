@@ -8,6 +8,7 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -234,12 +235,10 @@ describe('emulators', () => {
     await $(testId('emu-form-save')).click();
     // The global toast surface (parity gap 5) with the reference's text
     // (emulator_ui_mixin.py:1591). Asserted before the row wait so it is
-    // read well inside TOAST_DURATION_MS.
-    await $(testId('toast')).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
+    // read well inside TOAST_DURATION_MS; any card in the stack may hold it.
+    await waitForToast("Added emulator 'RetroArch (Multi-System)'.", {
       timeoutMsg: 'no toast appeared after adding an emulator',
     });
-    await expect($(testId('toast'))).toHaveText("Added emulator 'RetroArch (Multi-System)'.");
     await $(testId(`emulator-row-${sanitize('RetroArch (Multi-System)')}`)).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the saved emulator never appeared in the list',

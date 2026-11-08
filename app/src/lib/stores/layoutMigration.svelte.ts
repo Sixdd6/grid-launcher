@@ -6,7 +6,7 @@ import { migrationToastText } from '../layoutMigration';
 import { pushToast } from './toasts.svelte';
 
 /** The notice explains a half-done library move, so it stays up far longer
- *  than a routine 4 s toast. */
+ *  than a routine 10 s card. */
 export const MIGRATION_TOAST_DURATION_MS = 20000;
 
 let shown = false;

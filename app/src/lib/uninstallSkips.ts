@@ -6,7 +6,7 @@
 
 import type { SkippedRemoval } from './api';
 
-/** Long enough to read a few paths; the default toast is 4 s. */
+/** Long enough to read a few paths; the default card lasts 10 s. */
 export const SKIPPED_TOAST_MS = 12000;
 
 /**

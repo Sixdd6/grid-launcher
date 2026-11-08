@@ -9,6 +9,7 @@ import {
   REAP_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -246,12 +247,8 @@ describe('launch', () => {
     await openEmulators();
     await showPage('installed');
     await $(testId('emulator-launch-instantexit')).click();
-    await $(testId('toast')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
+    await waitForToast(/Process exited immediately \(code 3\)\./, {
       timeoutMsg: 'no toast appeared after launching the instant-exit stub',
-    });
-    await expect($(testId('toast'))).toHaveText('Process exited immediately (code 3).', {
-      containing: true,
     });
     await closeEmulators();
   });

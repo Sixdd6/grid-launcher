@@ -327,6 +327,106 @@ h1 {
   border: 0;
 }
 
+/* The one notification style: a card in Toast.svelte's stack at the bottom
+   right. Shared by the message cards and the setup card (SetupProgress),
+   which is why it lives here rather than in either component. */
+.note-card {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  box-sizing: border-box;
+  border-radius: var(--r-row);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-lift);
+  animation: note-in var(--m-base) ease;
+}
+
+.note-card .note-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text-h);
+  overflow-wrap: anywhere;
+}
+
+.note-card.error .note-title {
+  color: var(--danger);
+}
+
+.note-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.note-btn {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: var(--r-chip);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.note-btn:hover {
+  background: var(--surface);
+}
+
+/* Dismiss carries the countdown: a bar along its bottom edge that runs down
+   over the card's life. The timing itself is JS (stores/toasts.svelte.ts,
+   countdown.ts), so the card still closes when reduced motion stops the
+   bar; `.paused` follows the same hover/focus hold. */
+.note-dismiss {
+  position: relative;
+  overflow: hidden;
+}
+
+.note-cd {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 3px;
+  background: var(--primary);
+  transform-origin: left center;
+  animation: note-cd linear forwards;
+}
+
+.note-cd.paused {
+  animation-play-state: paused;
+}
+
+@keyframes note-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes note-cd {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .note-card,
+  .note-cd {
+    animation: none;
+  }
+}
+
 /* While a user switches the theme (`setTheme` holds `html.theming` for
    320ms), every colour eases across instead of snapping. Scoped to that
    window, so no other change animates its colours; never added under

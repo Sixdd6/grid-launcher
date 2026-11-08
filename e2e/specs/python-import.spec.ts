@@ -7,6 +7,7 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -43,11 +44,9 @@ describe('python-import', () => {
   });
 
   it('shows the import notice on the connect screen', async () => {
-    await $(testId('toast')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
+    await waitForToast(NOTICE, {
       timeoutMsg: 'no toast appeared on the connect screen after a Python import',
     });
-    await expect($(testId('toast'))).toHaveText(NOTICE);
   });
 
   it('prefills the connect form with the imported server url and username', async () => {

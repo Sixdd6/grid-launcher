@@ -1,5 +1,5 @@
-// The app-wide transient message surface — the port of `show_toast`
-// (grid_launcher/ui/toast.py:97) and its `ToastWidget` (toast.py:7-95).
+// The app-wide message surface: the cards in Toast.svelte's bottom-right
+// stack (originally the port of `show_toast`, grid_launcher/ui/toast.py:97).
 // Module-scoped `$state` so any component can push without prop drilling,
 // mirroring `stores/appUpdate.svelte.ts`.
 //
@@ -7,25 +7,33 @@
 // `$state` wrapper under it is the part components read. Same split as
 // `stores/updates.svelte.ts`'s `labelFor`.
 
+import { CountdownTimer } from '../countdown';
+
 export type ToastLevel = 'success' | 'error';
 
-export type Toast = { id: number; text: string; level: ToastLevel };
+export type Toast = {
+  id: number;
+  text: string;
+  level: ToastLevel;
+  /** The card's whole life, which its countdown bar runs down over. */
+  durationMs: number;
+  /** True while the pointer is over the card or focus is inside it. */
+  paused: boolean;
+};
 
 /**
- * Python shows exactly one toast at a time (a single reused `ToastWidget`,
- * toast.py:100-105). The rewrite keeps a short stack instead so a fan-out
- * that reports twice in quick succession does not lose the first line; three
- * is the most that fits above the download strip without covering content.
+ * Every message is a card in one stack at the bottom right (design: "One
+ * notification style"). Four fit above the download strip; a fifth drops
+ * the oldest.
  */
-export const TOAST_LIMIT = 3;
+export const TOAST_LIMIT = 4;
 
 /**
- * `ToastWidget.__init__`'s `duration_ms` default is 2400 (toast.py:15). The
- * rewrite uses 4000: a WebDriver round trip plus a command's own latency
- * eats a visible slice of 2400 ms, and E2E asserts the "Added emulator"
- * text. Deliberate, documented deviation.
+ * A card closes itself after ten seconds (its Dismiss bar runs down over
+ * that), paused while pointed at. A few one-time notices that need reading
+ * and acting on pass a longer duration of their own.
  */
-export const TOAST_DURATION_MS = 4000;
+export const TOAST_DURATION_MS = 10_000;
 
 /** `show_message` ignores a blank message (toast.py:64-66); so does this. */
 export function appendToast(list: Toast[], next: Toast, limit: number = TOAST_LIMIT): Toast[] {
@@ -37,7 +45,14 @@ export function removeToast(list: Toast[], id: number): Toast[] {
   return list.filter((t) => t.id !== id);
 }
 
+export function setPaused(list: Toast[], id: number, paused: boolean): Toast[] {
+  return list.map((t) => (t.id === id && t.paused !== paused ? { ...t, paused } : t));
+}
+
 const state = $state<{ list: Toast[] }>({ list: [] });
+
+/** One countdown per card on screen, keyed by toast id. */
+const timers = new Map<number, CountdownTimer>();
 
 let nextId = 0;
 
@@ -48,10 +63,9 @@ export const toasts = {
 };
 
 /**
- * Shows `text` for `durationMs` (default [`TOAST_DURATION_MS`]). Returns the
- * new toast's id, or `null` when the message was blank and nothing was
- * shown. A one-time upgrade instruction passes a longer duration — four
- * seconds is not enough to read "re-enter your tokens" and act on it.
+ * Shows `text` for `durationMs` (default [`TOAST_DURATION_MS`]) of unpaused
+ * time. Returns the new toast's id, or `null` when the message was blank and
+ * nothing was shown.
  */
 export function pushToast(
   text: string,
@@ -62,11 +76,32 @@ export function pushToast(
   if (trimmed === '') return null;
   nextId += 1;
   const id = nextId;
-  state.list = appendToast(state.list, { id, text: trimmed, level });
-  setTimeout(() => dismissToast(id), durationMs);
+  const next = appendToast(state.list, { id, text: trimmed, level, durationMs, paused: false });
+  // Cards that fell off the top of a full stack take their timers with them.
+  const kept = new Set(next.map((t) => t.id));
+  for (const t of state.list) if (!kept.has(t.id)) stopTimer(t.id);
+  state.list = next;
+  timers.set(id, new CountdownTimer(durationMs, () => dismissToast(id)));
   return id;
 }
 
 export function dismissToast(id: number): void {
+  stopTimer(id);
   state.list = removeToast(state.list, id);
+}
+
+/** Holds a card's countdown while it is pointed at or focused. */
+export function pauseToast(id: number): void {
+  timers.get(id)?.pause();
+  state.list = setPaused(state.list, id, true);
+}
+
+export function resumeToast(id: number): void {
+  timers.get(id)?.resume();
+  state.list = setPaused(state.list, id, false);
+}
+
+function stopTimer(id: number): void {
+  timers.get(id)?.stop();
+  timers.delete(id);
 }

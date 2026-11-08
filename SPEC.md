@@ -37,6 +37,17 @@ sparkline of the current transfer's last 60 seconds (network in the primary colo
 in teal) and an "Open Downloads" link. Clicking anywhere on the strip opens the Downloads
 view.
 
+**Notifications.** Every message (install results, launches, firmware, cloud saves,
+errors) is a card in one stack at the bottom right, above the download strip and over
+dialogs; there are no centred toasts. Each card has a Dismiss button with a bar along its
+bottom edge that runs down over 10 seconds, after which the card closes itself (a few
+one-time notices that need reading, such as the Python import and a library move's
+outcome, stay 12–20 seconds). Pointing at a card, or focus inside it, pauses its
+countdown. Errors are in the danger colour and announced as alerts. At most four cards
+stack; a fifth drops the oldest. The first-run setup card sits at the top of the same
+stack and counts down only once its installs are done. With reduced motion the bar
+stays still, but the cards still close on time.
+
 # Main Sections
 There are several main sections to the application with buttons across the top bar to navigate between them:
 - Library
@@ -266,9 +277,10 @@ alphabetical order, none ticked:
 - A platform nothing installable serves shows "No emulator available" and cannot be
   ticked; one whose recommended emulator is already configured shows "Installed".
 - **Install N emulators** (N counts emulators, not platforms) queues one catalog install
-  per chosen emulator and opens the app at once. A card over the views follows the
+  per chosen emulator and opens the app at once. A card at the top of the notification stack follows the
   installs ("Setting up 3 emulators · 1 done"), with Retry for a failed one, and ends
-  with how many platforms are ready.
+  with how many platforms are ready. Once nothing is still installing, its Dismiss
+  counts down and the card closes itself after 10 seconds, like every notification.
 - As each emulator installs, every platform it was chosen for gets it as its default
   emulator, replacing an automatic default but never an explicit "(none)". A RetroArch
   choice becomes the default only when a compatible core is actually installed; otherwise

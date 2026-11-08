@@ -2,19 +2,48 @@
   import { api } from '../api';
   import { downloads } from '../stores/downloads.svelte';
   import { dismissSetupRun, setupRun } from '../stores/setupRun.svelte';
-  import { assignedCount, headline, outcomeNotes, summarize } from './progress';
+  import { CountdownTimer, holdWhileEngaged } from '../countdown';
+  import { TOAST_DURATION_MS } from '../stores/toasts.svelte';
+  import { assignedCount, cardCountsDown, headline, outcomeNotes, summarize } from './progress';
 
   // The first-run setup's progress in the shell (plan step 3, "Into the
-  // app"): a small card over the views until dismissed. The installs
-  // themselves are ordinary Downloads rows; this only follows them.
+  // app"): the first card in the notification stack (Toast.svelte, which
+  // App.svelte hands this to). The installs themselves are ordinary
+  // Downloads rows; this only follows them. Like every card it closes itself,
+  // but its countdown only starts once the installs are done.
   let { onOpenDownloads }: { onOpenDownloads: () => void } = $props();
 
   let progress = $derived(summarize(setupRun.queued, downloads.entries));
   let notes = $derived(outcomeNotes(setupRun.outcomes));
-  let finished = $derived(progress.running === 0);
+  let finished = $derived(cardCountsDown(progress));
   let assigned = $derived(assignedCount(setupRun.outcomes));
   let percent = $derived(progress.total === 0 ? 100 : Math.round((progress.done / progress.total) * 100));
   let retryError = $state<string | null>(null);
+  let countsDown = $derived(setupRun.active && finished);
+
+  // Plain, not `$state`: the countdown effect below must not restart when
+  // the pointer comes and goes, only when the card starts or stops counting.
+  let held = false;
+  let paused = $state(false);
+  let timer: CountdownTimer | null = null;
+
+  $effect(() => {
+    if (!countsDown) return;
+    const t = new CountdownTimer(TOAST_DURATION_MS, dismissSetupRun);
+    if (held) t.pause();
+    timer = t;
+    return () => {
+      t.stop();
+      if (timer === t) timer = null;
+    };
+  });
+
+  function onHold(next: boolean) {
+    held = next;
+    paused = next;
+    if (next) timer?.pause();
+    else timer?.resume();
+  }
 
   async function retry(entryId: number) {
     retryError = null;
@@ -27,8 +56,8 @@
 </script>
 
 {#if setupRun.active}
-  <aside class="card" data-testid="setup-progress" aria-live="polite">
-    <p class="title" data-testid="setup-progress-title">{headline(progress)}</p>
+  <aside class="note-card" data-testid="setup-progress" aria-live="polite" use:holdWhileEngaged={onHold}>
+    <p class="note-title" data-testid="setup-progress-title">{headline(progress)}</p>
     {#if progress.total > 0}
       <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={percent}>
         <span style={`width: ${percent}%`}></span>
@@ -50,50 +79,25 @@
       <p class="line" data-testid="setup-note">{note}</p>
     {/each}
     {#if retryError}<p class="line failed" role="alert">{retryError}</p>{/if}
-    <div class="actions">
-      <button class="secondary" onclick={onOpenDownloads}>Open Downloads</button>
-      {#if finished}
-        <button class="secondary" data-testid="setup-progress-dismiss" onclick={dismissSetupRun}>Dismiss</button>
+    <div class="note-actions">
+      <button class="note-btn" onclick={onOpenDownloads}>Open Downloads</button>
+      {#if countsDown}
+        <button class="note-btn note-dismiss" data-testid="setup-progress-dismiss" onclick={dismissSetupRun}>
+          Dismiss<span
+            class="note-cd"
+            class:paused
+            style:animation-duration={`${TOAST_DURATION_MS}ms`}
+            aria-hidden="true"
+          ></span>
+        </button>
       {/if}
     </div>
   </aside>
 {/if}
 
 <style>
-  /* Floats over the views at the bottom right, above the download strip;
-     under the details dialog (z 20) and toasts (z 30). Toasts are centred and
-     at most 480px wide, so only a narrow window brings them under the card:
-     there it rises above the toast lane instead. Design system: surface-2
-     panel, border hairline, r-row, shadow-float. */
-  .card {
-    position: fixed;
-    right: 24px;
-    bottom: calc(var(--footer-h) + 24px);
-    z-index: 15;
-    width: min(340px, calc(100vw - 48px));
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 12px 14px;
-    box-sizing: border-box;
-    border-radius: var(--r-row);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-  }
-
-  @media (max-width: 1240px) {
-    .card {
-      bottom: calc(var(--footer-h) + 96px);
-    }
-  }
-
-  .title {
-    margin: 0;
-    font-weight: 600;
-    color: var(--text-h);
-  }
-
+  /* The card itself (.note-card, .note-btn, the Dismiss countdown) is the
+     shared notification style in app.css; Toast.svelte positions the stack. */
   .bar {
     height: 4px;
     border-radius: var(--r-pill);
@@ -118,40 +122,14 @@
     color: var(--danger);
   }
 
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-
-  button {
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .secondary {
-    padding: 5px 10px;
-    border-radius: var(--r-chip);
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text-h);
-  }
-
-  .secondary:hover {
-    background: var(--surface);
-  }
-
   .link {
     padding: 0;
     border: none;
     background: none;
+    font: inherit;
+    font-size: 12px;
     color: var(--primary);
     text-decoration: underline;
-  }
-
-  button:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 1px;
+    cursor: pointer;
   }
 </style>

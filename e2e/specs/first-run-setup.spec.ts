@@ -134,6 +134,11 @@ describe('first-run setup: pick platforms, install their emulators', () => {
     }
     expect(title).toBe('2 emulators installed');
     await screenshot('4-done');
+    // Done, the card counts down (it would close itself after 10 s); Dismiss
+    // closes it at once. Done here, before the slower checks below, so the
+    // countdown cannot beat the click.
+    await $(testId('setup-progress-dismiss')).click();
+    await expect($(testId('setup-progress'))).not.toExist();
 
     // The chosen defaults land once each entry exists (the install hook).
     await browser.waitUntil(
@@ -170,8 +175,6 @@ describe('first-run setup: pick platforms, install their emulators', () => {
     expect(config).toMatch(/\[setup\]\s*\ncompleted = true/);
     expect(config).not.toContain('[setup.pending');
 
-    await $(testId('setup-progress-dismiss')).click();
-    await expect($(testId('setup-progress'))).not.toExist();
   });
 
   it('opens the picker again from Emulators › Platform defaults', async () => {

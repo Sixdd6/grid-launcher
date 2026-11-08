@@ -3,7 +3,6 @@
   import Server from './Server.svelte';
   import Downloads from './Downloads.svelte';
   import DownloadsFooter from './DownloadsFooter.svelte';
-  import SetupProgress from './setup/SetupProgress.svelte';
   import Emulators from './Emulators.svelte';
   import BackgroundArt from './BackgroundArt.svelte';
   import Icon from './Icon.svelte';
@@ -112,7 +111,8 @@
   // with no command in flight and usually no popup open. Mounted here, not
   // in Details.svelte, because the Shell is mounted exactly once and is
   // never `hidden`. (`Toast.svelte` itself hosts in `App.svelte`, above the
-  // phase branch, so the startup import notice shows in Connect too.)
+  // phase branch, so the startup import notice shows in Connect too; the
+  // setup card rides in the same stack.)
   $effect(() => {
     const unlisten = listen<CloudUploadFinished>(CLOUD_UPLOAD_FINISHED_EVENT, (e) => {
       const { title, message, failed } = e.payload;
@@ -256,11 +256,6 @@
      vanish from every other view. It is the last row of `#app`'s column,
      so the views end where it starts. -->
 <DownloadsFooter onOpen={() => (view = 'downloads')} />
-
-<!-- First-run setup's installs, followed until dismissed (fixed, like the
-     strip above, so it shows over every view). -->
-<SetupProgress onOpenDownloads={() => (view = 'downloads')} />
-
 
 <style>
   .topbar {

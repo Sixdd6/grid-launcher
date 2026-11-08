@@ -7,8 +7,8 @@ import { pushToast, dismissToast } from './stores/toasts.svelte';
 // Ids pushed here are dismissed after each test so the module-state store
 // (shared across tests in this file) starts empty every time.
 const pushed: number[] = [];
-function push(text: string, level: 'success' | 'error') {
-  const id = pushToast(text, level);
+function push(text: string, level: 'success' | 'error', durationMs?: number) {
+  const id = pushToast(text, level, durationMs);
   if (id !== null) pushed.push(id);
   return id;
 }
@@ -48,5 +48,25 @@ describe('Toast', () => {
     const { body } = render(Toast);
     expect(body).toContain('data-testid="toast-region"');
     expect(body).toContain('data-testid="toast"');
+  });
+
+  it('keeps Dismiss outside the message, so its text is the message alone', () => {
+    push('Saved successfully.', 'success');
+    const { body } = render(Toast);
+    const message = body.match(/<p data-testid="toast"[^>]*>([\s\S]*?)<\/p>/);
+    expect(message).not.toBeNull();
+    expect(message![1]).not.toContain('Dismiss');
+    expect(body).toContain('data-testid="toast-dismiss"');
+  });
+
+  it("runs the countdown bar over the card's own duration", () => {
+    push('One-time notice.', 'success', 20000);
+    const { body } = render(Toast);
+    expect(body).toContain('animation-duration: 20000ms');
+  });
+
+  it('renders nothing with no cards and no setup card', () => {
+    const { body } = render(Toast);
+    expect(body).not.toContain('toast-region');
   });
 });
