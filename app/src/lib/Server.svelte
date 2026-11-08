@@ -41,7 +41,7 @@
     firmwareChipLabel,
     firmwareChipTarget,
     platformCountsLine,
-    showsEmulatorChip,
+    showsChips,
     type FirmwareChipState,
   } from './server/header';
   import { platformLabel } from './server/platformLabel';
@@ -101,6 +101,9 @@
     games.filter((game) => isInstalled(game, activePlatformName)).length,
   );
   let defaultEmulator = $derived(savedDefaultFor(defaultEmulators, activePlatformName));
+  // Native and Windows platforms, and the Emulators shelf, show neither the
+  // emulator nor the firmware chip, and their firmware is never asked about.
+  let chipsShown = $derived(showsChips(activePlatformName, activePlatformRow?.slug ?? ''));
 
   // Design §5: the Server rail is the shared `RailPane`. The row keeps the
   // `platform-btn-<id>` id the specs already use and carries the §11
@@ -161,9 +164,9 @@
   $effect(() => {
     const id = activePlatform;
     const name = activePlatformName;
-    if (id === null || name === '') return;
-    void session.connected; // re-runs on reconnect
     firmware = null;
+    if (id === null || name === '' || !chipsShown) return;
+    void session.connected; // re-runs on reconnect
     refreshFirmwareStatus(id, name);
   });
 
@@ -188,7 +191,7 @@
     let unlisten: UnlistenFn | null = null;
     let stopped = false;
     listen<FirmwarePassFinished>(FIRMWARE_PASS_FINISHED_EVENT, (e) => {
-      if (e.payload.platform_id === activePlatform && activePlatformName !== '') {
+      if (e.payload.platform_id === activePlatform && activePlatformName !== '' && chipsShown) {
         refreshFirmwareStatus(activePlatform, activePlatformName);
       }
     }).then((un) => {
@@ -508,25 +511,25 @@
                   {platformCountsLine(activePlatformRow?.rom_count ?? 0, installedCount)}
                 </p>
               {/if}
-              <div class="chips">
-                {#if firmwareTarget}
-                  <button
-                    data-testid="server-firmware-chip"
-                    class="chip link"
-                    title="Install firmware from Emulators"
-                    onclick={() => onOpenEmulators(firmwareTarget)}
-                  >
-                    {firmwareChipLabel(firmware)}
-                  </button>
-                {:else}
-                  <span data-testid="server-firmware-chip" class="chip">{firmwareChipLabel(firmware)}</span>
-                {/if}
-                {#if showsEmulatorChip(activePlatformName, activePlatformRow?.slug ?? '')}
+              {#if chipsShown}
+                <div class="chips">
+                  {#if firmwareTarget}
+                    <button
+                      data-testid="server-firmware-chip"
+                      class="chip link"
+                      title="Install firmware from Emulators"
+                      onclick={() => onOpenEmulators(firmwareTarget)}
+                    >
+                      {firmwareChipLabel(firmware)}
+                    </button>
+                  {:else}
+                    <span data-testid="server-firmware-chip" class="chip">{firmwareChipLabel(firmware)}</span>
+                  {/if}
                   <button data-testid="server-emulator-chip" class="chip link" onclick={() => onOpenEmulators('defaults')}>
                     {emulatorChipLabel(defaultEmulator)}
                   </button>
-                {/if}
-              </div>
+                </div>
+              {/if}
             </header>
           {/snippet}
           {#snippet toolbar()}

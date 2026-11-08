@@ -117,6 +117,14 @@ describe('native', () => {
     await $(testId('platform-btn-1')).click();
   });
 
+  // Native and Windows platforms show neither the emulator nor the firmware
+  // chip in their Server header.
+  it('shows no emulator or firmware chip for a native platform', async () => {
+    await $(testId('server-platform-header')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('server-emulator-chip'))).not.toExist();
+    await expect($(testId('server-firmware-chip'))).not.toExist();
+  });
+
   it('labels the primary button "Install App" for a Windows game', async () => {
     await openDetails(701);
     await expect($(testId('details-install'))).toHaveText('Install App');
@@ -378,6 +386,7 @@ describe('native', () => {
     await closeDetails();
     await $(testId('platform-btn-3')).click();
     await expect($(testId('server-emulator-chip'))).not.toExist();
+    await expect($(testId('server-firmware-chip'))).not.toExist();
 
     await openDetails(704);
     await expect($(testId('details-install'))).toHaveText('Install App');

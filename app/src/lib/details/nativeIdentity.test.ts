@@ -9,7 +9,7 @@ import { compatToolNotice, installLabel, isNativePlatform } from './actions';
 import { launchTargetLine } from './header';
 import { fromInstalled, mergeDetail } from './subject';
 import { needsEmulator } from '../emulators/defaults';
-import { showsEmulatorChip } from '../server/header';
+import { showsChips } from '../server/header';
 
 const NAME = 'PC Fangames & Ports';
 
@@ -72,7 +72,7 @@ describe('Details for a custom-named Windows platform', () => {
 
 describe('Server and Emulators panels for a custom-named Windows platform', () => {
   it('shows no emulator chip and offers no default emulator', () => {
-    expect(showsEmulatorChip(NAME, 'win')).toBe(false);
+    expect(showsChips(NAME, 'win')).toBe(false);
     expect(needsEmulator({ display_name: NAME, name: 'Windows', slug: 'win' })).toBe(false);
     expect(needsEmulator({ display_name: NAME, name: NAME, slug: 'win' })).toBe(false);
   });

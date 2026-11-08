@@ -4,7 +4,7 @@ import {
   firmwareChipLabel,
   firmwareChipTarget,
   platformCountsLine,
-  showsEmulatorChip,
+  showsChips,
 } from './header';
 import { NO_EMULATOR_MARKER } from '../emulators/defaults';
 
@@ -34,19 +34,19 @@ describe('emulatorChipLabel', () => {
   });
 });
 
-describe('showsEmulatorChip', () => {
+describe('showsChips', () => {
   it('is hidden for native launch platforms', () => {
-    expect(showsEmulatorChip('Windows 9x', '')).toBe(false);
-    expect(showsEmulatorChip('Windows', '')).toBe(false);
-    expect(showsEmulatorChip('Linux', '')).toBe(false);
+    expect(showsChips('Windows 9x', '')).toBe(false);
+    expect(showsChips('Windows', '')).toBe(false);
+    expect(showsChips('Linux', '')).toBe(false);
   });
   it('is hidden for the Emulators shelf', () => {
-    expect(showsEmulatorChip('Emulators', 'emulators')).toBe(false);
-    expect(showsEmulatorChip(' emulators ', '')).toBe(false);
+    expect(showsChips('Emulators', 'emulators')).toBe(false);
+    expect(showsChips(' emulators ', '')).toBe(false);
   });
   it('shows for anything else, including empty', () => {
-    expect(showsEmulatorChip('Super Nintendo Entertainment System', '')).toBe(true);
-    expect(showsEmulatorChip('', '')).toBe(true);
+    expect(showsChips('Super Nintendo Entertainment System', '')).toBe(true);
+    expect(showsChips('', '')).toBe(true);
   });
 });
 

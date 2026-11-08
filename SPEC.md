@@ -87,14 +87,22 @@ There are several main sections to the application with buttons across the top b
   - **Remove from library (keeps files)** — the same action as for a game with no server
     id below: the Library row goes, no file is touched.
 - **Server** mirrors Library: a rail of the server's platforms (alphabetical by name) with ROM counts, a
-  platform header (name, ROM count, installed count, a firmware chip that links to
-  Emulators › Installed when the server offers firmware — or to Platform defaults when
-  the platform has no default emulator — and the platform's default emulator chip
-  linking to the Emulators view), a search box that filters the loaded platform list by
+  platform header (name, ROM count, installed count, a firmware chip and the platform's
+  default emulator chip), a search box that filters the loaded platform list by
   title, platform or genre, and a grid of cover cards. The hover action is
   Install for a game that is not installed and Play for one that is. The card size is
   remembered as `ui.card_size_server`. Downloads and installs are queued and handled in
   the background.
+
+  **Header chips follow the state.** The firmware chip reads "Firmware: 3 files — no
+  default emulator" until the platform has a default emulator, then "Firmware: 3 files",
+  then "Firmware: 3 files · installed" ("No server firmware" when the server has none,
+  "Firmware: checking…" / "Firmware: unavailable" while the status is loading or was
+  refused). It links to Emulators › Installed when the server offers firmware, or to
+  Platform defaults when the platform has no default emulator. The emulator chip names
+  the default emulator ("No default emulator" when none) and links to the Emulators view.
+  Native platforms (games native to this OS, and Windows games run through Proton) and
+  the Emulators shelf show neither chip, and their firmware status is never fetched.
 - **Server and Library headers fold while you scroll** (one shared behaviour). Past 32px
   of scroll the title row (title, counts, chips) folds up into the toolbar row, leaving
   the search field and Size (and Library's Sort) pinned to the top of the main panel;

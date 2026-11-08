@@ -27,14 +27,15 @@ export function emulatorChipLabel(name: string): string {
 }
 
 /**
- * Whether the Server header shows an emulator chip at all for this platform
- * (design §6: the emulator chip is omitted for native platforms). A native
- * platform's games launch as host executables, so "No default emulator" was
- * never a true statement about them — the chip is not merely relabeled, it
- * does not appear. Nor does it on the Emulators shelf, which holds emulator
- * packages rather than games and never has a default emulator.
+ * Whether the Server header shows its emulator and firmware chips at all for
+ * this platform (design: native and Windows platforms show neither). A
+ * native platform's games — native to this OS, or Windows games run through
+ * Proton — launch as host executables, so "No default emulator" was never a
+ * true statement about them, and no emulator wants firmware for them: the
+ * chips are not relabeled, they do not appear. Nor do they on the Emulators
+ * shelf, which holds emulator packages rather than games.
  */
-export function showsEmulatorChip(platformLabel: string, platformSlug: string): boolean {
+export function showsChips(platformLabel: string, platformSlug: string): boolean {
   return !isNativeLaunchPlatform(platformSlug, platformLabel) && !isEmulatorsPlatform(platformLabel);
 }
 
