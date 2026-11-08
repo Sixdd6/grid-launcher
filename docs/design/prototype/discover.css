@@ -4,6 +4,9 @@
   .disc-sec { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
   .disc-head h2 { margin: 0; font-size: 18px; font-weight: 600; color: var(--text-h); }
   .disc-head .lede { margin: 2px 0 0; }
+  /* Recently added: platform filter pills across the top, beside the title. */
+  .ra-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .ra-pills { flex-wrap: wrap; max-width: 100%; }
 
   /* New releases: a coverflow. Centre cover flat and lit; neighbours tilt
      52° back, recede and dim; a soft reflection under each. */

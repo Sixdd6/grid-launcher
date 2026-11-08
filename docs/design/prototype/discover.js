@@ -1,7 +1,7 @@
 /* ==== Server › Discover: the first rail item and the default view.
    New releases (a coverflow of the newest games on the preferred platforms)
    and Recently added (newest on the server, minus the coverflow's games). ==== */
-var DISC = { cf: 0, ra: 0, sig: '' };
+var DISC = { cf: 0, ra: 0, sig: '', plat: '' };
 var TODAY = '2026-11-07';
 
 /* Preferred platforms: every system with an emulator, Windows once a compat
@@ -22,10 +22,25 @@ function discNew() {
   return G.filter(function (g) { return pref.indexOf(g.p) >= 0 && g.rel >= since && g.rel <= TODAY; })
     .sort(function (a, b) { return b.rel.localeCompare(a.rel); }).slice(0, NEW_MAX);
 }
-function discRecent(newest) {
+/* Recently added: the newest games on the server, minus the coverflow's, up
+   to 8. A platform pill narrows it to that platform's newest additions (still
+   without the coverflow's games). */
+var RECENT_MAX = 8, RECENT_DAYS = 30;
+function discPool(newest) {
   var ids = newest.map(function (g) { return g.id; });
   return G.filter(function (g) { return ids.indexOf(g.id) < 0; })
-    .sort(function (a, b) { return b.added.localeCompare(a.added); }).slice(0, 8);
+    .sort(function (a, b) { return b.added.localeCompare(a.added); });
+}
+function discRecent(newest, plat) {
+  return discPool(newest).filter(function (g) { return !plat || g.p === plat; }).slice(0, RECENT_MAX);
+}
+/* The pills: one per platform with a recent addition (the last 30 days here),
+   the platform with the most recent addition first. None when only one
+   platform has recent additions. */
+function discRecentPlatforms(newest) {
+  var since = new Date(Date.parse(TODAY) - RECENT_DAYS * 86400000).toISOString().slice(0, 10), out = [];
+  discPool(newest).forEach(function (g) { if (g.added >= since && out.indexOf(g.p) < 0) out.push(g.p); });
+  return out.length > 1 ? out : [];
 }
 var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function fmtDate(d) { var p = d.split('-'); return (+p[2]) + ' ' + MONTHS[+p[1] - 1] + ' ' + p[0]; }
@@ -95,8 +110,10 @@ function rgbToHsl(c) {
 function discArt(g, extra) { return '<div class="g-art" style="background:' + g.c + (extra || '') + '"><span>' + esc(g.t) + '</span></div>'; }
 
 function renderDiscover() {
-  var el = $('discover'), newest = discNew(), recent = discRecent(newest);
-  var sig = newest.map(function (g) { return g.id; }).join(',') + '|' + recent.map(function (g) { return g.id; }).join(',');
+  var el = $('discover'), newest = discNew(), plats = discRecentPlatforms(newest);
+  if (plats.indexOf(DISC.plat) < 0) DISC.plat = '';
+  var recent = discRecent(newest, DISC.plat);
+  var sig = newest.map(function (g) { return g.id; }).join(',') + '|' + recent.map(function (g) { return g.id; }).join(',') + '|' + plats.join(',') + '|' + DISC.plat;
   if (sig !== DISC.sig || !el.firstChild) {
     DISC.sig = sig; DISC.cf = Math.min(DISC.cf, Math.max(newest.length - 1, 0)); DISC.ra = Math.min(DISC.ra, Math.max(recent.length - 1, 0));
     DISC.newest = newest; DISC.recent = recent;
@@ -112,8 +129,10 @@ function renderDiscover() {
       recent.map(function (g, i) { return '<button class="ra-row" data-ra-i="' + i + '"><span class="ra-cover">' + discArt(g) + '</span><span class="ra-text"><b>' + esc(g.t) + '</b><span>' + PLAT[g.p] + '</span></span></button>'; }).join('') +
       '</div></div></div>'
       : '<p class="note">Nothing new on your server yet.</p>';
+    var pills = plats.length ? '<nav class="g-pills ra-pills" aria-label="Filter by platform">' +
+      [''].concat(plats).map(function (p) { var on = DISC.plat === p; return '<button class="g-pill' + (on ? ' active' : '') + '" data-ra-plat="' + p + '" aria-pressed="' + on + '">' + (p ? PLAT[p] : 'All') + '</button>'; }).join('') + '</nav>' : '';
     el.innerHTML = '<section class="g-panel disc-sec"><header class="disc-head"><h2>New releases</h2><p class="lede">Released in the last six months for your systems.</p></header>' + cf + '</section>' +
-      '<section class="g-panel disc-sec"><header class="disc-head"><h2>Recently added</h2><p class="lede">New on your server.</p></header>' + ra + '</section>';
+      '<section class="g-panel disc-sec"><header class="disc-head ra-head"><div><h2>Recently added</h2><p class="lede">New on your server.</p></div>' + pills + '</header>' + ra + '</section>';
     gIcons(el);
     el.onclick = discClick;
     var stage = el.querySelector('.cf');
@@ -184,6 +203,9 @@ function raCaption() {
 function discClick(e) {
   var t = e.target, b;
   if (t.closest('[data-cf-prev]')) { cfGo(DISC.cf - 1); return; }
+  /* A pill narrows Recently added and restarts the rotation at the first
+     row; clicking the active pill again, or All, clears it. */
+  if ((b = t.closest('[data-ra-plat]'))) { var pl = b.getAttribute('data-ra-plat'); DISC.plat = DISC.plat === pl ? '' : pl; DISC.ra = 0; renderDiscover(); return; }
   if (t.closest('[data-cf-next]')) { cfGo(DISC.cf + 1); return; }
   if ((b = t.closest('[data-cf-i]'))) { var i = +b.getAttribute('data-cf-i'); if (i === DISC.cf) openDetails(DISC.newest[i]); else cfGo(i); return; }
   /* A game opens its Details when clicked: the centre cover, the screenshot,
