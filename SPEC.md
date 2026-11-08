@@ -292,9 +292,18 @@ There are several main sections to the application with buttons across the top b
     then Installed; each server file is checked against the size and MD5 the server lists
     before it is written; "Installing PlayStation firmware for DuckStation…" when it
     starts and "PlayStation firmware installed for DuckStation" when it ends), the PS3
-    firmware package line for RPCS3 (shown once the background PS3 firmware download has
-    put a package beside RPCS3; Install hands it to RPCS3's own installer), and the Setup
-    tips. An emulator used by several systems shows on each
+    firmware line for RPCS3, and the Setup tips. RPCS3's firmware counts as installed
+    when RPCS3's own dev_flash holds `sys/external/liblv2.sprx` (the file RPCS3 needs to
+    boot a game); the version comes from `vsh/etc/version.txt`. GRID finds dev_flash the
+    way RPCS3 does: the `portable` folder beside the program, else the program's folder,
+    else RPCS3's config folder, each honouring the `/dev_flash/` entry in its vfs.yml.
+    Installed firmware shows one line, "PS3 firmware 4.93 installed" ("PS3 firmware
+    installed" when the version is unknown), with no Install button, and the system is
+    not "Firmware needed". When it is not installed and the background download has put
+    a package beside RPCS3, the line says so and Install hands the package to RPCS3's own
+    installer; the page then checks again every few seconds for two minutes, and on each
+    visit. With neither, the server firmware line offers the download. GRID does not
+    download the package for an RPCS3 that already has firmware installed. An emulator used by several systems shows on each
     and says which others it plays.
   - **Update availability** is checked once per session, the first time Systems opens
     (one release request per emulator installed from a source, one at a time), and kept

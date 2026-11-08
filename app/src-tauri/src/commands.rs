@@ -829,7 +829,9 @@ pub struct PlatformFirmwareStatus {
     pub has_default_emulator: bool,
     /// Whether every server firmware file is already installed for the
     /// emulator (the named one, else the platform's default;
-    /// `grid_core::firmware::manifest`), so the
+    /// `grid_core::firmware::manifest`) — or, for RPCS3, whether RPCS3 has
+    /// installed PS3 firmware into its dev_flash
+    /// (`grid_core::firmware::rpcs3::rpcs3_installed_firmware`), so the
     /// Settings › Systems says "Installed" rather than offering Install again.
     pub installed: bool,
     /// Whether any server firmware file can land in that emulator's
@@ -865,15 +867,25 @@ pub async fn platform_firmware_status(
             return (false, false, false);
         };
         let profiles = grid_core::launch::profiles::load_profiles();
-        let has_default = crate::firmware_service::entry_for_platform(
+        let entry = crate::firmware_service::entry_for_platform(
             &config,
             &platform,
             emulator.as_deref(),
             profiles,
-        )
-        .is_some();
+        );
+        let has_default = entry.is_some();
         if !has_default || records.is_empty() {
             return (has_default, false, false);
+        }
+        // RPCS3 keeps its firmware in its own dev_flash once `--installfw`
+        // has run: that is installed whether or not GRID's PUP is on disk,
+        // so nothing (chip or Systems row) offers the download again.
+        if let Some(entry) = entry {
+            if grid_core::autoconfig::is_rpcs3(entry, profiles)
+                && grid_core::firmware::rpcs3::rpcs3_installed_firmware(&entry.path).installed
+            {
+                return (true, true, true);
+            }
         }
         use grid_core::firmware::manifest::{
             firmware_available, firmware_installed, FirmwareManifest, MANIFEST_FILE,

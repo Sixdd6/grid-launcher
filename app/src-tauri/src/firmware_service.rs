@@ -60,7 +60,7 @@ use grid_core::firmware::routing::{
     config_dir_of, emulator_dir_of, install_for_game, platform_ids_for_profile, targets_for_entry,
     GameFirmwareContext,
 };
-use grid_core::firmware::rpcs3::{ps3_platform_id, rpcs3_pup_path};
+use grid_core::firmware::rpcs3::{ps3_platform_id, rpcs3_installed_firmware, rpcs3_pup_path};
 use grid_core::firmware::{
     install_platform_firmware, install_platform_firmware_recorded, FirmwareOptions,
 };
@@ -484,7 +484,8 @@ impl FirmwareService {
     /// PUP is large and nothing else in the queue accounts for it.
     ///
     /// Does nothing when a PUP is already installed beside the executable,
-    /// when the profile routes no firmware directory, when the server's
+    /// when RPCS3 already has firmware installed in its `dev_flash` (there
+    /// is nothing for the PUP to do), when the profile routes no firmware directory, when the server's
     /// platform map carries no PS3 platform (D17), when no session is
     /// connected, or when that emulator directory already has any firmware
     /// job running.
@@ -497,7 +498,8 @@ impl FirmwareService {
         let Some(client) = session.client() else {
             return;
         };
-        if rpcs3_pup_path(&entry.path).is_some() {
+        if rpcs3_pup_path(&entry.path).is_some() || rpcs3_installed_firmware(&entry.path).installed
+        {
             return;
         }
         let config_path = Config::default_path();

@@ -1,6 +1,7 @@
 //! RPCS3 PS3-firmware helpers: locating `PS3UPDAT.PUP` beside the
-//! executable, launching `rpcs3 --installfw`, and picking the PS3 platform
-//! id out of the server's platform map.
+//! executable, launching `rpcs3 --installfw`, telling whether RPCS3 has
+//! actually installed the firmware (its `dev_flash` markers), and picking
+//! the PS3 platform id out of the server's platform map.
 //!
 //! Ports `grid_launcher/emulator/rpcs3.py:274-283` (`rpcs3_pup_path`),
 //! `rpcs3.py:365-386` (`trigger_rpcs3_firmware_install`) and the PS3
@@ -13,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::autoconfig::paths::{self, expand_user, resolve_best_effort};
+use crate::autoconfig::readers::rpcs3_dev_flash_candidates;
 use crate::launch::spawn::clean_env;
 
 /// The `PS3UPDAT.PUP` sitting beside `emulator_path`, or `None` when there
@@ -31,6 +33,80 @@ pub fn rpcs3_pup_path(emulator_path: &str) -> Option<PathBuf> {
     let pup = emulator_dir.join("PS3UPDAT.PUP");
     // `is_file()` already implies `exists()` — Python checks both.
     pup.is_file().then(|| resolve_best_effort(&pup))
+}
+
+/// The firmware RPCS3 itself has installed (what `--installfw` extracted
+/// into its `dev_flash`), as opposed to a PUP merely sitting on disk.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Rpcs3InstalledFirmware {
+    /// `dev_flash/sys/external/liblv2.sprx` exists — the file RPCS3 refuses
+    /// to boot a game without ("PS3 firmware is not installed").
+    pub installed: bool,
+    /// The version from `dev_flash/vsh/etc/version.txt` (`"4.93"` from
+    /// `release:04.9300:`), or `None` when the file is missing or garbled.
+    /// Always `None` when `installed` is false.
+    pub version: Option<String>,
+}
+
+/// The marker rule over an explicit list of `dev_flash` candidates: the
+/// FIRST one holding `sys/external/liblv2.sprx` decides. `liblv2.sprx` alone
+/// means installed — it is RPCS3's own boot gate — and `vsh/etc/version.txt`
+/// only supplies the version, so a missing or unreadable version file yields
+/// "installed, version unknown" rather than "not installed". A version file
+/// without `liblv2.sprx` counts for nothing.
+pub fn installed_firmware_in(dev_flash_dirs: &[PathBuf]) -> Rpcs3InstalledFirmware {
+    for dir in dev_flash_dirs {
+        if !dir
+            .join("sys")
+            .join("external")
+            .join("liblv2.sprx")
+            .is_file()
+        {
+            continue;
+        }
+        let version = std::fs::read(dir.join("vsh").join("etc").join("version.txt"))
+            .ok()
+            .and_then(|bytes| parse_firmware_version(&String::from_utf8_lossy(&bytes)));
+        return Rpcs3InstalledFirmware {
+            installed: true,
+            version,
+        };
+    }
+    Rpcs3InstalledFirmware::default()
+}
+
+/// The firmware RPCS3 at `emulator_path` has installed, searched through
+/// every `dev_flash` its config roots may name (portable dir, the exe's
+/// folder, `$RPCS3_CONFIG_DIR`, `~/.config/rpcs3`; each honouring its
+/// `vfs.yml` `/dev_flash/` entry). A blank path never resolves.
+pub fn rpcs3_installed_firmware(emulator_path: &str) -> Rpcs3InstalledFirmware {
+    if emulator_path.trim().is_empty() {
+        return Rpcs3InstalledFirmware::default();
+    }
+    installed_firmware_in(&rpcs3_dev_flash_candidates(emulator_path))
+}
+
+/// `"4.93"` from version.txt's `release:04.9300:` line: the major without
+/// leading zeros, the minor without trailing zeros but at least two digits
+/// (`03.5500` -> `3.55`, `04.9000` -> `4.90`). `None` when no line carries a
+/// numeric `major.minor` release field.
+fn parse_firmware_version(text: &str) -> Option<String> {
+    let field = text.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("release:")?;
+        Some(rest.split(':').next().unwrap_or("").trim().to_string())
+    })?;
+    let (major, minor) = field.split_once('.')?;
+    let all_digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    if !all_digits(major) || !all_digits(minor) {
+        return None;
+    }
+    let major = major.trim_start_matches('0');
+    let major = if major.is_empty() { "0" } else { major };
+    let mut minor = minor.trim_end_matches('0').to_string();
+    while minor.len() < 2 {
+        minor.push('0');
+    }
+    Some(format!("{major}.{minor}"))
 }
 
 /// The three paths `rpcs3 --installfw` is started with: the executable, the
@@ -126,6 +202,201 @@ mod tests {
             rpcs3_pup_path(temp.path().to_str().unwrap()),
             Some(resolve_best_effort(&temp.path().join("PS3UPDAT.PUP")))
         );
+    }
+
+    /// Writes RPCS3's two firmware markers under `dev_flash`; `version`
+    /// `None` leaves version.txt out.
+    fn write_firmware(dev_flash: &Path, liblv2: bool, version: Option<&[u8]>) {
+        if liblv2 {
+            let external = dev_flash.join("sys").join("external");
+            std::fs::create_dir_all(&external).unwrap();
+            std::fs::write(external.join("liblv2.sprx"), b"sce").unwrap();
+        }
+        if let Some(text) = version {
+            let etc = dev_flash.join("vsh").join("etc");
+            std::fs::create_dir_all(&etc).unwrap();
+            std::fs::write(etc.join("version.txt"), text).unwrap();
+        }
+    }
+
+    #[test]
+    fn firmware_version_parses_rpcs3_release_lines() {
+        assert_eq!(
+            parse_firmware_version("release:04.9300:\nbuild:12345,67890:\n").as_deref(),
+            Some("4.93")
+        );
+        assert_eq!(
+            parse_firmware_version("release:03.5500:").as_deref(),
+            Some("3.55")
+        );
+        assert_eq!(
+            parse_firmware_version("release:04.9000:").as_deref(),
+            Some("4.90")
+        );
+        assert_eq!(
+            parse_firmware_version("release:04.8150:").as_deref(),
+            Some("4.815")
+        );
+        assert_eq!(parse_firmware_version("garbage"), None);
+        assert_eq!(parse_firmware_version("release:abc:"), None);
+        assert_eq!(parse_firmware_version("release::"), None);
+        assert_eq!(parse_firmware_version(""), None);
+    }
+
+    #[test]
+    fn installed_firmware_needs_liblv2_and_reads_the_version() {
+        let temp = tempfile::tempdir().unwrap();
+        let flash = temp.path().join("dev_flash");
+        write_firmware(&flash, true, Some(b"release:04.9300:\n"));
+
+        assert_eq!(
+            installed_firmware_in(std::slice::from_ref(&flash)),
+            Rpcs3InstalledFirmware {
+                installed: true,
+                version: Some("4.93".into())
+            }
+        );
+    }
+
+    #[test]
+    fn installed_firmware_without_liblv2_is_not_installed() {
+        let temp = tempfile::tempdir().unwrap();
+        let flash = temp.path().join("dev_flash");
+        write_firmware(&flash, false, Some(b"release:04.9300:\n"));
+
+        assert_eq!(
+            installed_firmware_in(&[flash]),
+            Rpcs3InstalledFirmware::default()
+        );
+        assert_eq!(
+            installed_firmware_in(&[]),
+            Rpcs3InstalledFirmware::default()
+        );
+    }
+
+    #[test]
+    fn installed_firmware_with_a_missing_or_garbled_version_is_installed_unknown() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("a");
+        write_firmware(&missing, true, None);
+        let garbled = temp.path().join("b");
+        write_firmware(&garbled, true, Some(&[0xff, 0xfe, 0x00]));
+
+        for flash in [missing, garbled] {
+            assert_eq!(
+                installed_firmware_in(&[flash]),
+                Rpcs3InstalledFirmware {
+                    installed: true,
+                    version: None
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn installed_firmware_takes_the_first_candidate_with_liblv2() {
+        let temp = tempfile::tempdir().unwrap();
+        let empty = temp.path().join("empty");
+        let second = temp.path().join("second");
+        write_firmware(&second, true, Some(b"release:04.9200:"));
+
+        assert_eq!(
+            installed_firmware_in(&[empty, second]).version.as_deref(),
+            Some("4.92")
+        );
+    }
+
+    #[test]
+    fn rpcs3_installed_firmware_finds_a_portable_dev_flash() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated(temp.path());
+        let dir = temp.path().join("RPCS3");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("rpcs3.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        assert!(!rpcs3_installed_firmware(exe.to_str().unwrap()).installed);
+
+        write_firmware(
+            &dir.join("portable").join("dev_flash"),
+            true,
+            Some(b"release:04.9300:"),
+        );
+        assert_eq!(
+            rpcs3_installed_firmware(exe.to_str().unwrap())
+                .version
+                .as_deref(),
+            Some("4.93")
+        );
+        assert!(!rpcs3_installed_firmware("  ").installed);
+    }
+
+    #[test]
+    fn rpcs3_installed_firmware_honours_a_custom_vfs_dev_flash() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated(temp.path());
+        let dir = temp.path().join("RPCS3");
+        let config = dir.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        let exe = dir.join("rpcs3.exe");
+        std::fs::write(&exe, b"").unwrap();
+        let flash = temp.path().join("custom").join("flash");
+        // The default location holds no firmware; the configured one does.
+        std::fs::write(
+            config.join("vfs.yml"),
+            format!(
+                "/dev_flash/: {}/\n",
+                flash.to_string_lossy().replace('\\', "/")
+            ),
+        )
+        .unwrap();
+        write_firmware(&flash, true, Some(b"release:04.9100:"));
+
+        assert_eq!(
+            rpcs3_installed_firmware(exe.to_str().unwrap())
+                .version
+                .as_deref(),
+            Some("4.91")
+        );
+    }
+
+    /// GRID's own layout: `portable` is a symlink into the saves folder.
+    #[cfg(unix)]
+    #[test]
+    fn rpcs3_installed_firmware_follows_a_symlinked_portable_dir() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated(temp.path());
+        let dir = temp.path().join("emulators").join("RPCS3");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("rpcs3.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let saves = temp.path().join("saves").join("RPCS3").join("portable");
+        std::fs::create_dir_all(&saves).unwrap();
+        std::os::unix::fs::symlink(&saves, dir.join("portable")).unwrap();
+        write_firmware(&saves.join("dev_flash"), true, Some(b"release:04.9300:"));
+
+        assert_eq!(
+            rpcs3_installed_firmware(exe.to_str().unwrap()),
+            Rpcs3InstalledFirmware {
+                installed: true,
+                version: Some("4.93".into())
+            }
+        );
+    }
+
+    /// Points every RPCS3 config root GRID consults at `dir`, so the host's
+    /// own `~/.config/rpcs3` cannot leak into a test.
+    fn isolated(dir: &Path) -> crate::test_env::EnvGuard {
+        let dir = dir.to_str().unwrap();
+        crate::test_env::EnvGuard::set(&[
+            ("HOME", Some(dir)),
+            ("XDG_CONFIG_HOME", None),
+            ("USERPROFILE", None),
+            ("APPDATA", None),
+            ("RPCS3_CONFIG_DIR", None),
+        ])
     }
 
     #[test]

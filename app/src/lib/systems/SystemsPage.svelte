@@ -19,6 +19,7 @@
     type PlatformFirmwareStatus,
     type PlatformSetup,
     type ProfileSummary,
+    type Rpcs3FirmwareStatus,
     type SetupChoice,
     type SetupStarted,
   } from '../api';
@@ -47,6 +48,13 @@
   import EmulatorBlock from './EmulatorBlock.svelte';
   import RowMenu from './RowMenu.svelte';
   import WindowsRow from './WindowsRow.svelte';
+  import {
+    isRpcs3Name,
+    pollUntilInstalled,
+    ps3FirmwareInstalled,
+    ps3FirmwareView,
+    withPs3Firmware,
+  } from './ps3Firmware';
   import {
     alsoPlays,
     alsoPlaysText,
@@ -84,7 +92,7 @@
   let pendingLabels = $state<string[]>([]);
   let profiles = $state<ProfileSummary[]>([]);
   let facts = $state<Map<string, EmulatorFacts>>(new Map());
-  let rpcs3Pup = $state<Map<string, string | null>>(new Map());
+  let rpcs3Firmware = $state<Map<string, Rpcs3FirmwareStatus>>(new Map());
   let loaded = $state(false);
   let loadError = $state<string | null>(null);
 
@@ -192,9 +200,10 @@
       .catch(() => {});
   });
 
-  // The Eden notes' file probes and the RPCS3 firmware package check, re-read
-  // when the entry list changes and when a firmware download completes (the
-  // background PS3 firmware fetch may just have put a PS3UPDAT.PUP in place).
+  // The Eden notes' file probes and the RPCS3 firmware check, re-read when
+  // the entry list changes, when the page is shown again, and when a
+  // firmware download completes (the background PS3 firmware fetch may just
+  // have put a PS3UPDAT.PUP in place).
   let emulatorNames = $derived(emulators.map((e) => e.name).join('\n'));
   let firmwareCompleted = $derived(
     downloads.entries
@@ -217,17 +226,47 @@
       }),
     ).then((answers) => (facts = new Map(answers.filter((a) => a !== null))));
     void Promise.all(
-      names
-        .filter((n) => n.toLowerCase().includes('rpcs3'))
-        .map(async (name) => {
-          try {
-            return [name, (await api.rpcs3FirmwareStatus(name)).pup_path] as const;
-          } catch {
-            return null;
-          }
-        }),
-    ).then((answers) => (rpcs3Pup = new Map(answers.filter((a) => a !== null))));
+      names.filter(isRpcs3Name).map(async (name) => {
+        try {
+          return [name, await api.rpcs3FirmwareStatus(name)] as const;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((answers) => (rpcs3Firmware = new Map(answers.filter((a) => a !== null))));
   });
+
+  function ps3Installed(name: string): boolean {
+    return ps3FirmwareInstalled(rpcs3Firmware.get(name));
+  }
+
+  // RPCS3 shows its own install dialog after `--installfw`; poll briefly
+  // (every 3 s for 2 minutes, only while this page is shown) so the line
+  // turns to "installed" without a revisit.
+  async function installPs3Firmware(name: string) {
+    let ok: boolean;
+    try {
+      ok = await api.installPs3Firmware(name);
+    } catch (err) {
+      pushToast(errorMessage(err), 'error');
+      return;
+    }
+    pushToast(
+      ok
+        ? 'PS3 firmware installation started — follow the RPCS3 dialog to complete.'
+        : 'Could not launch RPCS3 to install firmware. Check the emulator path.',
+      ok ? 'success' : 'error',
+    );
+    if (!ok) return;
+    await pollUntilInstalled(
+      async () => {
+        const status = await api.rpcs3FirmwareStatus(name);
+        rpcs3Firmware = new Map(rpcs3Firmware).set(name, status);
+        return status.installed;
+      },
+      { intervalMs: 3000, attempts: 40, stopped: () => !active },
+    );
+  }
 
   // Setup's defaults land after each picked emulator's install.
   $effect(() => {
@@ -340,7 +379,10 @@
 
   function rowStatus(row: Row) {
     const fw = firmwareLine(row);
-    const action = fw ? firmwareAction(fw, firmwarePending[fw.key] === true, false) : null;
+    const action = withPs3Firmware(
+      fw ? firmwareAction(fw, firmwarePending[fw.key] === true, false) : null,
+      ps3Installed(row.emulator),
+    );
     const status = statusOf({
       emulator: row.emulator,
       installing: installingRow(row) || busyRows[row.key] === true,
@@ -541,25 +583,20 @@
 {/snippet}
 
 {#snippet ps3Firmware(name: string, key: string)}
-  {#if rpcs3Pup.get(name)}
+  {@const view = ps3FirmwareView(rpcs3Firmware.get(name))}
+  {#if view?.kind === 'installed'}
+    <div class="check-row" data-testid={`sys-ps3-firmware-${key}`}>
+      <span class="st ok"><Icon name="check" size={12} /></span>
+      <span class="grow" data-testid={`sys-ps3-firmware-installed-${key}`}>{view.text}</span>
+    </div>
+  {:else if view?.kind === 'install'}
     <div class="check-row" data-testid={`sys-ps3-firmware-${key}`}>
       <span class="st warn">!</span>
-      <span class="grow">PS3 firmware downloaded — click Install to activate it.</span>
+      <span class="grow">{view.text}</span>
       <button
         class="small-btn primary"
         data-testid={`sys-ps3-firmware-install-${key}`}
-        onclick={() =>
-          api
-            .installPs3Firmware(name)
-            .then((ok) =>
-              pushToast(
-                ok
-                  ? 'PS3 firmware installation started — follow the RPCS3 dialog to complete.'
-                  : 'Could not launch RPCS3 to install firmware. Check the emulator path.',
-                ok ? 'success' : 'error',
-              ),
-            )
-            .catch((err) => pushToast(errorMessage(err), 'error'))}
+        onclick={() => void installPs3Firmware(name)}
       >
         Install
       </button>
@@ -677,7 +714,7 @@
                   </select>
                 </label>
               {/if}
-              {#if fw}
+              {#if fw && !ps3Installed(row.emulator)}
                 {@const action = firmwareAction(fw, firmwarePending[fw.key] === true, false)}
                 {#if action !== 'unavailable'}
                   <div class="check-row" data-testid={`sys-firmware-${key}`}>

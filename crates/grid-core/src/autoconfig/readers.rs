@@ -1391,6 +1391,42 @@ pub fn ps3_vfs_games_path(path: &str, args: Args, ps3_library: &str) -> Option<P
     ps3_vfs_scalar_path(path, args, ps3_library, "/games/", "games")
 }
 
+/// RPCS3's `dev_flash` (where `--installfw` extracts the firmware) for one
+/// data root: the first readable `vfs.yml` candidate's `/dev_flash/` scalar,
+/// default `$(EmulatorDir)dev_flash/`, resolved against that file's
+/// `$(EmulatorDir)` (default: the data root itself) — the same rule
+/// [`rpcs3_directory_settings`] applies to `/dev_hdd0/`. With no readable
+/// `vfs.yml` it is `<data_root>/dev_flash`, RPCS3's built-in default.
+pub fn rpcs3_dev_flash_for_root(data_root: &Path) -> PathBuf {
+    for candidate in rpcs3_vfs_path_candidates(data_root) {
+        if !candidate.is_file() {
+            continue;
+        }
+        let Ok(raw_content) = std::fs::read_to_string(&candidate) else {
+            continue;
+        };
+        let raw_emulator_root = rpcs3_yaml_scalar_value(&raw_content, "$(EmulatorDir)");
+        let emulator_root = resolve_rpcs3_path(data_root, &raw_emulator_root, "");
+        let raw_dev_flash = rpcs3_yaml_scalar_value(&raw_content, "/dev_flash/");
+        return resolve_rpcs3_path(&emulator_root, &raw_dev_flash, "$(EmulatorDir)dev_flash/");
+    }
+    resolve_best_effort(&data_root.join("dev_flash"))
+}
+
+/// Every place an RPCS3 install at `path` may keep its `dev_flash`, in
+/// [`rpcs3_data_root_candidates`] order (portable dir, the executable's own
+/// folder — RPCS3's config root on Windows — `$RPCS3_CONFIG_DIR`, then
+/// `~/.config/rpcs3` and the macOS root), each resolved through
+/// [`rpcs3_dev_flash_for_root`] and deduplicated.
+pub fn rpcs3_dev_flash_candidates(path: &str) -> Vec<PathBuf> {
+    unique_paths(
+        rpcs3_data_root_candidates(path, &[])
+            .iter()
+            .map(|root| rpcs3_dev_flash_for_root(root))
+            .collect(),
+    )
+}
+
 // =======================================================================
 // Shared helpers for part 2 (Azahar, Eden, Cemu, Xemu, Xenia, Redream,
 // FBNeo, MAME, Pico-8, Vita3K, Flycast VMU).
@@ -4761,6 +4797,81 @@ mod tests {
         let candidates = rpcs3_data_root_candidates(&exe, &[]);
 
         assert_eq!(candidates.first(), Some(&resolve_best_effort(&dir)));
+    }
+
+    #[test]
+    fn rpcs3_dev_flash_defaults_to_the_data_root_without_a_vfs_file() {
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            rpcs3_dev_flash_for_root(temp.path()),
+            resolve_best_effort(&temp.path().join("dev_flash"))
+        );
+    }
+
+    #[test]
+    fn rpcs3_dev_flash_reads_vfs_yml_against_its_emulator_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("root");
+        let config = root.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        let flash = temp.path().join("elsewhere").join("flash");
+
+        // `/dev_flash/` unset: the default expands `$(EmulatorDir)`.
+        std::fs::write(config.join("vfs.yml"), "\"$(EmulatorDir)\": \"\"\n").unwrap();
+        assert_eq!(
+            rpcs3_dev_flash_for_root(&root),
+            resolve_best_effort(&root.join("dev_flash"))
+        );
+
+        // An absolute custom path wins.
+        std::fs::write(
+            config.join("vfs.yml"),
+            format!(
+                "\"$(EmulatorDir)\": \"\"\n/dev_flash/: {}/\n",
+                flash.to_string_lossy().replace('\\', "/")
+            ),
+        )
+        .unwrap();
+        assert_eq!(rpcs3_dev_flash_for_root(&root), resolve_best_effort(&flash));
+
+        // A custom `$(EmulatorDir)` moves the default with it.
+        let emu = temp.path().join("emu");
+        std::fs::write(
+            config.join("vfs.yml"),
+            format!(
+                "$(EmulatorDir): {}/\n",
+                emu.to_string_lossy().replace('\\', "/")
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            rpcs3_dev_flash_for_root(&root),
+            resolve_best_effort(&emu.join("dev_flash"))
+        );
+    }
+
+    #[test]
+    fn rpcs3_dev_flash_candidates_start_with_the_portable_dir() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, dir) = rpcs3_emulator(temp.path());
+        std::fs::create_dir_all(dir.join("portable")).unwrap();
+
+        let candidates = rpcs3_dev_flash_candidates(&exe);
+
+        assert_eq!(
+            candidates.first(),
+            Some(&resolve_best_effort(
+                &dir.join("portable").join("dev_flash")
+            ))
+        );
+        assert_eq!(
+            candidates.get(1),
+            Some(&resolve_best_effort(&dir.join("dev_flash")))
+        );
+        let xdg = temp.path().join(".config").join("rpcs3").join("dev_flash");
+        assert!(candidates.contains(&resolve_best_effort(&xdg)));
     }
 
     #[test]

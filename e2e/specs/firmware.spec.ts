@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   APP_START_TIMEOUT,
@@ -32,7 +32,11 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  *    row (`admit_external`) because the PUP is large. Once that row
  *    completes, Settings › Systems re-queries `rpcs3_firmware_status` and
  *    reveals the note and its Install button, which hands the PUP to
- *    RPCS3's own `--installfw`.
+ *    RPCS3's own `--installfw`. The stub installs nothing, so the spec then
+ *    plays RPCS3's part — writing the two dev_flash markers
+ *    (`sys/external/liblv2.sprx`, `vsh/etc/version.txt`) — and the page,
+ *    polling after the Install click, swaps the prompt for a single
+ *    "PS3 firmware 4.93 installed" line with no Install button.
  *
  * The seed writes the RPCS3 stub file but deliberately NOT a config entry
  * for it: adding that entry with Add an emulator manually is the trigger.
@@ -240,5 +244,36 @@ describe('firmware', () => {
     const argv = readFileSync(argvLog, 'utf-8').split('\n').filter(Boolean);
     expect(argv[0]).toBe('--installfw');
     expect(argv[1].endsWith('PS3UPDAT.PUP')).toBe(true);
+  });
+
+  it('shows the firmware RPCS3 installed into dev_flash, with no Install button', async () => {
+    // What `--installfw` leaves behind in RPCS3's default dev_flash (the
+    // executable's folder: the stub has no `portable` dir or vfs.yml).
+    const devFlash = path.join(stubs(), 'rpcs3', 'dev_flash');
+    mkdirSync(path.join(devFlash, 'sys', 'external'), { recursive: true });
+    writeFileSync(path.join(devFlash, 'sys', 'external', 'liblv2.sprx'), 'SCE');
+    mkdirSync(path.join(devFlash, 'vsh', 'etc'), { recursive: true });
+    writeFileSync(path.join(devFlash, 'vsh', 'etc', 'version.txt'), 'release:04.9300:\nbuild:00000,00000:\n');
+
+    // The page polls after the Install click, so the line flips on its own.
+    let installed = '';
+    await browser.waitUntil(
+      async () => {
+        installed = await browser.execute(() => {
+          const hit = Array.from(document.querySelectorAll('[data-testid^="sys-emu-name-"]')).find(
+            (el) => el.textContent?.trim() === 'RPCS3',
+          );
+          const el = hit?.closest('li')?.querySelector('[data-testid^="sys-ps3-firmware-installed-"]');
+          return (el as HTMLElement | null)?.dataset.testid ?? '';
+        });
+        return installed !== '';
+      },
+      { timeout: FIRMWARE_TIMEOUT, timeoutMsg: 'RPCS3 never showed its installed PS3 firmware' },
+    );
+    await expect($(testId(installed))).toHaveText('PS3 firmware 4.93 installed');
+    const key = installed.replace('sys-ps3-firmware-installed-', '');
+    expect(await $(testId(`sys-ps3-firmware-install-${key}`)).isExisting()).toBe(false);
+    // One line: the server-firmware line does not also offer the download.
+    expect(await $(testId(`sys-firmware-install-${key}`)).isExisting()).toBe(false);
   });
 });

@@ -688,12 +688,14 @@ export type UmuRunStatus = { source: 'system' | 'managed' | 'missing'; path: str
 
 export type CompatToolsDto = { tools: CompatTool[]; default_tool: string; umu_run: UmuRunStatus };
 
-/// `pup_path` is the `PS3UPDAT.PUP` beside the RPCS3 executable, or `null`
-/// when that install has none. Settings › Systems shows the firmware note
-/// and its Install Firmware button only when `pup_path` is set: the button
-/// hands the already-downloaded PUP to RPCS3 (Python parity — the download
-/// itself is the background firmware job's work, not this button's).
-export type Rpcs3FirmwareStatus = { pup_path: string | null };
+/// An RPCS3 install's PS3 firmware (`commands/specials.rs`).
+/// `installed` is RPCS3's own state: its `dev_flash` holds `liblv2.sprx`;
+/// `version` (`"4.93"`) comes from `dev_flash/vsh/etc/version.txt` and is
+/// `null` when unknown. `pup_path` is the downloaded `PS3UPDAT.PUP` beside
+/// the executable, or `null`. Settings › Systems offers Install Firmware
+/// (handing the PUP to RPCS3's `--installfw`) only when the PUP is present
+/// and the firmware is not installed (`systems/ps3Firmware.ts`).
+export type Rpcs3FirmwareStatus = { pup_path: string | null; installed: boolean; version: string | null };
 
 /// The Server platform header's firmware chip input (design §6). See
 /// `app/src-tauri/src/commands.rs`'s `PlatformFirmwareStatus`.

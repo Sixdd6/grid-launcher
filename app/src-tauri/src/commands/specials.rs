@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use grid_core::config::Config;
-use grid_core::firmware::rpcs3::{rpcs3_pup_path, spawn_rpcs3_installfw};
+use grid_core::firmware::rpcs3::{rpcs3_installed_firmware, rpcs3_pup_path, spawn_rpcs3_installfw};
 use grid_core::launch::catalog::{
     compat_tool_catalog_entries, mark_compat_installed, CatalogEntry,
 };
@@ -443,23 +443,34 @@ pub async fn install_umu_launcher(state: State<'_, AppState>) -> Result<(), Stri
 
 // --- RPCS3 PS3 firmware -------------------------------------------------------
 
-/// Whether an RPCS3 install already has its `PS3UPDAT.PUP`, and where.
-/// `None` means there is no PUP to install yet, so the frontend renders no
-/// firmware note and no Install Firmware button — the button exists to hand
-/// an already-downloaded PUP to RPCS3 (Python parity).
+/// An RPCS3 install's PS3 firmware state.
+///
+/// `installed`/`version` say whether RPCS3 itself has installed the
+/// firmware (its `dev_flash` holds `liblv2.sprx`; the version comes from
+/// `vsh/etc/version.txt`). `pup_path` is the downloaded `PS3UPDAT.PUP`
+/// beside the executable, or `None`. The frontend offers Install Firmware
+/// (handing the PUP to RPCS3) only when the PUP is present and the firmware
+/// is not yet installed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Rpcs3FirmwareStatus {
     pub pup_path: Option<String>,
+    pub installed: bool,
+    pub version: Option<String>,
 }
 
 #[tauri::command]
 pub async fn rpcs3_firmware_status(emulator_name: String) -> Result<Rpcs3FirmwareStatus, String> {
     tokio::task::spawn_blocking(move || {
         let config = Config::load(&Config::default_path()).map_err(err)?;
-        let pup = emulator_entry_by_name(&config.emulators, &emulator_name)
-            .and_then(|entry| rpcs3_pup_path(&entry.path));
+        let entry = emulator_entry_by_name(&config.emulators, &emulator_name);
+        let pup = entry.and_then(|entry| rpcs3_pup_path(&entry.path));
+        let firmware = entry
+            .map(|entry| rpcs3_installed_firmware(&entry.path))
+            .unwrap_or_default();
         Ok(Rpcs3FirmwareStatus {
             pup_path: pup.map(path_string),
+            installed: firmware.installed,
+            version: firmware.version,
         })
     })
     .await
