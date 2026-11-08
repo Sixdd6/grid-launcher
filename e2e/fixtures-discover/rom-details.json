@@ -1,0 +1,184 @@
+{
+  "501": {
+    "id": 501,
+    "name": "Starlit Run",
+    "fs_name_no_ext": "Starlit Run",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "Starlit Run.zip",
+    "summary": "A Discover fixture game.",
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 5011,
+        "file_name": "Starlit Run.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": {
+      "genres": []
+    }
+  },
+  "502": {
+    "id": 502,
+    "name": "Neon Drift",
+    "fs_name_no_ext": "Neon Drift",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "Neon Drift.zip",
+    "summary": "A Discover fixture game.",
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 5021,
+        "file_name": "Neon Drift.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": {
+      "genres": []
+    }
+  },
+  "503": {
+    "id": 503,
+    "name": "Old Classic",
+    "fs_name_no_ext": "Old Classic",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "Old Classic.zip",
+    "summary": "A Discover fixture game.",
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 5031,
+        "file_name": "Old Classic.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": {
+      "genres": []
+    }
+  },
+  "504": {
+    "id": 504,
+    "name": "Upcoming Thing",
+    "fs_name_no_ext": "Upcoming Thing",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "Upcoming Thing.zip",
+    "summary": "A Discover fixture game.",
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 5041,
+        "file_name": "Upcoming Thing.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": {
+      "genres": []
+    }
+  },
+  "505": {
+    "id": 505,
+    "name": "Mid Year",
+    "fs_name_no_ext": "Mid Year",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "Mid Year.zip",
+    "summary": "A Discover fixture game.",
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 5051,
+        "file_name": "Mid Year.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": {
+      "genres": []
+    }
+  },
+  "601": {
+    "id": 601,
+    "name": "Arcade Fresh",
+    "fs_name_no_ext": "Arcade Fresh",
+    "platform_id": 2,
+    "platform_display_name": "Arcade",
+    "fs_name": "Arcade Fresh.zip",
+    "summary": "A Discover fixture game.",
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 6011,
+        "file_name": "Arcade Fresh.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": {
+      "genres": []
+    }
+  },
+  "602": {
+    "id": 602,
+    "name": "Arcade Logo",
+    "fs_name_no_ext": "Arcade Logo",
+    "platform_id": 2,
+    "platform_display_name": "Arcade",
+    "fs_name": "Arcade Logo.zip",
+    "summary": "A Discover fixture game.",
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 6021,
+        "file_name": "Arcade Logo.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": {
+      "genres": []
+    }
+  }
+}

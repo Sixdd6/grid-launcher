@@ -1,4 +1,5 @@
 import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { openPlatform } from '../helpers/server.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -117,6 +118,8 @@ describe('large platform: windowed grid, bounded cover loading', () => {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the platform rail never appeared after connecting',
     });
+    // Server opens on Discover: select the 2500-game platform.
+    await openPlatform(1);
   });
 
   it('renders only the rows near the screen, at the full list’s height', async () => {

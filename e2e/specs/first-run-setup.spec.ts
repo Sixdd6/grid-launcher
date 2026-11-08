@@ -127,6 +127,8 @@ describe('first-run setup: choose systems, install their emulators', () => {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the shell never opened after starting setup',
     });
+    // The app opens on Server › Discover after first-run setup too.
+    await $(testId('discover')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await $(testId('setup-progress')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     // One segment per install, Proton included, each named by its title.
     const segs = await browser.execute(() =>

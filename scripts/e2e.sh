@@ -68,6 +68,9 @@ STAGE_GROUPS=(
   "connect:specs/connect.spec.ts"
   "connect-restore:specs/connect-restore-a.spec.ts specs/connect-restore-b.spec.ts specs/connect-restore-c.spec.ts"
   "library:specs/library.spec.ts specs/library-grid.spec.ts"
+  # Server › Discover against its own fixture set, whose release and added
+  # dates are relative to the day the run starts (mock-romm applyRelativeDates).
+  "discover:specs/discover.spec.ts"
   # install-c: Settings › Library — change the folder, Start fresh › Leave (Q2).
   "install:specs/install-a.spec.ts specs/install-b.spec.ts specs/install-c.spec.ts"
   "downloads:specs/downloads.spec.ts"
@@ -473,6 +476,7 @@ mock_args_for_group() {
     # groups and mock-romm/server.test.mjs make about it — stays untouched.
     emulator-catalog) printf -- '--fixtures-dir fixtures-emulator-catalog' ;;
     first-run-setup|systems) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
+    discover) printf -- '--fixtures-dir fixtures-discover' ;;
     # An "Emulators" platform with one package (rom 801) that zips the mock
     # forge's PCSX2 AppImage stub, plus a PS2 platform for the defaults.
     server-emulator) printf -- '--fixtures-dir fixtures-server-emulator' ;;

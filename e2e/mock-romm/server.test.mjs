@@ -13,7 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile, rm } from "node:fs/promises";
 
-import { expandSyntheticRoms, startMockRomm } from "./server.mjs";
+import { applyRelativeDates, expandSyntheticRoms, orderRoms, startMockRomm } from "./server.mjs";
 
 const TOKEN = "FAKE-E2E-TOKEN-not-real";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -177,6 +177,38 @@ test("GET /api/roms filters by platform_ids", async () => {
       [201, 301],
     );
   });
+});
+
+test("GET /api/roms orders by created_at and first_release_date, ignoring an unknown order_by", async () => {
+  await withServer(async ({ url }) => {
+    const get = (q) =>
+      fetch(`${url}/api/roms?limit=50&${q}`, { headers: authHeader() })
+        .then((r) => r.json())
+        .then((b) => b.items.map((i) => i.id));
+    assert.deepEqual(await get("order_by=created_at&order_dir=desc"), [101, 102, 103, 201, 301, 302]);
+    assert.deepEqual(await get("order_by=created_at&order_dir=asc"), [302, 301, 201, 103, 102, 101]);
+    // Undated games (103, 301) sort last.
+    assert.deepEqual(await get("order_by=first_release_date&order_dir=desc"), [302, 102, 101, 201, 103, 301]);
+    const plain = await get("");
+    assert.deepEqual(await get("order_by=bogus&order_dir=desc"), plain);
+  });
+});
+
+test("orderRoms leaves the pool alone for an unknown field", () => {
+  const pool = [{ id: 1 }, { id: 2 }];
+  assert.equal(orderRoms(pool, "name", "desc"), pool);
+});
+
+test("applyRelativeDates turns the day directives into RomM's fields", () => {
+  const now = Date.UTC(2026, 10, 8, 12);
+  const roms = { 1: [{ id: 1, e2e_released_days_ago: 10, e2e_added_days_ago: 2, metadatum: { rom_id: 1 } }] };
+  applyRelativeDates(roms, now);
+  const [rom] = roms[1];
+  assert.equal(rom.metadatum.first_release_date, now - 10 * 86_400_000);
+  assert.equal(rom.metadatum.rom_id, 1);
+  assert.equal(rom.created_at, "2026-11-06T12:00:00+00:00");
+  assert.equal(rom.e2e_released_days_ago, undefined);
+  assert.equal(rom.e2e_added_days_ago, undefined);
 });
 
 test("GET /api/roms includes one game with a null name (fs_name_no_ext fallback)", async () => {

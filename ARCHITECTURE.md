@@ -40,7 +40,8 @@ Modules as declared in `src/lib.rs`:
 - `firmware` — server firmware download and install: keyword-based target routing, the
   zip keep-vs-extract decision, and the RPCS3 PS3 firmware path.
 - `images` — the image pipeline: URL resolution rules, the on-disk cache, the startup
-  sweep, the replenish job, background art, and cached video.
+  sweep, the replenish job, background art, cached video, and `shade` (a cached image's
+  dominant shade, remembered per process, for Discover's generated logos).
 - `import_python` — one-shot import of a Python-era `~/.grid-launcher/config.json` into
   `config.toml` and the installed-games registry. Holds no token, by construction: the
   parsed struct has no field for one.
@@ -84,7 +85,11 @@ Modules as declared in `src/lib.rs`:
 - `retroachievements` — the RetroAchievements login client. Login only.
 - `romm` — the RomM HTTP client: `RommClient`, platforms, games, ROM detail, firmware,
   byte fetches, the cloud save/state endpoints, and the play-session ingest. All request construction lives here;
-  check `openapi.json` before changing any of it.
+  check `openapi.json` before changing any of it. `RommClient::recent_games` is one
+  `/api/roms` page by `order_by`; `romm::discover` holds Server › Discover's pure rules
+  (the preferred platforms, the New releases window and limit, Recently added without
+  the coverflow's games), which always re-filter and re-sort because the server ignores
+  an unknown `order_by`.
 - `secrets` — `Credential`, the `SecretStore`/`RaTokenStore` traits, and `KeyringStore`,
   the OS keyring implementation. Secrets are `SecretString` values that cannot be
   formatted or logged.
@@ -108,7 +113,7 @@ The shell owns *when* things run; grid-core owns *what* they do.
   `relocate::recover` (finishes a Commit) → gates handed to the services → `.setup()`,
   which resumes a Copy or Cleanup in the background.
 - `commands.rs` (+ `commands/cloud.rs`, `commands/specials.rs`, `commands/updates.rs`,
-  `commands/logging.rs`, `commands/setup.rs`) — the `#[tauri::command]` surface. Thin
+  `commands/logging.rs`, `commands/setup.rs`, `commands/discover.rs`) — the `#[tauri::command]` surface. Thin
   wrappers: they build a context, call a service or grid-core, and map the result to a
   serializable DTO. `commands/setup.rs` owns first-run setup and Settings › Systems'
   installs: `start_platform_setup` and `install_for_systems` share one body
@@ -118,7 +123,10 @@ The shell owns *when* things run; grid-core owns *what* they do.
   opens an entry's program folder by name; `install_compat_tool_as_default`
   (specials.rs) records a waiting compat-tool default
   (`grid_core::launch::compat::request_compat_default`) that the compat-tools hook
-  applies when the install lands.
+  applies when the install lands. `commands/discover.rs` owns `discover_feed` (the
+  preferred platforms from the saved defaults, two `recent_games` pages, filtered by
+  `romm::discover`) and `image_dominant_shade` (`ensure_image`'s host filter, then
+  `images::shade`).
 - Services — `cloud_service.rs` (sync caches, auto-restore before launch, auto-upload
   after exit), `firmware_service.rs` (the background firmware triggers and their
   one-job-per-pass guard), `update_service.rs` (when the library is re-checked for server
@@ -168,11 +176,16 @@ session exists and `Shell.svelte` afterwards.
   `libraryUnreachable` (while it says unreachable, `App.svelte` shows only
   `LibraryUnreachableDialog.svelte`, whose pure half is `lib/libraryUnreachable.ts`).
 - Views — `Library.svelte`, `Server.svelte`, `Downloads.svelte`, `Settings.svelte`, plus
-  `Details.svelte` as a sub-view. `shell.ts` holds the view list (its order is the
+  `Details.svelte` as a sub-view. Server opens on Discover (`lib/discover/`:
+  `Discover.svelte` mounted by `Server.svelte` in place of the folding header and grid,
+  with `Coverflow`, `RecentlyAdded`, `Shot` and `GameLogo`; the pure halves are
+  `feed.ts` — action label, dates, coverflow geometry, the picture and logo colours —
+  and `rotation.ts`, Recently added's pausable 10 s timer). Server still owns Details
+  and the install/launch flow; Discover calls back into it. `shell.ts` holds the view list (its order is the
   `Ctrl+1`..`Ctrl+4` accelerators) and the session-phase mapping. Emulators live in
   Settings › Systems; `Shell.svelte` routes the Server header's chips there with
   `Settings.show('systems', { system })`.
-- Feature folders — `lib/details/`, `lib/downloads/`, `lib/emulators/`, `lib/settings/`,
+- Feature folders — `lib/discover/`, `lib/details/`, `lib/downloads/`, `lib/emulators/`, `lib/settings/`,
   `lib/systems/`, `lib/library/`, `lib/server/`, `lib/cards/`, `lib/focus/`. Each pairs a `.svelte`
   component with a pure `.ts` module holding the logic, and a `.test.ts` beside it. Put
   new logic in the pure module: that is what vitest can reach.

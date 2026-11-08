@@ -15,6 +15,8 @@
     heading?: string;
     /** A `data-rail` attribute value for the row, when the view wants one. */
     dataRail?: string;
+    /** A divider under this row (Server's Discover row). */
+    divider?: boolean;
   };
 </script>
 
@@ -53,6 +55,9 @@
         <span data-testid={entry.countTestId} class="rail-count">{entry.count}</span>
       {/if}
     </button>
+    {#if entry.divider}
+      <hr class="rail-divider" />
+    {/if}
   {/each}
 </nav>
 
@@ -118,6 +123,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .rail-divider {
+    margin: 6px 8px;
+    border: none;
+    border-top: 1px solid var(--line);
   }
 
   .rail-count {

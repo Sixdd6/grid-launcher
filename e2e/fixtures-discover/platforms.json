@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "name": "Super Nintendo Entertainment System",
+    "slug": "snes",
+    "rom_count": 5,
+    "custom_name": null,
+    "display_name": "Super Nintendo Entertainment System"
+  },
+  {
+    "id": 2,
+    "name": "Arcade",
+    "slug": "arcade",
+    "rom_count": 2,
+    "custom_name": null,
+    "display_name": "Arcade"
+  }
+]

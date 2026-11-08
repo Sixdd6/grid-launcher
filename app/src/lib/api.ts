@@ -66,6 +66,22 @@ export type GameSummary = {
   platform_display_name: string;
   /** The server's genres for the game; the Server search box matches them. */
   genres: string[];
+  /** When the game reached the server, ISO 8601 verbatim; `''` when unknown. */
+  created_at: string;
+  /** First release date in seconds since the epoch; `null` when unknown. */
+  first_release_date: number | null;
+  /** The server's clear logo, resolved + host-filtered; `''` when none. */
+  logo_url: string;
+};
+
+/** `discover_feed`: Server › Discover's two lists, already filtered and
+ *  sorted by the backend (`grid_core::romm::discover`). */
+export type DiscoverFeed = {
+  /** The coverflow: preferred platforms, released in the last six months,
+   *  newest first, at most 25. */
+  new_releases: GameSummary[];
+  /** Newest on the server, without the coverflow's games, at most 8. */
+  recently_added: GameSummary[];
 };
 
 export type RomFile = {
@@ -770,6 +786,11 @@ export const api = {
   listPlatforms: () => invoke<Platform[]>('list_platforms'),
   listGames: (platformId: number) => invoke<GameSummary[]>('list_games', { platformId }),
   getRomDetail: (romId: number) => invoke<RomDetail>('get_rom_detail', { romId }),
+  /** Server › Discover's New releases and Recently added. */
+  discoverFeed: () => invoke<DiscoverFeed>('discover_feed'),
+  /** The dominant shade `[r, g, b]` of the screenshot at `url` (computed in
+   *  Rust: an `asset://` image taints a canvas in WebKitGTK). */
+  imageDominantShade: (url: string) => invoke<[number, number, number]>('image_dominant_shade', { url }),
   getAchievements: (romId: number) => invoke<AchievementsView>('get_achievements', { romId }),
   ensureImage: (url: string) => invoke<string>('ensure_image', { url }),
   /** The `http://127.0.0.1:<port>/…` URL of a server-hosted game video,

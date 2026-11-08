@@ -5,6 +5,7 @@
 //   GET  /api/users/me
 //   GET  /api/platforms
 //   GET  /api/roms?platform_ids=&limit=&offset=&with_char_index=&with_filter_values=
+//        [&order_by=created_at|first_release_date&order_dir=asc|desc]
 //   GET  /api/roms/:id
 //   GET  /api/roms/:id/content/:file_name?file_ids=[&e2e_throttle=<ms-per-chunk>]
 //   GET  /assets/romm/resources/roms/:id/cover/(small|large).png
@@ -410,6 +411,52 @@ export function expandSyntheticRoms(romsByPlatform, platforms) {
   return out;
 }
 
+const DAY_MS = 86_400_000;
+
+// Mock-only date directives on a ROM summary, so Server › Discover's
+// "released in the last six months" and "Added 3 days ago" stay true
+// whatever day the suite runs: `e2e_released_days_ago` sets
+// `metadatum.first_release_date` (milliseconds, as RomM sends it; negative
+// is a future release) and `e2e_added_days_ago` sets `created_at` (ISO 8601
+// with an offset, as RomM sends it). Both directives are removed.
+export function applyRelativeDates(romsByPlatform, now = Date.now()) {
+  for (const roms of Object.values(romsByPlatform)) {
+    for (const rom of roms) {
+      if (rom.e2e_released_days_ago !== undefined) {
+        const released = now - Number(rom.e2e_released_days_ago) * DAY_MS;
+        rom.metadatum = { ...(rom.metadatum ?? {}), first_release_date: released };
+        delete rom.e2e_released_days_ago;
+      }
+      if (rom.e2e_added_days_ago !== undefined) {
+        const added = new Date(now - Number(rom.e2e_added_days_ago) * DAY_MS);
+        rom.created_at = added.toISOString().replace(/\.\d{3}Z$/, "+00:00");
+        delete rom.e2e_added_days_ago;
+      }
+    }
+  }
+  return romsByPlatform;
+}
+
+// `order_by` for the two fields Discover asks for, like RomM: a value it
+// does not know leaves the default order (RomM 5.4.1 ignores it silently).
+// A ROM without the field sorts last either way.
+export function orderRoms(pool, orderBy, orderDir) {
+  const keyOf = {
+    created_at: (rom) => (rom.created_at ? Date.parse(rom.created_at) : null),
+    first_release_date: (rom) => rom.metadatum?.first_release_date ?? null,
+  }[orderBy];
+  if (!keyOf) return pool;
+  const sign = orderDir === "desc" ? -1 : 1;
+  return [...pool].sort((a, b) => {
+    const ka = keyOf(a);
+    const kb = keyOf(b);
+    if (ka === null && kb === null) return 0;
+    if (ka === null) return 1;
+    if (kb === null) return -1;
+    return sign * (ka - kb);
+  });
+}
+
 async function loadFixtures(fixturesDir) {
   const [platforms, romsByPlatformRaw, romDetails, savesByRom, firmwareByPlatformRaw] =
     await Promise.all([
@@ -419,7 +466,7 @@ async function loadFixtures(fixturesDir) {
       loadSaveFixtures(fixturesDir),
       loadFirmwareFixtures(fixturesDir),
     ]);
-  const romsByPlatform = expandSyntheticRoms(romsByPlatformRaw, platforms);
+  const romsByPlatform = applyRelativeDates(expandSyntheticRoms(romsByPlatformRaw, platforms));
 
   const saveContentById = new Map();
   const saveRecordsByRom = {};
@@ -560,6 +607,9 @@ const SCREENSHOT_PATH_RE = /^\/assets\/romm\/resources\/roms\/\d+\/screenshots\/
 // (grid-core/src/images/urls.rs, verified against a live server 2026-09-05)
 // — hence two \d+ segments here, not one.
 const FANART_PATH_RE = /^\/assets\/romm\/resources\/roms\/\d+\/\d+\/fanart\/fanart\.png$/;
+// ScreenScraper's clear logo (`ss_metadata.logo_path`), resources-relative
+// like fanart_path.
+const LOGO_PATH_RE = /^\/assets\/romm\/resources\/roms\/\d+\/\d+\/logo\/logo\.png$/;
 const VIDEO_PATH_RE =
   /^\/assets\/romm\/resources\/roms\/\d+\/\d+\/video_normalized\/video-normalized\.mp4$/;
 // A minimal ISO-BMFF header: a 32-byte `ftyp` box (brand isom) and an empty
@@ -778,7 +828,7 @@ async function handleRequest(req, res, state) {
     sendBuffer(res, 200, "image/png", state.pngBytes);
     return;
   }
-  if (req.method === "GET" && FANART_PATH_RE.test(pathname)) {
+  if (req.method === "GET" && (FANART_PATH_RE.test(pathname) || LOGO_PATH_RE.test(pathname))) {
     sendBuffer(res, 200, "image/png", state.pngBytes);
     return;
   }
@@ -850,6 +900,11 @@ async function handleRequest(req, res, state) {
       pool = Object.values(state.romsByPlatform).flat();
     }
 
+    pool = orderRoms(
+      pool,
+      requestUrl.searchParams.get("order_by") ?? "",
+      requestUrl.searchParams.get("order_dir") ?? "asc",
+    );
     const items = pool.slice(offset, offset + limit);
     sendJson(res, 200, { items });
     return;

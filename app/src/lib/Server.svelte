@@ -16,6 +16,7 @@
   import GameCard from './GameCard.svelte';
   import CardGrid from './CardGrid.svelte';
   import FoldingHeader from './FoldingHeader.svelte';
+  import Discover from './discover/Discover.svelte';
   import { serverSearchPlaceholder } from './views/fold';
   import RailPane, { type RailPaneEntry } from './RailPane.svelte';
   import { fromSummary } from './details/subject';
@@ -64,6 +65,10 @@
   // and genre arrays) cost time on load and on every read for nothing.
   let games = $state.raw<GameSummary[]>([]);
   let activePlatform = $state<number | null>(null);
+  // Server › Discover is the first rail row and the default view; a
+  // platform row turns it off, the Discover row back on.
+  let discover = $state(true);
+  let discoverView = $state<ReturnType<typeof Discover> | null>(null);
   let search = $state('');
   let focusIndex = $state(0);
   let grid = $state<ReturnType<typeof CardGrid> | null>(null);
@@ -111,8 +116,16 @@
   // Design §5: the Server rail is the shared `RailPane`. The row keeps the
   // `platform-btn-<id>` id the specs already use and carries the §11
   // `data-rail` value beside it.
-  let railRows = $derived(
-    platforms.map(
+  let railRows = $derived([
+    {
+      key: 'discover',
+      testId: 'server-rail-discover',
+      dataRail: 'server-rail-discover',
+      label: 'Discover',
+      selected: discover,
+      divider: true,
+    } satisfies RailPaneEntry<string>,
+    ...platforms.map(
       (p): RailPaneEntry<string> => ({
         key: String(p.id),
         testId: `platform-btn-${p.id}`,
@@ -120,16 +133,28 @@
         dataRail: `server-rail-${p.id}`,
         label: platformLabel(p),
         count: p.rom_count,
-        selected: p.id === activePlatform,
+        selected: !discover && p.id === activePlatform,
       }),
     ),
-  );
+  ]);
+
+  /** The label a game's platform shows, which is also the name the
+   *  installed registry and the defaults know it by. Discover lists games of
+   *  every platform, so it cannot use the active one. */
+  function platformOf(game: GameSummary): Platform | null {
+    return platforms.find((p) => p.id === game.platform_id) ?? null;
+  }
+
+  function labelFor(game: GameSummary): string {
+    const row = platformOf(game);
+    return row ? platformLabel(row) : game.platform_display_name;
+  }
 
   $effect(() => {
     if (!session.connected) return; // re-runs on reconnect: session.connected is read above
+    // No platform is selected for the user: Server opens on Discover.
     api.listPlatforms().then((p) => {
       platforms = p;
-      if (p.length && activePlatform === null) selectPlatform(p[0].id);
     });
     refreshInstalled();
     checkLibraryPath();
@@ -168,7 +193,7 @@
     const id = activePlatform;
     const name = activePlatformName;
     firmware = null;
-    if (id === null || name === '' || !chipsShown) return;
+    if (discover || id === null || name === '' || !chipsShown) return;
     void session.connected; // re-runs on reconnect
     refreshFirmwareStatus(id, name);
   });
@@ -231,7 +256,13 @@
     }
   }
 
+  function showDiscover() {
+    discover = true;
+    search = '';
+  }
+
   async function selectPlatform(id: number) {
+    discover = false;
     activePlatform = id;
     search = '';
     // The header renders the new platform's name at once; `games` still
@@ -269,7 +300,7 @@
   async function primary(game: GameSummary) {
     actionError = null;
     try {
-      if (isInstalled(game, activePlatformName)) await api.launchGame(game.id);
+      if (isInstalled(game, labelFor(game))) await api.launchGame(game.id);
       else await api.installGame(game.id);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -391,6 +422,7 @@
 
   /** Design §3: `Ctrl+F` focuses the current view's search box. */
   export function focusSearch() {
+    if (discover) return; // Discover has no search box
     searchEl?.focus();
     searchEl?.select();
   }
@@ -407,6 +439,20 @@
     if (!active) return;
     // One read of the document, shared by both branches below.
     const ctx = chordContext(document);
+    if (discover) {
+      // No search box and no grid: Ctrl+F does nothing here. ← / → / Enter
+      // drive the coverflow while nothing else has the keyboard (the
+      // coverflow handles its own keys when it is focused).
+      if (detailsGame || chordBlocked(ctx) || e.ctrlKey || e.metaKey || e.altKey) return;
+      // A focused rail row (the Discover row just clicked) gives up ← / →
+      // too, but keeps Enter, which presses it.
+      const focused = document.activeElement;
+      const free = !focused || focused === document.body;
+      const onRail = focused instanceof HTMLElement && focused.closest('[data-testid="server-rail"]') !== null;
+      if (!free && !(onRail && e.key !== 'Enter')) return;
+      if (discoverView?.handleKey(e)) noteDirectional('keyboard');
+      return;
+    }
     if (shouldFocusSearch(e, ctx)) {
       e.preventDefault();
       focusSearch();
@@ -501,9 +547,25 @@
         entries={railRows}
         testId="server-rail"
         ariaLabel="Server platforms"
-        onSelect={(key) => selectPlatform(Number(key))}
+        onSelect={(key) => (key === 'discover' ? showDiscover() : selectPlatform(Number(key)))}
       />
 
+      {#if discover}
+        <div class="body">
+          {#if actionError}
+            <p data-testid="server-error" class="error panel discover-error" role="alert">{actionError}</p>
+            {#if actionError === umuOfferFor}<UmuInstallOffer />{/if}
+          {/if}
+          <Discover
+            bind:this={discoverView}
+            active={active && discover}
+            {labelFor}
+            onOpen={(game) => openDetails(game)}
+            onPrimary={(game) => primary(game)}
+            onOpenSystems={() => onOpenSystems('')}
+          />
+        </div>
+      {:else}
       <div class="body">
         <FoldingHeader testId="server-head" scroller={scrollEl} resetKey={activePlatform} bind:folded>
           {#snippet title()}
@@ -619,6 +681,7 @@
         {/if}
         </div>
       </div>
+      {/if}
     </div>
   {/if}
 </section>
@@ -626,7 +689,7 @@
 {#if detailsGame}
   {#key detailsGame.id}
     <Details
-      subject={fromSummary(detailsGame, activePlatformName, activePlatformRow?.slug ?? '')}
+      subject={fromSummary(detailsGame, labelFor(detailsGame), platformOf(detailsGame)?.slug ?? '')}
       initialCloudMode={detailsCloudMode}
       onClose={closeDetails}
       onLibraryPathUnset={() => { showLibraryBanner = true; }}
@@ -800,6 +863,10 @@
   .error {
     color: var(--danger);
     font-size: 12px;
+  }
+
+  .discover-error {
+    margin: 0 0 var(--gutter);
   }
 
   .library-banner {

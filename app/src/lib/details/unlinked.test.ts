@@ -13,6 +13,9 @@ function game(id: number, name: string, extra: Partial<GameSummary> = {}): GameS
     fanart_urls: [],
     platform_display_name: 'Super Nintendo Entertainment System',
     genres: [],
+    created_at: '',
+    first_release_date: null,
+    logo_url: '',
     ...extra,
   } as GameSummary;
 }

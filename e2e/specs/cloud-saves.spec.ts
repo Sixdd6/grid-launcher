@@ -10,6 +10,7 @@ import {
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
 import { waitForToast } from '../helpers/toasts.js';
+import { openPlatform } from '../helpers/server.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -80,7 +81,8 @@ describe('cloud-saves', () => {
   }
 
   async function openDetails(romId: number) {
-    await $(testId('platform-btn-1')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    // Server opens on Discover: select the platform for its grid.
+    await openPlatform(1);
     await $(testId(`game-card-${romId}`)).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId(`game-card-${romId}`)).click();
     await $(testId('details-panel')).waitForExist({

@@ -154,6 +154,9 @@ describe('syntheticCloudGame', () => {
       fanart_urls: [],
       platform_display_name: '',
       genres: [],
+      created_at: '',
+      first_release_date: null,
+      logo_url: '',
     };
     const synthetic = syntheticCloudGame(game, 'Emulators', '');
     expect(synthetic.title).toBe('Portal');

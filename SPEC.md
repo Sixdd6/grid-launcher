@@ -53,8 +53,7 @@ stays still, but the cards still close on time.
 # Main Sections
 There are several main sections to the application with buttons across the top bar to navigate between them:
 - Library
-- Server
-- Discover (ON HOLD — not built; see below)
+- Server (opens on Server › Discover)
 - Downloads
 - Settings (emulators are set up in its Systems pane)
 
@@ -87,7 +86,8 @@ There are several main sections to the application with buttons across the top b
     reason.
   - **Remove from library (keeps files)** — the same action as for a game with no server
     id below: the Library row goes, no file is touched.
-- **Server** mirrors Library: a rail of the server's platforms (alphabetical by name) with ROM counts, a
+- **Server** mirrors Library: a rail with **Discover** first (a divider under it), then the
+  server's platforms (alphabetical by name) with ROM counts. A platform shows a
   platform header (name, ROM count, installed count, a firmware chip and the platform's
   default emulator chip), a search box that filters the loaded platform list by
   title, platform or genre, and a grid of cover cards. The hover action is
@@ -105,6 +105,44 @@ There are several main sections to the application with buttons across the top b
   emulator is picked.
   Native platforms (games native to this OS, and Windows games run through Proton) and
   the Emulators shelf show neither chip, and their firmware status is never fetched.
+- **Server › Discover** is the first Server rail row and the default view: a connected app, and
+  the app after first-run setup, opens on it. It has no folding header and no search;
+  Ctrl+F does nothing there. Its lists come from the server's `created_at` and
+  `metadatum.first_release_date`, always filtered and sorted by GRID itself (RomM
+  ignores an `order_by` it does not know, and lists upcoming games with future dates).
+  The **preferred platforms** are the systems with a default emulator, Windows once a
+  compat tool is the default (on a computer that is not Windows), and the platforms
+  native to this computer, always (Linux games on Linux, Windows games on Windows).
+  - **New releases:** a coverflow of the games on the preferred platforms released in
+    the last six months (never in the future), newest front and centre, at most 25.
+    With none, the section says so and links to Settings › Systems. The centre cover is
+    flat and lit; the others tilt 52° back, recede and dim, with a soft reflection.
+    The arrows, a click on a side cover, or ← / → (on the coverflow, or anywhere while
+    nothing else has the keyboard) move it with a 450ms glide; it stops at both ends. A
+    click on the centre cover, or Enter, opens Details. Under it: the title, the
+    platform, "Released 7 Nov 2026", and Install or Play (Installing… / Queued while an
+    install is live) — the same install and launch as the platform grid.
+  - **Recently added:** the newest games on the server, leaving out the coverflow's, up
+    to 8. A large 16:9 screenshot on the left with the platform, "Added 3 days ago"
+    (today / yesterday / N days / N weeks, then the date) and Install or Play under it;
+    on the right a column of small covers with their titles. A highlight frame glides
+    to the next row every 10 seconds (450ms) while the screenshot crossfades (600ms),
+    wrapping at the end; a thin bar inside the frame fills over the 10 seconds. Pointing
+    at (or focusing inside) the section pauses it; clicking a row jumps to it; clicking
+    the screenshot or the highlighted row opens Details. There are no Details buttons.
+    The timer runs under reduced motion too, where the glide, crossfade and bar are off.
+  - **Screenshots of another shape** (8:7, 4:3, 21:9…) are fitted inside the 16:9 frame,
+    uncropped, over a blurred, darkened, enlarged copy of the same picture. A game with
+    no screenshot shows its fanart, else its cover, fitted the same way.
+  - **Logo, never plain text:** the title is a logo on the screenshot's bottom-left over
+    a soft dark fade. A game with a ScreenScraper clear logo on the server
+    (`ss_metadata.logo_path`, else `logo_url`, on the server's own host) shows it.
+    Otherwise GRID draws the title in one of three logo styles (fixed per game),
+    coloured from the screenshot's dominant shade: its own pixels grouped into
+    4-bit-per-channel buckets, the most common bucket's average; the letters a light
+    tint of it (88% lightness), the outline and shadow a deep shade (16%). The shade is
+    computed in the backend from the cached image (a webview canvas cannot read an
+    `asset://` image) and remembered for the session.
 - **Server and Library headers fold while you scroll** (one shared behaviour). Past 32px
   of scroll the title row (title, counts, chips) folds up into the toolbar row, leaving
   the search field and Size (and Library's Sort) pinned to the top of the main panel;
@@ -120,7 +158,6 @@ There are several main sections to the application with buttons across the top b
   genre" and "Search installed games"). Switching platform or rail entry starts the grid
   at the top, unfolded. Arrow-key movement keeps the selected card clear of the folded
   bar, and moving into the first row scrolls back to the top.
-- **Discover** (ON HOLD since 2026-09-09 by user decision; not part of the current app — kept here as the reference if it is revived as a redesign) contains collapsible, cached recommendation sections built from the server library — Short But Fun, New on Server, Highly Rated (All-Time), Recommended for You, Browse by Genre, and Your Watchlist — with genre/platform filters and a manual refresh. Sections load in the background and fall back to the cached view when the server is unreachable.
 - **Downloads** is a full view, capped at 1100px and centred, with three stacked
   segments in this order — Active (downloading, installing, cancelling), Queued, and
   Completed (finished, failed, or cancelled) — each with a count; the three section
@@ -367,7 +404,7 @@ their game counts, in alphabetical order, each with a tick box, none ticked:
   when only an installed Proton version was picked, **Use selected emulators** when
   everything ticked is already installed, and is disabled ("Install emulators") while
   nothing is ticked.
-- Installing opens the app at once (on Server). A card at the top of the notification
+- Installing opens the app at once (on Server › Discover). A card at the top of the notification
   stack follows the installs, Proton included: "Setting up 3 installs · 1 done", then
   "3 installs done" and "3 systems are ready to play." (Windows counts once its Proton
   version is the default). Its bar has one segment per install: filled when done, a

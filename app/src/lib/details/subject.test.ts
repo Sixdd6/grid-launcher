@@ -57,6 +57,9 @@ function game(overrides: Partial<GameSummary>): GameSummary {
     fanart_urls: [],
     platform_display_name: '',
     genres: [],
+    created_at: '',
+    first_release_date: null,
+    logo_url: '',
     ...overrides,
   };
 }
