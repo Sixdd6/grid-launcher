@@ -111,7 +111,7 @@
       <span class="muted-s sys-note" data-testid={`sys-note-${testKey}`}>{note}</span>
     {:else if tick === null || tick.checked}
       <select
-        class="sys-pick"
+        class="g-field sys-pick"
         data-testid={`sys-pick-${testKey}`}
         aria-label={pickerLabel}
         value={selected}
@@ -282,19 +282,6 @@
 
   .sys-pick {
     width: 100%;
-    min-width: 0;
-    font: inherit;
-    font-size: 13px;
-    padding: 6px 8px;
-    border-radius: var(--r-control);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--text-h);
-    text-overflow: ellipsis;
-  }
-
-  .sys-pick:disabled {
-    opacity: 0.6;
   }
 
   .pill-s {

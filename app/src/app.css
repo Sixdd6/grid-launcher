@@ -318,6 +318,232 @@ h1 {
 /* Visually hidden but still read by a screen reader — the standard
    clip-based recipe, not `display: none` (which pulls the text out of the
    accessibility tree too). */
+/* Settings forms (design prototype: .pane, .form, .field, .check, .kv,
+   .form-actions, .g-btn). One set of shared classes for every Settings page,
+   the Systems sheet and Choose your systems, so the pages cannot drift
+   apart. `g-` mirrors the design system's class names. */
+.g-pane-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.g-btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 16px;
+  border-radius: var(--r-control);
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--m-fast) ease;
+}
+
+.g-btn:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+.g-btn:active:not(:disabled) {
+  background: var(--primary-pressed);
+  border-color: var(--primary-pressed);
+}
+
+.g-btn.secondary {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text-h);
+}
+
+.g-btn.secondary:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.g-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Inputs and selects: one 32px control height, the see-through field fill. */
+.g-field {
+  font: inherit;
+  font-size: 13px;
+  height: var(--control-h);
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 0 10px;
+  border-radius: var(--r-control);
+  border: 1px solid var(--line-strong);
+  background: var(--field);
+  color: var(--text-h);
+}
+
+.g-field.narrow {
+  width: 120px;
+}
+
+/* A select draws its own chevron, so WebKitGTK's raised native button does
+   not stand out from the inputs. The open list stays native. */
+select.g-field {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 30px;
+  /* The chevron is two gradient triangles, not an image: the CSP allows no
+     data: images, and gradients follow the theme's muted text colour. */
+  background-color: var(--field);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-repeat: no-repeat;
+  background-position:
+    calc(100% - 15px) 55%,
+    calc(100% - 10px) 55%;
+  background-size: 5px 5px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.g-field:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+select option,
+select optgroup {
+  background-color: var(--overlay);
+  color: var(--text-h);
+}
+
+/* A stacked form: small muted labels over full-width fields, 520px wide. */
+.g-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 520px;
+}
+
+.g-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.g-form label.g-check,
+.g-check {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.g-check input {
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.g-help {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.g-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.g-line {
+  margin: 0;
+  color: var(--text-h);
+}
+
+.g-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--danger);
+}
+
+.g-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Read-only facts: a 140px name column and hairlines between rows. */
+.g-kv {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.g-kv > div {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.g-kv dt {
+  color: var(--text-muted);
+}
+
+.g-kv dd {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  min-width: 0;
+  color: var(--text-h);
+  overflow-wrap: anywhere;
+}
+
+/* A sub-section inside a page: a 14px heading over its own column. */
+.g-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.g-sub h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+/* A path as a value: monospace, wraps anywhere, selectable. */
+.g-path {
+  display: block;
+  padding: 8px 10px;
+  border-radius: var(--r-control);
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--text-h);
+  font: 13px ui-monospace, 'Cascadia Mono', Consolas, 'SFMono-Regular', Menlo, monospace;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* A slider in a Settings row, and its value beside it. */
+.g-range {
+  width: 240px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.g-value {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

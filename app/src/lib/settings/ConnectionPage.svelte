@@ -73,20 +73,20 @@
   }
 </script>
 
-<dl class="rows">
-  <div class="row">
+<dl class="g-kv">
+  <div>
     <dt>Server</dt>
     <dd data-testid="settings-connection-url">{serverLine(session.serverUrl)}</dd>
   </div>
-  <div class="row">
+  <div>
     <dt>User</dt>
     <dd data-testid="settings-connection-user">{session.username.trim() === '' ? 'Not set' : session.username}</dd>
   </div>
-  <div class="row">
+  <div>
     <dt>Credential</dt>
     <dd data-testid="settings-connection-credential">{credentialStatusLabel(session.connected)}</dd>
   </div>
-  <div class="row">
+  <div>
     <dt>Status</dt>
     <dd data-testid="settings-connection-status">
       <span class="dot" class:online={session.connected} aria-hidden="true"></span>
@@ -99,7 +99,7 @@
   <form
     id="settings-connection-edit-form"
     data-testid="settings-connection-edit-form"
-    class="edit"
+    class="g-form"
     onsubmit={(e) => {
       e.preventDefault();
       submitEdit();
@@ -107,17 +107,18 @@
   >
     <label>
       Server URL
-      <input data-testid="settings-connection-server-url" bind:value={editServerUrl} required />
+      <input class="g-field" data-testid="settings-connection-server-url" bind:value={editServerUrl} required />
     </label>
     {#if !editUseToken}
       <label>
         Username
-        <input data-testid="settings-connection-username" bind:value={editUsername} autocomplete="username" />
+        <input class="g-field" data-testid="settings-connection-username" bind:value={editUsername} autocomplete="username" />
       </label>
     {/if}
     <label>
       {editUseToken ? 'API Token' : 'Password'}
       <input
+        class="g-field"
         data-testid="settings-connection-secret"
         type="password"
         bind:value={editSecret}
@@ -125,42 +126,44 @@
         required
       />
     </label>
-    <label class="checkbox">
+    <label class="g-check">
       <input data-testid="settings-connection-use-token" type="checkbox" bind:checked={editUseToken} />
       Use API token
     </label>
-    <div class="actions">
+    <div class="g-actions">
       <button
+        class="g-btn"
         data-testid="settings-connection-save"
         type="submit"
         disabled={session.busy || !canConnect(editServerUrl, editSecret)}
       >
         {session.busy ? 'Connecting…' : 'Connect'}
       </button>
-      <button data-testid="settings-connection-cancel" type="button" class="secondary" onclick={closeEdit}>
+      <button data-testid="settings-connection-cancel" type="button" class="g-btn secondary" onclick={closeEdit}>
         Cancel
       </button>
     </div>
     {#if session.error}
-      <p data-testid="settings-connection-edit-error" class="error" role="alert">{session.error}</p>
+      <p data-testid="settings-connection-edit-error" class="g-error" role="alert">{session.error}</p>
     {/if}
   </form>
 {/if}
 
 {#if !session.connected && session.lastError}
-  <p data-testid="settings-connection-error" class="error" role="alert">{session.lastError}</p>
+  <p data-testid="settings-connection-error" class="g-error" role="alert">{session.lastError}</p>
 {/if}
 
-<div class="actions">
+<div class="g-actions">
   <button
     data-testid="settings-connection-edit"
-    class="secondary"
+    class="g-btn secondary"
     aria-expanded={editing}
     onclick={() => (editing ? closeEdit() : openEdit())}
   >
     {editing ? 'Close editor' : 'Edit connection'}
   </button>
   <button
+    class="g-btn"
     data-testid="settings-connection-reconnect"
     disabled={!reconnectEnabled(session.connected, session.busy)}
     onclick={() => {
@@ -171,7 +174,7 @@
   </button>
   <button
     data-testid="settings-connection-disconnect"
-    class="secondary"
+    class="g-btn secondary"
     onclick={() => {
       disconnect();
     }}
@@ -180,7 +183,7 @@
   </button>
   <button
     data-testid="settings-open-config-folder"
-    class="secondary"
+    class="g-btn secondary"
     onclick={() => {
       handleOpenConfigFolder();
     }}
@@ -190,36 +193,10 @@
 </div>
 
 {#if configFolderError}
-  <p data-testid="settings-config-folder-error" class="error" role="alert">{configFolderError}</p>
+  <p data-testid="settings-config-folder-error" class="g-error" role="alert">{configFolderError}</p>
 {/if}
 
 <style>
-  .rows {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin: 0;
-  }
-
-  .row {
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
-    font-size: 13px;
-  }
-
-  dt {
-    flex: 0 0 180px;
-    color: var(--text-muted);
-  }
-
-  dd {
-    margin: 0;
-    min-width: 0;
-    color: var(--text-h);
-    overflow-wrap: anywhere;
-  }
-
   .dot {
     display: inline-block;
     width: 8px;
@@ -227,89 +204,9 @@
     margin-right: 6px;
     border-radius: 50%;
     background: var(--danger);
-    vertical-align: middle;
   }
 
   .dot.online {
     background: var(--success);
-  }
-
-  .error {
-    margin: 0;
-    color: var(--danger);
-    font-size: 13px;
-  }
-
-  .actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .actions button {
-    font: inherit;
-    padding: 8px 16px;
-    border-radius: var(--r-chip);
-    border: none;
-    background: var(--primary);
-    color: var(--on-primary);
-    cursor: pointer;
-    transition: background var(--m-fast) ease;
-  }
-
-  .actions button:hover:not(:disabled) {
-    background: var(--primary-hover);
-  }
-
-  .actions button.secondary {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-h);
-  }
-
-  .actions button:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-
-  .edit {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    max-width: 420px;
-    margin: 16px 0;
-  }
-
-  .edit label {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--text);
-  }
-
-  .edit label.checkbox {
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .edit input {
-    font: inherit;
-    padding: 8px 10px;
-    border-radius: var(--r-chip);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--text-h);
-  }
-
-  .edit input[type='checkbox'] {
-    width: auto;
-    padding: 0;
-    accent-color: var(--primary);
-  }
-
-  .edit input:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 1px;
   }
 </style>

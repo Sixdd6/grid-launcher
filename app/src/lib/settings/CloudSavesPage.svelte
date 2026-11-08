@@ -48,12 +48,13 @@
 
 {#if cloudSettings}
   <form
+    class="g-form"
     onsubmit={(e) => {
       e.preventDefault();
       handleCloudSettingsSave();
     }}
   >
-    <label class="checkbox">
+    <label class="g-check">
       <input
         data-testid="cloud-settings-download-on-launch"
         type="checkbox"
@@ -61,7 +62,7 @@
       />
       Restore cloud saves before launch
     </label>
-    <label class="checkbox">
+    <label class="g-check">
       <input
         data-testid="cloud-settings-upload-on-exit"
         type="checkbox"
@@ -69,7 +70,7 @@
       />
       Upload cloud saves after exit
     </label>
-    <label class="checkbox">
+    <label class="g-check">
       <input
         data-testid="cloud-settings-skip-if-local-newer"
         type="checkbox"
@@ -80,6 +81,7 @@
     <label>
       Upload delay (seconds)
       <input
+        class="g-field narrow"
         data-testid="cloud-settings-upload-delay"
         type="number"
         min="0"
@@ -90,6 +92,7 @@
     <label>
       Save retention limit (0 = unlimited)
       <input
+        class="g-field narrow"
         data-testid="cloud-settings-retention-limit"
         type="number"
         min="0"
@@ -100,108 +103,19 @@
          clause is dropped here: the rewrite auto-syncs Windows/PC games
          too (grid-core/src/cloud/ops/upload.rs:117-118,
          ops/restore.rs:120-121 delegate to the native flows). -->
-    <p data-testid="cloud-settings-autosync-hint" class="hint">
+    <p data-testid="cloud-settings-autosync-hint" class="g-note">
       Auto-sync uses the latest server save record only.
     </p>
-    {#if cloudSettingsError}<p data-testid="cloud-settings-error" class="error" role="alert">{cloudSettingsError}</p>{/if}
-    {#if cloudSettingsSavedLine}<p class="hint">{cloudSettingsSavedLine}</p>{/if}
-    <div class="form-actions">
-      <button data-testid="cloud-settings-save" type="submit" disabled={cloudSettingsPending}>
+    {#if cloudSettingsError}<p data-testid="cloud-settings-error" class="g-error" role="alert">{cloudSettingsError}</p>{/if}
+    {#if cloudSettingsSavedLine}<p class="g-note">{cloudSettingsSavedLine}</p>{/if}
+    <div class="g-actions">
+      <button class="g-btn" data-testid="cloud-settings-save" type="submit" disabled={cloudSettingsPending}>
         {cloudSettingsPending ? 'Saving…' : 'Save'}
       </button>
     </div>
   </form>
 {:else if cloudSettingsError}
-  <p data-testid="cloud-settings-error" class="error" role="alert">{cloudSettingsError}</p>
+  <p data-testid="cloud-settings-error" class="g-error" role="alert">{cloudSettingsError}</p>
 {:else}
-  <p class="muted">Loading…</p>
+  <p class="g-note">Loading…</p>
 {/if}
-
-<style>
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--text);
-  }
-
-  label.checkbox {
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
-  }
-
-  input {
-    font: inherit;
-    padding: 8px 10px;
-    border-radius: var(--r-chip);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--text-h);
-  }
-
-  input[type='checkbox'] {
-    width: auto;
-    padding: 0;
-    accent-color: var(--primary);
-  }
-
-  input[type='number'] {
-    width: 100px;
-  }
-
-  input:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 1px;
-  }
-
-  .muted {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: 13px;
-  }
-
-  .error {
-    margin: 0;
-    color: var(--danger);
-    font-size: 13px;
-  }
-
-  .hint {
-    margin: -4px 0 0;
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-
-  .form-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .form-actions button {
-    font: inherit;
-    padding: 8px 16px;
-    border-radius: var(--r-chip);
-    border: none;
-    background: var(--primary);
-    color: var(--on-primary);
-    cursor: pointer;
-    transition: background var(--m-fast) ease;
-  }
-
-  .form-actions button:hover:not(:disabled) {
-    background: var(--primary-hover);
-  }
-
-  .form-actions button:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-</style>

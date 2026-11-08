@@ -56,7 +56,9 @@
     {#each SETTINGS_PAGES as p (p)}
       <section data-testid={`settings-page-${p}`} class="pane" hidden={page !== p} aria-label={settingsPageLabel(p)}>
         <div class="view-content pane-inner">
-          <h2>{settingsPageLabel(p)}</h2>
+          <!-- Systems titles itself: its header holds the title, the lede
+               and the actions in one row (design prototype 31). -->
+          {#if p !== 'systems'}<h2 class="g-pane-title">{settingsPageLabel(p)}</h2>{/if}
           {#if p === 'appearance'}
             <AppearancePage />
           {:else if p === 'connection'}
@@ -132,17 +134,11 @@
     display: none;
   }
 
+  /* The design prototype's `.pane`: 24px in, 14px between blocks. */
   .pane-inner {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 14px;
     padding: 24px;
-  }
-
-  h2 {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 600;
-    color: var(--text-h);
   }
 </style>

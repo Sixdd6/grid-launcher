@@ -39,6 +39,11 @@ async function setControl(id: string, value: string): Promise<void> {
   );
 }
 
+/** Picks one option of a segmented switch (Game labels, Game card display). */
+async function pickSwitch(id: string, value: string): Promise<void> {
+  await $(testId(`${id}-${value}`)).click();
+}
+
 async function appearance(theme: string, fade: number): Promise<void> {
   await $(testId('nav-settings')).click();
   await $(testId('settings-nav-appearance')).click();
@@ -132,13 +137,13 @@ describe('ui screens: the main views for a design review', () => {
   it('labels on hover, both themes, fade 40', async () => {
     for (const theme of ['dark', 'light']) {
       await appearance(theme, 40);
-      await setControl('card-labels', 'hover');
+      await pickSwitch('card-labels', 'hover');
       await openServerPlatform();
       await hoverFirstCard();
       await shot(`server-${theme}-fade40-hover-labels`);
     }
     await $(testId('nav-settings')).click();
-    await setControl('card-labels', 'always');
+    await pickSwitch('card-labels', 'always');
   });
 
   // A hovered card shows its whole title in either label mode. The first
@@ -148,7 +153,7 @@ describe('ui screens: the main views for a design review', () => {
   it('a long title on hover, both label modes, dark, fade 70', async () => {
     for (const labels of ['always', 'hover']) {
       await appearance('dark', 70);
-      await setControl('card-labels', labels);
+      await pickSwitch('card-labels', labels);
       await openServerPlatform();
       await browser.execute(() => {
         const label = document.querySelector('[data-testid="server-grid"] [data-testid^="game-card-"] .label');
@@ -159,7 +164,7 @@ describe('ui screens: the main views for a design review', () => {
       await shot(`server-dark-fade70-long-title-${labels}`);
     }
     await $(testId('nav-settings')).click();
-    await setControl('card-labels', 'always');
+    await pickSwitch('card-labels', 'always');
   });
 
   it('both card displays on a mixed-art platform (E2E_LIVE_MIXED_PLATFORM)', async () => {
@@ -167,14 +172,14 @@ describe('ui screens: the main views for a design review', () => {
     if (!mixed) return;
     for (const display of ['rows', 'columns']) {
       await appearance('dark', 70);
-      await setControl('card-display', display);
+      await pickSwitch('card-display', display);
       await $(testId('nav-server')).click();
       await $(testId(`platform-btn-${mixed}`)).click();
       await browser.pause(6000);
       await shot(`mixed-${display}`);
     }
     await $(testId('nav-settings')).click();
-    await setControl('card-display', 'rows');
+    await pickSwitch('card-display', 'rows');
   });
 
   it('the other views, dark, fade 70', async () => {

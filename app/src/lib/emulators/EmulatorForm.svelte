@@ -136,14 +136,15 @@
 </script>
 
 {#snippet actions()}
-  {#if formError}<p data-testid="emu-form-error" class="error" role="alert">{formError}</p>{/if}
-  <div class="form-actions">
-    <button data-testid="emu-form-save" type="submit" disabled={formPending}>{formPending ? 'Saving…' : 'Save'}</button>
-    <button data-testid="emu-form-cancel" type="button" onclick={onCancel} disabled={formPending}>Cancel</button>
+  {#if formError}<p data-testid="emu-form-error" class="g-error" role="alert">{formError}</p>{/if}
+  <div class="g-actions">
+    <button class="g-btn" data-testid="emu-form-save" type="submit" disabled={formPending}>{formPending ? 'Saving…' : 'Save'}</button>
+    <button class="g-btn secondary" data-testid="emu-form-cancel" type="button" onclick={onCancel} disabled={formPending}>Cancel</button>
   </div>
 {/snippet}
 
 <form
+  class="g-form"
   data-testid="emu-form"
   onsubmit={(e) => {
     e.preventDefault();
@@ -154,6 +155,7 @@
     <label>
       Which emulator is it?
       <select
+        class="g-field"
         data-testid="emu-form-which"
         value={whichValue}
         onchange={(e) => onWhichChange((e.currentTarget as HTMLSelectElement).value)}
@@ -163,7 +165,7 @@
         {/each}
         <option value={SOMETHING_ELSE}>Something else</option>
       </select>
-      <span class="help">GRID fills in the rest for emulators it knows.</span>
+      <span class="g-help">GRID fills in the rest for emulators it knows.</span>
     </label>
   {/if}
   <!-- Adding: asked only for Something else (a known emulator brings its
@@ -172,35 +174,36 @@
   {#if mode === 'edit' || whichValue === SOMETHING_ELSE}
     <label>
       Name
-      <input data-testid="emu-form-name" bind:value={formName} required />
+      <input class="g-field" data-testid="emu-form-name" bind:value={formName} required />
     </label>
   {/if}
   <label>
     Program
     <span class="path-row">
       <input
+        class="g-field"
         data-testid="emu-form-path"
         bind:value={formPath}
         placeholder="Choose the emulator's program file"
         onblur={autoFillFromPath}
         onkeydown={onPathKeydown}
       />
-      <button data-testid="emu-form-path-browse" type="button" disabled={formPending} onclick={browseEmulatorPath}>
+      <button class="g-btn secondary" data-testid="emu-form-path-browse" type="button" disabled={formPending} onclick={browseEmulatorPath}>
         Browse…
       </button>
     </span>
   </label>
   <label>
     Launch options
-    <input data-testid="emu-form-args" bind:value={formArgs} />
-    <span class="help">%rom% is replaced by the game file.</span>
+    <input class="g-field" data-testid="emu-form-args" bind:value={formArgs} />
+    <span class="g-help">%rom% is replaced by the game file.</span>
   </label>
   <details class="advanced">
     <summary data-testid="emu-form-advanced">Cloud saves (advanced)</summary>
     <div class="advanced-fields">
       <label>
         How this emulator stores saves
-        <select data-testid="emu-form-save-strategy" bind:value={formSaveStrategy}>
+        <select class="g-field" data-testid="emu-form-save-strategy" bind:value={formSaveStrategy}>
           {#each SAVE_STRATEGIES as strategy (strategy)}
             <option value={strategy}>{SAVE_STRATEGY_LABELS[strategy]}</option>
           {/each}
@@ -208,20 +211,20 @@
       </label>
       <label>
         Save folders
-        <input data-testid="emu-form-save-paths" bind:value={formSavePaths} placeholder="memcards; saves" />
-        <span class="help">Separate folders with ;</span>
+        <input class="g-field" data-testid="emu-form-save-paths" bind:value={formSavePaths} placeholder="memcards; saves" />
+        <span class="g-help">Separate folders with ;</span>
       </label>
       <label>
         Save state folders
-        <input data-testid="emu-form-state-paths" bind:value={formStatePaths} placeholder="savestates" />
+        <input class="g-field" data-testid="emu-form-state-paths" bind:value={formStatePaths} placeholder="savestates" />
       </label>
       <label>
         Don't upload these files
-        <input data-testid="emu-form-ignore-files" bind:value={formIgnoreFiles} placeholder="settings.ini" />
+        <input class="g-field" data-testid="emu-form-ignore-files" bind:value={formIgnoreFiles} placeholder="settings.ini" />
       </label>
       <label>
         Don't upload these file types
-        <input data-testid="emu-form-ignore-extensions" bind:value={formIgnoreExtensions} placeholder=".log; .tmp" />
+        <input class="g-field" data-testid="emu-form-ignore-extensions" bind:value={formIgnoreExtensions} placeholder=".log; .tmp" />
       </label>
     </div>
   </details>
@@ -229,48 +232,6 @@
 </form>
 
 <style>
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--text);
-  }
-
-  input {
-    font: inherit;
-    padding: 8px 10px;
-    border-radius: var(--r-chip);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--text-h);
-  }
-
-  input:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 1px;
-  }
-
-  select {
-    font: inherit;
-    padding: 8px 10px;
-    border-radius: var(--r-chip);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--text-h);
-  }
-
-  select:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 1px;
-  }
-
   .path-row {
     display: flex;
     gap: 8px;
@@ -279,34 +240,11 @@
 
   .path-row input {
     flex: 1;
-    min-width: 0;
   }
 
   .path-row button {
-    font: inherit;
-    padding: 8px 16px;
-    border-radius: var(--r-chip);
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text-h);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .path-row button:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-
-  .error {
-    margin: 0;
-    color: var(--danger);
-    font-size: 13px;
-  }
-
-  .help {
-    font-size: 11px;
-    color: var(--text-muted);
+    padding: 0 14px;
+    height: var(--control-h);
   }
 
   .advanced summary {
@@ -326,36 +264,5 @@
     flex-direction: column;
     gap: 12px;
     padding-top: 10px;
-  }
-
-  .form-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .form-actions button {
-    font: inherit;
-    padding: 8px 16px;
-    border-radius: var(--r-chip);
-    border: none;
-    background: var(--primary);
-    color: var(--on-primary);
-    cursor: pointer;
-    transition: background var(--m-fast) ease;
-  }
-
-  .form-actions button:hover:not(:disabled) {
-    background: var(--primary-hover);
-  }
-
-  .form-actions button[type='button'] {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-h);
-  }
-
-  .form-actions button:disabled {
-    opacity: 0.6;
-    cursor: default;
   }
 </style>

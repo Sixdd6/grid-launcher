@@ -69,9 +69,9 @@
 </script>
 
 <div data-testid="settings-library-pane" class="library">
-  <section class="section" aria-labelledby="library-folder-title">
+  <section class="g-sub" aria-labelledby="library-folder-title">
     <h3 id="library-folder-title">Library folder</h3>
-    <p id="library-folder-hint" class="hint">
+    <p id="library-folder-hint" class="g-note">
       Games, emulators and saves live in this folder. New installs go here.
     </p>
 
@@ -80,15 +80,15 @@
     {:else}
       <code
         data-testid="library-path-value"
-        class="path"
+        class="g-path"
         class:unset={path !== null && path.trim() === ''}>{path === null ? '…' : path.trim() === '' ? 'Not set' : path}</code
       >
     {/if}
 
-    <div class="actions">
+    <div class="g-actions">
       <button
         data-testid="library-path-change"
-        class="primary"
+        class="g-btn change"
         aria-describedby={moving ? 'library-folder-hint library-change-reason' : 'library-folder-hint'}
         onclick={openDialog}
         disabled={path === null || moving}
@@ -158,54 +158,25 @@
 {/if}
 
 <style>
+  /* "Not set" is a status, not a path: proportional and muted. */
+  .g-path.unset {
+    font-family: inherit;
+    color: var(--text-muted);
+  }
+
+  /* Visibly off: a dashed outline and muted text rather than a faded fill, so
+     it reads as unavailable and its label stays legible. */
+  .change:disabled {
+    opacity: 1;
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-muted);
+  }
+
   .library {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    max-width: 720px;
-  }
-
-  .section {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  h3 {
-    margin: 0;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-h);
-  }
-
-  .hint {
-    margin: 0;
-    font-size: 13px;
-    color: var(--text-muted);
-    max-width: 60ch;
-  }
-
-  /* The folder as a value: monospace, wraps at any character so a long path
-     never widens the pane, selectable for copying. */
-  .path {
-    display: block;
-    padding: 10px 12px;
-    border-radius: var(--r-row);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--text-h);
-    font-family: ui-monospace, 'Cascadia Mono', Consolas, 'SFMono-Regular', Menlo, monospace;
-    font-size: 12px;
-    line-height: 150%;
-    overflow-wrap: anywhere;
-    user-select: text;
-  }
-
-  /* "Not set" is a status, not a path: proportional and muted. */
-  .path.unset {
-    font-family: inherit;
-    font-size: 13px;
-    color: var(--text-muted);
+    gap: 14px;
   }
 
   /* A calm notice, as on the Connect form's reason line: the neutral
@@ -224,13 +195,6 @@
 
   .notice.error {
     border-left-color: var(--danger);
-  }
-
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px 12px;
   }
 
   /* Why Change… is off, next to the button. */
@@ -349,36 +313,4 @@
     }
   }
 
-  /* The label is the theme background rather than white: white on the dark
-     theme's #8b74e8 is about 3.6:1, `--bg` on it is about 5.4:1 (and about
-     7.6:1 on the light theme's #553e98). */
-  .primary {
-    font: inherit;
-    padding: 8px 16px;
-    border-radius: var(--r-chip);
-    border: 1px solid transparent;
-    background: var(--primary);
-    color: var(--on-primary);
-    font-weight: 600;
-    cursor: pointer;
-    transition: background var(--m-fast) ease;
-  }
-
-  .primary:hover:not(:disabled) {
-    background: var(--primary-hover);
-  }
-
-  .primary:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 2px;
-  }
-
-  /* Visibly off: a dashed outline and muted text rather than a faded fill, so
-     it reads as unavailable and its label stays legible. */
-  .primary:disabled {
-    background: transparent;
-    border: 1px dashed var(--border);
-    color: var(--text-muted);
-    cursor: default;
-  }
 </style>

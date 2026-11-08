@@ -40,59 +40,27 @@
   }
 </script>
 
-<p data-testid="settings-updates-version" class="line">{versionLine(version)}</p>
+<p data-testid="settings-updates-version" class="g-line">{versionLine(version)}</p>
 
 {#if appUpdate.stored}
-  <p data-testid="app-update-notice" class="update-line">
+  <p data-testid="app-update-notice" class="g-line update-line">
     {updateStatusLine(appUpdate.stored, appUpdate.checkedAt, now)}
-    <button data-testid="app-update-open" onclick={openRelease}>Open release</button>
+    <button class="g-btn" data-testid="app-update-open" onclick={openRelease}>Open release</button>
     {#if appUpdate.notice}
-      <button data-testid="app-update-dismiss" class="secondary" onclick={dismiss}>Dismiss</button>
+      <button data-testid="app-update-dismiss" class="g-btn secondary" onclick={dismiss}>Dismiss</button>
     {/if}
   </p>
 {:else}
-  <p data-testid="settings-updates-status" class="line">{updateStatusLine(null, appUpdate.checkedAt, now)}</p>
+  <p data-testid="settings-updates-status" class="g-line">{updateStatusLine(null, appUpdate.checkedAt, now)}</p>
 {/if}
 
-<p data-testid="settings-updates-note" class="muted">{CHECK_ONLY_NOTE}</p>
+<p data-testid="settings-updates-note" class="g-note">{CHECK_ONLY_NOTE}</p>
 
 <style>
-  .line {
-    margin: 0;
-    font-size: 13px;
-    color: var(--text-h);
-  }
-
-  .muted {
-    margin: 0;
-    font-size: 13px;
-    color: var(--text-muted);
-    max-width: 60ch;
-  }
-
   .update-line {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 10px;
-    margin: 0;
-    font-size: 13px;
-    color: var(--text-h);
-  }
-
-  .update-line button {
-    font: inherit;
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: var(--r-control);
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text-h);
-    cursor: pointer;
-  }
-
-  .update-line button.secondary {
-    border-color: transparent;
-    color: var(--text-muted);
   }
 </style>

@@ -138,8 +138,9 @@
   });
 </script>
 
-<p class="muted" data-testid="ra-status">{statusLabel(raStatus)}</p>
+<p class="g-note" data-testid="ra-status">{statusLabel(raStatus)}</p>
 <form
+  class="g-form"
   onsubmit={(e) => {
     e.preventDefault();
     handleRaSave();
@@ -147,11 +148,12 @@
 >
   <label>
     Username
-    <input data-testid="ra-username" bind:value={raUsername} autocomplete="username" />
+    <input class="g-field" data-testid="ra-username" bind:value={raUsername} autocomplete="username" />
   </label>
   <label>
     Password
     <input
+      class="g-field"
       data-testid="ra-password"
       type="password"
       bind:value={raPassword}
@@ -161,16 +163,18 @@
   <label>
     Token
     <input
+      class="g-field"
       data-testid="ra-token"
       type="password"
       bind:value={raToken}
       autocomplete="new-password"
     />
   </label>
-  {#if raError}<p data-testid="ra-error" class="error" role="alert">{raError}</p>{/if}
-  {#if raResultLine}<p class="hint">{raResultLine}</p>{/if}
-  <div class="form-actions">
+  {#if raError}<p data-testid="ra-error" class="g-error" role="alert">{raError}</p>{/if}
+  {#if raResultLine}<p class="g-note">{raResultLine}</p>{/if}
+  <div class="g-actions">
     <button
+      class="g-btn secondary"
       data-testid="ra-login"
       type="button"
       onclick={handleRaLogin}
@@ -179,6 +183,7 @@
       {raLoginPending ? 'Logging in…' : 'Log In'}
     </button>
     <button
+      class="g-btn"
       data-testid="ra-save"
       type="submit"
       disabled={raSavePending || !canSubmit(raUsername, raToken)}
@@ -186,6 +191,7 @@
       {raSavePending ? 'Saving…' : 'Save'}
     </button>
     <button
+      class="g-btn secondary"
       data-testid="ra-clear"
       type="button"
       onclick={handleRaClear}
@@ -195,82 +201,3 @@
     </button>
   </div>
 </form>
-
-<style>
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--text);
-  }
-
-  input {
-    font: inherit;
-    padding: 8px 10px;
-    border-radius: var(--r-chip);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--text-h);
-  }
-
-  input:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 1px;
-  }
-
-  .muted {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: 13px;
-  }
-
-  .error {
-    margin: 0;
-    color: var(--danger);
-    font-size: 13px;
-  }
-
-  .hint {
-    margin: -4px 0 0;
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-
-  .form-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .form-actions button {
-    font: inherit;
-    padding: 8px 16px;
-    border-radius: var(--r-chip);
-    border: none;
-    background: var(--primary);
-    color: var(--on-primary);
-    cursor: pointer;
-    transition: background var(--m-fast) ease;
-  }
-
-  .form-actions button:hover:not(:disabled) {
-    background: var(--primary-hover);
-  }
-
-  .form-actions button[type='button'] {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-h);
-  }
-
-  .form-actions button:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-</style>

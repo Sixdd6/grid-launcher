@@ -399,6 +399,31 @@ describe('updates', () => {
     await expect($(testId('background-blur'))).toHaveValue('2');
   });
 
+  // Two named options, so a segmented switch (radio group), not a dropdown:
+  // one Tab stop on the chosen option, the arrow keys move the choice, and
+  // the pick persists like the select it replaced.
+  it('picks Game labels with the segmented switch, by click and by arrow key', async () => {
+    const group = $(testId('card-labels'));
+    await group.waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await expect(group).toHaveAttribute('role', 'radiogroup');
+    await expect(group).toHaveAttribute('data-value', 'always');
+    await expect($(testId('card-labels-always'))).toHaveAttribute('aria-checked', 'true');
+    await expect($(testId('card-labels-hover'))).toHaveAttribute('tabindex', '-1');
+
+    await $(testId('card-labels-hover')).click();
+    await expect(group).toHaveAttribute('data-value', 'hover');
+    await expect($(testId('card-labels-hover'))).toHaveAttribute('aria-checked', 'true');
+    await waitForConfigLine('card_labels = "hover"');
+
+    // From the chosen option, ArrowRight wraps back to the first.
+    await browser.keys(['ArrowRight']);
+    await expect(group).toHaveAttribute('data-value', 'always');
+    expect(
+      await browser.execute(() => (document.activeElement as HTMLElement | null)?.dataset.testid ?? null),
+    ).toBe('card-labels-always');
+    await waitForConfigLine('card_labels = "always"');
+  });
+
   // Design §10: the four pages plan 1 left as placeholders. One pass over
   // the rail, reading one line each page owns; the pure rules live in
   // `settings/*.test.ts`.

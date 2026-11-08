@@ -157,7 +157,7 @@
   {#if loadError !== null}
     <p class="notice" role="status">Your systems could not be loaded: {loadError}</p>
     <div class="row-actions">
-      <button class="secondary" onclick={load}>Retry</button>
+      <button class="g-btn secondary" onclick={load}>Retry</button>
     </div>
   {:else if rows === null}
     <p class="muted" role="status">Loading your systems…</p>
@@ -212,10 +212,10 @@
   <footer>
     {#if startError}<p class="error" role="alert" data-testid="setup-error">{startError}</p>{/if}
     <div class="row-actions">
-      <button class="secondary" data-testid="setup-skip" disabled={busy} onclick={skip}>
+      <button class="g-btn secondary" data-testid="setup-skip" disabled={busy} onclick={skip}>
         Skip for now
       </button>
-      <button class="primary" data-testid="setup-install" disabled={busy || !canStart(button)} onclick={install}>
+      <button class="g-btn" data-testid="setup-install" disabled={busy || !canStart(button)} onclick={install}>
         {busy ? 'Starting…' : primaryLabel(button)}
       </button>
     </div>
@@ -289,44 +289,6 @@
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-  }
-
-  button {
-    font: inherit;
-    padding: 8px 16px;
-    border-radius: var(--r-chip);
-    cursor: pointer;
-  }
-
-  .primary {
-    border: none;
-    background: var(--primary);
-    color: var(--on-primary);
-    transition: background var(--m-fast) ease;
-  }
-
-  .primary:hover:not(:disabled) {
-    background: var(--primary-hover);
-  }
-
-  .secondary {
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text-h);
-  }
-
-  .secondary:hover:not(:disabled) {
-    background: var(--surface);
-  }
-
-  button:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-
-  button:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 1px;
   }
 
   .notice {

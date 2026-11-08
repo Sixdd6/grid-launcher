@@ -24,6 +24,8 @@
   import { CARD_LABEL_MODES, cardLabelsLabel, normalizeCardLabels } from '../cards/labels';
   import { CARD_DISPLAYS, cardDisplayLabel, normalizeCardDisplay } from '../cards/layout';
   import { backgroundEnabled, CARD_SIZE_VIEWS } from './appearance';
+  import SegmentedSwitch from '../SegmentedSwitch.svelte';
+  import SettingRow from './SettingRow.svelte';
 
   function onThemeChange(e: Event) {
     const value = (e.currentTarget as HTMLSelectElement).value as ThemeChoice;
@@ -41,13 +43,17 @@
     setHardwareAcceleration((e.currentTarget as HTMLInputElement).checked).catch(() => {});
   }
 
-  function onCardDisplay(e: Event) {
-    setCardDisplay(normalizeCardDisplay((e.currentTarget as HTMLSelectElement).value)).catch(() => {});
+  function onCardDisplay(value: string) {
+    setCardDisplay(normalizeCardDisplay(value)).catch(() => {});
   }
 
-  function onCardLabels(e: Event) {
-    setCardLabels(normalizeCardLabels((e.currentTarget as HTMLSelectElement).value)).catch(() => {});
+  function onCardLabels(value: string) {
+    setCardLabels(normalizeCardLabels(value)).catch(() => {});
   }
+
+  // Two named options each, so a segmented switch rather than a dropdown.
+  const labelOptions = CARD_LABEL_MODES.map((mode) => ({ value: mode, label: cardLabelsLabel(mode) }));
+  const displayOptions = CARD_DISPLAYS.map((display) => ({ value: display, label: cardDisplayLabel(display) }));
 
   function onCardSize(view: 'library' | 'server', e: Event) {
     setCardSize(view, normalizeCardSize((e.currentTarget as HTMLSelectElement).value)).catch(() => {});
@@ -80,31 +86,36 @@
   }
 </script>
 
-<div class="field">
-  <label for="theme-select">Theme</label>
-  <select data-testid="theme-select" id="theme-select" value={uiSettings.theme} onchange={onThemeChange}>
+<!-- The design prototype's order (attachments/proposed-ui/30): theme, the
+     background art, the cards, then the two switches that act on restart or
+     on logging. Each row is a `SettingRow`. -->
+<SettingRow label="Theme" forId="theme-select">
+  <select class="g-field" data-testid="theme-select" id="theme-select" value={uiSettings.theme} onchange={onThemeChange}>
     <option value="system">Follow system</option>
     <option value="dark">Dark</option>
     <option value="light">Light</option>
   </select>
-</div>
+</SettingRow>
 
-<div class="field">
-  <label for="background-art-toggle">Background art</label>
-  <input
-    data-testid="background-art-toggle"
-    id="background-art-toggle"
-    type="checkbox"
-    checked={backgroundEnabled(uiSettings.backgroundFade)}
-    onchange={onToggle}
-  />
-</div>
+<SettingRow label="Background art" forId="background-art-toggle">
+  <label class="g-check">
+    <input
+      data-testid="background-art-toggle"
+      id="background-art-toggle"
+      type="checkbox"
+      checked={backgroundEnabled(uiSettings.backgroundFade)}
+      onchange={onToggle}
+    />
+    Show the last game’s art behind the views
+  </label>
+</SettingRow>
 
-<div class="field">
-  <label for="background-fade">Background art fade</label>
+<SettingRow label="Background art fade" hint="0 is full strength; 100 turns the art off" forId="background-fade">
   <input
+    class="g-range"
     data-testid="background-fade"
     id="background-fade"
+    aria-describedby="background-fade-hint"
     type="range"
     min="0"
     max={FADE_MAX}
@@ -115,12 +126,12 @@
       commitBackgroundFade(Number((e.currentTarget as HTMLInputElement).value)).catch(() => {});
     }}
   />
-  <span class="value">{uiSettings.backgroundFade}%{backgroundEnabled(uiSettings.backgroundFade) ? '' : ' · off'}</span>
-</div>
+  <span class="g-value">{uiSettings.backgroundFade}%{backgroundEnabled(uiSettings.backgroundFade) ? '' : ' · off'}</span>
+</SettingRow>
 
-<div class="field">
-  <label for="background-blur">Background art blur</label>
+<SettingRow label="Background art blur" forId="background-blur">
   <input
+    class="g-range"
     data-testid="background-blur"
     id="background-blur"
     type="range"
@@ -132,98 +143,64 @@
       commitBackgroundBlur(Number((e.currentTarget as HTMLInputElement).value)).catch(() => {});
     }}
   />
-  <span class="value">{uiSettings.backgroundBlur}</span>
-</div>
+  <span class="g-value">{uiSettings.backgroundBlur}</span>
+</SettingRow>
 
-<div class="field">
-  <label for="hardware-acceleration-toggle">Hardware acceleration</label>
-  <input
-    data-testid="hardware-acceleration-toggle"
-    id="hardware-acceleration-toggle"
-    type="checkbox"
-    checked={uiSettings.hardwareAcceleration}
-    onchange={onHardwareAcceleration}
+<SettingRow label="Game labels" labelId="card-labels-label">
+  <SegmentedSwitch
+    testId="card-labels"
+    id="card-labels"
+    ariaLabelledby="card-labels-label"
+    options={labelOptions}
+    value={uiSettings.cardLabels}
+    onChange={onCardLabels}
   />
-  <span class="value">Render with the graphics card · applies after you restart GRID</span>
-</div>
+</SettingRow>
 
-<div class="field">
-  <label for="debug-prints-toggle">Debug</label>
-  <input
-    data-testid="debug-prints-toggle"
-    id="debug-prints-toggle"
-    type="checkbox"
-    checked={debugPrints}
-    onchange={onDebugPrints}
+<SettingRow label="Game card display" labelId="card-display-label">
+  <SegmentedSwitch
+    testId="card-display"
+    id="card-display"
+    ariaLabelledby="card-display-label"
+    options={displayOptions}
+    value={uiSettings.cardDisplay}
+    onChange={onCardDisplay}
   />
-  <span class="value">Enable debug prints</span>
-</div>
+</SettingRow>
 
 {#each CARD_SIZE_VIEWS as v (v.view)}
-  <div class="field">
-    <label for={v.testId}>{v.label}</label>
-    <select data-testid={v.testId} id={v.testId} value={sizeFor(v.view)} onchange={(e) => onCardSize(v.view, e)}>
+  <SettingRow label={v.label} forId={v.testId}>
+    <select class="g-field" data-testid={v.testId} id={v.testId} value={sizeFor(v.view)} onchange={(e) => onCardSize(v.view, e)}>
       {#each CARD_SIZES as size (size)}
         <option value={size}>{cardSizeLabel(size)}</option>
       {/each}
     </select>
-  </div>
+  </SettingRow>
 {/each}
 
-<div class="field">
-  <label for="card-display">Game card display</label>
-  <select data-testid="card-display" id="card-display" value={uiSettings.cardDisplay} onchange={onCardDisplay}>
-    {#each CARD_DISPLAYS as display (display)}
-      <option value={display}>{cardDisplayLabel(display)}</option>
-    {/each}
-  </select>
-</div>
+<SettingRow label="Hardware acceleration" hint="Applies after you restart GRID" forId="hardware-acceleration-toggle">
+  <label class="g-check">
+    <input
+      data-testid="hardware-acceleration-toggle"
+      id="hardware-acceleration-toggle"
+      aria-describedby="hardware-acceleration-toggle-hint"
+      type="checkbox"
+      checked={uiSettings.hardwareAcceleration}
+      onchange={onHardwareAcceleration}
+    />
+    Render with the graphics card
+  </label>
+</SettingRow>
 
-<div class="field">
-  <label for="card-labels">Game labels</label>
-  <select data-testid="card-labels" id="card-labels" value={uiSettings.cardLabels} onchange={onCardLabels}>
-    {#each CARD_LABEL_MODES as mode (mode)}
-      <option value={mode}>{cardLabelsLabel(mode)}</option>
-    {/each}
-  </select>
-</div>
-
-<style>
-  .field {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-size: 13px;
-    color: var(--text-h);
-  }
-
-  .field label {
-    flex: 0 0 180px;
-  }
-
-  .field select {
-    font: inherit;
-    font-size: 13px;
-    padding: 6px 8px;
-    border-radius: var(--r-control);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--text-h);
-  }
-
-  .field input[type='range'] {
-    flex: 1 1 auto;
-    max-width: 320px;
-    accent-color: var(--primary);
-  }
-
-  .field input[type='checkbox'] {
-    accent-color: var(--primary);
-  }
-
-  .value {
-    flex: none;
-    color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
-  }
-</style>
+<SettingRow label="Debug" forId="debug-prints-toggle">
+  <label class="g-check">
+    <input
+      data-testid="debug-prints-toggle"
+      id="debug-prints-toggle"
+      type="checkbox"
+      checked={debugPrints}
+      onchange={onDebugPrints}
+    />
+    Enable debug prints
+  </label>
+</SettingRow>

@@ -118,10 +118,14 @@ STAGE_GROUPS=(
   # both themes, under ctr-out/ui-screens/, against the mock or (with the
   # E2E_LIVE_* variables) a real server.
   "ui-screens:specs/ui-screens.spec.ts"
+  # Screenshots only, opt-in: Choose your systems and every Settings page at
+  # 1280x800 in both themes, under ctr-out/$E2E_SETTINGS_SHOTS (default
+  # settings-screens/), on the first-run-setup fixtures and the mock forge.
+  "settings-screens:specs/settings-screens.spec.ts"
 )
 
 # Groups that run only when named on the command line.
-OPT_IN_GROUPS=(large-platform-perf ui-screens)
+OPT_IN_GROUPS=(large-platform-perf ui-screens settings-screens)
 
 # Run only the named groups by passing them as arguments, e.g.
 # `scripts/e2e.sh library downloads` — already supported by the
@@ -475,7 +479,7 @@ mock_args_for_group() {
     # from e2e/fixtures so the shared set — and every assertion the other
     # groups and mock-romm/server.test.mjs make about it — stays untouched.
     emulator-catalog) printf -- '--fixtures-dir fixtures-emulator-catalog' ;;
-    first-run-setup|systems) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
+    first-run-setup|systems|settings-screens) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
     discover) printf -- '--fixtures-dir fixtures-discover' ;;
     # An "Emulators" platform with one package (rom 801) that zips the mock
     # forge's PCSX2 AppImage stub, plus a PS2 platform for the defaults.
@@ -520,7 +524,7 @@ mock_args_for_group() {
 # `Sixdd6/grid-launcher`'s latest release through the same ForgeClient, so
 # the same redirect points it at the mock forge's release route.
 group_needs_forge() {
-  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" ]]
+  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "settings-screens" ]]
 }
 
 # The `launch` group's data dir is pre-seeded (Ruling A, task-7-brief.md):
@@ -739,7 +743,7 @@ EOF
       # Only the `first-run-setup` group sees the platform picker after
       # connecting (wdio.conf.ts turns this into
       # GRID_LAUNCHER_E2E_FIRST_RUN_SETUP, read by the e2e build only).
-      if [[ "$name" == "first-run-setup" ]]; then
+      if [[ "$name" == "first-run-setup" || "$name" == "settings-screens" ]]; then
         export E2E_FIRST_RUN_SETUP=1
       fi
       # Only the `library-move` group: the whole run is on one disk, where

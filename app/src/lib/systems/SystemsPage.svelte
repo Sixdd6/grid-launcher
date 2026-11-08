@@ -574,19 +574,22 @@
 
 <div class="systems" data-testid="systems-page">
   <div class="pane-head">
-    <p class="lede">
-      Each system on your server needs an emulator to play its games. Pick one here; GRID installs, updates and sets
-      it up.
-    </p>
+    <div class="title">
+      <h2 class="g-pane-title">Systems</h2>
+      <p class="lede">
+        Each system on your server needs an emulator to play its games. Pick one here; GRID installs, updates and sets
+        it up.
+      </p>
+    </div>
     <div class="head-acts">
-      <button class="btn secondary" data-testid="systems-check-updates" disabled={checking} onclick={checkForUpdates}>
+      <button class="g-btn secondary" data-testid="systems-check-updates" disabled={checking} onclick={checkForUpdates}>
         {checking ? 'Checking…' : 'Check for updates'}
       </button>
-      <button class="btn secondary" data-testid="systems-add-manual" onclick={() => (sheet = { mode: 'add' })}>
+      <button class="g-btn secondary" data-testid="systems-add-manual" onclick={() => (sheet = { mode: 'add' })}>
         Add an emulator manually
       </button>
       {#if missing.length > 0}
-        <button class="btn" data-testid="systems-install-recommended" onclick={installAllRecommended}>
+        <button class="g-btn" data-testid="systems-install-recommended" onclick={installAllRecommended}>
           {installRecommendedLabel(missing.length)}
         </button>
       {/if}
@@ -613,10 +616,10 @@
     </section>
   {/if}
 
-  {#if loadError}<p class="error" role="alert">{loadError}</p>{/if}
+  {#if loadError}<p class="g-error" role="alert">{loadError}</p>{/if}
 
   {#if !loaded}
-    <p class="muted">Loading…</p>
+    <p class="note">Loading…</p>
   {:else}
     <ul class="sys-list" data-testid="systems-list" bind:this={listEl}>
       {#each rows as row (row.key)}
@@ -663,6 +666,7 @@
                 <label class="dfield">
                   <span>Core</span>
                   <select
+                    class="g-field"
                     data-testid={`sys-core-${key}`}
                     value={core.selected}
                     disabled={core.disabled}
@@ -757,16 +761,21 @@
     gap: 14px;
   }
 
+  /* The design prototype's header: the title and the lede on the left, the
+     actions top-right beside the title. */
   .pane-head {
     display: flex;
     align-items: flex-start;
     gap: 12px;
   }
 
-  .lede {
+  .title {
     flex: 1 1 auto;
     min-width: 0;
-    margin: 0;
+  }
+
+  .lede {
+    margin: 4px 0 0;
     color: var(--text-muted);
     font-size: 13px;
   }
@@ -779,42 +788,10 @@
     flex: none;
   }
 
-  .btn {
-    font: inherit;
-    font-size: 13px;
-    padding: 6px 14px;
-    border-radius: var(--r-control);
-    border: 1px solid var(--primary);
-    background: var(--primary);
-    color: var(--on-primary);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .btn:hover:not(:disabled) {
-    background: var(--primary-hover);
-  }
-
-  .btn.secondary {
-    border-color: var(--border);
-    background: transparent;
-    color: var(--text-h);
-  }
-
-  .btn.secondary:hover:not(:disabled) {
-    background: var(--surface);
-  }
-
-  .btn:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-
   .sheet {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    max-width: 560px;
     padding: 16px;
     border-radius: var(--r-row);
     border: 1px solid var(--line);
@@ -884,17 +861,10 @@
     margin-top: 6px;
   }
 
-  .note,
-  .muted {
+  .note {
     margin: 0;
     font-size: 13px;
     color: var(--text-muted);
-  }
-
-  .error {
-    margin: 0;
-    font-size: 13px;
-    color: var(--danger);
   }
 
   .meta2 {
@@ -994,13 +964,6 @@
 
   .dfield select {
     max-width: 260px;
-    font: inherit;
-    font-size: 13px;
-    padding: 6px 8px;
-    border-radius: var(--r-control);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--text-h);
   }
 
   .tips summary {
