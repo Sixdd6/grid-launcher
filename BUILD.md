@@ -80,7 +80,7 @@ with a host build in the same tree. `appimage` builds, then repacks with the sam
 checksum-pinned `appimagetool` and update information as the release job, so its output
 is named and laid out like a released AppImage. The cargo
 and npm caches are shared volumes, and so are Tauri's AppImage bundling tools (about 40 MB,
-in `grid-launcher-xdg-cache`), so `appimage` downloads them from GitHub only once. Commit from the host; the container only builds and
+in `grid-launcher-xdg-cache`, with the AppImage runtime, refreshed after 30 days), so `appimage` does not depend on GitHub once they are cached. Commit from the host; the container only builds and
 tests.
 
 ## Develop

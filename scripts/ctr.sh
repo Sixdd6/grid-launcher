@@ -151,15 +151,32 @@ case "${1:-}" in
     TARGET_VOLUME=$VOL_PREFIX-release-target
     # Tauri downloads its bundling tools (linuxdeploy, its plugins, AppRun; about 40 MB)
     # into $XDG_CACHE_HOME/tauri on every run of a fresh container. Keep them in a shared
-    # volume so a GitHub outage only breaks the first build. Only tauri/ is kept: the
-    # script below empties everything else in it.
+    # volume so a GitHub outage only breaks the first build. The AppImage runtime (about
+    # 1 MB) that linuxdeploy's AppImage plugin and appimagetool would each download is
+    # kept there too, in appimage-runtime/. It is refreshed once it is 30 days old (the
+    # release job always takes the latest); a failed refresh keeps the cached copy. Only
+    # those two folders are kept: the script below empties everything else in it.
     EXTRA_ARGS=(-v "$CACHE_PREFIX-xdg-cache:/cache/xdg" -e XDG_CACHE_HOME=/cache/xdg)
     # The release job's steps (build-linux in build.yml): build, then repack with
     # appimagetool to embed the update information. Same tool, version and digest as
     # there; keep the two in step.
     in_ctr bash -c 'set -euo pipefail
       version=$1
-      trap '\''find /cache/xdg -mindepth 1 -maxdepth 1 ! -name tauri -exec rm -rf {} +'\'' EXIT
+      trap '\''find /cache/xdg -mindepth 1 -maxdepth 1 ! -name tauri ! -name appimage-runtime -exec rm -rf {} +'\'' EXIT
+      runtime=/cache/xdg/appimage-runtime/runtime-x86_64
+      if [ ! -s "$runtime" ] || [ -n "$(find "$runtime" -mtime +30)" ]; then
+        mkdir -p "${runtime%/*}"
+        if curl -fsSL --retry 6 --retry-delay 10 --retry-all-errors -o "$runtime.part" \
+            https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64 \
+            && [ "$(head -c 4 "$runtime.part" | od -An -tx1 | tr -d " ")" = 7f454c46 ]; then
+          mv "$runtime.part" "$runtime"
+        else
+          rm -f "$runtime.part"
+          [ -s "$runtime" ] || { echo "ctr.sh: could not download the AppImage runtime" >&2; exit 1; }
+          echo "ctr.sh: AppImage runtime refresh failed; using the cached copy" >&2
+        fi
+      fi
+      export LDAI_RUNTIME_FILE=$runtime
       (cd app && npm ci --no-audit --no-fund && npx tauri build --bundles appimage --config "{\"version\":\"$version\"}")
       tool=target/tools/appimagetool-1.9.1
       if [ ! -x "$tool" ]; then
@@ -173,7 +190,7 @@ case "${1:-}" in
       work=$(mktemp -d)
       (cd "$work" && "/work/target/release/bundle/appimage/GRID Launcher_${version}_amd64.AppImage" --appimage-extract >/dev/null)
       rm -f "ctr-out/$out" "ctr-out/$out.zsync"
-      (cd ctr-out && "/work/$tool" --appimage-extract-and-run \
+      (cd ctr-out && "/work/$tool" --appimage-extract-and-run --runtime-file "$runtime" \
         -u "gh-releases-zsync|Sixdd6|grid-launcher|latest|grid-launcher-*-x86_64.AppImage.zsync" \
         "$work/squashfs-root" "$out")
       rm -rf "$work"
