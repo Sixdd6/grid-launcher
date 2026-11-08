@@ -5,7 +5,7 @@ var FR = { phase: null, form: { url: '', user: '', secret: '', lib: '~/Games/GRI
 
 function freshReset() {
   SY.installed = []; SY.order.forEach(function (k) { SY.pick[k] = ''; EMU[k] = 'none'; });
-  SY.fw = {}; SY.upd = {}; SY.open = {}; SY.busy = {}; SY.menu = null; SY.sheet = null;
+  SY.fw = {}; SY.upd = {}; SY.winSet = false; SY.open = {}; SY.busy = {}; SY.menu = null; SY.sheet = null;
   SY.protons = ['Wine 10.0 (system)', 'Proton 9.0 (Steam)', 'Proton Experimental (Steam)']; SY.protonGet = ['GE-Proton10-17', 'Proton-CachyOS 10.0-20251031']; SY.proton = 'Wine 10.0 (system)';
   G.forEach(function (g) { g.installed = false; g.update = false; g.missing = false; g.cloud = false; });
   S.view = 'server'; S.platform = 'DISCOVER'; S.setPane = 'systems'; S.libFilter = 'all'; S.detail = null; S.dl = null;
@@ -41,7 +41,7 @@ function freshShow(phase) {
         t ? '<select class="field sys-pick" data-fr-pick="' + k + '">' + opts.map(function (n) { return '<option value="' + n + '"' + (n === FR.choice[k] ? ' selected' : '') + '>' + n + (n === SY.rec[k] ? ' (recommended)' : '') + '</option>'; }).join('') + '</select>' : '';
       return '<li class="sysrow fr-row' + (t ? ' ticked' : '') + (opts.length ? '' : ' off') + '"><label class="fr-pick"><input type="checkbox" data-fr-tick="' + k + '"' + (t ? ' checked' : '') + (opts.length ? '' : ' disabled') + '><b>' + SY.name[k] + '</b><span class="muted-s">' + SY.games[k] + ' games</span></label>' + right + '</li>';
     });
-    rows.push('<li class="sysrow fr-row' + (FR.proton ? ' ticked' : '') + '"><label class="fr-pick"><input type="checkbox" data-fr-proton' + (FR.proton ? ' checked' : '') + '><b>Windows</b><span class="muted-s">' + SY.games.PC + ' games · Linux only</span></label>' +
+    rows.push('<li class="sysrow fr-row' + (FR.proton ? ' ticked' : '') + '"><label class="fr-pick"><input type="checkbox" data-fr-proton' + (FR.proton ? ' checked' : '') + '><b>Windows</b><span class="muted-s">' + SY.games.PC + ' games · runs through Proton</span></label>' +
       (FR.proton ? '<select class="field sys-pick" data-fr-proton-pick aria-label="Proton version for Windows games">' + syProtonOptions(FR.protonChoice) + '</select>' : '') + '</li>');
     var n = Object.keys(count).length, pDl = FR.proton && FR.protonChoice.indexOf('install:') === 0 ? FR.protonChoice.slice(8) : '';
     /* One count: a Proton download is one of the installs. */
@@ -61,6 +61,7 @@ function frStartRun() {
   var jobs = {};
   Object.keys(FR.ticked).forEach(function (k) { if (FR.ticked[k]) { var n = FR.choice[k]; (jobs[n] = jobs[n] || []).push(k); } });
   var pDl = FR.proton && FR.protonChoice.indexOf('install:') === 0 ? FR.protonChoice.slice(8) : '';
+  if (FR.proton) SY.winSet = true;
   if (FR.proton && !pDl) SY.proton = FR.protonChoice;
   if (pDl) jobs[pDl] = ['PC'];
   var names = Object.keys(jobs);

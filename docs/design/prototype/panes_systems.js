@@ -17,8 +17,12 @@ var SY = {
   fw: { PS: 'installed', SAT: 'install' },
   proton: 'GE-Proton10-17', protonRec: 'GE-Proton10-17',
   protons: ['GE-Proton10-17', 'Wine 10.0 (system)', 'Proton 9.0 (Steam)', 'Proton Experimental (Steam)'], protonGet: ['Proton-CachyOS 10.0-20251031'],
-  umu: 'system', open: {}, busy: {}, menu: null, sheet: null, adv: false
+  umu: 'system', open: {}, busy: {}, menu: null, sheet: null, adv: false,
+  /* Windows counts as a preferred platform once a compat tool is picked for it. */
+  winSet: true
 };
+/* Game counts match the Server rail (each prototype game stands for 8). */
+Object.keys(SY.games).forEach(function (k) { var n = G.filter(function (g) { return g.p === (k === 'PC' ? 'WIN' : k); }).length; if (n) SY.games[k] = n * 8; });
 function syHas(n) { return SY.installed.indexOf(n) >= 0; }
 function syNeeds() { return SY.order.filter(function (k) { return !SY.pick[k] && SY.rec[k]; }); }
 function syEsc(v) { return esc(v).replace(/"/g, '&quot;'); }
@@ -92,7 +96,7 @@ function syWindows() {
   var body = open ? '<div class="sys-body"><p class="note">Windows games run through Proton on Linux. Most people never need to change this.</p>' +
     '<div class="check-row"><span class="st ok" data-icon="check" data-size="14"></span><span>Proton launcher (umu-run) <span class="muted-s">· ' + umu + '</span></span><span class="acts"><button class="small-btn" data-sy-umu' + (SY.umu === 'busy' ? ' disabled' : '') + '>' + (SY.umu === 'system' ? 'Use GRID’s copy' : 'Reinstall') + '</button></span></div>' +
     '<p class="note small">The first Windows game you launch downloads the Steam Linux Runtime (about 200 MB), so it takes longer than later ones.</p></div>' : '';
-  return '<li class="sysrow' + (open ? ' open' : '') + '"><div class="sys-head"><button class="sys-toggle" data-sy-toggle="PC" aria-expanded="' + open + '"><span class="chev" data-icon="chevronRight" data-size="14"></span><b>Windows</b><span class="muted-s">' + SY.games.PC + ' games · Linux only</span></button>' +
+  return '<li class="sysrow' + (open ? ' open' : '') + '"><div class="sys-head"><button class="sys-toggle" data-sy-toggle="PC" aria-expanded="' + open + '"><span class="chev" data-icon="chevronRight" data-size="14"></span><b>Windows</b><span class="muted-s">' + SY.games.PC + ' games · runs through Proton</span></button>' +
     '<select class="field sys-pick" data-sy-proton aria-label="Proton version for Windows games"' + (SY.busy.PC ? ' disabled' : '') + '>' + o + '</select>' + (SY.busy.PC ? '<span class="pill-s">Installing…</span>' : syStatus('PC')) + '</div>' + body + '</li>';
 }
 
@@ -204,6 +208,7 @@ function syChange(e) {
     SY.pick[k] = v; EMU[k] = v || 'none'; SY.open[k] = !!v; syRerender(); return;
   }
   if (t.hasAttribute('data-sy-proton')) {
+    SY.winSet = true;
     if (v.indexOf('install:') === 0) { syInstall(v.slice(8), 'PC'); return; }
     SY.proton = v; toast('Windows games now use ' + SY.proton); syRerender();
   }

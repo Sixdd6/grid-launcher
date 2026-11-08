@@ -30,6 +30,12 @@ EXTRA = [
   ("Coral Static", "hsl(10 55% 40%)", "PS", "2000-11-16", "2026-10-31"),
   ("Signal Fires", "hsl(230 45% 40%)", "PS2", "2007-03-08", "2026-10-29"),
   ("Orbit Bloom", "hsl(300 40% 40%)", "GC", "2006-06-15", "2026-11-06"),
+  ("Harbor Lights", "hsl(205 50% 38%)", "WIN", "2026-08-21", "2026-08-25"),
+  ("Grey Meridian", "hsl(220 15% 34%)", "WIN", "2026-03-05", "2026-10-27"),
+  ("Foxglove", "hsl(330 45% 40%)", "WIN", "2025-10-16", "2026-07-08"),
+  ("Iron Lullaby", "hsl(15 35% 34%)", "WIN", "2024-12-11", "2026-09-30"),
+  ("Low Tide Radio", "hsl(185 40% 34%)", "WIN", "2023-05-25", "2026-11-03"),
+  ("Pale Summit", "hsl(210 25% 46%)", "WIN", "2022-02-17", "2026-04-14"),
 ]
 data = {
   "games": [
@@ -271,8 +277,8 @@ __ICON_JS__
 (function(){
 var DATA = __DATA__;
 var G = DATA.games.map(function(g, i){ return Object.assign({ id: i, installed: [0,1,2,4,6,9,12].indexOf(i) >= 0, update: i === 1, missing: i === 9, cloud: [0,4,6].indexOf(i) >= 0 }, g); });
-var PLAT = { PS: 'PlayStation', N64: 'Nintendo 64', SAT: 'Sega Saturn', GC: 'GameCube', SNES: 'Super Nintendo', PS2: 'PlayStation 2', LINUX: 'Linux' };
-var EMU = { PS: 'DuckStation', N64: 'RetroArch · Mupen64Plus-Next', SAT: 'Ymir (Sega Saturn)', GC: 'Dolphin', SNES: 'RetroArch · Snes9x', PS2: 'PCSX2', LINUX: 'none' };
+var PLAT = { PS: 'PlayStation', N64: 'Nintendo 64', SAT: 'Sega Saturn', GC: 'GameCube', SNES: 'Super Nintendo', PS2: 'PlayStation 2', LINUX: 'Linux', WIN: 'Windows' };
+var EMU = { PS: 'DuckStation', N64: 'RetroArch · Mupen64Plus-Next', SAT: 'Ymir (Sega Saturn)', GC: 'Dolphin', SNES: 'RetroArch · Snes9x', PS2: 'PCSX2', LINUX: 'none', WIN: 'none' };
 var VIEWS = ['library','server','downloads','emulators','settings'];
 var S = { view: 'server', platform: 'PS', libFilter: 'all', q: { library: '', server: '' }, cardW: 160, labels: 'always', fade: 50, blur: 2, lastFade: 50, emuPane: 'installed', setPane: 'appearance', detail: null, tab: 'overview', kind: 'save', dl: null, fw: { PS: 'installed', SAT: 'install', GC: 'unavailable' } };
 var $ = function(id){ return document.getElementById(id); };
@@ -328,8 +334,8 @@ function renderServer(){
   $('srv-title').textContent = PLAT[S.platform];
   $('srv-count').textContent = (inPlat.length * 8) + ' games · ' + inPlat.filter(function(g){return g.installed;}).length + ' installed';
   $('srv-emu').textContent = 'Emulator: ' + EMU[S.platform];
-  /* A native platform runs without an emulator: no emulator or firmware chips. */
-  document.querySelector('[data-view=server] .g-chips').hidden = S.platform === 'LINUX';
+  /* Native and Windows games run without an emulator: no emulator or firmware chips. */
+  document.querySelector('[data-view=server] .g-chips').hidden = S.platform === 'LINUX' || S.platform === 'WIN';
   var shown = inPlat.concat(G.filter(function(g){ return g.p !== S.platform; }).slice(0, 10)).filter(function(g){ return match(g, S.q.server); });
   fillGrid('srv-grid', shown, false, S.q.server.trim() ? 'No games match “'+S.q.server.trim()+'”' : 'This platform has no games');
 }

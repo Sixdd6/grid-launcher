@@ -4,10 +4,12 @@
 var DISC = { cf: 0, ra: 0, sig: '' };
 var TODAY = '2026-11-07';
 
-/* Preferred platforms: every system with an emulator, plus the games native
-   to this computer (Linux here), which need nothing installed. */
+/* Preferred platforms: every system with an emulator, Windows once a compat
+   tool is picked for it, plus the games native to this computer (Linux here;
+   on a Windows computer that would be the Windows games). */
 function prefPlatforms() {
   var out = Object.keys(SY.pick).filter(function (k) { return SY.pick[k] && PLAT[k]; });
+  if (SY.winSet) out.push('WIN');
   out.push('LINUX');
   return out;
 }
