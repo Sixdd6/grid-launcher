@@ -297,14 +297,14 @@ function match(g, q){ q = q.trim().toLowerCase(); return !q || g.t.toLowerCase()
 
 function renderServer(){
   var plats = Object.keys(PLAT).sort(function(a,b){ return PLAT[a].localeCompare(PLAT[b]); });
-  rail('srv-rail', plats.map(function(p){ return { key: p, label: PLAT[p], count: G.filter(function(g){return g.p===p;}).length * 8, sel: S.platform === p }; }), function(k){ S.platform = k; renderServer(); });
+  rail('srv-rail', plats.map(function(p){ return { key: p, label: PLAT[p], count: G.filter(function(g){return g.p===p;}).length, sel: S.platform === p }; }), function(k){ S.platform = k; renderServer(); });
   var inPlat = G.filter(function(g){ return g.p === S.platform; });
   $('srv-title').textContent = PLAT[S.platform];
-  $('srv-count').textContent = (inPlat.length * 8) + ' games · ' + inPlat.filter(function(g){return g.installed;}).length + ' installed';
+  $('srv-count').textContent = inPlat.length + (inPlat.length === 1 ? ' game · ' : ' games · ') + inPlat.filter(function(g){return g.installed;}).length + ' installed';
   $('srv-emu').textContent = 'Emulator: ' + EMU[S.platform];
   /* Native and Windows games run without an emulator: no emulator or firmware chips. */
   document.querySelector('[data-view=server] .g-chips').hidden = S.platform === 'LINUX' || S.platform === 'WIN';
-  var shown = inPlat.concat(G.filter(function(g){ return g.p !== S.platform; }).slice(0, 10)).filter(function(g){ return match(g, S.q.server); });
+  var shown = inPlat.filter(function(g){ return match(g, S.q.server); });
   fillGrid('srv-grid', shown, false, S.q.server.trim() ? 'No games match “'+S.q.server.trim()+'”' : 'This platform has no games');
 }
 function renderLibrary(){

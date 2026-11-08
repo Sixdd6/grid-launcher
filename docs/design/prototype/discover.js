@@ -202,7 +202,7 @@ function discClick(e) {
 function srvRail() {
   var plats = Object.keys(PLAT).sort(function (a, b) { return PLAT[a].localeCompare(PLAT[b]); });
   rail('srv-rail', [{ key: 'DISCOVER', label: 'Discover', sel: S.platform === 'DISCOVER', divider: true }].concat(
-    plats.map(function (p) { return { key: p, label: PLAT[p], count: G.filter(function (g) { return g.p === p; }).length * 8, sel: S.platform === p }; })),
+    plats.map(function (p) { return { key: p, label: PLAT[p], count: G.filter(function (g) { return g.p === p; }).length, sel: S.platform === p }; })),
     function (k) { S.platform = k; renderServer(); });
 }
 var discRenderServer = renderServer;

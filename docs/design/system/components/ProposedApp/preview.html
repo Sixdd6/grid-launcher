@@ -524,14 +524,14 @@ function match(g, q){ q = q.trim().toLowerCase(); return !q || g.t.toLowerCase()
 
 function renderServer(){
   var plats = Object.keys(PLAT).sort(function(a,b){ return PLAT[a].localeCompare(PLAT[b]); });
-  rail('srv-rail', plats.map(function(p){ return { key: p, label: PLAT[p], count: G.filter(function(g){return g.p===p;}).length * 8, sel: S.platform === p }; }), function(k){ S.platform = k; renderServer(); });
+  rail('srv-rail', plats.map(function(p){ return { key: p, label: PLAT[p], count: G.filter(function(g){return g.p===p;}).length, sel: S.platform === p }; }), function(k){ S.platform = k; renderServer(); });
   var inPlat = G.filter(function(g){ return g.p === S.platform; });
   $('srv-title').textContent = PLAT[S.platform];
-  $('srv-count').textContent = (inPlat.length * 8) + ' games · ' + inPlat.filter(function(g){return g.installed;}).length + ' installed';
+  $('srv-count').textContent = inPlat.length + (inPlat.length === 1 ? ' game · ' : ' games · ') + inPlat.filter(function(g){return g.installed;}).length + ' installed';
   $('srv-emu').textContent = EMU[S.platform]==='none' ? 'No default emulator' : 'Emulator: ' + EMU[S.platform]; var fwN = { PS: 3, SAT: 2 }[S.platform], fwS = SY.fw[S.platform]; $('srv-fw').textContent = !fwN ? 'No server firmware' : (EMU[S.platform]==='none' ? 'Firmware: ' + fwN + ' files — no default emulator' : fwS==='installed' ? 'Firmware: ' + fwN + ' files · installed' : 'Firmware: ' + fwN + ' files');
   /* Native and Windows games run without an emulator: no emulator or firmware chips. */
   document.querySelector('[data-view=server] .g-chips').hidden = S.platform === 'LINUX' || S.platform === 'WIN';
-  var shown = inPlat.concat(G.filter(function(g){ return g.p !== S.platform; }).slice(0, 10)).filter(function(g){ return match(g, S.q.server); });
+  var shown = inPlat.filter(function(g){ return match(g, S.q.server); });
   fillGrid('srv-grid', shown, false, S.q.server.trim() ? 'No games match “'+S.q.server.trim()+'”' : 'This platform has no games');
 }
 function renderLibrary(){
@@ -761,8 +761,8 @@ var SY = {
   /* Windows counts as a preferred platform once a compat tool is picked for it. */
   winSet: true
 };
-/* Game counts match the Server rail (each prototype game stands for 8). */
-Object.keys(SY.games).forEach(function (k) { var n = G.filter(function (g) { return g.p === (k === 'PC' ? 'WIN' : k); }).length; if (n) SY.games[k] = n * 8; });
+/* Game counts match the Server rail. */
+Object.keys(SY.games).forEach(function (k) { var n = G.filter(function (g) { return g.p === (k === 'PC' ? 'WIN' : k); }).length; if (n) SY.games[k] = n; });
 function syHas(n) { return SY.installed.indexOf(n) >= 0; }
 function syNeeds() { return SY.order.filter(function (k) { return !SY.pick[k] && SY.rec[k]; }); }
 function syEsc(v) { return esc(v).replace(/"/g, '&quot;'); }
@@ -1363,7 +1363,7 @@ function discClick(e) {
 function srvRail() {
   var plats = Object.keys(PLAT).sort(function (a, b) { return PLAT[a].localeCompare(PLAT[b]); });
   rail('srv-rail', [{ key: 'DISCOVER', label: 'Discover', sel: S.platform === 'DISCOVER', divider: true }].concat(
-    plats.map(function (p) { return { key: p, label: PLAT[p], count: G.filter(function (g) { return g.p === p; }).length * 8, sel: S.platform === p }; })),
+    plats.map(function (p) { return { key: p, label: PLAT[p], count: G.filter(function (g) { return g.p === p; }).length, sel: S.platform === p }; })),
     function (k) { S.platform = k; renderServer(); });
 }
 var discRenderServer = renderServer;

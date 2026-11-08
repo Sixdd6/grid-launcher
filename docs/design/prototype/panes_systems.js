@@ -21,8 +21,8 @@ var SY = {
   /* Windows counts as a preferred platform once a compat tool is picked for it. */
   winSet: true
 };
-/* Game counts match the Server rail (each prototype game stands for 8). */
-Object.keys(SY.games).forEach(function (k) { var n = G.filter(function (g) { return g.p === (k === 'PC' ? 'WIN' : k); }).length; if (n) SY.games[k] = n * 8; });
+/* Game counts match the Server rail. */
+Object.keys(SY.games).forEach(function (k) { var n = G.filter(function (g) { return g.p === (k === 'PC' ? 'WIN' : k); }).length; if (n) SY.games[k] = n; });
 function syHas(n) { return SY.installed.indexOf(n) >= 0; }
 function syNeeds() { return SY.order.filter(function (k) { return !SY.pick[k] && SY.rec[k]; }); }
 function syEsc(v) { return esc(v).replace(/"/g, '&quot;'); }
