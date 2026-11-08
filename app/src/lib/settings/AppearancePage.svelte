@@ -1,6 +1,7 @@
 <script lang="ts">
   // Settings › Appearance (design §10): theme, card size defaults, background
-  // art on/off, the fade slider 0–60% and the blur slider 0–40. The art reads
+  // art on/off, the fade slider 0–100% (100 = fully faded, which is off) and
+  // the blur slider 0–40. The art reads
   // the same store, so the FADE slider previews on `oninput` and persists on
   // `onchange`. The BLUR slider persists on `onchange` only: each sigma is a
   // separate variant the backend builds and caches, so a live drag preview
@@ -114,7 +115,7 @@
       commitBackgroundFade(Number((e.currentTarget as HTMLInputElement).value)).catch(() => {});
     }}
   />
-  <span class="value">{uiSettings.backgroundFade}%</span>
+  <span class="value">{uiSettings.backgroundFade}%{backgroundEnabled(uiSettings.backgroundFade) ? '' : ' · off'}</span>
 </div>
 
 <div class="field">

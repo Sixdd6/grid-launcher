@@ -5,9 +5,22 @@
 export type ThemeChoice = 'system' | 'dark' | 'light';
 export type ResolvedTheme = 'dark' | 'light';
 
-/** Design §3: the Appearance slider's range and its default. */
+/** Design §3: the Appearance fade slider's range and its default. The fade is
+ *  how far the art is faded toward the window background: 0 shows it at full
+ *  strength, `FADE_MAX` fades it away entirely and turns it off. */
 export const FADE_DEFAULT = 50;
-export const FADE_MAX = 60;
+export const FADE_MAX = 100;
+
+/** Whether the background art shows at all. Fully faded is off: nothing is
+ *  fetched, built or cycled for art nobody can see. */
+export function artVisible(fade: number): boolean {
+  return fade < FADE_MAX;
+}
+
+/** The art layer's opacity for a fade: 0 → 1 (full strength), 100 → 0. */
+export function artOpacity(fade: number): number {
+  return Math.min(1, Math.max(0, 1 - fade / FADE_MAX));
+}
 
 /** Design §3: the Appearance blur slider's range and its default sigma. The
  *  blur is baked into the cached variant by the backend, so every distinct

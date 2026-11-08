@@ -79,7 +79,9 @@ describe('ui screens: the main views for a design review', () => {
   });
 
   for (const theme of ['dark', 'light']) {
-    for (const fade of [0, 30, 60]) {
+    // Fully faded (art off), halfway, and the art at full strength: the
+    // hardest case for readability (user ruling 2026-11-07: 0 is no fade).
+    for (const fade of [100, 50, 0]) {
       it(`server grid and details, ${theme}, fade ${fade}`, async () => {
         await appearance(theme, fade);
         await openServerPlatform();
@@ -97,9 +99,9 @@ describe('ui screens: the main views for a design review', () => {
     }
   }
 
-  it('the Media tab, both themes, fade 30', async () => {
+  it('the Media tab, both themes, fade 70', async () => {
     for (const theme of ['dark', 'light']) {
-      await appearance(theme, 30);
+      await appearance(theme, 70);
       await openServerPlatform();
       const card = await $('[data-testid="server-grid"] [data-testid^="game-card-"]');
       if (!(await card.isExisting())) continue;
@@ -107,7 +109,7 @@ describe('ui screens: the main views for a design review', () => {
       await $(testId('details-panel')).waitForDisplayed({ timeout: 20_000 });
       await $(testId('details-tab-media')).click();
       await browser.pause(2500);
-      await shot(`details-media-${theme}-fade30`);
+      await shot(`details-media-${theme}-fade70`);
       await $(testId('details-media-0')).click();
       await $(testId('media-viewer')).waitForDisplayed({ timeout: 20_000 });
       await browser.pause(1500);
@@ -121,19 +123,19 @@ describe('ui screens: the main views for a design review', () => {
       await $(testId('media-viewer')).waitForExist({ timeout: 20_000, reverse: true });
       await $(testId('details-tab-saves')).click();
       await browser.pause(1500);
-      await shot(`details-saves-${theme}-fade30`);
+      await shot(`details-saves-${theme}-fade70`);
       await $(testId('details-tab-overview')).click();
       await $(testId('details-close')).click();
     }
   });
 
-  it('labels on hover, both themes, fade 60', async () => {
+  it('labels on hover, both themes, fade 40', async () => {
     for (const theme of ['dark', 'light']) {
-      await appearance(theme, 60);
+      await appearance(theme, 40);
       await setControl('card-labels', 'hover');
       await openServerPlatform();
       await hoverFirstCard();
-      await shot(`server-${theme}-fade60-hover-labels`);
+      await shot(`server-${theme}-fade40-hover-labels`);
     }
     await $(testId('nav-settings')).click();
     await setControl('card-labels', 'always');
@@ -143,9 +145,9 @@ describe('ui screens: the main views for a design review', () => {
   // card's title is lengthened in the page, since few fixtures have one,
   // and the card is shown in its focused state (styled as hover), since a
   // WebDriver pointer does not reliably hold :hover for the screenshot.
-  it('a long title on hover, both label modes, dark, fade 30', async () => {
+  it('a long title on hover, both label modes, dark, fade 70', async () => {
     for (const labels of ['always', 'hover']) {
-      await appearance('dark', 30);
+      await appearance('dark', 70);
       await setControl('card-labels', labels);
       await openServerPlatform();
       await browser.execute(() => {
@@ -154,7 +156,7 @@ describe('ui screens: the main views for a design review', () => {
         label?.closest('[data-testid^="game-card-"]')?.classList.add('focused');
       });
       await browser.pause(500);
-      await shot(`server-dark-fade30-long-title-${labels}`);
+      await shot(`server-dark-fade70-long-title-${labels}`);
     }
     await $(testId('nav-settings')).click();
     await setControl('card-labels', 'always');
@@ -164,7 +166,7 @@ describe('ui screens: the main views for a design review', () => {
     const mixed = process.env.E2E_LIVE_MIXED_PLATFORM;
     if (!mixed) return;
     for (const display of ['rows', 'columns']) {
-      await appearance('dark', 30);
+      await appearance('dark', 70);
       await setControl('card-display', display);
       await $(testId('nav-server')).click();
       await $(testId(`platform-btn-${mixed}`)).click();
@@ -175,15 +177,15 @@ describe('ui screens: the main views for a design review', () => {
     await setControl('card-display', 'rows');
   });
 
-  it('the other views, dark, fade 30', async () => {
-    await appearance('dark', 30);
-    await shot('settings-dark-fade30');
+  it('the other views, dark, fade 70', async () => {
+    await appearance('dark', 70);
+    await shot('settings-dark-fade70');
     for (const view of ['library', 'emulators', 'downloads']) {
       const nav = await $(testId(`nav-${view}`));
       if (!(await nav.isExisting())) continue;
       await nav.click();
       await browser.pause(1500);
-      await shot(`${view}-dark-fade30`);
+      await shot(`${view}-dark-fade70`);
     }
   });
 });

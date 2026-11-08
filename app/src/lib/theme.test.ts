@@ -3,8 +3,11 @@ import {
   BLUR_DEFAULT,
   BLUR_MAX,
   clampBlur,
+  artOpacity,
+  artVisible,
   clampFade,
   FADE_DEFAULT,
+  FADE_MAX,
   normalizeTheme,
   resolveTheme,
   themeAttribute,
@@ -52,16 +55,32 @@ describe('clampFade', () => {
   it('keeps values inside the design range', () => {
     expect(clampFade(0)).toBe(0);
     expect(clampFade(25)).toBe(25);
-    expect(clampFade(60)).toBe(60);
+    expect(clampFade(100)).toBe(100);
   });
   it('clamps out-of-range values instead of rejecting them', () => {
     expect(clampFade(-5)).toBe(0);
-    expect(clampFade(120)).toBe(60);
+    expect(clampFade(120)).toBe(100);
   });
   it('rounds fractional slider values and falls back on garbage', () => {
     expect(clampFade(30.6)).toBe(31);
     expect(clampFade(Number.NaN)).toBe(FADE_DEFAULT);
     expect(FADE_DEFAULT).toBe(50);
+  });
+});
+
+// User ruling 2026-11-07: the fade is a real fade. 0 is the art at full
+// strength, 100 is the window background alone, and fully faded is off.
+describe('artOpacity and artVisible', () => {
+  it('maps the fade to the art layer opacity, falling as the fade rises', () => {
+    expect(artOpacity(0)).toBe(1);
+    expect(artOpacity(50)).toBe(0.5);
+    expect(artOpacity(FADE_MAX)).toBe(0);
+    expect(artOpacity(150)).toBe(0);
+  });
+  it('turns the art off only when fully faded', () => {
+    expect(artVisible(0)).toBe(true);
+    expect(artVisible(99)).toBe(true);
+    expect(artVisible(FADE_MAX)).toBe(false);
   });
 });
 

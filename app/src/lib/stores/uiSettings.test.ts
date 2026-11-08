@@ -183,19 +183,19 @@ describe('setBackgroundEnabled', () => {
     return { store, setUiSettings };
   }
 
-  it('off writes fade 0, and on restores the value the slider last held', async () => {
+  it('off writes a full fade, and on restores the value the slider last held', async () => {
     const { store, setUiSettings } = await loadStore(40);
     await store.setBackgroundEnabled(false);
-    expect(store.uiSettings.backgroundFade).toBe(0);
-    expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ background_fade: 0 }));
+    expect(store.uiSettings.backgroundFade).toBe(100);
+    expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ background_fade: 100 }));
 
     await store.setBackgroundEnabled(true);
     expect(store.uiSettings.backgroundFade).toBe(40);
     expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ background_fade: 40 }));
   });
 
-  it('on with a config that was already 0 uses the design default', async () => {
-    const { store } = await loadStore(0);
+  it('on with a config that was already off uses the design default', async () => {
+    const { store } = await loadStore(100);
     await store.setBackgroundEnabled(true);
     expect(store.uiSettings.backgroundFade).toBe(50);
   });

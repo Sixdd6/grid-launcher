@@ -137,10 +137,11 @@ describe('shouldCycle', () => {
     expect(shouldCycle([], 25)).toBe(false);
   });
 
-  // User ruling 2026-09-05: fade 0 means the art is invisible, so a timer
-  // swapping invisible images is pure cost.
-  it('does not cycle while the fade slider is at 0', () => {
-    expect(shouldCycle(['a', 'b'], 0)).toBe(false);
+  // User ruling 2026-09-05: art nobody can see is not cycled. Fully faded
+  // (100) is off (user ruling 2026-11-07); 0 is the art at full strength.
+  it('does not cycle while the art is fully faded', () => {
+    expect(shouldCycle(['a', 'b'], 100)).toBe(false);
+    expect(shouldCycle(['a', 'b'], 0)).toBe(true);
   });
 });
 

@@ -76,7 +76,7 @@ describe('prefetchBackground', () => {
   });
 
   it('asks for nothing while the background art is switched off', () => {
-    fade.value = 0;
+    fade.value = 100;
     prefetchBackground({ fanart: [], screenshots: [], cover: 'https://romm/cover.png' });
     expect(ensureBackgroundVariant).not.toHaveBeenCalled();
   });
@@ -323,7 +323,7 @@ describe('warmBackground', () => {
   });
 
   it('reports the art as switched off, so the caller keeps watching the card', () => {
-    fade.value = 0;
+    fade.value = 100;
     expect(warmBackground(cover('https://romm/a.png'))).toBe(false);
     expect(ensureBackgroundVariant).not.toHaveBeenCalled();
   });

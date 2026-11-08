@@ -7,6 +7,7 @@
   import { clearIfBottom, initialSlotState, outgoingSlot, withNextCover } from './backgroundSlots';
   import { lastViewed } from './stores/lastViewed.svelte';
   import { uiSettings } from './stores/uiSettings.svelte';
+  import { artOpacity, artVisible } from './theme';
   import { trackViewportFill, viewportFill } from './stores/viewportFill.svelte';
 
   // Two layers so a change cross-fades rather than popping (design §3:
@@ -60,8 +61,8 @@
   $effect(() => trackViewportFill());
   let fill = $derived(viewportFill());
 
-  // 0–60 in the config, 0–0.6 as an opacity.
-  let opacity = $derived(uiSettings.backgroundFade / 100);
+  // The fade, 0–100, as an opacity: 0 → 1 (full strength), 100 → 0 (off).
+  let opacity = $derived(artOpacity(uiSettings.backgroundFade));
 
   // The 5s rotation (fanart_background.py:52-53, 80-84). Only with more than
   // one image, and only while the art is visible — user ruling 2026-09-05.
@@ -78,7 +79,7 @@
     // Background art off (design §10): nothing is visible, so nothing is
     // worth downloading, decoding and blurring. Turning it back on re-runs
     // this effect, which then fetches.
-    if (uiSettings.backgroundFade === 0) return;
+    if (!artVisible(uiSettings.backgroundFade)) return;
     const url = current;
     if (url === null) return;
     // Part of the variant's file name, so a change of sigma re-runs this

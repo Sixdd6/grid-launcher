@@ -1,6 +1,7 @@
 // Pure selection logic for the shell's background art (design §3).
 import type { GameSummary, InstalledGame } from './api';
 import type { DetailsSubject } from './details/subject';
+import { artVisible } from './theme';
 
 /** Design §3: a card must be hovered for MORE than 120ms before it becomes
  *  the background. Long enough that a pointer crossing the grid does not
@@ -96,7 +97,7 @@ export function isEmptySubject(subject: BackgroundSubject): boolean {
 
 /** Cycle only with something to cycle to, and only while the art is visible. */
 export function shouldCycle(urls: string[], fade: number): boolean {
-  return urls.length > 1 && fade > 0;
+  return urls.length > 1 && artVisible(fade);
 }
 
 /**

@@ -623,9 +623,9 @@ pub async fn set_library_path(state: State<'_, AppState>, path: String) -> Resul
 
 // --- desktop shell appearance (design §4, §10) --------------------------------
 
-/// The highest background-art opacity the Appearance slider offers
-/// (design §3: "0–60%").
-const MAX_BACKGROUND_FADE: u8 = 60;
+/// The strongest background-art fade the Appearance slider offers (design
+/// §3: "0–100%"): fully faded, which turns the art off.
+const MAX_BACKGROUND_FADE: u8 = 100;
 
 /// The strongest background blur the Appearance slider offers. Aliased from
 /// grid-core so the clamp here and the builder's documented range can never
@@ -3333,7 +3333,7 @@ mod ui_settings_tests {
     }
 
     #[test]
-    fn the_fade_is_clamped_to_the_designs_zero_to_sixty() {
+    fn the_fade_is_clamped_to_the_designs_zero_to_a_hundred() {
         let fade = |value: u8| {
             normalize_ui_settings(UiSettings {
                 theme: "system".to_string(),
@@ -3344,9 +3344,9 @@ mod ui_settings_tests {
         };
         assert_eq!(fade(0), 0);
         assert_eq!(fade(50), 50);
-        assert_eq!(fade(60), 60);
-        assert_eq!(fade(61), 60);
-        assert_eq!(fade(255), 60);
+        assert_eq!(fade(100), 100);
+        assert_eq!(fade(101), 100);
+        assert_eq!(fade(255), 100);
     }
 
     /// The blur is clamped the same way the fade is: a stale or hand-edited

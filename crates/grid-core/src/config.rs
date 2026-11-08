@@ -96,8 +96,13 @@ pub struct UiSettings {
     /// normalizes on read.
     #[serde(default = "default_theme")]
     pub theme: String,
-    /// Background-art opacity in percent, 0–60 (design §3). Clamped on
-    /// write by `normalize_ui_settings`; read sites clamp again.
+    /// How far the background art is faded toward the window background, in
+    /// percent, 0–100 (design §3): 0 shows the art at full strength, 100
+    /// fades it away entirely, which turns the art off (nothing is fetched
+    /// or built). The art's opacity is `1 - fade / 100`. Clamped on write by
+    /// `normalize_ui_settings`; read sites clamp again. Configs written
+    /// before 2026-11-07 stored the art's opacity (0–60, 0 = off) here;
+    /// [`Config::load`] converts them once (`background_fade_inverted`).
     #[serde(default = "default_background_fade")]
     pub background_fade: u8,
     /// Background-art blur sigma, 0-40, applied at the variant's 960px scale
@@ -283,6 +288,13 @@ pub struct Config {
     /// name, so each state slot file has one cloud record.
     #[serde(default)]
     pub cloud_retention_default_migrated: bool,
+    /// One-time migration marker for `ui.background_fade`, which used to
+    /// store the art's opacity (0–60, 0 = off) and now stores its fade
+    /// (0–100, 100 = off). Absent in an older config (`false`), so
+    /// [`Config::load`] converts the stored value once; a new config starts
+    /// `true`.
+    #[serde(default)]
+    pub background_fade_inverted: bool,
     /// Raw per-game cloud sync state, keyed by `cloud::state::game_key`.
     /// Stored as an untyped TOML table (not `SyncStateEntry`s) so foreign/
     /// future keys and mistyped fields round-trip byte-for-byte through a
@@ -402,6 +414,7 @@ impl Default for Config {
             auto_cloud_save_upload_delay_seconds: 3,
             cloud_save_retention_limit: default_save_retention_limit(),
             cloud_retention_default_migrated: true,
+            background_fade_inverted: true,
             cloud_sync_state: toml::value::Table::new(),
             native_manual_save_paths: BTreeMap::new(),
             native_removed_save_paths: BTreeMap::new(),
@@ -453,6 +466,7 @@ impl Config {
         // Filter out emulators with blank names
         config.emulators.retain(|e| !e.name.trim().is_empty());
         config.migrate_retention_default();
+        config.migrate_background_fade();
         Ok(config)
     }
 
@@ -468,6 +482,19 @@ impl Config {
             self.cloud_save_retention_limit = default_save_retention_limit();
         }
         self.cloud_retention_default_migrated = true;
+    }
+
+    /// One-time migration of `ui.background_fade` from the art's opacity
+    /// (0–60, 0 = off) to its fade (0–100, 100 = off): opacity `v` becomes
+    /// fade `100 - v`, so the art looks the same, and off stays off. The
+    /// marker persists with the next [`Config::save`].
+    fn migrate_background_fade(&mut self) {
+        if self.background_fade_inverted {
+            return;
+        }
+        let opacity = self.ui.background_fade.min(60);
+        self.ui.background_fade = if opacity == 0 { 100 } else { 100 - opacity };
+        self.background_fade_inverted = true;
     }
 
     /// Atomic + durable: write `<path>.tmp`, fsync it, then rename over the
@@ -1249,7 +1276,8 @@ mod tests {
         .unwrap();
         let loaded = Config::load(&path).unwrap();
         assert_eq!(loaded.ui.theme, "dark");
-        assert_eq!(loaded.ui.background_fade, 40);
+        // An old opacity of 40 is a fade of 60 (`migrate_background_fade`).
+        assert_eq!(loaded.ui.background_fade, 60);
         assert_eq!(loaded.ui.card_size_library, "medium");
         assert_eq!(loaded.ui.card_size_server, "medium");
         assert_eq!(loaded.ui.card_labels, "always");
@@ -1327,6 +1355,45 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, text).unwrap();
         Config::load(&path).unwrap()
+    }
+
+    /// The fade used to store the art's opacity (0–60, 0 = off). An old
+    /// config converts once, so the art looks the same and off stays off.
+    #[test]
+    fn an_old_background_opacity_becomes_the_same_looking_fade() {
+        for (opacity, fade) in [(50, 50), (30, 70), (60, 40), (1, 99), (0, 100), (90, 40)] {
+            let cfg = load_text(&format!(
+                "schema_version = 1\n\n[ui]\nbackground_fade = {opacity}\n"
+            ));
+            assert_eq!(cfg.ui.background_fade, fade, "opacity {opacity}");
+            assert!(cfg.background_fade_inverted);
+        }
+    }
+
+    #[test]
+    fn a_converted_fade_is_left_alone() {
+        let cfg = load_text(
+            "schema_version = 1\nbackground_fade_inverted = true\n\n[ui]\nbackground_fade = 0\n",
+        );
+        assert_eq!(cfg.ui.background_fade, 0);
+    }
+
+    #[test]
+    fn a_new_config_needs_no_fade_conversion() {
+        let cfg = Config::default();
+        assert!(cfg.background_fade_inverted);
+        assert_eq!(cfg.ui.background_fade, 50);
+    }
+
+    #[test]
+    fn the_fade_conversion_runs_once_across_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "schema_version = 1\n\n[ui]\nbackground_fade = 20\n").unwrap();
+        let cfg = Config::load(&path).unwrap();
+        assert_eq!(cfg.ui.background_fade, 80);
+        cfg.save(&path).unwrap();
+        assert_eq!(Config::load(&path).unwrap().ui.background_fade, 80);
     }
 
     /// Q9: the save retention default is 10 when the key is absent.

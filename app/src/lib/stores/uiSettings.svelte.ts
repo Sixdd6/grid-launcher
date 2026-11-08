@@ -44,10 +44,10 @@ const state = $state<{
   hardwareAcceleration: true,
 });
 
-// What "background art on" restores (design §10): the last non-zero fade
+// What "background art on" restores (design §10): the last fade short of off
 // this session saw — loaded from config or dragged on the slider. Module
-// scoped like `state`, not persisted: fade 0 in config means off, and the
-// default is what a fresh "on" goes back to.
+// scoped like `state`, not persisted: a full fade in config means off, and
+// the default is what a fresh "on" goes back to.
 let rememberedFade = FADE_DEFAULT;
 
 /** The one place the whole `UiSettings` payload is assembled, so no writer
@@ -252,7 +252,8 @@ export async function setCardLabels(mode: CardLabels): Promise<void> {
 }
 
 /**
- * The Appearance page's on/off checkbox (design §10). Off persists fade 0;
+ * The Appearance page's on/off checkbox (design §10). Off persists a full
+ * fade (`FADE_MAX`);
  * on persists the remembered value, so toggling off and on returns the art
  * exactly as it was.
  */

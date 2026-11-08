@@ -11,7 +11,8 @@ stored. `Ctrl+1`..`Ctrl+5` switch views from the keyboard.
 
 Views stay mounted and switch with the `hidden` attribute, so scroll positions and
 selections survive a switch. Behind the content sits blurred background art — the
-cover of the last game viewed, at the opacity set in Settings › Appearance.
+cover of the last game viewed, faded toward the window background by the amount set in
+Settings › Appearance.
 
 **Surfaces.** Text never sits on the raw art. There are three levels: the art (the
 canvas), **panels** and **overlays**. The top bar, each view's rail, its header and
@@ -157,12 +158,15 @@ There are several main sections to the application with buttons across the top b
   the launcher only ever checks — it never downloads or installs an update), and
   **Appearance**.
 - **Appearance** (under Settings) chooses the theme — follow the OS, dark, or light —
-  turns the background art on or off, sets its fade from 0 to 60 percent with a live
-  preview behind the pane, sets the default card size for the Library and Server
+  turns the background art on or off, sets its fade from 0 to 100 percent with a live
+  preview behind the pane (0 shows the art at full strength; each step fades it toward
+  the window background; 100 is fully faded, which turns the art off, so nothing is
+  fetched or built; the value reads "100% · off"), sets its blur, sets the default card size for the Library and Server
   grids, and sets **Game labels**: "Always visible" (a small label under every cover) or
   "Visible on hover" (covers only; the title shows on hover or keyboard focus), and
   **Game card display**: "Equal height" or "Equal width" (see Cards). They are stored
-  under `[ui]` in `config.toml` as `theme`, `background_fade` (0 is off),
+  under `[ui]` in `config.toml` as `theme`, `background_fade` (100 is off; a config from before 2026-11-07 stored the art's
+  opacity, 0–60 with 0 off, and is converted once on load),
   `card_size_library`, `card_size_server`, `card_labels` (`always` or `hover`) and
   `card_display` (`rows` or `columns`). **Hardware acceleration** (on by default) renders
   the window on the graphics card; it applies after a restart and is stored as

@@ -5,6 +5,7 @@
 import { api } from './api';
 import { backgroundUrls, type BackgroundSubject } from './background';
 import { uiSettings } from './stores/uiSettings.svelte';
+import { artVisible } from './theme';
 import { viewportFill, type Fill } from './stores/viewportFill.svelte';
 
 /** How many resolved paths to keep: enough for a long browse of one view,
@@ -50,7 +51,7 @@ export function rememberVariant(key: string, path: string): void {
 type BuildTarget = { url: string; blur: number; fill: Fill; key: string; front: boolean };
 
 function buildTarget(subject: BackgroundSubject, front: boolean): BuildTarget | null {
-  if (uiSettings.backgroundFade === 0) return null;
+  if (!artVisible(uiSettings.backgroundFade)) return null;
   const url = backgroundUrls(subject)[0];
   if (url === undefined) return null;
   const blur = uiSettings.backgroundBlur;
@@ -214,7 +215,7 @@ export function prefetchBackground(subject: BackgroundSubject): void {
  * card is dealt with: queued, already queued, or already on disk.
  */
 export function warmBackground(subject: BackgroundSubject): boolean {
-  if (uiSettings.backgroundFade === 0) return false;
+  if (!artVisible(uiSettings.backgroundFade)) return false;
   queueBuild(subject, false);
   return true;
 }
