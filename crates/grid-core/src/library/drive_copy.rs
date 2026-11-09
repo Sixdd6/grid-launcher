@@ -47,7 +47,7 @@ pub fn copy_targets(
 
 /// [`copy_targets`] with a hook called after each chunk is written. Tests use
 /// it to remove the drive in the middle of a copy.
-fn copy_targets_with(
+pub(crate) fn copy_targets_with(
     root: &Path,
     label: &str,
     files: &[CopyFile],

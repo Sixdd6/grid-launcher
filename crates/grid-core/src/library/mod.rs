@@ -11,6 +11,7 @@ pub mod backup_job;
 pub mod content;
 pub mod download;
 pub mod drive_copy;
+pub mod drive_install;
 pub mod emulator_package;
 pub mod emulator_removal;
 pub mod extract;
@@ -336,6 +337,13 @@ pub struct DriveSource {
     /// server file id (`PackFile::server_file_id`, resolved with
     /// `backup::pack::resolve`).
     pub files: BTreeMap<i64, PathBuf>,
+    /// The server the backup came from (`PackSource::server`, without
+    /// userinfo): recorded as the row's `source_server`.
+    pub server: String,
+    /// Whether the row keeps the pack's `rom_id`. `false` when a live session
+    /// is connected to another server, whose ids mean other games; the
+    /// relink pass can then match the row instead.
+    pub keep_rom_id: bool,
 }
 
 impl DriveSource {
@@ -421,7 +429,27 @@ struct EmulatorJob {
     /// Set for a build from the RomM server's Emulators platform: the one
     /// file to download from it instead of resolving a forge release.
     romm: Option<RommBuild>,
+    /// Set for an emulator installed from a backup drive: the files to copy
+    /// off the drive instead of downloading anything.
+    local: Option<drive_install::LocalBuild>,
 }
+
+impl EmulatorJob {
+    /// Whether this job installs a build from the RomM server's Emulators
+    /// platform, downloaded now or copied from a backup of one.
+    fn server_build(&self) -> bool {
+        self.romm.is_some() || self.source_id.starts_with(SERVER_SOURCE_PREFIX)
+    }
+
+    /// The drive this job copies from, for an install from a backup drive.
+    fn drive_id(&self) -> Option<&str> {
+        self.local.as_ref().map(|local| local.drive_id.as_str())
+    }
+}
+
+/// The `source_id` prefix of an emulator installed from the RomM server's
+/// Emulators platform ([`server_emulator_source_id`]).
+const SERVER_SOURCE_PREFIX: &str = "romm:";
 
 /// A build from the RomM server's Emulators platform
 /// (`docs/server-emulator-packages.md`): one file of a platform folder.
@@ -1052,6 +1080,11 @@ pub struct InstallService {
     backup_rows: Mutex<HashMap<u64, (backup_job::DriveTarget, backup_job::BackupItem)>>,
     /// Test hook run before each file a backup writes to its drive.
     backup_write_hook: RwLock<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// Every install-from-drive row admitted this session, by entry id: what
+    /// `retry` rebuilds the row from.
+    drive_rows: Mutex<HashMap<u64, drive_install::DriveRow>>,
+    /// Test hook run after each chunk an install copies off a drive.
+    drive_copy_hook: RwLock<Option<drive_install::DriveCopyHook>>,
 }
 
 impl InstallService {
@@ -1104,6 +1137,8 @@ impl InstallService {
             resolved_sizes: Mutex::new(HashMap::new()),
             backup_rows: Mutex::new(HashMap::new()),
             backup_write_hook: RwLock::new(None),
+            drive_rows: Mutex::new(HashMap::new()),
+            drive_copy_hook: RwLock::new(None),
         })
     }
 
@@ -1803,6 +1838,7 @@ impl InstallService {
             resolved: None,
             target: JobTarget::Emulator,
             entry_name: entry_name.clone(),
+            local: None,
             romm: Some(RommBuild {
                 client,
                 rom_id: request.rom_id,
@@ -1848,6 +1884,7 @@ impl InstallService {
             target: JobTarget::Emulator,
             entry_name: profile.name.clone(),
             romm: None,
+            local: None,
         };
         let title = job.profile_name.clone();
         self.admit(
@@ -1951,6 +1988,7 @@ impl InstallService {
             target: JobTarget::CompatTool,
             entry_name: profile.name.clone(),
             romm: None,
+            local: None,
         };
         let title = job.profile_name.clone();
         self.admit(
@@ -2010,6 +2048,7 @@ impl InstallService {
             target: JobTarget::UmuLauncher,
             entry_name: umu::UMU_TITLE.to_string(),
             romm: None,
+            local: None,
         };
         self.admit(
             JobKey::Emulator(umu::UMU_SOURCE_ID.to_string()),
@@ -2209,6 +2248,12 @@ impl InstallService {
         };
         {
             let mut rows = self.backup_rows.lock().unwrap();
+            for id in &removed {
+                rows.remove(id);
+            }
+        }
+        {
+            let mut rows = self.drive_rows.lock().unwrap();
             for id in &removed {
                 rows.remove(id);
             }
@@ -2490,6 +2535,14 @@ impl InstallService {
         entry_id: u64,
     ) -> Result<(), LibraryError> {
         let retryable = self.queue.lock().unwrap().retryable(entry_id);
+        // An install from a backup drive retries from the drive, never from
+        // the server.
+        if retryable.is_some() {
+            let row = self.drive_rows.lock().unwrap().get(&entry_id).cloned();
+            if let Some(row) = row {
+                return self.retry_drive_row(entry_id, row);
+            }
+        }
         match retryable {
             Some(JobKey::Rom(rom_id)) => {
                 let client =
@@ -2567,6 +2620,7 @@ impl InstallService {
         self.pending_jobs.lock().unwrap().remove(&entry_id);
         self.cancel_flags.lock().unwrap().remove(&entry_id);
         self.backup_rows.lock().unwrap().remove(&entry_id);
+        self.drive_rows.lock().unwrap().remove(&entry_id);
         self.notify_now();
     }
 
@@ -2950,9 +3004,25 @@ impl InstallService {
                             .await
                         }
                         GameSource::Drive(drive) => {
-                            copy_from_drive(drive, job, cancel.clone(), on_progress).await
+                            copy_from_drive(
+                                drive,
+                                job,
+                                cancel.clone(),
+                                owner.drive_copy_hook(),
+                                on_progress,
+                            )
+                            .await
                         }
                     },
+                    JobPayload::Emulator(job) if job.local.is_some() => {
+                        drive_install::copy_local_emulator(
+                            job,
+                            cancel.clone(),
+                            owner.drive_copy_hook(),
+                            on_progress,
+                        )
+                        .await
+                    }
                     JobPayload::Emulator(job) => {
                         download_emulator(job, &cancel, &mut on_progress).await
                     }
@@ -3029,6 +3099,7 @@ impl InstallService {
                 source: GameSource::Drive(drive),
                 ..
             }) => Some(drive.drive_id.as_str()),
+            JobPayload::Emulator(job) => job.drive_id(),
             _ => None,
         };
         let result = match (drive.and_then(|key| self.removed_reason(key)), result) {
@@ -3255,6 +3326,12 @@ impl InstallService {
         let detail = &job.detail;
         let platform = detail.platform_name.as_str();
         let mut record = new_record(detail, &job.launch_entry);
+        if let GameSource::Drive(drive) = &job.source {
+            record.source_server = drive.server.clone();
+            if !drive.keep_rom_id {
+                record.rom_id = None;
+            }
+        }
         let archive = job.primary_archive.as_path();
         let archive_to_delete: Option<&Path>;
 
@@ -3954,17 +4031,25 @@ impl InstallService {
         // permissions (on Windows, say): its emulator's own executable names
         // get their executable bit back before the pick, which only counts an
         // extensionless file that has one.
-        if job.romm.is_some() {
+        if job.server_build() {
             if let Some(profile) = self.profiles.iter().find(|p| p.name == job.profile_name) {
                 mark_profile_executables(install_dir, profile);
             }
         }
-        let selected = if !should_extract("", EMULATOR_PLATFORM, archive)
+        let manual = job.local.as_ref().and_then(|local| local.manual.as_ref());
+        let selected = if let Some(manual) = manual {
+            // An archived manual emulator names its own program.
+            Some(drive_install::manual_program(
+                install_dir,
+                &manual.program,
+                &job.entry_name,
+            )?)
+        } else if !should_extract("", EMULATOR_PLATFORM, archive)
             && is_appimage(archive)
             && archive.is_file()
         {
             Some(archive.to_path_buf())
-        } else if job.romm.is_some() {
+        } else if job.server_build() {
             // Only this host's binaries: a build may carry a stray `.exe`.
             emu_install::select_package_executable(
                 &job.profile_name,
@@ -3979,14 +4064,16 @@ impl InstallService {
         // only fail at launch with the kernel's "Exec format error": refuse
         // it here, and say why.
         let Some(exe) = selected else {
-            let other_machine = job.romm.as_ref().and_then(|_| {
+            let other_machine = if job.server_build() {
                 emu_install::package_executable_for_another_machine(
                     &job.profile_name,
                     install_dir,
                     archive,
                     cfg!(windows),
                 )
-            });
+            } else {
+                None
+            };
             return Err(LibraryError::Extract(match other_machine {
                 Some((path, target)) => wrong_machine_message(job, &path, &target),
                 None => NO_EMULATOR_EXECUTABLE.to_string(),
@@ -4013,7 +4100,13 @@ impl InstallService {
         let job_profile = catalog::find_profile(&self.profiles, &job.source_id).or_else(|| {
             self.profiles
                 .iter()
-                .find(|p| job.romm.is_some() && p.name == job.profile_name)
+                .find(|p| job.server_build() && p.name == job.profile_name)
+        });
+        // An archived manual emulator is matched the way a hand-added one is.
+        let job_profile = job_profile.or_else(|| {
+            manual.and_then(|_| {
+                profile_for_entry(&job.entry_name, &path_string(&exe), &self.profiles)
+            })
         });
         if let Some(profile) = job_profile {
             if !profile.user_data.is_empty() {
@@ -4065,7 +4158,7 @@ impl InstallService {
                 name: job.entry_name.clone(),
                 fresh,
                 compat_tool: false,
-                server_source: job.romm.as_ref().map(|_| job.source_id.clone()),
+                server_source: job.server_build().then(|| job.source_id.clone()),
             });
         }
         Ok(())
@@ -4257,6 +4350,20 @@ impl InstallService {
         // tag is recorded beside it, as the version actually on disk.
         entry.source_release_tag = job.configured_tag.clone();
         entry.source_installed_tag = resolved.release_tag.clone();
+        // An archived manual emulator from a backup drive is a manual entry
+        // again: it has no update source.
+        if job
+            .local
+            .as_ref()
+            .is_some_and(|local| local.manual.is_some())
+        {
+            entry.source_id.clear();
+            entry.source_provider.clear();
+            entry.source_owner.clear();
+            entry.source_repo.clear();
+            entry.source_release_tag.clear();
+            entry.source_installed_tag.clear();
+        }
         let fresh = match position {
             Some(index) => {
                 config.emulators[index] = entry;
@@ -4539,16 +4646,12 @@ async fn copy_from_drive(
     drive: &DriveSource,
     job: &InstallJob,
     cancel: Arc<AtomicBool>,
-    mut on_progress: impl FnMut(u64, u64, f64) + Send + 'static,
+    hook: Option<drive_install::DriveCopyHook>,
+    on_progress: impl FnMut(u64, u64, f64) + Send + 'static,
 ) -> Result<(), LibraryError> {
     let files = drive.copy_files(&job.file_ids, &job.targets)?;
-    let root = crate::backup::pack::pack_dir(&drive.mount);
-    let label = drive.label.clone();
-    tokio::task::spawn_blocking(move || {
-        drive_copy::copy_targets(&root, &label, &files, &cancel, &mut on_progress)
-    })
-    .await
-    .map_err(|e| LibraryError::Extract(format!("the copy did not finish: {e}")))?
+    drive_install::copy_off_drive(&drive.mount, &drive.label, files, cancel, hook, on_progress)
+        .await
 }
 
 /// The install error for a build whose program cannot run on this computer.
@@ -6233,6 +6336,8 @@ mod tests {
                 .iter()
                 .map(|file| (file.server_file_id, resolve(mount, &file.path).unwrap()))
                 .collect(),
+            server: game.source.server.clone(),
+            keep_rom_id: true,
         }
     }
 
@@ -6321,6 +6426,7 @@ mod tests {
             &drive,
             &job,
             Arc::new(AtomicBool::new(false)),
+            None,
             move |copied, total, _| sink.lock().unwrap().push((copied, total)),
         )
         .await
