@@ -1092,6 +1092,60 @@ impl Registry {
         Ok(affected > 0)
     }
 
+    /// The relink guard (game backups, plan Part 4), run on connect before
+    /// the relink pass: every row whose `source_server` names a server other
+    /// than `server` (compared by host, port and path, as
+    /// [`crate::backup::pack::server_key`] does) has its `rom_id` cleared and
+    /// its `source_server` set to `server` without userinfo. That server's
+    /// rom ids mean other games, so cloud saves and play activity must not
+    /// reach them; the relink pass that follows can link the row again, and
+    /// what it links then belongs to `server`. Rows with a blank
+    /// `source_server` (installed from the live server) are left alone.
+    /// Returns the `(title, platform)` of every row it changed. One
+    /// transaction.
+    pub fn clear_foreign_rom_ids(
+        &self,
+        server: &str,
+    ) -> Result<Vec<(String, String)>, LibraryError> {
+        let current = crate::backup::pack::server_key(server);
+        if current.trim_matches(':').is_empty() {
+            return Ok(Vec::new());
+        }
+        let stored = crate::romm::strip_userinfo(server.trim())
+            .trim_end_matches('/')
+            .to_string();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(registry_err)?;
+        let candidates: Vec<(i64, String, String, String)> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT id, title, platform, source_server FROM installed_games \
+                     WHERE source_server <> ''",
+                )
+                .map_err(registry_err)?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })
+                .map_err(registry_err)?;
+            rows.collect::<Result<_, _>>().map_err(registry_err)?
+        };
+        let mut changed = Vec::new();
+        for (id, title, platform, source) in candidates {
+            if crate::backup::pack::server_key(&source) == current {
+                continue;
+            }
+            tx.execute(
+                "UPDATE installed_games SET rom_id = NULL, source_server = ?1 WHERE id = ?2",
+                params![stored, id],
+            )
+            .map_err(registry_err)?;
+            changed.push((title, platform));
+        }
+        tx.commit().map_err(registry_err)?;
+        Ok(changed)
+    }
+
     /// Links the row for `(title, platform)`'s identity key to `rom_id`
     /// (Q4: rows with no rom id). Refuses an id another row already holds,
     /// so two rows never share a rom id. Linking a row to the id it already
@@ -1240,6 +1294,50 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let registry = Registry::open(&dir.path().join("registry.db")).unwrap();
         (dir, registry)
+    }
+
+    #[test]
+    fn clear_foreign_rom_ids_unlinks_rows_from_another_server_only() {
+        let (_dir, registry) = temp_registry();
+        let row = |title: &str, rom_id: i64, source: &str| InstalledGame {
+            title: title.to_string(),
+            platform: "Sony PlayStation".to_string(),
+            rom_id: Some(rom_id),
+            source_server: source.to_string(),
+            installed_at: 1,
+            ..Default::default()
+        };
+        registry.upsert(&row("Server install", 1, "")).unwrap();
+        registry
+            .upsert(&row("Same server", 2, "https://ROMM.home.lan:443/"))
+            .unwrap();
+        registry
+            .upsert(&row("Other server", 3, "https://romm.friend.lan"))
+            .unwrap();
+
+        let changed = registry
+            .clear_foreign_rom_ids("https://user:pw@romm.home.lan")
+            .unwrap();
+        assert_eq!(
+            changed,
+            vec![("Other server".to_string(), "Sony PlayStation".to_string())]
+        );
+        let rows = registry.all().unwrap();
+        let get = |title: &str| rows.iter().find(|r| r.title == title).unwrap().clone();
+        assert_eq!(get("Server install").rom_id, Some(1));
+        assert_eq!(get("Server install").source_server, "");
+        assert_eq!(get("Same server").rom_id, Some(2));
+        assert_eq!(get("Other server").rom_id, None);
+        // Rebased onto the connected server, never with userinfo.
+        assert_eq!(get("Other server").source_server, "https://romm.home.lan");
+
+        // A second connect to the same server changes nothing.
+        assert!(registry
+            .clear_foreign_rom_ids("https://romm.home.lan/")
+            .unwrap()
+            .is_empty());
+        // A blank server URL clears nothing.
+        assert!(registry.clear_foreign_rom_ids("").unwrap().is_empty());
     }
 
     /// A row with every path column this migration rewrites set.
