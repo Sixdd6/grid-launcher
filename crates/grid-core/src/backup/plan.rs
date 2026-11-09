@@ -669,9 +669,18 @@ pub struct Planned {
 }
 
 /// Plans a backup. Pure.
-/// - Games already on the drive (same server and rom id) are skipped; on a
-///   FAT32 drive, games with a known file over 4 GB are `too_big` (a game
-///   over 4 GB in all whose files are each under it goes).
+/// - Games already on the drive (same server and rom id) are skipped.
+/// - A game is copied from this computer's install when `use_local` is on,
+///   it is [`LocalState::Eligible`], and the server has no newer files or
+///   the user chose [`SourceChoice::Local`]. Every other game downloads;
+///   an [`LocalState::Ineligible`] one says why in its [`PlanSource`].
+/// - An out-of-date eligible game is listed in `outdated` (with any
+///   choice); while `use_local` is on, one with no choice counts in
+///   `needs_choice` and downloads until the user picks.
+/// - On a FAT32 drive, a game that downloads with a known file over 4 GB is
+///   `too_big` (a game over 4 GB in all whose files are each under it
+///   goes). A local copy is written in parts under 4 GB, so it never is.
+/// - A local game counts its archive's size, a download the server's size.
 /// - Each system of the games to write brings its emulator for every OS of
 ///   the pack that does not have it yet; Windows games bring the compat tool
 ///   when the pack is for Linux.
@@ -685,7 +694,12 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
     let mut too_big = Vec::new();
     let mut games_to_write = Vec::new();
     let mut bytes: u64 = 0;
+    let mut local_bytes: u64 = 0;
     let mut systems: Vec<&PlanGame> = Vec::new();
+    let mut sources = Vec::new();
+    let mut outdated = Vec::new();
+    let mut needs_choice: u32 = 0;
+    let mut local_available = false;
     for game in input.games {
         let entry = PlanGameRef {
             rom_id: game.rom_id,
@@ -693,19 +707,75 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
         };
         if input.pack.has_game(input.server, game.rom_id) {
             skipped.push(entry);
-        } else if input.fat32 && game.largest_file.is_some_and(|f| f > FAT32_MAX_FILE) {
-            too_big.push(entry);
-        } else if !games_to_write.contains(&game.rom_id) {
-            games_to_write.push(game.rom_id);
-            bytes = bytes.saturating_add(game.size);
-            items.games.push(GameItem {
-                rom_id: game.rom_id,
-                name: game.name.clone(),
-                platform_name: game.platform_name.clone(),
-                local: false,
-            });
-            systems.push(game);
+            continue;
         }
+        if games_to_write.contains(&game.rom_id)
+            || too_big
+                .iter()
+                .any(|known: &PlanGameRef| known.rom_id == game.rom_id)
+        {
+            continue;
+        }
+        let choice = input.choices.get(&game.rom_id).copied();
+        let archive = match &game.local {
+            LocalState::Eligible {
+                archive_bytes,
+                outdated: stale,
+                ..
+            } => {
+                local_available = true;
+                if let Some(stale) = stale {
+                    outdated.push(PlanOutdated {
+                        rom_id: game.rom_id,
+                        name: game.name.clone(),
+                        installed_version: stale.installed_version.clone(),
+                        server_version: stale.server_version.clone(),
+                        choice,
+                    });
+                    if input.use_local && choice.is_none() {
+                        needs_choice += 1;
+                    }
+                }
+                let local =
+                    input.use_local && (stale.is_none() || choice == Some(SourceChoice::Local));
+                local.then_some(*archive_bytes)
+            }
+            LocalState::NotInstalled | LocalState::Ineligible { .. } => None,
+        };
+        if archive.is_none() && input.fat32 && game.largest_file.is_some_and(|f| f > FAT32_MAX_FILE)
+        {
+            too_big.push(entry);
+            continue;
+        }
+        games_to_write.push(game.rom_id);
+        match archive {
+            Some(archive_bytes) => {
+                bytes = bytes.saturating_add(archive_bytes);
+                local_bytes = local_bytes.saturating_add(archive_bytes);
+            }
+            None => bytes = bytes.saturating_add(game.size),
+        }
+        let note = match &game.local {
+            LocalState::Ineligible { reason } => reason.clone(),
+            _ => String::new(),
+        };
+        sources.push(PlanSource {
+            rom_id: game.rom_id,
+            name: game.name.clone(),
+            source: if archive.is_some() {
+                SourceChoice::Local
+            } else {
+                SourceChoice::Download
+            },
+            note,
+        });
+        items.games.push(GameItem {
+            rom_id: game.rom_id,
+            name: game.name.clone(),
+            platform_name: game.platform_name.clone(),
+            local: archive.is_some(),
+        });
+        systems.push(game);
     }
 
     // One pick per emulator name, serving every system that chose it.
@@ -892,13 +962,13 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
             bytes_to_write: bytes,
             free_bytes: input.free_bytes,
             fits,
-            local_available: false,
+            local_available,
             use_local: input.use_local,
-            sources: Vec::new(),
-            outdated: Vec::new(),
-            needs_choice: 0,
-            local_bytes: 0,
-            download_bytes: bytes,
+            sources,
+            outdated,
+            needs_choice,
+            local_bytes,
+            download_bytes: bytes.saturating_sub(local_bytes),
         },
         items,
     }
@@ -961,6 +1031,8 @@ mod tests {
         fat32: bool,
         free: u64,
         include_firmware: bool,
+        use_local: bool,
+        choices: HashMap<i64, SourceChoice>,
     }
 
     impl Fixture {
@@ -983,6 +1055,8 @@ mod tests {
                 fat32: false,
                 free: 1 << 40,
                 include_firmware: true,
+                use_local: true,
+                choices: HashMap::new(),
             }
         }
 
@@ -1001,10 +1075,212 @@ mod tests {
                 include_runtime: false,
                 host: Some(PackOs::Linux),
                 sizes: &self.sizes,
-                choices: &HashMap::new(),
-                use_local: true,
+                choices: &self.choices,
+                use_local: self.use_local,
             })
         }
+    }
+
+    // --- local copies ---------------------------------------------------------
+
+    fn eligible(archive_bytes: u64) -> LocalState {
+        LocalState::Eligible {
+            layout: InstalledLayout::Extracted,
+            archive_bytes,
+            outdated: None,
+        }
+    }
+
+    fn stale(archive_bytes: u64) -> LocalState {
+        LocalState::Eligible {
+            layout: InstalledLayout::Native,
+            archive_bytes,
+            outdated: Some(Outdated {
+                installed_version: "v1.0".into(),
+                server_version: "v1.2".into(),
+            }),
+        }
+    }
+
+    /// Games 1-5: not installed, eligible, out of date, ineligible, and
+    /// eligible but already on the drive.
+    fn local_fixture() -> Fixture {
+        let mut fx = Fixture::new();
+        fx.include_firmware = false;
+        let with = |id: i64, local: LocalState| {
+            let mut g = game(id, "psx", 1000 * id as u64, 10);
+            g.local = local;
+            g
+        };
+        fx.games = vec![
+            with(1, LocalState::NotInstalled),
+            with(2, eligible(2500)),
+            with(3, stale(3500)),
+            with(
+                4,
+                LocalState::Ineligible {
+                    reason: "Its files weren't found on this computer".into(),
+                },
+            ),
+            with(5, eligible(5500)),
+        ];
+        fx.pack.games.push(backed_up(5));
+        fx
+    }
+
+    fn sources_of(planned: &Planned) -> Vec<(i64, SourceChoice, &str)> {
+        planned
+            .plan
+            .sources
+            .iter()
+            .map(|s| (s.rom_id, s.source, s.note.as_str()))
+            .collect()
+    }
+
+    const MISSING: &str = "Its files weren't found on this computer";
+
+    #[test]
+    fn each_game_is_local_or_downloads() {
+        let planned = local_fixture().run();
+        use SourceChoice::{Download, Local};
+        assert_eq!(
+            sources_of(&planned),
+            vec![
+                (1, Download, ""),
+                (2, Local, ""),
+                // Out of date with no choice: downloads until the user picks.
+                (3, Download, ""),
+                (4, Download, MISSING),
+            ]
+        );
+        let local: Vec<(i64, bool)> = planned
+            .items
+            .games
+            .iter()
+            .map(|g| (g.rom_id, g.local))
+            .collect();
+        assert_eq!(local, vec![(1, false), (2, true), (3, false), (4, false)]);
+        assert!(planned.plan.local_available);
+        assert!(planned.plan.use_local);
+        assert_eq!(planned.plan.skipped.len(), 1);
+        assert_eq!(
+            planned.plan.outdated,
+            vec![PlanOutdated {
+                rom_id: 3,
+                name: "Game 3".into(),
+                installed_version: "v1.0".into(),
+                server_version: "v1.2".into(),
+                choice: None,
+            }]
+        );
+        assert_eq!(planned.plan.needs_choice, 1);
+    }
+
+    #[test]
+    fn without_use_local_everything_downloads() {
+        let mut fx = local_fixture();
+        fx.use_local = false;
+        let planned = fx.run();
+        assert!(planned
+            .plan
+            .sources
+            .iter()
+            .all(|s| s.source == SourceChoice::Download));
+        assert!(planned.items.games.iter().all(|g| !g.local));
+        // The checkbox still shows, so it can be ticked again.
+        assert!(planned.plan.local_available);
+        assert!(!planned.plan.use_local);
+        assert_eq!(planned.plan.needs_choice, 0);
+        assert_eq!(planned.plan.outdated.len(), 1);
+        assert_eq!(planned.plan.local_bytes, 0);
+        assert_eq!(planned.plan.download_bytes, 1000 + 2000 + 3000 + 4000);
+        assert_eq!(planned.plan.bytes_to_write, planned.plan.download_bytes);
+        // The ineligible game still says why it downloads.
+        assert_eq!(planned.plan.sources[3].note, MISSING);
+    }
+
+    #[test]
+    fn an_explicit_choice_is_honoured() {
+        let mut fx = local_fixture();
+        fx.choices.insert(3, SourceChoice::Local);
+        let planned = fx.run();
+        assert_eq!(planned.plan.sources[2].source, SourceChoice::Local);
+        assert!(planned.items.games[2].local);
+        assert_eq!(planned.plan.outdated[0].choice, Some(SourceChoice::Local));
+        assert_eq!(planned.plan.needs_choice, 0);
+
+        fx.choices.insert(3, SourceChoice::Download);
+        let planned = fx.run();
+        assert_eq!(planned.plan.sources[2].source, SourceChoice::Download);
+        assert!(!planned.items.games[2].local);
+        assert_eq!(
+            planned.plan.outdated[0].choice,
+            Some(SourceChoice::Download)
+        );
+        assert_eq!(planned.plan.needs_choice, 0);
+    }
+
+    #[test]
+    fn bytes_count_archives_for_local_games_and_sizes_for_downloads() {
+        let mut fx = local_fixture();
+        fx.choices.insert(3, SourceChoice::Local);
+        let planned = fx.run();
+        let plan = &planned.plan;
+        assert_eq!(plan.local_bytes, 2500 + 3500);
+        assert_eq!(plan.download_bytes, 1000 + 4000);
+        assert_eq!(plan.bytes_to_write, plan.local_bytes + plan.download_bytes);
+
+        // Emulators and firmware download: they count on that side.
+        fx.include_firmware = true;
+        fx.sizes
+            .insert(("DuckStation".to_string(), PackOs::Linux), 70);
+        fx.sizes
+            .insert(("DuckStation".to_string(), PackOs::Windows), 30);
+        let planned = fx.run();
+        let plan = &planned.plan;
+        assert_eq!(plan.local_bytes, 2500 + 3500);
+        assert_eq!(plan.bytes_to_write, plan.local_bytes + plan.download_bytes);
+        assert_eq!(plan.download_bytes, 1000 + 4000 + 1000 + 70 + 30);
+    }
+
+    #[test]
+    fn too_big_counts_only_games_that_download() {
+        let mut fx = local_fixture();
+        fx.fat32 = true;
+        for g in &mut fx.games {
+            g.largest_file = Some(FAT32_MAX_FILE + 1);
+        }
+        let planned = fx.run();
+        let too_big: Vec<i64> = planned.plan.too_big.iter().map(|g| g.rom_id).collect();
+        // 2 goes as a local archive; 3 (no choice yet) and the rest download.
+        assert_eq!(too_big, vec![1, 3, 4]);
+        assert_eq!(planned.plan.games_to_write, vec![2]);
+        assert_eq!(sources_of(&planned), vec![(2, SourceChoice::Local, "")]);
+        assert_eq!(planned.plan.needs_choice, 1);
+
+        // Choosing this computer's copy rescues it.
+        fx.choices.insert(3, SourceChoice::Local);
+        let planned = fx.run();
+        assert_eq!(planned.plan.games_to_write, vec![2, 3]);
+
+        // Without local copies, every big game is too big.
+        fx.use_local = false;
+        let planned = fx.run();
+        assert!(planned.plan.games_to_write.is_empty());
+        assert_eq!(planned.plan.too_big.len(), 4);
+    }
+
+    #[test]
+    fn nothing_installed_hides_the_checkbox() {
+        let mut fx = Fixture::new();
+        fx.games[1].local = LocalState::Ineligible {
+            reason: MISSING.into(),
+        };
+        let planned = fx.run();
+        assert!(!planned.plan.local_available);
+        assert_eq!(planned.plan.local_bytes, 0);
+        assert_eq!(planned.plan.download_bytes, planned.plan.bytes_to_write);
+        assert_eq!(planned.plan.sources.len(), 2);
     }
 
     #[test]
