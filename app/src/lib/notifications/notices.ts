@@ -31,6 +31,7 @@ export type NoticeGroup =
   | 'launch'
   | 'launch-failed'
   | 'removed'
+  | 'drive-queued'
   | 'drive-installed'
   | 'drive-failed'
   // One card per backup batch (backups/notices.ts).
@@ -225,6 +226,16 @@ export function removedFromLibraryNotice(title: string): Notice {
   return { group: 'removed', text: `${title} removed from the library`, level: 'success' };
 }
 
+/**
+ * A line `install_from_drive` answers with: something it queued from the
+ * drive beside the game ("DuckStation from Couch kit added to download
+ * queue"). Its own group, so a firmware "installed from" card arriving in the
+ * same moment is not summed with it as "2 items installed".
+ */
+export function driveQueuedNotice(message: string): Notice {
+  return { group: 'drive-queued', text: message, level: 'success' };
+}
+
 /** A `backup-notice` event's card ("PlayStation firmware installed from Couch kit"); the backend words it. */
 export function backupNoticeCard(notice: BackupNotice): Notice {
   return notice.error
@@ -287,6 +298,8 @@ export function summaryText(group: NoticeGroup, n: number): string {
       return `${plural(n, 'launch', 'launches')} failed`;
     case 'removed':
       return `${games} removed`;
+    case 'drive-queued':
+      return `${plural(n, 'item', 'items')} from a backup drive added to download queue`;
     case 'drive-installed':
       return `${plural(n, 'item', 'items')} installed from a backup drive`;
     case 'drive-failed':

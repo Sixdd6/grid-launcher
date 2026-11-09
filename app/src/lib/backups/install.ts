@@ -6,7 +6,7 @@
 // the refusal or removal cards.
 import { api } from '../api';
 import { notify } from '../notifications/notifier';
-import { backupNoticeCard, queueRefusedNotice } from '../notifications/notices';
+import { driveQueuedNotice, queueRefusedNotice } from '../notifications/notices';
 import { refresh as refreshDrives } from '../stores/drives.svelte';
 import { removedFromDriveText } from '../library/drive';
 
@@ -18,7 +18,7 @@ function message(err: unknown): string {
 export async function installFromDrive(key: string, game: { rom_id: number; name: string; server: string }): Promise<boolean> {
   try {
     const outcome = await api.installFromDrive(key, game.rom_id, game.server);
-    for (const line of outcome.notices) notify(backupNoticeCard({ message: line, error: false }));
+    for (const line of outcome.notices) notify(driveQueuedNotice(line));
     return true;
   } catch (err) {
     notify(queueRefusedNotice(game.name, message(err)));
