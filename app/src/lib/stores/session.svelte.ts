@@ -97,3 +97,16 @@ export async function useOffline() {
   } catch (e) { session.error = String(e); }
   finally { session.busy = false; }
 }
+
+/**
+ * Offline mode's "Connect to a server…" (the chip menu, the Server panel,
+ * Settings › Connection): back to the Connect screen, as Disconnect does,
+ * but nothing is cleared. The library folder, the stored server and
+ * username (they prefill the form) and the offline flag all stay: offline
+ * mode ends only when a connection succeeds, so quitting from Connect
+ * starts offline again.
+ */
+export function connectToServer() {
+  session.error = null;
+  session.phase = 'none';
+}

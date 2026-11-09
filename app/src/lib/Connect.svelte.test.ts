@@ -75,4 +75,11 @@ describe('Connect', () => {
     const { body } = render(Connect);
     expect(body).toMatch(/<button[^>]*data-testid="connect-submit"[^>]*disabled/);
   });
+
+  it('offers Use without a server after an "or" divider, disabled until the folder is known', () => {
+    const { body } = render(Connect);
+    expect(body).toMatch(/data-testid="connect-submit"[\s\S]*class="or[^"]*"[\s\S]*data-testid="connect-use-offline"/);
+    expect(body).toMatch(/<button[^>]*data-testid="connect-use-offline"[^>]*disabled/);
+    expect(body).toContain('Use without a server');
+  });
 });

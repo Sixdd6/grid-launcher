@@ -15,6 +15,7 @@
   import { isUmuMissing } from './launchError';
   import { installGame, launchGame } from './notifications/notifier';
   import GameCard from './GameCard.svelte';
+  import Icon from './Icon.svelte';
   import { coverPair } from './cards/cover';
   import CardGrid from './CardGrid.svelte';
   import FoldingHeader from './FoldingHeader.svelte';
@@ -27,7 +28,7 @@
   import { isInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
   import { updates } from './stores/updates.svelte';
   import { hostOf } from './shell';
-  import { session, retry } from './stores/session.svelte';
+  import { session, retry, connectToServer } from './stores/session.svelte';
   import { HOVER_DELAY_MS, PREFETCH_DELAY_MS, subjectFromSummary } from './background';
   import { createHoverViewed } from './lastViewedHover';
   import { dropPendingWarms } from './backgroundPrefetch';
@@ -541,7 +542,18 @@
     </div>
   {/if}
 
-  {#if !session.connected}
+  {#if session.offline && !session.connected}
+    <!-- Offline mode (GameBackups README): one panel in place of the rail
+         and grid, with the way back to a server. -->
+    <div data-testid="server-offline-mode" class="offline-mode panel">
+      <div class="offline-mode-in">
+        <span class="offline-icon"><Icon name="cloud" size={24} /></span>
+        <h2>Not connected to a server</h2>
+        <p class="note">Your Library and backup drives work without one. Connect to browse the server and back up games.</p>
+        <button data-testid="server-connect" class="g-btn" onclick={() => connectToServer()}>Connect to a server…</button>
+      </div>
+    </div>
+  {:else if !session.connected}
     <div data-testid="server-offline" class="offline panel">
       Not connected to {hostOf(session.serverUrl)}
       <button data-testid="server-retry" onclick={() => retry()}>Retry</button>
@@ -940,6 +952,47 @@
     padding: 40px 24px;
     color: var(--text);
     font-size: 14px;
+  }
+
+  /* GameBackups prototype `.bk-off`: the panel fills the view, its content
+     centred in one 420px column. */
+  .offline-mode {
+    flex: 1 1 auto;
+    display: grid;
+    place-items: center;
+    padding: 40px;
+  }
+
+  .offline-mode-in {
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    text-align: center;
+  }
+
+  .offline-mode-in h2 {
+    margin: 0;
+    font-size: 18px;
+    color: var(--text-h);
+  }
+
+  .offline-mode-in .note {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .offline-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border-radius: var(--r-control);
+    background: var(--field);
+    color: var(--text-h);
   }
 
   .offline button {

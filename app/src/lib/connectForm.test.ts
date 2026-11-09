@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canConnect, libraryField, type ConnectFields } from './connectForm';
+import { canConnect, canUseOffline, libraryField, type ConnectFields } from './connectForm';
 
 describe('libraryField', () => {
   it('asks for a folder on a first run, pre-filled with the suggestion', () => {
@@ -41,5 +41,22 @@ describe('canConnect', () => {
   it('needs a library folder only when it asks for one', () => {
     expect(canConnect({ ...filled, libraryPath: '  ' })).toBe(false);
     expect(canConnect({ ...filled, libraryPath: null })).toBe(true);
+  });
+});
+
+describe('canUseOffline', () => {
+  it('waits until the stored folder is known', () => {
+    expect(canUseOffline(false, null)).toBe(false);
+    expect(canUseOffline(false, '/home/me/Games/GRID')).toBe(false);
+  });
+
+  it('needs the library folder when the form asks for one', () => {
+    expect(canUseOffline(true, '/home/me/Games/GRID')).toBe(true);
+    expect(canUseOffline(true, '')).toBe(false);
+    expect(canUseOffline(true, '   ')).toBe(false);
+  });
+
+  it('ignores the server fields when a folder is already stored', () => {
+    expect(canUseOffline(true, null)).toBe(true);
   });
 });

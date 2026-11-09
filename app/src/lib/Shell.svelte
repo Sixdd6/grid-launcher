@@ -17,7 +17,7 @@
     type CloudRestoreNotice,
     type CloudUploadFinished,
   } from './api';
-  import { session, retry, disconnect } from './stores/session.svelte';
+  import { session, retry, disconnect, connectToServer } from './stores/session.svelte';
   import { appUpdate } from './stores/appUpdate.svelte';
   import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
   import { seedLastViewed } from './stores/lastViewed.svelte';
@@ -191,7 +191,13 @@
     <!-- A failed save is not worth an error here: the theme is already
          applied, the same trade the Appearance select makes. -->
     <ThemeToggle resolved={uiSettings.resolved} onToggle={() => toggleTheme().catch(() => {})} />
-    <span class="status-dot" class:online={session.connected} aria-hidden="true"></span>
+    <span
+      data-testid="session-dot"
+      class="status-dot"
+      class:online={session.connected}
+      class:offline={session.offline && !session.connected}
+      aria-hidden="true"
+    ></span>
     <button
       data-testid="session-chip"
       class="chip"
@@ -203,6 +209,18 @@
     </button>
     {#if serverMenuOpen}
       <div class="server-menu" role="menu">
+        {#if session.offline && !session.connected}
+          <!-- Offline mode (GameBackups README): one way out, back to the
+               Connect screen. Nothing is cleared until a connect succeeds. -->
+          <button
+            data-testid="session-connect"
+            role="menuitem"
+            onclick={() => { serverMenuOpen = false; connectToServer(); }}
+          >
+            Connect to a server…
+          </button>
+          <span class="menu-host" role="none">Library and backup drives work offline</span>
+        {:else}
         {#if !session.connected}
           <button
             data-testid="session-retry"
@@ -224,6 +242,7 @@
           Open RomM in browser
         </button>
         <span class="menu-host" role="none">{hostOf(session.serverUrl)}</span>
+        {/if}
       </div>
     {/if}
   </div>
@@ -357,6 +376,11 @@
 
   .status-dot.online {
     background: var(--success);
+  }
+
+  /* Offline mode is chosen, not a fault: grey, not the danger red. */
+  .status-dot.offline {
+    background: var(--text-muted);
   }
 
   .chip {
