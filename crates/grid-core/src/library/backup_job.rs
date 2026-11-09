@@ -299,6 +299,7 @@ async fn download_game(
             top_level: file.is_top_level,
             md5: file.md5_hash.clone(),
             sha1: file.sha1_hash.clone(),
+            extra: Default::default(),
         });
     }
     let game = pack_game(&detail, &job.server, pack_files, size);
@@ -465,6 +466,8 @@ pub(crate) fn pack_game(
         files,
         assets: PackAssets::default(),
         added: pack::now_rfc3339(),
+        extra: Default::default(),
+        installed: None,
     }
 }
 
@@ -489,6 +492,7 @@ async fn download_emulator(
         supplementals: Vec::new(),
         asset_name: asset_name.to_string(),
         size: 0,
+        extra: Default::default(),
     };
     let staged = match &pick.source {
         EmulatorSource::Catalog { .. } => {
@@ -882,6 +886,7 @@ async fn download_firmware(
             platform: item.slug.clone(),
             platform_name: item.platform_name.clone(),
             files: entry_files,
+            extra: Default::default(),
         },
         files,
     });

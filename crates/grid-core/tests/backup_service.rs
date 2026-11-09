@@ -220,6 +220,7 @@ impl Harness {
                     rom_id: *rom_id,
                     name: name.to_string(),
                     platform_name: "GENESIS".into(),
+                    local: false,
                 })
                 .collect(),
             ..Default::default()

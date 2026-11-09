@@ -666,6 +666,7 @@ mod tests {
             supplementals: Vec::new(),
             asset_name: "d.zip".into(),
             size: 7,
+            extra: Default::default(),
         });
         let info = drive_info(&ScannedDrive {
             drive: detected("/run/media/u/T7", false),
@@ -774,6 +775,7 @@ mod tests {
                 platform: "psx".into(),
                 platform_name: "PlayStation".into(),
                 files: Vec::new(),
+                extra: Default::default(),
             },
         };
         service.add_pending_firmware(pending("Sony PlayStation"));

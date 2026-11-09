@@ -33,6 +33,9 @@ pub const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
 /// The longest path component (in bytes) a pack may hold. FAT, exFAT and
 /// NTFS allow 255 UTF-16 units; 255 UTF-8 bytes never exceeds that.
 pub const MAX_COMPONENT_BYTES: usize = 255;
+/// The largest part of an installed copy's archive: under
+/// [`FAT32_MAX_FILE`], so any drive can hold one.
+pub const PART_BYTES: u64 = 4095 * 1024 * 1024;
 
 /// An operating system a pack carries emulators for.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -163,10 +166,109 @@ pub struct PackGame {
     pub size: u64,
     #[serde(default)]
     pub sha1: String,
+    /// The server's files on the drive. Empty for a game backed up as an
+    /// archived install ([`Self::installed`]).
+    #[serde(default)]
     pub files: Vec<PackFile>,
     #[serde(default)]
     pub assets: PackAssets,
     pub added: String,
+    /// Set when the game is a copy of the install on the computer that
+    /// backed it up, written as an archive in parts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed: Option<PackInstalled>,
+    /// Keys this build does not know, kept so a rewrite does not drop them.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// A copy of a game as installed on the computer that backed it up.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PackInstalled {
+    pub archive: ArchiveKind,
+    pub layout: InstalledLayout,
+    /// The folder (or file) name in the platform folder.
+    pub name: String,
+    /// The archive's parts, in order.
+    pub parts: Vec<PackPart>,
+    /// The space the restored tree needs.
+    pub tree_bytes: u64,
+    pub tree_files: u64,
+    /// The launch file, relative to the tree (`""` for [`InstalledLayout::File`]).
+    #[serde(default)]
+    pub launch: String,
+    /// The install row's ROM file name, for update detection.
+    #[serde(default)]
+    pub rom_file_name: String,
+    /// The install row's server timestamp (the installed copy's).
+    #[serde(default)]
+    pub server_updated_at: String,
+    /// `"v1.2"`, or `""` when the file name has no version tag.
+    #[serde(default)]
+    pub version: String,
+    /// The server had newer files at backup time.
+    #[serde(default)]
+    pub outdated: bool,
+    #[serde(default)]
+    pub from_os: Option<PackOs>,
+    #[serde(default)]
+    pub row: PackInstalledRow,
+}
+
+/// How an installed copy is archived.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveKind {
+    /// Uncompressed tar, split into parts of at most [`PART_BYTES`].
+    Tar,
+    /// Written by a newer GRID: listed, never installed.
+    #[serde(other)]
+    Unknown,
+}
+
+/// What an installed copy's tree is, which picks how it is restored.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum InstalledLayout {
+    Extracted,
+    Native,
+    Multi,
+    File,
+    /// Written by a newer GRID: listed, never installed.
+    #[serde(other)]
+    Unknown,
+}
+
+/// One part of an installed copy's archive.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PackPart {
+    pub path: String,
+    pub size: u64,
+    /// The MD5 of the bytes GRID wrote.
+    pub md5: String,
+}
+
+/// The install row values a restore needs. Relative or plain values only,
+/// never an absolute path.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct PackInstalledRow {
+    /// Relative to the tree.
+    #[serde(default)]
+    pub native_executable: String,
+    #[serde(default)]
+    pub native_launch_parameters: String,
+    #[serde(default)]
+    pub native_launch_source: String,
+    #[serde(default)]
+    pub native_working_dir: String,
+    #[serde(default)]
+    pub ps4_game_id: String,
+    #[serde(default)]
+    pub ps4_content: String,
+    #[serde(default)]
+    pub included_dlc: String,
+    #[serde(default)]
+    pub ra_id: String,
 }
 
 /// One file of a game, as the server lists it.
@@ -190,6 +292,9 @@ pub struct PackFile {
     /// RomM's SHA-1 for the file; informational, like [`Self::md5`].
     #[serde(default)]
     pub sha1: String,
+    /// Keys this build does not know, kept so a rewrite does not drop them.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 fn yes() -> bool {
@@ -236,6 +341,9 @@ pub struct PackEmulator {
     pub supplementals: Vec<String>,
     pub asset_name: String,
     pub size: u64,
+    /// Keys this build does not know, kept so a rewrite does not drop them.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// The firmware of one platform.
@@ -244,6 +352,9 @@ pub struct PackFirmware {
     pub platform: String,
     pub platform_name: String,
     pub files: Vec<PackFirmwareFile>,
+    /// Keys this build does not know, kept so a rewrite does not drop them.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// One firmware file, as the server serves it.
@@ -1012,6 +1123,102 @@ mod tests {
         );
     }
 
+    /// A game backed up from this computer's install: no `files`, an
+    /// `installed` block with its parts.
+    fn installed_game() -> serde_json::Value {
+        serde_json::json!({
+            "platform": "ps4", "platform_name": "PlayStation 4",
+            "source": { "server": "https://romm.home.lan", "rom_id": 77 },
+            "name": "Ember Run", "size": 6442450944_u64, "added": "2026-11-09T10:00:00Z",
+            "installed": {
+                "archive": "tar", "layout": "extracted", "name": "Ember Run",
+                "parts": [
+                    { "path": "games/ps4/Ember Run/installed.tar.001", "size": 4293918720_u64, "md5": "aa" },
+                    { "path": "games/ps4/Ember Run/installed.tar.002", "size": 2148532224_u64, "md5": "bb" }
+                ],
+                "tree_bytes": 6400000000_u64, "tree_files": 1200,
+                "launch": "eboot.bin", "rom_file_name": "Ember Run (v1.02).pkg",
+                "server_updated_at": "2026-10-01T00:00:00Z", "version": "v1.02",
+                "outdated": true, "from_os": "linux",
+                "row": { "ps4_game_id": "CUSA00001", "ra_id": "12" }
+            }
+        })
+    }
+
+    #[test]
+    fn an_installed_block_round_trips() {
+        let game: PackGame = serde_json::from_value(installed_game()).expect("parses");
+        assert!(game.files.is_empty(), "files defaults to empty");
+        let copy = game.installed.as_ref().expect("installed block");
+        assert_eq!(copy.archive, ArchiveKind::Tar);
+        assert_eq!(copy.layout, InstalledLayout::Extracted);
+        assert_eq!(copy.parts.len(), 2);
+        assert_eq!(copy.parts[1].path, "games/ps4/Ember Run/installed.tar.002");
+        assert_eq!(copy.from_os, Some(PackOs::Linux));
+        assert!(copy.outdated);
+        assert_eq!(copy.row.ps4_game_id, "CUSA00001");
+        assert_eq!(copy.row.native_executable, "");
+
+        let written = serde_json::to_value(&game).unwrap();
+        assert_eq!(written["installed"]["archive"], "tar");
+        assert_eq!(written["installed"]["layout"], "extracted");
+        let again: PackGame = serde_json::from_value(written).unwrap();
+        assert_eq!(again, game);
+    }
+
+    #[test]
+    fn a_game_without_an_installed_block_writes_none() {
+        let written = serde_json::to_value(&draft().games[0]).unwrap();
+        assert!(written.get("installed").is_none());
+    }
+
+    #[test]
+    fn unknown_archive_and_layout_parse_as_unknown() {
+        let mut value = installed_game();
+        value["installed"]["archive"] = serde_json::json!("zstd-tar");
+        value["installed"]["layout"] = serde_json::json!("hologram");
+        let game: PackGame = serde_json::from_value(value).expect("still parses");
+        let copy = game.installed.unwrap();
+        assert_eq!(copy.archive, ArchiveKind::Unknown);
+        assert_eq!(copy.layout, InstalledLayout::Unknown);
+    }
+
+    #[test]
+    fn a_pack_without_game_files_parses() {
+        let mut value: serde_json::Value = serde_json::from_str(DRAFT).unwrap();
+        value["games"][0].as_object_mut().unwrap().remove("files");
+        let pack: Pack = serde_json::from_value(value).expect("parses");
+        assert!(pack.games[0].files.is_empty());
+        assert!(pack.games[0].installed.is_none());
+    }
+
+    #[test]
+    fn unknown_entry_keys_round_trip() {
+        let mut value: serde_json::Value = serde_json::from_str(DRAFT).unwrap();
+        let kept = serde_json::json!({ "kept": true });
+        value["games"][0]["future_game"] = kept.clone();
+        value["games"][0]["files"][0]["future_file"] = kept.clone();
+        value["emulators"][0]["future_emulator"] = kept.clone();
+        value["firmware"][0]["future_firmware"] = kept.clone();
+        let pack: Pack = serde_json::from_value(value).expect("parses");
+        assert_eq!(pack.games[0].extra.get("future_game"), Some(&kept));
+        assert_eq!(pack.games[0].files[0].extra.get("future_file"), Some(&kept));
+        assert_eq!(pack.emulators[0].extra.get("future_emulator"), Some(&kept));
+        assert_eq!(pack.firmware[0].extra.get("future_firmware"), Some(&kept));
+
+        let written = serde_json::to_value(&pack).unwrap();
+        assert_eq!(written["games"][0]["future_game"], kept);
+        assert_eq!(written["games"][0]["files"][0]["future_file"], kept);
+        assert_eq!(written["emulators"][0]["future_emulator"], kept);
+        assert_eq!(written["firmware"][0]["future_firmware"], kept);
+        assert!(
+            !pack.extra.contains_key("future_game"),
+            "kept on the entry, not the pack"
+        );
+        let again: Pack = serde_json::from_value(written).unwrap();
+        assert_eq!(again, pack);
+    }
+
     fn write_index(mount: &Path, json: &str) {
         std::fs::create_dir_all(pack_dir(mount)).unwrap();
         std::fs::write(index_path(mount), json).unwrap();
@@ -1037,6 +1244,7 @@ mod tests {
                 top_level: true,
                 md5: String::new(),
                 sha1: String::new(),
+                extra: Default::default(),
             })
             .collect();
         game.assets = PackAssets::default();
@@ -1429,6 +1637,7 @@ mod tests {
             top_level: false,
             md5: String::new(),
             sha1: String::new(),
+            extra: Default::default(),
         });
         let detail = pack_game_detail(&game);
         assert_eq!(detail.id, 1234);

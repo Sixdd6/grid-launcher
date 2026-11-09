@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::pack::{Pack, PackOs, FAT32_MAX_FILE};
+use super::pack::{InstalledLayout, Pack, PackOs, FAT32_MAX_FILE};
 use super::write::SPACE_MARGIN;
 use crate::config::Config;
 use crate::launch::catalog;
@@ -85,6 +85,60 @@ pub struct BackupPlan {
     pub bytes_to_write: u64,
     pub free_bytes: u64,
     pub fits: bool,
+    /// Some requested game is installed on this computer (shows "Copy
+    /// installed games from this computer").
+    #[serde(default)]
+    pub local_available: bool,
+    /// [`PlanInput::use_local`], echoed.
+    #[serde(default)]
+    pub use_local: bool,
+    /// Where each game being written comes from.
+    #[serde(default)]
+    pub sources: Vec<PlanSource>,
+    /// Eligible local games the server has newer files for.
+    #[serde(default)]
+    pub outdated: Vec<PlanOutdated>,
+    /// Out-of-date local games with no choice yet, while `use_local` is on.
+    #[serde(default)]
+    pub needs_choice: u32,
+    /// The part of `bytes_to_write` copied from this computer.
+    #[serde(default)]
+    pub local_bytes: u64,
+    /// The part of `bytes_to_write` downloaded from the server.
+    #[serde(default)]
+    pub download_bytes: u64,
+}
+
+/// Where a game in a backup comes from.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceChoice {
+    /// This computer's install.
+    Local,
+    /// The server.
+    Download,
+}
+
+/// One game being written and where it comes from.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PlanSource {
+    pub rom_id: i64,
+    pub name: String,
+    pub source: SourceChoice,
+    /// Why it downloads although it is installed here, else empty.
+    pub note: String,
+}
+
+/// An eligible local game the server has newer files for.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PlanOutdated {
+    pub rom_id: i64,
+    pub name: String,
+    /// `"v1.2"`, or `""` when there is no version tag.
+    pub installed_version: String,
+    pub server_version: String,
+    /// The user's pick, if any.
+    pub choice: Option<SourceChoice>,
 }
 
 /// What `InstallService::start_backup` answers: the batch the rows share and
@@ -499,6 +553,32 @@ pub struct PlanGame {
     /// the server did not say. An unknown size never makes a game
     /// `too_big`: the caller resolves it first wherever it matters.
     pub largest_file: Option<u64>,
+    /// Whether this computer's install can go instead of a download.
+    pub local: LocalState,
+}
+
+/// Whether a requested game's install on this computer can be backed up.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum LocalState {
+    /// No matching install: the game downloads, with no note.
+    NotInstalled,
+    Eligible {
+        layout: InstalledLayout,
+        /// The exact size of the archive on the drive.
+        archive_bytes: u64,
+        /// Set when the server has newer files.
+        outdated: Option<Outdated>,
+    },
+    /// Installed, but it downloads; `reason` says why ("Its files weren't
+    /// found on this computer").
+    Ineligible { reason: String },
+}
+
+/// The versions of an out-of-date local game.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Outdated {
+    pub installed_version: String,
+    pub server_version: String,
 }
 
 /// One platform's firmware on the server.
@@ -517,6 +597,8 @@ pub struct GameItem {
     pub rom_id: i64,
     pub name: String,
     pub platform_name: String,
+    /// Copied from this computer's install instead of downloaded.
+    pub local: bool,
 }
 
 /// One emulator row: one emulator for one OS.
@@ -573,6 +655,10 @@ pub struct PlanInput<'a> {
     pub host: Option<PackOs>,
     /// Known emulator sizes, per name and OS (the service's cache).
     pub sizes: &'a HashMap<(String, PackOs), u64>,
+    /// "Copy installed games from this computer".
+    pub use_local: bool,
+    /// The user's pick per out-of-date local game, by rom id.
+    pub choices: &'a HashMap<i64, SourceChoice>,
 }
 
 /// The plan and the rows it would queue.
@@ -616,6 +702,7 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
                 rom_id: game.rom_id,
                 name: game.name.clone(),
                 platform_name: game.platform_name.clone(),
+                local: false,
             });
             systems.push(game);
         }
@@ -805,6 +892,13 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
             bytes_to_write: bytes,
             free_bytes: input.free_bytes,
             fits,
+            local_available: false,
+            use_local: input.use_local,
+            sources: Vec::new(),
+            outdated: Vec::new(),
+            needs_choice: 0,
+            local_bytes: 0,
+            download_bytes: bytes,
         },
         items,
     }
@@ -834,6 +928,7 @@ mod tests {
             platform_slug: slug.to_string(),
             size,
             largest_file: Some(largest),
+            local: LocalState::NotInstalled,
         }
     }
 
@@ -906,6 +1001,8 @@ mod tests {
                 include_runtime: false,
                 host: Some(PackOs::Linux),
                 sizes: &self.sizes,
+                choices: &HashMap::new(),
+                use_local: true,
             })
         }
     }
@@ -997,6 +1094,7 @@ mod tests {
                 size: 512,
                 md5: String::new(),
             }],
+            extra: Default::default(),
         });
         let planned = fx.run();
         assert!(planned.plan.firmware[0].already);
@@ -1037,6 +1135,7 @@ mod tests {
                 supplementals: Vec::new(),
                 asset_name: "a.zip".into(),
                 size: 5,
+                extra: Default::default(),
             });
         }
         let planned = fx.run();
@@ -1072,6 +1171,8 @@ mod tests {
             include_runtime: false,
             host: Some(PackOs::Linux),
             sizes: &fx.sizes,
+            choices: &HashMap::new(),
+            use_local: true,
         });
         let rows: Vec<(String, PackOs)> = planned
             .items
@@ -1107,6 +1208,8 @@ mod tests {
             include_runtime: false,
             host: Some(PackOs::Linux),
             sizes: &fx.sizes,
+            choices: &HashMap::new(),
+            use_local: true,
         });
         assert!(planned
             .items
@@ -1137,6 +1240,8 @@ mod tests {
                 include_runtime,
                 host: Some(PackOs::Linux),
                 sizes: &sizes,
+                choices: &HashMap::new(),
+                use_local: true,
             })
         };
         let has_runtime = |planned: &Planned| {
@@ -1187,6 +1292,7 @@ mod tests {
             supplementals: Vec::new(),
             asset_name: "SteamLinuxRuntime_sniper.tar.xz".into(),
             size: 300,
+            extra: Default::default(),
         });
         let already = run(&have, &windows, true);
         assert!(!has_runtime(&already));
@@ -1211,6 +1317,7 @@ mod tests {
             supplementals: Vec::new(),
             asset_name: "umu.tar".into(),
             size: 10,
+            extra: Default::default(),
         });
         let mut tool = pick("GE-Proton", "");
         tool.kind = EmulatorKind::CompatTool;
@@ -1228,6 +1335,8 @@ mod tests {
             include_runtime: false,
             host: Some(PackOs::Linux),
             sizes: &fx.sizes,
+            choices: &HashMap::new(),
+            use_local: true,
         });
         let names: Vec<&str> = planned
             .items

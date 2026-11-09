@@ -102,6 +102,13 @@ pub struct DriveGame {
     pub added: String,
     /// Already installed on this computer.
     pub installed: bool,
+    /// A copy of the install on the computer that backed it up, not the
+    /// server's files.
+    pub installed_copy: bool,
+    /// The installed copy's version (`"v1.2"`), else empty.
+    pub installed_version: String,
+    /// The server had newer files when the installed copy was backed up.
+    pub outdated: bool,
 }
 
 /// What `install_from_drive` queued besides the game, as toast lines
@@ -662,6 +669,13 @@ pub async fn drive_games(
             version: game.version.clone(),
             added: game.added.clone(),
             installed: installed_on_computer(&rows, game, live.as_deref()),
+            installed_copy: game.installed.is_some(),
+            installed_version: game
+                .installed
+                .as_ref()
+                .map(|copy| copy.version.clone())
+                .unwrap_or_default(),
+            outdated: game.installed.as_ref().is_some_and(|copy| copy.outdated),
         })
         .collect())
 }
@@ -763,6 +777,7 @@ async fn plan_games(
                     platform_slug: platform.slug.clone(),
                     size,
                     largest_file,
+                    local: plan::LocalState::NotInstalled,
                 },
             );
         }
@@ -793,6 +808,7 @@ async fn plan_games(
             platform_slug: detail.platform_slug.clone(),
             size: detail.filesize_bytes.max(0) as u64,
             largest_file: Some(detail.largest_game_file_bytes() as u64),
+            local: plan::LocalState::NotInstalled,
         });
     }
     Ok((games, ids))
@@ -851,6 +867,8 @@ async fn make_plan(
             include_runtime,
             host: PackOs::host(),
             sizes,
+            choices: &std::collections::HashMap::new(),
+            use_local: false,
         })
     };
     let planned = run(&install.emulator_sizes());
@@ -1304,6 +1322,7 @@ mod tests {
             supplementals: Vec::new(),
             asset_name: "x.zip".into(),
             size: 1,
+            extra: Default::default(),
         }
     }
 

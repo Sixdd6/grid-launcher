@@ -373,6 +373,8 @@ export type DownloadKind =
   // Game backups (`job: 'backup'`): one game, one emulator release for one
   // OS, or one platform's firmware written to a drive.
   | 'backup_game'
+  // A game copied from this computer's install instead of downloaded.
+  | 'backup_game_local'
   | 'backup_emulator'
   | 'backup_firmware'
   // The one `cancelled` row that stands for the waiting backup rows of a
@@ -497,6 +499,12 @@ export type DriveGame = {
   screenshots: string[];
   /** RFC 3339 UTC: when it was backed up. */
   added: string;
+  /** A copy of the install on the computer that backed it up, not the server's files. */
+  installed_copy: boolean;
+  /** The installed copy's version (`"v1.2"`), else `''`. */
+  installed_version: string;
+  /** The server had newer files when the installed copy was backed up. */
+  outdated: boolean;
 };
 
 /**
@@ -548,6 +556,43 @@ export type BackupPlan = {
   bytes_to_write: number;
   free_bytes: number;
   fits: boolean;
+  /** Some requested game is installed on this computer (shows "Copy installed games from this computer"). */
+  local_available: boolean;
+  /** The `use_local` the plan was made with. */
+  use_local: boolean;
+  /** Where each game being written comes from. */
+  sources: PlanSource[];
+  /** Eligible local games the server has newer files for. */
+  outdated: PlanOutdated[];
+  /** Out-of-date local games with no choice yet, while `use_local` is on. */
+  needs_choice: number;
+  /** The part of `bytes_to_write` copied from this computer. */
+  local_bytes: number;
+  /** The part of `bytes_to_write` downloaded from the server. */
+  download_bytes: number;
+};
+
+/** Where a game in a backup comes from. Mirrors `grid_core::backup::plan::SourceChoice`. */
+export type SourceChoice = 'local' | 'download';
+
+/** One game being written and where it comes from. Mirrors `grid_core::backup::plan::PlanSource`. */
+export type PlanSource = {
+  rom_id: number;
+  name: string;
+  source: SourceChoice;
+  /** Why it downloads although it is installed here, else `''`. */
+  note: string;
+};
+
+/** An eligible local game the server has newer files for. Mirrors `grid_core::backup::plan::PlanOutdated`. */
+export type PlanOutdated = {
+  rom_id: number;
+  name: string;
+  /** `"v1.2"`, or `''` when there is no version tag. */
+  installed_version: string;
+  server_version: string;
+  /** The user's pick, if any. */
+  choice: SourceChoice | null;
 };
 
 export type BackupQueued = { batch: number; games: number; emulators: number; firmware: number };

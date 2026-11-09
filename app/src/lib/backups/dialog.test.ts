@@ -62,6 +62,13 @@ function plan(overrides: Partial<BackupPlan> = {}): BackupPlan {
     bytes_to_write: 11.1 * GB,
     free_bytes: 61.4 * GB,
     fits: true,
+    local_available: false,
+    use_local: true,
+    sources: [],
+    outdated: [],
+    needs_choice: 0,
+    local_bytes: 0,
+    download_bytes: 11.1 * GB,
     ...overrides,
   };
 }

@@ -370,6 +370,7 @@ async fn an_emulator_from_the_pack_installs_with_the_packs_source_id() {
         supplementals: Vec::new(),
         asset_name: "widget-x86_64.AppImage".to_string(),
         size: 22,
+        extra: Default::default(),
     };
     h.service
         .install_emulator_from_drive(h.drive(), &entry)
@@ -415,6 +416,7 @@ async fn an_emulator_for_another_os_is_refused() {
         supplementals: Vec::new(),
         asset_name: "widget.zip".to_string(),
         size: 1,
+        extra: Default::default(),
     };
     assert!(h
         .service
@@ -451,6 +453,7 @@ async fn a_local_zip_emulator_installs_as_a_manual_entry() {
         supplementals: Vec::new(),
         asset_name: "My Emu.zip".to_string(),
         size: fs::metadata(&zip).unwrap().len(),
+        extra: Default::default(),
     };
     h.service
         .install_emulator_from_drive(h.drive(), &entry)

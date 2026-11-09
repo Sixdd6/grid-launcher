@@ -314,6 +314,7 @@ function driveGame(overrides: Partial<DriveGame> = {}): DriveGame {
     release_date: '1998-03-01', genres: ['Platform', 'Puzzle'], game_modes: [], franchises: [], players: '1',
     version: '', fanart: 'assets/psx/Cinder Peaks/fanart.jpg', logo: '',
     screenshots: ['assets/psx/Cinder Peaks/screenshots/screenshot-01.jpg'], added: '2026-11-07T09:01:00Z',
+    installed_copy: false, installed_version: '', outdated: false,
     ...overrides,
   };
 }

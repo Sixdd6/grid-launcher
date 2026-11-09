@@ -112,6 +112,7 @@ fn entry(name: &str, source_id: &str, version: &str, rel: &str, asset: &str) -> 
         supplementals: Vec::new(),
         asset_name: asset.to_string(),
         size: 0,
+        extra: Default::default(),
     }
 }
 

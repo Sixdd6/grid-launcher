@@ -729,6 +729,7 @@ async fn a_pack_source_routes_its_files_to_the_same_targets_as_the_server() {
             platform: "ps".into(),
             platform_name: "PlayStation".into(),
             files: pack_files,
+            extra: Default::default(),
         },
     };
 
@@ -780,6 +781,7 @@ async fn a_pack_source_never_reads_outside_gridpack() {
             size: 12,
             md5: String::new(),
         }],
+        extra: Default::default(),
     };
     let absolute = drive
         .path()
