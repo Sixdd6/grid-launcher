@@ -613,42 +613,8 @@ pub fn free_space(path: &Path) -> Option<u64> {
     free_space_at(existing)
 }
 
-#[cfg(windows)]
 fn free_space_at(dir: &Path) -> Option<u64> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
-    let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
-    let mut available: u64 = 0;
-    // SAFETY: `wide` is NUL-terminated and outlives the call; the two
-    // optional out-pointers may be null.
-    let ok = unsafe {
-        GetDiskFreeSpaceExW(
-            wide.as_ptr(),
-            &mut available,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    };
-    (ok != 0).then_some(available)
-}
-
-#[cfg(unix)]
-// The statvfs field types differ between targets (u32 on some 32-bit
-// ones), so the casts are needed there even where they are no-ops here.
-#[allow(clippy::unnecessary_cast)]
-fn free_space_at(dir: &Path) -> Option<u64> {
-    use std::os::unix::ffi::OsStrExt;
-    let c_path = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
-    // SAFETY: an all-zero `statvfs` is a valid value to be overwritten.
-    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
-    // SAFETY: `c_path` is NUL-terminated and `stat` is a valid out-pointer.
-    let rc = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
-    (rc == 0).then(|| (stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64))
-}
-
-#[cfg(not(any(unix, windows)))]
-fn free_space_at(_dir: &Path) -> Option<u64> {
-    None
+    crate::platform::disk_space(dir).map(|(_total, free)| free)
 }
 
 /// One folder the move takes along.
