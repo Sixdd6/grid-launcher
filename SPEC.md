@@ -86,11 +86,11 @@ and whichever view is open:
   <library> is missing. Install it with your system's package manager (often named
   <package>)." Opening an emulator from Settings › Systems uses the same wording in its
   toast.
-- A backup is one card per batch (every row one Back up click queued), never one per
+- A backup is one card per batch (every row one Backup click queued), never one per
   game. Queued, once the batch stops growing: "3 games added to the backup queue for
   <pack>". When every row has ended: "3 games and 1 emulator backed up to <pack>". If a
   row failed or the drive was removed, one error card instead: "<label> was removed. 4 of
-  17 items were written to <pack>." (or "Couldn't back up <Title>: <reason>. …"). Adding
+  17 items were written to <pack>." (or "Couldn't backup <Title>: <reason>. …"). Adding
   a computer to a pack words its batch "Windows builds of 2 emulators added to the backup
   queue for <pack>" and "… backed up to <pack>". Backup rows show no per-row cards.
 - An install from a backup drive shows the game's own cards as above. What it brings
@@ -129,7 +129,7 @@ There are several main sections to the application with buttons across the top b
   - The grid is the drive's games, with search ("Search games on this drive"), sort
     (Title, Platform, Recently backed up, Largest first) and size. A game installed here
     shows Play; any other shows **Install**, which copies it from the drive with no
-    network. An empty drive reads "Nothing on this drive yet. Back up games from Server
+    network. An empty drive reads "Nothing on this drive yet. Backup games from Server
     or Library."
   - Select mode on a drive offers **Install N games** and **Remove from drive…** (two
     clicks: "Remove N from drive"); the result reads "Removed 3 games from <pack>".
@@ -138,9 +138,9 @@ There are several main sections to the application with buttons across the top b
   on and reads **Done** while on. A click on a cover picks it instead of opening Details;
   Shift-click picks a range. A picked cover shows a filled check and a ring, and its hover
   bar is hidden. A bar pinned to the bottom of the grid shows "3 selected · 4.2 GB",
-  Select all N / All N selected, Clear and the action: **Back up to drive…** on installed
+  Select all N / All N selected, Clear and the action: **Backup to drive…** on installed
   games and on Server. Esc or Done leaves select mode, and so does changing the rail
-  entry. A Library platform row also has **Back up all N…** in its header, for its
+  entry. A Library platform row also has **Backup all N…** in its header, for its
   installed games that have a server id. Backing up needs a server: offline, both are
   disabled with the reason.
 
@@ -172,13 +172,13 @@ There are several main sections to the application with buttons across the top b
   title, platform or genre, and a grid of cover cards. The hover action is
   Install for a game that is not installed and Play for one that is. The card size is
   remembered as `ui.card_size_server`. Downloads and installs are queued and handled in
-  the background. A platform header has **Back up all N…** on its right, which opens the
+  the background. A platform header has **Backup all N…** on its right, which opens the
   Backup dialog for every game of the platform, and the toolbar has Select (see Select
   mode above).
 
   **Offline.** In offline mode Server shows one panel in place of the rail and grid: "Not
   connected to a server", "Your Library and backup drives work without one. Connect to
-  browse the server and back up games." and **Connect to a server…**.
+  browse the server and backup games." and **Connect to a server…**.
 
   **Header chips follow the state.** The firmware chip reads "Firmware: 3 files — no
   default emulator" until the platform has a default emulator, then "Firmware: 3 files",
@@ -269,7 +269,7 @@ There are several main sections to the application with buttons across the top b
   game rows run first, then its emulators, then its firmware; backups and installs share
   one queue, first in, first out. When the drive is removed, the row being written fails
   ("Failed — SAMSUNG T7 was removed") and the drive's waiting rows fold into one
-  Completed row, "13 more items" with "Cancelled — SAMSUNG T7 was removed · back up
+  Completed row, "13 more items" with "Cancelled — SAMSUNG T7 was removed · backup
   again to finish", which offers only Dismiss. A failed or cancelled backup row can be
   retried while its drive is connected. An install from a drive reads "Copying from
   <label> 45%" while it copies.
@@ -596,13 +596,13 @@ native games, Uninstall, and a cloud button that opens the Saves tab. Under them
 states when the game was last played and which emulator — and, for RetroArch, which core —
 would launch it.
 
-**Backups in Details.** Under the install actions sits **Back up to drive…**, which opens
+**Backups in Details.** Under the install actions sits **Backup to drive…**, which opens
 the Backup dialog for this game (offline it is disabled, and a line reads "Connect to a
-server to back up games."). It is not shown for a Missing game. When connected drives
+server to backup games."). It is not shown for a Missing game. When connected drives
 hold the game already (same server and ROM id), a line under the actions reads "On
 <pack>" ("On Couch kit, Travel kit" for several). Details opened from a drive's grid adds
 "From <pack>" to the header line. It offers **Install from drive** in place of Install
-when the game is not installed here, and **Remove from drive…** in place of Back up
+when the game is not installed here, and **Remove from drive…** in place of Backup
 (two clicks; the second reads "Remove from <pack>").
 
 Uninstall never removes a protected folder (a filesystem root, home, a library folder, its
@@ -759,15 +759,15 @@ are none), then the remembered drives that are not connected.
 - **A remembered drive that is not connected** shows its name, label, file system and
   size, when it was last seen and its game count, with **Forget**.
 - **Every backup also copies** holds one default for the Backup dialog: "The server's
-  firmware for the systems you back up", on by default (`[backup] include_firmware`).
+  firmware for the systems you backup", on by default (`[backup] include_firmware`).
   Each game always takes its art and details, and each system its emulator.
 - **What's in the gridpack folder** (collapsed) shows the layout below.
 
 ## The Backup dialog
-Opened by Details › Back up to drive…, the select bar's Back up to drive…, and Back up
+Opened by Details › Backup to drive…, the select bar's Backup to drive…, and Backup
 all N… (Server platform header, Library platform row). It opens over every view and over
 Details.
-- **Title:** "Back up Cinder Peaks", "Back up 3 games" or "Back up PlayStation · 4
+- **Title:** "Backup Cinder Peaks", "Backup 3 games" or "Backup PlayStation · 4
   games". The lede says GRID downloads each game from the server and writes it, with its
   art and details, to the drive's gridpack folder. A backup always downloads the game
   from the server, even when it is installed here, so the drive gets the server's
@@ -793,7 +793,7 @@ Details.
 - **Notes:** games already on the drive (same server and ROM id) are skipped ("1 game is
   already on Couch kit and will be skipped: Moss & Marrow"). On a FAT32 drive, games with
   a file over 4 GB are listed as not possible.
-- **Footer:** "11.1 GB to write", Cancel and **Back up 3 games** ("Nothing to back up"
+- **Footer:** "11.1 GB to write", Cancel and **Backup 3 games** ("Nothing to backup"
   when there is nothing new). The bytes to write plus a safety margin must fit the free
   space.
 

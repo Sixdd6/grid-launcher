@@ -170,11 +170,11 @@ export function launchSourceNote(launchSource: string, selected: string, shown: 
   return launchSource === 'sidecar' && selected === shown ? 'Set by game.json' : '';
 }
 
-/** Why "Back up to drive…" is disabled offline (GameBackups README). */
-export const BACKUP_NEEDS_SERVER = 'Connect to a server to back up games';
+/** Why "Backup to drive…" is disabled offline (GameBackups README). */
+export const BACKUP_NEEDS_SERVER = 'Connect to a server to backup games';
 
 /**
- * Details' "Back up to drive…": a backup downloads each game from the
+ * Details' "Backup to drive…": a backup downloads each game from the
  * server, so it is disabled, with the reason, while no server is connected.
  */
 export function backupAction(connected: boolean): { disabled: boolean; reason: string } {

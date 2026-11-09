@@ -52,9 +52,9 @@ describe('backups-b: the drive is removed mid-backup', () => {
     await $(testId('server-selection-backup')).click();
     await $(testId('backup-dialog')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     const start = $(testId('backup-start'));
-    await browser.waitUntil(async () => (await start.isEnabled()) && (await start.getText()) === 'Back up 4 games', {
+    await browser.waitUntil(async () => (await start.isEnabled()) && (await start.getText()) === 'Backup 4 games', {
       timeout: 15_000,
-      timeoutMsg: 'the Backup dialog never offered "Back up 4 games"',
+      timeoutMsg: 'the Backup dialog never offered "Backup 4 games"',
     });
     // Everything else is already on the drive.
     await expect($(testId('backup-emulators'))).toHaveText('Already on the drive');
@@ -98,7 +98,7 @@ describe('backups-b: the drive is removed mid-backup', () => {
     const cancelled = rows.filter((r) => r.detail.startsWith('Cancelled'));
     expect(cancelled).toHaveLength(1);
     expect(cancelled[0].title).toBe('3 more items');
-    expect(cancelled[0].detail).toBe(`Cancelled — ${removed} · back up again to finish`);
+    expect(cancelled[0].detail).toBe(`Cancelled — ${removed} · backup again to finish`);
     // No row of this backup is still waiting or running.
     expect(rows.filter((r) => /^(Waiting|Downloading|Writing)/.test(r.detail))).toEqual([]);
 

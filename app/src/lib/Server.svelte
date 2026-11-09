@@ -305,7 +305,7 @@
     if (next !== untrack(() => selection)) selection = next;
   });
 
-  /** "Back up to drive…" on the selection bar. */
+  /** "Backup to drive…" on the selection bar. */
   function backUpSelection() {
     if (selection.ids.length === 0 || activePlatform === null) return;
     openBackup({
@@ -314,7 +314,7 @@
     });
   }
 
-  /** "Back up all N…" in the platform header: every game of the platform. */
+  /** "Backup all N…" in the platform header: every game of the platform. */
   function backUpPlatform() {
     if (activePlatform === null || games.length === 0) return;
     openBackup({
@@ -617,7 +617,7 @@
       <div class="offline-mode-in">
         <span class="offline-icon"><Icon name="cloud" size={24} /></span>
         <h2>Not connected to a server</h2>
-        <p class="note">Your Library and backup drives work without one. Connect to browse the server and back up games.</p>
+        <p class="note">Your Library and backup drives work without one. Connect to browse the server and backup games.</p>
         <button data-testid="server-connect" class="g-btn" onclick={() => connectToServer()}>Connect to a server…</button>
       </div>
     </div>
@@ -681,9 +681,9 @@
                   </button>
                   {/if}
                   {#if !gamesLoading && games.length > 0}
-                    <!-- GameBackups README: "Back up all 11…" on the right of the header. -->
+                    <!-- GameBackups README: "Backup all 11…" on the right of the header. -->
                     <button data-testid="server-backup-platform" class="chip link backup-all" onclick={backUpPlatform}>
-                      Back up all {games.length}…
+                      Backup all {games.length}…
                     </button>
                   {/if}
                 </div>
@@ -806,7 +806,7 @@
                 disabled={selection.ids.length === 0}
                 onclick={backUpSelection}
               >
-                Back up to drive…
+                Backup to drive…
               </button>
             {/snippet}
           </SelectionBar>
@@ -939,7 +939,7 @@
     cursor: default;
   }
 
-  /* "Back up all N…" sits at the right end of the header row, after the
+  /* "Backup all N…" sits at the right end of the header row, after the
      chips (which take the free space when shown). */
   .backup-all {
     white-space: nowrap;

@@ -525,7 +525,7 @@
   <div class="view" data-view="server">
     <div class="columns">
       <nav class="g-rail" id="srv-rail" aria-label="Server platforms"></nav>
-      <div class="g-panel bk-off" id="bk-srv-off" hidden><div class="bk-off-in"><span class="bk-drive-icon" data-icon="cloud" data-size="24"></span><h2>Not connected to a server</h2><p class="note">Your Library and backup drives work without one. Connect to browse the server and back up games.</p><button class="g-btn" data-bk-connect>Connect to a server…</button></div></div>
+      <div class="g-panel bk-off" id="bk-srv-off" hidden><div class="bk-off-in"><span class="bk-drive-icon" data-icon="cloud" data-size="24"></span><h2>Not connected to a server</h2><p class="note">Your Library and backup drives work without one. Connect to browse the server and backup games.</p><button class="g-btn" data-bk-connect>Connect to a server…</button></div></div>
       <div class="body sbody" id="srv-body">
         <div class="g-panel g-head shead" id="srv-head"><div class="shead-fold"><div class="shead-fold-in">
           <header class="g-platform-header">
@@ -1597,7 +1597,7 @@ var FAT32_MAX = 4;
    library instead of downloading it: as plain files when the install is
    exactly the server's files (`file`), otherwise as an uncompressed tar in
    parts of at most 4 GiB (`extracted`, `native`). `have`/`srv` mark a game
-   whose server copy is newer: the dialog asks which copy to back up. `why` is
+   whose server copy is newer: the dialog asks which copy to backup. `why` is
    the reason an installed game downloads instead. Wine prefixes are never
    copied (`wine`). */
 G[12].update = true; G[16].installed = true; G[25].installed = true;
@@ -1656,7 +1656,7 @@ function bkDriveCard(d) {
                  : '<span class="pill-s">Not connected</span>') + '</header>';
   if (!d.connected) {
     return '<article class="bk-drive away">' + head + '<p class="note">Last seen ' + d.seen + ' · ' + bkPlural(d.games.length, 'game') + ' · ' + bkFmt(bkGridUsed(d)) +
-      '. Plug it in to back up to it or install from it.</p><div class="form-actions"><button class="small-btn" data-bk-forget="' + d.id + '">Forget</button>' +
+      '. Plug it in to backup to it or install from it.</p><div class="form-actions"><button class="small-btn" data-bk-forget="' + d.id + '">Forget</button>' +
       '<button class="small-btn bk-proto" data-bk-plug="' + d.id + '">Prototype: plug in</button></div></article>';
   }
   var body;
@@ -1666,10 +1666,10 @@ function bkDriveCard(d) {
         '<fieldset class="bk-os"><legend>Computers this pack is for</legend>' + BK_OS.map(function (o) { return '<label class="check"><input type="checkbox" data-bk-setup-os="' + o[0] + '"' + (o[0] === 'linux' ? ' checked' : '') + '> ' + o[1] + (o[0] === 'linux' ? ' (this computer)' : '') + '</label>'; }).join('') +
           '<span class="help">GRID adds the emulators each system needs, built for every computer you pick. You can change this later.</span></fieldset>' +
         '<p class="note">GRID makes a <code>gridpack</code> folder at the root of ' + esc(d.label) + '. Nothing else on the drive is changed.</p>' +
-        (d.fs === 'FAT32' ? '<p class="bk-warn"><b>FAT32 can’t hold files over 4 GB.</b> Games with a larger file (many PlayStation 2, GameCube and Windows games) can’t go on this drive. Reformat it as exFAT to back up everything.</p>' : '') +
+        (d.fs === 'FAT32' ? '<p class="bk-warn"><b>FAT32 can’t hold files over 4 GB.</b> Games with a larger file (many PlayStation 2, GameCube and Windows games) can’t go on this drive. Reformat it as exFAT to backup everything.</p>' : '') +
         '<div class="form-actions"><button class="g-btn" type="button" data-bk-setup-go="' + d.id + '">Set up drive</button><button class="g-btn secondary" type="button" data-bk-setup-cancel>Cancel</button></div></form>';
     } else {
-      body = '<p class="note">' + bkFmt(bkFree(d)) + ' free. Set it up to back up games to it.</p>' +
+      body = '<p class="note">' + bkFmt(bkFree(d)) + ' free. Set it up to backup games to it.</p>' +
         '<div class="form-actions"><button class="g-btn" data-bk-setup="' + d.id + '">Set up for GRID…</button></div>';
     }
   } else {
@@ -1698,7 +1698,7 @@ function renderBackupPane(el) {
       '<div class="empty-state"><b>No removable drives</b><span class="note">Plug in a USB flash drive or SSD. It shows up here.</span></div>') + '</div>' +
     (away.length ? '<div class="sub"><h3>Not connected</h3>' + away.map(bkDriveCard).join('') + '</div>' : '') +
     '<div class="sub"><h3>Every backup also copies</h3>' +
-    '<label class="check"><input type="checkbox" data-bk-default="fw"' + (BK.opts.fw ? ' checked' : '') + '> The server’s firmware for the systems you back up</label>' +
+    '<label class="check"><input type="checkbox" data-bk-default="fw"' + (BK.opts.fw ? ' checked' : '') + '> The server’s firmware for the systems you backup</label>' +
     '<p class="note">You can change this for each backup. Each game always takes its covers, fanart, screenshots, logo and details, and the emulator its system needs, built for every computer the drive is for.</p></div>' +
     '<details class="bk-tree"><summary>What’s in the gridpack folder</summary><pre>gridpack/\n  gridpack.json        pack name, drive id, format version, game index\n  games/&lt;platform&gt;/     the files the server gives (zip, 7z, iso, folder),\n                       or installed.tar.001 … for a game copied from a computer\n  assets/&lt;platform&gt;/&lt;game&gt;/\n    cover.jpg  fanart.jpg  logo.png  screenshots/\n  emulators/&lt;emulator&gt;/&lt;version&gt;/&lt;os&gt;/\n  firmware/&lt;platform&gt;/</pre></details>';
   gIcons(el);
@@ -1778,7 +1778,7 @@ function bkSelBar() {
     var acts = drv
       ? '<button class="g-btn" data-bk-sel-install' + (ids.length ? '' : ' disabled') + '>Install ' + (ids.length ? bkPlural(ids.length, 'game') : '') + '</button>' +
         (BK.confirm === 'selrm' ? '<button class="g-btn destructive" data-bk-sel-rm-go>Remove ' + ids.length + ' from drive</button>' : '<button class="g-btn secondary destructive" data-bk-sel-rm' + (ids.length ? '' : ' disabled') + '>Remove from drive…</button>')
-      : '<button class="g-btn" data-bk-open' + (ids.length ? '' : ' disabled') + '>Back up to drive…</button>';
+      : '<button class="g-btn" data-bk-open' + (ids.length ? '' : ' disabled') + '>Backup to drive…</button>';
     bar.innerHTML = '<span class="bk-sel-count"><b>' + (ids.length ? ids.length + ' selected' : 'Select games') + '</b>' + (ids.length ? '<span class="note">' + bkFmt(size) + '</span>' : '<span class="note">Click covers to pick them · Shift-click picks a range</span>') + '</span>' +
       '<button class="small-btn" data-bk-all' + (vis.length ? '' : ' disabled') + '>' + (all ? 'All ' + vis.length + ' selected' : 'Select all ' + vis.length) + '</button>' +
       (ids.length ? '<button class="small-btn" data-bk-clear>Clear</button>' : '') + '<span class="bk-sel-gap"></span>' + acts;
@@ -1811,11 +1811,11 @@ renderLibrary = function () {
   chips.hidden = false;
   chips.innerHTML = '<span class="g-chip-outline">Emulators: ' + (d.emus.length ? esc(d.emus.join(', ')) : 'none') + '</span><span class="g-chip-outline">Firmware: ' +
     (d.fw.length ? esc(d.fw.map(function (k) { return SY.name[k]; }).join(', ')) : 'none') + '</span>';
-  fillGrid('lib-grid', list, true, S.q.library.trim() ? 'No games on this drive match “' + S.q.library.trim() + '”' : 'Nothing on this drive yet. Back up games from Server or Library.');
+  fillGrid('lib-grid', list, true, S.q.library.trim() ? 'No games on this drive match “' + S.q.library.trim() + '”' : 'Nothing on this drive yet. Backup games from Server or Library.');
   bkPlatAct(); bkSelBar();
 };
 
-/* "Back up all N…" for a whole platform: Server platform headers and
+/* "Backup all N…" for a whole platform: Server platform headers and
    Library platform rows. */
 function bkPlatAct() {
   [['srv', 'server'], ['lib', 'library']].forEach(function (p) {
@@ -1825,7 +1825,7 @@ function bkPlatAct() {
     var ok = !S.offline && PLAT[plat] && plat !== 'DISCOVER';
     var n = !ok ? 0 : G.filter(function (g) { return g.p === plat && (p[1] === 'server' || g.installed); }).length;
     if (!b) { head.insertAdjacentHTML('beforeend', '<button class="small-btn bk-plat" data-bk-plat="' + p[1] + '"></button>'); b = head.querySelector('[data-bk-plat]'); }
-    b.hidden = !n; b.textContent = 'Back up all ' + n + '…';
+    b.hidden = !n; b.textContent = 'Backup all ' + n + '…';
   });
 }
 var bkOrigSrv = renderServer;
@@ -1838,7 +1838,7 @@ renderServer = function () {
 
 /* ---- the backup dialog ---- */
 function bkOpen(ids, title) {
-  if (S.offline) { toast('Connect to a server to back up games', 'error'); return; }
+  if (S.offline) { toast('Connect to a server to backup games', 'error'); return; }
   var ready = bkReady();
   var pick = BK.dlg && BK.dlg.drive && bkDrive(BK.dlg.drive) && bkDrive(BK.dlg.drive).connected ? BK.dlg.drive : (ready[0] ? ready[0].id : null);
   BK.dlg = { ids: ids.slice(), title: title, drive: pick, emus: true, fw: BK.opts.fw, local: true, choices: {}, each: false };
@@ -1847,7 +1847,7 @@ function bkOpen(ids, title) {
 /* Where each game comes from. A game is copied from this computer when the
    checkbox is on, it is an eligible install, and it is not out of date or the
    user chose this computer's copy. An out-of-date game with no choice yet
-   counts as a download and holds the Back up button. */
+   counts as a download and holds the Backup button. */
 function bkPlan(dl) {
   var d = bkDrive(dl.drive), games = dl.ids.map(function (id) { return G[id]; });
   var useLocal = dl.local !== false, choices = dl.choices || {};
@@ -1908,7 +1908,7 @@ function bkSourceSection(pl, dl) {
     var many = pl.outdated.length > 1;
     h += '<div class="bk-outdated" role="group" aria-label="Out-of-date games">' +
       '<p class="bk-outdated-head"><b>' + (many ? 'The server has newer files for ' + pl.outdated.length + ' games' : 'The server has newer files') + '</b>' +
-      '<span class="note">Back up the copy installed here, or download the newer version.</span></p>' +
+      '<span class="note">Backup the copy installed here, or download the newer version.</span></p>' +
       (many ? '<div class="bk-outdated-bulk"><button class="small-btn" type="button" data-bk-bulk="local">Use this computer’s copies</button><button class="small-btn" type="button" data-bk-bulk="download">Download all</button></div>' : '') +
       pl.outdated.map(function (o) {
         var nm = 'bk-choice-' + o.g.id;
@@ -1944,11 +1944,11 @@ function bkRenderDlg() {
     ? 'GRID copies games installed on this computer and downloads the rest from romm.home.lan, then writes each one, with its art and details, to the drive’s gridpack folder.'
     : 'GRID downloads each game from romm.home.lan and writes it, with its art and details, to the drive’s gridpack folder.';
   var foot = !n ? 'Nothing new to write' : bkFmt(pl.size) + ' to write' + (pl.local.length && pl.downloadBytes ? ' · ' + bkFmt(pl.downloadBytes) + ' to download' : '');
-  var goLabel = ask ? 'Choose for ' + bkPlural(ask, 'game') : over ? 'Not enough space' : n ? 'Back up ' + bkPlural(n, 'game') : 'Nothing to back up';
+  var goLabel = ask ? 'Choose for ' + bkPlural(ask, 'game') : over ? 'Not enough space' : n ? 'Backup ' + bkPlural(n, 'game') : 'Nothing to backup';
   var emuLine = pl.emus.length ? esc(pl.emus.join(', ')) + (pl.d ? ' for ' + bkOsNames(pl.d.os) : '') + ' · ' + bkFmt(pl.emus.reduce(function (s, x) { return s + bkEmuSize(x, pl.d); }, 0)) : (pl.d ? 'Already on the drive' : 'None needed');
   var fwLine = pl.fw.length ? esc(pl.fw.map(function (k) { return SY.name[k] + ' (' + BK_FW[k] + ' files)'; }).join(', ')) : (pl.d ? 'Already on the drive, or none on the server' : 'None on the server');
   el.innerHTML = '<button class="g-icon-btn g-dialog-close" aria-label="Close" data-bk-dlg="cancel"><span data-icon="close" data-size="20"></span></button>' +
-    '<h3 id="bk-dlg-title">' + esc(dl.title || ('Back up ' + bkPlural(dl.ids.length, 'game'))) + '</h3>' +
+    '<h3 id="bk-dlg-title">' + esc(dl.title || ('Backup ' + bkPlural(dl.ids.length, 'game'))) + '</h3>' +
     '<p class="note">' + lede + '</p>' +
     '<div class="sub"><h4>Drive</h4>' + drives + '</div>' +
     (ready.length ? bkSourceSection(pl, dl) : '') +
@@ -2016,7 +2016,7 @@ function bkFail(driveId) {
   var d = bkDrive(driveId), it = BK.job, left = BK.q.filter(function (x) { return x.drive === driveId; });
   var b = BK.batches[it.batch], wrote = b ? b.written : 0;
   addDone(it.t, 'Backup', it.sub + ' · Failed — ' + d.label + ' was removed');
-  if (left.length) addDone(left.length === 1 ? left[0].t : bkPlural(left.length, 'more item'), 'Backup', 'Cancelled — ' + d.label + ' was removed · back up again to finish');
+  if (left.length) addDone(left.length === 1 ? left[0].t : bkPlural(left.length, 'more item'), 'Backup', 'Cancelled — ' + d.label + ' was removed · backup again to finish');
   BK.q = BK.q.filter(function (x) { return x.drive !== driveId; });
   BK.job = null; delete BK.batches[it.batch];
   toast('Backup to ' + d.name + ' stopped: ' + d.label + ' was removed. ' + wrote + ' of ' + (wrote + 1 + left.length) + ' items were written; the half-written one was cleaned up when the drive came back.', 'error');
@@ -2093,7 +2093,7 @@ freshShow = function (phase) {
     '<p class="help center">Install games from a backup drive and play what’s installed. Connect to a server any time from the top bar.</p>');
 };
 
-/* ---- Details: Back up to drive, and drive context ---- */
+/* ---- Details: Backup to drive, and drive context ---- */
 var bkOrigDet = renderDetails;
 renderDetails = function () {
   bkOrigDet();
@@ -2105,7 +2105,7 @@ renderDetails = function () {
     left.querySelector('.g-meta-line').insertAdjacentHTML('beforebegin', BK.confirm === 'drm' ? '<button class="g-btn destructive" data-bk-drm-go>Remove from ' + esc(d.name) + '</button>' : '<button class="g-btn secondary destructive" data-bk-drm>Remove from drive…</button>');
   } else if (!g.missing) {
     var on = bkReady().filter(function (x) { return x.games.indexOf(g.id) >= 0; });
-    var btn = '<button class="g-btn secondary" data-bk-one' + (S.offline ? ' disabled title="Connect to a server to back up games"' : '') + '>Back up to drive…</button>';
+    var btn = '<button class="g-btn secondary" data-bk-one' + (S.offline ? ' disabled title="Connect to a server to backup games"' : '') + '>Backup to drive…</button>';
     left.querySelector('.g-meta-line').insertAdjacentHTML('beforebegin', btn);
     if (on.length) left.insertAdjacentHTML('beforeend', '<p class="g-meta-line bk-on"><span data-icon="drive" data-size="12"></span>On ' + esc(on.map(function (x) { return x.name; }).join(', ')) + '</p>');
   }
@@ -2151,9 +2151,9 @@ document.addEventListener('click', function (e) {
   if ((b = t.closest('[data-bk-plat]'))) {
     var view = b.getAttribute('data-bk-plat'), plat = view === 'server' ? S.platform : S.libFilter;
     var ids = G.filter(function (g) { return g.p === plat && (view === 'server' || g.installed); }).map(function (g) { return g.id; });
-    bkOpen(ids, 'Back up ' + PLAT[plat] + ' · ' + bkPlural(ids.length, 'game')); return;
+    bkOpen(ids, 'Backup ' + PLAT[plat] + ' · ' + bkPlural(ids.length, 'game')); return;
   }
-  if (t.closest('[data-bk-one]')) { bkOpen([S.detail.id], 'Back up ' + S.detail.t); return; }
+  if (t.closest('[data-bk-one]')) { bkOpen([S.detail.id], 'Backup ' + S.detail.t); return; }
   if ((b = t.closest('[data-bk-bulk]'))) { var v2 = b.getAttribute('data-bk-bulk'); bkPlan(BK.dlg).outdated.forEach(function (o) { BK.dlg.choices[o.g.id] = v2; }); bkRenderDlg(); return; }
   if ((b = t.closest('[data-bk-dlg]'))) { if (b.getAttribute('data-bk-dlg') === 'go') bkGo(); else bkCloseDlg(); return; }
   if (t === $('bkscrim')) { bkCloseDlg(); return; }

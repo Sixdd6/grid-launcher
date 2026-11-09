@@ -42,7 +42,7 @@ const NEEDS_SERVER: &str = "Backing up needs a server";
 
 // --- DTOs ---------------------------------------------------------------------
 
-/// What the Backup dialog asks to back up. `platform_ids` is optional: the
+/// What the Backup dialog asks to backup. `platform_ids` is optional: the
 /// platforms the games are on, when the caller knows them (the Server grid
 /// does). With them the plan reads one game list per platform; without them
 /// it reads each game's detail.
@@ -943,7 +943,7 @@ pub async fn start_backup(
     )
     .await?;
     if planned.items.is_empty() {
-        return Err("Nothing to back up".to_string());
+        return Err("Nothing to backup".to_string());
     }
     if !planned.plan.fits {
         return Err(format!(

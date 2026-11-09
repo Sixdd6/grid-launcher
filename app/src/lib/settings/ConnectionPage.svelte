@@ -102,7 +102,7 @@
 {#if offlineMode}
   <p data-testid="settings-connection-offline-note" class="note">
     GRID is running without a server. Your Library and backup drives work without one. Connect to browse the server and
-    back up games.
+    backup games.
   </p>
 {/if}
 

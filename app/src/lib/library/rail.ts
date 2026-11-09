@@ -153,7 +153,7 @@ export function entryForKey(entries: RailEntry[], key: RailKey): RailEntry {
 }
 
 /** An empty drive's grid (GameBackups prototype). */
-export const DRIVE_EMPTY_TEXT = 'Nothing on this drive yet. Back up games from Server or Library.';
+export const DRIVE_EMPTY_TEXT = 'Nothing on this drive yet. Backup games from Server or Library.';
 
 /** Design §5's empty-state text, one line per rail entry, verbatim. */
 export function emptyText(entry: RailEntry): string {

@@ -107,7 +107,7 @@
         disabled={includeFirmware === null || savingFirmware}
         onchange={(e) => setFirmware(e.currentTarget.checked)}
       />
-      The server's firmware for the systems you back up
+      The server's firmware for the systems you backup
     </label>
     <p class="g-note">
       You can change this for each backup. Each game always takes its covers, fanart, screenshots, logo and details, and

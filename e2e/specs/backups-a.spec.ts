@@ -25,14 +25,14 @@ function walk(dir: string, prefix = ''): string[] {
 }
 
 /**
- * Stage `backups/backups-a`: set up a fake drive, back up two games from
+ * Stage `backups/backups-a`: set up a fake drive, backup two games from
  * Server select mode, and check what landed on the drive from Node.
  *
  * The seed makes PCSX2 (installed from the server's Emulators platform)
  * PlayStation 2's emulator, so the backup carries the server's PCSX2 builds
  * for both computers the pack is for, and the PS2 firmware.
  */
-describe('backups-a: set up a drive and back up two games', () => {
+describe('backups-a: set up a drive and backup two games', () => {
   const DRIVE = 'TESTDRIVE';
 
   before(async () => {
@@ -100,7 +100,7 @@ describe('backups-a: set up a drive and back up two games', () => {
 
     const dialog = $(testId('backup-dialog'));
     await dialog.waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the Backup dialog never opened' });
-    await expect($(testId('backup-dialog-title'))).toHaveText('Back up 2 games');
+    await expect($(testId('backup-dialog-title'))).toHaveText('Backup 2 games');
     // The plan: a size to write, the emulator for both computers, and the
     // firmware ticked by default.
     await browser.waitUntil(async () => /to write$/.test((await $(testId('backup-footer-note')).getText()).trim()), {
@@ -115,8 +115,8 @@ describe('backups-a: set up a drive and back up two games', () => {
     await expect($(testId('backup-firmware-text'))).toHaveText(expect.stringContaining('PlayStation 2'));
 
     const start = $(testId('backup-start'));
-    await start.waitForEnabled({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Back up never became enabled' });
-    await expect(start).toHaveText('Back up 2 games');
+    await start.waitForEnabled({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Backup never became enabled' });
+    await expect(start).toHaveText('Backup 2 games');
     await startRecording();
     await start.click();
     await dialog.waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
@@ -148,7 +148,7 @@ describe('backups-a: set up a drive and back up two games', () => {
     expect(toasts.filter((t) => t === `2 games added to the backup queue for ${DRIVE}`)).toHaveLength(1);
     expect(toasts.filter((t) => / added to the backup queue for /.test(t))).toHaveLength(1);
     expect(toasts.filter((t) => / backed up to /.test(t))).toHaveLength(1);
-    expect(toasts.filter((t) => /was removed|couldn't be backed up|Couldn't back up/.test(t))).toEqual([]);
+    expect(toasts.filter((t) => /was removed|couldn't be backed up|Couldn't backup/.test(t))).toEqual([]);
   });
 
   it('leaves a valid gridpack with both games, their files, the emulators and the firmware', async () => {

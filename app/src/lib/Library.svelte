@@ -230,7 +230,7 @@
     }
   }
 
-  /** "Back up to drive…" on the select bar of installed games. */
+  /** "Backup to drive…" on the select bar of installed games. */
   function backUpSelection() {
     if (selection.ids.length === 0 || backup.disabled) return;
     openBackup({
@@ -239,7 +239,7 @@
     });
   }
 
-  // "Back up all N…" on a Library platform row: the installed games of
+  // "Backup all N…" on a Library platform row: the installed games of
   // that platform the server knows (a row with no server id can't be
   // downloaded again).
   let platformBackupIds = $derived(
@@ -603,7 +603,7 @@
           {:else}
             <p data-testid="library-count" class="counts">{gameCountLine(rows.length)}</p>
             {#if platformBackupIds.length > 0}
-              <!-- GameBackups README: "Back up all N…" on a Library platform row, installed games only. -->
+              <!-- GameBackups README: "Backup all N…" on a Library platform row, installed games only. -->
               <div class="chips">
                 <button
                   data-testid="library-backup-platform"
@@ -612,7 +612,7 @@
                   title={backup.reason || undefined}
                   onclick={backUpPlatform}
                 >
-                  Back up all {platformBackupIds.length}…
+                  Backup all {platformBackupIds.length}…
                 </button>
               </div>
             {/if}
@@ -824,7 +824,7 @@
               title={backup.reason || undefined}
               onclick={backUpSelection}
             >
-              Back up to drive…
+              Backup to drive…
             </button>
           {/if}
         {/snippet}

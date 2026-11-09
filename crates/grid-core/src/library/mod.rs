@@ -2420,7 +2420,7 @@ impl InstallService {
         let remembered = self.backup_rows.lock().unwrap().get(&entry_id).cloned();
         let Some((mut drive, item)) = remembered.filter(|(_, known)| known.key() == item) else {
             return Err(LibraryError::Extract(
-                "This backup can't be retried; back up again".to_string(),
+                "This backup can't be retried; backup again".to_string(),
             ));
         };
         let not_connected = || LibraryError::Extract(format!("Connect {} to retry", drive.label));

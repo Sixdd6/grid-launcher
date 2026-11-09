@@ -180,7 +180,7 @@ describe('backupAction', () => {
   });
 
   it('is disabled offline with the reason', () => {
-    expect(backupAction(false)).toEqual({ disabled: true, reason: 'Connect to a server to back up games' });
+    expect(backupAction(false)).toEqual({ disabled: true, reason: 'Connect to a server to backup games' });
   });
 });
 

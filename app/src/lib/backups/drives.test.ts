@@ -292,7 +292,7 @@ describe('driveCardModel', () => {
     );
     expect(m.title).toBe('KINGSTON');
     expect(m.status).toBe('Not set up');
-    expect(m.note).toBe('31.0 GB free. Set it up to back up games to it.');
+    expect(m.note).toBe('31.0 GB free. Set it up to backup games to it.');
     expect([m.showsPack, m.canEdit, m.canSetUp, m.canRemove]).toEqual([false, false, true, false]);
   });
 
@@ -377,12 +377,12 @@ describe('rememberedCardModel', () => {
     expect(rememberedCardModel(wd, now)).toEqual({
       title: 'Everything',
       subtitle: 'WD Elements · NTFS · 2.0 TB',
-      note: 'Last seen 3 days ago · 16 games. Plug it in to back up to it or install from it.',
+      note: 'Last seen 3 days ago · 16 games. Plug it in to backup to it or install from it.',
     });
   });
   it('drops an unknown last-seen time', () => {
     expect(rememberedCardModel({ ...wd, last_seen: '' }, now).note).toBe(
-      '16 games. Plug it in to back up to it or install from it.',
+      '16 games. Plug it in to backup to it or install from it.',
     );
   });
 });

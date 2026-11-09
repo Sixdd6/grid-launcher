@@ -138,7 +138,7 @@ describe('BackupBatches', () => {
     b.due(1_000);
     const end = b.observe([game(2, 'completed'), game(1, 'failed', { error: 'HTTP 404' })], false, 2_000);
     expect(end).toEqual([
-      { group: 'backup-failed', text: "Couldn't back up Game 1: HTTP 404. 1 of 2 items were written to Couch kit.", level: 'error' },
+      { group: 'backup-failed', text: "Couldn't backup Game 1: HTTP 404. 1 of 2 items were written to Couch kit.", level: 'error' },
     ]);
   });
 

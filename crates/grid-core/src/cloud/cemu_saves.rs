@@ -285,7 +285,7 @@ pub fn place_cemu_payload(
                     .map_err(|e| format!("failed to create the backup folder: {e}"))?;
             }
             std::fs::copy(local, &target)
-                .map_err(|e| format!("failed to back up an existing save file: {e}"))?;
+                .map_err(|e| format!("failed to backup an existing save file: {e}"))?;
         }
         backup_dir = Some(backup);
     }

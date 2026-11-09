@@ -124,7 +124,7 @@ function loneOutcome(e: DownloadEntry): Notice | null {
       return { group: 'backup-done', text: `${e.title} backed up to ${name}`, level: 'success' };
     case 'failed': {
       const reason = e.error.trim();
-      const head = `Couldn't back up ${e.title}`;
+      const head = `Couldn't backup ${e.title}`;
       return { group: 'backup-failed', text: reason === '' ? head : `${head}: ${reason}`, level: 'error' };
     }
     case 'cancelled':
@@ -289,7 +289,7 @@ export class BackupBatches {
     if (removed !== undefined) lead = removed;
     else if (failed.length === 1) {
       const reason = failed[0].error.trim();
-      lead = reason === '' ? `Couldn't back up ${failed[0].title}` : `Couldn't back up ${failed[0].title}: ${reason}`;
+      lead = reason === '' ? `Couldn't backup ${failed[0].title}` : `Couldn't backup ${failed[0].title}: ${reason}`;
     } else lead = `${plural(failed.length, 'item')} couldn't be backed up`;
     lead = lead.replace(/\.$/, '');
     const total = rows.length;

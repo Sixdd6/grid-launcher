@@ -571,7 +571,7 @@
     if (e.target === e.currentTarget) onClose();
   }
 
-  // GameBackups README: "Back up to drive…" under the install actions, and
+  // GameBackups README: "Backup to drive…" under the install actions, and
   // "On Couch kit" when a connected drive holds the game already.
   let backup = $derived(backupAction(session.connected));
   let onDrives = $derived(
@@ -850,7 +850,7 @@
                 title={backup.reason || undefined}
                 onclick={backUp}
               >
-                Back up to drive…
+                Backup to drive…
               </button>
               {#if backup.disabled}
                 <!-- The button's `title` is hover-only; this line is the visible reason. -->

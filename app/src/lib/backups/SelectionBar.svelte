@@ -2,7 +2,7 @@
   // The selection bar of select mode (GameBackups README; prototype
   // `bkSelBar`): pinned to the bottom of the grid panel, with the count and
   // total size, Select all N / All N selected, Clear and the view's action
-  // ("Back up to drive…" on Server; Library's drive view passes its own).
+  // ("Backup to drive…" on Server; Library's drive view passes its own).
   import type { Snippet } from 'svelte';
   import { selectAllLabel, selectionSummary } from './selection';
 

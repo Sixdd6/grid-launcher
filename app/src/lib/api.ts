@@ -508,7 +508,7 @@ export type DriveGame = {
 };
 
 /**
- * What to back up. `platform_ids` (optional) are the platforms the games are
+ * What to backup. `platform_ids` (optional) are the platforms the games are
  * on, when the caller knows them: the plan then reads one game list per
  * platform instead of one detail per game.
  */

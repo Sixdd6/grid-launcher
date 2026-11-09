@@ -74,7 +74,7 @@ describe('the drive grid', () => {
   });
 
   it('says why it is empty', () => {
-    expect(driveEmptyText('')).toBe('Nothing on this drive yet. Back up games from Server or Library.');
+    expect(driveEmptyText('')).toBe('Nothing on this drive yet. Backup games from Server or Library.');
     expect(driveEmptyText(' zz ')).toBe('No games on this drive match “zz”');
   });
 

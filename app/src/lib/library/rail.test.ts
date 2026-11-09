@@ -198,6 +198,6 @@ describe('Library › Backup drives rail rows (GameBackups README)', () => {
 
   it('says the drive is empty in the empty state', () => {
     expect(emptyText(driveRailEntries([t7])[0])).toBe(DRIVE_EMPTY_TEXT);
-    expect(DRIVE_EMPTY_TEXT).toBe('Nothing on this drive yet. Back up games from Server or Library.');
+    expect(DRIVE_EMPTY_TEXT).toBe('Nothing on this drive yet. Backup games from Server or Library.');
   });
 });

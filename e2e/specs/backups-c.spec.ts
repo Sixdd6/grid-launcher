@@ -121,7 +121,7 @@ describe('backups-c: use without a server and install from a drive', () => {
     expect(configText()).toContain('romm:ps2/pcsx2 (playstation 2)');
   });
 
-  it('offers Play, and disables Back up to drive with its reason', async () => {
+  it('offers Play, and disables Backup to drive with its reason', async () => {
     const platformRow = $('[data-testid^="library-rail-platform-"]');
     await platformRow.waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Library never listed the installed platform' });
     await platformRow.click();
@@ -140,8 +140,8 @@ describe('backups-c: use without a server and install from a drive', () => {
     expect(await backup.isEnabled()).toBe(false);
     // details/actions.ts BACKUP_NEEDS_SERVER: the hover title, and the same
     // words as the visible line under the button.
-    expect(await backup.getAttribute('title')).toBe('Connect to a server to back up games');
-    await expect($('#details-backup-offline')).toHaveText('Connect to a server to back up games.');
+    expect(await backup.getAttribute('title')).toBe('Connect to a server to backup games');
+    await expect($('#details-backup-offline')).toHaveText('Connect to a server to backup games.');
     await $(testId('details-close')).click();
   });
 });

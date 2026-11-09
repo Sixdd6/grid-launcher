@@ -84,7 +84,7 @@ function volumeLabel(e: DownloadEntry): string {
 function backupDetail(e: DownloadEntry): string {
   if (e.kind === 'backup_cancelled') {
     const reason = e.error.trim();
-    return `Cancelled${reason === '' ? '' : ` — ${reason}`} · back up again to finish`;
+    return `Cancelled${reason === '' ? '' : ` — ${reason}`} · backup again to finish`;
   }
   switch (e.status) {
     case 'queued':
@@ -237,7 +237,7 @@ export function actionFor(
   if (kind === 'firmware') {
     return LIVE_STATUSES.includes(status) ? 'none' : 'dismiss';
   }
-  // The removed drive's summary row is never retried: back up again.
+  // The removed drive's summary row is never retried: backup again.
   if (kind === 'backup_cancelled') return 'dismiss';
   // A backup row's write to the drive can be stopped (its writer checks a
   // flag per chunk and removes its temporary file), unlike an extraction.

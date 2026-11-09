@@ -188,7 +188,7 @@ export function addedOses(before: readonly PackOs[], after: readonly PackOs[]): 
 /** The setup form's warning on a FAT32 drive. GRID never formats a drive, so it only suggests exFAT. */
 export const FAT32_WARNING = {
   title: "FAT32 can't hold files over 4 GB.",
-  body: "Games with a larger file (many PlayStation 2, GameCube and Windows games) can't go on this drive. Reformat it as exFAT to back up everything.",
+  body: "Games with a larger file (many PlayStation 2, GameCube and Windows games) can't go on this drive. Reformat it as exFAT to backup everything.",
 } as const;
 
 /**
@@ -296,7 +296,7 @@ const STATUS_TEXT: Record<DriveInfo['status'], { text: string; tone: DriveTone }
 function statusNote(d: DriveInfo): string {
   switch (d.status) {
     case 'not_set_up':
-      return `${formatBytes(d.free_bytes)} free. Set it up to back up games to it.`;
+      return `${formatBytes(d.free_bytes)} free. Set it up to backup games to it.`;
     case 'read_only':
       return d.pack
         ? `${d.label} is read-only. Games install from it, but backups can't go to it.`
@@ -357,6 +357,6 @@ export function rememberedCardModel(
   return {
     title: r.name || r.label,
     subtitle: `${label}${r.fs} · ${formatBytes(r.total_bytes)}`,
-    note: `${facts.join(' · ')}. Plug it in to back up to it or install from it.`,
+    note: `${facts.join(' · ')}. Plug it in to backup to it or install from it.`,
   };
 }

@@ -517,7 +517,7 @@ describe('backup rows', () => {
       error: 'SAMSUNG T7 was removed',
     });
     expect(`${summary.title} · ${entryDetail(summary)}`).toBe(
-      '13 more items · Cancelled — SAMSUNG T7 was removed · back up again to finish',
+      '13 more items · Cancelled — SAMSUNG T7 was removed · backup again to finish',
     );
     expect(actionFor(summary.status, summary.kind)).toBe('dismiss');
   });

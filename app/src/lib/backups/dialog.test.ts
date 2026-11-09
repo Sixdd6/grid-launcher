@@ -83,21 +83,21 @@ describe('sizeText', () => {
 
 describe('titles and requests', () => {
   it('titles each way of starting a backup', () => {
-    expect(backupTitle({ kind: 'games', count: 3 })).toBe('Back up 3 games');
-    expect(backupTitle({ kind: 'games', count: 1 })).toBe('Back up 1 game');
-    expect(backupTitle({ kind: 'game', name: 'Cinder Peaks' })).toBe('Back up Cinder Peaks');
-    expect(backupTitle({ kind: 'platform', platform: 'PlayStation', count: 4 })).toBe('Back up PlayStation · 4 games');
+    expect(backupTitle({ kind: 'games', count: 3 })).toBe('Backup 3 games');
+    expect(backupTitle({ kind: 'games', count: 1 })).toBe('Backup 1 game');
+    expect(backupTitle({ kind: 'game', name: 'Cinder Peaks' })).toBe('Backup Cinder Peaks');
+    expect(backupTitle({ kind: 'platform', platform: 'PlayStation', count: 4 })).toBe('Backup PlayStation · 4 games');
   });
 
   it('builds the request, with platform ids only when given', () => {
     expect(backupRequest({ kind: 'game', name: 'Cinder Peaks' }, [7])).toEqual({
       rom_ids: [7],
-      title: 'Back up Cinder Peaks',
+      title: 'Backup Cinder Peaks',
     });
     expect(backupRequest({ kind: 'platform', platform: 'PlayStation', count: 2 }, [1, 2], [5])).toEqual({
       rom_ids: [1, 2],
       platform_ids: [5],
-      title: 'Back up PlayStation · 2 games',
+      title: 'Backup PlayStation · 2 games',
     });
   });
 
@@ -273,13 +273,13 @@ describe('planNotes', () => {
 
 describe('footerModel', () => {
   it('shows the bytes to write and the game count', () => {
-    expect(footerModel(plan())).toEqual({ note: '11.1 GB to write', button: 'Back up 3 games', disabled: false });
+    expect(footerModel(plan())).toEqual({ note: '11.1 GB to write', button: 'Backup 3 games', disabled: false });
   });
 
-  it('reads "Nothing to back up" when every game is on the drive', () => {
+  it('reads "Nothing to backup" when every game is on the drive', () => {
     expect(footerModel(plan({ games_to_write: [], bytes_to_write: 0 }))).toEqual({
       note: 'Nothing new to write',
-      button: 'Nothing to back up',
+      button: 'Nothing to backup',
       disabled: true,
     });
   });

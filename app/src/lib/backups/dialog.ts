@@ -24,15 +24,15 @@ export type BackupSubject =
   | { kind: 'games'; count: number }
   | { kind: 'platform'; platform: string; count: number };
 
-/** "Back up Cinder Peaks", "Back up 3 games" or "Back up PlayStation · 4 games". */
+/** "Backup Cinder Peaks", "Backup 3 games" or "Backup PlayStation · 4 games". */
 export function backupTitle(subject: BackupSubject): string {
   switch (subject.kind) {
     case 'game':
-      return `Back up ${subject.name}`;
+      return `Backup ${subject.name}`;
     case 'games':
-      return `Back up ${plural(subject.count, 'game')}`;
+      return `Backup ${plural(subject.count, 'game')}`;
     case 'platform':
-      return `Back up ${subject.platform} · ${plural(subject.count, 'game')}`;
+      return `Backup ${subject.platform} · ${plural(subject.count, 'game')}`;
   }
 }
 
@@ -234,14 +234,14 @@ export type FooterModel = {
 
 /**
  * The footer for the chosen drive's plan (`null` while it is being made).
- * The button reads "Back up 3 games", "Nothing to back up" when every game
+ * The button reads "Backup 3 games", "Nothing to backup" when every game
  * is on the drive or can't go, or "Not enough space" when it does not fit.
  */
 export function footerModel(plan: BackupPlan | null): FooterModel {
   if (plan === null) return { note: '', button: 'Checking the drive…', disabled: true };
   const n = plan.games_to_write.length;
-  if (n === 0) return { note: 'Nothing new to write', button: 'Nothing to back up', disabled: true };
+  if (n === 0) return { note: 'Nothing new to write', button: 'Nothing to backup', disabled: true };
   const note = `${sizeText(plan.bytes_to_write)} to write`;
   if (!plan.fits) return { note, button: 'Not enough space', disabled: true };
-  return { note, button: `Back up ${plural(n, 'game')}`, disabled: false };
+  return { note, button: `Backup ${plural(n, 'game')}`, disabled: false };
 }

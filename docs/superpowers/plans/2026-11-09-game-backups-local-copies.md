@@ -205,7 +205,7 @@ pub struct GameItem { /* … */ pub local: bool }   // BackupItemKey::Game(rom_i
 ### 2.3 IPC (`app/src-tauri/src/commands/backups.rs`, `app/src/lib/api.ts`)
 
 - **`plan_backup` and `start_backup`** take `use_local: Option<bool>` (default true) and `choices: Option<Vec<{rom_id, source}>>`.
-- **`start_backup` refuses** when `plan.needs_choice > 0`, with "Choose which copy to back up for N games".
+- **`start_backup` refuses** when `plan.needs_choice > 0`, with "Choose which copy to backup for N games".
 - **`DriveGame` gains:**
   - `installed_copy: bool`;
   - `installed_version: String`;
@@ -255,7 +255,7 @@ pub struct GameItem { /* … */ pub local: bool }   // BackupItemKey::Game(rom_i
 - **`download_game`** branches on `item.local`:
   1. `rom_detail` (still needed for metadata and art).
   2. Read the registry row again and run `assess` again, using `reconcile::fs_probe` on the anchor.
-     - If the game is no longer eligible, fail with "<Game> is no longer installed on this computer; back up again". It never silently switches to downloading.
+     - If the game is no longer eligible, fail with "<Game> is no longer installed on this computer; backup again". It never silently switches to downloading.
   3. `download_assets` into staging, unchanged.
   4. Decide how to copy it:
      - copy as-is (§1.3): `Staged::Game` with `StagedFile.src` set to the library files;
@@ -477,7 +477,7 @@ These are never archived, so they never need restoring:
 **The steps:**
 1. Open the dialog for all three. The checkbox is ticked and the sources are listed.
 2. Check the out-of-date prompt. The button reads "Choose for 1 game". Pick "Use this computer's copy".
-3. Back up.
+3. Backup.
 4. Check `e2e/last-run-requests.log`: no `/content/` request for the local games.
 5. Check `gridpack.json` (with the `readPack` helper): `installed` entries with relative part paths, and nothing outside `gridpack/`.
 6. Uninstall one game, then install it from the drive. Play becomes available, and the sqlite registry row has paths under the library and the original `server_updated_at`.
@@ -514,7 +514,7 @@ Legend: [P-x] tasks in the same wave touch different files and can run in parall
 
 ## Part 8: Risks
 
-- **Files changing mid-archive.** A running game or emulator can write saves into the tree, for example a native game saving inside its folder. GRID reads each file in one pass and refuses one whose length changed (`SourceChanged`, which fails the row with "<file> changed while it was being copied; close the game and back up again").
+- **Files changing mid-archive.** A running game or emulator can write saves into the tree, for example a native game saving inside its folder. GRID reads each file in one pass and refuses one whose length changed (`SourceChanged`, which fails the row with "<file> changed while it was being copied; close the game and backup again").
   - Optional: if `LaunchService` exposes the running rom ids, refuse a local copy of a running game up front. Check this in Task 6.
 - **The update set may be stale or still computing.** Handled by the detail-fetch fallback (§1.6), and the job records the true `outdated` value.
 - **Orphaned parts.** A drive pulled between part renames and the index write can leave renamed parts that no index entry names. This is the same class of problem multi-file games already have today. Possible follow-up: have `cleanup_leftovers` also remove `installed.tar.*` files that no entry names.
