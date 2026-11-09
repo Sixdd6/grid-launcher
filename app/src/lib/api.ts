@@ -76,8 +76,8 @@ export type GameSummary = {
   logo_url: string;
   /** The ROM's size on the server's disk (`fs_size_bytes`), all files; 0 when unknown. */
   fs_size_bytes: number;
-  /** The largest top-level game file, in bytes; 0 when unknown. */
-  largest_file_bytes: number;
+  /** The largest top-level game file, in bytes; `null` when the list carried no files. */
+  largest_file_bytes: number | null;
 };
 
 /** `discover_feed`: Server › Discover's two lists, already filtered and

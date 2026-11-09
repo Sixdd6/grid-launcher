@@ -495,8 +495,10 @@ pub struct PlanGame {
     pub platform_slug: String,
     /// The game's size on the server (`fs_size_bytes`).
     pub size: u64,
-    /// The largest single file (`largest_file_bytes`).
-    pub largest_file: u64,
+    /// The largest top-level game file (`largest_file_bytes`); `None` when
+    /// the server did not say. An unknown size never makes a game
+    /// `too_big`: the caller resolves it first wherever it matters.
+    pub largest_file: Option<u64>,
 }
 
 /// One platform's firmware on the server.
@@ -582,7 +584,8 @@ pub struct Planned {
 
 /// Plans a backup. Pure.
 /// - Games already on the drive (same server and rom id) are skipped; on a
-///   FAT32 drive, games with a file over 4 GB are `too_big`.
+///   FAT32 drive, games with a known file over 4 GB are `too_big` (a game
+///   over 4 GB in all whose files are each under it goes).
 /// - Each system of the games to write brings its emulator for every OS of
 ///   the pack that does not have it yet; Windows games bring the compat tool
 ///   when the pack is for Linux.
@@ -604,7 +607,7 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
         };
         if input.pack.has_game(input.server, game.rom_id) {
             skipped.push(entry);
-        } else if input.fat32 && game.largest_file > FAT32_MAX_FILE {
+        } else if input.fat32 && game.largest_file.is_some_and(|f| f > FAT32_MAX_FILE) {
             too_big.push(entry);
         } else if !games_to_write.contains(&game.rom_id) {
             games_to_write.push(game.rom_id);
@@ -830,7 +833,7 @@ mod tests {
             platform_name: slug.to_uppercase(),
             platform_slug: slug.to_string(),
             size,
-            largest_file: largest,
+            largest_file: Some(largest),
         }
     }
 
@@ -935,6 +938,24 @@ mod tests {
         // Not FAT32: it goes.
         fx.fat32 = false;
         assert_eq!(fx.run().plan.games_to_write, vec![1, 2, 3]);
+    }
+
+    /// A multi-disc game over 4 GB in all, each file under it, fits FAT32;
+    /// so does a big game whose largest file is unknown (the caller looks
+    /// it up first), while a single file over 4 GB still does not.
+    #[test]
+    fn fat32_judges_the_largest_file_not_the_whole_game() {
+        let mut fx = Fixture::new();
+        fx.fat32 = true;
+        fx.games.push(game(3, "psx", 6 << 30, 2 << 30));
+        let mut unknown = game(4, "psx", 6 << 30, 0);
+        unknown.largest_file = None;
+        fx.games.push(unknown);
+        fx.games.push(game(5, "psx", 6 << 30, FAT32_MAX_FILE + 1));
+        let planned = fx.run();
+        assert_eq!(planned.plan.games_to_write, vec![1, 2, 3, 4]);
+        assert_eq!(planned.plan.too_big.len(), 1);
+        assert_eq!(planned.plan.too_big[0].rom_id, 5);
     }
 
     #[test]

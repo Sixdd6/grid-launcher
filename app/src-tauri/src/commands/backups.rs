@@ -718,9 +718,16 @@ pub async fn drive_asset(
 
 /// The requested games as the planner needs them, and each platform's
 /// server id by slug.
+///
+/// For a FAT32 drive the list is asked for with its file entries, so the
+/// 4 GB check reads each game's largest file, not its total size; a game
+/// over 4 GB whose largest file the server still did not list (an older
+/// server ignoring `with_files`) is looked up by id. Other drives need no
+/// file sizes.
 async fn plan_games(
     client: &RommClient,
     request: &BackupRequest,
+    fat32: bool,
 ) -> Result<(Vec<PlanGame>, BTreeMap<String, i64>), String> {
     let platforms = client.platforms().await.map_err(err)?;
     let mut found: BTreeMap<i64, PlanGame> = BTreeMap::new();
@@ -729,12 +736,23 @@ async fn plan_games(
         let Some(platform) = platforms.iter().find(|p| p.id == *platform_id) else {
             continue;
         };
-        let games = client.games(*platform_id).await.map_err(err)?;
+        let games = if fat32 {
+            client.games_with_files(*platform_id).await
+        } else {
+            client.games(*platform_id).await
+        }
+        .map_err(err)?;
         for game in games {
             if !request.rom_ids.contains(&game.id) {
                 continue;
             }
             ids.insert(platform.slug.clone(), platform.id);
+            let size = game.fs_size_bytes.max(0) as u64;
+            let mut largest_file = game.largest_file_bytes.map(|bytes| bytes.max(0) as u64);
+            if fat32 && largest_file.is_none() && size > pack::FAT32_MAX_FILE {
+                let detail = client.rom_detail(game.id).await.map_err(err)?;
+                largest_file = Some(detail.largest_game_file_bytes() as u64);
+            }
             found.insert(
                 game.id,
                 PlanGame {
@@ -743,8 +761,8 @@ async fn plan_games(
                     platform_label: platform.label().to_string(),
                     platform_name: platform.label().to_string(),
                     platform_slug: platform.slug.clone(),
-                    size: game.fs_size_bytes.max(0) as u64,
-                    largest_file: game.largest_file_bytes.max(0) as u64,
+                    size,
+                    largest_file,
                 },
             );
         }
@@ -774,12 +792,7 @@ async fn plan_games(
             platform_name: label,
             platform_slug: detail.platform_slug.clone(),
             size: detail.filesize_bytes.max(0) as u64,
-            largest_file: detail
-                .files
-                .iter()
-                .map(|file| file.file_size_bytes.max(0) as u64)
-                .max()
-                .unwrap_or(0),
+            largest_file: Some(detail.largest_game_file_bytes() as u64),
         });
     }
     Ok((games, ids))
@@ -797,7 +810,7 @@ async fn make_plan(
     resolve_sizes: bool,
 ) -> Result<Planned, String> {
     let pack = writable_pack(scanned)?;
-    let (games, platform_ids) = plan_games(&client, request).await?;
+    let (games, platform_ids) = plan_games(&client, request, scanned.drive.fat32).await?;
     let mut firmware = Vec::new();
     for game in &games {
         if firmware
