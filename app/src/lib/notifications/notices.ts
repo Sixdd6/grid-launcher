@@ -32,7 +32,11 @@ export type NoticeGroup =
   | 'launch-failed'
   | 'removed'
   | 'drive-installed'
-  | 'drive-failed';
+  | 'drive-failed'
+  // One card per backup batch (backups/notices.ts).
+  | 'backup-queued'
+  | 'backup-done'
+  | 'backup-failed';
 
 export type Notice = { group: NoticeGroup; text: string; level: ToastLevel };
 
@@ -97,6 +101,8 @@ function withReason(text: string, error: string): string {
  */
 export function noticesFor(t: Transition, ctx: NoticeContext): Notice[] {
   const { entry } = t;
+  // A backup row's cards are its batch's (backups/notices.ts), never its own.
+  if (entry.job === 'backup') return [];
   const out: Notice[] = [];
   const arrived = t.from === null || TERMINAL.has(t.from);
   if (arrived) {
@@ -140,7 +146,10 @@ function queuedNotice(entry: DownloadEntry, ctx: NoticeContext): Notice | null {
         return { group: 'game-queued', text: `${t} added to download queue`, level: 'success' };
     }
   }
-  if (isTool(entry) && !ctx.setupActive) {
+  // An emulator or Proton an install from a drive brings is announced by
+  // that command's own notice ("DuckStation from Couch kit added to download
+  // queue"), so its queue row stays quiet.
+  if (isTool(entry) && !ctx.setupActive && entry.drive_label.trim() === '') {
     return ctx.hint?.update
       ? { group: 'tool-updating', text: `Updating ${t}…`, level: 'success' }
       : { group: 'tool-queued', text: `Installing ${t}…`, level: 'success' };
@@ -282,6 +291,12 @@ export function summaryText(group: NoticeGroup, n: number): string {
       return `${plural(n, 'item', 'items')} installed from a backup drive`;
     case 'drive-failed':
       return `${plural(n, 'item', 'items')} from a backup drive could not be installed`;
+    case 'backup-queued':
+      return `${plural(n, 'backup', 'backups')} added to the backup queue`;
+    case 'backup-done':
+      return `${plural(n, 'backup', 'backups')} finished`;
+    case 'backup-failed':
+      return `${plural(n, 'backup', 'backups')} stopped — see Downloads`;
   }
 }
 
