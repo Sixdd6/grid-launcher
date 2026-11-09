@@ -801,7 +801,7 @@ The pure `selection.ts` handles toggle, shift-range over the visible order, sele
   - Characters invalid on Windows (`<>:"/\|?*`) are sanitized even when writing from Linux. Reserved device names (`CON`, `AUX`, …) are not caught by `sanitize_component` today; extend it, or add a pack-specific check that appends `_`.
   - ntfs-3g shows `fuseblk`, mapped to "NTFS".
   - Linux renames over an existing file on vfat and exFAT, and Windows `MoveFileExW(REPLACE_EXISTING)` does too. Both need tests.
-- **Mount point changes.** All pack paths are relative. A drive's identity is the pack `id`. A queued job holds the mount path from its admission. A re-mount at another path mid-job fails as "removed", and the user backs up again; the work is idempotent through the index.
+- **Mount point changes.** All pack paths are relative. A drive is identified by its mount path or drive letter. A queued job holds the mount path from its admission. A re-mount at another path mid-job fails as "removed", and the user backs up again; the work is idempotent through the index.
 - **Partial writes.** Every file is `.gridtmp`, then `sync_all`, then rename, and the index is rewritten atomically after each item. Leftovers are removed on the next appearance, never while a live job targets that drive. Data still in the drive's cache after a yank is covered by `sync_all`. Optionally show "Safe to remove" once the queue for that drive is empty.
 - **Cloned drives.** Not a problem: a drive is identified by its mount path or drive letter, which the OS keeps unique. Two drives with identical packs are two separate drives.
 - **Space.**
