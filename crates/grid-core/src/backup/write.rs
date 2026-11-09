@@ -76,7 +76,7 @@ pub enum WriteError {
     /// A local file being archived could not be read, or its length is not
     /// what the tree scan saw: the game changed it while it was copied.
     /// Never a drive error. Holds the file's path inside the tree.
-    #[error("{0} changed while it was being copied; close the game and back up again")]
+    #[error("{0} changed while it was being copied; close the game and backup again")]
     SourceChanged(String),
     /// A guarded delete refused its target.
     #[error("{0}")]

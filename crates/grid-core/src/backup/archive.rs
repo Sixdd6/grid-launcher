@@ -1189,7 +1189,7 @@ mod tests {
         );
         assert_eq!(
             error.to_string(),
-            "a/one.bin changed while it was being copied; close the game and back up again"
+            "a/one.bin changed while it was being copied; close the game and backup again"
         );
         let dir = pack::resolve(drive.path(), BASE).unwrap();
         assert_eq!(files_under(&dir), Vec::<String>::new());
