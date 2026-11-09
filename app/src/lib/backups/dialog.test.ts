@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { BackupPlan, DriveInfo, PackSummary } from '../api';
 import {
+  anyLocal,
   backupRequest,
+  chooseAll,
   backupTitle,
   chooseDrive,
   dialogLede,
@@ -9,10 +11,15 @@ import {
   emulatorLine,
   firmwareLine,
   footerModel,
+  localLine,
   noDrivesText,
+  outdatedRows,
   planNotes,
   runtimeLine,
   sizeText,
+  sourcePicks,
+  sourceRows,
+  wineNote,
 } from './dialog';
 
 const GB = 1024 ** 3;
@@ -104,6 +111,13 @@ describe('titles and requests', () => {
   it('names the server in the lede', () => {
     expect(dialogLede('romm.home.lan')).toContain('from romm.home.lan and writes it');
     expect(dialogLede('')).toContain('from the server');
+  });
+
+  it('says it copies installed games when some game comes from this computer', () => {
+    expect(dialogLede('romm.home.lan', true)).toBe(
+      'GRID copies games installed on this computer and downloads the rest from romm.home.lan, then writes each one, with its art and details, to the drive’s gridpack folder.',
+    );
+    expect(dialogLede('romm.home.lan', false)).toContain('GRID downloads each game from romm.home.lan');
   });
 });
 
@@ -291,5 +305,184 @@ describe('footerModel', () => {
 
   it('waits while the plan is being made', () => {
     expect(footerModel(null).disabled).toBe(true);
+  });
+});
+
+// ── Source ───────────────────────────────────────────────────────────────
+
+const LOCAL_PLAN: Partial<BackupPlan> = {
+  games_to_write: [1, 2, 3, 4, 5, 6],
+  local_available: true,
+  use_local: true,
+  sources: [
+    { rom_id: 1, name: 'Cinder Peaks', source: 'local', note: '' },
+    { rom_id: 2, name: 'Harbor Lights', source: 'local', note: '' },
+    { rom_id: 3, name: 'Neon Orchard', source: 'local', note: '' },
+    { rom_id: 4, name: 'Moss & Marrow', source: 'download', note: 'Its files weren’t found on this computer' },
+    { rom_id: 5, name: 'Velvet Static', source: 'download', note: '' },
+    { rom_id: 6, name: 'Lantern Vale', source: 'download', note: '' },
+  ],
+  outdated: [{ rom_id: 6, name: 'Lantern Vale', installed_version: 'v1.1', server_version: 'v1.2', choice: null }],
+  needs_choice: 1,
+  bytes_to_write: 14.3 * GB,
+  local_bytes: 11.2 * GB,
+  download_bytes: 3.1 * GB,
+};
+
+const lookup = (id: number) =>
+  ({
+    1: { platform: 'PlayStation', windows: false },
+    2: { platform: 'Windows', windows: true },
+    3: { platform: 'PlayStation 2', windows: false },
+    4: { platform: 'Game Boy', windows: false },
+    6: { platform: 'Nintendo 64', windows: false },
+  })[id];
+
+describe('localLine', () => {
+  it('counts the games copied, downloaded and still to choose', () => {
+    expect(localLine(plan(LOCAL_PLAN), 'romm.home.lan')).toEqual({
+      label: 'Copy installed games from this computer',
+      note: '3 games from this computer (11.2 GB) · 2 downloaded · 1 to choose',
+    });
+  });
+
+  it('says every game downloads when unticked', () => {
+    expect(localLine(plan({ ...LOCAL_PLAN, use_local: false }), 'romm.home.lan').note).toBe(
+      'Every game downloads from romm.home.lan',
+    );
+  });
+
+  it('says so when no game here can be copied', () => {
+    const p = plan({ ...LOCAL_PLAN, sources: [LOCAL_PLAN.sources![3]], outdated: [], needs_choice: 0 });
+    expect(localLine(p, 'h').note).toBe('No game here can be copied · 1 downloaded');
+  });
+});
+
+describe('sourceRows', () => {
+  it('tags each game and says why an installed one downloads', () => {
+    const m = sourceRows(plan(LOCAL_PLAN), {}, lookup);
+    expect(m.collapsed).toBe(false);
+    expect(m.rows[0]).toEqual({
+      romId: 1,
+      name: 'Cinder Peaks',
+      sub: 'PlayStation',
+      tag: 'local',
+      tagText: 'From this computer',
+    });
+    expect(m.rows[3].sub).toBe('Game Boy · Its files weren’t found on this computer');
+    expect(m.rows[3].tagText).toBe('Download');
+    expect(m.rows[4]).toMatchObject({ sub: '', tag: 'download' });
+    expect(m.rows[5]).toMatchObject({ sub: 'Nintendo 64 · the server has newer files', tag: 'ask', tagText: 'Choose below' });
+  });
+
+  it('says which copy goes once an out-of-date game is picked', () => {
+    expect(sourceRows(plan(LOCAL_PLAN), { 6: 'local' }).rows[5]).toMatchObject({
+      sub: 'an older copy than the server’s',
+      tag: 'download',
+    });
+    expect(sourceRows(plan(LOCAL_PLAN), { 6: 'download' }).rows[5].sub).toBe('the newer version');
+  });
+
+  it('collapses more than 6 games into "Show each game"', () => {
+    const many = plan({
+      sources: [1, 2, 3, 4, 5, 6, 7].map((id) => ({ rom_id: id, name: `G${id}`, source: 'download' as const, note: '' })),
+    });
+    expect(sourceRows(many)).toMatchObject({ collapsed: true, summary: 'Show each game', count: 7 });
+  });
+});
+
+describe('outdatedRows', () => {
+  it('asks per game which copy to backup', () => {
+    const m = outdatedRows(plan(LOCAL_PLAN))!;
+    expect(m.title).toBe('The server has newer files');
+    expect(m.bulk).toBeNull();
+    expect(m.items).toEqual([
+      {
+        romId: 6,
+        name: 'Lantern Vale',
+        detail: ': the server has newer files (v1.2; this computer has v1.1)',
+        localLabel: 'Use this computer’s copy',
+        downloadLabel: 'Download v1.2 from the server',
+        choice: null,
+      },
+    ]);
+  });
+
+  it('counts several games and offers the bulk buttons', () => {
+    const p = plan({
+      ...LOCAL_PLAN,
+      outdated: [
+        { rom_id: 6, name: 'Lantern Vale', installed_version: 'v1.1', server_version: 'v1.2', choice: null },
+        { rom_id: 5, name: 'Velvet Static', installed_version: '', server_version: 'v1.3', choice: 'download' },
+      ],
+      needs_choice: 1,
+    });
+    const m = outdatedRows(p, { 6: 'local' })!;
+    expect(m.title).toBe('The server has newer files for 2 games');
+    expect(m.bulk).toEqual({ local: 'Use this computer’s copies', download: 'Download all' });
+    expect(m.items[0].choice).toBe('local');
+    expect(m.items[1].detail).toBe(': the server has newer files (v1.3; this computer has an older copy)');
+    expect(m.items[1].choice).toBe('download');
+    expect(chooseAll(p, { 6: 'local' }, 'download')).toEqual({ 5: 'download', 6: 'download' });
+  });
+
+  it('is hidden when unticked or nothing is out of date', () => {
+    expect(outdatedRows(plan({ ...LOCAL_PLAN, use_local: false }))).toBeNull();
+    expect(outdatedRows(plan())).toBeNull();
+  });
+});
+
+describe('sourcePicks', () => {
+  it('turns the record into the IPC list', () => {
+    expect(sourcePicks({ 6: 'local', 9: 'download' })).toEqual([
+      { rom_id: 6, source: 'local' },
+      { rom_id: 9, source: 'download' },
+    ]);
+  });
+});
+
+describe('wineNote', () => {
+  it('appears when a Windows game is copied from this computer', () => {
+    expect(wineNote(plan(LOCAL_PLAN), lookup)).toBe(
+      'Windows games are copied without their Wine prefix, so saves kept in the prefix stay on this computer.',
+    );
+    const downloads = plan({ ...LOCAL_PLAN, sources: LOCAL_PLAN.sources!.filter((s) => s.rom_id !== 2) });
+    expect(wineNote(downloads, lookup)).toBe('');
+    expect(wineNote(plan({ ...LOCAL_PLAN, use_local: false }), lookup)).toBe('');
+  });
+});
+
+describe('local copies in the notes and footer', () => {
+  it('names only games that download in the FAT32 note', () => {
+    const fat = drive({ label: 'KINGSTON', fs: 'FAT32', fat32: true });
+    const p = plan({
+      ...LOCAL_PLAN,
+      too_big: [
+        { rom_id: 1, name: 'Cinder Peaks' },
+        { rom_id: 9, name: 'Big Game' },
+      ],
+    });
+    expect(planNotes(p, fat)).toEqual([
+      { text: '1 game has a file over 4 GB, which KINGSTON (FAT32) can’t hold: Big Game', warn: true },
+    ]);
+  });
+
+  it('holds the button until every out-of-date game is picked', () => {
+    expect(footerModel(plan({ ...LOCAL_PLAN, needs_choice: 2 }))).toEqual({
+      note: '14.3 GB to write · 3.1 GB to download',
+      button: 'Choose for 2 games',
+      disabled: true,
+    });
+    expect(footerModel(plan({ ...LOCAL_PLAN, needs_choice: 1 })).button).toBe('Choose for 1 game');
+    expect(footerModel(plan({ ...LOCAL_PLAN, needs_choice: 0 }))).toEqual({
+      note: '14.3 GB to write · 3.1 GB to download',
+      button: 'Backup 6 games',
+      disabled: false,
+    });
+  });
+
+  it('leaves out the download half when nothing comes from this computer', () => {
+    expect(anyLocal(plan({ ...LOCAL_PLAN, use_local: false }))).toBe(false);
+    expect(footerModel(plan({ ...LOCAL_PLAN, use_local: false, needs_choice: 0 })).note).toBe('14.3 GB to write');
   });
 });

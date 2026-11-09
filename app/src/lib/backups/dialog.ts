@@ -3,7 +3,15 @@
 // `plan_backup` answers and renders what comes back. Nothing here reads a
 // store or talks to the backend.
 
-import type { BackupPlan, BackupRequest, DriveInfo, PackOs, PlanEmulator } from '../api';
+import type {
+  BackupPlan,
+  BackupRequest,
+  DriveInfo,
+  PackOs,
+  PlanEmulator,
+  SourceChoice,
+  SourcePick,
+} from '../api';
 import { formatBytes } from '../settings/library';
 import { osNames, usageSegments } from './drives';
 
@@ -47,10 +55,24 @@ export function backupRequest(subject: BackupSubject, romIds: readonly number[],
   return request;
 }
 
-/** The lede under the title. */
-export function dialogLede(host: string): string {
-  const from = host.trim() === '' ? 'the server' : host.trim();
-  return `GRID downloads each game from ${from} and writes it, with its art and details, to the drive’s gridpack folder.`;
+/**
+ * The lede under the title. `anyLocal`: some game in the plan is copied from
+ * this computer (the checkbox is ticked and at least one game qualifies).
+ */
+export function dialogLede(host: string, anyLocal = false): string {
+  const from = hostName(host);
+  return anyLocal
+    ? `GRID copies games installed on this computer and downloads the rest from ${from}, then writes each one, with its art and details, to the drive’s gridpack folder.`
+    : `GRID downloads each game from ${from} and writes it, with its art and details, to the drive’s gridpack folder.`;
+}
+
+function hostName(host: string): string {
+  return host.trim() === '' ? 'the server' : host.trim();
+}
+
+/** Whether the plan copies any game from this computer. */
+export function anyLocal(plan: BackupPlan | null): boolean {
+  return plan !== null && plan.use_local && plan.sources.some((s) => s.source === 'local');
 }
 
 // ── Drives ───────────────────────────────────────────────────────────────
@@ -119,6 +141,166 @@ export function noDrivesText(connected: readonly DriveInfo[]): { title: string; 
     title: 'No backup drive connected',
     body: `Plug in a drive you set up for GRID${also}. Set up a drive once in Settings › Backup drives.`,
   };
+}
+
+// ── Source ───────────────────────────────────────────────────────────────
+
+/**
+ * What the dialog knows about a game from this computer's registry: its
+ * platform name, and whether it is a Windows game (the Wine-prefix note).
+ * `undefined` for a game that is not installed here.
+ */
+export type LocalGameInfo = { platform: string; windows: boolean };
+export type LocalGameLookup = (romId: number) => LocalGameInfo | undefined;
+
+/** The user's picks for out-of-date games, by rom id. */
+export type SourceChoices = Readonly<Record<number, SourceChoice>>;
+
+/** The picks as `plan_backup` and `start_backup` take them. */
+export function sourcePicks(choices: SourceChoices): SourcePick[] {
+  return Object.entries(choices).map(([id, source]) => ({ rom_id: Number(id), source }));
+}
+
+/** The out-of-date games whose pick is still open, while copying from this computer. */
+function openChoices(plan: BackupPlan): number {
+  return plan.use_local ? plan.needs_choice : 0;
+}
+
+/**
+ * The "Copy installed games from this computer" checkbox and its note:
+ * "3 games from this computer (11.2 GB) · 2 downloaded · 1 to choose", or
+ * "Every game downloads from romm.home.lan" when it is unticked.
+ */
+export function localLine(plan: BackupPlan, host: string): { label: string; note: string } {
+  const label = 'Copy installed games from this computer';
+  if (!plan.use_local) return { label, note: `Every game downloads from ${hostName(host)}` };
+  const local = plan.sources.filter((s) => s.source === 'local').length;
+  const ask = openChoices(plan);
+  const downloaded = Math.max(0, plan.sources.length - local - ask);
+  const parts = [
+    local > 0
+      ? `${plural(local, 'game')} from this computer (${sizeText(plan.local_bytes)})`
+      : ask > 0
+        ? ''
+        : 'No game here can be copied',
+    downloaded > 0 ? `${downloaded} downloaded` : '',
+    ask > 0 ? `${ask} to choose` : '',
+  ];
+  return { label, note: parts.filter((p) => p !== '').join(' · ') };
+}
+
+export type SourceRow = {
+  romId: number;
+  name: string;
+  /** "PlayStation · Its files weren’t found on this computer"; `''` when there is nothing to say. */
+  sub: string;
+  /** `ask`: an out-of-date game with no pick yet ("Choose below"). */
+  tag: 'local' | 'download' | 'ask';
+  tagText: string;
+};
+
+export type SourceRowsModel = {
+  rows: SourceRow[];
+  /** More than 6 games: the rows sit in a collapsed "Show each game". */
+  collapsed: boolean;
+  summary: string;
+  count: number;
+};
+
+const SOURCE_ROWS_OPEN = 6;
+
+/**
+ * One row per game being written, with where it comes from. A game that
+ * downloads although it is installed says why; an out-of-date game says the
+ * server has newer files until it is picked, then which copy goes.
+ */
+export function sourceRows(plan: BackupPlan, choices: SourceChoices = {}, lookup?: LocalGameLookup): SourceRowsModel {
+  const rows = plan.sources.map((s): SourceRow => {
+    const stale = plan.outdated.find((o) => o.rom_id === s.rom_id);
+    const chose = stale ? (choices[s.rom_id] ?? stale.choice) : null;
+    const why =
+      s.note.trim() !== ''
+        ? s.note.trim()
+        : stale
+          ? chose === 'local'
+            ? 'an older copy than the server’s'
+            : chose === 'download'
+              ? 'the newer version'
+              : 'the server has newer files'
+          : '';
+    const platform = lookup?.(s.rom_id)?.platform ?? '';
+    const tag: SourceRow['tag'] = stale && chose === null ? 'ask' : s.source === 'local' ? 'local' : 'download';
+    return {
+      romId: s.rom_id,
+      name: s.name,
+      sub: [platform, why].filter((p) => p !== '').join(' · '),
+      tag,
+      tagText: tag === 'ask' ? 'Choose below' : tag === 'local' ? 'From this computer' : 'Download',
+    };
+  });
+  return { rows, collapsed: rows.length > SOURCE_ROWS_OPEN, summary: 'Show each game', count: rows.length };
+}
+
+export type OutdatedItem = {
+  romId: number;
+  name: string;
+  /** ": the server has newer files (v1.3; this computer has v1.2)", after the bold name. */
+  detail: string;
+  localLabel: string;
+  downloadLabel: string;
+  choice: SourceChoice | null;
+};
+
+export type OutdatedModel = {
+  /** "The server has newer files", or "… for 2 games". */
+  title: string;
+  hint: string;
+  /** With more than one game: "Use this computer’s copies" and "Download all". */
+  bulk: { local: string; download: string } | null;
+  items: OutdatedItem[];
+};
+
+/**
+ * The warning block that asks, per out-of-date game, which copy to backup.
+ * `null` when there is nothing to choose, or the checkbox is unticked.
+ */
+export function outdatedRows(plan: BackupPlan, choices: SourceChoices = {}): OutdatedModel | null {
+  if (!plan.use_local || plan.outdated.length === 0) return null;
+  const many = plan.outdated.length > 1;
+  return {
+    title: many ? `The server has newer files for ${plan.outdated.length} games` : 'The server has newer files',
+    hint: 'Backup the copy installed here, or download the newer version.',
+    bulk: many ? { local: 'Use this computer’s copies', download: 'Download all' } : null,
+    items: plan.outdated.map((o) => {
+      const srv = o.server_version.trim();
+      const have = o.installed_version.trim() || 'an older copy';
+      return {
+        romId: o.rom_id,
+        name: o.name,
+        detail: `: the server has newer files (${srv === '' ? '' : `${srv}; `}this computer has ${have})`,
+        localLabel: 'Use this computer’s copy',
+        downloadLabel: srv === '' ? 'Download the newer version from the server' : `Download ${srv} from the server`,
+        choice: choices[o.rom_id] ?? o.choice,
+      };
+    }),
+  };
+}
+
+/** Every out-of-date game set to one pick (the bulk buttons). */
+export function chooseAll(plan: BackupPlan, choices: SourceChoices, source: SourceChoice): Record<number, SourceChoice> {
+  const next: Record<number, SourceChoice> = { ...choices };
+  for (const o of plan.outdated) next[o.rom_id] = source;
+  return next;
+}
+
+/**
+ * The Wine-prefix note, when a Windows game is copied from this computer
+ * (its prefix stays behind); else `''`.
+ */
+export function wineNote(plan: BackupPlan, lookup?: LocalGameLookup): string {
+  if (!plan.use_local || lookup === undefined) return '';
+  const windows = plan.sources.some((s) => s.source === 'local' && lookup(s.rom_id)?.windows === true);
+  return windows ? 'Windows games are copied without their Wine prefix, so saves kept in the prefix stay on this computer.' : '';
 }
 
 // ── Also copy ────────────────────────────────────────────────────────────
@@ -213,7 +395,10 @@ export function planNotes(plan: BackupPlan, drive: DriveInfo): { text: string; w
     const list = skipped.length <= 3 ? `: ${names(skipped)}` : '';
     notes.push({ text: `${verb} already on ${pack} and will be skipped${list}`, warn: false });
   }
-  const big = plan.too_big;
+  // A game copied from this computer is split into parts, so the FAT32
+  // limit names only games that download.
+  const local = new Set(plan.sources.filter((s) => s.source === 'local').map((s) => s.rom_id));
+  const big = plan.too_big.filter((g) => !local.has(g.rom_id));
   if (big.length > 0) {
     const verb = big.length === 1 ? '1 game has' : `${big.length} games have`;
     notes.push({
@@ -225,7 +410,7 @@ export function planNotes(plan: BackupPlan, drive: DriveInfo): { text: string; w
 }
 
 export type FooterModel = {
-  /** "11.1 GB to write", "Nothing new to write", or `''`. */
+  /** "11.1 GB to write · 3.2 GB to download", "Nothing new to write", or `''`. */
   note: string;
   /** The main button's label. */
   button: string;
@@ -234,14 +419,19 @@ export type FooterModel = {
 
 /**
  * The footer for the chosen drive's plan (`null` while it is being made).
- * The button reads "Backup 3 games", "Nothing to backup" when every game
- * is on the drive or can't go, or "Not enough space" when it does not fit.
+ * The button reads "Backup 3 games", "Choose for 2 games" while an
+ * out-of-date pick is open, "Nothing to backup" when every game is on the
+ * drive or can't go, or "Not enough space" when it does not fit. The note
+ * adds what downloads when some games come from this computer.
  */
 export function footerModel(plan: BackupPlan | null): FooterModel {
   if (plan === null) return { note: '', button: 'Checking the drive…', disabled: true };
   const n = plan.games_to_write.length;
   if (n === 0) return { note: 'Nothing new to write', button: 'Nothing to backup', disabled: true };
-  const note = `${sizeText(plan.bytes_to_write)} to write`;
+  const split = anyLocal(plan) && plan.download_bytes > 0 ? ` · ${sizeText(plan.download_bytes)} to download` : '';
+  const note = `${sizeText(plan.bytes_to_write)} to write${split}`;
+  const ask = openChoices(plan);
+  if (ask > 0) return { note, button: `Choose for ${plural(ask, 'game')}`, disabled: true };
   if (!plan.fits) return { note, button: 'Not enough space', disabled: true };
   return { note, button: `Backup ${plural(n, 'game')}`, disabled: false };
 }
