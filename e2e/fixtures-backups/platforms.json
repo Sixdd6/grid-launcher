@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "name": "PlayStation 2",
+    "slug": "ps2",
+    "rom_count": 6
+  },
+  {
+    "id": 2,
+    "name": "Emulators",
+    "slug": "emulators",
+    "rom_count": 1
+  }
+]
