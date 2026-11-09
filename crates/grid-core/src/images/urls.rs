@@ -453,6 +453,33 @@ fn sniff(ext: &str, identified: bool) -> Sniff {
     }
 }
 
+/// The image format the bytes' magic number names (PNG, JPEG, GIF, BMP,
+/// TIFF, ICO, WebP), without the leading dot; `None` for anything else.
+pub fn magic_extension(body: &[u8]) -> Option<&'static str> {
+    if body.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some("png");
+    }
+    if body.starts_with(b"\xff\xd8\xff") {
+        return Some("jpg");
+    }
+    if body.starts_with(b"GIF87a") || body.starts_with(b"GIF89a") {
+        return Some("gif");
+    }
+    if body.starts_with(b"BM") {
+        return Some("bmp");
+    }
+    if body.starts_with(b"II*\0") || body.starts_with(b"MM\0*") {
+        return Some("tiff");
+    }
+    if body.starts_with(b"\0\0\x01\0") {
+        return Some("ico");
+    }
+    if body.len() >= 12 && body.starts_with(b"RIFF") && &body[8..12] == b"WEBP" {
+        return Some("webp");
+    }
+    None
+}
+
 /// `cover_cache_extension_from_payload` (cover/utils.py:220), without the
 /// leading dot. D11: the SVG `<?xml` branch lowercases (Python's
 /// `bytes.casefold()` does not exist).
@@ -470,29 +497,8 @@ pub fn extension_for(url: &str, body: &[u8], content_type: &str) -> Sniff {
         "image/svg+xml" => Some("svg"),
         _ => None,
     };
-    if let Some(ext) = mapped {
+    if let Some(ext) = mapped.or_else(|| magic_extension(body)) {
         return sniff(ext, true);
-    }
-    if body.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return sniff("png", true);
-    }
-    if body.starts_with(b"\xff\xd8\xff") {
-        return sniff("jpg", true);
-    }
-    if body.starts_with(b"GIF87a") || body.starts_with(b"GIF89a") {
-        return sniff("gif", true);
-    }
-    if body.starts_with(b"BM") {
-        return sniff("bmp", true);
-    }
-    if body.starts_with(b"II*\0") || body.starts_with(b"MM\0*") {
-        return sniff("tiff", true);
-    }
-    if body.starts_with(b"\0\0\x01\0") {
-        return sniff("ico", true);
-    }
-    if body.len() >= 12 && body.starts_with(b"RIFF") && &body[8..12] == b"WEBP" {
-        return sniff("webp", true);
     }
     let preview = &body[..body.len().min(256)];
     let start = preview

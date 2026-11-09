@@ -27,7 +27,7 @@ use crate::backup::plan::{
 };
 use crate::backup::write::{self as drive_write, FileWrite, WriteError, WriteTarget};
 use crate::config::Config;
-use crate::images::urls::{extension_for, filter_to_server_host, server_resolver};
+use crate::images::urls::{extension_for, filter_to_server_host, magic_extension, server_resolver};
 use crate::launch::binary_target::Cpu;
 use crate::launch::forge::{ForgeClient, ForgeProvider, ResolvedDownload};
 use crate::launch::setup::{newest_server_build, recommendations, ServerPackage};
@@ -365,8 +365,7 @@ async fn download_assets(
         }
         match job.client.get_bytes_with_type(&url).await {
             Ok((bytes, content_type)) if !bytes.is_empty() => {
-                let ext = extension_for(&url, &bytes, &content_type).ext;
-                let name = format!("{stem}.{}", if ext.is_empty() { "img" } else { &ext });
+                let name = format!("{stem}.{}", asset_extension(&url, &bytes, &content_type));
                 let src = dir.join(&name);
                 fs::write(&src, &bytes)?;
                 staged.push((
@@ -386,6 +385,21 @@ async fn download_assets(
         }
     }
     Ok(staged)
+}
+
+/// The file extension of a downloaded asset: what the bytes are (the
+/// server mislabels art: JPEG bytes as `image/png`, PNG as `image/jpeg`),
+/// else the Content-Type, else the URL suffix, else `img`.
+fn asset_extension(url: &str, body: &[u8], content_type: &str) -> String {
+    if let Some(ext) = magic_extension(body) {
+        return ext.to_string();
+    }
+    let ext = extension_for(url, body, content_type).ext;
+    if ext.is_empty() {
+        "img".to_string()
+    } else {
+        ext
+    }
 }
 
 fn asset_word(kind: AssetKind) -> &'static str {
@@ -1156,6 +1170,30 @@ mod tests {
         assert_eq!(iso_date("1234567890"), "2009-02-13");
         assert_eq!(iso_date(""), "");
         assert_eq!(iso_date("soon"), "");
+    }
+
+    /// Art is named by its bytes, not the server's label: JPEG bytes sent as
+    /// `image/png` are a `.jpg`, PNG bytes sent as `image/jpeg` a `.png`.
+    /// Bytes with no known magic fall back to the Content-Type, then the
+    /// URL suffix.
+    #[test]
+    fn assets_are_named_by_their_bytes() {
+        let jpeg = b"\xff\xd8\xff\xe0\0\x10JFIF";
+        let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+        assert_eq!(
+            asset_extension("https://h/fanart.png", jpeg, "image/png"),
+            "jpg"
+        );
+        assert_eq!(
+            asset_extension("https://h/screenshots/0.jpg", png, "image/jpeg"),
+            "png"
+        );
+        assert_eq!(
+            asset_extension("https://h/a.png", b"????", "image/webp"),
+            "webp"
+        );
+        assert_eq!(asset_extension("https://h/a.gif?x=1", b"????", ""), "gif");
+        assert_eq!(asset_extension("https://h/a", b"????", ""), "img");
     }
 
     #[test]
