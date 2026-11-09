@@ -721,3 +721,26 @@ nxt = sub(nxt, 'subtitle="Proposed: emulators and Windows setup in one Systems t
 d = os.path.join(OUT, 'ProposedApp'); os.makedirs(d, exist_ok=True)
 open(os.path.join(d, 'preview.html'), 'w').write(nxt)
 print('ProposedApp written', len(nxt))
+
+# Game backups: ProposedApp plus backup drives, multi-select, the backup
+# dialog, Library › Backup drives and an offline mode. Its own card, so the
+# Proposed app card keeps showing what is on main.
+BK_JS = open(os.path.join(HERE, 'backups.js')).read()
+BK_CSS = open(os.path.join(HERE, 'backups.css')).read()
+bk = nxt
+bk = sub(bk, 'subtitle="Proposed: starts as a new user; emulators and Windows setup in one Systems tab under Settings"', 'subtitle="Game backups: copy games to a USB drive and install them from it, with or without a server"')
+bk = sub(bk, '<title>Proposed app</title>', '<title>Game backups</title>')
+bk = sub(bk, '</style></head>', BK_CSS + '\n</style></head>')
+bk = sub(bk, '/* ---- details ---- */', BK_JS + '\n/* ---- details ---- */')
+bk = sub(bk, "[['appearance','Appearance'],['cloud','Cloud saves'],", "[['appearance','Appearance'],['backup','Backup drives'],['cloud','Cloud saves'],")
+bk = sub(bk, "  if (S.setPane === 'systems') { renderSystems(el); return; }\n", "  if (S.setPane === 'systems') { renderSystems(el); return; }\n  if (S.setPane === 'backup') { renderBackupPane(el); return; }\n")
+bk = sub(bk, '<header class="g-platform-header"><h2 id="lib-title">All games</h2><p class="g-counts" id="lib-count"></p></header>', '<header class="g-platform-header"><h2 id="lib-title">All games</h2><p class="g-counts" id="lib-count"></p><div class="g-chips" id="lib-chips" hidden></div></header>')
+SIZE = '<label class="g-control"><span>Size</span><select data-size-select><option value="120">Small</option><option value="160" selected>Medium</option><option value="200">Large</option></select></label>'
+assert bk.count(SIZE) == 2
+bk = bk.replace(SIZE, SIZE + '\n            <button class="small-btn bk-select-btn" data-bk-select aria-pressed="false">Select</button>')
+bk = sub(bk, '<nav class="g-rail" id="srv-rail" aria-label="Server platforms"></nav>', '<nav class="g-rail" id="srv-rail" aria-label="Server platforms"></nav>\n      <div class="g-panel bk-off" id="bk-srv-off" hidden><div class="bk-off-in"><span class="bk-drive-icon" data-icon="cloud" data-size="24"></span><h2>Not connected to a server</h2><p class="note">Your Library and backup drives work without one. Connect to browse the server and back up games.</p><button class="g-btn" data-bk-connect>Connect to a server…</button></div></div>')
+bk = sub(bk, '<div class="g-scrim" id="libscrim" hidden>', '<div class="g-scrim" id="bkscrim" hidden><div class="g-dialog bkdlg" role="dialog" aria-modal="true" aria-labelledby="bk-dlg-title" id="bkdlg"></div></div>\n  <div class="g-scrim" id="libscrim" hidden>')
+bk = sub(bk, "freshReset(); paintArt(null); $('art').style.opacity = 0; renderAll(); gIcons(); freshShow('connect');", "bkBoot();")
+d = os.path.join(OUT, 'GameBackups'); os.makedirs(d, exist_ok=True)
+open(os.path.join(d, 'preview.html'), 'w').write(bk)
+print('GameBackups written', len(bk))

@@ -1,0 +1,2195 @@
+<!-- @dsCard group="Prototype" height=800 width=1280 subtitle="Game backups: copy games to a USB drive and install them from it, with or without a server" -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Game backups</title>
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  body { padding: 0; background: var(--bg); }
+  .app { position: relative; height: 100vh; min-height: 420px; display: flex; flex-direction: column; overflow: clip; isolation: isolate; }
+  .art-clip { position: absolute; inset: 0; overflow: clip; z-index: -1; pointer-events: none; }
+
+  /* Background art: the last-viewed cover, blurred, under every panel. */
+  .art { position: absolute; inset: -60px; filter: blur(40px); transition: opacity 220ms ease; }
+  .art i { position: absolute; border-radius: 50%; }
+
+  .view { flex: 1 1 auto; min-height: 0; position: relative; box-sizing: border-box; padding: var(--gutter); overflow-y: auto; }
+  .view[hidden] { display: none; }
+  .rail-divider { border: 0; border-top: 1px solid var(--line); margin: 6px 8px; }
+  .columns { display: flex; align-items: stretch; gap: var(--gutter); height: 100%; min-height: 0; }
+  .body { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--card-w, 160px), 1fr)); gap: 18px 14px; padding: var(--gutter) 2px 40px; }
+  .grid.hover-labels { row-gap: 18px; }
+  .grid.hover-labels .g-card { gap: 0; }
+  .grid.hover-labels .g-label { position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); opacity: 0; width: max-content; max-width: calc(100% + 32px); background: var(--overlay); box-shadow: var(--shadow-lift); pointer-events: none; transition: opacity 150ms ease; }
+  .grid.hover-labels .g-card:hover .g-label { opacity: 1; top: calc(100% + 6px); }
+  .empty { align-self: flex-start; margin: var(--gutter) 0 0; padding: 10px 14px; color: var(--text-muted); font-size: 14px; }
+  .content { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--gutter); }
+
+  /* Downloads */
+  .seg { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .seg h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--text-h); }
+  .seg h3 span { color: var(--text-muted); font-weight: 400; margin-left: 6px; }
+  .legend { margin: 0; font-size: 12px; color: var(--text-muted); padding: 10px 16px; }
+  .dl { display: grid; grid-template-columns: 1fr 120px auto; gap: 14px; align-items: center; padding: 10px 12px; border-radius: var(--r-row); background: var(--surface); }
+  .dl .t { color: var(--text-h); font-weight: 600; }
+  .dl .s { font-size: 12px; color: var(--text-muted); }
+  .bar { height: 4px; border-radius: 2px; background: var(--field); margin-top: 6px; overflow: hidden; }
+  .bar b { display: block; height: 100%; background: var(--primary); }
+  .kind { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: var(--r-chip); border: 1px solid var(--border); color: var(--text-muted); margin-left: 6px; }
+  .small-btn { font: inherit; font-size: 12px; padding: 5px 12px; border-radius: var(--r-control); border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
+  .small-btn:hover { background: var(--surface); }
+  .small-btn.primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+  .small-btn.primary:hover { background: var(--primary-hover); }
+  .small-btn.ok { color: var(--text-muted); cursor: default; display: inline-flex; gap: 4px; align-items: center; }
+  .small-btn.ok:hover { background: transparent; }
+
+  /* Emulators / Settings panes */
+  /* As in the app (Emulators.svelte, Settings.svelte): the panel is the whole
+     column and stays put; only the page inside it scrolls. */
+  .panes { flex: 1 1 auto; min-width: 0; height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .pane-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .pane { width: 100%; max-width: 1100px; margin: 0 auto; box-sizing: border-box; padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+  .pane h2 { margin: 0; font-size: 18px; font-weight: 600; color: var(--text-h); }
+  .emu { padding: 12px 14px; border-radius: var(--r-row); border: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; gap: 8px; }
+  .emu-top { display: flex; align-items: baseline; gap: 10px; }
+  .emu-top b { color: var(--text-h); font-size: 14px; }
+  .emu-top code, .fw code { font-size: 12px; color: var(--text-muted); font-family: ui-monospace, monospace; }
+  .emu-top .acts { margin-left: auto; display: flex; gap: 6px; }
+  .fw { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-muted); padding-top: 8px; border-top: 1px solid var(--line); }
+  .fw .acts { margin-left: auto; }
+  .setting { display: grid; grid-template-columns: 200px 1fr; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .setting:last-child { border-bottom: none; }
+  .setting > span { color: var(--text-h); }
+  .setting > .g-switch, .setting > .g-control { justify-self: start; }
+  .setting small { display: block; color: var(--text-muted); font-size: 11px; }
+  .setting input[type=range] { width: 240px; accent-color: var(--primary); }
+  .note { margin: 0; color: var(--text-muted); font-size: 13px; }
+  .pane-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .sub { display: flex; flex-direction: column; gap: 10px; }
+  .sub h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-h); }
+  .sub h4 { margin: 6px 0 0; font-size: 13px; font-weight: 600; color: var(--text-h); }
+  .cat-list, .defaults, .radios, .moves { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .cat-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; border-radius: var(--r-row); background: var(--surface); border: 1px solid var(--line); }
+  .cat-row .t, .umu .t { display: block; color: var(--text-h); font-weight: 600; }
+  .cat-row .s { display: block; font-size: 12px; color: var(--text-muted); }
+  .small-btn:disabled { opacity: .6; cursor: default; }
+  .defaults { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  .dcard { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--r-row); background: var(--surface); border: 1px solid var(--line); }
+  .dcard b { color: var(--text-h); }
+  .dfield { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-muted); }
+  .dfield > span { width: 54px; flex: none; }
+  .dfield .field { flex: 1; }
+  .umu { padding: 12px 14px; border-radius: var(--r-row); background: var(--surface); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+  .umu-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .radios label { display: flex; align-items: center; gap: 8px; color: var(--text); cursor: pointer; }
+  .radios input, .check input { accent-color: var(--primary); }
+  .form { display: flex; flex-direction: column; gap: 12px; max-width: 520px; }
+  .form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
+  .form label.check, .check { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+  .field { font: inherit; font-size: 13px; height: var(--control-h); box-sizing: border-box; padding: 0 10px; border-radius: var(--r-control); border: 1px solid var(--line-strong); background: var(--field); color: var(--text-h); }
+  .field.narrow { width: 120px; }
+  .inline { display: flex; gap: 8px; }
+  .inline .field { flex: 1; }
+  .inline .g-btn { padding: 0 14px; height: var(--control-h); }
+  .form-actions, .choice { display: flex; flex-wrap: wrap; gap: 8px; }
+  .form-actions .g-btn, .choice .g-btn, .update-line .g-btn { padding: 7px 16px; }
+  .kv { margin: 0; display: flex; flex-direction: column; }
+  .kv div { display: grid; grid-template-columns: 140px 1fr; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .kv dt { color: var(--text-muted); }
+  .kv dd { margin: 0; color: var(--text-h); display: flex; align-items: center; }
+  .path { display: block; padding: 8px 10px; border-radius: var(--r-control); background: var(--field); border: 1px solid var(--line); color: var(--text-h); font: 13px ui-monospace, monospace; }
+  .line { margin: 0; color: var(--text-h); }
+  .update-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .moves li { display: flex; justify-content: space-between; padding: 8px 12px; border-radius: var(--r-row); background: var(--surface); }
+  .moves span { color: var(--text-muted); font-size: 12px; }
+  .g-dialog.libdlg { width: 480px; height: auto; max-height: calc(100% - 48px); overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+  .libdlg h3 { margin: 0; font-size: 16px; color: var(--text-h); }
+
+
+  /* Details sits inside the app frame here (fixed in the app). */
+  .g-scrim[hidden] { display: none; }
+  .g-dialog { width: min(1040px, calc(100% - 48px)); height: min(680px, calc(100% - 48px)); }
+  .g-details-left { overflow-y: auto; }
+  .tabpanel { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
+  .overview { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 20px 28px; }
+  .media-row { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+  .shot { flex: none; width: 220px; aspect-ratio: 16/9; border-radius: var(--r-row); box-shadow: var(--shadow-card); }
+  .sec-title { margin: 4px 0 8px; font-size: 13px; font-weight: 600; color: var(--text-h); }
+  .save-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: var(--r-row); background: var(--surface); margin-top: 8px; }
+  .save-row .t { color: var(--text-h); }
+  .save-row .s { color: var(--text-muted); font-size: 12px; margin-left: auto; }
+
+  .toasts { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--footer-h) + 24px); z-index: 30; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+  .toasts .g-toast { animation: toast-in 220ms ease; }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .g-strip[hidden] { display: none; }
+  .menu-wrap { position: absolute; top: calc(100% + 6px); right: 0; z-index: 6; }
+  .menu-wrap[hidden] { display: none; }
+
+  .g-art::before { content:''; position:absolute; right:-18%; top:12%; width:70%; aspect-ratio:1; border-radius:50%; background:rgba(255,255,255,.12); }
+  .g-art::after { content:''; position:absolute; left:10%; top:8%; width:34%; height:6px; border-radius:3px; background:rgba(255,255,255,.35); }
+  .g-art { padding-bottom: 34px; }
+  .g-art span { position:relative; text-shadow:0 1px 2px rgba(0,0,0,.35); }
+
+  /* Proposed Emulators page */
+  .lede { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; }
+  .pane-head > div:first-child { flex: 1 1 auto; min-width: 0; }
+  .head-acts { display: flex; gap: 8px; flex: none; }
+  .pane-head { align-items: flex-start; }
+  .empty-state { display: flex; flex-direction: column; gap: 8px; padding: 20px; border-radius: var(--r-row); border: 1px dashed var(--line-strong); }
+  .empty-state b { color: var(--text-h); font-size: 14px; }
+  .emu2 { position: relative; padding: 12px 14px; border-radius: var(--r-row); border: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; gap: 6px; }
+  .emu2-top { display: flex; align-items: center; gap: 12px; }
+  .emu2-name { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .emu2-name b { color: var(--text-h); font-size: 14px; }
+  .emu2-top .acts { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .meta2 { margin: 0; font-size: 12px; color: var(--text-muted); }
+  .muted-s { font-size: 12px; color: var(--text-muted); font-weight: 400; }
+  .warn-t { color: var(--warning-text); }
+  .checks { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+  .check-row, .fix { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); padding: 6px 0 0; border-top: 1px solid var(--line); }
+  .fix { border-top: none; padding: 0; flex-wrap: wrap; }
+  .fix > span:nth-child(2) { flex: 1 1 140px; }
+  .fix .small-btn { margin-left: 26px; }
+  .check-row .acts { margin-left: auto; }
+  .st { flex: none; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; font-size: 11px; font-weight: 700; color: var(--text-muted); }
+  .st.ok { color: var(--on-primary); background: var(--primary); }
+  .st.warn { color: #1a1a12; background: var(--warning); }
+  .tips summary { cursor: pointer; font-size: 12px; color: var(--text-muted); padding: 2px 0; }
+  .tips summary:hover { color: var(--text-h); }
+  .tips ul { margin: 6px 0 2px; padding-left: 18px; font-size: 13px; color: var(--text); }
+  .tips[open] summary { color: var(--text-h); }
+  .menu-anchor { position: relative; }
+  .row-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 8; min-width: 190px; }
+  .row-menu .danger { color: var(--danger); }
+  .rec { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: var(--r-pill); font-size: 11px; font-weight: 600; background: var(--selected); color: var(--text-h); vertical-align: 1px; }
+  .foot { margin-top: 4px; }
+  .link { font: inherit; border: none; background: none; padding: 0; color: var(--primary); text-decoration: underline; cursor: pointer; }
+  .link:hover { color: var(--primary-hover); }
+  .dcard.attention { border-color: var(--warning); }
+  .dhead { display: flex; align-items: baseline; justify-content: space-between; }
+  .sheet2 { padding: 16px; border-radius: var(--r-row); border: 1px solid var(--line); background: var(--overlay); box-shadow: var(--shadow-lift); display: flex; flex-direction: column; gap: 12px; }
+  .sheet2-head { display: flex; align-items: center; justify-content: space-between; }
+  .sheet2-head h3 { margin: 0; font-size: 15px; color: var(--text-h); }
+  .help { font-size: 11px; color: var(--text-muted); }
+  .sub h3 + .radios, .sub h3 + .cat-list { margin-top: -2px; }
+  /* Unified Systems tab */
+  .sys-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .sysrow { border-radius: var(--r-row); border: 1px solid var(--line); background: var(--surface); }
+  .sysrow.attention { border-color: var(--warning); }
+  .sys-head { display: grid; grid-template-columns: minmax(0, 1fr) 260px 150px; align-items: center; gap: 12px; padding: 8px 12px 8px 6px; }
+  .sys-toggle { display: flex; align-items: baseline; gap: 8px; min-width: 0; font: inherit; text-align: left; border: none; background: none; color: var(--text); padding: 4px 6px; border-radius: var(--r-control); cursor: pointer; }
+  .sys-toggle:hover:not(:disabled) { background: var(--surface); }
+  .sys-toggle:disabled { cursor: default; }
+  .sys-toggle b { color: var(--text-h); font-size: 14px; white-space: nowrap; }
+  .sys-toggle .chev { align-self: center; color: var(--text-muted); transition: transform 150ms ease; }
+  .sysrow.open .chev { transform: rotate(90deg); }
+  .sys-toggle:disabled .chev { visibility: hidden; }
+  .sys-pick { width: 100%; }
+  .pill-s { justify-self: start; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: var(--r-pill); color: var(--text-muted); border: 1px solid var(--line); white-space: nowrap; }
+  .pill-s.ok { color: var(--text-h); }
+  .pill-s.ok .g-icon { color: var(--primary); }
+  .pill-s.warn { background: var(--warning); border-color: var(--warning); color: #1a1a12; }
+  .pill-s.info { color: var(--text-h); border-color: var(--primary); }
+  .sys-body { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px 12px 34px; border-top: 1px solid var(--line); }
+  .emu-line { display: flex; align-items: center; gap: 12px; }
+  .emu-line b { color: var(--text-h); }
+  .emu-line .acts { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .note.small { font-size: 12px; }
+
+  /* Collapsing Server header */
+  .sbody { position: relative; overflow: hidden; }
+  .sscroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-anchor: none; padding-top: var(--head-h, 116px); box-sizing: border-box; }
+  .shead { position: absolute; top: 0; left: 0; right: var(--sb, 0px); z-index: 3;
+    transition: padding 260ms cubic-bezier(.2,.7,.2,1), gap 260ms cubic-bezier(.2,.7,.2,1), background-color 260ms ease, box-shadow 260ms ease, border-color 260ms ease; }
+  /* Folded, the bar floats over the cards: it becomes the overlay level
+     (opaque), so no cover shows through the search field. */
+  .shead.folded { padding-top: 8px; padding-bottom: 8px; gap: 0; background: var(--overlay); border-color: var(--line-strong); box-shadow: 0 10px 24px rgba(10, 10, 30, 0.22); }
+  .shead-fold { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 260ms cubic-bezier(.2,.7,.2,1); }
+  .shead.folded .shead-fold { grid-template-rows: 0fr; }
+  .shead-fold-in { min-height: 0; overflow: hidden; }
+  /* The title row lifts and fades as it folds; the chips go a beat earlier.
+     Unfolding, the row waits a moment so it appears into the space opening. */
+  .shead-fold-in > header { transition: opacity 180ms ease 60ms, transform 260ms cubic-bezier(.2,.7,.2,1); }
+  .shead .g-chips { transition: opacity 140ms ease 80ms; }
+  .shead.folded .shead-fold-in > header { opacity: 0; transform: translateY(-8px); transition: opacity 160ms ease, transform 260ms cubic-bezier(.2,.7,.2,1); }
+  .shead.folded .g-chips { opacity: 0; transition: opacity 100ms ease; }
+  @media (prefers-reduced-motion: reduce) { .shead, .shead * { transition: none !important; } }
+
+  /* Fresh startup (Connect, Choose your systems) and the setup card */
+  .fresh { position: absolute; inset: 0; z-index: 100; background: var(--bg); overflow-y: auto; display: flex; justify-content: center; }
+  .fresh[hidden] { display: none; }
+  .fr-card { width: min(360px, 100%); margin: auto; padding: 32px 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; }
+  .fr-card.wide { width: min(720px, 100%); }
+  .fr-card label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
+  .fr-card label.check { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+  .fr-card .g-btn:disabled { opacity: .6; cursor: default; }
+  .fr-head { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+  .fr-head h1 { margin: 0; font-size: 22px; font-weight: 600; color: var(--text-h); }
+  .fr-head .lede { margin: 0; }
+  .help.center { text-align: center; }
+  .fr-row { display: grid; grid-template-columns: minmax(0, 1fr) 280px; align-items: center; gap: 12px; padding: 8px 12px; min-height: 36px; }
+  .fr-row.ticked { border-color: var(--primary); background: var(--selected); }
+  .fr-row.off { opacity: .7; }
+  .fr-pick { flex-direction: row !important; align-items: baseline !important; gap: 10px !important; cursor: pointer; }
+  .fr-pick input { align-self: center; accent-color: var(--primary); }
+  .fr-pick b { color: var(--text-h); font-size: 14px; }
+  .fr-foot { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+  /* The one notification: a card in a stack at the bottom right, above the
+     download strip and over dialogs. */
+  .notes { position: absolute; right: 24px; bottom: calc(var(--footer-h) + 24px); z-index: 30; width: min(340px, calc(100% - 48px)); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+  .note-card { pointer-events: auto; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; box-sizing: border-box; border-radius: var(--r-row); border: 1px solid var(--border); background: var(--surface-2); box-shadow: 0 12px 32px rgba(0,0,0,.35); animation: note-in 220ms ease; transition: opacity 180ms ease, transform 180ms ease; }
+  .note-card[hidden] { display: none; }
+  .note-card.leaving { opacity: 0; transform: translateX(12px); }
+  .note-card .title { margin: 0; font-weight: 600; color: var(--text-h); overflow-wrap: anywhere; }
+  .note-card.error .title { color: var(--danger); }
+  .note-card .line { margin: 0; font-size: 13px; color: var(--text); }
+  .note-card .form-actions { justify-content: flex-end; }
+  .note-card .bar { height: 4px; border-radius: var(--r-pill); background: var(--surface); overflow: hidden; margin: 0; }
+  .note-card .bar b { display: block; height: 100%; background: var(--primary); transition: width 220ms ease; }
+  @keyframes note-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  /* Dismiss carries the auto-dismiss countdown: a bar along its bottom edge
+     that runs down over 10 s. Pointing at the card pauses it. */
+  .note-dismiss { position: relative; overflow: hidden; }
+  .note-dismiss .cd { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--primary); transform-origin: left center; animation: note-cd linear forwards; }
+  .note-card:hover .cd, .note-card:focus-within .cd { animation-play-state: paused; }
+  @keyframes note-cd { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+  /* The setup card's bar: one segment per install. Done is a solid fill,
+     the one installing a moving fill, waiting ones empty. */
+  .segbar { display: flex; gap: 3px; }
+  .setup-seg { flex: 1 1 0; height: 4px; border-radius: var(--r-pill); background: var(--field); overflow: hidden; position: relative; }
+  .setup-seg b { position: absolute; inset: 0; transform: scaleX(0); transform-origin: left center; background: var(--primary); }
+  .setup-seg.done b { transform: scaleX(1); transition: transform 220ms ease; }
+  .setup-seg.running b { transform: scaleX(1); opacity: .45; background: linear-gradient(90deg, transparent 0, var(--primary) 50%, transparent 100%); background-size: 200% 100%; animation: seg-run 1.2s linear infinite; }
+  .setup-seg.failed { background: var(--danger); }
+  @keyframes seg-run { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+  /* Light / dark toggle */
+  .theme-toggle { color: var(--text-h); }
+  .theme-start { position: absolute; top: 16px; right: 16px; z-index: 101; }
+  .theme-start[hidden] { display: none; }
+  .tt-icon { display: grid; place-items: center; }
+  .tt-icon.spin { animation: tt-spin 300ms cubic-bezier(.2,.7,.2,1); }
+  @keyframes tt-spin { from { opacity: 0; transform: rotate(-90deg) scale(.6); } to { opacity: 1; transform: none; } }
+  /* While the theme changes, colours ease across instead of snapping. */
+  html.theming, html.theming *, html.theming *::before, html.theming *::after { transition: background-color 240ms ease, color 240ms ease, border-color 240ms ease, fill 240ms ease, box-shadow 240ms ease !important; }
+  @media (prefers-reduced-motion: reduce) { .tt-icon.spin { animation: none; } }
+
+  /* Server › Discover */
+  .discover { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--gutter); padding-bottom: 24px; }
+  .discover[hidden], .shead[hidden], .sscroll[hidden] { display: none; }
+  .disc-sec { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .disc-head h2 { margin: 0; font-size: 18px; font-weight: 600; color: var(--text-h); }
+  .disc-head .lede { margin: 2px 0 0; }
+  /* Recently added: platform filter pills across the top, beside the title. */
+  .ra-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .ra-pills { flex-wrap: wrap; max-width: 100%; }
+
+  /* New releases: a coverflow. Centre cover flat and lit; neighbours tilt
+     52° back, recede and dim; a soft reflection under each. */
+  /* isolation: the covers' and arrows' z-index rank only inside the coverflow,
+     never against the app's overlays. */
+  .cf { position: relative; height: 330px; outline: none; border-radius: var(--r-row); isolation: isolate; }
+  .cf:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  /* Clipped left and right only: the reflections run down below the stage,
+     under the caption, and fade out there. */
+  .cf-stage { position: absolute; inset: 0; perspective: 1100px; overflow-x: clip; overflow-y: visible; }
+  .cf-item { position: absolute; left: 50%; top: 14px; width: 200px; margin-left: -100px; cursor: pointer; transform-style: preserve-3d;
+    transition: transform 450ms cubic-bezier(.2,.7,.2,1), opacity 450ms ease, filter 450ms ease; filter: brightness(.62) saturate(.85); }
+  .cf-item.center { filter: none; }
+  .cf-cover { position: relative; aspect-ratio: 3 / 4; border-radius: var(--r-card); overflow: hidden; box-shadow: var(--shadow-card);
+    -webkit-box-reflect: below 6px linear-gradient(transparent 46%, rgba(255, 255, 255, 0.24)); }
+  .cf-item.center .cf-cover { box-shadow: var(--shadow-lift); }
+  .cf-arrow { position: absolute; top: 50%; margin-top: -24px; z-index: 60; width: 36px; height: 48px; background: var(--overlay); box-shadow: var(--shadow-lift); }
+  .cf-arrow.prev { left: 8px; } .cf-arrow.next { right: 8px; }
+  .cf-arrow:disabled { opacity: .35; cursor: default; }
+  .cf-caption { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
+  .cf-caption b, .ra-caption b { color: var(--text-h); font-size: 18px; }
+  .cf-caption .form-actions { margin-top: 6px; }
+
+  /* Recently added: a screenshot, and a column of small covers whose
+     highlight frame glides to the active game every 10 s. */
+  .ra { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 16px; }
+  .ra-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .ra-shot { position: relative; aspect-ratio: 16 / 9; border-radius: var(--r-row); overflow: hidden; box-shadow: var(--shadow-card); background: var(--field); cursor: pointer; transition: transform 150ms ease, box-shadow 150ms ease; }
+  .ra-shot:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+  .ra-shot:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .cf-item.center:hover .cf-cover { transform: translateY(-4px); }
+  .cf-cover { transition: transform 150ms ease; }
+  .ra-layer { position: absolute; inset: 0; opacity: 0; transition: opacity 600ms ease; }
+  .ra-layer.on { opacity: 1; }
+  .ra-art { position: absolute; inset: 0; }
+  .ra-art span { position: absolute; left: 8%; bottom: 14%; width: 46%; height: 34%; border-radius: 10px; background: rgba(255,255,255,.14); }
+  .ra-art i { position: absolute; right: 10%; top: 16%; width: 26%; aspect-ratio: 1; border-radius: 50%; background: rgba(255,255,255,.18); }
+  .ra-caption { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .ra-caption > div:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .ra-side { position: relative; }
+  .ra-list { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 0 2px; scrollbar-width: thin; }
+  .ra-row { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; padding: 6px; border: none; border-radius: var(--r-row); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; flex: none; }
+  .ra-row:hover:not(.active) { background: var(--surface); }
+  .ra-cover { position: relative; flex: none; width: 46px; aspect-ratio: 3 / 4; border-radius: 6px; overflow: hidden; box-shadow: var(--shadow-card); }
+  .ra-cover .g-art { padding: 0; font-size: 0; }
+  .ra-cover .g-art::after { display: none; }
+  .ra-text { display: flex; flex-direction: column; min-width: 0; }
+  .ra-text b { color: var(--text-h); font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ra-text span { color: var(--text-muted); font-size: 11px; }
+  .ra-row.active .ra-text b { color: var(--text-h); }
+  .ra-hl { position: absolute; left: 2px; right: 2px; top: 0; z-index: 0; border-radius: var(--r-row); background: var(--selected); box-shadow: inset 0 0 0 2px var(--primary); overflow: hidden; pointer-events: none;
+    transition: transform 450ms cubic-bezier(.2,.7,.2,1), height 450ms cubic-bezier(.2,.7,.2,1); }
+  .ra-bar { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--primary); transform: scaleX(0); transform-origin: left center; animation: ra-fill 10s linear forwards; }
+  .ra:hover .ra-bar, .ra:focus-within .ra-bar { animation-play-state: paused; }
+  @keyframes ra-fill { to { transform: scaleX(1); } }
+  @media (prefers-reduced-motion: reduce) { .cf-item, .ra-hl, .ra-layer { transition: none; } }
+
+  /* Off-ratio screenshots: fitted in the 16:9 frame over a blurred copy. */
+  .ra-fill { position: absolute; inset: -12%; filter: blur(26px) brightness(.55) saturate(1.15); transform: scale(1.1); }
+  .ra-fill span { position: absolute; left: 8%; bottom: 14%; width: 46%; height: 34%; border-radius: 10px; background: rgba(255,255,255,.14); }
+  .ra-fill i { position: absolute; right: 10%; top: 16%; width: 26%; aspect-ratio: 1; border-radius: 50%; background: rgba(255,255,255,.18); }
+  .ra-pic { position: absolute; inset: 0; margin: auto; overflow: hidden; box-shadow: 0 0 24px rgba(0,0,0,.35); }
+  .ra-pic.tall { height: 100%; width: auto; }
+  .ra-pic.wide { width: 100%; height: auto; }
+  /* Clear logo: bottom-left on the art, over a soft fade so a light logo
+     reads on any screenshot. */
+  .ra-logo-wrap { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 20px 16px; background: linear-gradient(to top, rgba(0,0,0,.6), rgba(0,0,0,0)); pointer-events: none; }
+  .ra-logo { max-width: 55%; line-height: 1; color: #fff; overflow-wrap: anywhere; }
+  /* --lf: letters, --ls: outline and shadow. A server logo stand-in keeps the
+     defaults; a generated logo sets both from the screenshot's dominant shade. */
+  .logo-a { font: italic 700 34px/1 Georgia, 'Times New Roman', serif; color: var(--lf, #f6d77a); text-shadow: 0 2px 0 var(--ls, #6b4a0e), 0 4px 12px rgba(0,0,0,.6); }
+  .logo-b { font: 900 30px/0.95 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em; color: var(--lf, #fff); -webkit-text-stroke: 1px rgba(0,0,0,.6); text-shadow: 3px 3px 0 var(--ls, #553e98), 0 4px 14px rgba(0,0,0,.6); }
+  .logo-c { font: 800 32px/1 system-ui, sans-serif; letter-spacing: -.01em; color: var(--lf, #eafcff); text-shadow: 0 0 1px var(--ls, #0b3b46), 0 3px 0 var(--ls, #0b3b46), 0 5px 14px rgba(0,0,0,.55); }
+
+  /* Game backups: Settings › Backup drives, the backup dialog, grid select
+     mode, Library › Backup drives and the offline Server panel. */
+  .bk-lede { max-width: 620px; }
+  .bk-drive { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: var(--r-row); border: 1px solid var(--line); background: var(--surface); }
+  .bk-drive + .bk-drive { margin-top: 10px; }
+  .bk-drive.away { opacity: .72; }
+  .bk-drive.fresh-drive { border-style: dashed; border-color: var(--line-strong); }
+  .bk-drive-head { display: flex; align-items: center; gap: 10px; padding-right: 120px; }
+  .bk-drive-icon { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: var(--r-control); background: var(--field); color: var(--text-h); flex: none; }
+  .bk-drive-id { display: flex; flex-direction: column; gap: 1px; min-width: 0; margin-right: auto; }
+  .bk-drive-id b { color: var(--text-h); font-size: 14px; }
+  .bk-drive .kv div { grid-template-columns: 120px 1fr; padding: 6px 0; }
+  .bk-drive code, .bk-confirm code, .bk-setup code { font: 12px ui-monospace, monospace; }
+  .bk-usage { position: relative; display: flex; height: 8px; border-radius: var(--r-pill); background: var(--field); overflow: hidden; }
+  .bk-usage b { display: block; height: 100%; }
+  .bk-usage b.u-other { background: var(--line-strong); }
+  .bk-usage b.u-grid { background: var(--primary); }
+  .bk-usage b.adding { background: repeating-linear-gradient(135deg, var(--graph-disk) 0 4px, color-mix(in srgb, var(--graph-disk) 55%, transparent) 4px 8px); }
+  .bk-usage b.adding.over { background: var(--danger); }
+  .bk-legend { margin: -2px 0 0; display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-muted); }
+  .bk-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; background: var(--field); border: 1px solid var(--line-strong); vertical-align: -1px; }
+  .bk-legend i.u-other { background: var(--line-strong); border-color: transparent; }
+  .bk-legend i.u-grid { background: var(--primary); border-color: transparent; }
+  .bk-warn { margin: 0; padding: 8px 10px; border-radius: var(--r-control); border-left: 3px solid var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent); color: var(--text); font-size: 13px; }
+  .bk-warn-line { color: var(--warning-text); }
+  .bk-confirm { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: var(--r-control); border: 1px solid var(--danger); }
+  .bk-confirm p { margin: 0; font-size: 13px; color: var(--text); }
+  .bk-rename { display: flex; gap: 8px; align-items: center; }
+  .bk-rename .field { max-width: 280px; }
+  .bk-proto { font-size: 11px; padding: 3px 8px; border-style: dashed; color: var(--text-muted); }
+  .bk-proto-corner { position: absolute; top: 12px; right: 12px; }
+  .bk-tree summary { cursor: pointer; color: var(--text-h); font-size: 14px; font-weight: 600; }
+  .bk-tree pre { margin: 8px 0 0; padding: 10px 12px; border-radius: var(--r-control); background: var(--field); border: 1px solid var(--line); color: var(--text-h); font: 12px/1.6 ui-monospace, monospace; overflow-x: auto; }
+
+  /* Select mode on the grids */
+  .bk-select-btn.active { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+  .grid.selecting .g-card { cursor: pointer; }
+  .grid.selecting .g-bar, .grid.selecting .g-shade { display: none; }
+  .grid.selecting .g-cover { transition: transform 120ms ease, box-shadow 120ms ease; }
+  .grid.selecting .g-card.picked .g-cover { box-shadow: 0 0 0 3px var(--primary), var(--shadow-card); transform: scale(.96); }
+  .bk-check { position: absolute; top: 8px; left: 8px; z-index: 3; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; border: 2px solid #fff; background: rgba(0,0,0,.35); color: var(--on-primary); box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+  .g-card.picked .bk-check { background: var(--primary); border-color: var(--primary); }
+  .grid.selecting .g-tag-stack { top: 36px; }
+  .bk-selbar { position: sticky; bottom: 0; z-index: 4; display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin-top: 8px; border-radius: var(--r-row); background: var(--overlay); box-shadow: 0 -6px 24px rgba(0,0,0,.18); }
+  .bk-selbar[hidden] { display: none; }
+  .bk-sel-count { display: flex; flex-direction: column; gap: 1px; }
+  .bk-sel-count b { color: var(--text-h); font-size: 14px; }
+  .bk-sel-gap { flex: 1 1 auto; }
+  .bk-selbar .g-btn { padding: 7px 16px; }
+  .bk-selbar .g-btn:disabled { opacity: .55; cursor: default; }
+  .g-platform-header { position: relative; }
+  .bk-plat { margin-left: 8px; white-space: nowrap; }
+  .bk-plat[hidden] { display: none; }
+
+  /* Library › Backup drives rail rows */
+  .bk-rail { justify-content: flex-start; }
+  .bk-rail .g-rail-label { flex: 1 1 auto; text-align: left; }
+  .bk-rail .bk-rail-icon { display: inline-grid; place-items: center; flex: none; color: var(--text-muted); margin-right: 8px; }
+  .bk-rail.active .bk-rail-icon { color: inherit; }
+  #lib-chips[hidden] { display: none; }
+
+  /* The backup dialog */
+  .g-dialog.bkdlg { position: relative; width: 520px; height: auto; max-height: calc(100% - 48px); overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 22px 24px; box-sizing: border-box; }
+  .bkdlg h3 { margin: 0; padding-right: 36px; font-size: 17px; color: var(--text-h); }
+  .bkdlg .sub { gap: 8px; }
+  .bkdlg h4 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+  .bk-opts { display: flex; flex-direction: column; gap: 8px; }
+  .bk-opt { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "r m f" "u u u"; align-items: center; gap: 6px 10px; padding: 10px 12px; border-radius: var(--r-row); border: 1px solid var(--line); background: var(--surface); cursor: pointer; }
+  .bk-opt input { grid-area: r; accent-color: var(--primary); }
+  .bk-opt.on { border-color: var(--primary); background: var(--selected); }
+  .bk-opt-main { grid-area: m; display: flex; flex-direction: column; gap: 1px; }
+  .bk-opt-main b { color: var(--text-h); }
+  .bk-opt-free { grid-area: f; font-size: 12px; color: var(--text-muted); }
+  .bk-opt-free.warn { color: var(--danger); font-weight: 600; }
+  .bk-opt .bk-usage { grid-area: u; height: 6px; }
+  .bk-also { display: flex; flex-direction: row; align-items: flex-start !important; gap: 10px; font-size: 13px; color: var(--text); }
+  .bk-also input:disabled + span { opacity: .6; }
+  .bk-also input { margin-top: 3px; }
+  .bk-also > span { display: flex; flex-direction: column; gap: 1px; }
+  .bk-also b { color: var(--text-h); font-weight: 600; }
+  .bk-notes { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: var(--r-control); background: var(--field); }
+  .bk-foot { align-items: center; justify-content: flex-end; }
+  .bk-foot > .note { margin-right: auto; }
+  .bk-foot .g-btn:disabled { opacity: .55; cursor: default; }
+
+  /* Details */
+  .bk-on { display: flex; align-items: center; justify-content: center; gap: 5px; }
+  .bk-src { color: var(--primary); }
+
+  /* Offline */
+  .g-status-dot.bk-offline-dot { background: var(--text-muted); }
+  .bk-off { flex: 1 1 auto; display: grid; place-items: center; padding: 40px; }
+  .bk-off[hidden] { display: none; }
+  .bk-off-in { max-width: 420px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+  .bk-off-in h2 { margin: 0; font-size: 18px; color: var(--text-h); }
+  .bk-off-in .bk-drive-icon { width: 48px; height: 48px; }
+  .bk-or { display: flex; align-items: center; gap: 10px; color: var(--text-muted); font-size: 12px; }
+  .bk-or::before, .bk-or::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+  #bkscrim { z-index: 25; }
+  .bk-os { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
+  .bk-os legend { padding: 0; margin-bottom: 4px; font-size: 12px; color: var(--text-muted); }
+  .bk-os-edit { padding: 10px 12px; border-radius: var(--r-control); border: 1px solid var(--line); }
+  .bk-for { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .bk-for b { color: var(--text-h); }
+  .bk-auto { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; color: var(--text); }
+  .bk-auto-mark { display: inline-grid; place-items: center; width: 15px; height: 15px; margin-top: 2px; border-radius: 3px; background: var(--primary); color: var(--on-primary); flex: none; }
+
+</style></head>
+<body>
+<div class="app" id="app">
+  <div class="art-clip" aria-hidden="true"><div class="art" id="art"></div></div>
+
+  <header class="g-topbar">
+    <div class="g-brand"><span class="g-logo" data-icon="grid" data-size="20"></span><span class="g-wordmark">GRID</span></div>
+    <nav class="g-pills" aria-label="Views" id="pills"></nav>
+    <div class="g-session">
+      <button class="g-icon-btn theme-toggle" data-theme-toggle aria-label="Switch to dark mode"></button>
+      <span class="g-status-dot online" aria-hidden="true"></span>
+      <button class="g-session-chip" id="chip" aria-expanded="false">player@romm.home.lan</button>
+      <div class="menu-wrap" id="menu" hidden>
+        <div class="g-menu" role="menu"><button role="menuitem">Disconnect</button><button role="menuitem">Open RomM in browser</button><span class="g-menu-host">romm.home.lan</span></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="view" data-view="library" hidden>
+    <div class="columns">
+      <nav class="g-rail" id="lib-rail" aria-label="Library filters"></nav>
+      <div class="body sbody" id="lib-body">
+        <div class="g-panel g-head shead" id="lib-head"><div class="shead-fold"><div class="shead-fold-in">
+          <header class="g-platform-header"><h2 id="lib-title">All games</h2><p class="g-counts" id="lib-count"></p><div class="g-chips" id="lib-chips" hidden></div></header></div></div>
+          <div class="g-toolbar">
+            <input class="g-search" type="search" placeholder="Search by title" aria-label="Search the library" data-search="library">
+            <label class="g-control"><span>Sort</span><select><option>Recently played</option><option>Recently installed</option><option>Title</option><option>Platform</option></select></label>
+            <label class="g-control"><span>Size</span><select data-size-select><option value="120">Small</option><option value="160" selected>Medium</option><option value="200">Large</option></select></label>
+            <button class="small-btn bk-select-btn" data-bk-select aria-pressed="false">Select</button>
+          </div>
+        </div>
+        <div class="sscroll" id="lib-scroll"><div class="grid" id="lib-grid"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="view" data-view="server">
+    <div class="columns">
+      <nav class="g-rail" id="srv-rail" aria-label="Server platforms"></nav>
+      <div class="g-panel bk-off" id="bk-srv-off" hidden><div class="bk-off-in"><span class="bk-drive-icon" data-icon="cloud" data-size="24"></span><h2>Not connected to a server</h2><p class="note">Your Library and backup drives work without one. Connect to browse the server and back up games.</p><button class="g-btn" data-bk-connect>Connect to a server…</button></div></div>
+      <div class="body sbody" id="srv-body">
+        <div class="g-panel g-head shead" id="srv-head"><div class="shead-fold"><div class="shead-fold-in">
+          <header class="g-platform-header">
+            <h2 id="srv-title"></h2><p class="g-counts" id="srv-count"></p>
+            <div class="g-chips"><button class="g-chip-outline" data-go="emulators" id="srv-fw">Firmware: 3 files · installed</button><button class="g-chip-outline" data-go="emulators" id="srv-emu"></button></div>
+          </header></div></div>
+          <div class="g-toolbar">
+            <input class="g-search" type="search" placeholder="Search title, platform or genre" aria-label="Search this platform" data-search="server">
+            <label class="g-control"><span>Size</span><select data-size-select><option value="120">Small</option><option value="160" selected>Medium</option><option value="200">Large</option></select></label>
+            <button class="small-btn bk-select-btn" data-bk-select aria-pressed="false">Select</button>
+          </div>
+        </div>
+        <div class="sscroll" id="srv-scroll"><div class="grid" id="srv-grid"></div></div>
+        <div class="discover" id="discover" hidden></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="view" data-view="downloads" hidden>
+    <div class="content">
+      <section class="g-panel seg"><h3>Active<span id="dl-active-n">1</span></h3><div id="dl-active"></div></section>
+      <section class="g-panel seg"><h3>Queued<span id="dl-queued-n">0</span></h3><div id="dl-queued"><p class="note">Nothing is waiting.</p></div></section>
+      <section class="g-panel seg"><h3>Completed<span id="dl-done-n">0</span></h3><div id="dl-done"></div></section>
+    </div>
+  </div>
+
+  <div class="view" data-view="emulators" hidden>
+    <div class="columns">
+      <nav class="g-rail" id="emu-rail" aria-label="Emulator categories"></nav>
+      <div class="panes g-panel"><div class="pane-scroll"><section class="pane" id="emu-pane"></section></div></div>
+    </div>
+  </div>
+
+  <div class="view" data-view="settings" hidden>
+    <div class="columns">
+      <nav class="g-rail" id="set-rail" aria-label="Settings"></nav>
+      <div class="panes g-panel"><div class="pane-scroll"><section class="pane" id="set-pane"></section></div></div>
+    </div>
+  </div>
+
+  <footer class="g-strip" id="strip" role="button" tabindex="0" data-go="downloads">
+    <span class="g-strip-lead" data-icon="download" data-size="14"></span>
+    <span class="g-strip-line" id="strip-line"></span>
+    <svg width="120" height="18" viewBox="0 0 120 18" aria-hidden="true"><polyline id="spark-net" fill="none" stroke="var(--primary)" stroke-width="1.5"/><polyline id="spark-disk" fill="none" stroke="var(--graph-disk)" stroke-width="1.5"/></svg>
+    <span class="g-strip-open">Open Downloads</span>
+  </footer>
+
+  <div class="notes" id="notes" aria-live="polite"><aside class="note-card setup-card" id="setup-card" hidden></aside></div>
+  <div class="fresh" id="fresh" hidden></div>
+
+  <div class="g-scrim" id="bkscrim" hidden><div class="g-dialog bkdlg" role="dialog" aria-modal="true" aria-labelledby="bk-dlg-title" id="bkdlg"></div></div>
+  <div class="g-scrim" id="libscrim" hidden><div class="g-dialog libdlg" role="dialog" aria-modal="true" id="libdlg"></div></div>
+
+  <button class="g-icon-btn theme-toggle theme-start" id="theme-start" data-theme-toggle aria-label="Switch to dark mode" hidden></button>
+  <div class="g-scrim" id="scrim" hidden>
+    <div class="g-dialog" role="dialog" aria-modal="true" id="dialog" tabindex="-1" style="outline:none">
+      <button class="g-icon-btn g-dialog-close" aria-label="Close" id="close"><span data-icon="close" data-size="20"></span></button>
+      <div class="g-details">
+        <aside class="g-details-left" id="d-left"></aside>
+        <section class="g-details-right">
+          <header class="g-details-head" id="d-head"></header>
+          <div class="g-tabs" role="tablist" id="d-tabs"></div>
+          <div class="tabpanel" id="d-panel"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+var I={"close": "M6 6l12 12M18 6L6 18", "chevronLeft": "M15.5 5L8.5 12l7 7", "check": "M5 12.5l5 5L19 7", "chevronRight": "M8.5 5l7 7-7 7", "arrowLeft": "M19.5 12H4.5M11 5.5L4.5 12l6.5 6.5", "cloud": "M6.2 17h10a4 4 0 0 0 0-8h-.6A5.2 5.2 0 0 0 6.4 10.6 3.3 3.3 0 0 0 6.2 17z", "star": "M12 4.4L13.88 9.81L19.61 9.93L15.04 13.39L16.7 18.87L12 15.6L7.3 18.87L8.96 13.39L4.39 9.93L10.12 9.81Z", "download": "M12 3.5V14M7.5 9.5L12 14L16.5 9.5M4.5 17v2a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-2", "play": "M7.5 4.5L19 12L7.5 19.5Z", "more": "M7.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0zM13.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0zM19.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0z", "grid": "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z", "sun": "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM12 2.75v2M12 19.25v2M2.75 12h2M19.25 12h2M5.46 5.46l1.41 1.41M17.13 17.13l1.41 1.41M5.46 18.54l1.41-1.41M17.13 6.87l1.41-1.41", "moon": "M19.5 14.6A7.6 7.6 0 0 1 9.4 4.5a7.6 7.6 0 1 0 10.1 10.1z", "drive": "M3.5 14h17v4.5A1.5 1.5 0 0 1 19 20H5a1.5 1.5 0 0 1-1.5-1.5zM3.5 14l2.6-8.2A1.5 1.5 0 0 1 7.5 4.7h9a1.5 1.5 0 0 1 1.4 1.1L20.5 14M16.5 17h.01M13.5 17h.01"}, F=['star','play','more'];
+window.gIcon=function(n,s){s=s||14;var f=F.indexOf(n)>=0;
+return '<svg class="g-icon" viewBox="0 0 24 24" width="'+s+'" height="'+s+'" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'+I[n]+'" fill="'+(f?'currentColor':'none')+'" stroke="'+(f?'none':'currentColor')+'"/></svg>';};
+window.gIcons=function(root){(root||document).querySelectorAll('[data-icon]').forEach(function(el){el.innerHTML=gIcon(el.getAttribute('data-icon'),+el.getAttribute('data-size')||14);});};
+gIcons();
+})();
+</script>
+<script>
+(function(){
+var DATA = {"games": [{"t": "Starfall Circuit", "c": "hsl(258 45% 38%)", "p": "PS", "rel": "1998-03-14", "added": "2026-10-02"}, {"t": "Lantern Vale", "c": "hsl(32 70% 42%)", "p": "N64", "rel": "1999-11-05", "added": "2026-09-21"}, {"t": "Ironclad Drift", "c": "hsl(205 55% 34%)", "p": "SAT", "rel": "1997-06-27", "added": "2026-10-30"}, {"t": "Moss & Marrow", "c": "hsl(140 35% 30%)", "p": "GC", "rel": "2003-04-18", "added": "2026-11-05"}, {"t": "Pixel Harbor", "c": "hsl(350 55% 42%)", "p": "SNES", "rel": "1995-08-11", "added": "2026-08-14"}, {"t": "Cinder Peaks", "c": "hsl(15 60% 40%)", "p": "PS", "rel": "2000-02-24", "added": "2026-11-06"}, {"t": "Echo Garden", "c": "hsl(175 45% 30%)", "p": "N64", "rel": "2001-01-19", "added": "2026-10-28"}, {"t": "Velvet Static", "c": "hsl(290 35% 36%)", "p": "PS2", "rel": "2006-09-07", "added": "2026-11-03"}, {"t": "Tidewalker", "c": "hsl(195 60% 32%)", "p": "GC", "rel": "2004-12-02", "added": "2026-10-12"}, {"t": "Brass Comet", "c": "hsl(45 65% 36%)", "p": "SAT", "rel": "1998-10-22", "added": "2026-07-30"}, {"t": "Hollow Signal", "c": "hsl(220 30% 28%)", "p": "PS", "rel": "1999-05-13", "added": "2026-11-04"}, {"t": "Kite Season", "c": "hsl(95 40% 34%)", "p": "SNES", "rel": "1996-03-29", "added": "2026-10-19"}, {"t": "Neon Orchard", "c": "hsl(320 50% 40%)", "p": "PS2", "rel": "2005-07-21", "added": "2026-09-09"}, {"t": "Glass Monsoon", "c": "hsl(185 35% 38%)", "p": "N64", "rel": "2000-10-10", "added": "2026-11-01"}, {"t": "Quiet Engine", "c": "hsl(0 0% 30%)", "p": "SAT", "rel": "1997-12-04", "added": "2026-10-25"}, {"t": "Ember Choir", "c": "hsl(8 65% 38%)", "p": "GC", "rel": "2005-03-31", "added": "2026-11-07"}, {"t": "Lumen Drift", "c": "hsl(265 55% 42%)", "p": "LINUX", "rel": "2026-10-24", "added": "2026-10-26"}, {"t": "Paper Orbit", "c": "hsl(28 70% 44%)", "p": "LINUX", "rel": "2026-09-12", "added": "2026-09-15"}, {"t": "Kestrel Run", "c": "hsl(160 45% 32%)", "p": "LINUX", "rel": "2026-06-30", "added": "2026-11-02"}, {"t": "Saltmarsh", "c": "hsl(200 35% 36%)", "p": "LINUX", "rel": "2025-11-02", "added": "2026-08-03"}, {"t": "Quiet Atlas", "c": "hsl(340 40% 38%)", "p": "LINUX", "rel": "2025-03-15", "added": "2026-06-11"}, {"t": "Rook & Ribbon", "c": "hsl(48 60% 38%)", "p": "LINUX", "rel": "2024-08-08", "added": "2026-05-20"}, {"t": "Coral Static", "c": "hsl(10 55% 40%)", "p": "PS", "rel": "2000-11-16", "added": "2026-10-31"}, {"t": "Signal Fires", "c": "hsl(230 45% 40%)", "p": "PS2", "rel": "2007-03-08", "added": "2026-10-29"}, {"t": "Orbit Bloom", "c": "hsl(300 40% 40%)", "p": "GC", "rel": "2006-06-15", "added": "2026-11-06"}, {"t": "Harbor Lights", "c": "hsl(205 50% 38%)", "p": "WIN", "rel": "2026-08-21", "added": "2026-08-25"}, {"t": "Grey Meridian", "c": "hsl(220 15% 34%)", "p": "WIN", "rel": "2026-03-05", "added": "2026-10-27"}, {"t": "Foxglove", "c": "hsl(330 45% 40%)", "p": "WIN", "rel": "2025-10-16", "added": "2026-07-08"}, {"t": "Iron Lullaby", "c": "hsl(15 35% 34%)", "p": "WIN", "rel": "2024-12-11", "added": "2026-09-30"}, {"t": "Low Tide Radio", "c": "hsl(185 40% 34%)", "p": "WIN", "rel": "2023-05-25", "added": "2026-11-03"}, {"t": "Pale Summit", "c": "hsl(210 25% 46%)", "p": "WIN", "rel": "2022-02-17", "added": "2026-04-14"}, {"t": "Night Ferry", "c": "hsl(250 40% 30%)", "p": "LINUX", "rel": "2026-11-04", "added": "2026-11-05"}, {"t": "Copperline", "c": "hsl(25 55% 36%)", "p": "WIN", "rel": "2026-10-30", "added": "2026-11-01"}, {"t": "Wren Hollow", "c": "hsl(120 30% 30%)", "p": "LINUX", "rel": "2026-10-15", "added": "2026-10-18"}, {"t": "Static Bloom", "c": "hsl(315 45% 38%)", "p": "WIN", "rel": "2026-10-02", "added": "2026-10-06"}, {"t": "Pocket Monsoon", "c": "hsl(190 50% 34%)", "p": "SNES", "rel": "2026-09-27", "added": "2026-10-01"}, {"t": "Glassjaw", "c": "hsl(0 45% 36%)", "p": "WIN", "rel": "2026-09-03", "added": "2026-09-10"}, {"t": "Lowland Signal", "c": "hsl(90 30% 32%)", "p": "LINUX", "rel": "2026-08-12", "added": "2026-08-20"}, {"t": "Tinroof Rally", "c": "hsl(40 60% 38%)", "p": "N64", "rel": "2026-07-25", "added": "2026-08-02"}, {"t": "Ashgrove", "c": "hsl(15 25% 30%)", "p": "WIN", "rel": "2026-07-09", "added": "2026-07-15"}, {"t": "Mirrorlake", "c": "hsl(200 45% 42%)", "p": "LINUX", "rel": "2026-06-18", "added": "2026-06-25"}, {"t": "Fable Engine", "c": "hsl(275 35% 34%)", "p": "WIN", "rel": "2026-05-29", "added": "2026-06-04"}, {"t": "Old Moon Arcade", "c": "hsl(55 45% 34%)", "p": "LINUX", "rel": "2026-04-20", "added": "2026-05-02"}]};
+var G = DATA.games.map(function(g, i){ return Object.assign({ id: i, installed: [0,1,2,4,6,9,12].indexOf(i) >= 0, update: i === 1, missing: i === 9, cloud: [0,4,6].indexOf(i) >= 0 }, g); });
+var PLAT = { PS: 'PlayStation', N64: 'Nintendo 64', SAT: 'Sega Saturn', GC: 'GameCube', SNES: 'Super Nintendo', PS2: 'PlayStation 2', LINUX: 'Linux', WIN: 'Windows' };
+var EMU = { PS: 'DuckStation', N64: 'RetroArch · Mupen64Plus-Next', SAT: 'Ymir (Sega Saturn)', GC: 'Dolphin', SNES: 'RetroArch · Snes9x', PS2: 'PCSX2', LINUX: 'none', WIN: 'none' };
+var VIEWS = ['library','server','downloads','settings'];
+var S = { view: 'settings', platform: 'DISCOVER', libFilter: 'all', q: { library: '', server: '' }, cardW: 160, labels: 'always', fade: 50, blur: 2, lastFade: 50, emuPane: 'installed', setPane: 'appearance', detail: null, tab: 'overview', kind: 'save', dl: null, fw: { PS: 'installed', SAT: 'install', GC: 'unavailable' } };
+var $ = function(id){ return document.getElementById(id); };
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+/* ---- background art ---- */
+function paintArt(g){
+  var c = g ? g.c : 'hsl(258 45% 38%)';
+  $('art').innerHTML = '<i style="left:-5%;top:-10%;width:55%;height:80%;background:'+c+'"></i><i style="right:-10%;top:20%;width:50%;height:90%;background:'+c+';opacity:.7"></i><i style="left:30%;bottom:-20%;width:40%;height:50%;background:hsl(220 40% 20%)"></i>';
+  /* The app: opacity = 1 - fade/100; 100 is fully faded, which is off. */
+  $('art').style.opacity = Math.max(0, 1 - S.fade / 100);
+  $('art').style.filter = 'blur(' + (12 + S.blur * 1.4) + 'px)';
+}
+
+/* ---- top bar ---- */
+function renderPills(){
+  $('pills').innerHTML = VIEWS.map(function(v){ return '<button class="g-pill'+(S.view===v?' active':'')+'" data-view-btn="'+v+'"'+(S.view===v?' aria-current="page"':'')+'>'+v.charAt(0).toUpperCase()+v.slice(1)+'</button>'; }).join('');
+  document.querySelectorAll('.view').forEach(function(el){ el.hidden = el.getAttribute('data-view') !== S.view; });
+}
+
+/* ---- rails ---- */
+function rail(id, rows, onPick){
+  $(id).innerHTML = rows.map(function(r){
+    return (r.heading ? '<span class="g-rail-heading">'+r.heading+'</span>' : '') + '<button class="g-rail-item'+(r.sel?' active':'')+'" data-key="'+r.key+'"'+(r.sel?' aria-current="page"':'')+'><span class="g-rail-label">'+esc(r.label)+'</span>'+(r.count!==undefined?'<span class="g-rail-count">'+r.count+'</span>':'')+'</button>'+(r.divider?'<hr class="rail-divider">':'');
+  }).join('');
+  $(id).onclick = function(e){ var b = e.target.closest('[data-key]'); if (b) onPick(b.getAttribute('data-key')); };
+}
+
+/* ---- cards ---- */
+function card(g, showPlatform){
+  var tags = (g.missing || g.update) ? '<div class="g-tag-stack">'+(g.missing?'<span class="g-tag missing">MISSING</span>':'')+(g.update?'<span class="g-tag update">UPDATE</span>':'')+'</div>' : '';
+  var prim = g.missing ? 'Details' : (g.installed ? 'Play' : (S.dl && S.dl.id === g.id ? 'Installing…' : DLQ.indexOf(g.id) >= 0 ? 'Queued' : 'Install'));
+  return '<div class="g-card" data-game="'+g.id+'"><div class="g-cover"><div class="g-art" style="background:'+g.c+'"><span>'+esc(g.t)+'</span></div>'+tags+
+    (g.installed?'<span class="g-dot" role="img" aria-label="Installed"></span>':'')+
+    (showPlatform?'<span class="g-tag platform g-corner">'+g.p+'</span>':'')+
+    (g.cloud?'<span class="g-cloud-badge g-corner" data-icon="cloud" data-size="14"></span>':'')+
+    '<div class="g-shade"></div><div class="g-bar"><button class="g-card-primary" data-act="primary">'+prim+'</button><button class="g-round" data-act="cloud" aria-label="Cloud sync" data-icon="cloud" data-size="15"></button><button class="g-round" data-act="details" aria-label="Details" data-icon="more" data-size="15"></button></div></div>'+
+    '<span class="g-label" title="'+esc(g.t)+'">'+esc(g.t)+'</span></div>';
+}
+function fillGrid(id, list, showPlatform, emptyText){
+  var el = $(id);
+  el.className = 'grid' + (S.labels === 'hover' ? ' hover-labels' : '');
+  el.style.setProperty('--card-w', S.cardW + 'px');
+  el.innerHTML = list.length ? list.map(function(g){ return card(g, showPlatform); }).join('') : '<p class="g-panel empty">'+esc(emptyText)+'</p>';
+  gIcons(el);
+}
+function match(g, q){ q = q.trim().toLowerCase(); return !q || g.t.toLowerCase().indexOf(q) >= 0 || PLAT[g.p].toLowerCase().indexOf(q) >= 0; }
+
+function renderServer(){
+  var plats = Object.keys(PLAT).sort(function(a,b){ return PLAT[a].localeCompare(PLAT[b]); });
+  rail('srv-rail', plats.map(function(p){ return { key: p, label: PLAT[p], count: G.filter(function(g){return g.p===p;}).length, sel: S.platform === p }; }), function(k){ S.platform = k; renderServer(); });
+  var inPlat = G.filter(function(g){ return g.p === S.platform; });
+  $('srv-title').textContent = PLAT[S.platform];
+  $('srv-count').textContent = inPlat.length + (inPlat.length === 1 ? ' game · ' : ' games · ') + inPlat.filter(function(g){return g.installed;}).length + ' installed';
+  $('srv-emu').textContent = EMU[S.platform]==='none' ? 'No default emulator' : 'Emulator: ' + EMU[S.platform]; var fwN = { PS: 3, SAT: 2 }[S.platform], fwS = SY.fw[S.platform]; $('srv-fw').textContent = !fwN ? 'No server firmware' : (EMU[S.platform]==='none' ? 'Firmware: ' + fwN + ' files — no default emulator' : fwS==='installed' ? 'Firmware: ' + fwN + ' files · installed' : 'Firmware: ' + fwN + ' files');
+  /* Native and Windows games run without an emulator: no emulator or firmware chips. */
+  document.querySelector('[data-view=server] .g-chips').hidden = S.platform === 'LINUX' || S.platform === 'WIN';
+  var shown = inPlat.filter(function(g){ return match(g, S.q.server); });
+  fillGrid('srv-grid', shown, false, S.q.server.trim() ? 'No games match “'+S.q.server.trim()+'”' : 'This platform has no games');
+}
+function renderLibrary(){
+  var inst = G.filter(function(g){ return g.installed; });
+  var plats = Object.keys(PLAT).filter(function(p){ return inst.some(function(g){return g.p===p;}); }).sort(function(a,b){ return PLAT[a].localeCompare(PLAT[b]); });
+  var rows = [{key:'all',label:'All games',count:inst.length},{key:'recent',label:'Recent',count:3},{key:'updates',label:'Updates',count:inst.filter(function(g){return g.update;}).length}]
+    .concat(plats.map(function(p,i){ return { key: p, label: PLAT[p], count: inst.filter(function(g){return g.p===p;}).length, heading: i===0?'PLATFORMS':undefined }; }));
+  rows.forEach(function(r){ r.sel = r.key === S.libFilter; });
+  rail('lib-rail', rows, function(k){ S.libFilter = k; renderLibrary(); });
+  var f = S.libFilter, list = inst.filter(function(g){ return f==='all' ? true : f==='recent' ? g.id < 5 : f==='updates' ? g.update : g.p === f; }).filter(function(g){ return match(g, S.q.library); });
+  $('lib-title').textContent = rows.filter(function(r){return r.sel;})[0].label;
+  $('lib-count').textContent = list.length + (list.length === 1 ? ' game' : ' games');
+  fillGrid('lib-grid', list, true, f === 'recent' ? 'Nothing played in the last 30 days' : f === 'updates' ? 'Everything is up to date' : f === 'all' ? 'No games installed' : 'No games installed for ' + PLAT[f]);
+}
+
+/* ---- downloads ---- */
+var spark = [];
+function renderDownloads(){
+  var d = S.dl;
+  $('strip').hidden = !d;
+  $('dl-active-n').textContent = d ? 1 : 0;
+  $('dl-queued-n').textContent = DLQ.length;
+  $('dl-done-n').textContent = DONE.length;
+  $('dl-done').innerHTML = DONE.length ? DONE.map(function(x, i){ return '<div class="dl"' + (i ? ' style="margin-top:8px"' : '') + '><div><span class="t">'+esc(x.t)+'</span>'+(x.kind ? '<span class="kind">'+x.kind+'</span>' : '')+'<div class="s">'+esc(x.sub)+'</div></div><span></span><button class="small-btn" data-undone="'+i+'">Dismiss</button></div>'; }).join('') : '<p class="note">Nothing has finished yet.</p>';
+  $('dl-queued').innerHTML = DLQ.length ? DLQ.map(function(id){ var q = G[id]; return '<div class="dl" style="margin-top:8px"><div><span class="t">'+esc(q.t)+'</span><div class="s">'+PLAT[q.p]+' · Waiting for a slot</div></div><span></span><button class="small-btn" data-unqueue="'+id+'">Cancel</button></div>'; }).join('') : '<p class="note">Nothing is waiting.</p>';
+  if (!d) { $('dl-active').innerHTML = '<p class="note">Nothing is downloading.</p>'; return; }
+  var pct = Math.round(d.pct), g = G[d.id];
+  var line = d.pct < 100 ? esc(g.t)+' · '+pct+'% · '+d.speed.toFixed(1)+' MB/s' : esc(g.t)+' · Installing';
+  $('strip-line').innerHTML = line;
+  var pts = function(arr){ return arr.map(function(v,i){ return (i*120/59).toFixed(1)+','+(17-v).toFixed(1); }).join(' '); };
+  $('spark-net').setAttribute('points', pts(spark));
+  $('spark-disk').setAttribute('points', pts(spark.map(function(v){return Math.max(1, v-3);})));
+  $('dl-active').innerHTML = '<div class="dl"><div><span class="t">'+esc(g.t)+'</span><div class="s">'+PLAT[g.p]+' · '+(d.pct<100?'Downloading '+pct+'%':'Installing')+'</div><div class="bar"><b style="width:'+pct+'%"></b></div></div><svg width="120" height="38" viewBox="0 0 120 18" preserveAspectRatio="none"><polyline fill="none" stroke="var(--primary)" stroke-width="1.2" points="'+pts(spark)+'"/></svg><button class="small-btn" data-cancel>Cancel</button></div>';
+}
+var DLQ = [];
+/* Completed downloads, newest first (the app keeps the last 50). */
+var DONE = [{ t: 'Moss & Marrow', kind: 'Update', sub: 'GameCube · Finished' }, { t: 'DuckStation', kind: 'Emulator', sub: 'Finished' }];
+function addDone(t, kind, sub) { DONE.unshift({ t: t, kind: kind, sub: sub }); if (DONE.length > 50) DONE.length = 50; renderDownloads(); }
+function startInstall(g, fromQueue){
+  if (S.dl) {
+    if (S.dl.id !== g.id && DLQ.indexOf(g.id) < 0) { DLQ.push(g.id); toast('Added to download queue'); renderAll(); }
+    return;
+  }
+  S.dl = { id: g.id, pct: 0, speed: 30 }; spark = []; for (var i=0;i<60;i++) spark.push(2);
+  if (!fromQueue) toast('Added to download queue');
+  var timer = setInterval(function(){
+    if (!S.dl) { clearInterval(timer); return; }
+    S.dl.speed = 28 + Math.random()*16; S.dl.pct = Math.min(100, S.dl.pct + 4 + Math.random()*4);
+    spark.push(4 + Math.random()*11); spark.shift();
+    if (S.dl.pct >= 100) { clearInterval(timer); renderDownloads(); setTimeout(function(){ G[S.dl.id].installed = true; toast(G[S.dl.id].t + ' installed'); addDone(G[S.dl.id].t, '', PLAT[G[S.dl.id].p] + ' · Finished'); S.dl = null; renderAll(); if (DLQ.length) startInstall(G[DLQ.shift()], true); }, 900); }
+    renderDownloads();
+  }, 400);
+  renderAll();
+}
+
+/* ---- emulators ---- */
+var CATALOG = [
+  { n: 'DuckStation', p: 'GitHub · stenzek/duckstation', tag: 'v0.1-9226', inst: true },
+  { n: 'Dolphin', p: 'dolphin-emu.org', tag: '2509', inst: true },
+  { n: 'Ymir (Sega Saturn)', p: 'GitHub · StrikerX3/Ymir', tag: 'v0.4.1', inst: true },
+  { n: 'PCSX2', p: 'GitHub · PCSX2/pcsx2', tag: 'v2.4.0', inst: false },
+  { n: 'RetroArch', p: 'buildbot.libretro.com', tag: '1.21.0', inst: false },
+  { n: 'RPCS3', p: 'GitHub · RPCS3/rpcs3-binaries-linux', tag: 'build-0.0.37', inst: false },
+  { n: 'Eden', p: 'git.eden-emu.dev', tag: 'v0.0.3', inst: false },
+  { n: 'xemu', p: 'GitHub · xemu-project/xemu', tag: 'v0.8.92', inst: false },
+  { n: 'PPSSPP', p: 'GitHub · hrydgard/ppsspp', tag: 'v1.19.3', inst: false },
+  { n: 'Cemu', p: 'GitHub · cemu-project/Cemu', tag: 'v2.6', inst: false }
+];
+var COMPAT = [
+  { n: 'GE-Proton10-17', p: 'GitHub · GloriousEggroll/proton-ge-custom', tag: 'GE-Proton10-17', inst: true },
+  { n: 'Wine-GE 8-26', p: 'GitHub · GloriousEggroll/wine-ge-custom', tag: 'GE-Proton8-26', inst: false },
+  { n: 'Proton Experimental (umu)', p: 'GitHub · Open-Wine-Components/umu-proton', tag: 'UMU-Proton-9.0-4e', inst: false }
+];
+var DEFAULTS = { PS: 'DuckStation', N64: 'RetroArch', SAT: 'Ymir (Sega Saturn)', GC: 'Dolphin', SNES: 'RetroArch', PS2: '(none)' };
+var CORES = { N64: ['mupen64plus_next', 'parallel_n64'], SNES: ['snes9x', 'bsnes'] };
+S.addTab = 'catalog'; S.catQ = ''; S.compatDefault = 'GE-Proton10-17'; S.umu = 'system';
+
+function catRow(e, kind) {
+  var busy = S.installing && S.installing[e.n];
+  var btn = e.inst ? '<button class="small-btn" disabled>Installed</button>'
+    : '<button class="small-btn primary" data-cat="' + kind + ':' + esc(e.n) + '"' + (busy ? ' disabled' : '') + '>' + (busy ? 'Installing…' : 'Install') + '</button>';
+  return '<li class="cat-row"><div><span class="t">' + esc(e.n) + '</span><span class="s">' + esc(e.p) + ' • ' + esc(e.tag) + '</span></div>' + btn + '</li>';
+}
+
+function renderEmulators(){
+  var panes = [['installed','Installed'],['catalog','Add from catalog'],['defaults','Platform defaults'],['compat','Compat tools']];
+  rail('emu-rail', panes.map(function(p){ return { key: p[0], label: p[1], sel: S.emuPane === p[0] }; }), function(k){ S.emuPane = k; renderEmulators(); });
+  var el = $('emu-pane'), h;
+  if (S.emuPane === 'installed') {
+    var emus = [['DuckStation','PS','~/Games/GRID/emulators/duckstation/DuckStation.AppImage','-fullscreen "%rom%"'],['Ymir (Sega Saturn)','SAT','~/Games/GRID/emulators/ymir/ymir-sdl3','-f "%rom%"'],['Dolphin','GC','~/Games/GRID/emulators/dolphin/dolphin-emu','-b -e "%rom%"']];
+    h = '<h2>Installed</h2>' + emus.map(function(e){
+      var st = S.fw[e[1]], act;
+      if (st === 'installed') act = '<span class="small-btn ok"><span data-icon="check" data-size="14"></span>Installed</span>';
+      else if (st === 'requested') act = '<button class="small-btn" disabled>Requested…</button>';
+      else if (st === 'unavailable') act = '<button class="small-btn" data-fw="'+e[1]+'">Not needed</button>';
+      else act = '<button class="small-btn primary" data-fw="'+e[1]+'">Install firmware</button>';
+      return '<div class="emu"><div class="emu-top"><b>'+e[0]+'</b><code>'+esc(e[3])+'</code><div class="acts"><button class="small-btn" data-edit="'+esc(e[0])+'">Edit</button><button class="small-btn">Delete</button></div></div><div class="emu-top"><code>'+esc(e[2])+'</code></div>'+
+        '<div class="fw">'+PLAT[e[1]]+' firmware · '+(e[1]==='GC'?'1 file':'3 files')+'<span class="acts">'+act+'</span></div></div>';
+    }).join('');
+  } else if (S.emuPane === 'catalog') {
+    h = '<h2>Add from catalog</h2><div class="g-tabs" role="tablist"><button data-addtab="catalog" class="' + (S.addTab === 'catalog' ? 'active' : '') + '">Catalog</button><button data-addtab="manual" class="' + (S.addTab === 'manual' ? 'active' : '') + '">Manual</button></div>';
+    if (S.addTab === 'catalog') {
+      var q = S.catQ.trim().toLowerCase(), list = CATALOG.filter(function(e){ return !q || e.n.toLowerCase().indexOf(q) >= 0; });
+      h += '<input class="g-search" style="flex:none" type="search" placeholder="Search emulators…" aria-label="Search emulators" id="cat-q" value="' + esc(S.catQ) + '">' +
+        (list.length ? '<ul class="cat-list">' + list.map(function(e){ return catRow(e, 'emu'); }).join('') + '</ul>' : '<p class="note">No emulators found.</p>');
+    } else {
+      h += '<form class="form" onsubmit="return false"><label>Profile<select class="field"><option>Choose a profile to fill in the fields…</option><option>DuckStation</option><option>PCSX2</option></select></label>' +
+        '<label>Name<input class="field" placeholder="PCSX2"></label><label>Executable path<span class="inline"><input class="field" placeholder="/path/to/emulator"><button class="g-btn secondary" type="button">Browse…</button></span></label>' +
+        '<label>Arguments<input class="field" placeholder="-fullscreen &quot;%rom%&quot;"></label><label>Save strategy<select class="field"><option>auto</option><option>single_file</option><option>folder</option></select></label>' +
+        '<label>Save directories<input class="field" placeholder="memcards;saves (semicolon-separated)"></label><div class="form-actions"><button class="g-btn" type="button" data-toast="Emulator saved">Save</button><button class="g-btn secondary" type="button" data-addtab="catalog">Cancel</button></div></form>';
+    }
+  } else if (S.emuPane === 'defaults') {
+    var plats = Object.keys(PLAT).sort(function(a,b){ return PLAT[a].localeCompare(PLAT[b]); });
+    h = '<div class="pane-head"><h2>Platform defaults</h2><button class="g-btn secondary" data-toast="Opens the first-run platform picker">Set up platforms…</button></div><ul class="defaults">' + plats.map(function(p){
+      var opts = ['(none)', 'DuckStation', 'Dolphin', 'Ymir (Sega Saturn)', 'RetroArch'];
+      var sel = '<select class="field" data-default="' + p + '">' + opts.map(function(o){ return '<option' + (DEFAULTS[p] === o ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select>';
+      var core = DEFAULTS[p] === 'RetroArch' ? '<div class="dfield"><span>Core</span><select class="field">' + (CORES[p] || []).map(function(c){ return '<option>' + c + '</option>'; }).join('') + (CORES[p] ? '' : '<option>No installed core</option>') + '</select></div>' : '';
+      return '<li class="dcard"><b>' + PLAT[p] + '</b><div class="dfield"><span>Emulator</span>' + sel + '</div>' + core + '</li>';
+    }).join('') + '</ul>';
+  } else {
+    var umuLabel = S.umu === 'system' ? 'umu-run: system · /usr/bin/umu-run' : S.umu === 'busy' ? 'umu-run: installing…' : 'umu-run: GRID-managed · 1.2.9';
+    h = '<h2>Compat tools</h2><div class="sub"><h3>Compatibility tools</h3>' +
+      '<div class="umu"><div class="umu-row"><span class="t">' + umuLabel + '</span><button class="small-btn" data-umu' + (S.umu === 'busy' ? ' disabled' : '') + '>' + (S.umu === 'busy' ? 'Installing…' : S.umu === 'system' ? 'Install' : 'Reinstall') + '</button></div>' +
+      '<p class="note">Proton games run through umu-run. The first Proton launch downloads the Steam Linux Runtime (about 200 MB), so it takes longer than later ones.</p></div>' +
+      '<h4>Default</h4><ul class="radios">' + ['GE-Proton10-17', 'Wine 10.0 (system)'].map(function(t){ return '<li><label><input type="radio" name="cd" data-compat="' + esc(t) + '"' + (S.compatDefault === t ? ' checked' : '') + '> ' + esc(t) + '</label></li>'; }).join('') + '</ul>' +
+      '<h4>Install</h4><ul class="cat-list">' + COMPAT.map(function(e){ return catRow(e, 'compat'); }).join('') + '</ul></div>';
+  }
+  el.innerHTML = h;
+  gIcons(el);
+  var cq = $('cat-q'); if (cq) { cq.oninput = function(){ S.catQ = this.value; var pos = this.selectionStart; renderEmulators(); var n = $('cat-q'); n.focus(); n.setSelectionRange(pos, pos); }; }
+}
+
+function installCatalog(kind, name) {
+  var list = kind === 'emu' ? CATALOG : COMPAT, e = list.filter(function(x){ return x.n === name; })[0];
+  S.installing = S.installing || {}; S.installing[name] = true; toast('Installing ' + name + '…'); renderEmulators();
+  setTimeout(function(){ e.inst = true; delete S.installing[name]; toast(name + ' installed'); renderEmulators(); }, 1800);
+}
+
+/* ---- settings ---- */
+S.cloud = { restore: true, upload: true, skip: true, delay: 5, keep: 10 };
+S.ra = { user: '', set: false };
+S.connEdit = false; S.updateNotice = true;
+
+function renderSettings(){
+  var panes = [['appearance','Appearance'],['backup','Backup drives'],['cloud','Cloud saves'],['connection','Connection'],['library','Library'],['ra','RetroAchievements'],['systems','Systems'],['updates','Updates']];
+  rail('set-rail', panes.map(function(p){ return { key: p[0], label: p[1], sel: S.setPane === p[0] }; }), function(k){ S.setPane = k; S.connEdit = false; renderSettings(); });
+  var el = $('set-pane'), h;
+  if (S.setPane === 'systems') { renderSystems(el); return; }
+  if (S.setPane === 'backup') { renderBackupPane(el); return; }
+  if (S.setPane === 'connection') {
+    h = '<h2>Connection</h2><dl class="kv"><div><dt>Server</dt><dd>https://romm.home.lan</dd></div><div><dt>User</dt><dd>player</dd></div><div><dt>Credential</dt><dd>Stored in the OS keyring · session verified</dd></div><div><dt>Status</dt><dd><span class="g-status-dot online" style="display:inline-block;margin-right:6px"></span>Connected</dd></div></dl>';
+    h += S.connEdit
+      ? '<form class="form" onsubmit="return false"><label>Server URL<input class="field" value="https://romm.home.lan"></label><label>Username<input class="field" value="player"></label><label>Password<input class="field" type="password" placeholder="Not shown"></label><label class="check"><input type="checkbox"> Use API token</label><div class="form-actions"><button class="g-btn" type="button" data-conn="save">Connect</button><button class="g-btn secondary" type="button" data-conn="cancel">Cancel</button></div></form>'
+      : '<div class="form-actions"><button class="g-btn" data-conn="edit">Change server…</button><button class="g-btn secondary" data-toast="Reconnected to romm.home.lan">Reconnect</button><button class="g-btn secondary">Disconnect</button></div>';
+  } else if (S.setPane === 'library') {
+    h = '<h2>Library</h2><div class="sub"><h3>Library folder</h3><p class="note">Games, emulators and saves live in this folder. New installs go here.</p><code class="path">/home/player/Games/GRID</code><div class="form-actions"><button class="g-btn" data-libchange>Change…</button></div></div>';
+  } else if (S.setPane === 'cloud') {
+    var c = S.cloud;
+    h = '<h2>Cloud saves</h2><form class="form" onsubmit="return false">' +
+      '<label class="check"><input type="checkbox" data-cloud="restore"' + (c.restore ? ' checked' : '') + '> Restore cloud saves before launch</label>' +
+      '<label class="check"><input type="checkbox" data-cloud="upload"' + (c.upload ? ' checked' : '') + '> Upload cloud saves after exit</label>' +
+      '<label class="check"><input type="checkbox" data-cloud="skip"' + (c.skip ? ' checked' : '') + '> Skip download when the local save is newer</label>' +
+      '<label>Upload delay (seconds)<input class="field narrow" type="number" min="0" max="60" value="' + c.delay + '"></label>' +
+      '<label>Save retention limit (0 = unlimited)<input class="field narrow" type="number" min="0" value="' + c.keep + '"></label>' +
+      '<p class="note">Auto-sync uses the latest server save record only.</p><div class="form-actions"><button class="g-btn" type="button" data-toast="Cloud save settings saved">Save</button></div></form>';
+  } else if (S.setPane === 'ra') {
+    h = '<h2>RetroAchievements</h2><p class="note">' + (S.ra.set ? 'Set for ' + esc(S.ra.user) : 'Not set') + '</p><form class="form" onsubmit="return false">' +
+      '<label>Username<input class="field" id="ra-user" value="' + esc(S.ra.user) + '" autocomplete="off"></label><label>Password<input class="field" type="password" autocomplete="off"></label><label>Token<input class="field" type="password" autocomplete="off"></label>' +
+      '<div class="form-actions"><button class="g-btn secondary" type="button" data-ra="login">Log In</button><button class="g-btn" type="button" data-ra="save">Save</button><button class="g-btn secondary" type="button" data-ra="clear">Clear</button></div></form>';
+  } else if (S.setPane === 'updates') {
+    h = '<h2>Updates</h2><p class="line">GRID Launcher 0.9.10</p>' +
+      (S.updateNotice ? '<p class="line update-line">GRID Launcher v0.9.11 is available <button class="g-btn" data-toast="Opens the release page in your browser">Open release</button><button class="g-btn secondary" data-dismiss-update>Dismiss</button></p>' : '<p class="line">Checked 2 hours ago — you have the latest release</p>') +
+      '<p class="note">GRID Launcher checks GitHub for a newer release once at startup. It never downloads or installs an update — open the release page to get it.</p>';
+  } else {
+    var theme = document.documentElement.getAttribute('data-theme') || 'light';
+    h = '<h2>Appearance</h2>'+
+      '<label class="setting"><span>Theme</span><span class="g-control"><select id="set-theme"><option value="light"'+(theme==='light'?' selected':'')+'>Light</option><option value="dark"'+(theme==='dark'?' selected':'')+'>Dark</option></select></span></label>'+
+      '<label class="setting"><span>Background art</span><span class="check"><input type="checkbox" id="set-art"'+(S.fade<100?' checked':'')+'> Show the last game\u2019s art behind the views</span></label>'+
+      '<label class="setting"><span>Background art fade<small>0 is full strength; 100 turns the art off</small></span><span style="display:flex;align-items:center;gap:10px"><input type="range" min="0" max="100" step="1" value="'+S.fade+'" id="set-fade"><span class="g-counts" id="fade-val">'+S.fade+'%'+(S.fade>=100?' · off':'')+'</span></span></label>'+
+      '<label class="setting"><span>Background art blur</span><span style="display:flex;align-items:center;gap:10px"><input type="range" min="0" max="40" step="1" value="'+S.blur+'" id="set-blur"><span class="g-counts">'+S.blur+'</span></span></label>'+
+      '<label class="setting"><span>Game labels</span><span class="g-switch" id="set-labels"><button data-l="always" class="'+(S.labels==='always'?'active':'')+'">Always visible</button><button data-l="hover" class="'+(S.labels==='hover'?'active':'')+'">Visible on hover</button></span></label>'+
+      '<label class="setting"><span>Card size</span><span class="g-control"><select id="set-size"><option value="120"'+(S.cardW===120?' selected':'')+'>Small</option><option value="160"'+(S.cardW===160?' selected':'')+'>Medium</option><option value="200"'+(S.cardW===200?' selected':'')+'>Large</option></select></span></label>'+
+      '<label class="setting"><span>Hardware acceleration<small>Applies after a restart</small></span><span class="check"><input type="checkbox" checked> Render on the graphics card</span></label>';
+  }
+  el.innerHTML = h;
+  if (S.setPane === 'appearance') {
+    $('set-theme').onchange = function(){ document.documentElement.setAttribute('data-theme', this.value); };
+    $('set-fade').oninput = function(){ S.fade = +this.value; if (S.fade < 100) S.lastFade = S.fade; paintArt(G[S.lastViewed || 0]); $('fade-val').textContent = S.fade + '%' + (S.fade >= 100 ? ' · off' : ''); $('set-art').checked = S.fade < 100; };
+    $('set-art').onchange = function(){ S.fade = this.checked ? (S.lastFade < 100 ? S.lastFade : 50) : 100; paintArt(G[S.lastViewed || 0]); renderSettings(); };
+    $('set-blur').onchange = function(){ S.blur = +this.value; paintArt(G[S.lastViewed || 0]); renderSettings(); };
+    $('set-labels').onclick = function(e){ var b = e.target.closest('[data-l]'); if (b) { e.preventDefault(); S.labels = b.getAttribute('data-l'); renderAll(); } };
+    $('set-size').onchange = function(){ S.cardW = +this.value; syncSize(); renderAll(); };
+  }
+}
+
+/* ---- library change dialog ---- */
+function openLibChange(step) {
+  S.libStep = step || 'pick';
+  var d = $('libdlg'), h;
+  if (S.libStep === 'pick') h = '<h3>Change library folder</h3><p class="note">Pick or type the new folder. It must be a full path, not inside the current folder.</p><label class="form"><span class="inline"><input class="field" value="/mnt/games/GRID"><button class="g-btn secondary" type="button">Browse…</button></span></label>' +
+    '<div class="choice"><button class="g-btn" data-lib="move">Move existing files</button><button class="g-btn secondary" data-lib="fresh">Start fresh</button><button class="g-btn secondary" data-lib="close">Cancel</button></div>';
+  else if (S.libStep === 'move') h = '<h3>Move existing files</h3><ul class="moves"><li><code>games/</code><span>Copied and checked</span></li><li><code>emulators/</code><span>Copied and checked</span></li><li><code>saves/</code><span>Copied and checked</span></li></ul><p class="line">Copies 48.2 GB; 1.3 TB free</p><p class="note">Installs, launches and cloud transfers wait while the move runs. Follow it in Downloads.</p><div class="choice"><button class="g-btn" data-lib="start">Start move</button><button class="g-btn secondary" data-lib="pick">Back</button></div>';
+  else h = '<h3>Start fresh</h3><p class="line">Delete the old game files, or leave them on disk?</p><p class="note">Either way, games in the old folder leave the library. Emulators and saves are not touched.</p><div class="choice"><button class="g-btn secondary confirm" data-lib="delete">Delete…</button><button class="g-btn" data-lib="leave">Leave them</button><button class="g-btn secondary" data-lib="pick">Back</button></div>';
+  d.innerHTML = h; $('libscrim').hidden = false;
+}
+function closeLibChange() { $('libscrim').hidden = true; }
+
+/* ==== Proposed: one Systems tab in Settings for every emulator choice,
+   install, update and the Windows (Proton) setup. ==== */
+var SY = {
+  name: { PS: 'PlayStation', PS2: 'PlayStation 2', N64: 'Nintendo 64', SNES: 'Super Nintendo', GC: 'GameCube', SAT: 'Sega Saturn', PC: 'Windows' },
+  games: { PS: 48, PS2: 16, N64: 24, SNES: 32, GC: 24, SAT: 16, PC: 9 },
+  order: ['GC', 'N64', 'PS', 'PS2', 'SAT', 'SNES'],
+  pick: { PS: 'DuckStation', PS2: '', N64: '', SNES: '', GC: 'Dolphin', SAT: 'Ymir' },
+  rec: { PS: 'DuckStation', PS2: 'PCSX2', N64: 'RetroArch', SNES: 'RetroArch', GC: 'Dolphin', SAT: 'Ymir' },
+  core: { N64: 'Mupen64Plus-Next', SNES: 'Snes9x' },
+  /* What each emulator can play (from its profile's platform keywords). */
+  can: { DuckStation: ['PS'], PCSX2: ['PS2'], RetroArch: ['N64', 'SNES', 'PS'], Dolphin: ['GC'], Ymir: ['SAT'], Mednafen: ['PS', 'SAT', 'SNES'] },
+  ver: { DuckStation: 'v0.1-9226', PCSX2: 'v2.4.0', RetroArch: '1.21.0', Dolphin: '2509', Ymir: 'v0.4.0', Mednafen: '1.32.1' },
+  upd: { Ymir: 'v0.4.1' },
+  tips: { DuckStation: ['Controller: Settings → Controls → Auto Map', 'Press Esc to close the emulator'], Dolphin: ['Controller: Controllers → Configure → Standard Controller'] },
+  paths: { DuckStation: ['~/Games/GRID/emulators/duckstation/DuckStation.AppImage', '-fullscreen "%rom%"'], Dolphin: ['~/Games/GRID/emulators/dolphin/dolphin-emu', '-b -e "%rom%"'], Ymir: ['~/Games/GRID/emulators/ymir/ymir-sdl3', '-f "%rom%"'], Mednafen: ['/usr/bin/mednafen', '"%rom%"'] },
+  installed: ['DuckStation', 'Dolphin', 'Ymir', 'Mednafen'],
+  fw: { PS: 'installed', SAT: 'install' },
+  proton: 'GE-Proton10-17', protonRec: 'GE-Proton10-17',
+  protons: ['GE-Proton10-17', 'Wine 10.0 (system)', 'Proton 9.0 (Steam)', 'Proton Experimental (Steam)'], protonGet: ['Proton-CachyOS 10.0-20251031'],
+  umu: 'system', open: {}, busy: {}, menu: null, sheet: null, adv: false,
+  /* Windows counts as a preferred platform once a compat tool is picked for it. */
+  winSet: true
+};
+/* Game counts match the Server rail. */
+Object.keys(SY.games).forEach(function (k) { var n = G.filter(function (g) { return g.p === (k === 'PC' ? 'WIN' : k); }).length; if (n) SY.games[k] = n; });
+function syHas(n) { return SY.installed.indexOf(n) >= 0; }
+function syNeeds() { return SY.order.filter(function (k) { return !SY.pick[k] && SY.rec[k]; }); }
+function syEsc(v) { return esc(v).replace(/"/g, '&quot;'); }
+
+function syStatus(k) {
+  var e = SY.pick[k];
+  if (k === 'PC') return '<span class="pill-s ok"><span data-icon="check" data-size="12"></span>Ready</span>';
+  if (SY.busy[k]) return '<span class="pill-s">Installing…</span>';
+  if (!e) return '<span class="pill-s warn">! No emulator</span>';
+  if (SY.fw[k] === 'install') return '<span class="pill-s warn">! Firmware needed</span>';
+  if (SY.fw[k] === 'requested') return '<span class="pill-s">Installing firmware…</span>';
+  if (SY.upd[e]) return '<span class="pill-s info">Update available</span>';
+  return '<span class="pill-s ok"><span data-icon="check" data-size="12"></span>Ready</span>';
+}
+
+function syPicker(k) {
+  var cur = SY.pick[k], have = [], get = [];
+  Object.keys(SY.can).forEach(function (n) { if (SY.can[n].indexOf(k) < 0) return; (syHas(n) ? have : get).push(n); });
+  get.sort(function (a, b) { return (b === SY.rec[k]) - (a === SY.rec[k]); });
+  var o = '<option value=""' + (cur ? '' : ' selected') + '>None</option>';
+  if (have.length) o += '<optgroup label="Installed">' + have.map(function (n) { return '<option value="' + n + '"' + (n === cur ? ' selected' : '') + '>' + n + (n === SY.rec[k] ? ' (recommended)' : '') + '</option>'; }).join('') + '</optgroup>';
+  if (get.length) o += '<optgroup label="Download">' + get.map(function (n) { return '<option value="install:' + n + '">Install ' + n + (n === SY.rec[k] ? ' (recommended)' : '') + '</option>'; }).join('') + '</optgroup>';
+  return '<select class="field sys-pick" data-sy-pick="' + k + '" aria-label="Emulator for ' + SY.name[k] + '"' + (SY.busy[k] ? ' disabled' : '') + '>' + o + '</select>';
+}
+
+function syEmuBlock(n, where) {
+  var menu = SY.menu === where ? '<div class="g-menu row-menu" role="menu"><button data-sy-edit="' + n + '">Settings…</button><button data-sy-folder>Show program folder</button><button class="danger" data-sy-remove="' + n + '">Remove ' + n + '…</button></div>' : '';
+  var used = SY.order.filter(function (k) { return SY.pick[k] === n; }).map(function (k) { return SY.name[k]; });
+  return '<div class="emu-line"><span><b>' + n + '</b> <span class="muted-s">' + SY.ver[n] + (SY.upd[n] ? '' : ' · up to date') + (used.length > 1 ? ' · also plays ' + used.filter(function (u) { return u !== SY.name[where]; }).join(', ') : '') + '</span></span><span class="acts">' +
+    (SY.upd[n] ? '<button class="small-btn primary" data-sy-update="' + n + '">Update to ' + SY.upd[n] + '</button>' : '') +
+    '<button class="small-btn" data-toast="Opens ' + n + ' on its own, to change its settings">Open</button>' +
+    '<span class="menu-anchor"><button class="g-icon-btn" aria-label="More for ' + n + '" data-sy-more="' + where + '"><span data-icon="more" data-size="16"></span></button>' + menu + '</span></span></div>';
+}
+
+function syRow(k) {
+  var e = SY.pick[k], open = !!SY.open[k] || !e;
+  var body = '';
+  if (open) {
+    if (!e) {
+      body = !SY.rec[k] ? '<p class="note">No emulator GRID installs plays this system. If you have one, use Add an emulator manually.</p>' : SY.busy[k] ? '<p class="note">Installing ' + SY.rec[k] + '…</p>' :
+        '<div class="fix"><span>Games for this system can’t start yet. ' + SY.rec[k] + ' is recommended.</span><button class="small-btn primary" data-sy-install="' + SY.rec[k] + '" data-for="' + k + '">Install ' + SY.rec[k] + '</button></div>';
+    } else {
+      body = syEmuBlock(e, k);
+      if (e === 'RetroArch') body += '<div class="dfield"><span>Core</span><select class="field" style="max-width:260px"><option>' + SY.core[k] + '</option></select></div>';
+      if (SY.fw[k]) {
+        var st = SY.fw[k];
+        body += '<div class="check-row">' + (st === 'installed' ? '<span class="st ok" data-icon="check" data-size="14"></span>' : '<span class="st warn">!</span>') +
+          '<span>' + SY.name[k] + ' firmware <span class="muted-s">· from your server</span></span><span class="acts">' +
+          (st === 'installed' ? '<span class="muted-s">Installed</span>' : st === 'requested' ? '<button class="small-btn" disabled>Installing…</button>' : '<button class="small-btn primary" data-sy-fw="' + k + '">Install</button>') + '</span></div>';
+      }
+      if (SY.tips[e]) body += '<details class="tips"><summary>Setup tips</summary><ul>' + SY.tips[e].map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul></details>';
+    }
+  }
+  return '<li class="sysrow' + (e ? '' : ' attention') + (open ? ' open' : '') + '"><div class="sys-head"><button class="sys-toggle" data-sy-toggle="' + k + '" aria-expanded="' + open + '"' + (e ? '' : ' disabled') + '><span class="chev" data-icon="chevronRight" data-size="14"></span><b>' + SY.name[k] + '</b><span class="muted-s">' + SY.games[k] + ' games</span></button>' +
+    syPicker(k) + syStatus(k) + '</div>' + (body ? '<div class="sys-body">' + body + '</div>' : '') + '</li>';
+}
+
+/* Proton choices: what is on this computer (system Wine, Steam's Proton,
+   GRID's downloads), then the versions GRID can download, the recommended one
+   first. `cur` is an installed name or "install:<name>". */
+function syProtonOptions(cur) {
+  var rec = function (p) { return p === SY.protonRec ? ' (recommended)' : ''; };
+  var get = SY.protonGet.slice().sort(function (a, b) { return (b === SY.protonRec) - (a === SY.protonRec); });
+  return '<optgroup label="Installed">' + SY.protons.map(function (p) { return '<option value="' + syEsc(p) + '"' + (p === cur ? ' selected' : '') + '>' + p + rec(p) + '</option>'; }).join('') + '</optgroup>' +
+    (get.length ? '<optgroup label="Download">' + get.map(function (p) { return '<option value="install:' + syEsc(p) + '"' + ('install:' + p === cur ? ' selected' : '') + '>Install ' + p + rec(p) + '</option>'; }).join('') + '</optgroup>' : '');
+}
+function syWindows() {
+  var open = !!SY.open.PC;
+  var o = syProtonOptions(SY.proton);
+  var umu = SY.umu === 'system' ? 'provided by your system' : SY.umu === 'busy' ? 'installing…' : 'installed by GRID · 1.2.9';
+  var body = open ? '<div class="sys-body"><p class="note">Windows games run through Proton on Linux. Most people never need to change this.</p>' +
+    '<div class="check-row"><span class="st ok" data-icon="check" data-size="14"></span><span>Proton launcher (umu-run) <span class="muted-s">· ' + umu + '</span></span><span class="acts"><button class="small-btn" data-sy-umu' + (SY.umu === 'busy' ? ' disabled' : '') + '>' + (SY.umu === 'system' ? 'Use GRID’s copy' : 'Reinstall') + '</button></span></div>' +
+    '<p class="note small">The first Windows game you launch downloads the Steam Linux Runtime (about 200 MB), so it takes longer than later ones.</p></div>' : '';
+  return '<li class="sysrow' + (open ? ' open' : '') + '"><div class="sys-head"><button class="sys-toggle" data-sy-toggle="PC" aria-expanded="' + open + '"><span class="chev" data-icon="chevronRight" data-size="14"></span><b>Windows</b><span class="muted-s">' + SY.games.PC + ' games · runs through Proton</span></button>' +
+    '<select class="field sys-pick" data-sy-proton aria-label="Proton version for Windows games"' + (SY.busy.PC ? ' disabled' : '') + '>' + o + '</select>' + (SY.busy.PC ? '<span class="pill-s">Installing…</span>' : syStatus('PC')) + '</div>' + body + '</li>';
+}
+
+function sySheet(n) {
+  var p = n ? SY.paths[n] || ['', '"%rom%"'] : ['', ''];
+  return '<div class="sheet2"><div class="sheet2-head"><h3>' + (n ? esc(n) + ' settings' : 'Add an emulator you already have') + '</h3><button class="g-icon-btn" aria-label="Close" data-sy-close><span data-icon="close" data-size="16"></span></button></div><form class="form" onsubmit="return false">' +
+    (n ? '' : '<label>Which emulator is it?<select class="field"><option>Mednafen</option><option>PCSX2</option><option>Dolphin</option><option>Something else</option></select><span class="help">GRID fills in the rest for emulators it knows.</span></label>') +
+    '<label>Program<span class="inline"><input class="field" value="' + syEsc(p[0]) + '" placeholder="Choose the emulator’s program file"><button class="g-btn secondary" type="button">Browse…</button></span></label>' +
+    '<label>Launch options<input class="field" value="' + syEsc(p[1]) + '"><span class="help">%rom% is replaced by the game file.</span></label>' +
+    '<details class="tips"' + (SY.adv ? ' open' : '') + '><summary data-sy-adv>Cloud saves (advanced)</summary><div class="form">' +
+    '<label>How this emulator stores saves<select class="field"><option>Find out automatically</option><option>One file per game</option><option>A folder per game</option></select></label>' +
+    '<label>Save folders<input class="field" placeholder="memcards; saves"><span class="help">Separate folders with ;</span></label>' +
+    '<label>Save state folders<input class="field" placeholder="savestates"></label>' +
+    '<label>Don’t upload these files<input class="field" placeholder="settings.ini"></label>' +
+    '<label>Don’t upload these file types<input class="field" placeholder=".log; .tmp"></label></div></details>' +
+    '<div class="form-actions"><button class="g-btn" type="button" data-sy-save>Save</button><button class="g-btn secondary" type="button" data-sy-close>Cancel</button></div></form></div>';
+}
+
+function renderSystems(el) {
+  var needs = syNeeds().filter(function (k) { return !SY.busy[k]; });
+  var order = SY.order.slice().sort(function (a, b) { return (!!SY.pick[a] - !!SY.pick[b]) || SY.name[a].localeCompare(SY.name[b]); });
+  var others = SY.installed.filter(function (n) { return !SY.order.some(function (k) { return SY.pick[k] === n; }); });
+  var h = '<div class="pane-head"><div><h2>Systems</h2><p class="lede">Each system on your server needs an emulator to play its games. Pick one here; GRID installs, updates and sets it up.</p></div>' +
+    '<div class="head-acts"><button class="g-btn secondary" data-sy-manual>Add an emulator manually</button>' +
+    (needs.length ? '<button class="g-btn" data-sy-all>Install recommended (' + needs.length + ')</button>' : '') + '</div></div>' +
+    (SY.sheet !== null ? sySheet(SY.sheet === 'new' ? null : SY.sheet) : '') +
+    '<ul class="sys-list">' + order.map(syRow).join('') + syWindows() + '</ul>' +
+    '<div class="sub" style="margin-top:6px"><h3>Other emulators</h3>' +
+    (others.length ? '<ul class="sys-list">' + others.map(function (n) { return '<li class="sysrow open"><div class="sys-body" style="border-top:none">' + syEmuBlock(n, 'other-' + n) + '<p class="meta2">Not used by any system. It can play ' + SY.can[n].map(function (k) { return SY.name[k]; }).join(', ') + '.</p></div></li>'; }).join('') + '</ul>' : '<p class="note">None. Emulators that aren’t picked for a system show here.</p>') +
+    '</div>';
+  el.innerHTML = h;
+  gIcons(el);
+  syPlaceMenu();
+  el.onclick = function (e) { if (S.setPane === 'systems') syClick(e); };
+  el.onchange = function (e) { if (S.setPane === 'systems') syChange(e); };
+}
+
+/* The ⋯ menu: below the button, right-aligned, when it fits; otherwise beside
+   it (left, else right), shifted to stay on screen. It never covers its
+   button and never opens upward over it. "Screen" is the app window. */
+var SY_EDGE = 8, SY_GAP = 4;
+function syPlaceMenu() {
+  var m = document.querySelector('#set-pane .row-menu');
+  if (!m) return;
+  var b = m.parentNode.querySelector('[data-sy-more]').getBoundingClientRect();
+  var win = document.getElementById('app').getBoundingClientRect();
+  m.style.position = 'fixed'; m.style.right = 'auto'; m.style.left = '0px'; m.style.top = '0px';
+  var w = m.offsetWidth, h = m.offsetHeight, top, left;
+  var minX = win.left + SY_EDGE, maxX = win.right - SY_EDGE, minY = win.top + SY_EDGE, maxY = win.bottom - SY_EDGE;
+  if (b.bottom + SY_GAP + h <= maxY) {
+    top = b.bottom + SY_GAP;
+    left = Math.max(minX, Math.min(b.right - w, maxX - w));
+    m.dataset.side = 'below';
+  } else {
+    top = Math.max(minY, Math.min(b.top, maxY - h));
+    if (b.left - SY_GAP - w >= minX) { left = b.left - SY_GAP - w; m.dataset.side = 'left'; }
+    else { left = Math.min(b.right + SY_GAP, maxX - w); m.dataset.side = 'right'; }
+  }
+  m.style.left = left + 'px'; m.style.top = top + 'px';
+}
+/* A fixed menu would drift from its button as the list scrolls: close it. */
+document.addEventListener('scroll', function () { if (SY.menu !== null) { SY.menu = null; syRerender(); } }, true);
+window.addEventListener('resize', function () { if (SY.menu !== null) syPlaceMenu(); });
+
+function syRerender() { renderSettings(); renderServer(); }
+
+function syInstall(n, forSys) {
+  SY.busy[forSys] = true; toast('Installing ' + n + '…'); syRerender();
+  setTimeout(function () {
+    delete SY.busy[forSys];
+    if (forSys === 'PC') { SY.protons.push(n); SY.protonGet = SY.protonGet.filter(function (p) { return p !== n; }); SY.proton = n; toast(n + ' installed and used for Windows games'); syRerender(); return; }
+    if (!syHas(n)) SY.installed.push(n);
+    SY.order.forEach(function (k) { if (!SY.pick[k] && (k === forSys || SY.rec[k] === n) && SY.can[n].indexOf(k) >= 0) { SY.pick[k] = n; EMU[k] = n; } });
+    if (SY.pick[forSys] !== n && SY.can[n].indexOf(forSys) >= 0) { SY.pick[forSys] = n; EMU[forSys] = n; }
+    toast(n + ' installed for ' + SY.name[forSys]); syRerender();
+  }, 1400);
+}
+
+function syClick(e) {
+  var t = e.target, b;
+  if (t.closest('select')) return;
+  if ((b = t.closest('[data-sy-toggle]'))) { var k = b.getAttribute('data-sy-toggle'); SY.open[k] = !SY.open[k]; syRerender(); return; }
+  if ((b = t.closest('[data-sy-install]'))) { syInstall(b.getAttribute('data-sy-install'), b.getAttribute('data-for')); return; }
+  if (t.closest('[data-sy-all]')) { syNeeds().forEach(function (k, i) { setTimeout(function () { if (!SY.pick[k] && !SY.busy[k]) syInstall(SY.rec[k], k); }, i * 150); }); return; }
+  if ((b = t.closest('[data-sy-more]'))) { var w = b.getAttribute('data-sy-more'); SY.menu = SY.menu === w ? null : w; syRerender(); return; }
+  if ((b = t.closest('[data-sy-edit]'))) { SY.sheet = b.getAttribute('data-sy-edit'); SY.menu = null; syRerender(); return; }
+  if (t.closest('[data-sy-folder]')) { SY.menu = null; toast('Opens the folder in your file manager'); syRerender(); return; }
+  if ((b = t.closest('[data-sy-remove]'))) {
+    var n = b.getAttribute('data-sy-remove');
+    if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Remove ' + n + '? Games and saves stay'; return; }
+    SY.installed = SY.installed.filter(function (x) { return x !== n; });
+    SY.order.forEach(function (k) { if (SY.pick[k] === n) { SY.pick[k] = ''; EMU[k] = 'none'; } });
+    SY.menu = null; toast(n + ' removed'); syRerender(); return;
+  }
+  if ((b = t.closest('[data-sy-update]'))) { var u = b.getAttribute('data-sy-update'); toast('Updating ' + u + '…'); setTimeout(function () { SY.ver[u] = SY.upd[u]; delete SY.upd[u]; toast(u + ' updated'); syRerender(); }, 1200); return; }
+  if ((b = t.closest('[data-sy-fw]'))) { var f = b.getAttribute('data-sy-fw'); SY.fw[f] = 'requested'; toast('Installing ' + SY.name[f] + ' firmware…'); syRerender(); setTimeout(function () { SY.fw[f] = 'installed'; toast(SY.name[f] + ' firmware installed'); syRerender(); }, 1300); return; }
+  if (t.closest('[data-sy-umu]')) { e.stopPropagation(); SY.umu = 'busy'; syRerender(); setTimeout(function () { SY.umu = 'managed'; toast('umu-run installed'); syRerender(); }, 1200); return; }
+  if (t.closest('[data-sy-manual]')) { SY.sheet = 'new'; syRerender(); return; }
+  if (t.closest('[data-sy-close]')) { SY.sheet = null; syRerender(); return; }
+  if (t.closest('[data-sy-save]')) { if (SY.sheet === 'new' && !syHas('Mednafen')) SY.installed.push('Mednafen'); SY.sheet = null; toast('Emulator saved'); syRerender(); return; }
+  if (t.closest('[data-sy-adv]')) { SY.adv = !SY.adv; return; }
+  if (SY.menu !== null && !t.closest('.row-menu')) { SY.menu = null; syRerender(); }
+}
+
+function syChange(e) {
+  var t = e.target, k = t.getAttribute('data-sy-pick'), v = t.value;
+  if (k) {
+    if (v.indexOf('install:') === 0) { syInstall(v.slice(8), k); return; }
+    SY.pick[k] = v; EMU[k] = v || 'none'; SY.open[k] = !!v; syRerender(); return;
+  }
+  if (t.hasAttribute('data-sy-proton')) {
+    SY.winSet = true;
+    if (v.indexOf('install:') === 0) { syInstall(v.slice(8), 'PC'); return; }
+    SY.proton = v; toast('Windows games now use ' + SY.proton); syRerender();
+  }
+}
+Object.keys(SY.pick).forEach(function (k) { EMU[k] = SY.pick[k] || 'none'; });
+
+/* ==== Fresh startup: Connect → Choose your systems → the app, with the
+   setup card following the installs. Disconnect starts over. ==== */
+SY.name.JAG = 'Atari Jaguar'; SY.games.JAG = 3; SY.order.push('JAG'); SY.pick.JAG = '';
+var FR = { phase: null, form: { url: '', user: '', secret: '', lib: '~/Games/GRID', token: false }, busy: false, ticked: {}, choice: {}, proton: false, protonChoice: '', run: null };
+
+function freshReset() {
+  SY.installed = []; SY.order.forEach(function (k) { SY.pick[k] = ''; EMU[k] = 'none'; });
+  SY.fw = {}; SY.upd = {}; SY.winSet = false; SY.open = {}; SY.busy = {}; SY.menu = null; SY.sheet = null;
+  SY.protons = ['Wine 10.0 (system)', 'Proton 9.0 (Steam)', 'Proton Experimental (Steam)']; SY.protonGet = ['GE-Proton10-17', 'Proton-CachyOS 10.0-20251031']; SY.proton = 'Wine 10.0 (system)';
+  G.forEach(function (g) { g.installed = false; g.update = false; g.missing = false; g.cloud = false; });
+  S.view = 'server'; S.platform = 'DISCOVER'; S.setPane = 'appearance'; S.libFilter = 'all'; S.detail = null; S.dl = null;
+  FR.form = { url: '', user: '', secret: '', lib: '~/Games/GRID', token: false }; FR.busy = false; FR.ticked = {}; FR.choice = {}; FR.proton = false; FR.protonChoice = ''; FR.run = null;
+  $('setup-card').hidden = true; $('scrim').hidden = true;
+  DONE.length = 0; DLQ.length = 0;
+}
+
+function frOptions(k) {
+  return Object.keys(SY.can).filter(function (n) { return SY.can[n].indexOf(k) >= 0; })
+    .sort(function (a, b) { return (b === SY.rec[k]) - (a === SY.rec[k]) || a.localeCompare(b); });
+}
+
+function freshShow(phase) {
+  FR.phase = phase;
+  var el = $('fresh'), h;
+  el.hidden = false;
+  if (phase === 'connect') {
+    var f = FR.form, ready = f.url.trim() && f.secret.trim() && f.lib.trim() && (f.token || f.user.trim());
+    h = '<form class="fr-card" onsubmit="return false"><header class="fr-head"><span class="g-logo" data-icon="grid" data-size="28"></span><h1>Connect to RomM</h1><p class="lede">GRID plays the games on your RomM server.</p></header>' +
+      '<label>Server URL<input class="field" data-fr="url" placeholder="https://romm.example" value="' + syEsc(f.url) + '"></label>' +
+      (f.token ? '' : '<label>Username<input class="field" data-fr="user" autocomplete="off" value="' + syEsc(f.user) + '"></label>') +
+      '<label>' + (f.token ? 'API token' : 'Password') + '<input class="field" type="password" data-fr="secret" autocomplete="off" value="' + syEsc(f.secret) + '"></label>' +
+      '<label class="check"><input type="checkbox" data-fr-token' + (f.token ? ' checked' : '') + '> Use API token</label>' +
+      '<label>Library folder<span class="inline"><input class="field" data-fr="lib" value="' + syEsc(f.lib) + '"><button class="g-btn secondary" type="button">Browse…</button></span><span class="help">Games, emulators and saves go here.</span></label>' +
+      '<button class="g-btn" data-fr-connect' + (ready && !FR.busy ? '' : ' disabled') + '>' + (FR.busy ? 'Connecting…' : 'Connect') + '</button>' +
+      '<p class="help center">Prototype: any values connect.</p></form>';
+  } else {
+    var count = {}, rows = SY.order.slice().sort(function (a, b) { return SY.name[a].localeCompare(SY.name[b]); }).map(function (k) {
+      var opts = frOptions(k), t = !!FR.ticked[k];
+      if (t) count[FR.choice[k]] = 1;
+      var right = !opts.length ? '<span class="muted-s">No emulator available</span>' :
+        t ? '<select class="field sys-pick" data-fr-pick="' + k + '">' + opts.map(function (n) { return '<option value="' + n + '"' + (n === FR.choice[k] ? ' selected' : '') + '>' + n + (n === SY.rec[k] ? ' (recommended)' : '') + '</option>'; }).join('') + '</select>' : '';
+      return '<li class="sysrow fr-row' + (t ? ' ticked' : '') + (opts.length ? '' : ' off') + '"><label class="fr-pick"><input type="checkbox" data-fr-tick="' + k + '"' + (t ? ' checked' : '') + (opts.length ? '' : ' disabled') + '><b>' + SY.name[k] + '</b><span class="muted-s">' + SY.games[k] + ' games</span></label>' + right + '</li>';
+    });
+    rows.push('<li class="sysrow fr-row' + (FR.proton ? ' ticked' : '') + '"><label class="fr-pick"><input type="checkbox" data-fr-proton' + (FR.proton ? ' checked' : '') + '><b>Windows</b><span class="muted-s">' + SY.games.PC + ' games · runs through Proton</span></label>' +
+      (FR.proton ? '<select class="field sys-pick" data-fr-proton-pick aria-label="Proton version for Windows games">' + syProtonOptions(FR.protonChoice) + '</select>' : '') + '</li>');
+    var n = Object.keys(count).length, pDl = FR.proton && FR.protonChoice.indexOf('install:') === 0 ? FR.protonChoice.slice(8) : '';
+    /* One count: a Proton download is one of the installs. */
+    var all = n + (pDl ? 1 : 0);
+    var label = all ? 'Install ' + all + ' emulator' + (all === 1 ? '' : 's') : FR.proton ? 'Continue' : 'Install emulators';
+    h = '<section class="fr-card wide"><header class="fr-head"><span class="g-logo" data-icon="grid" data-size="28"></span><h1>Choose your systems</h1><p class="lede">Tick the systems you play. GRID installs an emulator for each and sets it up.</p></header>' +
+      '<ul class="sys-list">' + rows.join('') + '</ul>' +
+      '<footer class="fr-foot"><div class="form-actions"><button class="g-btn secondary" data-fr-skip>Skip for now</button><button class="g-btn" data-fr-install' + (n || FR.proton ? '' : ' disabled') + '>' + label + '</button></div>' +
+      '<p class="help">You can change these later in Settings › Systems.</p></footer></section>';
+  }
+  el.innerHTML = h;
+  gIcons(el);
+}
+function freshHide() { $('fresh').hidden = true; FR.phase = null; renderAll(); }
+
+function frStartRun() {
+  var jobs = {};
+  Object.keys(FR.ticked).forEach(function (k) { if (FR.ticked[k]) { var n = FR.choice[k]; (jobs[n] = jobs[n] || []).push(k); } });
+  var pDl = FR.proton && FR.protonChoice.indexOf('install:') === 0 ? FR.protonChoice.slice(8) : '';
+  if (FR.proton) SY.winSet = true;
+  if (FR.proton && !pDl) SY.proton = FR.protonChoice;
+  if (pDl) jobs[pDl] = ['PC'];
+  var names = Object.keys(jobs);
+  if (!names.length) { if (FR.proton) toast('Windows games will use ' + SY.proton); renderAll(); return; }
+  /* One item per install, Proton included: the card's count and its bar
+     segments both come from this list. */
+  FR.run = { items: names.map(function (n) { return { name: n, state: 'queued' }; }), systems: 0 };
+  names.forEach(function (n) { jobs[n].forEach(function (k) { SY.busy[k] = true; }); });
+  frCard();
+  names.forEach(function (n, i) {
+    setTimeout(function () { if (FR.run) { FR.run.items[i].state = 'running'; frCard(); } }, i * 1300);
+    setTimeout(function () {
+      jobs[n].forEach(function (k) { delete SY.busy[k]; });
+      if (jobs[n][0] === 'PC') { SY.protons.unshift(n); SY.protonGet = SY.protonGet.filter(function (p) { return p !== n; }); SY.proton = n; if (FR.run) FR.run.systems += 1; }
+      else {
+        if (!syHas(n)) SY.installed.push(n);
+        jobs[n].forEach(function (k) { SY.pick[k] = n; EMU[k] = n; if (FR.run) FR.run.systems += 1; });
+        if (jobs[n].indexOf('PS') >= 0) SY.fw.PS = 'install';
+        if (jobs[n].indexOf('SAT') >= 0) SY.fw.SAT = 'install';
+      }
+      addDone(n, jobs[n][0] === 'PC' ? 'Compat tool' : 'Emulator', 'Finished');
+      if (FR.run) { FR.run.items[i].state = 'done'; frCard(); }
+      renderSettings(); renderServer();
+    }, 1600 + i * 1300);
+  });
+}
+var FR_STATE = { queued: 'Waiting', running: 'Installing', done: 'Installed', failed: 'Didn’t install' };
+function frCard() {
+  var r = FR.run, c = $('setup-card');
+  if (!r) { c.hidden = true; return; }
+  var total = r.items.length, done = r.items.filter(function (it) { return it.state === 'done'; }).length, finished = done >= total;
+  var noun = total + ' install' + (total === 1 ? '' : 's');
+  var segs = r.items.map(function (it) { return '<span class="setup-seg ' + it.state + '" title="' + syEsc(it.name) + ' · ' + FR_STATE[it.state] + '"><b></b></span>'; }).join('');
+  c.innerHTML = '<p class="title">' + (finished ? noun + ' done' : 'Setting up ' + noun + ' · ' + done + ' done') + '</p>' +
+    '<div class="segbar" role="progressbar" aria-valuemin="0" aria-valuemax="' + total + '" aria-valuenow="' + done + '" aria-label="' + done + ' of ' + total + ' installs done">' + segs + '</div>' +
+    (finished ? '<p class="line">' + r.systems + ' system' + (r.systems === 1 ? ' is' : 's are') + ' ready to play.</p>' : '') +
+    '<div class="form-actions"><button class="small-btn" data-go="downloads">Open Downloads</button>' + (finished ? '<button class="small-btn note-dismiss" data-note-dismiss>Dismiss</button>' : '') + '</div>';
+  c.hidden = false;
+  if (finished) noteCountdown(c);
+}
+
+document.addEventListener('input', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-fr'); if (k) { FR.form[k] = e.target.value; var b = document.querySelector('[data-fr-connect]'); var f = FR.form; if (b) b.disabled = !(f.url.trim() && f.secret.trim() && f.lib.trim() && (f.token || f.user.trim())); } });
+document.addEventListener('change', function (e) {
+  var t = e.target;
+  if (t.hasAttribute && t.hasAttribute('data-fr-token')) { FR.form.token = t.checked; freshShow('connect'); return; }
+  var k = t.getAttribute && t.getAttribute('data-fr-tick');
+  if (k) { FR.ticked[k] = t.checked; if (t.checked && !FR.choice[k]) FR.choice[k] = frOptions(k)[0]; freshShow('setup'); return; }
+  if (t.hasAttribute && t.hasAttribute('data-fr-proton')) { FR.proton = t.checked; if (t.checked && !FR.protonChoice) FR.protonChoice = 'install:' + SY.protonRec; freshShow('setup'); return; }
+  if (t.hasAttribute && t.hasAttribute('data-fr-proton-pick')) { FR.protonChoice = t.value; freshShow('setup'); return; }
+  k = t.getAttribute && t.getAttribute('data-fr-pick');
+  if (k) { FR.choice[k] = t.value; freshShow('setup'); }
+});
+document.addEventListener('click', function (e) {
+  var t = e.target;
+  if (t.closest('[data-fr-connect]')) { FR.busy = true; freshShow('connect'); setTimeout(function () { FR.busy = false; freshShow('setup'); }, 700); return; }
+  if (t.closest('[data-fr-skip]')) { freshHide(); return; }
+  if (t.closest('[data-fr-install]')) { freshHide(); frStartRun(); return; }
+  var m = t.closest('#menu button');
+  if (m && /Disconnect/.test(m.textContent)) { $('menu').hidden = true; freshReset(); renderAll(); freshShow('connect'); }
+});
+
+/* ==== One notification style: cards stacked at the bottom right. Each closes
+   itself 10 s after it appears (the bar inside Dismiss runs down); pointing
+   at a card pauses it. This toast() replaces the centred one. ==== */
+var NOTE_MS = 10000, NOTE_MAX = 4;
+function noteCountdown(card) {
+  var btn = card.querySelector('[data-note-dismiss]');
+  if (!btn || btn.querySelector('.cd')) return;
+  var bar = document.createElement('span'); bar.className = 'cd'; bar.style.animationDuration = NOTE_MS + 'ms';
+  bar.addEventListener('animationend', function () { noteClose(card); });
+  btn.appendChild(bar);
+}
+function noteClose(card) {
+  if (card.id === 'setup-card') { FR.run = null; card.hidden = true; card.innerHTML = ''; return; }
+  card.classList.add('leaving'); setTimeout(function () { card.remove(); }, 180);
+}
+function toast(msg, kind) {
+  var stack = $('notes');
+  var cards = stack.querySelectorAll('.note-card:not(#setup-card)');
+  if (cards.length >= NOTE_MAX) cards[0].remove();
+  var c = document.createElement('aside');
+  c.className = 'note-card' + (kind === 'error' ? ' error' : ''); c.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+  c.innerHTML = '<p class="title"></p><div class="form-actions"><button class="small-btn note-dismiss" data-note-dismiss>Dismiss</button></div>';
+  c.querySelector('.title').textContent = msg;
+  stack.appendChild(c);
+  noteCountdown(c);
+}
+document.addEventListener('click', function (e) { var b = e.target.closest('[data-note-dismiss]'); if (b) noteClose(b.closest('.note-card')); });
+
+/* ==== Grid headers (Server, Library): each folds into its toolbar row once
+   its grid scrolls, and unfolds near the top. The header floats over the grid
+   (the scroller reserves its unfolded height as top padding), so folding never
+   moves a card. One behaviour, two instances. ==== */
+var FOLD_AT = 32, UNFOLD_AT = 8;
+function makeFold(o) {
+  var f = { folded: false, key: null };
+  var head = function () { return $(o.head); }, scroll = function () { return $(o.scroll); };
+  f.measure = function () {
+    var sc = scroll(), hd = head();
+    if (!sc || !hd || f.folded || !hd.offsetHeight) return;
+    sc.style.setProperty('--head-h', hd.offsetHeight + 'px');
+    $(o.body).style.setProperty('--sb', (sc.offsetWidth - sc.clientWidth) + 'px');
+  };
+  f.set = function (folded) {
+    if (f.folded === folded) return;
+    f.folded = folded;
+    head().classList.toggle('folded', folded);
+    head().querySelector('.g-search').placeholder = folded ? o.foldedPlaceholder() : o.placeholder;
+  };
+  f.onScroll = function () {
+    var y = scroll().scrollTop;
+    if (!f.folded && y > FOLD_AT) f.set(true);
+    else if (f.folded && y < UNFOLD_AT) f.set(false);
+  };
+  /* After each render: a new system or filter starts at the top, unfolded. */
+  f.sync = function () {
+    var k = o.key();
+    if (f.key !== k) { f.key = k; scroll().scrollTop = 0; f.set(false); }
+    else if (f.folded) head().querySelector('.g-search').placeholder = o.foldedPlaceholder();
+    requestAnimationFrame(f.measure);
+  };
+  setTimeout(function () { scroll().addEventListener('scroll', f.onScroll, { passive: true }); f.measure(); }, 0);
+  window.addEventListener('resize', function () { requestAnimationFrame(f.measure); });
+  return f;
+}
+
+var SRV_FOLD = makeFold({ body: 'srv-body', head: 'srv-head', scroll: 'srv-scroll',
+  placeholder: 'Search title, platform or genre',
+  foldedPlaceholder: function () { return 'Search ' + PLAT[S.platform] + '…'; },
+  key: function () { return S.platform; } });
+var LIB_FOLD = makeFold({ body: 'lib-body', head: 'lib-head', scroll: 'lib-scroll',
+  placeholder: 'Search by title',
+  foldedPlaceholder: function () { var f = S.libFilter; return f === 'all' ? 'Search your library…' : f === 'recent' ? 'Search recent games…' : f === 'updates' ? 'Search games with updates…' : 'Search ' + PLAT[f] + '…'; },
+  key: function () { return S.libFilter; } });
+
+var foldRenderServer = renderServer;
+renderServer = function () { foldRenderServer(); SRV_FOLD.sync(); };
+var foldRenderLibrary = renderLibrary;
+renderLibrary = function () { foldRenderLibrary(); LIB_FOLD.sync(); };
+
+/* ==== Server › Discover: the first rail item and the default view.
+   New releases (a coverflow of the newest games on the preferred platforms)
+   and Recently added (newest on the server, minus the coverflow's games). ==== */
+var DISC = { cf: 0, ra: 0, sig: '', plat: '' };
+var TODAY = '2026-11-07';
+
+/* Preferred platforms: every system with an emulator, Windows once a compat
+   tool is picked for it, plus the games native to this computer (Linux here;
+   on a Windows computer that would be the Windows games). */
+function prefPlatforms() {
+  var out = Object.keys(SY.pick).filter(function (k) { return SY.pick[k] && PLAT[k]; });
+  if (SY.winSet) out.push('WIN');
+  out.push('LINUX');
+  return out;
+}
+/* New releases: games on the preferred platforms released in the last six
+   months, newest first, at most 25. */
+var NEW_MONTHS = 6, NEW_MAX = 25;
+function monthsBefore(day, months) { var d = new Date(day + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - months); return d.toISOString().slice(0, 10); }
+function discNew() {
+  var pref = prefPlatforms(), since = monthsBefore(TODAY, NEW_MONTHS);
+  return G.filter(function (g) { return pref.indexOf(g.p) >= 0 && g.rel >= since && g.rel <= TODAY; })
+    .sort(function (a, b) { return b.rel.localeCompare(a.rel); }).slice(0, NEW_MAX);
+}
+/* Recently added: the newest games on the server, minus the coverflow's, up
+   to 8. A platform pill narrows it to that platform's newest additions (still
+   without the coverflow's games). */
+var RECENT_MAX = 8, RECENT_DAYS = 30;
+function discPool(newest) {
+  var ids = newest.map(function (g) { return g.id; });
+  return G.filter(function (g) { return ids.indexOf(g.id) < 0; })
+    .sort(function (a, b) { return b.added.localeCompare(a.added); });
+}
+function discRecent(newest, plat) {
+  return discPool(newest).filter(function (g) { return !plat || g.p === plat; }).slice(0, RECENT_MAX);
+}
+/* The pills: one per platform with a recent addition (the last 30 days here),
+   the platform with the most recent addition first. None when only one
+   platform has recent additions. */
+function discRecentPlatforms(newest) {
+  var since = new Date(Date.parse(TODAY) - RECENT_DAYS * 86400000).toISOString().slice(0, 10), out = [];
+  discPool(newest).forEach(function (g) { if (g.added >= since && out.indexOf(g.p) < 0) out.push(g.p); });
+  return out.length > 1 ? out : [];
+}
+var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function fmtDate(d) { var p = d.split('-'); return (+p[2]) + ' ' + MONTHS[+p[1] - 1] + ' ' + p[0]; }
+function addedAgo(d) {
+  var days = Math.round((Date.parse(TODAY) - Date.parse(d)) / 86400000);
+  if (days <= 0) return 'Added today';
+  if (days === 1) return 'Added yesterday';
+  if (days < 14) return 'Added ' + days + ' days ago';
+  if (days < 60) return 'Added ' + Math.round(days / 7) + ' weeks ago';
+  return 'Added ' + fmtDate(d);
+}
+function discAction(g) {
+  if (g.missing) return 'Details';
+  if (g.installed) return 'Play';
+  if (S.dl && S.dl.id === g.id) return 'Installing…';
+  if (DLQ.indexOf(g.id) >= 0) return 'Queued';
+  return 'Install';
+}
+/* Screenshot shape per game (the prototype's: by era, with a few modern
+   exceptions), and whether the game has a clear logo. */
+var SHOT = { SNES: [8, 7], N64: [4, 3], PS: [4, 3], SAT: [4, 3], PS2: [4, 3], GC: [4, 3], WIN: [16, 9], LINUX: [16, 9] };
+var SHOT_OVERRIDE = { 'Orbit Bloom': [16, 9], 'Signal Fires': [16, 9], 'Grey Meridian': [21, 9], 'Paper Orbit': [16, 10] };
+var LOGO_PLATFORMS = ['WIN', 'LINUX', 'PS2', 'GC'], LOGO_TITLES = ['Cinder Peaks', 'Coral Static'];
+function shotRatio(g) { return SHOT_OVERRIDE[g.t] || SHOT[g.p] || [16, 9]; }
+function hasLogo(g) { return LOGO_PLATFORMS.indexOf(g.p) >= 0 || LOGO_TITLES.indexOf(g.t) >= 0; }
+/* Every game gets a logo on its screenshot. A server clear logo is a
+   transparent image (here a styled-text stand-in in fixed colours). Without
+   one, GRID draws the title in one of the same three styles, coloured from the
+   screenshot: a light tint of its dominant shade for the letters and a deep
+   shade of it for the outline and shadow, so it matches the art and reads. */
+function clearLogo(g) {
+  var style = 'abc'.charAt(g.id % 3), vars = '';
+  if (!hasLogo(g)) {
+    var hsl = rgbToHsl(dominantShade(g));
+    vars = ' data-generated style="--lf:hsl(' + hsl[0] + ' ' + Math.min(hsl[1], 70) + '% 88%);--ls:hsl(' + hsl[0] + ' ' + Math.min(hsl[1], 60) + '% 16%)"';
+  }
+  return '<div class="ra-logo logo-' + style + '" role="img" aria-label="' + syEsc(g.t) + '"' + vars + '>' + esc(g.t) + '</div>';
+}
+
+/* The screenshot's dominant shade: sample its own pixels (never the blurred
+   fill around an off-ratio shot), group them into 4-bit-per-channel buckets,
+   take the most common bucket and average its pixels. The prototype draws its
+   placeholder screenshot to a small canvas first; the app samples the image. */
+var SHADE_CACHE = {};
+function dominantShade(g) {
+  if (SHADE_CACHE[g.id]) return SHADE_CACHE[g.id];
+  var r = shotRatio(g), w = 64, h = Math.round(64 * r[1] / r[0]);
+  var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  var x = cv.getContext('2d');
+  x.fillStyle = g.c; x.fillRect(0, 0, w, h);
+  x.fillStyle = 'rgba(255,255,255,.14)'; x.fillRect(w * .08, h * .52, w * .46, h * .34);
+  x.fillStyle = 'rgba(255,255,255,.18)'; x.beginPath(); x.arc(w * .77, h * .16 + w * .13, w * .13, 0, Math.PI * 2); x.fill();
+  var px = x.getImageData(0, 0, w, h).data, buckets = {}, best = null;
+  for (var i = 0; i < px.length; i += 4) {
+    var k = (px[i] >> 4) << 8 | (px[i + 1] >> 4) << 4 | (px[i + 2] >> 4), b = buckets[k] || (buckets[k] = [0, 0, 0, 0]);
+    b[0]++; b[1] += px[i]; b[2] += px[i + 1]; b[3] += px[i + 2];
+    if (!best || b[0] > best[0]) best = b;
+  }
+  return (SHADE_CACHE[g.id] = [Math.round(best[1] / best[0]), Math.round(best[2] / best[0]), Math.round(best[3] / best[0])]);
+}
+function rgbToHsl(c) {
+  var r = c[0] / 255, gg = c[1] / 255, b = c[2] / 255, mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), l = (mx + mn) / 2, h = 0, s = 0;
+  if (mx !== mn) { var d = mx - mn; s = l > .5 ? d / (2 - mx - mn) : d / (mx + mn);
+    h = mx === r ? (gg - b) / d + (gg < b ? 6 : 0) : mx === gg ? (b - r) / d + 2 : (r - gg) / d + 4; h *= 60; }
+  return [Math.round(h), Math.round(s * 100), Math.round(l * 100)];
+}
+function discArt(g, extra) { return '<div class="g-art" style="background:' + g.c + (extra || '') + '"><span>' + esc(g.t) + '</span></div>'; }
+
+function renderDiscover() {
+  var el = $('discover'), newest = discNew(), plats = discRecentPlatforms(newest);
+  if (plats.indexOf(DISC.plat) < 0) DISC.plat = '';
+  var recent = discRecent(newest, DISC.plat);
+  var sig = newest.map(function (g) { return g.id; }).join(',') + '|' + recent.map(function (g) { return g.id; }).join(',') + '|' + plats.join(',') + '|' + DISC.plat;
+  if (sig !== DISC.sig || !el.firstChild) {
+    DISC.sig = sig; DISC.cf = Math.min(DISC.cf, Math.max(newest.length - 1, 0)); DISC.ra = Math.min(DISC.ra, Math.max(recent.length - 1, 0));
+    DISC.newest = newest; DISC.recent = recent;
+    var cf = newest.length ? '<div class="cf" tabindex="0" aria-label="New releases" aria-roledescription="carousel">' +
+      '<button class="g-icon-btn cf-arrow prev" aria-label="Previous" data-cf-prev><span data-icon="chevronLeft" data-size="20"></span></button>' +
+      '<div class="cf-stage">' + newest.map(function (g, i) { return '<div class="cf-item" data-cf-i="' + i + '"><div class="cf-cover">' + discArt(g) + '</div></div>'; }).join('') + '</div>' +
+      '<button class="g-icon-btn cf-arrow next" aria-label="Next" data-cf-next><span data-icon="chevronRight" data-size="20"></span></button></div>' +
+      '<div class="cf-caption" id="cf-caption"></div>'
+      : '<p class="note">Nothing released in the last six months for your systems. Add systems in Settings › Systems to see more.</p>';
+    var ra = recent.length ? '<div class="ra">' +
+      '<div class="ra-main"><div class="ra-shot" data-ra-open role="button" tabindex="0" aria-label="Open details"><div class="ra-layer" id="ra-a"></div><div class="ra-layer" id="ra-b"></div></div><div class="ra-caption" id="ra-caption"></div></div>' +
+      '<div class="ra-side"><div class="ra-list" id="ra-list"><div class="ra-hl" id="ra-hl"><span class="ra-bar"></span></div>' +
+      recent.map(function (g, i) { return '<button class="ra-row" data-ra-i="' + i + '"><span class="ra-cover">' + discArt(g) + '</span><span class="ra-text"><b>' + esc(g.t) + '</b><span>' + PLAT[g.p] + '</span></span></button>'; }).join('') +
+      '</div></div></div>'
+      : '<p class="note">Nothing new on your server yet.</p>';
+    var pills = plats.length ? '<nav class="g-pills ra-pills" aria-label="Filter by platform">' +
+      [''].concat(plats).map(function (p) { var on = DISC.plat === p; return '<button class="g-pill' + (on ? ' active' : '') + '" data-ra-plat="' + p + '" aria-pressed="' + on + '">' + (p ? PLAT[p] : 'All') + '</button>'; }).join('') + '</nav>' : '';
+    el.innerHTML = '<section class="g-panel disc-sec"><header class="disc-head"><h2>New releases</h2><p class="lede">Released in the last six months for your systems.</p></header>' + cf + '</section>' +
+      '<section class="g-panel disc-sec"><header class="disc-head ra-head"><div><h2>Recently added</h2><p class="lede">New on your server.</p></div>' + pills + '</header>' + ra + '</section>';
+    gIcons(el);
+    el.onclick = discClick;
+    var stage = el.querySelector('.cf');
+    var shot = el.querySelector('[data-ra-open]');
+    if (shot) shot.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetails(DISC.recent[DISC.ra]); } };
+    if (stage) stage.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); openDetails(DISC.newest[DISC.cf]); return; } if (e.key === 'ArrowLeft') { e.preventDefault(); cfGo(DISC.cf - 1); } if (e.key === 'ArrowRight') { e.preventDefault(); cfGo(DISC.cf + 1); } };
+    var hl = $('ra-hl'); if (hl) hl.addEventListener('animationend', function () { raGo(DISC.ra + 1, true); });
+    DISC.layer = 'a';
+    cfLayout(); raGo(DISC.ra, false, true);
+  } else { cfCaption(); raCaption(); }
+}
+
+/* Coverflow: the centre cover flat and large; the rest tilt back and recede
+   in 3D, fading with distance. Only transforms change, so moves glide. */
+function cfLayout() {
+  var items = document.querySelectorAll('#discover .cf-item');
+  items.forEach(function (it, i) {
+    var d = i - DISC.cf, a = Math.abs(d), s = d < 0 ? -1 : 1;
+    var t = d === 0 ? 'translateX(0) translateZ(0) rotateY(0deg)'
+      : 'translateX(' + s * (150 + (a - 1) * 66) + 'px) translateZ(' + (-140 - (a - 1) * 40) + 'px) rotateY(' + (-s * 52) + 'deg)';
+    it.style.transform = t;
+    it.style.zIndex = 50 - a;
+    it.style.opacity = a > 4 ? 0 : 1;
+    it.classList.toggle('center', d === 0);
+    it.setAttribute('aria-hidden', a > 4 ? 'true' : 'false');
+  });
+  var p = document.querySelector('[data-cf-prev]'), n = document.querySelector('[data-cf-next]');
+  if (p) p.disabled = DISC.cf === 0; if (n) n.disabled = DISC.cf >= DISC.newest.length - 1;
+  cfCaption();
+}
+function cfCaption() {
+  var g = DISC.newest && DISC.newest[DISC.cf], c = $('cf-caption'); if (!g || !c) return;
+  c.innerHTML = '<b>' + esc(g.t) + '</b><span class="meta2">' + PLAT[g.p] + ' · Released ' + fmtDate(g.rel) + '</span>' +
+    '<div class="form-actions"><button class="g-btn" data-disc-act="' + g.id + '">' + discAction(g) + '</button></div>';
+}
+function cfGo(i) { DISC.cf = Math.max(0, Math.min(i, DISC.newest.length - 1)); cfLayout(); }
+
+/* Recently added: the highlight frame glides to the active row; its bar fills
+   over 10 s and, when it ends, moves on. Hover pauses the bar (CSS). */
+function raGo(i, auto, first) {
+  var list = DISC.recent; if (!list || !list.length) return;
+  DISC.ra = ((i % list.length) + list.length) % list.length;
+  var g = list[DISC.ra], rows = document.querySelectorAll('#discover .ra-row'), row = rows[DISC.ra], hl = $('ra-hl'), lst = $('ra-list');
+  rows.forEach(function (r, k) { r.classList.toggle('active', k === DISC.ra); r.setAttribute('aria-current', k === DISC.ra ? 'true' : 'false'); });
+  hl.style.height = row.offsetHeight + 'px';
+  hl.style.transform = 'translateY(' + row.offsetTop + 'px)';
+  var bar = hl.querySelector('.ra-bar'), nb = bar.cloneNode(); bar.replaceWith(nb);   // restart the 10 s fill
+  lst.scrollTo({ top: Math.max(0, row.offsetTop - (lst.clientHeight - row.offsetHeight) / 2), behavior: first ? 'auto' : 'smooth' });
+  var next = DISC.layer === 'a' ? 'b' : 'a', shot = $('ra-' + next);
+  /* The frame is 16:9; a screenshot of another shape is fitted inside it,
+     uncropped, over a blurred, darkened copy of itself. */
+  var r = shotRatio(g), wide = r[0] / r[1] >= 16 / 9;
+  shot.innerHTML = '<div class="ra-fill" style="background:' + g.c + '"><span></span><i></i></div>' +
+    '<div class="ra-pic ' + (wide ? 'wide' : 'tall') + '" style="aspect-ratio:' + r[0] + ' / ' + r[1] + '"><div class="ra-art" style="background:' + g.c + '"><span></span><i></i></div></div>' +
+    '<div class="ra-logo-wrap">' + clearLogo(g) + '</div>';
+  shot.dataset.ratio = r[0] + ':' + r[1];
+  if (first) { $('ra-a').classList.remove('on'); $('ra-b').classList.remove('on'); }
+  shot.classList.add('on'); $('ra-' + DISC.layer).classList.remove('on'); DISC.layer = next;
+  raCaption();
+}
+function raCaption() {
+  var g = DISC.recent && DISC.recent[DISC.ra], c = $('ra-caption'); if (!g || !c) return;
+  /* The title is the logo on the screenshot; the caption has the rest. */
+  c.innerHTML = '<div><span class="meta2">' + PLAT[g.p] + ' · ' + addedAgo(g.added) + '</span></div>' +
+    '<div class="form-actions"><button class="g-btn" data-disc-act="' + g.id + '">' + discAction(g) + '</button></div>';
+}
+
+function discClick(e) {
+  var t = e.target, b;
+  if (t.closest('[data-cf-prev]')) { cfGo(DISC.cf - 1); return; }
+  /* A pill narrows Recently added and restarts the rotation at the first
+     row; clicking the active pill again, or All, clears it. */
+  if ((b = t.closest('[data-ra-plat]'))) { var pl = b.getAttribute('data-ra-plat'); DISC.plat = DISC.plat === pl ? '' : pl; DISC.ra = 0; renderDiscover(); return; }
+  if (t.closest('[data-cf-next]')) { cfGo(DISC.cf + 1); return; }
+  if ((b = t.closest('[data-cf-i]'))) { var i = +b.getAttribute('data-cf-i'); if (i === DISC.cf) openDetails(DISC.newest[i]); else cfGo(i); return; }
+  /* A game opens its Details when clicked: the centre cover, the screenshot,
+     or the highlighted row; a click on another row selects it first. */
+  if ((b = t.closest('[data-ra-i]'))) { var k = +b.getAttribute('data-ra-i'); if (k === DISC.ra) openDetails(DISC.recent[k]); else raGo(k); return; }
+  if (t.closest('[data-ra-open]')) { openDetails(DISC.recent[DISC.ra]); return; }
+  if ((b = t.closest('[data-disc-act]'))) {
+    var g = G[+b.getAttribute('data-disc-act')];
+    if (g.missing) openDetails(g); else if (g.installed) { S.playing = g.id; toast('Launching ' + g.t + '…'); } else startInstall(g);
+    return;
+  }
+}
+
+/* Discover is the first Server rail row, with a divider under it, and the
+   default selection. */
+function srvRail() {
+  var plats = Object.keys(PLAT).sort(function (a, b) { return PLAT[a].localeCompare(PLAT[b]); });
+  rail('srv-rail', [{ key: 'DISCOVER', label: 'Discover', sel: S.platform === 'DISCOVER', divider: true }].concat(
+    plats.map(function (p) { return { key: p, label: PLAT[p], count: G.filter(function (g) { return g.p === p; }).length, sel: S.platform === p }; })),
+    function (k) { S.platform = k; renderServer(); });
+}
+var discRenderServer = renderServer;
+renderServer = function () {
+  var on = S.platform === 'DISCOVER';
+  $('srv-head').hidden = on; $('srv-scroll').hidden = on; $('discover').hidden = !on;
+  if (on) { srvRail(); renderDiscover(); return; }
+  discRenderServer(); srvRail();
+};
+
+/* ==== Light / dark toggle: top-right on the startup screens, left of the
+   connection dot and username in the top bar. Shows the current mode (sun or
+   moon); a click switches, and the palette eases across instead of snapping.
+   Settings › Appearance › Theme follows it. ==== */
+function currentTheme() { return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'; }
+function paintToggles(spin) {
+  var t = currentTheme(), next = t === 'dark' ? 'light' : 'dark';
+  document.querySelectorAll('[data-theme-toggle]').forEach(function (b) {
+    b.setAttribute('aria-label', 'Switch to ' + next + ' mode'); b.title = 'Switch to ' + next + ' mode';
+    b.innerHTML = '<span class="tt-icon' + (spin ? ' spin' : '') + '">' + gIcon(t === 'dark' ? 'moon' : 'sun', 18) + '</span>';
+  });
+}
+function setTheme(t) {
+  var root = document.documentElement;
+  if (!window.matchMedia || !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    root.classList.add('theming'); clearTimeout(setTheme.t); setTheme.t = setTimeout(function () { root.classList.remove('theming'); }, 320);
+  }
+  root.setAttribute('data-theme', t);
+  paintToggles(true);
+  if (S.view === 'settings' && S.setPane === 'appearance') renderSettings();
+}
+document.addEventListener('click', function (e) { if (e.target.closest('[data-theme-toggle]')) setTheme(currentTheme() === 'dark' ? 'light' : 'dark'); });
+/* The Appearance select changes it too: keep the icons in step. */
+document.addEventListener('change', function (e) { if (e.target.id === 'set-theme') { setTheme(e.target.value); } });
+/* Only the startup screens show the corner toggle. */
+var ttShow = freshShow; freshShow = function (p) { ttShow(p); $('theme-start').hidden = false; };
+var ttHide = freshHide; freshHide = function () { ttHide(); $('theme-start').hidden = true; };
+setTimeout(function () { paintToggles(false); }, 0);
+
+/* ==== Game backups: copy games from the server to a removable drive, with
+   their art, details, emulators and firmware, and install them from that
+   drive on any computer, with or without a server.
+
+   A drive is set up once (Settings › Backup drives): GRID makes one
+   `gridpack` folder at the drive's root and never touches anything else on
+   it. A drive is recognised by `gridpack/gridpack.json`. ==== */
+var BK = {
+  drives: [
+    { id: 't7', label: 'SAMSUNG T7', fs: 'exFAT', size: 1000, other: 361.4, connected: true, init: true,
+      name: 'Couch kit', created: '2026-10-12', last: '2026-11-02',
+      games: [0, 3, 5, 8, 10, 15], emus: ['DuckStation', 'Dolphin'], fw: ['PS'], os: ['linux', 'windows'] },
+    { id: 'clas', label: 'ClasPlatf', fs: 'exFAT', size: 64, other: 2.1, connected: true, init: true,
+      name: 'Classic Platformers', created: '2026-10-10', last: '2026-10-10',
+      games: [4, 11, 1, 6], emus: ['RetroArch'], fw: [], os: ['linux'] },
+    { id: 'king', label: 'KINGSTON', fs: 'FAT32', size: 32, other: 0.8, connected: true, init: false,
+      name: '', games: [], emus: [], fw: [], os: [] },
+    { id: 'wd', label: 'WD Elements', fs: 'NTFS', size: 2000, other: 840, connected: false, init: true,
+      name: 'Everything', created: '2026-09-01', last: '2026-09-28', seen: '3 days ago',
+      games: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], emus: ['DuckStation', 'Dolphin', 'PCSX2', 'RetroArch', 'Ymir', 'GE-Proton10-17'], fw: ['PS', 'SAT'], os: ['linux', 'windows'] }
+  ],
+  sel: { view: null, ids: [] },
+  dlg: null,
+  q: [], job: null, batches: {}, from: {},
+  opts: { fw: true }, osEdit: null,
+  setup: null, rename: null, confirm: null
+};
+var BK_SIZE = { PS: .62, PS2: 4.6, N64: .03, SNES: .004, GC: 1.4, SAT: .58, WIN: 6.5, LINUX: 2.1 };
+var BK_EMU_SIZE = { DuckStation: .05, Dolphin: .04, RetroArch: .41, Ymir: .02, PCSX2: .06, Mednafen: .01, 'GE-Proton10-17': .48 };
+var BK_FW = { PS: 3, SAT: 2 };
+var FAT32_MAX = 4;
+
+/* The computers a pack is for, picked at setup and changed in its card. Each
+   emulator on the drive has a build for each; Proton only for Linux. */
+var BK_OS = [['linux', 'Linux'], ['windows', 'Windows']];
+function bkOsNames(os) { return os.map(function (o) { return o === 'linux' ? 'Linux' : 'Windows'; }).join(' and '); }
+function bkEmuOs(n, d) { var os = d ? d.os : ['linux']; return n === 'GE-Proton10-17' ? os.filter(function (o) { return o === 'linux'; }) : os; }
+function bkEmuSize(n, d) { return (BK_EMU_SIZE[n] || .05) * Math.max(1, bkEmuOs(n, d).length); }
+function bkSize(g) { return +(BK_SIZE[g.p] * (0.7 + ((g.id * 37) % 60) / 100)).toFixed(3); }
+function bkFmt(gb) { return gb >= 100 ? Math.round(gb) + ' GB' : gb >= 1 ? gb.toFixed(1) + ' GB' : gb >= 0.001 ? Math.max(1, Math.round(gb * 1000)) + ' MB' : '<1 MB'; }
+function bkDrive(id) { return BK.drives.filter(function (d) { return d.id === id; })[0]; }
+function bkReady() { return BK.drives.filter(function (d) { return d.connected && d.init; }); }
+function bkGridUsed(d) {
+  return d.games.reduce(function (s, id) { return s + bkSize(G[id]); }, 0) +
+    d.emus.reduce(function (s, n) { return s + bkEmuSize(n, d); }, 0) + d.fw.length * .002;
+}
+function bkFree(d) { return Math.max(0, d.size - d.other - bkGridUsed(d)); }
+function bkPath(d) { return '/run/media/player/' + d.label; }
+function bkPlural(n, one, many) { return n + ' ' + (n === 1 ? one : many || one + 's'); }
+/* The emulator a backup takes for a system: the default, else the recommended
+   one. Windows games take the compat tool. */
+function bkEmuFor(p) { return p === 'WIN' ? (S.compatDefault || 'GE-Proton10-17') : p === 'LINUX' ? '' : (SY.pick[p] || SY.rec[p] || ''); }
+function bkSysOf(p) { return p === 'WIN' ? 'PC' : p; }
+
+/* ---- Settings › Backup drives ---- */
+function bkUsage(d, extra) {
+  var used = d.size - d.other - bkFree(d) - (extra || 0);
+  var pc = function (v) { return Math.max(0, Math.min(100, v / d.size * 100)).toFixed(2) + '%'; };
+  return '<div class="bk-usage" role="img" aria-label="' + bkFmt(bkFree(d)) + ' free of ' + bkFmt(d.size) + '">' +
+    '<b class="u-other" style="width:' + pc(d.other) + '"></b><b class="u-grid" style="width:' + pc(used) + '"></b>' +
+    (extra ? '<b class="adding' + (extra > bkFree(d) ? ' over' : '') + '" style="width:' + pc(Math.min(extra, bkFree(d) || extra)) + '"></b>' : '') + '</div>';
+}
+function bkDriveCard(d) {
+  var head = '<header class="bk-drive-head"><span class="bk-drive-icon" data-icon="drive" data-size="20"></span><div class="bk-drive-id"><b>' +
+    esc(d.init ? d.name : d.label) + '</b><span class="note">' + (d.init && d.name !== d.label ? esc(d.label) + ' · ' : '') + d.fs + ' · ' + bkFmt(d.size) + '</span></div>' +
+    (d.connected ? '<span class="pill-s' + (d.init ? ' ok' : '') + '">' + (d.init ? '<span data-icon="check" data-size="12"></span>Ready for backups' : 'Not set up') + '</span>'
+                 : '<span class="pill-s">Not connected</span>') + '</header>';
+  if (!d.connected) {
+    return '<article class="bk-drive away">' + head + '<p class="note">Last seen ' + d.seen + ' · ' + bkPlural(d.games.length, 'game') + ' · ' + bkFmt(bkGridUsed(d)) +
+      '. Plug it in to back up to it or install from it.</p><div class="form-actions"><button class="small-btn" data-bk-forget="' + d.id + '">Forget</button>' +
+      '<button class="small-btn bk-proto" data-bk-plug="' + d.id + '">Prototype: plug in</button></div></article>';
+  }
+  var body;
+  if (!d.init) {
+    if (BK.setup === d.id) {
+      body = '<form class="form bk-setup" onsubmit="return false"><label>Pack name<input class="field" id="bk-setup-name" value="' + syEsc(d.label) + '"><span class="help">Shown in Library and on other computers. You can change it later.</span></label>' +
+        '<fieldset class="bk-os"><legend>Computers this pack is for</legend>' + BK_OS.map(function (o) { return '<label class="check"><input type="checkbox" data-bk-setup-os="' + o[0] + '"' + (o[0] === 'linux' ? ' checked' : '') + '> ' + o[1] + (o[0] === 'linux' ? ' (this computer)' : '') + '</label>'; }).join('') +
+          '<span class="help">GRID adds the emulators each system needs, built for every computer you pick. You can change this later.</span></fieldset>' +
+        '<p class="note">GRID makes a <code>gridpack</code> folder at the root of ' + esc(d.label) + '. Nothing else on the drive is changed.</p>' +
+        (d.fs === 'FAT32' ? '<p class="bk-warn"><b>FAT32 can’t hold files over 4 GB.</b> Games with a larger file (many PlayStation 2, GameCube and Windows games) can’t go on this drive. Reformat it as exFAT to back up everything.</p>' : '') +
+        '<div class="form-actions"><button class="g-btn" type="button" data-bk-setup-go="' + d.id + '">Set up drive</button><button class="g-btn secondary" type="button" data-bk-setup-cancel>Cancel</button></div></form>';
+    } else {
+      body = '<p class="note">' + bkFmt(bkFree(d)) + ' free. Set it up to back up games to it.</p>' +
+        '<div class="form-actions"><button class="g-btn" data-bk-setup="' + d.id + '">Set up for GRID…</button></div>';
+    }
+  } else {
+    var name = BK.rename === d.id
+      ? '<form class="bk-rename" onsubmit="return false"><input class="field" id="bk-rename" value="' + syEsc(d.name) + '" aria-label="Pack name"><button class="small-btn primary" type="button" data-bk-rename-go="' + d.id + '">Save</button><button class="small-btn" type="button" data-bk-rename-cancel>Cancel</button></form>' : '';
+    var fwNames = d.fw.map(function (k) { return SY.name[k]; });
+    body = name + bkUsage(d) +
+      '<p class="bk-legend"><span><i class="u-other"></i>Other files ' + bkFmt(d.other) + '</span><span><i class="u-grid"></i>GRID ' + bkFmt(bkGridUsed(d)) + '</span><span><i></i>Free ' + bkFmt(bkFree(d)) + '</span></p>' +
+      bkOsRow(d) + '<dl class="kv bk-kv"><div><dt>Games</dt><dd>' + d.games.length + '</dd></div><div><dt>Emulators</dt><dd>' + (d.emus.length ? esc(d.emus.join(', ')) : 'None') + '</dd></div>' +
+      '<div><dt>Firmware</dt><dd>' + (fwNames.length ? esc(fwNames.join(', ')) : 'None') + '</dd></div><div><dt>Last backup</dt><dd>' + fmtDate(d.last) + '</dd></div>' +
+      '<div><dt>Folder</dt><dd><code>' + esc(bkPath(d)) + '/gridpack</code></dd></div></dl>' +
+      (BK.confirm === 'wipe:' + d.id
+        ? '<div class="bk-confirm"><p><b>Delete the gridpack folder from ' + esc(d.label) + '?</b> This removes ' + bkPlural(d.games.length, 'game') + ' and ' + bkFmt(bkGridUsed(d)) + ' of GRID files from the drive. Nothing else on the drive is touched, and games installed on this computer stay.</p>' +
+          '<div class="form-actions"><button class="g-btn destructive" data-bk-wipe-go="' + d.id + '">Delete GRID files</button><button class="g-btn secondary" data-bk-confirm-cancel>Cancel</button></div></div>'
+        : '<div class="form-actions"><button class="g-btn" data-bk-show="' + d.id + '">Show in Library</button><button class="g-btn secondary" data-toast="Opens ' + syEsc(bkPath(d)) + '/gridpack in the file manager">Open folder</button>' +
+          '<button class="g-btn secondary" data-bk-rename="' + d.id + '">Rename…</button><button class="g-btn secondary destructive" data-bk-wipe="' + d.id + '">Remove GRID files…</button></div>');
+  }
+  return '<article class="bk-drive' + (d.init ? '' : ' fresh-drive') + '">' + head + body +
+    '<button class="small-btn bk-proto bk-proto-corner" data-bk-plug="' + d.id + '">Prototype: unplug</button></article>';
+}
+function renderBackupPane(el) {
+  var on = BK.drives.filter(function (d) { return d.connected; }), away = BK.drives.filter(function (d) { return !d.connected; });
+  el.innerHTML = '<h2>Backup drives</h2>' +
+    '<p class="note bk-lede">Copy games from your server to a USB drive, with their art, details, emulators and firmware. Plug the drive into any computer with GRID to install them, even without a network.</p>' +
+    '<div class="sub"><h3>Connected</h3>' + (on.length ? on.map(bkDriveCard).join('') :
+      '<div class="empty-state"><b>No removable drives</b><span class="note">Plug in a USB flash drive or SSD. It shows up here.</span></div>') + '</div>' +
+    (away.length ? '<div class="sub"><h3>Not connected</h3>' + away.map(bkDriveCard).join('') + '</div>' : '') +
+    '<div class="sub"><h3>Every backup also copies</h3>' +
+    '<label class="check"><input type="checkbox" data-bk-default="fw"' + (BK.opts.fw ? ' checked' : '') + '> The server’s firmware for the systems you back up</label>' +
+    '<p class="note">You can change this for each backup. Each game always takes its covers, fanart, screenshots, logo and details, and the emulator its system needs, built for every computer the drive is for.</p></div>' +
+    '<details class="bk-tree"><summary>What’s in the gridpack folder</summary><pre>gridpack/\n  gridpack.json        pack name, drive id, format version, game index\n  games/&lt;platform&gt;/     the files the server gives (zip, 7z, iso, folder)\n  assets/&lt;platform&gt;/&lt;game&gt;/\n    cover.jpg  fanart.jpg  logo.png  screenshots/\n  emulators/&lt;emulator&gt;/&lt;version&gt;/&lt;os&gt;/\n  firmware/&lt;platform&gt;/</pre></details>';
+  gIcons(el);
+}
+
+/* "For: Linux and Windows · Change…" in a set-up drive's card. Adding a
+   computer queues that build of every emulator already on the drive;
+   removing one deletes those builds. */
+function bkOsRow(d) {
+  if (BK.osEdit !== d.id) return '<p class="bk-for"><span class="note">For</span> <b>' + bkOsNames(d.os) + '</b> <button class="small-btn" data-bk-os-edit="' + d.id + '">Change…</button></p>';
+  return '<form class="bk-os bk-os-edit" onsubmit="return false"><span class="note">Computers this pack is for</span>' + BK_OS.map(function (o) {
+      return '<label class="check"><input type="checkbox" data-bk-os="' + o[0] + '"' + (d.os.indexOf(o[0]) >= 0 ? ' checked' : '') + '> ' + o[1] + '</label>'; }).join('') +
+    '<span class="help">Adding one writes its build of the ' + bkPlural(d.emus.length, 'emulator') + ' on this drive. Removing one deletes those builds; games and firmware stay.</span>' +
+    '<div class="form-actions"><button class="small-btn primary" type="button" data-bk-os-go="' + d.id + '">Save</button><button class="small-btn" type="button" data-bk-os-cancel>Cancel</button></div></form>';
+}
+function bkOsSave(d) {
+  var next = Array.prototype.filter.call(document.querySelectorAll('[data-bk-os]'), function (c) { return c.checked; }).map(function (c) { return c.getAttribute('data-bk-os'); });
+  if (!next.length) { toast('Pick at least one computer', 'error'); return; }
+  var added = next.filter(function (o) { return d.os.indexOf(o) < 0; }), removed = d.os.filter(function (o) { return next.indexOf(o) < 0; });
+  var emusFor = function (os) { return d.emus.filter(function (n) { return n !== 'GE-Proton10-17' || os.indexOf('linux') >= 0; }); };
+  BK.osEdit = null;
+  if (removed.length) {
+    var gone = emusFor(removed); d.os = d.os.filter(function (o) { return removed.indexOf(o) < 0; });
+    if (removed.indexOf('linux') >= 0) d.emus = d.emus.filter(function (n) { return n !== 'GE-Proton10-17'; });
+    toast('Removed the ' + bkOsNames(removed) + ' builds of ' + bkPlural(gone.length, 'emulator') + ' from ' + d.name);
+  }
+  if (added.length) {
+    var todo = emusFor(added), bid = 'o' + Date.now();
+    d.os = d.os.concat(added);
+    var items = todo.map(function (n) { return { kind: 'emu', t: n, sub: 'Emulator · ' + bkOsNames(added) + ' build', size: (BK_EMU_SIZE[n] || .05) * added.length, drive: d.id, batch: bid, pct: 0, phase: 'queued' }; });
+    if (items.length) {
+      BK.batches[bid] = { drive: d.id, games: 0, emus: items.length, fw: 0, left: items.length, written: 0 };
+      BK.q = BK.q.concat(items);
+      toast(bkOsNames(added) + ' builds of ' + bkPlural(items.length, 'emulator') + ' added to the backup queue for ' + d.name);
+    }
+  }
+  renderAll(); bkRun();
+}
+
+/* ---- grid multi-select ---- */
+function bkGridView() { return S.view === 'library' ? 'library' : 'server'; }
+function bkSelecting() { return BK.sel.view === bkGridView() && (S.view === 'library' || S.view === 'server'); }
+function bkVisible() {
+  var g = S.view === 'library' ? $('lib-grid') : $('srv-grid');
+  return Array.prototype.map.call(g.querySelectorAll('[data-game]'), function (c) { return +c.getAttribute('data-game'); });
+}
+function bkDecorate(gridId) {
+  var el = $(gridId); if (!el) return;
+  var view = gridId === 'lib-grid' ? 'library' : 'server';
+  var on = BK.sel.view === view;
+  el.classList.toggle('selecting', on);
+  if (!on) return;
+  el.querySelectorAll('[data-game]').forEach(function (c) {
+    var id = +c.getAttribute('data-game'), picked = BK.sel.ids.indexOf(id) >= 0;
+    c.classList.toggle('picked', picked);
+    c.setAttribute('aria-selected', picked);
+    c.querySelector('.g-cover').insertAdjacentHTML('beforeend', '<span class="bk-check" aria-hidden="true">' + (picked ? gIcon('check', 14) : '') + '</span>');
+  });
+}
+var bkOrigFill = fillGrid;
+fillGrid = function (id, list, sp, empty) { bkOrigFill(id, list, sp, empty); bkDecorate(id); };
+
+function bkSelBar() {
+  ['srv', 'lib'].forEach(function (k) {
+    var body = $(k + '-body'); if (!body) return;
+    var bar = $(k + '-selbar');
+    if (!bar) { bar = document.createElement('div'); bar.id = k + '-selbar'; bar.className = 'g-panel bk-selbar'; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Selected games'); body.appendChild(bar); }
+    var view = k === 'lib' ? 'library' : 'server';
+    var on = BK.sel.view === view && !(view === 'server' && S.platform === 'DISCOVER') && !S.offline;
+    bar.hidden = !on;
+    var btn = document.querySelector('[data-view=' + view + '] [data-bk-select]');
+    if (btn) { btn.classList.toggle('active', on); btn.setAttribute('aria-pressed', on); btn.textContent = on ? 'Done' : 'Select'; btn.hidden = S.offline && view === 'server'; }
+    if (!on) return;
+    var vis = bkVisible(), ids = BK.sel.ids, size = ids.reduce(function (s, id) { return s + bkSize(G[id]); }, 0);
+    var all = vis.length && vis.every(function (id) { return ids.indexOf(id) >= 0; });
+    var drv = view === 'library' && bkLibDrive();
+    var acts = drv
+      ? '<button class="g-btn" data-bk-sel-install' + (ids.length ? '' : ' disabled') + '>Install ' + (ids.length ? bkPlural(ids.length, 'game') : '') + '</button>' +
+        (BK.confirm === 'selrm' ? '<button class="g-btn destructive" data-bk-sel-rm-go>Remove ' + ids.length + ' from drive</button>' : '<button class="g-btn secondary destructive" data-bk-sel-rm' + (ids.length ? '' : ' disabled') + '>Remove from drive…</button>')
+      : '<button class="g-btn" data-bk-open' + (ids.length ? '' : ' disabled') + '>Back up to drive…</button>';
+    bar.innerHTML = '<span class="bk-sel-count"><b>' + (ids.length ? ids.length + ' selected' : 'Select games') + '</b>' + (ids.length ? '<span class="note">' + bkFmt(size) + '</span>' : '<span class="note">Click covers to pick them · Shift-click picks a range</span>') + '</span>' +
+      '<button class="small-btn" data-bk-all' + (vis.length ? '' : ' disabled') + '>' + (all ? 'All ' + vis.length + ' selected' : 'Select all ' + vis.length) + '</button>' +
+      (ids.length ? '<button class="small-btn" data-bk-clear>Clear</button>' : '') + '<span class="bk-sel-gap"></span>' + acts;
+  });
+}
+
+/* ---- Library › Backup drives ---- */
+function bkLibDrive() { var f = S.libFilter; return f && f.indexOf('drive:') === 0 ? bkDrive(f.slice(6)) : null; }
+var bkOrigLib = renderLibrary;
+renderLibrary = function () {
+  var d = bkLibDrive();
+  if (d && !(d.connected && d.init)) { S.libFilter = 'all'; d = null; }
+  var keep = S.libFilter; if (d) S.libFilter = 'all';
+  bkOrigLib();
+  S.libFilter = keep;
+  var ready = bkReady(), rail = $('lib-rail');
+  if (ready.length) {
+    if (d) rail.querySelectorAll('.g-rail-item').forEach(function (b) { b.classList.remove('active'); b.removeAttribute('aria-current'); });
+    rail.insertAdjacentHTML('beforeend', '<span class="g-rail-heading">BACKUP DRIVES</span>' + ready.map(function (x) {
+      var sel = d && d.id === x.id;
+      return '<button class="g-rail-item bk-rail' + (sel ? ' active' : '') + '" data-key="drive:' + x.id + '"' + (sel ? ' aria-current="page"' : '') + ' title="' + syEsc(x.label) + '"><span class="bk-rail-icon" data-icon="drive" data-size="14"></span><span class="g-rail-label">' + esc(x.name) + '</span><span class="g-rail-count">' + x.games.length + '</span></button>';
+    }).join(''));
+    gIcons(rail);
+  }
+  var chips = $('lib-chips');
+  if (!d) { if (chips) chips.hidden = true; bkPlatAct(); bkSelBar(); return; }
+  var list = d.games.map(function (id) { return G[id]; }).filter(function (g) { return match(g, S.q.library); });
+  $('lib-title').textContent = d.name;
+  $('lib-count').textContent = bkPlural(d.games.length, 'game') + ' · ' + bkFmt(bkGridUsed(d)) + ' · on ' + d.label;
+  chips.hidden = false;
+  chips.innerHTML = '<span class="g-chip-outline">Emulators: ' + (d.emus.length ? esc(d.emus.join(', ')) : 'none') + '</span><span class="g-chip-outline">Firmware: ' +
+    (d.fw.length ? esc(d.fw.map(function (k) { return SY.name[k]; }).join(', ')) : 'none') + '</span>';
+  fillGrid('lib-grid', list, true, S.q.library.trim() ? 'No games on this drive match “' + S.q.library.trim() + '”' : 'Nothing on this drive yet. Back up games from Server or Library.');
+  bkPlatAct(); bkSelBar();
+};
+
+/* "Back up all N…" for a whole platform: Server platform headers and
+   Library platform rows. */
+function bkPlatAct() {
+  [['srv', 'server'], ['lib', 'library']].forEach(function (p) {
+    var head = document.querySelector('#' + p[0] + '-head .g-platform-header'); if (!head) return;
+    var b = head.querySelector('[data-bk-plat]');
+    var plat = p[1] === 'server' ? S.platform : S.libFilter;
+    var ok = !S.offline && PLAT[plat] && plat !== 'DISCOVER';
+    var n = !ok ? 0 : G.filter(function (g) { return g.p === plat && (p[1] === 'server' || g.installed); }).length;
+    if (!b) { head.insertAdjacentHTML('beforeend', '<button class="small-btn bk-plat" data-bk-plat="' + p[1] + '"></button>'); b = head.querySelector('[data-bk-plat]'); }
+    b.hidden = !n; b.textContent = 'Back up all ' + n + '…';
+  });
+}
+var bkOrigSrv = renderServer;
+renderServer = function () {
+  var off = !!S.offline, srvView = document.querySelector('[data-view=server]');
+  $('srv-rail').style.display = off ? 'none' : ''; $('srv-body').style.display = off ? 'none' : ''; $('bk-srv-off').hidden = !off;
+  if (!off) bkOrigSrv();
+  bkPlatAct(); bkSelBar();
+};
+
+/* ---- the backup dialog ---- */
+function bkOpen(ids, title) {
+  if (S.offline) { toast('Connect to a server to back up games', 'error'); return; }
+  var ready = bkReady();
+  var pick = BK.dlg && BK.dlg.drive && bkDrive(BK.dlg.drive) && bkDrive(BK.dlg.drive).connected ? BK.dlg.drive : (ready[0] ? ready[0].id : null);
+  BK.dlg = { ids: ids.slice(), title: title, drive: pick, emus: true, fw: BK.opts.fw };
+  $('bkscrim').hidden = false; bkRenderDlg();
+}
+function bkPlan(dl) {
+  var d = bkDrive(dl.drive), games = dl.ids.map(function (id) { return G[id]; });
+  var have = d ? games.filter(function (g) { return d.games.indexOf(g.id) >= 0; }) : [];
+  var big = d && d.fs === 'FAT32' ? games.filter(function (g) { return bkSize(g) > FAT32_MAX && have.indexOf(g) < 0; }) : [];
+  var todo = games.filter(function (g) { return have.indexOf(g) < 0 && big.indexOf(g) < 0; });
+  var emus = [], fw = [];
+  todo.forEach(function (g) {
+    var e = bkEmuFor(g.p); if (e && bkEmuOs(e, d).length && emus.indexOf(e) < 0 && (!d || d.emus.indexOf(e) < 0)) emus.push(e);
+    if (BK_FW[g.p] && fw.indexOf(g.p) < 0 && (!d || d.fw.indexOf(g.p) < 0)) fw.push(g.p);
+  });
+  var size = todo.reduce(function (s, g) { return s + bkSize(g); }, 0) +
+    emus.reduce(function (s, n) { return s + bkEmuSize(n, d); }, 0) + (dl.fw ? fw.length * .002 : 0);
+  return { d: d, todo: todo, have: have, big: big, emus: emus, fw: fw, size: size };
+}
+function bkRenderDlg() {
+  var dl = BK.dlg, el = $('bkdlg'); if (!dl) return;
+  var ready = bkReady(), pl = bkPlan(dl), fresh = BK.drives.filter(function (d) { return d.connected && !d.init; });
+  var drives;
+  if (!ready.length) {
+    drives = '<div class="empty-state"><b>No backup drive connected</b><span class="note">Plug in a drive you set up for GRID' +
+      (fresh.length ? ', or set up ' + esc(fresh.map(function (d) { return d.label; }).join(' or ')) + ' (connected now)' : '') +
+      '. Set up a drive once in Settings › Backup drives.</span><div class="form-actions"><button class="g-btn secondary" data-bk-goset>Set up a drive…</button></div></div>';
+  } else {
+    drives = '<div class="bk-opts" role="radiogroup" aria-label="Drive">' + ready.map(function (d) {
+      var p = bkPlan({ ids: dl.ids, drive: d.id, emus: dl.emus, fw: dl.fw }), over = p.size > bkFree(d);
+      return '<label class="bk-opt' + (dl.drive === d.id ? ' on' : '') + (over ? ' over' : '') + '"><input type="radio" name="bk-drive" value="' + d.id + '"' + (dl.drive === d.id ? ' checked' : '') + '>' +
+        '<span class="bk-opt-main"><b>' + esc(d.name) + '</b><span class="note">' + esc(d.label) + ' · ' + d.fs + '</span></span>' +
+        '<span class="bk-opt-free' + (over ? ' warn' : '') + '">' + (over ? 'Needs ' + bkFmt(p.size) + ' · ' + bkFmt(bkFree(d)) + ' free' : bkFmt(bkFree(d)) + ' free') + '</span>' +
+        bkUsage(d, dl.drive === d.id ? p.size : 0) + '</label>';
+    }).join('') + '</div>';
+  }
+  var notes = [];
+  if (pl.d && pl.have.length) notes.push(bkPlural(pl.have.length, 'game is', 'games are').replace(/^(\d+) /, '$1 ') + ' already on ' + esc(pl.d.name) + ' and will be skipped' + (pl.have.length <= 3 ? ': ' + esc(pl.have.map(function (g) { return g.t; }).join(', ')) : '') + '.');
+  if (pl.big.length) notes.push('<span class="bk-warn-line">' + bkPlural(pl.big.length, 'game has', 'games have') + ' a file over 4 GB, which ' + esc(pl.d.label) + ' (FAT32) can’t hold: ' + esc(pl.big.map(function (g) { return g.t; }).join(', ')) + '.</span>');
+  var over = pl.d && pl.size > bkFree(pl.d), n = pl.todo.length;
+  var emuLine = pl.emus.length ? esc(pl.emus.join(', ')) + (pl.d ? ' for ' + bkOsNames(pl.d.os) : '') + ' · ' + bkFmt(pl.emus.reduce(function (s, x) { return s + bkEmuSize(x, pl.d); }, 0)) : (pl.d ? 'Already on the drive' : 'None needed');
+  var fwLine = pl.fw.length ? esc(pl.fw.map(function (k) { return SY.name[k] + ' (' + BK_FW[k] + ' files)'; }).join(', ')) : (pl.d ? 'Already on the drive, or none on the server' : 'None on the server');
+  el.innerHTML = '<button class="g-icon-btn g-dialog-close" aria-label="Close" data-bk-dlg="cancel"><span data-icon="close" data-size="20"></span></button>' +
+    '<h3 id="bk-dlg-title">' + esc(dl.title || ('Back up ' + bkPlural(dl.ids.length, 'game'))) + '</h3>' +
+    '<p class="note">GRID downloads each game from romm.home.lan and writes it, with its art and details, to the drive’s gridpack folder.</p>' +
+    '<div class="sub"><h4>Drive</h4>' + drives + '</div>' +
+    (ready.length ? '<div class="sub"><h4>Also copy</h4>' +
+      '<div class="bk-also bk-auto"><span class="bk-auto-mark" data-icon="check" data-size="13"></span><span><b>Emulators</b><span class="note">' + emuLine + '</span></span></div>' +
+      '<label class="check bk-also"><input type="checkbox" data-bk-opt="fw"' + (dl.fw ? ' checked' : '') + (pl.fw.length ? '' : ' disabled') + '><span><b>Firmware</b><span class="note">' + fwLine + '</span></span></label>' +
+      '<p class="note">Covers, fanart, screenshots, logos and game details always go with each game, and so do the emulators.</p></div>' : '') +
+    (notes.length ? '<div class="bk-notes">' + notes.map(function (t) { return '<p class="note">' + t + '</p>'; }).join('') + '</div>' : '') +
+    '<div class="form-actions bk-foot">' + (ready.length ? '<span class="note">' + (n ? bkFmt(pl.size) + ' to write' : 'Nothing new to write') + '</span>' : '<span></span>') +
+    '<button class="g-btn secondary" data-bk-dlg="cancel">Cancel</button>' +
+    (ready.length ? '<button class="g-btn" data-bk-dlg="go"' + (n && !over ? '' : ' disabled') + '>' + (over ? 'Not enough space' : n ? 'Back up ' + bkPlural(n, 'game') : 'Nothing to back up') + '</button>' : '') + '</div>';
+  gIcons(el);
+}
+function bkCloseDlg() { BK.dlg = null; $('bkscrim').hidden = true; }
+
+/* ---- the backup queue: one Downloads row per item, kind "Backup" ---- */
+function bkGo() {
+  var dl = BK.dlg, pl = bkPlan(dl), d = pl.d, bid = 'b' + Date.now();
+  var items = pl.todo.map(function (g) { return { kind: 'game', id: g.id, t: g.t, sub: PLAT[g.p], size: bkSize(g) }; });
+  pl.emus.forEach(function (n) { items.push({ kind: 'emu', t: n, sub: (n === 'GE-Proton10-17' ? 'Compat tool' : 'Emulator') + ' · ' + bkOsNames(bkEmuOs(n, d)), size: bkEmuSize(n, d) }); });
+  if (dl.fw) pl.fw.forEach(function (k) { items.push({ kind: 'fw', p: k, t: SY.name[k] + ' firmware', sub: BK_FW[k] + ' files', size: .002 }); });
+  items.forEach(function (it) { it.drive = d.id; it.batch = bid; it.pct = 0; it.phase = 'queued'; });
+  BK.batches[bid] = { drive: d.id, games: pl.todo.length, emus: pl.emus.length, fw: dl.fw ? pl.fw.length : 0, left: items.length, written: 0 };
+  BK.q = BK.q.concat(items);
+  bkCloseDlg();
+  BK.sel = { view: null, ids: [] };
+  toast((pl.todo.length === 1 ? pl.todo[0].t : bkPlural(pl.todo.length, 'game')) + ' added to the backup queue for ' + d.name);
+  renderAll(); bkRun();
+}
+function bkRun() {
+  if (BK.job || !BK.q.length) return;
+  var it = BK.job = BK.q.shift();
+  it.phase = 'download'; it.pct = 0;
+  var tick = setInterval(function () {
+    if (BK.job !== it) { clearInterval(tick); return; }
+    var d = bkDrive(it.drive);
+    if (!d.connected) { clearInterval(tick); bkFail(it.drive); return; }
+    it.pct = Math.min(100, it.pct + (it.kind === 'game' ? 7 + Math.random() * 7 : 30));
+    if (it.pct >= 100 && it.phase === 'download') { it.phase = 'write'; it.pct = 0; }
+    else if (it.pct >= 100 && it.phase === 'write') { clearInterval(tick); bkFinish(it); return; }
+    renderDownloads();
+  }, 260);
+  renderDownloads();
+}
+function bkFinish(it) {
+  var d = bkDrive(it.drive), b = BK.batches[it.batch];
+  if (it.kind === 'game' && d.games.indexOf(it.id) < 0) d.games.push(it.id);
+  if (it.kind === 'emu' && d.emus.indexOf(it.t) < 0) d.emus.push(it.t);
+  if (it.kind === 'fw' && d.fw.indexOf(it.p) < 0) d.fw.push(it.p);
+  d.last = TODAY;
+  addDone(it.t, 'Backup', it.sub + ' · Written to ' + d.name);
+  BK.job = null; b.left -= 1; b.written += 1;
+  if (!b.left) {
+    var extra = [b.emus ? bkPlural(b.emus, 'emulator') : '', b.fw ? 'firmware' : ''].filter(Boolean).join(' and ');
+    toast((b.games ? bkPlural(b.games, 'game') : 'Files') + (extra ? ' and ' + extra : '') + ' backed up to ' + d.name);
+    delete BK.batches[it.batch];
+  }
+  renderAll(); bkRun();
+}
+/* The drive went away mid-backup: the item being written fails, the rest of
+   that drive's queue is cancelled, one error card says so. */
+function bkFail(driveId) {
+  var d = bkDrive(driveId), it = BK.job, left = BK.q.filter(function (x) { return x.drive === driveId; });
+  var b = BK.batches[it.batch], wrote = b ? b.written : 0;
+  addDone(it.t, 'Backup', it.sub + ' · Failed — ' + d.label + ' was removed');
+  if (left.length) addDone(left.length === 1 ? left[0].t : bkPlural(left.length, 'more item'), 'Backup', 'Cancelled — ' + d.label + ' was removed · back up again to finish');
+  BK.q = BK.q.filter(function (x) { return x.drive !== driveId; });
+  BK.job = null; delete BK.batches[it.batch];
+  toast('Backup to ' + d.name + ' stopped: ' + d.label + ' was removed. ' + wrote + ' of ' + (wrote + 1 + left.length) + ' items were written; the half-written one was cleaned up when the drive came back.', 'error');
+  renderAll(); bkRun();
+}
+var bkOrigDl = renderDownloads;
+renderDownloads = function () {
+  bkOrigDl();
+  var j = BK.job, from = S.dl && BK.from[S.dl.id] && bkDrive(BK.from[S.dl.id]);
+  if (from) {
+    $('strip-line').innerHTML = $('strip-line').innerHTML.replace(/ · [\d.]+ MB\/s/, ' · Copying from ' + esc(from.label));
+    var s = $('dl-active').querySelector('.s'); if (s) s.textContent = s.textContent.replace(/Downloading (\d+)%/, 'Copying from ' + from.label + ' $1%');
+  }
+  if (!j && !BK.q.length) return;
+  var active = (S.dl ? 1 : 0) + (j ? 1 : 0);
+  $('dl-active-n').textContent = active;
+  $('dl-queued-n').textContent = DLQ.length + BK.q.length;
+  var row = function (it, live) {
+    var d = bkDrive(it.drive), pct = Math.round(it.pct);
+    var st = !live ? 'Waiting · to ' + esc(d.name) : it.phase === 'download' ? 'Downloading from server ' + pct + '%' : 'Writing to ' + esc(d.label) + ' ' + pct + '%';
+    return '<div class="dl"' + (live ? '' : ' style="margin-top:8px"') + '><div><span class="t">' + esc(it.t) + '</span><span class="kind">Backup</span><div class="s">' + esc(it.sub) + ' · ' + st + '</div>' +
+      (live ? '<div class="bar"><b style="width:' + pct + '%"></b></div>' : '') + '</div>' +
+      (live ? '<svg width="120" height="38" viewBox="0 0 120 18" preserveAspectRatio="none"><polyline fill="none" stroke="' + (it.phase === 'write' ? 'var(--graph-disk)' : 'var(--primary)') + '" stroke-width="1.2" points="0,12 20,8 40,10 60,6 80,9 100,7 120,8"/></svg>' : '<span></span>') +
+      '<button class="small-btn" data-bk-cancel="' + (live ? 'job' : BK.q.indexOf(it)) + '">Cancel</button></div>';
+  };
+  if (j) {
+    if (!S.dl) $('dl-active').innerHTML = '';
+    $('dl-active').insertAdjacentHTML(S.dl ? 'beforeend' : 'afterbegin', (S.dl ? '<div style="height:8px"></div>' : '') + row(j, true));
+  }
+  if (BK.q.length) {
+    if (!DLQ.length) $('dl-queued').innerHTML = '';
+    $('dl-queued').insertAdjacentHTML('beforeend', BK.q.map(function (it) { return row(it, false); }).join(''));
+  }
+  if (!S.dl && j) {
+    $('strip').hidden = false;
+    var d = bkDrive(j.drive);
+    $('strip-line').innerHTML = 'Backing up ' + esc(j.t) + ' to ' + esc(d.name) + ' · ' + Math.round(j.pct) + '% · ' + (j.phase === 'download' ? 'downloading' : 'writing');
+  }
+};
+
+/* ---- install from a drive ---- */
+function bkInstallFrom(g, d) {
+  if (g.installed) return;
+  BK.from[g.id] = d.id;
+  var sys = bkSysOf(g.p), e = bkEmuFor(g.p);
+  if (g.p !== 'LINUX' && g.p !== 'WIN' && !SY.pick[g.p] && d.emus.indexOf(e) >= 0) {
+    toast(e + ' from ' + d.name + ' added to download queue');
+    addDone(e, 'Emulator', 'Copied from ' + d.label + ' · Finished');
+    if (SY.installed.indexOf(e) < 0) SY.installed.push(e);
+    SY.pick[g.p] = e; EMU[g.p] = e;
+  }
+  if (g.p === 'WIN' && !SY.winSet && d.emus.indexOf(e) >= 0) { SY.winSet = true; toast(e + ' from ' + d.name + ' added to download queue'); }
+  if (BK_FW[g.p] && d.fw.indexOf(g.p) >= 0 && SY.fw[g.p] !== 'installed') { SY.fw[g.p] = 'installed'; toast(SY.name[g.p] + ' firmware installed from ' + d.name); }
+  startInstall(g);
+}
+
+/* ---- offline: GRID without a server ---- */
+function bkSession() {
+  var dot = document.querySelector('.g-session .g-status-dot'), chip = $('chip'), menu = document.querySelector('#menu .g-menu');
+  if (!dot || !chip) return;
+  dot.classList.toggle('online', !S.offline); dot.classList.toggle('bk-offline-dot', !!S.offline);
+  chip.textContent = S.offline ? 'Offline · no server' : 'player@romm.home.lan';
+  menu.innerHTML = S.offline
+    ? '<button role="menuitem" data-bk-connect>Connect to a server…</button><span class="g-menu-host">Library and backup drives work offline</span>'
+    : '<button role="menuitem">Disconnect</button><button role="menuitem">Open RomM in browser</button><span class="g-menu-host">romm.home.lan</span>';
+}
+var bkOrigFresh = freshShow;
+freshShow = function (phase) {
+  bkOrigFresh(phase);
+  if (phase !== 'connect') return;
+  var c = document.querySelector('[data-fr-connect]'); if (!c) return;
+  c.insertAdjacentHTML('afterend', '<div class="bk-or" aria-hidden="true"><span>or</span></div><button class="g-btn secondary" type="button" data-bk-offline' + (FR.form.lib.trim() ? '' : ' disabled') + '>Use without a server</button>' +
+    '<p class="help center">Install games from a backup drive and play what’s installed. Connect to a server any time from the top bar.</p>');
+};
+
+/* ---- Details: Back up to drive, and drive context ---- */
+var bkOrigDet = renderDetails;
+renderDetails = function () {
+  bkOrigDet();
+  var g = S.detail; if (!g) return;
+  var left = $('d-left'), d = BK.detFrom && bkDrive(BK.detFrom);
+  if (d && d.connected) {
+    var inst = left.querySelector('[data-d=install]');
+    if (inst) { inst.textContent = S.dl && S.dl.id === g.id ? 'Installing…' : 'Install from drive'; inst.setAttribute('data-bk-dinst', d.id); inst.removeAttribute('data-d'); }
+    left.querySelector('.g-meta-line').insertAdjacentHTML('beforebegin', BK.confirm === 'drm' ? '<button class="g-btn destructive" data-bk-drm-go>Remove from ' + esc(d.name) + '</button>' : '<button class="g-btn secondary destructive" data-bk-drm>Remove from drive…</button>');
+  } else if (!g.missing) {
+    var on = bkReady().filter(function (x) { return x.games.indexOf(g.id) >= 0; });
+    var btn = '<button class="g-btn secondary" data-bk-one' + (S.offline ? ' disabled title="Connect to a server to back up games"' : '') + '>Back up to drive…</button>';
+    left.querySelector('.g-meta-line').insertAdjacentHTML('beforebegin', btn);
+    if (on.length) left.insertAdjacentHTML('beforeend', '<p class="g-meta-line bk-on"><span data-icon="drive" data-size="12"></span>On ' + esc(on.map(function (x) { return x.name; }).join(', ')) + '</p>');
+  }
+  if (d) $('d-head').querySelector('.g-header-line').insertAdjacentHTML('beforeend', ' · <span class="bk-src">From ' + esc(d.name) + '</span>');
+  gIcons(left);
+};
+
+/* ---- events ---- */
+document.addEventListener('click', function (e) {
+  var t = e.target, b;
+  /* Select mode: a click on a card picks it instead of opening Details. */
+  var card = t.closest('[data-game]');
+  if (card && bkSelecting() && card.closest('.grid.selecting')) {
+    e.stopPropagation(); e.preventDefault();
+    var id = +card.getAttribute('data-game'), ids = BK.sel.ids, i = ids.indexOf(id);
+    if (e.shiftKey && BK.sel.last !== undefined) {
+      var vis = bkVisible(), a = vis.indexOf(BK.sel.last), z = vis.indexOf(id);
+      vis.slice(Math.min(a, z), Math.max(a, z) + 1).forEach(function (x) { if (ids.indexOf(x) < 0) ids.push(x); });
+    } else if (i >= 0) ids.splice(i, 1); else ids.push(id);
+    BK.sel.last = id; BK.confirm = null;
+    S.view === 'library' ? renderLibrary() : renderServer();
+    return;
+  }
+  /* Drive grid: Install copies from the drive. */
+  if (card && S.view === 'library' && bkLibDrive()) {
+    var g0 = G[+card.getAttribute('data-game')], act = t.closest('[data-act]');
+    if (act && act.getAttribute('data-act') === 'primary' && !g0.installed) { e.stopPropagation(); bkInstallFrom(g0, bkLibDrive()); return; }
+    if (!act || act.getAttribute('data-act') !== 'primary') BK.detFrom = bkLibDrive().id;
+  } else if (card) BK.detFrom = null;
+}, true);
+
+document.addEventListener('click', function (e) {
+  var t = e.target, b;
+  if (t.closest('[data-bk-select]')) { var v = bkGridView(); BK.sel = BK.sel.view === v ? { view: null, ids: [] } : { view: v, ids: [] }; BK.confirm = null; v === 'library' ? renderLibrary() : renderServer(); return; }
+  if (t.closest('[data-bk-all]')) { var vis = bkVisible(), all = vis.every(function (x) { return BK.sel.ids.indexOf(x) >= 0; }); BK.sel.ids = all ? [] : vis; S.view === 'library' ? renderLibrary() : renderServer(); return; }
+  if (t.closest('[data-bk-clear]')) { BK.sel.ids = []; BK.confirm = null; S.view === 'library' ? renderLibrary() : renderServer(); return; }
+  if (t.closest('[data-bk-open]')) { bkOpen(BK.sel.ids); return; }
+  if ((b = t.closest('[data-bk-plat]'))) {
+    var view = b.getAttribute('data-bk-plat'), plat = view === 'server' ? S.platform : S.libFilter;
+    var ids = G.filter(function (g) { return g.p === plat && (view === 'server' || g.installed); }).map(function (g) { return g.id; });
+    bkOpen(ids, 'Back up ' + PLAT[plat] + ' · ' + bkPlural(ids.length, 'game')); return;
+  }
+  if (t.closest('[data-bk-one]')) { bkOpen([S.detail.id], 'Back up ' + S.detail.t); return; }
+  if ((b = t.closest('[data-bk-dlg]'))) { if (b.getAttribute('data-bk-dlg') === 'go') bkGo(); else bkCloseDlg(); return; }
+  if (t === $('bkscrim')) { bkCloseDlg(); return; }
+  if (t.closest('[data-bk-goset]')) { bkCloseDlg(); closeDetails(); S.view = 'settings'; S.setPane = 'backup'; renderAll(); return; }
+  if ((b = t.closest('[data-bk-cancel]'))) {
+    var k = b.getAttribute('data-bk-cancel');
+    var it = k === 'job' ? BK.job : BK.q[+k];
+    if (k === 'job') BK.job = null; else BK.q.splice(+k, 1);
+    var bt = BK.batches[it.batch]; if (bt) { bt.left -= 1; if (!bt.left) delete BK.batches[it.batch]; }
+    addDone(it.t, 'Backup', it.sub + ' · Cancelled');
+    renderAll(); bkRun(); return;
+  }
+  /* Settings › Backup drives */
+  if ((b = t.closest('[data-bk-setup]'))) { BK.setup = b.getAttribute('data-bk-setup'); renderSettings(); var n = $('bk-setup-name'); if (n) n.select(); return; }
+  if (t.closest('[data-bk-setup-cancel]')) { BK.setup = null; renderSettings(); return; }
+  if ((b = t.closest('[data-bk-setup-go]'))) {
+    var d = bkDrive(b.getAttribute('data-bk-setup-go')); d.name = ($('bk-setup-name').value || d.label).trim(); d.init = true;
+    d.os = Array.prototype.filter.call(document.querySelectorAll('[data-bk-setup-os]'), function (c) { return c.checked; }).map(function (c) { return c.getAttribute('data-bk-setup-os'); }); if (!d.os.length) d.os = ['linux']; d.created = d.last = TODAY; BK.setup = null;
+    toast(d.label + ' is ready for backups as “' + d.name + '”'); renderAll(); return;
+  }
+  if ((b = t.closest('[data-bk-os-edit]'))) { BK.osEdit = b.getAttribute('data-bk-os-edit'); renderSettings(); return; }
+  if (t.closest('[data-bk-os-cancel]')) { BK.osEdit = null; renderSettings(); return; }
+  if ((b = t.closest('[data-bk-os-go]'))) { bkOsSave(bkDrive(b.getAttribute('data-bk-os-go'))); return; }
+  if ((b = t.closest('[data-bk-rename]'))) { BK.rename = b.getAttribute('data-bk-rename'); renderSettings(); return; }
+  if (t.closest('[data-bk-rename-cancel]')) { BK.rename = null; renderSettings(); return; }
+  if ((b = t.closest('[data-bk-rename-go]'))) { var d2 = bkDrive(b.getAttribute('data-bk-rename-go')); d2.name = ($('bk-rename').value || d2.name).trim(); BK.rename = null; renderAll(); return; }
+  if ((b = t.closest('[data-bk-wipe]'))) { BK.confirm = 'wipe:' + b.getAttribute('data-bk-wipe'); renderSettings(); return; }
+  if (t.closest('[data-bk-confirm-cancel]')) { BK.confirm = null; renderSettings(); return; }
+  if ((b = t.closest('[data-bk-wipe-go]'))) {
+    var d3 = bkDrive(b.getAttribute('data-bk-wipe-go')), used = bkGridUsed(d3);
+    d3.init = false; d3.games = []; d3.emus = []; d3.fw = []; BK.confirm = null;
+    toast('Deleted the gridpack folder from ' + d3.label + ' (' + bkFmt(used) + '). Nothing else on the drive was touched.'); renderAll(); return;
+  }
+  if ((b = t.closest('[data-bk-show]'))) { S.view = 'library'; S.libFilter = 'drive:' + b.getAttribute('data-bk-show'); renderAll(); return; }
+  if ((b = t.closest('[data-bk-forget]'))) { BK.drives = BK.drives.filter(function (x) { return x.id !== b.getAttribute('data-bk-forget'); }); renderSettings(); return; }
+  if ((b = t.closest('[data-bk-plug]'))) {
+    var d4 = bkDrive(b.getAttribute('data-bk-plug')); d4.connected = !d4.connected; d4.seen = 'just now';
+    if (d4.connected && d4.init) toast((d4.name) + ' connected · ' + bkPlural(d4.games.length, 'game'));
+    renderAll(); return;
+  }
+  /* Drive grid select bar */
+  if (t.closest('[data-bk-sel-install]')) { var dd = bkLibDrive(); BK.sel.ids.forEach(function (id) { bkInstallFrom(G[id], dd); }); BK.sel = { view: null, ids: [] }; renderAll(); return; }
+  if (t.closest('[data-bk-sel-rm]')) { BK.confirm = 'selrm'; renderLibrary(); return; }
+  if (t.closest('[data-bk-sel-rm-go]')) {
+    var dr = bkLibDrive(), n2 = BK.sel.ids.length; dr.games = dr.games.filter(function (id) { return BK.sel.ids.indexOf(id) < 0; });
+    BK.sel = { view: null, ids: [] }; BK.confirm = null; toast('Removed ' + bkPlural(n2, 'game') + ' from ' + dr.name); renderAll(); return;
+  }
+  /* Details on a drive */
+  if ((b = t.closest('[data-bk-dinst]'))) { bkInstallFrom(S.detail, bkDrive(b.getAttribute('data-bk-dinst'))); renderDetails(); return; }
+  if (t.closest('[data-bk-drm]')) { BK.confirm = 'drm'; renderDetails(); return; }
+  if (t.closest('[data-bk-drm-go]')) { var d5 = bkDrive(BK.detFrom); d5.games = d5.games.filter(function (id) { return id !== S.detail.id; }); toast('Removed ' + S.detail.t + ' from ' + d5.name); BK.confirm = null; closeDetails(); renderAll(); return; }
+  /* Offline */
+  if (t.closest('[data-bk-offline]')) { S.offline = true; freshHide(); S.view = 'library'; var r = bkReady()[0]; S.libFilter = r ? 'drive:' + r.id : 'all'; bkSession(); renderAll(); return; }
+  if (t.closest('[data-bk-connect]')) { $('menu').hidden = true; S.offline = false; bkSession(); freshShow('connect'); return; }
+});
+document.addEventListener('change', function (e) {
+  var t = e.target;
+  if (t.name === 'bk-drive') { BK.dlg.drive = t.value; bkRenderDlg(); return; }
+  var o = t.getAttribute && t.getAttribute('data-bk-opt'); if (o) { BK.dlg[o] = t.checked; bkRenderDlg(); return; }
+  var df = t.getAttribute && t.getAttribute('data-bk-default'); if (df) { BK.opts[df] = t.checked; }
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && BK.dlg) { e.stopImmediatePropagation(); bkCloseDlg(); }
+  else if (e.key === 'Escape' && BK.sel.view) { BK.sel = { view: null, ids: [] }; renderAll(); }
+}, true);
+
+function bkBoot() {
+  S.view = 'library'; S.libFilter = 'drive:t7'; S.platform = 'PS';
+  paintArt(G[5]); bkSession(); renderAll(); gIcons();
+}
+var bkOrigClose = closeDetails;
+closeDetails = function () { BK.detFrom = null; if (BK.confirm === 'drm') BK.confirm = null; bkOrigClose(); };
+
+/* ---- details ---- */
+/* Both grids' Size selects show the one card size. */
+function syncSize(){ document.querySelectorAll('[data-size-select]').forEach(function(s){ s.value = String(S.cardW); }); }
+function openDetails(g, tab){
+  S.detail = g; S.tab = tab || 'overview'; S.lastViewed = g.id; paintArt(g);
+  $('scrim').hidden = false; renderDetails(); $('dialog').focus({ preventScroll: true });
+}
+function renderDetails(){
+  var g = S.detail; if (!g) return;
+  var acts;
+  if (g.missing) acts = '<div class="g-chip status missing" style="align-self:center">Files not found</div><p class="g-meta-line">The game’s files are not in the library folder.</p><button class="g-btn">Locate…</button><button class="g-btn secondary destructive">Remove from library (keeps files)</button>';
+  else if (g.installed) acts = '<button class="g-btn" data-d="play">Play</button>'+(g.update?'<button class="g-btn secondary">Update to v1.2</button>':'')+'<button class="g-btn secondary" data-d="uninstall">Uninstall</button>';
+  else acts = '<button class="g-btn" data-d="install">'+(S.dl && S.dl.id===g.id?'Installing…':'Install')+'</button>';
+  $('d-left').innerHTML = '<div class="g-cover" style="box-shadow:var(--shadow-lift);max-height:320px"><div class="g-art" style="background:'+g.c+';font-size:20px"><span>'+esc(g.t)+'</span></div></div>'+acts+
+    '<p class="g-meta-line">'+(g.installed?'Last played 2 days ago':'Never played')+'</p><p class="g-meta-line">'+(g.p==='LINUX' ? 'Runs natively' : g.p==='WIN' ? 'Runs through Proton' : EMU[g.p]==='none' ? 'No emulator set up' : EMU[g.p])+'</p>';
+  $('d-head').innerHTML = '<h2>'+esc(g.t)+'</h2><p class="g-header-line">'+PLAT[g.p]+' · 1998 · Action · <span class="g-rating"><span data-icon="star" data-size="14"></span>8.'+(g.id%9)+'</span></p><div class="row" style="display:flex;gap:6px">'+(S.playing===g.id?'<span class="g-chip playing">Playing</span>':'')+'<span class="g-chip">Identified</span>'+(g.installed?'<span class="g-chip">v1.1</span>':'')+'</div>';
+  var tabs = [['overview','Overview'],['media','Media'],['saves','Saves'],['achievements','Achievements']];
+  $('d-tabs').innerHTML = tabs.map(function(t){ return '<button role="tab" data-tab="'+t[0]+'" class="'+(S.tab===t[0]?'active':'')+'" aria-selected="'+(S.tab===t[0])+'">'+t[1]+'</button>'; }).join('');
+  var p = $('d-panel');
+  if (S.tab === 'overview') p.innerHTML = '<div class="overview"><div class="g-description" style="flex:1 1 340px"><p>'+esc(g.t)+' is a placeholder title for this prototype. The real Overview shows the server’s summary here, broken into paragraphs at about 70 characters a line.</p><p>Related games from the same franchise sit under the text as chips.</p></div><dl class="g-facts" style="flex:0 1 220px"><div><dt>Released</dt><dd>14 March 1998</dd></div><div><dt>Genres</dt><dd>Action, Adventure</dd></div><div><dt>Companies</dt><dd>Northwind Interactive</dd></div><div><dt>Size</dt><dd>612 MB</dd></div><div><dt>Version</dt><dd>'+(g.update?'v1.1 installed · v1.2 on server':'v1.1')+'</dd></div></dl></div>';
+  else if (S.tab === 'media') p.innerHTML = '<p class="sec-title">Screenshots</p><div class="media-row">'+[0,1,2,3].map(function(i){ return '<div class="shot" style="background:'+g.c+';filter:hue-rotate('+(i*25)+'deg)"></div>'; }).join('')+'</div><p class="sec-title" style="margin-top:14px">Videos</p><div class="media-row"><div class="shot" style="background:hsl(220 20% 20%);display:grid;place-items:center;color:#fff"><span data-icon="play" data-size="28"></span></div></div>';
+  else if (S.tab === 'saves') p.innerHTML = '<div class="g-switch" role="tablist" id="kind"><button data-k="save" class="'+(S.kind==='save'?'active':'')+'">Saves</button><button data-k="state" class="'+(S.kind==='state'?'active':'')+'">States</button></div>'+
+    (S.kind==='save' ? '<div class="save-row"><span class="t">Memory card 1</span><span class="s">Uploaded today, 14:02</span><button class="small-btn">Restore</button></div><div class="save-row"><span class="t">Memory card 1</span><span class="s">Uploaded 3 days ago</span><button class="small-btn">Restore</button></div><div style="margin-top:12px"><button class="g-btn">Upload save</button></div>'
+                     : '<div class="save-row"><span class="t">Slot 1</span><span class="s">Uploaded yesterday</span><button class="small-btn">Restore</button></div><div style="margin-top:12px"><button class="g-btn">Upload state</button></div>');
+  else p.innerHTML = '<p class="note">Sign in to RetroAchievements in Settings to see progress here.</p>';
+  gIcons($('dialog'));
+}
+function closeDetails(){ S.detail = null; $('scrim').hidden = true; }
+
+/* ---- toasts ---- */
+function centredToastUnused(msg){
+  var t = document.createElement('p'); t.className = 'g-toast'; t.textContent = msg; $('toasts').appendChild(t);
+  setTimeout(function(){ t.remove(); }, 2600);
+}
+
+/* ---- events ---- */
+document.addEventListener('click', function(e){
+  var v = e.target.closest('[data-view-btn]'); if (v) { S.view = v.getAttribute('data-view-btn'); renderAll(); return; }
+  var go = e.target.closest('[data-go]'); if (go) { S.view = go.getAttribute('data-go'); if (S.view==='emulators') { S.view='settings'; S.setPane='systems'; } renderAll(); return; }
+  if (e.target.closest('#chip')) { var m = $('menu'); m.hidden = !m.hidden; $('chip').setAttribute('aria-expanded', !m.hidden); return; }
+  if (!e.target.closest('#menu')) $('menu').hidden = true;
+  var fw = e.target.closest('[data-fw]'); if (fw) { var k = fw.getAttribute('data-fw'); if (S.fw[k] === 'unavailable') { toast('Nothing on the server lands in this emulator’s folders'); return; } S.fw[k] = 'requested'; toast('Installing '+PLAT[k]+' firmware for '+EMU[k]+'…'); renderEmulators(); setTimeout(function(){ S.fw[k] = 'installed'; toast(PLAT[k]+' firmware installed'); renderEmulators(); }, 1600); return; }
+  var ud = e.target.closest('[data-undone]'); if (ud) { DONE.splice(+ud.getAttribute('data-undone'), 1); renderDownloads(); return; }
+  var uq = e.target.closest('[data-unqueue]'); if (uq) { DLQ.splice(DLQ.indexOf(+uq.getAttribute('data-unqueue')), 1); renderAll(); return; }
+  if (e.target.closest('[data-cancel]')) { toast('Cancelled ' + G[S.dl.id].t); addDone(G[S.dl.id].t, '', PLAT[G[S.dl.id].p] + ' · Cancelled'); S.dl = null; renderAll(); if (DLQ.length) startInstall(G[DLQ.shift()], true); return; }
+
+  var tst = e.target.closest('[data-toast]'); if (tst) { toast(tst.getAttribute('data-toast')); return; }
+  var at = e.target.closest('[data-addtab]'); if (at) { S.addTab = at.getAttribute('data-addtab'); renderEmulators(); return; }
+  var ct = e.target.closest('[data-cat]'); if (ct) { var pr = ct.getAttribute('data-cat').split(':'); installCatalog(pr[0], pr.slice(1).join(':')); return; }
+  if (e.target.closest('[data-umu]')) { S.umu = 'busy'; toast('Installing umu-launcher…'); renderEmulators(); setTimeout(function(){ S.umu = 'managed'; toast('umu-launcher installed'); renderEmulators(); }, 1600); return; }
+  var ed = e.target.closest('[data-edit]'); if (ed) { S.emuPane = 'catalog'; S.addTab = 'manual'; renderEmulators(); return; }
+  var cn = e.target.closest('[data-conn]'); if (cn) { var c2 = cn.getAttribute('data-conn'); S.connEdit = c2 === 'edit'; if (c2 === 'save') toast('Connected to romm.home.lan'); renderSettings(); return; }
+  var ra = e.target.closest('[data-ra]'); if (ra) { var r = ra.getAttribute('data-ra'), u = ($('ra-user') || {}).value || ''; if (r === 'clear') { S.ra = { user: '', set: false }; toast('RetroAchievements cleared from every emulator'); } else if (!u.trim()) { toast('Enter a username first'); return; } else { S.ra = { user: u.trim(), set: true }; toast(r === 'login' ? 'Logged in as ' + u.trim() : 'Updated: RetroArch, DuckStation, Dolphin'); } renderSettings(); return; }
+  if (e.target.closest('[data-dismiss-update]')) { S.updateNotice = false; renderSettings(); return; }
+  if (e.target.closest('[data-libchange]')) { openLibChange('pick'); return; }
+  var lb = e.target.closest('[data-lib]'); if (lb) { var l = lb.getAttribute('data-lib');
+    if (l === 'close') closeLibChange(); else if (l === 'move' || l === 'fresh' || l === 'pick') openLibChange(l);
+    else { closeLibChange(); toast(l === 'start' ? 'Library move started — follow it in Downloads' : l === 'leave' ? 'Library now at /mnt/games/GRID; old files left on disk' : 'Shows the folders and size to delete, then asks again'); }
+    return; }
+  if (e.target === $('libscrim')) { closeLibChange(); return; }
+  var c = e.target.closest('[data-game]');
+  if (c) {
+    var g = G[+c.getAttribute('data-game')], act = e.target.closest('[data-act]');
+    var a = act ? act.getAttribute('data-act') : 'open';
+    if (a === 'primary') { if (g.missing) openDetails(g); else if (g.installed) { S.playing = g.id; toast('Launching ' + g.t + '…'); } else startInstall(g); }
+    else if (a === 'cloud') openDetails(g, 'saves');
+    else openDetails(g);
+    return;
+  }
+  if (e.target === $('scrim') || e.target.closest('#close')) { closeDetails(); return; }
+  var tb = e.target.closest('[data-tab]'); if (tb) { S.tab = tb.getAttribute('data-tab'); renderDetails(); return; }
+  var kd = e.target.closest('[data-k]'); if (kd) { S.kind = kd.getAttribute('data-k'); renderDetails(); return; }
+  var d = e.target.closest('[data-d]');
+  if (d) { var a2 = d.getAttribute('data-d'); if (a2 === 'install') startInstall(S.detail); else if (a2 === 'play') { S.playing = S.detail.id; toast('Launching ' + S.detail.t + '…'); renderDetails(); } else if (a2 === 'uninstall') { if (d.textContent === 'Confirm uninstall') { S.detail.installed = false; toast(S.detail.t + ' uninstalled'); renderAll(); } else { d.textContent = 'Confirm uninstall'; d.classList.add('confirm'); } } }
+});
+document.addEventListener('input', function(e){ var k = e.target.getAttribute && e.target.getAttribute('data-search'); if (k) { S.q[k] = e.target.value; k === 'server' ? renderServer() : renderLibrary(); } });
+document.addEventListener('change', function(e){ var df = e.target.getAttribute && e.target.getAttribute('data-default'); if (df) { DEFAULTS[df] = e.target.value; EMU[df] = e.target.value === 'RetroArch' ? 'RetroArch · ' + (CORES[df] || ['core'])[0] : e.target.value; renderEmulators(); renderServer(); return; } var cd = e.target.getAttribute && e.target.getAttribute('data-compat'); if (cd) { S.compatDefault = cd; return; } var ck = e.target.getAttribute && e.target.getAttribute('data-cloud'); if (ck) { S.cloud[ck] = e.target.checked; return; } if (e.target.hasAttribute && e.target.hasAttribute('data-size-select')) { S.cardW = +e.target.value; syncSize(); renderAll(); } });
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape') { if (!$('libscrim').hidden) closeLibChange(); else if (S.detail) closeDetails(); $('menu').hidden = true; }
+  if ((e.ctrlKey || e.metaKey) && /^[1-4]$/.test(e.key)) { e.preventDefault(); S.view = VIEWS[+e.key - 1]; renderAll(); }
+});
+document.querySelector('#app').addEventListener('mouseover', function(e){ var c = e.target.closest('[data-game]'); if (c && S.fade < 100) { var id = +c.getAttribute('data-game'); if (S.hoverId !== id) { S.hoverId = id; clearTimeout(S.hoverT); S.hoverT = setTimeout(function(){ S.lastViewed = id; paintArt(G[id]); }, 600); } } });
+
+function renderAll(){ renderPills(); renderServer(); renderLibrary(); renderDownloads(); renderEmulators(); renderSettings(); renderDetails(); }
+bkBoot();
+})();
+</script>
+</body>
+</html>
