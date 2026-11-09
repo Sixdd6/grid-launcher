@@ -1375,7 +1375,7 @@ mod tests {
             "games/ps4/Ember Run/installed.tar.1000"
         );
         assert!(validate_rel(&installed_part_rel(&dir, 0)).is_ok());
-        assert!(PART_BYTES < FAT32_MAX_FILE);
+        const { assert!(PART_BYTES < FAT32_MAX_FILE) };
     }
 
     #[test]
