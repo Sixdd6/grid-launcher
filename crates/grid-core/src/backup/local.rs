@@ -904,6 +904,51 @@ mod tests {
         assert_eq!(read, names);
     }
 
+    /// The long-name rule is the tar crate's: a name of up to 100 bytes
+    /// fits the header; from 101 on it takes a GNU long-name record. A
+    /// folder's trailing `/` counts.
+    #[test]
+    fn the_long_name_rule_matches_the_tar_crate() {
+        let written = |name: &str, kind: TreeEntryKind, size: u64| {
+            let entry = TreeEntry {
+                path: PathBuf::new(),
+                name: name.to_string(),
+                kind,
+                size,
+                mode: 0o644,
+                mtime: 0,
+            };
+            let mut builder = tar::Builder::new(Vec::new());
+            let data = vec![1_u8; size as usize];
+            builder
+                .append_data(&mut tar_header(&entry), name, data.as_slice())
+                .unwrap();
+            builder.get_ref().len() as u64
+        };
+        for len in [98, 99, 100, 101, 102] {
+            let file = "f".repeat(len);
+            let folder = format!("{}/", "d".repeat(len - 1));
+            let nested = format!("{}/{}", "n".repeat(len / 2), "m".repeat(len - len / 2 - 1));
+            let unicode = format!("{}{}", "ü".repeat(len / 2), "u".repeat(len % 2));
+            for (name, kind) in [
+                (&file, TreeEntryKind::File),
+                (&folder, TreeEntryKind::Dir),
+                (&nested, TreeEntryKind::File),
+                (&unicode, TreeEntryKind::File),
+            ] {
+                assert_eq!(name.len(), len, "{name}");
+                let size = if kind == TreeEntryKind::Dir { 0 } else { 5 };
+                let long = written(name, kind, size) > BLOCK + padded(size);
+                assert_eq!(long, len > 100, "{len}: {name}");
+                assert_eq!(
+                    entry_archive_bytes(name, size),
+                    written(name, kind, size),
+                    "{len}: {name}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_single_file_is_one_entry_named_after_it() {
         let dir = tempfile::tempdir().unwrap();

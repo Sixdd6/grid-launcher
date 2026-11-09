@@ -22,17 +22,14 @@ use std::io::{self, BufWriter, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::UNIX_EPOCH;
 
 use md5::{Digest, Md5};
 
 use super::drives::disk_space;
+use super::local::{self, TreeEntry, TreeEntryKind, TreePlan};
 use super::pack::{self, PackPart, PART_BYTES};
 use super::write::{self, classify_io, WriteError, WriteTarget, CHUNK_BYTES};
 use crate::library::extract::{is_absolute_entry_path, unsafe_path_error};
-
-/// The parts' file name before the `.001` index.
-pub const PART_STEM: &str = "installed.tar";
 
 /// A part size tests set in place of [`PART_BYTES`]; 0 when unset.
 static PART_BYTES_OVERRIDE: AtomicU64 = AtomicU64::new(0);
@@ -50,34 +47,6 @@ pub fn part_bytes() -> u64 {
         0 => PART_BYTES,
         bytes => bytes,
     }
-}
-
-/// `<rel_base>/installed.tar.<index>`, the index 1-based with three digits.
-fn part_rel(rel_base: &str, index: usize) -> String {
-    format!("{rel_base}/{PART_STEM}.{index:03}")
-}
-
-/// One entry of a tree to archive.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ArchiveEntry {
-    /// The path inside the tree, `/`-separated, with only plain parts.
-    pub rel: String,
-    /// The local file or folder it is read from.
-    pub src: PathBuf,
-    /// The file's length when the tree was scanned (0 for a folder).
-    pub size: u64,
-    /// Unix permission bits; 0 when the OS has none (then 0o644 for a file,
-    /// 0o755 for a folder). Only `0o777` is kept.
-    pub mode: u32,
-    pub is_dir: bool,
-}
-
-/// A tree to archive: its entries (in any order) and the exact size of the
-/// tar stream they make, which progress is measured against.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ArchiveTree {
-    pub entries: Vec<ArchiveEntry>,
-    pub archive_bytes: u64,
 }
 
 fn hex(md5: [u8; 16]) -> String {
@@ -196,7 +165,7 @@ impl<'a> TarPartWriter<'a> {
             None if write::drive_gone(mount) => return Err(WriteError::DriveRemoved),
             None => {}
         }
-        let rel = part_rel(&self.rel_base, self.parts.len() + 1);
+        let rel = pack::installed_part_rel(&self.rel_base, self.parts.len());
         let dest = pack::resolve(mount, &rel)?;
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|error| classify_io(error, mount))?;
@@ -384,9 +353,18 @@ impl Read for SourceReader<'_> {
     }
 }
 
-/// Refuses an entry path that is empty, absolute, or has an empty, `.` or
-/// `..` part.
-fn check_entry_rel(rel: &str) -> Result<(), WriteError> {
+/// The entry's name as shown in an error: a folder without its `/`.
+fn shown_name(entry: &TreeEntry) -> String {
+    entry.name.trim_end_matches('/').to_string()
+}
+
+/// Refuses an entry name that is empty, absolute, or has an empty, `.` or
+/// `..` part. A folder's name may end in `/`; a file's may not.
+fn check_entry_name(entry: &TreeEntry) -> Result<(), WriteError> {
+    let rel = match entry.kind {
+        TreeEntryKind::Dir => entry.name.strip_suffix('/').unwrap_or(&entry.name),
+        TreeEntryKind::File => entry.name.as_str(),
+    };
     let plain = !rel.is_empty()
         && !rel.starts_with('/')
         && !rel.contains('\0')
@@ -397,73 +375,60 @@ fn check_entry_rel(rel: &str) -> Result<(), WriteError> {
         Ok(())
     } else {
         Err(WriteError::Refused(format!(
-            "{rel} is not a plain path inside the game's folder"
+            "{} is not a plain path inside the game's folder",
+            entry.name
         )))
     }
 }
 
-fn mtime(meta: &fs::Metadata) -> u64 {
-    meta.modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map_or(0, |since| since.as_secs())
-}
-
-/// Appends one entry. An error from the local file is returned as
-/// [`WriteError::SourceChanged`] directly, or flagged in `changed` when it
-/// happens inside the builder.
+/// Appends one entry with [`local::tar_header`] under its scanned name, as
+/// [`TreePlan::archive_bytes`] counts it. An error from the local file is
+/// returned as [`WriteError::SourceChanged`] directly, or flagged in
+/// `changed` when it happens inside the builder.
 fn append_entry<W: Write>(
     builder: &mut tar::Builder<W>,
-    entry: &ArchiveEntry,
+    entry: &TreeEntry,
     changed: &Cell<bool>,
 ) -> Result<io::Result<()>, WriteError> {
-    let source_changed = || WriteError::SourceChanged(entry.rel.clone());
-    let mut header = tar::Header::new_gnu();
-    let mode = entry.mode & 0o777;
-    if entry.is_dir {
-        let meta = fs::metadata(&entry.src).map_err(|_| source_changed())?;
-        if !meta.is_dir() {
-            return Err(source_changed());
+    let source_changed = || WriteError::SourceChanged(shown_name(entry));
+    let mut header = local::tar_header(entry);
+    match entry.kind {
+        TreeEntryKind::Dir => {
+            let meta = fs::symlink_metadata(&entry.path).map_err(|_| source_changed())?;
+            if !meta.is_dir() {
+                return Err(source_changed());
+            }
+            Ok(builder.append_data(&mut header, &entry.name, io::empty()))
         }
-        header.set_entry_type(tar::EntryType::Directory);
-        header.set_size(0);
-        header.set_mode(if mode == 0 { 0o755 } else { mode });
-        header.set_mtime(mtime(&meta));
-        return Ok(builder.append_data(&mut header, &entry.rel, io::empty()));
+        TreeEntryKind::File => {
+            let file = File::open(&entry.path).map_err(|_| source_changed())?;
+            let meta = file.metadata().map_err(|_| source_changed())?;
+            if !meta.is_file() || meta.len() != entry.size {
+                return Err(source_changed());
+            }
+            let source = SourceReader {
+                file,
+                left: entry.size,
+                changed,
+            };
+            Ok(builder.append_data(&mut header, &entry.name, source))
+        }
     }
-    let file = File::open(&entry.src).map_err(|_| source_changed())?;
-    let meta = file.metadata().map_err(|_| source_changed())?;
-    if !meta.is_file() || meta.len() != entry.size {
-        return Err(source_changed());
-    }
-    header.set_entry_type(tar::EntryType::Regular);
-    header.set_size(entry.size);
-    header.set_mode(if mode == 0 { 0o644 } else { mode });
-    header.set_mtime(mtime(&meta));
-    let source = SourceReader {
-        file,
-        left: entry.size,
-        changed,
-    };
-    Ok(builder.append_data(&mut header, &entry.rel, source))
-}
-
-/// Entries in archive order: by path parts, so a folder comes before what
-/// it holds.
-fn sorted(entries: &[ArchiveEntry]) -> Vec<&ArchiveEntry> {
-    let mut order: Vec<&ArchiveEntry> = entries.iter().collect();
-    order.sort_by(|a, b| a.rel.split('/').cmp(b.rel.split('/')));
-    order
 }
 
 type PartBuilder<'w, 'a> = tar::Builder<BufWriter<&'w mut TarPartWriter<'a>>>;
 
-/// Writes `tree` to the drive as checked tar parts under `rel_base` (a
-/// pack-relative folder), each at most `part_bytes` (use [`part_bytes`]).
+/// Writes the scanned `tree` ([`local::scan_tree`]) to the drive as checked
+/// tar parts `<rel_base>/installed.tar.001`, `.002`, … (named by
+/// [`pack::installed_part_rel`]), each at most `part_bytes` (use
+/// [`part_bytes`]). `rel_base` is a pack-relative folder.
 ///
-/// - Entries go in sorted order. A local file that can't be read, or whose
-///   length differs from [`ArchiveEntry::size`], fails with
-///   [`WriteError::SourceChanged`], never a drive error.
+/// - Entries go in [`TreePlan::entries`] order, each with
+///   [`local::tar_header`] and its scanned name, so the parts together
+///   hold exactly [`TreePlan::archive_bytes`] bytes.
+/// - A local file that can't be read, or whose length differs from
+///   [`TreeEntry::size`], fails with [`WriteError::SourceChanged`], never
+///   a drive error.
 /// - `cancel` is checked on every write; the space margin at each part.
 /// - `progress(done, total)` runs over `2 × tree.archive_bytes`.
 /// - On success every part has its final name and the parts are returned
@@ -471,16 +436,15 @@ type PartBuilder<'w, 'a> = tar::Builder<BufWriter<&'w mut TarPartWriter<'a>>>;
 ///   drive is gone.
 pub fn write_installed_tree(
     target: &WriteTarget<'_>,
-    tree: &ArchiveTree,
+    tree: &TreePlan,
     rel_base: &str,
     part_bytes: u64,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<Vec<PackPart>, WriteError> {
     pack::validate_rel(rel_base)?;
-    let order = sorted(&tree.entries);
-    for entry in &order {
-        check_entry_rel(&entry.rel)?;
+    for entry in &tree.entries {
+        check_entry_name(entry)?;
     }
     let mut writer = TarPartWriter::new(
         target,
@@ -493,7 +457,7 @@ pub fn write_installed_tree(
     let changed = Cell::new(false);
     let result = {
         let mut builder = tar::Builder::new(BufWriter::with_capacity(CHUNK_BYTES, &mut writer));
-        let result = build(&mut builder, &order, &changed);
+        let result = build(&mut builder, &tree.entries, &changed);
         if result.is_err() {
             builder.get_mut().get_mut().stop();
         }
@@ -520,10 +484,10 @@ fn discard(writer: &mut TarPartWriter<'_>, error: WriteError) -> WriteError {
 /// Streams every entry and the end blocks into the parts.
 fn build(
     builder: &mut PartBuilder<'_, '_>,
-    order: &[&ArchiveEntry],
+    entries: &[TreeEntry],
     changed: &Cell<bool>,
 ) -> Result<(), WriteError> {
-    for entry in order {
+    for entry in entries {
         changed.set(false);
         if let Err(error) = append_entry(builder, entry, changed)? {
             return Err(stopped(builder, error, changed.get().then_some(entry)));
@@ -543,13 +507,13 @@ fn build(
 fn stopped(
     builder: &mut PartBuilder<'_, '_>,
     error: io::Error,
-    source: Option<&&ArchiveEntry>,
+    source: Option<&TreeEntry>,
 ) -> WriteError {
     if let Some(failure) = builder.get_mut().get_mut().take_failure() {
         return failure;
     }
     match source {
-        Some(entry) => WriteError::SourceChanged(entry.rel.clone()),
+        Some(entry) => WriteError::SourceChanged(shown_name(entry)),
         None => WriteError::Io(error),
     }
 }
@@ -1009,47 +973,28 @@ mod tests {
         }
     }
 
-    fn walk(root: &Path, dir: &Path, out: &mut Vec<ArchiveEntry>) {
-        let mut children: Vec<_> = fs::read_dir(dir).unwrap().map(|e| e.unwrap()).collect();
-        children.sort_by_key(|entry| entry.file_name());
-        for child in children {
-            let path = child.path();
-            let meta = fs::symlink_metadata(&path).unwrap();
-            let rel = path
-                .strip_prefix(root)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .replace('\\', "/");
-            out.push(ArchiveEntry {
-                rel,
-                src: path.clone(),
-                size: if meta.is_dir() { 0 } else { meta.len() },
-                mode: mode_of(&meta),
-                is_dir: meta.is_dir(),
-            });
-            if meta.is_dir() {
-                walk(root, &path, out);
-            }
-        }
+    /// The tree at `root` as the backup scans it.
+    fn scan(root: &Path) -> TreePlan {
+        let source = local::LocalSource {
+            layout: crate::backup::pack::InstalledLayout::Extracted,
+            root: root.to_path_buf(),
+            name: root.file_name().unwrap().to_string_lossy().into_owned(),
+            excludes: Vec::new(),
+            launch: String::new(),
+        };
+        local::scan_tree(&source, false).unwrap()
     }
 
-    /// The entries of `root` and their exact archive size, measured with
-    /// the same entry writer.
-    fn scan(root: &Path) -> ArchiveTree {
-        let mut entries = Vec::new();
-        walk(root, root, &mut entries);
-        let mut builder = tar::Builder::new(Vec::new());
-        let changed = Cell::new(false);
-        for entry in sorted(&entries) {
-            append_entry(&mut builder, entry, &changed)
-                .unwrap()
-                .unwrap();
-        }
-        let archive_bytes = builder.into_inner().unwrap().len() as u64;
-        ArchiveTree {
+    /// A hand-made plan holding `entries`.
+    fn plan_of(entries: Vec<TreeEntry>, archive_bytes: u64) -> TreePlan {
+        TreePlan {
+            root: PathBuf::from("/nonexistent"),
+            layout: crate::backup::pack::InstalledLayout::Extracted,
+            excludes: Vec::new(),
             entries,
             archive_bytes,
+            tree_bytes: 0,
+            tree_files: 0,
         }
     }
 
@@ -1077,7 +1022,7 @@ mod tests {
 
     fn write_small(
         mount: &Path,
-        tree: &ArchiveTree,
+        tree: &TreePlan,
         cancel: &AtomicBool,
     ) -> Result<Vec<PackPart>, WriteError> {
         write_installed_tree(&target(mount), tree, BASE, SMALL, cancel, &mut |_, _| {})
@@ -1136,6 +1081,7 @@ mod tests {
         assert_eq!(parts.len(), expected_parts);
         let mut joined = Vec::new();
         for (index, part) in parts.iter().enumerate() {
+            assert_eq!(part.path, pack::installed_part_rel(BASE, index));
             assert_eq!(part.path, format!("{BASE}/installed.tar.{:03}", index + 1));
             let data = fs::read(pack::resolve(drive.path(), &part.path).unwrap()).unwrap();
             assert_eq!(data.len() as u64, part.size);
@@ -1251,12 +1197,13 @@ mod tests {
         // A file removed since the scan is the same.
         fs::remove_file(game.path().join("zero.txt")).unwrap();
         let mut tree = scan(game.path());
-        tree.entries.push(ArchiveEntry {
-            rel: "zero.txt".into(),
-            src: game.path().join("zero.txt"),
+        tree.entries.push(TreeEntry {
+            path: game.path().join("zero.txt"),
+            name: "zero.txt".into(),
+            kind: TreeEntryKind::File,
             size: 0,
-            mode: 0,
-            is_dir: false,
+            mode: 0o644,
+            mtime: 0,
         });
         let error = write_small(drive.path(), &tree, &AtomicBool::new(false)).unwrap_err();
         assert!(
@@ -1296,17 +1243,28 @@ mod tests {
     #[test]
     fn an_unplain_entry_path_is_refused_before_writing() {
         let drive = drive();
-        for rel in ["../x", "/abs", "a//b", "a/./b", ""] {
-            let tree = ArchiveTree {
-                entries: vec![ArchiveEntry {
-                    rel: rel.into(),
-                    src: PathBuf::from("/nonexistent"),
+        let cases = [
+            ("../x", TreeEntryKind::File),
+            ("/abs", TreeEntryKind::File),
+            ("a//b", TreeEntryKind::File),
+            ("a/./b", TreeEntryKind::File),
+            ("", TreeEntryKind::File),
+            ("dir/", TreeEntryKind::File),
+            ("/", TreeEntryKind::Dir),
+            ("../", TreeEntryKind::Dir),
+        ];
+        for (rel, kind) in cases {
+            let tree = plan_of(
+                vec![TreeEntry {
+                    path: PathBuf::from("/nonexistent"),
+                    name: rel.into(),
+                    kind,
                     size: 0,
-                    mode: 0,
-                    is_dir: false,
+                    mode: 0o644,
+                    mtime: 0,
                 }],
-                archive_bytes: 2048,
-            };
+                2048,
+            );
             let error = write_small(drive.path(), &tree, &AtomicBool::new(false)).unwrap_err();
             assert!(matches!(error, WriteError::Refused(_)), "{rel}: {error:?}");
         }
@@ -1606,5 +1564,126 @@ mod tests {
         .unwrap_err();
         assert!(matches!(error, RestoreError::DriveRemoved), "{error:?}");
         assert!(!dest.exists());
+    }
+
+    /// Every folder (`name/`) and file (with its bytes) under `dir`, sorted.
+    fn snapshot(dir: &Path) -> Vec<(String, Option<Vec<u8>>)> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(next) = stack.pop() {
+            for entry in fs::read_dir(&next).unwrap() {
+                let path = entry.unwrap().path();
+                let rel = path
+                    .strip_prefix(dir)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .replace('\\', "/");
+                if path.is_dir() {
+                    out.push((format!("{rel}/"), None));
+                    stack.push(path);
+                } else {
+                    out.push((rel, Some(fs::read(&path).unwrap())));
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// The whole path: the scan's tree through the writer gives exactly
+    /// `archive_bytes` across the parts, and the parts give the tree back,
+    /// both through any tar reader and through [`restore_tree`].
+    #[test]
+    fn a_scanned_tree_writes_exactly_its_estimate_and_restores() {
+        let drive = drive();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Velvet Static");
+        let put = |rel: &str, len: usize, seed: usize| {
+            let path = root.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes(len, seed)).unwrap();
+        };
+        // Names around the 100-byte header field, files and folders.
+        for (seed, len) in [99, 100, 101, 150].into_iter().enumerate() {
+            put(&"f".repeat(len), 10 + seed, seed);
+            fs::create_dir_all(root.join("d".repeat(len))).unwrap();
+        }
+        // Folder names of 99 and 100 bytes put the `/` at byte 100 and 101.
+        put(&format!("{}/x.bin", "p".repeat(99)), 3, 9);
+        // Short parts making a long path.
+        put(&format!("{}leaf.dat", "deep/".repeat(25)), 700, 11);
+        // Unicode, one name 100 bytes long and one 102.
+        put("ünïcødé/日本語のファイル名.txt", 77, 12);
+        put(&format!("ünïcødé/{}", "ü".repeat(50)), 5, 13);
+        put(&format!("ünïcødé/{}", "ü".repeat(51)), 6, 14);
+        // Files on and around the 512-byte block edges.
+        for (seed, len) in [0, 1, 511, 512, 513, 1023, 1024, 1025, 10_000]
+            .into_iter()
+            .enumerate()
+        {
+            put(&format!("sizes/{len}.bin"), len, 20 + seed);
+        }
+        fs::create_dir_all(root.join("empty/nested empty")).unwrap();
+
+        let tree = scan(&root);
+        let parts = write_small(drive.path(), &tree, &AtomicBool::new(false)).unwrap();
+        assert!(parts.len() > 3, "{}", parts.len());
+        let total: u64 = parts.iter().map(|part| part.size).sum();
+        assert_eq!(total, tree.archive_bytes);
+
+        let mut joined = Vec::new();
+        for (index, part) in parts.iter().enumerate() {
+            assert_eq!(part.path, pack::installed_part_rel(BASE, index));
+            joined.extend(fs::read(pack::resolve(drive.path(), &part.path).unwrap()).unwrap());
+        }
+        let expected = snapshot(&root);
+        let unpacked = tempfile::tempdir().unwrap();
+        tar::Archive::new(joined.as_slice())
+            .unpack(unpacked.path())
+            .unwrap();
+        assert_eq!(snapshot(unpacked.path()), expected);
+
+        let out = tempfile::tempdir().unwrap();
+        let dest = out.path().join("restored");
+        restore(
+            drive.path(),
+            &sources(drive.path(), &parts),
+            &dest,
+            &AtomicBool::new(false),
+            &mut || Ok(()),
+        )
+        .unwrap();
+        assert_eq!(snapshot(&dest), expected);
+    }
+
+    /// The scan names folders with a trailing `/`; the archive keeps it and
+    /// restore takes it.
+    #[test]
+    fn folder_names_keep_their_slash_and_restore() {
+        let drive = drive();
+        let game = game_tree();
+        let tree = scan(game.path());
+        assert!(tree
+            .entries
+            .iter()
+            .filter(|e| e.kind == TreeEntryKind::Dir)
+            .all(|e| e.name.ends_with('/')));
+        let parts = write_small(drive.path(), &tree, &AtomicBool::new(false)).unwrap();
+        let mut joined = Vec::new();
+        for part in &parts {
+            joined.extend(fs::read(pack::resolve(drive.path(), &part.path).unwrap()).unwrap());
+        }
+        let mut archive = tar::Archive::new(joined.as_slice());
+        let dirs: Vec<String> = archive
+            .entries()
+            .unwrap()
+            .map(|e| e.unwrap())
+            .filter(|e| e.header().entry_type().is_dir())
+            .map(|e| String::from_utf8(e.path_bytes().into_owned()).unwrap())
+            .collect();
+        assert!(dirs.contains(&"a/b/".to_string()), "{dirs:?}");
+        assert!(dirs.iter().all(|name| name.ends_with('/')), "{dirs:?}");
+        assert!(safe_rel(b"a/b/").is_ok());
     }
 }
