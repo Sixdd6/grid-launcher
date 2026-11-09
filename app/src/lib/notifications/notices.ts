@@ -7,7 +7,7 @@
 // snapshots (every event carries the whole list), so each transition is seen
 // exactly once whichever view started it.
 
-import type { DownloadEntry, DownloadStatus, GameSession } from '../api';
+import type { BackupNotice, DownloadEntry, DownloadStatus, GameSession } from '../api';
 import type { ToastLevel } from '../stores/toasts.svelte';
 
 /**
@@ -30,7 +30,9 @@ export type NoticeGroup =
   | 'tool-failed'
   | 'launch'
   | 'launch-failed'
-  | 'removed';
+  | 'removed'
+  | 'drive-installed'
+  | 'drive-failed';
 
 export type Notice = { group: NoticeGroup; text: string; level: ToastLevel };
 
@@ -214,6 +216,13 @@ export function removedFromLibraryNotice(title: string): Notice {
   return { group: 'removed', text: `${title} removed from the library`, level: 'success' };
 }
 
+/** A `backup-notice` event's card ("PlayStation firmware installed from Couch kit"); the backend words it. */
+export function backupNoticeCard(notice: BackupNotice): Notice {
+  return notice.error
+    ? { group: 'drive-failed', text: notice.message, level: 'error' }
+    : { group: 'drive-installed', text: notice.message, level: 'success' };
+}
+
 /**
  * The early-exit warning a `sessions-changed` snapshot carries, prefixed
  * with the game it was about when exactly one session went away with it.
@@ -269,6 +278,10 @@ export function summaryText(group: NoticeGroup, n: number): string {
       return `${plural(n, 'launch', 'launches')} failed`;
     case 'removed':
       return `${games} removed`;
+    case 'drive-installed':
+      return `${plural(n, 'item', 'items')} installed from a backup drive`;
+    case 'drive-failed':
+      return `${plural(n, 'item', 'items')} from a backup drive could not be installed`;
   }
 }
 

@@ -13,6 +13,10 @@ export type ShellSession = {
   serverUrl: string;
   username: string;
   lastError: string | null;
+  /** Offline mode (`Config.offline`): the user chose to run without a
+   *  server. Never true while `connected`; any successful connection clears
+   *  it. Distinct from an unreachable server, which keeps `lastError`. */
+  offline: boolean;
   /** Set only when the server rejected the stored credential (401): which
    *  kind it was, so Connect asks for the right one. Never the value. */
   rejected?: AuthKind;
@@ -23,24 +27,47 @@ export function applyRestore(outcome: RestoreOutcome): ShellSession {
     case 'no_session':
       // Carried through so `Connect` can prefill them: a config written by
       // the Python importer holds a server and a username but no credential.
-      return { phase: 'none', connected: false, serverUrl: outcome.server_url, username: outcome.username, lastError: null };
+      return { phase: 'none', connected: false, serverUrl: outcome.server_url, username: outcome.username, lastError: null, offline: false };
     case 'connected':
-      return { phase: 'shell', connected: true, serverUrl: outcome.state.server_url, username: outcome.state.username, lastError: null };
+      return {
+        phase: 'shell', connected: true, serverUrl: outcome.state.server_url, username: outcome.state.username, lastError: null,
+        offline: false,
+      };
     case 'unauthorized':
       // Q6: a rejected credential is not "offline" — Retry would resend it
       // forever. Back to Connect, pre-filled; the keyring item stays until
       // a new connect succeeds.
       return {
         phase: 'none', connected: false, serverUrl: outcome.server_url, username: outcome.username, lastError: null,
-        rejected: outcome.auth_kind,
+        offline: false, rejected: outcome.auth_kind,
       };
     case 'unreachable':
-      return { phase: 'shell', connected: false, serverUrl: outcome.server_url, username: outcome.username, lastError: outcome.error };
+      return {
+        phase: 'shell', connected: false, serverUrl: outcome.server_url, username: outcome.username, lastError: outcome.error,
+        offline: false,
+      };
     case 'offline':
-      // Offline mode: the same not-connected shell as `unreachable`, with no
-      // error. Its own chip and menu come with the offline-mode UI.
-      return { phase: 'shell', connected: false, serverUrl: outcome.server_url, username: outcome.username, lastError: null };
+      // Offline mode: a not-connected shell like `unreachable`, but chosen,
+      // so there is no error and no probe ran. The stored server and
+      // username are kept for "Connect to a server…".
+      return { phase: 'shell', connected: false, serverUrl: outcome.server_url, username: outcome.username, lastError: null, offline: true };
   }
+}
+
+/**
+ * The chip's Retry outcome. A connection always leaves offline mode; any
+ * other outcome (still unreachable, or a rejected credential) keeps the
+ * offline flag it had, since nothing connected.
+ */
+export function applyRetry(prevOffline: boolean, outcome: RestoreOutcome): ShellSession {
+  const next = applyRestore(outcome);
+  return next.connected ? next : { ...next, offline: next.offline || prevOffline };
+}
+
+/** The shell after "Use without a server": not connected, offline, no error.
+ *  The stored server and username are carried through for a later connect. */
+export function offlineSession(serverUrl: string, username: string): ShellSession {
+  return { phase: 'shell', connected: false, serverUrl, username, lastError: null, offline: true };
 }
 
 /**
@@ -54,9 +81,17 @@ export function applyUnauthorizedEvent(phase: SessionPhase, info: SessionUnautho
   return applyRestore({ kind: 'unauthorized', ...info });
 }
 
-/** R2: Server first when connected (E2E specs wait for platform-btn-1 after connecting), Library when offline. */
-export function initialView(connected: boolean): View {
-  return connected ? 'server' : 'library';
+/** The view the shell opens on, and the drive key Library selects, if any. */
+export type InitialView = { view: View; drive: string | null };
+
+/**
+ * R2: Server first when connected (E2E specs wait for platform-btn-1 after
+ * connecting), Library otherwise. In offline mode Library opens on
+ * `firstDrive` (the key of the first ready drive) when there is one.
+ */
+export function initialView(connected: boolean, offline = false, firstDrive: string | null = null): InitialView {
+  if (connected) return { view: 'server', drive: null };
+  return { view: 'library', drive: offline ? firstDrive : null };
 }
 
 export function viewLabel(view: View): string {
@@ -82,6 +117,7 @@ export function hostOf(serverUrl: string): string {
   }
 }
 
-export function chipLabel(s: ShellSession): string {
-  return s.connected ? `${s.username} @ ${hostOf(s.serverUrl)}` : 'Not connected';
+export function chipLabel(s: Pick<ShellSession, 'connected' | 'offline' | 'username' | 'serverUrl'>): string {
+  if (s.connected) return `${s.username} @ ${hostOf(s.serverUrl)}`;
+  return s.offline ? 'Offline · no server' : 'Not connected';
 }

@@ -34,7 +34,9 @@
   // Set once when the shell first mounts (R2): Server when the restored/just
   // -connected session is online, Library when it came up offline. Switching
   // views afterward is a user action — a pill, Ctrl+1..4, or `show()`.
-  let view = $state<View>(initialView(session.connected));
+  // The `drive` half (offline: Library on the first drive) is for Library ›
+  // Backup drives, which does not exist yet.
+  let view = $state<View>(initialView(session.connected, session.offline).view);
 
   let settings = $state<ReturnType<typeof Settings> | null>(null);
   let serverMenuOpen = $state(false);

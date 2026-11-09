@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DownloadEntry, GameSession } from '../api';
 import {
+  backupNoticeCard,
   coalesce,
   Coalescer,
   COALESCE_MAX_MS,
@@ -206,6 +207,19 @@ describe('single notices', () => {
     );
   });
 
+  it('shows a backup-notice as the backend worded it, failures as errors', () => {
+    expect(backupNoticeCard({ message: 'PlayStation firmware installed from Couch kit', error: false })).toEqual({
+      group: 'drive-installed',
+      text: 'PlayStation firmware installed from Couch kit',
+      level: 'success',
+    });
+    expect(backupNoticeCard({ message: 'Some PlayStation firmware from Couch kit could not be installed', error: true })).toEqual({
+      group: 'drive-failed',
+      text: 'Some PlayStation firmware from Couch kit could not be installed',
+      level: 'error',
+    });
+  });
+
   it('names the game an early exit was about when exactly one session went', () => {
     const s = (id: number, title: string): GameSession => ({
       id,
@@ -249,6 +263,8 @@ describe('coalesce', () => {
     expect(summaryText('cancelled', 3)).toBe('Cancelled 3 downloads');
     expect(summaryText('game-installed', 4)).toBe('4 games installed');
     expect(summaryText('update-queued', 2)).toBe('2 updates added to download queue');
+    expect(summaryText('drive-installed', 2)).toBe('2 items installed from a backup drive');
+    expect(summaryText('drive-failed', 1)).toBe('1 item from a backup drive could not be installed');
   });
 });
 

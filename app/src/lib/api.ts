@@ -408,7 +408,7 @@ export type DownloadEntry = {
 
 export type DownloadsSnapshot = { entries: DownloadEntry[] };
 
-// ── Game backups (plan §1.3). Types only: the command wrappers land in Task 15. ──
+// ── Game backups (plan §1.3; commands in app/src-tauri/src/commands/backups.rs). ──
 
 /** An OS a backup drive carries emulators for. Mirrors `grid_core::backup::pack::PackOs`. */
 export type PackOs = 'linux' | 'windows';
@@ -563,6 +563,12 @@ export type BackupNotice = { message: string; error: boolean };
 
 /** `get_backup_settings`'s answer. */
 export type BackupSettings = { include_firmware: boolean };
+
+/** Emitted with a `DrivesSnapshot`, only when the snapshot changes (drive_service.rs `DRIVES_CHANGED_EVENT`). */
+export const DRIVES_CHANGED_EVENT = 'drives-changed';
+
+/** Emitted with a `BackupNotice` for a toast the backend decides on (drive_service.rs `BACKUP_NOTICE_EVENT`). */
+export const BACKUP_NOTICE_EVENT = 'backup-notice';
 
 export type GameSession = {
   id: number;
@@ -1233,4 +1239,39 @@ export const api = {
   openReleasePage: (url: string) => invoke<void>('open_release_page', { url }),
   pythonImportNotice: () => invoke<PythonImportReport | null>('python_import_notice'),
   layoutMigrationNotice: () => invoke<LayoutMigrationNotice | null>('layout_migration_notice'),
+
+  // Game backups. Every drive command names a drive by its `key` (the mount
+  // path, or the drive letter on Windows) from the latest scan.
+  listDrives: () => invoke<DrivesSnapshot>('list_drives'),
+  /** Writes an empty pack. Refuses a mount the current scan did not find. */
+  setupDrive: (mount: string, name: string, os: PackOs[]) =>
+    invoke<DriveInfo>('setup_drive', { mount, name, os }),
+  renameDrive: (key: string, name: string) => invoke<void>('rename_drive', { key, name }),
+  /** Removing an OS works offline; adding one queues emulator builds and needs a server. */
+  setDriveOs: (key: string, os: PackOs[]) => invoke<OsChangeOutcome>('set_drive_os', { key, os }),
+  /** The bytes "Remove GRID files" would free. */
+  removeGridFilesSize: (key: string) => invoke<number>('remove_grid_files_size', { key }),
+  removeGridFiles: (key: string) => invoke<void>('remove_grid_files', { key }),
+  /** Drops a remembered (not connected) drive; takes its mount, as `RememberedDrive` has no key. */
+  forgetDrive: (mount: string) => invoke<void>('forget_drive', { mount }),
+  openDriveFolder: (key: string) => invoke<void>('open_drive_folder', { key }),
+  driveGames: (key: string) => invoke<DriveGame[]>('drive_games', { key }),
+  /** Seeds the image cache from a pack-relative art path; answers the cache path. */
+  driveAsset: (key: string, rel: string) => invoke<string>('drive_asset', { key, rel }),
+  /** `includeRuntime`: carry the Steam Linux Runtime ("Make Windows games work offline"); omitted, false. */
+  planBackup: (key: string, request: BackupRequest, includeFirmware: boolean, includeRuntime?: boolean) =>
+    invoke<BackupPlan>('plan_backup', { key, request, includeFirmware, includeRuntime: includeRuntime ?? null }),
+  /** Needs a server ("Backing up needs a server"). */
+  startBackup: (key: string, request: BackupRequest, includeFirmware: boolean, includeRuntime?: boolean) =>
+    invoke<BackupQueued>('start_backup', { key, request, includeFirmware, includeRuntime: includeRuntime ?? null }),
+  /** `server` is the game's `DriveGame.server`; omitted, the first game on the drive with that rom id. */
+  installFromDrive: (key: string, romId: number, server?: string) =>
+    invoke<DriveInstallOutcome>('install_from_drive', { key, romId, server: server ?? null }),
+  /** Answers how many games were removed. Refused while the drive has a live backup row. */
+  removeFromDrive: (key: string, romIds: number[], server?: string) =>
+    invoke<number>('remove_from_drive', { key, romIds, server: server ?? null }),
+  getBackupSettings: () => invoke<BackupSettings>('get_backup_settings'),
+  setBackupIncludeFirmware: (value: boolean) => invoke<void>('set_backup_include_firmware', { value }),
+  /** Offline mode: sets `Config.offline` and drops any live client. */
+  useWithoutServer: () => invoke<void>('use_without_server'),
 };
