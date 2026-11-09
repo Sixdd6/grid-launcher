@@ -39,6 +39,7 @@
   import { fullIndex, galleryItems, viewableIndex, viewableItems } from './details/media';
   import {
     detailApplies,
+    driveCopyLines,
     fromDriveText,
     mergeDetail,
     summaryOf,
@@ -589,6 +590,7 @@
   // Details from a drive (GameBackups README): Install from drive copies the
   // game from the drive, and Remove from drive… (two clicks) takes it off.
   let fromDrive = $derived(fromDriveText(subject));
+  let driveCopy = $derived(driveCopyLines(subject));
   let confirmingDriveRemove = $state(false);
 
   async function handleDriveInstall() {
@@ -861,6 +863,9 @@
           {#if onDrives !== '' && subject.drive === undefined}
             <p class="meta-line on-drives" data-testid="details-on-drives"><Icon name="drive" size={12} />{onDrives}</p>
           {/if}
+          {#each driveCopy as line (line)}
+            <p class="meta-line" data-testid="details-drive-copy">{line}</p>
+          {/each}
         {/if}
 
         <p class="meta-line" data-testid="details-last-played">

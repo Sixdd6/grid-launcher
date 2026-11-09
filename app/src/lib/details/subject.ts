@@ -6,6 +6,7 @@
 import type { DriveGame, DriveInfo, GameSummary, InstalledGame, RomDetail } from '../api';
 import { driveAssetUrl } from '../backups/driveArt';
 import { serverKey } from '../backups/drives';
+import { isWindowsPlatform } from './actions';
 
 /** The drive a drive subject was opened from (GameBackups README, "Details from a drive"). */
 export type SubjectDrive = {
@@ -43,6 +44,9 @@ export type DetailsSubject = {
    *  line before (or without) a server detail. */
   releaseDate?: string;
   companies?: string;
+  /** A drive game backed up from a computer's install, not the server's
+   *  files: the copy's version, and whether the server had newer files then. */
+  installedCopy?: { version: string; outdated: boolean };
 };
 
 export function fromSummary(game: GameSummary, platformName: string, platformSlug: string): DetailsSubject {
@@ -122,6 +126,9 @@ export function fromDriveGame(game: DriveGame, drive: Pick<DriveInfo, 'key' | 'l
     },
     releaseDate: releaseSeconds(game.release_date),
     companies: game.companies.join(', '),
+    ...(game.installed_copy
+      ? { installedCopy: { version: game.installed_version.trim(), outdated: game.outdated } }
+      : {}),
   };
 }
 
@@ -141,6 +148,22 @@ export function releaseSeconds(raw: string): string {
 /** "From Couch kit", the drive part of the header line; `''` for any other subject. */
 export function fromDriveText(subject: DetailsSubject): string {
   return subject.drive ? `From ${subject.drive.name}` : '';
+}
+
+/**
+ * Details from a drive, for a copy of an installed game: "A copy of an
+ * installed game · v1.1 (the server had newer files)", and for a Windows
+ * game the Wine-prefix line. Empty for any other subject.
+ */
+export function driveCopyLines(subject: DetailsSubject): string[] {
+  const copy = subject.installedCopy;
+  if (subject.drive === undefined || copy === undefined) return [];
+  const version = copy.version === '' ? '' : ` · ${copy.version}`;
+  const lines = [`A copy of an installed game${version}${copy.outdated ? ' (the server had newer files)' : ''}`];
+  if (isWindowsPlatform(subject.platformSlug, subject.platformName)) {
+    lines.push('Its Wine prefix wasn’t copied, so saves kept there aren’t on the drive');
+  }
+  return lines;
 }
 
 /**

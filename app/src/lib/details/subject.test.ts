@@ -3,6 +3,7 @@ import type { DriveGame, GameSummary, InstalledGame, RomDetail } from '../api';
 import { parseDriveAssetUrl } from '../backups/driveArt';
 import {
   detailApplies,
+  driveCopyLines,
   fromDriveGame,
   fromDriveText,
   fromInstalled,
@@ -365,6 +366,26 @@ describe('fromDriveGame (GameBackups README, "Details from a drive")', () => {
     expect(detailApplies(subject, 'https://elsewhere.lan')).toBe(false);
     expect(detailApplies(subject, '')).toBe(false);
     expect(detailApplies(fromInstalled(row({})), 'https://elsewhere.lan')).toBe(true);
+  });
+
+  it('says a copy of an installed game is one, with its version', () => {
+    expect(driveCopyLines(fromDriveGame(driveGame(), drive))).toEqual([]);
+    expect(driveCopyLines(fromDriveGame(driveGame({ installed_copy: true, installed_version: 'v1.1' }), drive))).toEqual([
+      'A copy of an installed game · v1.1',
+    ]);
+    expect(
+      driveCopyLines(fromDriveGame(driveGame({ installed_copy: true, installed_version: 'v1.1', outdated: true }), drive)),
+    ).toEqual(['A copy of an installed game · v1.1 (the server had newer files)']);
+    expect(driveCopyLines(fromDriveGame(driveGame({ installed_copy: true }), drive))).toEqual(['A copy of an installed game']);
+    expect(driveCopyLines(fromInstalled(row({})))).toEqual([]);
+  });
+
+  it('adds the Wine-prefix line for a Windows copy', () => {
+    const win = driveGame({ installed_copy: true, installed_version: 'v2.0', platform: 'win', platform_name: 'Windows' });
+    expect(driveCopyLines(fromDriveGame(win, drive))).toEqual([
+      'A copy of an installed game · v2.0',
+      'Its Wine prefix wasn’t copied, so saves kept there aren’t on the drive',
+    ]);
   });
 
   it('reads its version like a server game', () => {
