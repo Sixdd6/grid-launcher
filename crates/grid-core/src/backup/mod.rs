@@ -10,5 +10,6 @@ pub mod drives;
 pub mod local;
 pub mod pack;
 pub mod plan;
+pub mod saves;
 pub mod steam_runtime;
 pub mod write;

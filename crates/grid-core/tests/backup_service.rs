@@ -1336,3 +1336,130 @@ async fn a_running_game_is_not_copied_from_this_computer() {
     ));
     h.server.verify().await;
 }
+
+/// Installs "Moss & Marrow" (rom 2, Windows) here with a Wine prefix that
+/// holds a save under `%PROGRAMDATA%\Moss` (a path with no user name in
+/// it), and gives cloud saves that folder plus one that doesn't exist.
+fn install_windows_game_with_saves(h: &Harness) -> PathBuf {
+    let game_dir = h
+        .library
+        .join("games")
+        .join("Windows")
+        .join("Moss & Marrow");
+    let prefix = game_dir.join("prefix");
+    let saves = prefix.join("drive_c").join("ProgramData").join("Moss");
+    fs::create_dir_all(saves.join("slots")).unwrap();
+    fs::write(saves.join("slots").join("slot1.sav"), b"SAVE ONE").unwrap();
+    fs::write(prefix.join("system.reg"), b"never copied").unwrap();
+    let text = |path: &Path| path.to_string_lossy().into_owned();
+    h.registry
+        .upsert(&InstalledGame {
+            title: "Moss & Marrow".to_string(),
+            platform: "Windows".to_string(),
+            platform_slug: "win".to_string(),
+            rom_id: Some(2),
+            rom_file_name: "Moss.zip".to_string(),
+            native_game_dir: text(&game_dir),
+            native_wineprefix: text(&prefix),
+            ..Default::default()
+        })
+        .unwrap();
+    let config = h._tmp.path().join("config.toml");
+    let mut text = fs::read_to_string(&config).unwrap();
+    text.push_str(
+        "\n[native_pcgw_save_paths]\n\"Moss & Marrow__manual\" = ['%PROGRAMDATA%\\Moss', '%APPDATA%\\Moss']\n",
+    );
+    fs::write(&config, text).unwrap();
+    prefix
+}
+
+async fn mount_moss(h: &Harness) {
+    let archive = zip_bytes(&[("Moss.exe", b"MZ fake")]);
+    h.mount_game(
+        2,
+        "Moss & Marrow",
+        "win",
+        "Moss & Marrow",
+        &[(21, "Moss.zip", &archive)],
+        0,
+    )
+    .await;
+}
+
+/// A Windows game downloaded from the server takes its saves out of its
+/// Wine prefix on this computer, and records every save folder GRID knows.
+#[cfg(not(windows))]
+#[tokio::test]
+async fn a_windows_games_saves_are_copied_out_of_its_prefix() {
+    let h = Harness::new().await;
+    mount_moss(&h).await;
+    install_windows_game_with_saves(&h);
+
+    h.service
+        .start_backup(
+            h.client.clone(),
+            h.drive(),
+            Harness::items(&[(2, "Moss & Marrow")]),
+        )
+        .unwrap();
+    let row = h.wait_terminal(2).await;
+    assert_eq!(row.status, DownloadStatus::Completed, "{row:#?}");
+    assert_eq!(row.error, "", "no warning");
+
+    let pack = h.pack();
+    let game = &pack.games[0];
+    let saves = game.saves.as_ref().expect("a saves record");
+    assert_eq!(saves.folders, ["%PROGRAMDATA%\\Moss", "%APPDATA%\\Moss"]);
+    assert_eq!(saves.tree_files, 1);
+    assert_eq!(saves.parts.len(), 1);
+    assert_eq!(saves.parts[0].path, "saves/win/Moss & Marrow/saves.tar.001");
+    let tar_bytes = fs::read(h.mount.join("gridpack").join(&saves.parts[0].path)).unwrap();
+    assert_eq!(md5_hex(&tar_bytes), saves.parts[0].md5);
+    let mut archive = tar::Archive::new(&tar_bytes[..]);
+    let names: Vec<String> = archive
+        .entries()
+        .unwrap()
+        .map(|entry| {
+            entry
+                .unwrap()
+                .path()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    assert_eq!(names, ["0/", "0/slots/", "0/slots/slot1.sav"]);
+    assert!(
+        game.paths().any(|rel| rel == saves.parts[0].path),
+        "the pack knows the part, so removing the game removes it"
+    );
+    assert!(no_tmp_files(&h.mount));
+}
+
+/// While the game runs its saves stay in the prefix, but the backup goes
+/// ahead and still records the folders.
+#[cfg(not(windows))]
+#[tokio::test]
+async fn a_running_windows_games_saves_are_not_copied() {
+    let h = Harness::new().await;
+    mount_moss(&h).await;
+    install_windows_game_with_saves(&h);
+    h.service
+        .set_running_check(Some(Arc::new(|rom_id| rom_id == 2)));
+
+    h.service
+        .start_backup(
+            h.client.clone(),
+            h.drive(),
+            Harness::items(&[(2, "Moss & Marrow")]),
+        )
+        .unwrap();
+    let row = h.wait_terminal(2).await;
+    assert_eq!(row.status, DownloadStatus::Completed, "{row:#?}");
+    assert_eq!(row.error, "Its saves weren't copied because it's running");
+    let pack = h.pack();
+    let saves = pack.games[0].saves.as_ref().expect("a saves record");
+    assert_eq!(saves.folders.len(), 2);
+    assert!(saves.parts.is_empty());
+    assert!(!h.mount.join("gridpack").join("saves").exists());
+}

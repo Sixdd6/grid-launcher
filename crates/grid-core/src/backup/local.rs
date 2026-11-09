@@ -54,7 +54,8 @@ pub const REASON_OTHER_SERVER: &str = "It was installed from another server";
 pub const REASON_NO_ROM_ID: &str = "It isn't linked to this server's game";
 
 /// The folder inside a native game's home that holds its Wine prefix. Never
-/// copied: saves kept in the prefix stay on this computer.
+/// copied as a whole: only the save folders GRID knows are, through
+/// [`super::saves`].
 pub const WINE_PREFIX_DIR: &str = "prefix";
 
 /// The tar block size.
@@ -387,6 +388,21 @@ pub fn scan_tree(source: &LocalSource, for_windows: bool) -> Result<TreePlan, Sc
     } else {
         return Err(ScanRefusal::Special(root.clone()));
     }
+    Ok(plan_of(
+        root.clone(),
+        source.layout,
+        source.excludes.clone(),
+        entries,
+    ))
+}
+
+/// The plan for `entries` (in write order), with the exact archive size.
+pub(super) fn plan_of(
+    root: PathBuf,
+    layout: InstalledLayout,
+    excludes: Vec<PathBuf>,
+    entries: Vec<TreeEntry>,
+) -> TreePlan {
     let tree_bytes = entries.iter().map(|e| e.size).sum();
     let tree_files = entries
         .iter()
@@ -397,22 +413,25 @@ pub fn scan_tree(source: &LocalSource, for_windows: bool) -> Result<TreePlan, Sc
         .map(|e| entry_archive_bytes(&e.name, e.size))
         .sum::<u64>()
         + 2 * BLOCK;
-    Ok(TreePlan {
-        root: root.clone(),
-        layout: source.layout,
-        excludes: source.excludes.clone(),
+    TreePlan {
+        root,
+        layout,
+        excludes,
         entries,
         archive_bytes,
         tree_bytes,
         tree_files,
-    })
+    }
 }
 
-fn unreadable(error: io::Error) -> ScanRefusal {
+pub(super) fn unreadable(error: io::Error) -> ScanRefusal {
     ScanRefusal::Unreadable(error.to_string())
 }
 
-fn walk(
+/// Appends the entries under `dir` (named `<prefix><name>`), a folder
+/// before what it holds, siblings in byte order. See [`scan_tree`] for
+/// what is refused.
+pub(super) fn walk(
     dir: &Path,
     prefix: &str,
     excluded: &HashSet<Vec<String>>,
@@ -458,7 +477,12 @@ fn walk(
     Ok(())
 }
 
-fn entry(path: PathBuf, name: String, kind: TreeEntryKind, meta: &fs::Metadata) -> TreeEntry {
+pub(super) fn entry(
+    path: PathBuf,
+    name: String,
+    kind: TreeEntryKind,
+    meta: &fs::Metadata,
+) -> TreeEntry {
     let mtime = meta
         .modified()
         .ok()
@@ -494,7 +518,7 @@ fn mode_of(kind: TreeEntryKind, _meta: &fs::Metadata) -> u32 {
 
 /// One name of the tree, checked: UTF-8 always; portable to Windows when
 /// `for_windows`.
-fn check_name(
+pub(super) fn check_name(
     path: &Path,
     name: &std::ffi::OsStr,
     for_windows: bool,

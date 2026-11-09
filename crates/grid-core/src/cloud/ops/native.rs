@@ -45,7 +45,13 @@ const NO_NATIVE_CLOUD_SAVE: &str = "No cloud save found on the server for this g
 /// under this exact key and must use the same derivation this module reads
 /// with, rather than recomputing it.
 pub fn manual_paths_key(game: &CloudGame) -> String {
-    format!("{}__manual", game.title.trim())
+    manual_paths_key_for_title(&game.title)
+}
+
+/// [`manual_paths_key`] from the title alone (a backup knows a game's
+/// title, not its `CloudGame`).
+pub fn manual_paths_key_for_title(title: &str) -> String {
+    format!("{}__manual", title.trim())
 }
 
 fn manual_paths_for<'a>(ctx: &'a CloudContext, game: &CloudGame) -> &'a [String] {

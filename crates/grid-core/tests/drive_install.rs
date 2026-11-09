@@ -324,6 +324,155 @@ async fn a_native_game_installs_through_the_native_finalize() {
     assert_eq!(row.revision, "1.2");
 }
 
+/// The saves of "My Game" on the drive: `%PROGRAMDATA%\My Game` (no user
+/// name in its path) copied, `%APPDATA%\My Game` only recorded.
+fn put_saves(h: &Harness) -> serde_json::Value {
+    let parts = put_tar(
+        h,
+        "saves/win/My Game",
+        "saves",
+        &[
+            dir("0/"),
+            file("0/slot1.sav", &[7u8; 900]),
+            dir("0/cfg/"),
+            file("0/cfg/options.ini", &[1u8; 400]),
+        ],
+    );
+    json!({
+        "folders": ["%PROGRAMDATA%\\My Game", "%APPDATA%\\My Game"],
+        "parts": parts,
+        "tree_bytes": 1300,
+        "tree_files": 2,
+    })
+}
+
+/// The saves `put_saves` wrote, as a restore off Windows puts them back in
+/// the game's new prefix, and the folders given to cloud saves.
+fn assert_saves_restored(h: &Harness, game_dir: &Path) {
+    let config = h.config();
+    assert_eq!(
+        config.native_pcgw_save_paths.get("My Game__manual"),
+        Some(&vec![
+            "%PROGRAMDATA%\\My Game".to_string(),
+            "%APPDATA%\\My Game".to_string()
+        ]),
+        "the folders are cloud saves' list, with no lookup"
+    );
+    let saves = game_dir.join("prefix/drive_c/ProgramData/My Game");
+    assert_eq!(fs::read(saves.join("slot1.sav")).unwrap(), [7u8; 900]);
+    assert_eq!(fs::read(saves.join("cfg/options.ini")).unwrap(), [1u8; 400]);
+    let platform = h.library.join("games").join("Windows");
+    let leftovers: Vec<_> = fs::read_dir(&platform)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".grid-"))
+        .collect();
+    assert!(leftovers.is_empty(), "no temporary folder is left");
+}
+
+#[cfg(not(windows))]
+#[tokio::test]
+async fn a_native_game_from_a_drive_gets_its_saves_back_in_its_prefix() {
+    let h = Harness::new();
+    let staging = tempfile::tempdir().unwrap();
+    let zip = staging.path().join("mygame.zip");
+    write_zip(&zip, &[("MyGame/mygame.exe", b"MZ")]);
+    let bytes = fs::read(&zip).unwrap();
+    h.put("games/win/My Game/mygame.zip", &bytes);
+    let mut game = pack_game(
+        5,
+        "My Game",
+        "win",
+        "Windows",
+        &[(
+            51,
+            "mygame.zip",
+            "games/win/My Game/mygame.zip",
+            bytes.len(),
+        )],
+    );
+    game.saves = Some(serde_json::from_value(put_saves(&h)).unwrap());
+    h.service
+        .install_from_drive(h.drive(), &game, None)
+        .unwrap();
+    let entry = h.wait_terminal(h.newest_entry_id()).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    assert_eq!(entry.error, "", "no warning");
+    assert_saves_restored(&h, &h.library.join("games").join("Windows").join("My Game"));
+}
+
+#[cfg(not(windows))]
+#[tokio::test]
+async fn a_native_copy_gets_its_saves_back_in_its_fresh_prefix() {
+    let h = Harness::new();
+    let parts = put_installed(
+        &h,
+        "games/win/My Game/My Game",
+        &[dir("game/"), file("game/mygame.exe", &[0x4du8; 1400])],
+    );
+    let mut game = installed_game(
+        5,
+        "My Game",
+        "win",
+        "Windows",
+        "native",
+        "My Game",
+        "game/mygame.exe",
+        parts,
+        json!({ "native_executable": "game/mygame.exe" }),
+    );
+    game.saves = Some(serde_json::from_value(put_saves(&h)).unwrap());
+    let entry = install_and_wait(&h, &game).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    assert_saves_restored(&h, &h.library.join("games").join("Windows").join("My Game"));
+}
+
+#[cfg(not(windows))]
+#[tokio::test]
+async fn a_damaged_saves_archive_still_installs_the_game() {
+    let h = Harness::new();
+    let staging = tempfile::tempdir().unwrap();
+    let zip = staging.path().join("mygame.zip");
+    write_zip(&zip, &[("MyGame/mygame.exe", b"MZ")]);
+    let bytes = fs::read(&zip).unwrap();
+    h.put("games/win/My Game/mygame.zip", &bytes);
+    let mut game = pack_game(
+        5,
+        "My Game",
+        "win",
+        "Windows",
+        &[(
+            51,
+            "mygame.zip",
+            "games/win/My Game/mygame.zip",
+            bytes.len(),
+        )],
+    );
+    let mut saves = put_saves(&h);
+    saves["parts"][0]["md5"] = json!("0".repeat(32));
+    game.saves = Some(serde_json::from_value(saves).unwrap());
+    h.service
+        .install_from_drive(h.drive(), &game, None)
+        .unwrap();
+    let entry = h.wait_terminal(h.newest_entry_id()).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    // A completed row's `error` holds its warning.
+    assert!(
+        entry.error.contains("Its saves weren't restored"),
+        "{}",
+        entry.error
+    );
+    let game_dir = h.library.join("games").join("Windows").join("My Game");
+    assert!(game_dir.join("game/MyGame/mygame.exe").is_file());
+    assert!(!game_dir.join("prefix/drive_c").exists());
+    assert!(
+        h.config()
+            .native_pcgw_save_paths
+            .contains_key("My Game__manual"),
+        "the folders are still given to cloud saves"
+    );
+}
+
 /// The drive goes away in the middle of the copy (Unix only: Windows
 /// refuses to delete a folder holding an open file).
 #[cfg(unix)]
@@ -534,6 +683,11 @@ fn md5_hex(bytes: &[u8]) -> String {
 /// `<rel_base>/installed.tar.NNN` on the drive, and returns the pack's
 /// `parts` entries.
 fn put_installed(h: &Harness, rel_base: &str, items: &[TreeItem]) -> Vec<serde_json::Value> {
+    put_tar(h, rel_base, "installed", items)
+}
+
+/// [`put_installed`] for the tar `<rel_base>/<stem>.tar.NNN`.
+fn put_tar(h: &Harness, rel_base: &str, stem: &str, items: &[TreeItem]) -> Vec<serde_json::Value> {
     let mut builder = tar::Builder::new(Vec::new());
     for item in items {
         let mut header = tar::Header::new_gnu();
@@ -560,7 +714,7 @@ fn put_installed(h: &Harness, rel_base: &str, items: &[TreeItem]) -> Vec<serde_j
         .chunks(PART)
         .enumerate()
         .map(|(index, chunk)| {
-            let rel = format!("{rel_base}/installed.tar.{:03}", index + 1);
+            let rel = format!("{rel_base}/{stem}.tar.{:03}", index + 1);
             h.put(&rel, chunk);
             json!({ "path": rel, "size": chunk.len(), "md5": md5_hex(chunk) })
         })

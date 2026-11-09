@@ -21,19 +21,22 @@ use crate::backup::archive;
 use crate::backup::local::{self, LocalSource, Located, TreePlan};
 use crate::backup::pack::{
     self, asset_dir_rel, emulator_dir_rel, firmware_dir_rel, game_dir_rel, game_file_rel,
-    pack_component, unique_rel, ArchiveKind, InstalledLayout, Pack, PackAssets, PackEmulator,
-    PackError, PackFile, PackFirmware, PackFirmwareFile, PackGame, PackInstalled, PackOs,
-    PackSource, PackState,
+    pack_component, saves_dir_rel, unique_rel, ArchiveKind, InstalledLayout, Pack, PackAssets,
+    PackEmulator, PackError, PackFile, PackFirmware, PackFirmwareFile, PackGame, PackInstalled,
+    PackOs, PackSaves, PackSource, PackState,
 };
 use crate::backup::plan::{
     os_name, EmulatorItem, EmulatorKind, EmulatorSource, FirmwareItem, GameItem,
 };
+use crate::backup::saves;
 use crate::backup::write::{self as drive_write, FileWrite, WriteError, WriteTarget};
+use crate::cloud::ops::native::manual_paths_key_for_title;
 use crate::config::Config;
 use crate::images::urls::{extension_for, filter_to_server_host, magic_extension, server_resolver};
 use crate::launch::binary_target::Cpu;
 use crate::launch::forge::{ForgeClient, ForgeProvider, ResolvedDownload};
 use crate::launch::setup::{newest_server_build, recommendations, ServerPackage};
+use crate::library::platforms::is_windows_platform;
 use crate::romm::{strip_userinfo, RomDetail, RomFile, RommClient};
 
 use super::download::{download_targets, FileTarget, RommProvider};
@@ -163,6 +166,28 @@ pub(crate) struct BackupJob {
     /// Warnings collected on the way (an asset that could not be fetched, a
     /// firmware file that failed its check). Never fail the row.
     pub warnings: Vec<String>,
+    /// A Windows game's save folders and, when it is installed here with a
+    /// Wine prefix, the saves to copy out of it. Set by the download phase.
+    pub saves: Option<StagedSaves>,
+}
+
+/// A Windows game's saves, as the download phase found them
+/// ([`stage_saves`]).
+pub(crate) struct StagedSaves {
+    /// The folders to record ([`saves::recorded_folders`]).
+    pub folders: Vec<String>,
+    /// The folders found in the prefix, to archive in the write phase.
+    pub tree: Option<TreePlan>,
+}
+
+impl BackupJob {
+    /// Whether the write phase reads saves out of a Wine prefix on this
+    /// computer.
+    pub(crate) fn copies_saves(&self) -> bool {
+        self.saves
+            .as_ref()
+            .is_some_and(|saves| saves.tree.is_some())
+    }
 }
 
 impl BackupJob {
@@ -182,6 +207,7 @@ impl BackupJob {
             staging: PathBuf::new(),
             staged: None,
             warnings: Vec::new(),
+            saves: None,
         }
     }
 }
@@ -270,7 +296,9 @@ pub(crate) async fn download(
         BackupItem::Game(item) if item.local => {
             download_local_game(service, job, item.rom_id, cancel).await
         }
-        BackupItem::Game(item) => download_game(job, item.rom_id, cancel, on_progress).await,
+        BackupItem::Game(item) => {
+            download_game(service, job, item.rom_id, cancel, on_progress).await
+        }
         BackupItem::Emulator(item) => {
             download_emulator(service, job, &item, cancel, on_progress).await
         }
@@ -279,12 +307,25 @@ pub(crate) async fn download(
 }
 
 async fn download_game(
+    service: &InstallService,
     job: &mut BackupJob,
     rom_id: i64,
     cancel: &AtomicBool,
     on_progress: Progress<'_>,
 ) -> Result<(), LibraryError> {
     let detail = job.client.rom_detail(rom_id).await?;
+    let home = crate::platform::home_dir();
+    // The install on this computer, if any, for its Wine prefix: only a
+    // row from this server stands for this rom id.
+    let row = service
+        .registry
+        .find(Some(rom_id), "", "")?
+        .filter(|row| installed_match(row, rom_id))
+        .filter(|row| {
+            let source = row.source_server.trim();
+            source.is_empty() || pack::server_key(source) == pack::server_key(&job.server)
+        });
+    stage_saves(service, job, &detail, row.as_ref(), home.as_deref()).await;
     let (picked, single): (Vec<&RomFile>, bool) = match download_set(&detail)? {
         DownloadSet::Single(file) => (vec![file], true),
         DownloadSet::Multi { files, .. } => (files, false),
@@ -394,10 +435,8 @@ async fn download_local_game(
     if service.game_running(rom_id) {
         return Err(LibraryError::Extract(super::RUNNING_NOW.to_string()));
     }
-    let for_windows = matches!(
-        pack::read_pack(&job.drive.mount),
-        Ok(PackState::Ready(pack)) if pack.os.contains(&PackOs::Windows)
-    );
+    let for_windows = pack_for_windows(&job.drive.mount);
+    stage_saves(service, job, &detail, Some(&row), home).await;
     let outdated = game_has_server_update(
         &row,
         &ServerVersion {
@@ -488,6 +527,83 @@ async fn download_local_game(
     });
     Ok(())
 }
+
+/// Whether the drive's pack carries Windows: its names must then suit a
+/// Windows drive.
+fn pack_for_windows(mount: &Path) -> bool {
+    matches!(
+        pack::read_pack(mount),
+        Ok(PackState::Ready(pack)) if pack.os.contains(&PackOs::Windows)
+    )
+}
+
+/// The Wine prefix of `row`, a native install on this computer: its
+/// `native_wineprefix`, `~/` expanded. `None` on Windows, where a game has
+/// no prefix, and for a row that records none.
+fn wine_prefix_of(row: &InstalledGame, home: Option<&Path>) -> Option<PathBuf> {
+    if cfg!(windows) {
+        return None;
+    }
+    let raw = row.native_wineprefix.trim();
+    (!raw.is_empty()).then(|| super::path_change::expand(raw, home))
+}
+
+/// Fills `job.saves` for a Windows game: the save folders GRID knows for
+/// it (from the config, never a lookup), and, when `row` is its install
+/// here with a Wine prefix, the folders that exist in that prefix. A game
+/// with no known folder gets nothing. Never fails the row: a folder that
+/// can't be copied, or a game running right now, is a warning.
+async fn stage_saves(
+    service: &InstallService,
+    job: &mut BackupJob,
+    detail: &RomDetail,
+    row: Option<&InstalledGame>,
+    home: Option<&Path>,
+) {
+    if !is_windows_platform(&detail.platform_slug, &detail.platform_name) {
+        return;
+    }
+    let config = Config::load(&service.config_path).unwrap_or_default();
+    let title = row.map_or(detail.name.as_str(), |row| row.title.as_str());
+    let key = manual_paths_key_for_title(title);
+    let list = |map: &std::collections::BTreeMap<String, Vec<String>>| {
+        map.get(&key).cloned().unwrap_or_default()
+    };
+    let prefix = row.and_then(|row| wine_prefix_of(row, home));
+    let folders = saves::recorded_folders(
+        &list(&config.native_pcgw_save_paths),
+        &list(&config.native_manual_save_paths),
+        &list(&config.native_removed_save_paths),
+        prefix.as_deref(),
+        home,
+    );
+    if folders.is_empty() {
+        return;
+    }
+    let mut tree = None;
+    if let Some(prefix) = prefix.filter(|prefix| prefix.is_dir()) {
+        if service.game_running(detail.id) {
+            job.warnings.push(SAVES_RUNNING.to_string());
+        } else {
+            let scanned = folders.clone();
+            let for_windows = pack_for_windows(&job.drive.mount);
+            let scan = tokio::task::spawn_blocking(move || {
+                saves::scan_saves(&scanned, &prefix, for_windows)
+            })
+            .await
+            .unwrap_or_default();
+            for (folder, why) in scan.refused {
+                job.warnings
+                    .push(format!("Saves in {folder} weren't copied: {why}"));
+            }
+            tree = scan.tree;
+        }
+    }
+    job.saves = Some(StagedSaves { folders, tree });
+}
+
+/// The warning for saves left in a prefix because the game is running.
+const SAVES_RUNNING: &str = "Its saves weren't copied because it's running";
 
 /// "Its install contains links" as "its install contains links".
 fn lower_first(text: &str) -> String {
@@ -704,6 +820,7 @@ pub(crate) fn pack_game(
         added: pack::now_rfc3339(),
         extra: Default::default(),
         installed: None,
+        saves: None,
     }
 }
 
@@ -1142,6 +1259,13 @@ async fn download_firmware(
 /// through [`archive::write_installed_tree_with`], then its art; the
 /// caller holds a library-gate ticket meanwhile.
 ///
+/// A Windows game's saves ([`BackupJob::saves`]) come last: the folder
+/// list is always recorded; the saves found in its Wine prefix are written
+/// as `saves/<slug>/<stem>/saves.tar.NNN` when `copy_saves` (false while
+/// the game is running). A saves write that fails, short of the drive
+/// going away or a cancel, is a warning: the game is still recorded, with
+/// its folders and no saves.
+///
 /// `before_file` runs before each file, and before each archive part (a
 /// test hook).
 pub(crate) fn write(
@@ -1149,6 +1273,7 @@ pub(crate) fn write(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
     before_file: &dyn Fn(),
+    copy_saves: bool,
     warnings: &mut Vec<String>,
 ) -> Result<(), LibraryError> {
     let drive = &job.drive;
@@ -1182,6 +1307,8 @@ pub(crate) fn write(
     let mut writes: Vec<(&StagedFile, String)> = Vec::new();
     // An installed copy's tree and the pack folder its parts go in.
     let mut tree_write: Option<(&TreePlan, String)> = None;
+    // A game's saves folder on the drive (`saves/<slug>/<stem>`).
+    let mut saves_dir: Option<String> = None;
     let mut entry: Entry = match staged {
         Staged::Game {
             game,
@@ -1222,6 +1349,7 @@ pub(crate) fn write(
                 }
             }
             place_assets(&pack, &mut game, &stem, assets, &mut writes);
+            saves_dir = Some(place_saves(&pack, &game, &stem));
             Entry::Game(Box::new(game))
         }
         Staged::Installed { game, tree, assets } => {
@@ -1241,6 +1369,7 @@ pub(crate) fn write(
             );
             let stem = dir.rsplit('/').next().unwrap_or(&leaf).to_string();
             place_assets(&pack, &mut game, &stem, assets, &mut writes);
+            saves_dir = Some(place_saves(&pack, &game, &stem));
             tree_write = Some((&**tree, dir));
             Entry::Game(Box::new(game))
         }
@@ -1370,6 +1499,46 @@ pub(crate) fn write(
             }
         }
     }
+    if let (Ok(()), Entry::Game(game), Some(staged_saves), Some(dir)) =
+        (&outcome, &mut entry, &job.saves, &saves_dir)
+    {
+        let mut record = saves::folders_only(staged_saves.folders.clone());
+        match (&staged_saves.tree, copy_saves) {
+            (Some(_), false) => warnings.push(SAVES_RUNNING.to_string()),
+            (Some(tree), true) => {
+                before_file();
+                // The saves are small: the bar grows to take them in.
+                let base = done;
+                let grand = total.saturating_add(tree.archive_bytes.saturating_mul(2));
+                let result = archive::write_saves_tree(
+                    &target,
+                    tree,
+                    dir,
+                    archive::part_bytes(),
+                    cancel,
+                    &mut |bytes, _| progress(base.saturating_add(bytes).min(grand), grand),
+                );
+                match result {
+                    Ok(parts) => {
+                        written.extend(parts.iter().map(|part| part.path.clone()));
+                        record = PackSaves {
+                            parts,
+                            tree_bytes: tree.tree_bytes,
+                            tree_files: tree.tree_files,
+                            ..record
+                        };
+                    }
+                    Err(error @ (WriteError::DriveRemoved | WriteError::Cancelled)) => {
+                        outcome = Err(write_error(error, drive));
+                    }
+                    Err(WriteError::Pack(_)) if drive_gone(mount) => outcome = Err(removed(drive)),
+                    Err(error) => warnings.push(format!("Its saves weren't copied: {error}")),
+                }
+            }
+            (None, _) => {}
+        }
+        game.saves = Some(record);
+    }
     if outcome.is_ok() {
         let edited = pack::edit_pack(mount, |pack| match &entry {
             Entry::Game(game) => {
@@ -1420,6 +1589,18 @@ fn place_assets<'a>(
         }
         writes.push((file, rel));
     }
+}
+
+/// The pack folder a game's saves archive goes in: `saves/<slug>/<stem>`,
+/// unique in the pack.
+fn place_saves(pack: &Pack, game: &PackGame, stem: &str) -> String {
+    unique_rel(
+        pack,
+        &saves_dir_rel(&game.platform, stem),
+        &game.source.server,
+        game.source.rom_id,
+        false,
+    )
 }
 
 /// The folder an installed copy's parts go in (before [`unique_rel`]):

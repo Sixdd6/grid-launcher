@@ -373,6 +373,22 @@ pub struct DriveSource {
     /// is connected to another server, whose ids mean other games; the
     /// relink pass can then match the row instead.
     pub keep_rom_id: bool,
+    /// A Windows game's saves on the drive (`PackGame::saves`), put back
+    /// when the install finalizes ([`drive_restore`]).
+    pub saves: Option<DriveSaves>,
+}
+
+/// A Windows game's saves on a backup drive, as an install reads them.
+#[derive(Clone, Debug, Default)]
+pub struct DriveSaves {
+    /// The save folders, Windows-token paths (`PackSaves::folders`).
+    pub folders: Vec<String>,
+    /// The saves archive's parts (resolved, absolute); empty when only the
+    /// folders were recorded.
+    pub parts: Vec<crate::backup::archive::PartSource>,
+    /// The parts named a path the drive can't use: the saves are skipped
+    /// with a warning.
+    pub unusable: bool,
 }
 
 impl DriveSource {
@@ -3484,10 +3500,18 @@ impl InstallService {
         };
         // A game copied from this computer reads the library while it
         // writes: a gate ticket held for the whole write keeps a library
-        // move from starting under it.
-        let reads_library = matches!(&job.item, backup_job::BackupItem::Game(game) if game.local);
+        // move from starting under it. So does one whose saves are copied
+        // out of its Wine prefix.
+        let reads_library = job.copies_saves()
+            || matches!(&job.item, backup_job::BackupItem::Game(game) if game.local);
         let running = match &job.item {
             backup_job::BackupItem::Game(game) if game.local => self.game_running(game.rom_id),
+            _ => false,
+        };
+        // A downloaded game that is running here is still backed up, but
+        // its saves stay in the prefix: they may be mid-write.
+        let copy_saves = match &job.item {
+            backup_job::BackupItem::Game(game) => !self.game_running(game.rom_id),
             _ => false,
         };
         let gate = self.library_gate.read().unwrap().clone();
@@ -3502,6 +3526,7 @@ impl InstallService {
                     cancel,
                     &mut |done, total| self.on_install_progress(id, done, total),
                     &before_file,
+                    copy_saves,
                     &mut warnings,
                 ),
             },
@@ -3608,6 +3633,12 @@ impl InstallService {
         }
 
         self.registry.upsert(&record)?;
+
+        // A Windows game installed from a drive: its saves, before the
+        // finalized hook looks its save folders up.
+        if job.mode == InstallMode::Base {
+            self.restore_drive_saves(job, &record, warning);
+        }
 
         // Bound to a `let` first so the read lock is released before the
         // hook runs — an `if let` scrutinee would keep the temporary guard
@@ -6576,6 +6607,7 @@ mod tests {
                 .collect(),
             server: game.source.server.clone(),
             keep_rom_id: true,
+            saves: None,
         }
     }
 

@@ -180,9 +180,57 @@ pub struct PackGame {
     /// backed it up, written as an archive in parts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub installed: Option<PackInstalled>,
+    /// A Windows game's save folders, and the saves copied out of its Wine
+    /// prefix. Absent for any other game, and in packs written before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saves: Option<PackSaves>,
     /// Keys this build does not know, kept so a rewrite does not drop them.
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// A Windows game's saves on the drive.
+///
+/// `folders` lists every save folder GRID knew for the game when it was
+/// backed up (PCGamingWiki's and the user's own, less the ones the user
+/// removed), as Windows-token paths: `%APPDATA%\Foo`,
+/// `%USERPROFILE%\Documents\My Games\Foo`, `%SYSTEMDRIVE%\Games\Foo`.
+/// They are recorded even when none of them exist.
+///
+/// `parts` is an uncompressed tar of the folders that existed in the
+/// game's Wine prefix, written like an installed copy's archive
+/// ([`saves_part_rel`]). Each folder's contents are under its position in
+/// `folders`: `0/slot1.sav`, `1/config.ini`. Empty when nothing was copied
+/// (a Windows computer, no prefix, or no folder existed).
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct PackSaves {
+    #[serde(default)]
+    pub folders: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<PackPart>,
+    /// The space the restored saves need.
+    #[serde(default)]
+    pub tree_bytes: u64,
+    #[serde(default)]
+    pub tree_files: u64,
+    /// Keys this build does not know, kept so a rewrite does not drop them.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+impl PackSaves {
+    /// Whether saves were copied to the drive (not just their folders
+    /// recorded).
+    pub fn has_copy(&self) -> bool {
+        !self.parts.is_empty()
+    }
+
+    /// The bytes the parts take on the drive.
+    pub fn parts_bytes(&self) -> u64 {
+        self.parts
+            .iter()
+            .fold(0_u64, |sum, part| sum.saturating_add(part.size))
+    }
 }
 
 /// A copy of a game as installed on the computer that backed it up.
@@ -743,7 +791,35 @@ pub fn game_dir_rel(platform_slug: &str, fs_name: &str, single_file_name: Option
 /// [`game_dir_rel`] with no single file, through [`unique_rel`] with
 /// `is_file = false`.
 pub fn installed_part_rel(game_dir: &str, index: usize) -> String {
-    format!("{game_dir}/installed.tar.{:03}", index.saturating_add(1))
+    tar_part_rel(game_dir, INSTALLED_TAR, index)
+}
+
+/// The archive name of an installed copy's parts.
+pub const INSTALLED_TAR: &str = "installed";
+/// The archive name of a game's saves' parts.
+pub const SAVES_TAR: &str = "saves";
+
+/// Part `index` (zero-based) of the tar `<dir>/<stem>.tar.001`, `.002`…
+pub fn tar_part_rel(dir: &str, stem: &str, index: usize) -> String {
+    format!("{dir}/{stem}.tar.{:03}", index.saturating_add(1))
+}
+
+/// A game's saves folder: `saves/<slug>/<stem>`, beside its art folder
+/// (a single-file game owns a file, so its saves cannot go in its folder).
+/// Pass the result through [`unique_rel`] before writing.
+pub fn saves_dir_rel(platform_slug: &str, game_stem: &str) -> String {
+    format!(
+        "saves/{}/{}",
+        pack_component(platform_slug, "platform"),
+        pack_component(game_stem, "game")
+    )
+}
+
+/// Part `index` (zero-based) of a game's saves archive:
+/// `<saves folder>/saves.tar.001`, `.002`… The folder comes from
+/// [`saves_dir_rel`] through [`unique_rel`].
+pub fn saves_part_rel(saves_dir: &str, index: usize) -> String {
+    tar_part_rel(saves_dir, SAVES_TAR, index)
 }
 
 /// A file of a multi-file or native game: `<game folder>/<file>`.
@@ -909,7 +985,7 @@ pub fn pack_game_detail(game: &PackGame) -> RomDetail {
 
 impl PackGame {
     /// Every pack-relative path this game's entry names: files, an
-    /// installed copy's archive parts, and art.
+    /// installed copy's archive parts, art, and the saves' parts.
     pub fn paths(&self) -> impl Iterator<Item = &str> {
         let assets = &self.assets;
         self.files
@@ -932,6 +1008,11 @@ impl PackGame {
                 .map(String::as_str),
             )
             .chain(assets.screenshots.iter().map(String::as_str))
+            .chain(
+                self.saves
+                    .iter()
+                    .flat_map(|saves| saves.parts.iter().map(|part| part.path.as_str())),
+            )
     }
 
     /// Whether the entry is a copy of an install (an archive in parts)
@@ -1042,7 +1123,14 @@ impl Pack {
     /// The bytes the index accounts for: every game, emulator and firmware
     /// file. The usage bar's "GRID" share.
     pub fn pack_bytes(&self) -> u64 {
-        let games: u64 = self.games.iter().map(|game| game.size).sum();
+        let games: u64 = self
+            .games
+            .iter()
+            .map(|game| {
+                let saves = game.saves.as_ref().map_or(0, PackSaves::parts_bytes);
+                game.size.saturating_add(saves)
+            })
+            .sum();
         let emulators: u64 = self.emulators.iter().map(|emulator| emulator.size).sum();
         let firmware: u64 = self
             .firmware
@@ -1380,6 +1468,84 @@ mod tests {
         );
         assert!(validate_rel(&installed_part_rel(&dir, 0)).is_ok());
         const { assert!(PART_BYTES < FAT32_MAX_FILE) };
+    }
+
+    /// [`installed_game`] with a saves record: two folders, one copied.
+    fn game_with_saves() -> serde_json::Value {
+        let mut value = installed_game();
+        value["saves"] = serde_json::json!({
+            "folders": ["%APPDATA%\\Ember", "%USERPROFILE%\\Documents\\Ember"],
+            "parts": [{ "path": "saves/ps4/Ember Run/saves.tar.001", "size": 10240, "md5": "cc" }],
+            "tree_bytes": 1200,
+            "tree_files": 3,
+        });
+        value
+    }
+
+    #[test]
+    fn a_saves_record_round_trips_and_is_optional() {
+        let PackState::Ready(pack) = parse_pack(&installed_pack(game_with_saves())) else {
+            panic!("ready");
+        };
+        let game = &pack.games[0];
+        let saves = game.saves.as_ref().expect("saves");
+        assert_eq!(saves.folders.len(), 2);
+        assert!(saves.has_copy());
+        assert_eq!(saves.parts_bytes(), 10240);
+        assert!(game
+            .paths()
+            .any(|rel| rel == "saves/ps4/Ember Run/saves.tar.001"));
+        let mut without = pack.clone();
+        without.games[0].saves = None;
+        assert_eq!(
+            pack.pack_bytes(),
+            without.pack_bytes() + 10240,
+            "the saves count toward the drive's share"
+        );
+        let json = serde_json::to_value(game).unwrap();
+        assert_eq!(json["saves"]["parts"][0]["md5"], "cc");
+        assert_eq!(json["saves"]["tree_files"], 3);
+
+        // A pack written before saves were recorded.
+        let PackState::Ready(old) = parse_pack(&installed_pack(installed_game())) else {
+            panic!("ready");
+        };
+        assert!(old.games[0].saves.is_none());
+        let json = serde_json::to_value(&old.games[0]).unwrap();
+        assert!(json.get("saves").is_none(), "no saves key is written");
+
+        // Folders only: no parts key.
+        let mut value = installed_game();
+        value["saves"] = serde_json::json!({ "folders": ["%APPDATA%\\Ember"] });
+        let game: PackGame = serde_json::from_value(value).unwrap();
+        let saves = game.saves.as_ref().unwrap();
+        assert!(!saves.has_copy());
+        assert!(serde_json::to_value(saves).unwrap().get("parts").is_none());
+    }
+
+    #[test]
+    fn an_unsafe_saves_part_path_is_unreadable() {
+        let mut value = game_with_saves();
+        value["saves"]["parts"][0]["path"] = serde_json::json!("../saves.tar.001");
+        assert!(matches!(
+            parse_pack(&installed_pack(value)),
+            PackState::Unreadable(_)
+        ));
+    }
+
+    #[test]
+    fn saves_part_names() {
+        let dir = saves_dir_rel("win", "Moss & Marrow");
+        assert_eq!(dir, "saves/win/Moss & Marrow");
+        assert_eq!(
+            saves_part_rel(&dir, 0),
+            "saves/win/Moss & Marrow/saves.tar.001"
+        );
+        assert_eq!(
+            saves_part_rel(&dir, 1),
+            "saves/win/Moss & Marrow/saves.tar.002"
+        );
+        assert!(validate_rel(&saves_part_rel(&dir, 0)).is_ok());
     }
 
     #[test]

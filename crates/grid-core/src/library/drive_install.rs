@@ -28,11 +28,12 @@ use super::backup_job::DriveTarget;
 use super::queue::{EntryMeta, JobKey};
 use super::{
     drive_copy, drive_restore, file_stem_of, is_emulators_platform, plan_install, platform_dir,
-    safe_file_name, server_entry_name, DriveSource, EmulatorJob, GameSource, InstallMode,
-    InstallService, JobPayload, JobTarget, LibraryError, ResolvedPaths, COMPAT_TOOL_PLATFORM,
-    EMULATOR_PLATFORM, SERVER_SOURCE_PREFIX,
+    safe_file_name, server_entry_name, DriveSaves, DriveSource, EmulatorJob, GameSource,
+    InstallMode, InstallService, JobPayload, JobTarget, LibraryError, ResolvedPaths,
+    COMPAT_TOOL_PLATFORM, EMULATOR_PLATFORM, SERVER_SOURCE_PREFIX,
 };
-use crate::backup::pack::{self, PackEmulator, PackError, PackGame, PackOs};
+use crate::backup::archive::PartSource;
+use crate::backup::pack::{self, PackEmulator, PackError, PackGame, PackOs, PackSaves};
 use crate::config::Config;
 use crate::images::urls::resolve_image_url;
 use crate::launch::forge::ResolvedDownload;
@@ -109,6 +110,35 @@ fn game_files(
         .collect()
 }
 
+/// A game's saves on the drive mounted at `mount`, its parts resolved. A
+/// part path the drive can't use never refuses the install: the saves are
+/// marked unusable and skipped with a warning when it finalizes.
+fn drive_saves(mount: &Path, saves: &PackSaves) -> DriveSaves {
+    let parts: Result<Vec<PartSource>, PackError> = saves
+        .parts
+        .iter()
+        .map(|part| {
+            pack::resolve(mount, &part.path).map(|path| PartSource {
+                path,
+                size: part.size,
+                md5: part.md5.clone(),
+            })
+        })
+        .collect();
+    match parts {
+        Ok(parts) => DriveSaves {
+            folders: saves.folders.clone(),
+            parts,
+            unusable: false,
+        },
+        Err(_) => DriveSaves {
+            folders: saves.folders.clone(),
+            parts: Vec::new(),
+            unusable: true,
+        },
+    }
+}
+
 /// The compat-tool entry a drive's pack holds for the OS tag `os` whose
 /// `source_id` passes `is`, if any (umu-launcher, the Steam Linux Runtime).
 fn pack_entry(mount: &Path, os: &str, is: fn(&str) -> bool) -> Option<PackEmulator> {
@@ -181,6 +211,10 @@ impl InstallService {
             files: game_files(&drive, game)?,
             server: server.clone(),
             keep_rom_id: keeps_rom_id(&server, live_server),
+            saves: game
+                .saves
+                .as_ref()
+                .map(|saves| drive_saves(&drive.mount, saves)),
         };
         // A copy of an install restores its archive; anything else (a
         // download, or an install copied as the server's files) plans like a

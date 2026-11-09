@@ -77,6 +77,9 @@ struct OpenPart {
 pub struct TarPartWriter<'a> {
     mount: &'a Path,
     rel_base: String,
+    /// The archive's name: `installed` ([`pack::INSTALLED_TAR`]) unless
+    /// [`Self::with_stem`] set another.
+    stem: &'static str,
     part_bytes: u64,
     /// The archive's expected size, for the space check.
     expected: u64,
@@ -114,6 +117,7 @@ impl<'a> TarPartWriter<'a> {
         Self {
             mount: target.mount,
             rel_base: rel_base.to_string(),
+            stem: pack::INSTALLED_TAR,
             part_bytes: part_bytes.max(1),
             expected: archive_bytes,
             cancel,
@@ -129,6 +133,12 @@ impl<'a> TarPartWriter<'a> {
             failure: None,
             stopped: false,
         }
+    }
+
+    /// Names the parts `<rel_base>/<stem>.tar.NNN` ([`pack::tar_part_rel`]).
+    pub fn with_stem(mut self, stem: &'static str) -> Self {
+        self.stem = stem;
+        self
     }
 
     /// Runs `hook` before each part is created.
@@ -178,7 +188,7 @@ impl<'a> TarPartWriter<'a> {
             None if write::drive_gone(mount) => return Err(WriteError::DriveRemoved),
             None => {}
         }
-        let rel = pack::installed_part_rel(&self.rel_base, self.parts.len());
+        let rel = pack::tar_part_rel(&self.rel_base, self.stem, self.parts.len());
         let dest = pack::resolve(mount, &rel)?;
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|error| classify_io(error, mount))?;
@@ -477,6 +487,53 @@ pub fn write_installed_tree_with(
     progress: &mut dyn FnMut(u64, u64),
     before_part: &mut dyn FnMut(),
 ) -> Result<Vec<PackPart>, WriteError> {
+    write_tree_parts(
+        target,
+        tree,
+        rel_base,
+        pack::INSTALLED_TAR,
+        part_bytes,
+        cancel,
+        progress,
+        before_part,
+    )
+}
+
+/// A game's saves ([`super::saves::scan_saves`]) written as checked tar
+/// parts `<rel_base>/saves.tar.001`, … ([`pack::saves_part_rel`]), exactly
+/// as [`write_installed_tree`] writes an installed copy.
+pub fn write_saves_tree(
+    target: &WriteTarget<'_>,
+    tree: &TreePlan,
+    rel_base: &str,
+    part_bytes: u64,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<Vec<PackPart>, WriteError> {
+    write_tree_parts(
+        target,
+        tree,
+        rel_base,
+        pack::SAVES_TAR,
+        part_bytes,
+        cancel,
+        progress,
+        &mut || {},
+    )
+}
+
+/// [`write_installed_tree_with`] for the tar named `stem`.
+#[allow(clippy::too_many_arguments)]
+fn write_tree_parts(
+    target: &WriteTarget<'_>,
+    tree: &TreePlan,
+    rel_base: &str,
+    stem: &'static str,
+    part_bytes: u64,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(u64, u64),
+    before_part: &mut dyn FnMut(),
+) -> Result<Vec<PackPart>, WriteError> {
     pack::validate_rel(rel_base)?;
     for entry in &tree.entries {
         check_entry_name(entry)?;
@@ -489,6 +546,7 @@ pub fn write_installed_tree_with(
         cancel,
         progress,
     )
+    .with_stem(stem)
     .with_before_part(before_part);
     let changed = Cell::new(false);
     let result = {

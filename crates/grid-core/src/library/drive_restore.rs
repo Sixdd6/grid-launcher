@@ -11,7 +11,10 @@
 //!   writes the registry row ([`restored_record`]).
 //!
 //! The Wine prefix is never in the archive: a native game restored on a
-//! non-Windows host gets a fresh, empty `prefix/`.
+//! non-Windows host gets a fresh `prefix/`, and the saves the backup
+//! copied out of the old one are put into it
+//! ([`InstallService::restore_drive_saves`], which a drive install of the
+//! server's files runs too).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,14 +26,16 @@ use super::drive_install::DriveCopyHook;
 use super::path_change::is_strictly_inside;
 use super::registry::InstalledGame;
 use super::{
-    is_appimage, is_ps3_platform, make_executable, new_record, path_string, platform_dir,
-    removal_key, sanitize_component, specials, DriveSource, GameSource, InstallJob, InstallMode,
-    InstallService, LibraryError,
+    append_warning, is_appimage, is_ps3_platform, make_executable, new_record, path_string,
+    platform_dir, removal_key, sanitize_component, specials, DriveSource, GameSource, InstallJob,
+    InstallMode, InstallService, LibraryError,
 };
 use crate::backup::archive::{self, PartSource, RestoreError};
 use crate::backup::local::WINE_PREFIX_DIR;
 use crate::backup::pack::{self, InstalledLayout, PackGame, PackInstalled};
+use crate::backup::saves;
 use crate::backup::write::SPACE_MARGIN;
+use crate::config::Config;
 use crate::images::ImageFields;
 use crate::romm::RomDetail;
 
@@ -407,7 +412,7 @@ impl InstallService {
         self: &Arc<Self>,
         job: &InstallJob,
         plan: &RestorePlan,
-        _warning: &mut String,
+        warning: &mut String,
     ) -> Result<(), LibraryError> {
         let GameSource::Drive(drive) = &job.source else {
             return Err(LibraryError::Extract(
@@ -444,7 +449,7 @@ impl InstallService {
         }
         fs::rename(&restored, dest)?;
 
-        match self.write_restored_row(job, drive, plan) {
+        match self.write_restored_row(job, drive, plan, warning) {
             Ok(()) => Ok(()),
             Err(error) => {
                 remove_path(dest);
@@ -458,6 +463,7 @@ impl InstallService {
         job: &InstallJob,
         drive: &DriveSource,
         plan: &RestorePlan,
+        warning: &mut String,
     ) -> Result<(), LibraryError> {
         let detail = &job.detail;
         let installed = &plan.installed;
@@ -527,6 +533,9 @@ impl InstallService {
         }
 
         self.registry.upsert(&record)?;
+        // Before the finalized hook: it looks the save folders up for
+        // cloud saves only when the config has none.
+        self.restore_drive_saves(job, &record, warning);
 
         let hook = self.image_hook.read().unwrap().clone();
         if let Some(hook) = hook {
@@ -543,7 +552,104 @@ impl InstallService {
         }
         Ok(())
     }
+
+    /// Puts a Windows game's saves from the drive back, once its row
+    /// (`record`) is written. Both drive installs end here: a restored copy
+    /// ([`Self::finalize_restore`]) and the server's files copied off the
+    /// drive (`finalize_base`).
+    ///
+    /// 1. The save folders go to cloud saves ([`saves::seed_folders`]), so
+    ///    they are known with no lookup.
+    /// 2. The saves archive, if any, is read into a temporary folder in the
+    ///    platform folder and each folder copied to its place
+    ///    ([`saves::restore_saves`]): inside the row's Wine prefix off
+    ///    Windows, the real folder on Windows, and never into a folder that
+    ///    already holds files.
+    ///
+    /// Nothing here fails the install: every problem is a line in `warning`.
+    pub(super) fn restore_drive_saves(
+        &self,
+        job: &InstallJob,
+        record: &InstalledGame,
+        warning: &mut String,
+    ) {
+        let GameSource::Drive(drive) = &job.source else {
+            return;
+        };
+        let Some(drive_saves) = &drive.saves else {
+            return;
+        };
+        if drive_saves.folders.is_empty() {
+            return;
+        }
+        let seeded = Config::load(&self.config_path).and_then(|mut config| {
+            if saves::seed_folders(&mut config, &record.title, &drive_saves.folders) {
+                config.save(&self.config_path)?;
+            }
+            Ok(())
+        });
+        if let Err(error) = seeded {
+            append_warning(
+                warning,
+                &format!("Its save folders weren't added to cloud saves: {error}"),
+            );
+        }
+        if drive_saves.unusable {
+            append_warning(
+                warning,
+                &format!("Its saves on {} can't be used", drive.label),
+            );
+            return;
+        }
+        if drive_saves.parts.is_empty() {
+            return;
+        }
+        let prefix = if cfg!(windows) {
+            None
+        } else {
+            match record.native_wineprefix.trim() {
+                "" => {
+                    append_warning(warning, "Its saves weren't restored: it has no Wine prefix");
+                    return;
+                }
+                raw => Some(PathBuf::from(raw)),
+            }
+        };
+        let tmp = match self.library_root() {
+            Ok(library) => platform_dir(&library, &job.detail.platform_name)
+                .join(format!("{SAVES_TMP_PREFIX}{}", job.detail.id)),
+            Err(error) => {
+                append_warning(warning, &format!("Its saves weren't restored: {error}"));
+                return;
+            }
+        };
+        let result = saves::restore_saves(
+            &pack::pack_dir(&drive.mount),
+            &drive_saves.parts,
+            &drive_saves.folders,
+            &tmp,
+            prefix.as_deref(),
+            crate::platform::windows_documents_dir().as_deref(),
+            &AtomicBool::new(false),
+        );
+        match result {
+            Ok(restored) => {
+                for line in restored.warnings(&drive_saves.folders) {
+                    append_warning(warning, &line);
+                }
+            }
+            Err(RestoreError::DriveRemoved) => append_warning(
+                warning,
+                &format!("Its saves weren't restored: {} was removed", drive.label),
+            ),
+            Err(error) => append_warning(warning, &format!("Its saves weren't restored: {error}")),
+        }
+    }
 }
+
+/// The temporary folder a restore reads a game's saves into, in the
+/// platform folder.
+const SAVES_TMP_PREFIX: &str = ".grid-saves-";
 
 #[cfg(test)]
 mod tests {
@@ -614,6 +720,7 @@ mod tests {
             files: BTreeMap::new(),
             server: SERVER.to_string(),
             keep_rom_id: true,
+            saves: None,
         }
     }
 

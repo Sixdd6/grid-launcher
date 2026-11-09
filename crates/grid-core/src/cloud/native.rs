@@ -149,14 +149,15 @@ fn passwd_fallback_username() -> Option<String> {
 /// *before* the bare `%USERPROFILE%` prefix — that precedence is load
 /// bearing, since `%USERPROFILE%` is itself a prefix of both — followed by
 /// `%APPDATA%`, `%LOCALAPPDATA%`, then the bare `%USERPROFILE%`, then
-/// `%PROGRAMDATA%`, `%PUBLIC%`, `%WINDIR%`. Matching is case-insensitive;
+/// `%PROGRAMDATA%`, `%PUBLIC%`, `%WINDIR%`, and (GRID's own addition)
+/// `%SYSTEMDRIVE%` for `drive_c` itself. Matching is case-insensitive;
 /// `None` when no known token prefixes `raw`.
 pub fn translate_windows_path_to_wine_prefix(raw: &str, prefix: &Path) -> Option<PathBuf> {
     let username = current_username();
     let drive_c = prefix.join("drive_c");
     let user_home = drive_c.join("users").join(&username);
 
-    let mappings: [(&str, PathBuf); 8] = [
+    let mappings: [(&str, PathBuf); 9] = [
         (
             "%USERPROFILE%\\AppData\\LocalLow",
             user_home.join("AppData").join("LocalLow"),
@@ -168,6 +169,9 @@ pub fn translate_windows_path_to_wine_prefix(raw: &str, prefix: &Path) -> Option
         ("%PROGRAMDATA%", drive_c.join("ProgramData")),
         ("%PUBLIC%", drive_c.join("users").join("Public")),
         ("%WINDIR%", drive_c.join("windows")),
+        // Not in the Python original: the token a backup records for a
+        // save folder elsewhere on drive C (`backup::saves`).
+        ("%SYSTEMDRIVE%", drive_c.clone()),
     ];
 
     let raw_cf = raw.to_lowercase();
@@ -932,6 +936,20 @@ mod tests {
         assert_eq!(
             result,
             Some(prefix.join("drive_c").join("windows").join("Fonts"))
+        );
+    }
+
+    #[test]
+    fn translate_systemdrive() {
+        let _lock = crate::test_env::lock();
+        let _guard = wine_env();
+        let prefix = Path::new("/home/testuser/.wine");
+
+        let result = translate_windows_path_to_wine_prefix("%SystemDrive%\\Games\\Foo", prefix);
+
+        assert_eq!(
+            result,
+            Some(prefix.join("drive_c").join("Games").join("Foo"))
         );
     }
 
