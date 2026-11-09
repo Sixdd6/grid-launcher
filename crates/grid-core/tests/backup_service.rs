@@ -125,16 +125,34 @@ impl Harness {
         files: &[(i64, &str, &[u8])],
         delay_ms: u64,
     ) {
+        let hashed: Vec<(i64, &str, &[u8], String)> = files
+            .iter()
+            .map(|(file_id, file_name, body)| (*file_id, *file_name, *body, md5_hex(body)))
+            .collect();
+        self.mount_game_hashed(id, name, slug, fs_name, &hashed, delay_ms)
+            .await;
+    }
+
+    /// [`Self::mount_game`] with the MD5 the server states for each file.
+    async fn mount_game_hashed(
+        &self,
+        id: i64,
+        name: &str,
+        slug: &str,
+        fs_name: &str,
+        files: &[(i64, &str, &[u8], String)],
+        delay_ms: u64,
+    ) {
         let file_json: Vec<serde_json::Value> = files
             .iter()
-            .map(|(file_id, file_name, body)| {
+            .map(|(file_id, file_name, body, md5)| {
                 json!({
                     "id": file_id,
                     "file_name": file_name,
                     "file_size_bytes": body.len(),
                     "is_top_level": true,
                     "category": null,
-                    "md5_hash": md5_hex(body),
+                    "md5_hash": md5,
                 })
             })
             .collect();
@@ -163,7 +181,7 @@ impl Harness {
             .respond_with(ResponseTemplate::new(200).set_body_json(detail))
             .mount(&self.server)
             .await;
-        for (file_id, file_name, body) in files {
+        for (file_id, file_name, body, _) in files {
             let mut template = ResponseTemplate::new(200).set_body_bytes(body.to_vec());
             if delay_ms > 0 {
                 template = template.set_delay(Duration::from_millis(delay_ms));
@@ -424,6 +442,43 @@ async fn backs_up_a_single_file_game_and_a_native_game() {
         .find(|e| e.batch == again.batch)
         .unwrap();
     assert_eq!(row.error, "Already on Couch kit");
+}
+
+/// RomM states a zipped ROM's MD5 as the MD5 of the ROM inside, not of
+/// the zip. The backup must not hold that against the zip's bytes.
+#[tokio::test]
+async fn backs_up_a_zip_whose_server_md5_is_of_its_contents() {
+    let h = Harness::new().await;
+    let rom: &[u8] = b"SEGA GENESIS altered beast rom image";
+    let archive = zip_bytes(&[("Altered Beast (USA, Europe).md", rom)]);
+    let name = "Altered Beast (USA, Europe).zip";
+    h.mount_game_hashed(
+        5,
+        "Altered Beast",
+        "genesis",
+        name,
+        &[(51, name, &archive, md5_hex(rom))],
+        0,
+    )
+    .await;
+    h.service
+        .start_backup(
+            h.client.clone(),
+            h.drive(),
+            Harness::items(&[(5, "Altered Beast")]),
+        )
+        .unwrap();
+    let row = h.wait_terminal(5).await;
+    assert_eq!(row.status, DownloadStatus::Completed, "{row:#?}");
+    let grid = h.mount.join("gridpack");
+    assert_eq!(
+        fs::read(grid.join(format!("games/genesis/{name}"))).unwrap(),
+        archive
+    );
+    // The server's content hash is kept as metadata.
+    let game = h.pack().find_game(&h.server.uri(), 5).cloned().unwrap();
+    assert_eq!(game.files[0].md5, md5_hex(rom));
+    assert!(no_tmp_files(&grid));
 }
 
 #[tokio::test]

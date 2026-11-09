@@ -48,8 +48,6 @@ pub struct FileWrite<'a> {
     pub src: &'a Path,
     /// Where it goes, relative to `gridpack/`.
     pub rel: &'a str,
-    /// The expected MD5 as hex, when known. Blank means unknown.
-    pub md5: Option<&'a str>,
 }
 
 /// Why a drive write or delete failed.
@@ -65,7 +63,8 @@ pub enum WriteError {
     /// A file over FAT32's limit, refused before anything is written.
     #[error("{name} is over 4 GB, which {label} (FAT32) can't hold")]
     TooBigForFat32 { name: String, label: String },
-    /// The written file's size or MD5 differs from the source.
+    /// The written file's size, or the bytes read back from the drive,
+    /// differ from the staged source.
     #[error("{0}")]
     Mismatch(String),
     /// The cancel flag was set. The temporary file was removed.
@@ -88,8 +87,16 @@ pub enum WriteError {
 /// 4. copies in [`CHUNK_BYTES`] chunks to `<rel>.gridtmp`, reporting
 ///    `progress(written, total)` and stopping on `cancel`;
 /// 5. syncs it;
-/// 6. checks its size against the source's, and its MD5 when known;
+/// 6. checks its size against the source's, then reads it back from the
+///    drive and checks its MD5 against the MD5 of the source bytes it copied
+///    ([`verify_on_drive`]);
 /// 7. renames it onto `rel`, replacing an existing file.
+///
+/// The check is against what GRID staged, never against a hash the server
+/// states: RomM hashes an archive's decompressed contents, not its bytes.
+///
+/// `progress(done, total)` covers the copy and the read-back as one span:
+/// each moves `done` through half of `total`.
 ///
 /// On a failure after step 4 began, the temporary file is removed when the
 /// drive is still there. Returns the bytes written.
@@ -118,14 +125,12 @@ pub fn write_file(
         std::fs::create_dir_all(parent).map_err(|error| classify_io(error, mount))?;
     }
     let tmp = tmp_path(&dest);
-    let copied = copy_checked(
-        &mut src, &tmp, size, file.md5, &name, mount, cancel, progress,
-    )
-    .and_then(|written| {
-        std::fs::rename(&tmp, &dest)
-            .map(|()| written)
-            .map_err(|error| classify_io(error, mount))
-    });
+    let copied =
+        copy_checked(&mut src, &tmp, size, &name, mount, cancel, progress).and_then(|written| {
+            std::fs::rename(&tmp, &dest)
+                .map(|()| written)
+                .map_err(|error| classify_io(error, mount))
+        });
     match copied {
         Ok(written) => {
             sync_folder(dest.parent());
@@ -141,18 +146,21 @@ pub fn write_file(
 }
 
 /// Steps 4 to 6 of [`write_file`]: copy to `tmp`, sync, verify.
-#[allow(clippy::too_many_arguments)]
 fn copy_checked(
     src: &mut File,
     tmp: &Path,
     size: u64,
-    md5: Option<&str>,
     name: &str,
     mount: &Path,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<u64, WriteError> {
     let on_drive = |error: io::Error| classify_io(error, mount);
+    let size_mismatch = || {
+        WriteError::Mismatch(format!(
+            "{name} didn't copy correctly: its size doesn't match"
+        ))
+    };
     let mut out = File::create(tmp).map_err(on_drive)?;
     let mut hasher = Md5::new();
     let mut buf = vec![0u8; CHUNK_BYTES];
@@ -171,36 +179,164 @@ fn copy_checked(
         written += n as u64;
         // A source that grows while it is copied would never reach its end.
         if written > size {
-            return Err(WriteError::Mismatch(format!(
-                "{name} didn't copy correctly: its size doesn't match"
-            )));
+            return Err(size_mismatch());
         }
         out.write_all(&buf[..n]).map_err(on_drive)?;
         hasher.update(&buf[..n]);
-        progress(written, size);
+        progress(written / 2, size);
     }
     out.sync_all().map_err(on_drive)?;
     let on_disk = out.metadata().map_err(on_drive)?.len();
     drop(out);
     if written != size || on_disk != size {
+        return Err(size_mismatch());
+    }
+    let source_md5: [u8; 16] = hasher.finalize().into();
+    #[cfg(test)]
+    tests::after_sync(tmp);
+    let read_back = verify_on_drive(tmp, size, mount, cancel, &mut |read| {
+        progress(size / 2 + read - read / 2, size);
+    })?;
+    if read_back != Some(source_md5) {
         return Err(WriteError::Mismatch(format!(
-            "{name} didn't copy correctly: its size doesn't match"
+            "{name} didn't copy correctly: the copy on the drive doesn't match the download"
         )));
     }
-    let expected = md5.unwrap_or("").trim().to_ascii_lowercase();
-    if !expected.is_empty() {
-        let actual: String = hasher
-            .finalize()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        if actual != expected {
-            return Err(WriteError::Mismatch(format!(
-                "{name} didn't copy correctly: its MD5 doesn't match"
-            )));
-        }
-    }
     Ok(written)
+}
+
+/// Reads `tmp` back from the drive and returns its MD5, or `None` when the
+/// file isn't `size` bytes long. `progress(read)` follows each chunk.
+///
+/// What this verifies: the bytes the drive returns for the file after
+/// `sync_all`, against the bytes GRID copied. To make that a read from the
+/// device and not from the OS's page cache, the cache is bypassed where the
+/// OS allows it:
+/// - Linux: the file's cached pages are dropped with
+///   `posix_fadvise(POSIX_FADV_DONTNEED)` (the pages are clean after the
+///   sync, so the kernel drops them) before the read.
+/// - macOS: the read handle is opened with `F_NOCACHE`. Pages already cached
+///   may still be served, so this is best effort.
+/// - Windows: the read handle uses `FILE_FLAG_NO_BUFFERING`, with an aligned
+///   buffer. If the system refuses an unbuffered read, the check falls back
+///   to a normal read, which may come from the cache.
+///
+/// What it does not verify: a drive's own on-board cache, or a FUSE file
+/// system's private cache, can still answer the read. The cost is one full
+/// read of every file from the drive, which on a typical USB stick adds
+/// roughly a third to a half of the copy time.
+fn verify_on_drive(
+    tmp: &Path,
+    size: u64,
+    mount: &Path,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(u64),
+) -> Result<Option<[u8; 16]>, WriteError> {
+    let on_drive = |error: io::Error| classify_io(error, mount);
+    let outcome = |hashed: io::Result<Hashed>| match hashed {
+        Ok(Hashed::Done(md5)) => Ok(md5),
+        Ok(Hashed::Cancelled) => Err(WriteError::Cancelled),
+        Err(error) => Err(classify_io(error, mount)),
+    };
+    let file = open_uncached(tmp).map_err(on_drive)?;
+    let hashed = hash_file(file, size, cancel, progress);
+    // ERROR_INVALID_PARAMETER: the volume won't take an unbuffered read of
+    // this shape. Read it the normal way.
+    #[cfg(windows)]
+    if matches!(&hashed, Err(error) if error.raw_os_error() == Some(87)) {
+        let file = File::open(tmp).map_err(on_drive)?;
+        return outcome(hash_file(file, size, cancel, progress));
+    }
+    outcome(hashed)
+}
+
+/// What [`hash_file`] found.
+enum Hashed {
+    /// The MD5, or `None` when the file isn't the expected size.
+    Done(Option<[u8; 16]>),
+    Cancelled,
+}
+
+/// MD5 of all of `file`, `None` when it isn't `size` bytes long.
+fn hash_file(
+    mut file: File,
+    size: u64,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(u64),
+) -> io::Result<Hashed> {
+    // Unbuffered reads on Windows need a buffer aligned to the sector size;
+    // 4096 covers every common one. CHUNK_BYTES is a multiple of it.
+    const ALIGN: usize = 4096;
+    let mut storage = vec![0u8; CHUNK_BYTES + ALIGN];
+    let start = storage.as_ptr().align_offset(ALIGN).min(ALIGN);
+    let buf = &mut storage[start..start + CHUNK_BYTES];
+    let mut hasher = Md5::new();
+    let mut read: u64 = 0;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(Hashed::Cancelled);
+        }
+        let n = match file.read(buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
+        read += n as u64;
+        if read > size {
+            return Ok(Hashed::Done(None));
+        }
+        hasher.update(&buf[..n]);
+        progress(read);
+    }
+    Ok(Hashed::Done(
+        (read == size).then(|| hasher.finalize().into()),
+    ))
+}
+
+/// Opens `path` for a read that bypasses the OS cache where possible (see
+/// [`verify_on_drive`]).
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn open_uncached(path: &Path) -> io::Result<File> {
+    use std::os::fd::AsRawFd;
+    let file = File::open(path)?;
+    // SAFETY: a valid open descriptor; the call only advises the kernel.
+    // A refusal leaves the cache as it is, which only weakens the check.
+    unsafe {
+        libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    }
+    Ok(file)
+}
+
+#[cfg(target_os = "macos")]
+fn open_uncached(path: &Path) -> io::Result<File> {
+    use std::os::fd::AsRawFd;
+    let file = File::open(path)?;
+    // SAFETY: a valid open descriptor; F_NOCACHE takes an int flag.
+    unsafe {
+        libc::fcntl(file.as_raw_fd(), libc::F_NOCACHE, 1);
+    }
+    Ok(file)
+}
+
+#[cfg(windows)]
+fn open_uncached(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_NO_BUFFERING;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_NO_BUFFERING)
+        .open(path)
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    windows
+)))]
+fn open_uncached(path: &Path) -> io::Result<File> {
+    File::open(path)
 }
 
 /// Refuses a file over [`FAT32_MAX_FILE`] on a FAT32 drive.
@@ -408,6 +544,33 @@ mod tests {
         cleanup_leftovers, index_path, new_pack, pack_dir, write_pack_atomic,
     };
 
+    /// A hook run on a synced temporary file.
+    type Hook = Box<dyn Fn(&Path)>;
+
+    thread_local! {
+        /// Runs on the synced temporary file, before the read-back.
+        static AFTER_SYNC: std::cell::RefCell<Option<Hook>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// The test hook [`copy_checked`] calls between the sync and the
+    /// read-back, on this thread only.
+    pub(super) fn after_sync(tmp: &Path) {
+        AFTER_SYNC.with(|hook| {
+            if let Some(hook) = hook.borrow().as_ref() {
+                hook(tmp);
+            }
+        });
+    }
+
+    fn set_after_sync(hook: impl Fn(&Path) + 'static) {
+        AFTER_SYNC.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+    }
+
+    fn clear_after_sync() {
+        AFTER_SYNC.with(|slot| *slot.borrow_mut() = None);
+    }
+
     /// A tempdir "drive" set up for GRID.
     fn drive() -> tempfile::TempDir {
         let drive = tempfile::tempdir().unwrap();
@@ -431,13 +594,6 @@ mod tests {
         path
     }
 
-    fn md5_hex(bytes: &[u8]) -> String {
-        Md5::digest(bytes)
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect()
-    }
-
     fn no_progress() -> impl FnMut(u64, u64) {
         |_, _| {}
     }
@@ -448,14 +604,12 @@ mod tests {
         let staging = tempfile::tempdir().unwrap();
         let src = source(staging.path(), CHUNK_BYTES * 2 + 17);
         let expected = std::fs::read(&src).unwrap();
-        let md5 = md5_hex(&expected);
         let mut reports = Vec::new();
         let written = write_file(
             &target(drive.path()),
             &FileWrite {
                 src: &src,
                 rel: "games/genesis/Game.bin",
-                md5: Some(&md5.to_ascii_uppercase()),
             },
             &AtomicBool::new(false),
             &mut |done, total| reports.push((done, total)),
@@ -465,7 +619,10 @@ mod tests {
         let dest = pack_dir(drive.path()).join("games/genesis/Game.bin");
         assert_eq!(std::fs::read(&dest).unwrap(), expected);
         assert!(!tmp_path(&dest).exists());
-        assert_eq!(reports.len(), 3);
+        // Three chunks copied, then the same three read back.
+        assert_eq!(reports.len(), 6);
+        assert!(reports.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+        assert_eq!(reports[2], (written / 2, written));
         assert_eq!(reports.last(), Some(&(written, written)));
     }
 
@@ -500,7 +657,6 @@ mod tests {
             &FileWrite {
                 src: &src,
                 rel: "games/ps2/big.iso",
-                md5: None,
             },
             &AtomicBool::new(false),
             &mut no_progress(),
@@ -537,7 +693,6 @@ mod tests {
                 &FileWrite {
                     src: &src,
                     rel: "games/x/Game.bin",
-                    md5: None,
                 },
                 &AtomicBool::new(false),
                 &mut |_, _| panic!("power cut"),
@@ -578,7 +733,6 @@ mod tests {
             &FileWrite {
                 src: &src,
                 rel: "games/x/Game.bin",
-                md5: None,
             },
             &AtomicBool::new(false),
             &mut grow,
@@ -590,26 +744,66 @@ mod tests {
         assert!(!tmp_path(&dest).exists());
     }
 
+    /// The file on the drive is damaged after the sync: the read-back
+    /// catches it, whatever the server says about the file.
     #[test]
-    fn an_md5_mismatch_fails_and_leaves_no_file() {
+    fn a_copy_damaged_on_the_drive_fails_and_leaves_no_file() {
         let drive = drive();
         let staging = tempfile::tempdir().unwrap();
-        let src = source(staging.path(), 1000);
-        let dest = pack_dir(drive.path()).join("bios/x.bin");
+        let src = source(staging.path(), CHUNK_BYTES + 1000);
+        let dest = pack_dir(drive.path()).join("games/x/Game.zip");
+        set_after_sync(|tmp| {
+            let mut bytes = std::fs::read(tmp).unwrap();
+            bytes[CHUNK_BYTES + 10] ^= 0xff;
+            std::fs::write(tmp, bytes).unwrap();
+        });
         let error = write_file(
             &target(drive.path()),
             &FileWrite {
                 src: &src,
-                rel: "bios/x.bin",
-                md5: Some("00000000000000000000000000000000"),
+                rel: "games/x/Game.zip",
             },
             &AtomicBool::new(false),
             &mut no_progress(),
         )
         .unwrap_err();
-        assert!(error.to_string().contains("MD5"), "{error}");
+        clear_after_sync();
+        assert!(matches!(error, WriteError::Mismatch(_)), "{error:?}");
+        assert_eq!(
+            error.to_string(),
+            "Game.zip didn't copy correctly: the copy on the drive doesn't match the download"
+        );
         assert!(!dest.exists());
         assert!(!tmp_path(&dest).exists());
+    }
+
+    /// A file cut short on the drive after the sync fails the read-back.
+    #[test]
+    fn a_copy_cut_short_on_the_drive_fails() {
+        let drive = drive();
+        let staging = tempfile::tempdir().unwrap();
+        let src = source(staging.path(), 1000);
+        set_after_sync(|tmp| {
+            File::options()
+                .write(true)
+                .open(tmp)
+                .unwrap()
+                .set_len(999)
+                .unwrap();
+        });
+        let error = write_file(
+            &target(drive.path()),
+            &FileWrite {
+                src: &src,
+                rel: "games/x/Short.bin",
+            },
+            &AtomicBool::new(false),
+            &mut no_progress(),
+        )
+        .unwrap_err();
+        clear_after_sync();
+        assert!(matches!(error, WriteError::Mismatch(_)), "{error:?}");
+        assert!(!pack_dir(drive.path()).join("games/x/Short.bin").exists());
     }
 
     #[test]
@@ -626,7 +820,6 @@ mod tests {
             &FileWrite {
                 src: &src,
                 rel: "games/x/Game.bin",
-                md5: None,
             },
             &AtomicBool::new(false),
             &mut no_progress(),
@@ -648,7 +841,6 @@ mod tests {
             &FileWrite {
                 src: &src,
                 rel: "games/x/Game.bin",
-                md5: None,
             },
             &cancel,
             &mut |_, _| cancel.store(true, Ordering::Relaxed),
@@ -667,11 +859,7 @@ mod tests {
         for rel in ["../outside.bin", "/etc/x", "games/../../x"] {
             let error = write_file(
                 &target(drive.path()),
-                &FileWrite {
-                    src: &src,
-                    rel,
-                    md5: None,
-                },
+                &FileWrite { src: &src, rel },
                 &AtomicBool::new(false),
                 &mut no_progress(),
             )
@@ -751,7 +939,6 @@ mod tests {
             &FileWrite {
                 src: &src,
                 rel: "games/x/Game.bin",
-                md5: None,
             },
             &AtomicBool::new(false),
             &mut yank,

@@ -786,10 +786,13 @@ pub struct RomFile {
     #[serde(default, deserialize_with = "null_to_empty")]
     pub category: String,
     /// The file's MD5 as the server states it, lowercase hex; `""` when the
-    /// server sends none (absent or `null`).
+    /// server sends none (absent or `null`). For an archive (zip, 7z, ...)
+    /// RomM hashes the decompressed contents, not the archive's bytes, so
+    /// this must never be used to verify a downloaded file.
     #[serde(default, deserialize_with = "null_to_empty")]
     pub md5_hash: String,
     /// The file's SHA-1 as the server states it; `""` when absent or `null`.
+    /// A content hash, like [`Self::md5_hash`].
     #[serde(default, deserialize_with = "null_to_empty")]
     pub sha1_hash: String,
 }

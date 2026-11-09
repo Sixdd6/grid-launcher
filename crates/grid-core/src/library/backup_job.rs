@@ -172,8 +172,6 @@ pub(crate) struct StagedFile {
     pub src: PathBuf,
     /// The file name inside the item's folder on the drive.
     pub name: String,
-    /// The expected MD5, blank when unknown.
-    pub md5: String,
 }
 
 /// Which art a staged asset is.
@@ -282,7 +280,6 @@ async fn download_game(
         staged.push(StagedFile {
             src: dest,
             name: file.file_name.clone(),
-            md5: file.md5_hash.clone(),
         });
     }
     download_targets(&RommProvider(&job.client), &targets, cancel, on_progress).await?;
@@ -368,14 +365,7 @@ async fn download_assets(
                 let name = format!("{stem}.{}", asset_extension(&url, &bytes, &content_type));
                 let src = dir.join(&name);
                 fs::write(&src, &bytes)?;
-                staged.push((
-                    kind,
-                    StagedFile {
-                        src,
-                        name,
-                        md5: String::new(),
-                    },
-                ));
+                staged.push((kind, StagedFile { src, name }));
             }
             Ok(_) | Err(_) => job.warnings.push(format!(
                 "The {} of {} could not be downloaded",
@@ -528,7 +518,6 @@ async fn download_emulator(
                 files.push(StagedFile {
                     src: dest,
                     name: download.asset_name.clone(),
-                    md5: String::new(),
                 });
             }
             let provider = ForgeProvider::new(&forge, headers);
@@ -562,7 +551,6 @@ async fn download_emulator(
                 primary: StagedFile {
                     src: dest,
                     name: request.file_name.clone(),
-                    md5: String::new(),
                 },
                 supplementals: Vec::new(),
             }
@@ -606,11 +594,7 @@ async fn download_emulator(
             entry.args = args.clone();
             Staged::Emulator {
                 entry: Box::new(entry),
-                primary: StagedFile {
-                    src: dest,
-                    name,
-                    md5: String::new(),
-                },
+                primary: StagedFile { src: dest, name },
                 supplementals: Vec::new(),
             }
         }
@@ -885,7 +869,6 @@ async fn download_firmware(
         files.push(StagedFile {
             src,
             name: record.file_name.clone(),
-            md5: record.md5_hash.clone(),
         });
     }
     if files.is_empty() {
@@ -1077,13 +1060,13 @@ pub(crate) fn write(
     let mut outcome = Ok(());
     for (file, rel) in &writes {
         before_file();
-        let md5 = (!file.md5.trim().is_empty()).then_some(file.md5.as_str());
+        // Checked against the staged bytes, never the server's hash: RomM
+        // hashes an archive's decompressed contents, not the archive.
         let result = drive_write::write_file(
             &target,
             &FileWrite {
                 src: &file.src,
                 rel,
-                md5,
             },
             cancel,
             &mut |bytes, _| progress(done + bytes, total),

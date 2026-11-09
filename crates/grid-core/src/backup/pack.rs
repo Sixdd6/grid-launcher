@@ -180,8 +180,14 @@ pub struct PackFile {
     pub category: String,
     #[serde(default = "yes")]
     pub top_level: bool,
+    /// RomM's MD5 for the file, kept for identification only. RomM hashes
+    /// an archive's decompressed contents (for No-Intro matching), not its
+    /// bytes, so this is never used to check the file on the drive: the
+    /// write is checked against the bytes GRID downloaded
+    /// ([`super::write::write_file`]).
     #[serde(default)]
     pub md5: String,
+    /// RomM's SHA-1 for the file; informational, like [`Self::md5`].
     #[serde(default)]
     pub sha1: String,
 }
@@ -246,6 +252,9 @@ pub struct PackFirmwareFile {
     pub name: String,
     pub path: String,
     pub size: u64,
+    /// The server's MD5 of the raw firmware file. RomM serves firmware
+    /// as is, so this is the file's own hash, and an install from the drive
+    /// checks it (`firmware::verify_download`).
     #[serde(default)]
     pub md5: String,
 }
