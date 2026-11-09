@@ -82,6 +82,9 @@ pub struct TarPartWriter<'a> {
     expected: u64,
     cancel: &'a AtomicBool,
     progress: &'a mut dyn FnMut(u64, u64),
+    /// Runs before each part is created (a test hook; see
+    /// [`write_installed_tree_with`]).
+    before_part: Option<&'a mut dyn FnMut()>,
     open: Option<OpenPart>,
     /// The checked parts, in order.
     parts: Vec<PackPart>,
@@ -115,6 +118,7 @@ impl<'a> TarPartWriter<'a> {
             expected: archive_bytes,
             cancel,
             progress,
+            before_part: None,
             open: None,
             parts: Vec::new(),
             files: Vec::new(),
@@ -125,6 +129,12 @@ impl<'a> TarPartWriter<'a> {
             failure: None,
             stopped: false,
         }
+    }
+
+    /// Runs `hook` before each part is created.
+    pub fn with_before_part(mut self, hook: &'a mut dyn FnMut()) -> Self {
+        self.before_part = Some(hook);
+        self
     }
 
     fn total(&self) -> u64 {
@@ -153,6 +163,9 @@ impl<'a> TarPartWriter<'a> {
 
     fn open_part(&mut self) -> Result<(), WriteError> {
         let mount = self.mount;
+        if let Some(hook) = self.before_part.as_mut() {
+            hook();
+        }
         if self.cancel.load(Ordering::Relaxed) {
             return Err(WriteError::Cancelled);
         }
@@ -442,6 +455,28 @@ pub fn write_installed_tree(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<Vec<PackPart>, WriteError> {
+    write_installed_tree_with(
+        target,
+        tree,
+        rel_base,
+        part_bytes,
+        cancel,
+        progress,
+        &mut || {},
+    )
+}
+
+/// [`write_installed_tree`], running `before_part` before each part file
+/// is created (the backup job's per-file test hook).
+pub fn write_installed_tree_with(
+    target: &WriteTarget<'_>,
+    tree: &TreePlan,
+    rel_base: &str,
+    part_bytes: u64,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(u64, u64),
+    before_part: &mut dyn FnMut(),
+) -> Result<Vec<PackPart>, WriteError> {
     pack::validate_rel(rel_base)?;
     for entry in &tree.entries {
         check_entry_name(entry)?;
@@ -453,7 +488,8 @@ pub fn write_installed_tree(
         tree.archive_bytes,
         cancel,
         progress,
-    );
+    )
+    .with_before_part(before_part);
     let changed = Cell::new(false);
     let result = {
         let mut builder = tar::Builder::new(BufWriter::with_capacity(CHUNK_BYTES, &mut writer));
