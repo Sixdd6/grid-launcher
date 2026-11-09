@@ -1,9 +1,10 @@
-// The Settings rail (design §10): seven pages, their labels, and the rail
+// The Settings rail (design §10): eight pages, their labels, and the rail
 // entries Settings.svelte hands to RailPane. Pure.
 
 /** Alphabetical by label (ProposedApp README, "Settings rail"). */
 export const SETTINGS_PAGES = [
   'appearance',
+  'backup-drives',
   'cloud-saves',
   'connection',
   'library',
@@ -25,6 +26,7 @@ const LABELS: Record<SettingsPage, string> = {
   systems: 'Systems',
   updates: 'Updates',
   appearance: 'Appearance',
+  'backup-drives': 'Backup drives',
 };
 
 export function settingsPageLabel(page: SettingsPage): string {

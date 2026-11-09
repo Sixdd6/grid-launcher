@@ -1,6 +1,6 @@
 <script lang="ts">
   // The Settings view (design §10, D-UI-5): a 220px category rail and one
-  // pane per page. All seven panes stay mounted and switch with `hidden`,
+  // pane per page. All eight panes stay mounted and switch with `hidden`,
   // the same rule the shell applies to views, so an in-flight save or a
   // typed-but-unsaved field survives a rail click. Each pane's column caps
   // at 1100px (D-UI-7).
@@ -18,9 +18,21 @@
   import RetroAchievementsPage from './settings/RetroAchievementsPage.svelte';
   import UpdatesPage from './settings/UpdatesPage.svelte';
   import AppearancePage from './settings/AppearancePage.svelte';
+  import BackupDrivesPage from './settings/BackupDrivesPage.svelte';
   import SystemsPage from './systems/SystemsPage.svelte';
 
-  let { active = true }: { active?: boolean } = $props();
+  let {
+    active = true,
+    onShowDriveInLibrary = undefined,
+  }: {
+    active?: boolean;
+    /**
+     * Opens Library on a backup drive (Backup drives' "Show in Library").
+     * TODO(Task 20): Shell passes this once Library › Backup drives exists;
+     * until then the button is left out.
+     */
+    onShowDriveInLibrary?: (key: string) => void;
+  } = $props();
 
   let page = $state<SettingsPage>(DEFAULT_SETTINGS_PAGE);
 
@@ -61,6 +73,10 @@
           {#if p !== 'systems'}<h2 class="g-pane-title">{settingsPageLabel(p)}</h2>{/if}
           {#if p === 'appearance'}
             <AppearancePage />
+          {:else if p === 'backup-drives'}
+            <!-- Page-level activation: the backup default and the "last
+                 seen" clock are re-read each time the page comes forward. -->
+            <BackupDrivesPage active={active && page === 'backup-drives'} onShowInLibrary={onShowDriveInLibrary} />
           {:else if p === 'connection'}
             <!-- Page-level activation, unlike the other panes: the edit form
                  holds a plain secret, so leaving this page must close it. -->
