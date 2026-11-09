@@ -27,7 +27,7 @@ const game = (name: string, overrides: Partial<DriveGame> = {}): DriveGame => ({
   rom_id: 1, server: 's', name, platform: 'psx', platform_name: 'PlayStation', size: 1, files_max: 1, cover: '',
   installed: false, summary: '', region: '', languages: '', tags: '', revision: '', rating: '', companies: [],
   release_date: '', genres: [], game_modes: [], franchises: [], players: '', version: '', fanart: '', logo: '',
-  screenshots: [], added: '2026-11-01T00:00:00Z', installed_copy: false, installed_version: '', outdated: false,
+  screenshots: [], added: '2026-11-01T00:00:00Z', installed_copy: false, installed_version: '', outdated: false, saves_copied: false,
   ...overrides,
 });
 

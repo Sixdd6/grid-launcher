@@ -444,7 +444,7 @@ describe('sourcePicks', () => {
 describe('wineNote', () => {
   it('appears when a Windows game is copied from this computer', () => {
     expect(wineNote(plan(LOCAL_PLAN), lookup)).toBe(
-      'Windows games are copied without their Wine prefix, so saves kept in the prefix stay on this computer.',
+      'Windows games are copied without their Wine prefix. The save folders GRID knows about are copied from it.',
     );
     const downloads = plan({ ...LOCAL_PLAN, sources: LOCAL_PLAN.sources!.filter((s) => s.rom_id !== 2) });
     expect(wineNote(downloads, lookup)).toBe('');

@@ -505,6 +505,8 @@ export type DriveGame = {
   installed_version: string;
   /** The server had newer files when the installed copy was backed up. */
   outdated: boolean;
+  /** A Windows game whose saves were copied out of its Wine prefix. */
+  saves_copied: boolean;
 };
 
 /**

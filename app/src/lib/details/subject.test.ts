@@ -315,7 +315,7 @@ function driveGame(overrides: Partial<DriveGame> = {}): DriveGame {
     release_date: '1998-03-01', genres: ['Platform', 'Puzzle'], game_modes: [], franchises: [], players: '1',
     version: '', fanart: 'assets/psx/Cinder Peaks/fanart.jpg', logo: '',
     screenshots: ['assets/psx/Cinder Peaks/screenshots/screenshot-01.jpg'], added: '2026-11-07T09:01:00Z',
-    installed_copy: false, installed_version: '', outdated: false,
+    installed_copy: false, installed_version: '', outdated: false, saves_copied: false,
     ...overrides,
   };
 }
@@ -386,6 +386,16 @@ describe('fromDriveGame (GameBackups README, "Details from a drive")', () => {
       'A copy of an installed game · v2.0',
       'Its Wine prefix wasn’t copied, so saves kept there aren’t on the drive',
     ]);
+  });
+
+  it('says when a Windows game\'s saves came along from its Wine prefix', () => {
+    const win = { platform: 'win', platform_name: 'Windows', saves_copied: true };
+    expect(driveCopyLines(fromDriveGame(driveGame({ ...win, installed_copy: true, installed_version: 'v2.0' }), drive))).toEqual([
+      'A copy of an installed game · v2.0',
+      'Saves from its Wine prefix are included',
+    ]);
+    expect(driveCopyLines(fromDriveGame(driveGame(win), drive))).toEqual(['Saves from its Wine prefix are included']);
+    expect(driveCopyLines(fromInstalled(row({})))).toEqual([]);
   });
 
   it('reads its version like a server game', () => {

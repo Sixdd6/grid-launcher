@@ -295,12 +295,12 @@ export function chooseAll(plan: BackupPlan, choices: SourceChoices, source: Sour
 
 /**
  * The Wine-prefix note, when a Windows game is copied from this computer
- * (its prefix stays behind); else `''`.
+ * (its prefix stays behind, its known save folders go with it); else `''`.
  */
 export function wineNote(plan: BackupPlan, lookup?: LocalGameLookup): string {
   if (!plan.use_local || lookup === undefined) return '';
   const windows = plan.sources.some((s) => s.source === 'local' && lookup(s.rom_id)?.windows === true);
-  return windows ? 'Windows games are copied without their Wine prefix, so saves kept in the prefix stay on this computer.' : '';
+  return windows ? 'Windows games are copied without their Wine prefix. The save folders GRID knows about are copied from it.' : '';
 }
 
 // ── Also copy ────────────────────────────────────────────────────────────

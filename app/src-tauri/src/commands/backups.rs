@@ -129,6 +129,8 @@ pub struct DriveGame {
     pub installed_version: String,
     /// The server had newer files when the installed copy was backed up.
     pub outdated: bool,
+    /// A Windows game whose saves were copied out of its Wine prefix.
+    pub saves_copied: bool,
 }
 
 /// What `install_from_drive` queued besides the game, as toast lines
@@ -797,6 +799,7 @@ pub async fn drive_games(
                 .map(|copy| copy.version.clone())
                 .unwrap_or_default(),
             outdated: game.installed.as_ref().is_some_and(|copy| copy.outdated),
+            saves_copied: game.saves.as_ref().is_some_and(|saves| saves.has_copy()),
         })
         .collect())
 }
