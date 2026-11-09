@@ -72,6 +72,16 @@ export const ICONS = {
 
   /** The brandmark: four 6×6 cells with a 4-unit gutter, spanning 4–20. */
   grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
+
+  /**
+   * Outline external drive: a 17-wide base box from y=14 to y=20 with
+   * 1.5-radius bottom corners, sloping sides up to a 9-wide top at y=4.7,
+   * and two activity dots on the base at x=13.5 and 16.5. A backup drive
+   * (Settings › Backup drives, Library's drive rows). From
+   * `docs/design/prototype/icons.json`.
+   */
+  drive:
+    'M3.5 14h17v4.5A1.5 1.5 0 0 1 19 20H5a1.5 1.5 0 0 1-1.5-1.5zM3.5 14l2.6-8.2A1.5 1.5 0 0 1 7.5 4.7h9a1.5 1.5 0 0 1 1.4 1.1L20.5 14M16.5 17h.01M13.5 17h.01',
 } as const;
 
 export type IconName = keyof typeof ICONS;

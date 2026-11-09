@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FILLED_ICONS, ICONS, type IconName } from './icons';
 
-// The thirteen names the UI asks for. Written out here rather than derived from
+// The fourteen names the UI asks for. Written out here rather than derived from
 // `ICONS` so that deleting an icon a call site still uses fails this test
 // instead of silently shrinking the set.
 const EXPECTED: IconName[] = [
@@ -18,6 +18,7 @@ const EXPECTED: IconName[] = [
   'more',
   'sun',
   'moon',
+  'drive',
 ];
 
 // Every SVG path command letter, plus the number/separator characters a
