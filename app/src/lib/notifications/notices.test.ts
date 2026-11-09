@@ -34,6 +34,10 @@ function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
     install_total_bytes: 0,
     error: '',
     detail: '',
+    drive_id: '',
+    drive_name: '',
+    drive_label: '',
+    batch: 0,
     ...overrides,
   };
 }
