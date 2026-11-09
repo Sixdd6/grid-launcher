@@ -505,6 +505,8 @@ export type PlanEmulator = {
   /** `null` when the size is not known before the download. */
   bytes: number | null;
   already: boolean;
+  /** Why it goes for fewer computers than the pack, or not at all; else `''`. */
+  note: string;
 };
 
 export type PlanFirmware = { platform_name: string; files: number; bytes: number; already: boolean };

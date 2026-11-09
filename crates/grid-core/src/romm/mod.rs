@@ -193,6 +193,12 @@ impl RommClient {
         Ok(resp)
     }
 
+    /// The server's base URL, as this client requests it: never with
+    /// userinfo ([`strip_userinfo`] ran in [`Self::new`]), no trailing slash.
+    pub fn server_url(&self) -> &str {
+        &self.base
+    }
+
     pub async fn connect(&self) -> Result<UserInfo, RommError> {
         self.get_json("/api/users/me", &[]).await
     }

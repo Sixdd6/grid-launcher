@@ -7,6 +7,7 @@
 //! ("InstallService", "Data flow for one install") and
 //! `docs/porting/03-library-install.md` for the behavior this mirrors.
 
+pub mod backup_job;
 pub mod content;
 pub mod download;
 pub mod drive_copy;
@@ -34,7 +35,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -76,7 +77,9 @@ use paths::{
 use platforms::{
     is_native_platform, is_ps3_platform, is_ps4_platform, is_ps5_platform, is_xbox360_platform,
 };
-use queue::{Admission, CancelAction, DownloadStatus, DownloadsSnapshot, JobKey, QueueState};
+use queue::{
+    Admission, CancelAction, DownloadStatus, DownloadsSnapshot, EntryMeta, JobKey, QueueState,
+};
 use registry::{identity_key, installed_match, InstalledGame, Registry};
 use relocate::LibraryGate;
 use specials::ps3::Ps3Roots;
@@ -494,6 +497,9 @@ struct ResolvedPaths {
 enum JobPayload {
     Game(InstallJob),
     Emulator(EmulatorJob),
+    /// One backup row (`backup_job`): download to staging, then write to
+    /// the drive.
+    Backup(Box<backup_job::BackupJob>),
 }
 
 /// Whether a download from `provider` needs the GitHub API headers. Read
@@ -1031,6 +1037,21 @@ pub struct InstallService {
     /// The forge source a managed umu-launcher install resolves
     /// ([`umu::default_source`]; [`Self::set_umu_source`] in tests).
     umu_source: RwLock<Value>,
+    /// The last backup batch id handed out ([`Self::start_backup`]).
+    next_batch: AtomicU64,
+    /// Drives [`Self::abort_drive`] marked removed, with the reason their
+    /// rows fail with. Cleared by [`Self::drive_connected`] and by a new
+    /// backup to the drive.
+    removed_drives: Mutex<HashMap<String, String>>,
+    /// Emulator release sizes, per name and OS, as a download or
+    /// [`Self::resolve_emulator_sizes`] found them. Kept for the process, so
+    /// the Backup dialog does not query a forge again.
+    resolved_sizes: Mutex<HashMap<(String, crate::backup::pack::PackOs), u64>>,
+    /// Every backup row admitted this session, by entry id: what `retry`
+    /// rebuilds the row from.
+    backup_rows: Mutex<HashMap<u64, (backup_job::DriveTarget, backup_job::BackupItem)>>,
+    /// Test hook run before each file a backup writes to its drive.
+    backup_write_hook: RwLock<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl InstallService {
@@ -1078,6 +1099,11 @@ impl InstallService {
             emulator_installed_hook: RwLock::new(None),
             library_gate: RwLock::new(LibraryGate::default()),
             umu_source: RwLock::new(umu::default_source()),
+            next_batch: AtomicU64::new(0),
+            removed_drives: Mutex::new(HashMap::new()),
+            resolved_sizes: Mutex::new(HashMap::new()),
+            backup_rows: Mutex::new(HashMap::new()),
+            backup_write_hook: RwLock::new(None),
         })
     }
 
@@ -2032,6 +2058,326 @@ impl InstallService {
         }
     }
 
+    // --- backups ------------------------------------------------------------
+
+    /// Queues a backup to `drive`: one row per item, games first, then
+    /// emulators, then firmware ([`crate::backup::plan::plan`] builds
+    /// `items`). Every row shares one new batch id. Each row downloads into
+    /// `<library>/.grid-staging/backup-<entry id>/` and is then written to the
+    /// drive. An item already queued for the same drive is skipped.
+    ///
+    /// `Err` only before anything is queued: no library folder (staging lives
+    /// there), or a library move running. Starting a backup to a drive
+    /// clears an earlier removal mark for it: the caller resolved `drive`
+    /// from the current scan.
+    pub fn start_backup(
+        self: &Arc<Self>,
+        client: Arc<RommClient>,
+        drive: backup_job::DriveTarget,
+        items: crate::backup::plan::BackupItems,
+    ) -> Result<crate::backup::plan::BackupQueued, LibraryError> {
+        self.check_library_gate()?;
+        let library = self.library_root()?;
+        self.drive_connected(&drive.key);
+        let batch = self.next_batch.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut queued = crate::backup::plan::BackupQueued {
+            batch,
+            ..Default::default()
+        };
+        let rows = items
+            .games
+            .into_iter()
+            .map(backup_job::BackupItem::Game)
+            .chain(
+                items
+                    .emulators
+                    .into_iter()
+                    .map(backup_job::BackupItem::Emulator),
+            )
+            .chain(
+                items
+                    .firmware
+                    .into_iter()
+                    .map(backup_job::BackupItem::Firmware),
+            );
+        for item in rows {
+            let admitted = self.admit_backup_item(
+                client.clone(),
+                drive.clone(),
+                item.clone(),
+                &library,
+                batch,
+            )?;
+            if admitted {
+                match item {
+                    backup_job::BackupItem::Game(_) => queued.games += 1,
+                    backup_job::BackupItem::Emulator(_) => queued.emulators += 1,
+                    backup_job::BackupItem::Firmware(_) => queued.firmware += 1,
+                }
+            }
+        }
+        Ok(queued)
+    }
+
+    /// Admits one backup row and remembers it for `retry`. `false` for a
+    /// duplicate.
+    fn admit_backup_item(
+        self: &Arc<Self>,
+        client: Arc<RommClient>,
+        drive: backup_job::DriveTarget,
+        item: backup_job::BackupItem,
+        library: &Path,
+        batch: u64,
+    ) -> Result<bool, LibraryError> {
+        let (title, platform, kind) = item.row();
+        let key = JobKey::Backup {
+            drive: drive.key.clone(),
+            item: item.key(),
+        };
+        let meta = EntryMeta {
+            drive_id: drive.key.clone(),
+            drive_name: drive.name.clone(),
+            drive_label: drive.label.clone(),
+            batch,
+        };
+        let job =
+            backup_job::BackupJob::new(drive.clone(), item.clone(), client, library.to_path_buf());
+        let admitted = self.admit_meta(
+            key,
+            &title,
+            &platform,
+            kind,
+            JobPayload::Backup(Box::new(job)),
+            meta,
+        )?;
+        if let Some(id) = admitted {
+            self.backup_rows.lock().unwrap().insert(id, (drive, item));
+        }
+        Ok(admitted.is_some())
+    }
+
+    /// The drive `drive_id` is gone (the drive watcher saw it disappear, or a
+    /// write found it missing):
+    /// 1. it is marked removed, so every row for it fails with `reason`
+    ///    ("SAMSUNG T7 was removed") instead of "cancelled";
+    /// 2. the rows downloading or writing for it have their cancel flags
+    ///    flipped;
+    /// 3. every waiting row for it, backup and install-from-drive alike,
+    ///    folds into one `backup_cancelled` row.
+    ///
+    /// The mark stays until [`Self::drive_connected`].
+    pub fn abort_drive(&self, drive_id: &str, reason: &str) -> backup_job::AbortReport {
+        if drive_id.is_empty() {
+            return backup_job::AbortReport::default();
+        }
+        self.removed_drives
+            .lock()
+            .unwrap()
+            .insert(drive_id.to_string(), reason.to_string());
+        let (report, removed) = {
+            let mut queue = self.queue.lock().unwrap();
+            let snapshot = queue.snapshot();
+            let mine = || snapshot.entries.iter().filter(|e| e.drive_id == drive_id);
+            let active: Vec<u64> = mine()
+                .filter(|e| e.status.is_live() && e.status != DownloadStatus::Queued)
+                .map(|e| e.id)
+                .collect();
+            let written = mine()
+                .filter(|e| e.status == DownloadStatus::Completed)
+                .count();
+            {
+                let flags = self.cancel_flags.lock().unwrap();
+                for id in &active {
+                    if let Some(flag) = flags.get(id) {
+                        flag.store(true, Ordering::Relaxed);
+                    }
+                }
+            }
+            let removed = queue.cancel_drive_queue(drive_id, reason);
+            {
+                let mut pending = self.pending_jobs.lock().unwrap();
+                for id in &removed {
+                    pending.remove(id);
+                }
+            }
+            let report = backup_job::AbortReport {
+                failed: active.len() as u32,
+                cancelled: removed.len() as u32,
+                written: written as u32,
+            };
+            (report, removed)
+        };
+        {
+            let mut rows = self.backup_rows.lock().unwrap();
+            for id in &removed {
+                rows.remove(id);
+            }
+        }
+        self.notify_now();
+        report
+    }
+
+    /// The drive `drive_id` is connected again: rows queued for it from now
+    /// on run normally.
+    pub fn drive_connected(&self, drive_id: &str) {
+        self.removed_drives.lock().unwrap().remove(drive_id);
+    }
+
+    /// The reason `drive_id`'s rows fail with, while it is marked removed.
+    fn removed_reason(&self, drive_id: &str) -> Option<String> {
+        self.removed_drives.lock().unwrap().get(drive_id).cloned()
+    }
+
+    /// Installs a hook run before each file a backup writes to its drive.
+    /// Tests use it to hold a write open; production never sets one.
+    #[doc(hidden)]
+    pub fn set_backup_write_hook(&self, hook: Option<Arc<dyn Fn() + Send + Sync>>) {
+        *self.backup_write_hook.write().unwrap() = hook;
+    }
+
+    /// Records the size of the emulator `name`'s release for `os`.
+    fn record_emulator_size(&self, name: &str, os: crate::backup::pack::PackOs, size: u64) {
+        if size > 0 {
+            self.resolved_sizes
+                .lock()
+                .unwrap()
+                .insert((name.to_string(), os), size);
+        }
+    }
+
+    /// Every emulator release size known this session, per name and OS: the
+    /// `sizes` input of [`crate::backup::plan::plan`].
+    pub fn emulator_sizes(&self) -> HashMap<(String, crate::backup::pack::PackOs), u64> {
+        self.resolved_sizes.lock().unwrap().clone()
+    }
+
+    /// Looks up the sizes of the emulator rows `items` that are not known
+    /// yet, best effort: a forge release (with its supplementals) for a
+    /// catalog emulator, the server file for a server build (needs
+    /// `client`), the program folder for a manual emulator (its archive is
+    /// at most that). A lookup that fails leaves the size unknown. Results
+    /// are cached for the process ([`Self::emulator_sizes`]).
+    pub async fn resolve_emulator_sizes(
+        &self,
+        client: Option<Arc<RommClient>>,
+        items: &[crate::backup::plan::EmulatorItem],
+    ) {
+        use crate::backup::plan::EmulatorSource;
+        for item in items {
+            let name = &item.pick.name;
+            if self
+                .resolved_sizes
+                .lock()
+                .unwrap()
+                .contains_key(&(name.clone(), item.os))
+            {
+                continue;
+            }
+            let size = match &item.pick.source {
+                EmulatorSource::Catalog { .. } => {
+                    let Ok(forge) = self.forge() else { continue };
+                    match backup_job::resolve_catalog(self, &forge, name, item.os).await {
+                        Ok((primary, supplementals)) => {
+                            let all = std::iter::once(&primary).chain(supplementals.iter());
+                            if all.clone().any(|download| download.size <= 0) {
+                                continue;
+                            }
+                            all.map(|download| download.size as u64).sum()
+                        }
+                        Err(_) => {
+                            // The error can name a forge URL: not logged.
+                            tracing::debug!(emulator = %name, "emulator size unknown");
+                            continue;
+                        }
+                    }
+                }
+                EmulatorSource::Server { source_id } => {
+                    let Some(client) = &client else { continue };
+                    match backup_job::server_build(self, client, source_id, item.os).await {
+                        Ok((_, size)) if size > 0 => size as u64,
+                        _ => continue,
+                    }
+                }
+                EmulatorSource::Local { program, .. } => {
+                    let Some(folder) = program.parent().map(Path::to_path_buf) else {
+                        continue;
+                    };
+                    let sized = tokio::task::spawn_blocking(move || folder_bytes(&folder)).await;
+                    match sized {
+                        Ok(size) if size > 0 => size,
+                        _ => continue,
+                    }
+                }
+            };
+            self.record_emulator_size(name, item.os, size);
+        }
+    }
+
+    /// The emulator each system of `games` takes in a backup
+    /// ([`crate::backup::plan::choose_emulator`]), keyed by platform slug,
+    /// and the compat tool Windows games take
+    /// ([`crate::backup::plan::choose_compat_tool`]). Reads the config.
+    pub fn backup_emulator_choices(
+        &self,
+        games: &[crate::backup::plan::PlanGame],
+    ) -> (
+        Vec<(String, crate::backup::plan::EmulatorChoice)>,
+        Option<crate::backup::plan::EmulatorPick>,
+    ) {
+        let config = Config::load(&self.config_path).unwrap_or_default();
+        let mut choices: Vec<(String, crate::backup::plan::EmulatorChoice)> = Vec::new();
+        for game in games {
+            if choices.iter().any(|(slug, _)| *slug == game.platform_slug) {
+                continue;
+            }
+            let choice = crate::backup::plan::choose_emulator(
+                &config,
+                &self.profiles,
+                &game.platform_label,
+                &game.platform_slug,
+                &game.platform_name,
+            );
+            choices.push((game.platform_slug.clone(), choice));
+        }
+        let compat = crate::backup::plan::choose_compat_tool(&config, &self.profiles);
+        (choices, compat)
+    }
+
+    /// Retries a failed or cancelled backup row: the item it wrote, to the
+    /// same drive, which must be connected (its index still readable at the
+    /// mount path the row used, and not marked removed). The new row gets a
+    /// batch of its own.
+    async fn retry_backup(
+        self: &Arc<Self>,
+        client: Option<Arc<RommClient>>,
+        entry_id: u64,
+        drive_key: &str,
+        item: queue::BackupItemKey,
+    ) -> Result<(), LibraryError> {
+        let client = client.ok_or_else(|| LibraryError::Registry("not connected".to_string()))?;
+        // Every backup row this session admitted is remembered (the queue
+        // itself does not outlive the process).
+        let remembered = self.backup_rows.lock().unwrap().get(&entry_id).cloned();
+        let Some((mut drive, item)) = remembered.filter(|(_, known)| known.key() == item) else {
+            return Err(LibraryError::Extract(
+                "This backup can't be retried; back up again".to_string(),
+            ));
+        };
+        let not_connected = || LibraryError::Extract(format!("Connect {} to retry", drive.label));
+        if drive.key != drive_key || self.removed_reason(drive_key).is_some() {
+            return Err(not_connected());
+        }
+        match crate::backup::pack::read_pack(&drive.mount) {
+            Ok(crate::backup::pack::PackState::Ready(pack)) => drive.name = pack.name,
+            _ => return Err(not_connected()),
+        }
+        let library = self.library_root()?;
+        self.dismiss(entry_id);
+        let batch = self.next_batch.fetch_add(1, Ordering::Relaxed) + 1;
+        self.admit_backup_item(client, drive, item, &library, batch)?;
+        Ok(())
+    }
+
     /// Creates a drawer row for a transfer this service does NOT drive (the
     /// background firmware installer moves its own bytes). The returned id
     /// is handed back to [`Self::complete_external`] when that transfer
@@ -2199,9 +2545,11 @@ impl InstallService {
             Some(JobKey::External(_)) => Ok(()),
             // A library move is resumed or restarted by its own service.
             Some(JobKey::LibraryMove) => Ok(()),
-            // Backup jobs are not run by this service yet; a summary row is
-            // never retryable.
-            Some(JobKey::Backup { .. }) | Some(JobKey::BackupSummary(_)) => Ok(()),
+            Some(JobKey::Backup { drive, item }) => {
+                self.retry_backup(client, entry_id, &drive, item).await
+            }
+            // A summary row is never retryable.
+            Some(JobKey::BackupSummary(_)) => Ok(()),
             None => Ok(()),
         }
     }
@@ -2218,6 +2566,7 @@ impl InstallService {
         }
         self.pending_jobs.lock().unwrap().remove(&entry_id);
         self.cancel_flags.lock().unwrap().remove(&entry_id);
+        self.backup_rows.lock().unwrap().remove(&entry_id);
         self.notify_now();
     }
 
@@ -2508,6 +2857,21 @@ impl InstallService {
         kind: &'static str,
         payload: JobPayload,
     ) -> Result<(), LibraryError> {
+        self.admit_meta(key, title, platform, kind, payload, EntryMeta::default())
+            .map(|_| ())
+    }
+
+    /// [`Self::admit`], with the drive and batch the row belongs to.
+    /// Returns the new entry's id, or `None` for a duplicate.
+    fn admit_meta(
+        self: &Arc<Self>,
+        key: JobKey,
+        title: &str,
+        platform: &str,
+        kind: &'static str,
+        payload: JobPayload,
+        meta: EntryMeta,
+    ) -> Result<Option<u64>, LibraryError> {
         let (admitted, start) = {
             let mut queue = self.queue.lock().unwrap();
             // Under the queue lock: a library move closes the gate first and
@@ -2518,31 +2882,31 @@ impl InstallService {
                 JobPayload::Emulator(job) => job.romm.as_ref().map(|build| build.rom_id),
                 _ => None,
             };
-            let admission = queue.admit(key, title, platform, kind);
+            let admission = queue.admit_with(key, title, platform, kind, meta);
             if let (Some(rom_id), Admission::Start(id) | Admission::Queued(id)) =
                 (server_rom, &admission)
             {
                 queue.set_rom_id(*id, rom_id);
             }
             match admission {
-                Admission::Start(id) => (true, Some((id, payload))),
+                Admission::Start(id) => (Some(id), Some((id, payload))),
                 Admission::Queued(id) => {
                     self.pending_jobs.lock().unwrap().insert(id, payload);
-                    (true, None)
+                    (Some(id), None)
                 }
-                Admission::Duplicate => (false, None),
+                Admission::Duplicate => (None, None),
             }
         };
         // Nothing below runs under the queue lock: `spawn_download` takes it
         // again, and the listener must never see it held.
-        if !admitted {
-            return Ok(());
-        }
+        let Some(admitted) = admitted else {
+            return Ok(None);
+        };
         if let Some((id, payload)) = start {
             self.spawn_download(id, payload);
         }
         self.notify_now();
-        Ok(())
+        Ok(Some(admitted))
     }
 
     /// Starts the download task for `id`, registering its cancellation flag
@@ -2568,6 +2932,7 @@ impl InstallService {
             // through `on_download_progress` — comes back as a `JoinError`
             // instead of leaving the download slot taken forever.
             let reporter = service.clone();
+            let owner = service.clone();
             let worker = tokio::spawn(async move {
                 let mut payload = payload;
                 let mut on_progress = move |downloaded, total, speed| {
@@ -2590,6 +2955,15 @@ impl InstallService {
                     },
                     JobPayload::Emulator(job) => {
                         download_emulator(job, &cancel, &mut on_progress).await
+                    }
+                    JobPayload::Backup(job) => {
+                        job.staging = backup_job::staging_dir(&job.library, id);
+                        match owner.removed_reason(&job.drive.key) {
+                            Some(reason) => Err(LibraryError::DriveRemoved(reason)),
+                            None => {
+                                backup_job::download(&owner, job, &cancel, &mut on_progress).await
+                            }
+                        }
                     }
                 };
                 (payload, result)
@@ -2643,8 +3017,29 @@ impl InstallService {
                     && result.is_ok()
                     && self.already_installed(&job.detail).await
             }
-            JobPayload::Emulator(_) => false,
+            // A backup never short-circuits: its write phase decides whether
+            // the item is already on the drive.
+            JobPayload::Emulator(_) | JobPayload::Backup(_) => false,
         };
+        // A row whose drive was removed fails with the removal, whether its
+        // download was cancelled by `abort_drive` or finished just before.
+        let drive = match &payload {
+            JobPayload::Backup(job) => Some(job.drive.key.as_str()),
+            JobPayload::Game(InstallJob {
+                source: GameSource::Drive(drive),
+                ..
+            }) => Some(drive.drive_id.as_str()),
+            _ => None,
+        };
+        let result = match (drive.and_then(|key| self.removed_reason(key)), result) {
+            (Some(reason), Ok(()) | Err(LibraryError::Cancelled)) => {
+                Err(LibraryError::DriveRemoved(reason))
+            }
+            (_, result) => result,
+        };
+        if let (JobPayload::Backup(job), Err(_)) = (&payload, &result) {
+            backup_job::remove_staging(&job.staging);
+        }
         // A cancel that lands after the last chunk arrived is too late: the
         // download succeeded, so `Cancelling` gives way to `Installing` here
         // and the entry finishes. Extraction is not cancellable (doc 03 §1).
@@ -2687,11 +3082,28 @@ impl InstallService {
     /// Starts the finalize task for `id`. Called exactly once by the task
     /// that owns the finalize slot.
     fn spawn_finalize(self: &Arc<Self>, id: u64, payload: JobPayload) {
+        // Only a backup's write is cancellable ([`CancelAction::ActiveWrite`]):
+        // it gets a fresh flag, registered before the task exists. A cancel
+        // that landed between the download ending and this point left
+        // `Cancelling` behind; honour it.
+        let cancel = Arc::new(AtomicBool::new(false));
+        if matches!(payload, JobPayload::Backup(_)) {
+            self.cancel_flags.lock().unwrap().insert(id, cancel.clone());
+            let cancelling = matches!(
+                self.queue.lock().unwrap().entry(id).map(|e| e.status),
+                Some(DownloadStatus::Cancelling)
+            );
+            if cancelling {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        }
         let service = self.clone();
         tokio::spawn(async move {
             let worker = service.clone();
             let (result, warning) =
-                match tokio::task::spawn_blocking(move || worker.finalize(id, &payload)).await {
+                match tokio::task::spawn_blocking(move || worker.finalize(id, &payload, &cancel))
+                    .await
+                {
                     Ok(outcome) => outcome,
                     Err(e) => (
                         Err(LibraryError::Extract(format!(
@@ -2700,6 +3112,7 @@ impl InstallService {
                         String::new(),
                     ),
                 };
+            service.cancel_flags.lock().unwrap().remove(&id);
             service
                 .queue
                 .lock()
@@ -2758,13 +3171,62 @@ impl InstallService {
         self: &Arc<Self>,
         id: u64,
         payload: &JobPayload,
+        cancel: &AtomicBool,
     ) -> (Result<(), LibraryError>, String) {
         let mut warning = String::new();
         let result = match payload {
             JobPayload::Game(job) => self.finalize_inner(id, job, &mut warning),
             JobPayload::Emulator(job) => self.finalize_emulator(id, job, &mut warning),
+            JobPayload::Backup(job) => self.finalize_backup(id, job, cancel, &mut warning),
         };
         (result, warning)
+    }
+
+    /// The write phase of a backup row ([`backup_job::write`]). Staging is
+    /// deleted whatever happens. A drive found removed here aborts the
+    /// drive's whole queue ([`Self::abort_drive`]), exactly as the drive
+    /// watcher would; a write cancelled because the drive was removed fails
+    /// with the removal.
+    fn finalize_backup(
+        self: &Arc<Self>,
+        id: u64,
+        job: &backup_job::BackupJob,
+        cancel: &AtomicBool,
+        warning: &mut String,
+    ) -> Result<(), LibraryError> {
+        let mut warnings = job.warnings.clone();
+        let hook = self.backup_write_hook.read().unwrap().clone();
+        let before_file = || {
+            if let Some(hook) = &hook {
+                hook();
+            }
+        };
+        let result = match self.removed_reason(&job.drive.key) {
+            Some(reason) => Err(LibraryError::DriveRemoved(reason)),
+            None => backup_job::write(
+                job,
+                cancel,
+                &mut |done, total| self.on_install_progress(id, done, total),
+                &before_file,
+                &mut warnings,
+            ),
+        };
+        backup_job::remove_staging(&job.staging);
+        for line in &warnings {
+            append_warning(warning, line);
+        }
+        match result {
+            Err(LibraryError::DriveRemoved(message)) => {
+                let reason = self.removed_reason(&job.drive.key).unwrap_or(message);
+                self.abort_drive(&job.drive.key, &reason);
+                Err(LibraryError::DriveRemoved(reason))
+            }
+            Err(LibraryError::Cancelled) => match self.removed_reason(&job.drive.key) {
+                Some(reason) => Err(LibraryError::DriveRemoved(reason)),
+                None => Err(LibraryError::Cancelled),
+            },
+            other => other,
+        }
     }
 
     /// Routes a game job to its mode's finalize. `Base` and `Update` lay a
@@ -4901,6 +5363,28 @@ fn apply_sidecar_launch_to(
 const MAX_SIDECAR_BYTES: usize = 1024 * 1024;
 
 /// Appends `line` to `warning`, keeping any warning already there.
+/// The bytes of every regular file under `folder`; links are not followed.
+fn folder_bytes(folder: &Path) -> u64 {
+    let mut total: u64 = 0;
+    let mut stack = vec![folder.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.path().symlink_metadata() else {
+                continue;
+            };
+            if meta.is_dir() {
+                stack.push(entry.path());
+            } else if meta.is_file() {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    total
+}
+
 fn append_warning(warning: &mut String, line: &str) {
     if !warning.is_empty() {
         warning.push('\n');
