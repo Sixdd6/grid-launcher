@@ -15,10 +15,12 @@ pub mod routing;
 pub mod rpcs3;
 mod write;
 
-use std::path::{Path, PathBuf};
+use std::future::Future;
+use std::path::{Component, Path, PathBuf};
 
 use md5::{Digest, Md5};
 
+use crate::backup::pack::{PackFirmware, PACK_DIR};
 use crate::romm::{FirmwareRecord, RommClient};
 
 /// One destination directory a firmware file may be routed to.
@@ -173,6 +175,143 @@ pub fn verify_download(record: &FirmwareRecord, data: &[u8]) -> Result<(), Strin
     Ok(())
 }
 
+/// Where a platform's firmware files come from: the RomM server
+/// ([`ServerFirmware`]) or a drive's gridpack ([`PackFirmwareSource`]). The
+/// install pass ([`install_platform_firmware_from`]) routes, verifies
+/// ([`verify_download`]) and writes the files the same way for both.
+pub trait FirmwareSource: Sync {
+    /// Every firmware file the source has for its platform. `Err` is the
+    /// whole warning the install pass reports.
+    fn records(&self) -> impl Future<Output = Result<Vec<FirmwareRecord>, String>> + Send;
+
+    /// The bytes of one record that [`records`](Self::records) returned.
+    /// `Err` is the reason, without the file name.
+    fn bytes(
+        &self,
+        record: &FirmwareRecord,
+    ) -> impl Future<Output = Result<Vec<u8>, String>> + Send;
+}
+
+/// A platform's firmware on the RomM server: `GET /api/firmware` and each
+/// file's content route.
+pub struct ServerFirmware<'a> {
+    pub client: &'a RommClient,
+    pub platform_id: i64,
+}
+
+impl FirmwareSource for ServerFirmware<'_> {
+    async fn records(&self) -> Result<Vec<FirmwareRecord>, String> {
+        let platform_id = self.platform_id;
+        self.client
+            .firmware(platform_id)
+            .await
+            .map_err(|e| format!("Firmware fetch failed for platform {platform_id}: {e}"))
+    }
+
+    async fn bytes(&self, record: &FirmwareRecord) -> Result<Vec<u8>, String> {
+        self.client
+            .firmware_bytes(record.id, &record.file_name)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// The largest firmware file read from a drive. Real firmware is far
+/// smaller (a PS3 update is about 200 MB); the cap keeps a hostile index
+/// from making GRID read a huge file into memory.
+const PACK_FIRMWARE_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// A platform's firmware in a drive's gridpack: the index's
+/// [`PackFirmware`] entry for it, read from `<mount>/gridpack/`.
+///
+/// The entry comes from the drive's `gridpack.json`, which is untrusted:
+/// each file's `path` is validated, and resolved, under `<mount>/gridpack/`
+/// before a byte is read ([`pack_file_path`]). The record ids are the
+/// files' positions in the entry.
+pub struct PackFirmwareSource {
+    pub mount: PathBuf,
+    pub entry: PackFirmware,
+}
+
+impl FirmwareSource for PackFirmwareSource {
+    async fn records(&self) -> Result<Vec<FirmwareRecord>, String> {
+        Ok(self
+            .entry
+            .files
+            .iter()
+            .enumerate()
+            .map(|(index, file)| FirmwareRecord {
+                id: index as i64,
+                file_name: file.name.clone(),
+                file_size_bytes: file.size,
+                md5_hash: file.md5.clone(),
+                missing_from_fs: false,
+            })
+            .collect())
+    }
+
+    async fn bytes(&self, record: &FirmwareRecord) -> Result<Vec<u8>, String> {
+        let file = usize::try_from(record.id)
+            .ok()
+            .and_then(|index| self.entry.files.get(index))
+            .filter(|file| file.name == record.file_name)
+            .ok_or_else(|| "it is not in the drive's index".to_string())?;
+        let mount = self.mount.clone();
+        let rel = file.path.clone();
+        let stated = file.size;
+        tokio::task::spawn_blocking(move || read_pack_file(&mount, &rel, stated))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+}
+
+/// Reads one firmware file of a gridpack, after [`pack_file_path`] has
+/// placed it under `<mount>/gridpack/`. A file whose size differs from the
+/// stated one is refused before it is read.
+fn read_pack_file(mount: &Path, rel: &str, stated: u64) -> Result<Vec<u8>, String> {
+    let path = pack_file_path(mount, rel)?;
+    let len = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
+    if len > PACK_FIRMWARE_MAX_BYTES {
+        return Err(format!("the file on the drive is too big ({len} bytes)"));
+    }
+    if stated > 0 && len != stated {
+        return Err(format!(
+            "the file on the drive is {len} bytes, the drive's index lists {stated}"
+        ));
+    }
+    std::fs::read(&path).map_err(|e| e.to_string())
+}
+
+/// `rel` (a path from a drive's `gridpack.json`) as a regular file under
+/// `<mount>/gridpack/`, or why it is refused: it must be relative, made of
+/// plain components only (no `..`, no root, no drive prefix, no backslash or
+/// colon), each at most 255 bytes, and once symlinks are resolved it must
+/// still lie under `<mount>/gridpack/`.
+///
+/// A local guard: `backup::pack::resolve` (Task 1) is being written in
+/// parallel and should replace the lexical half of this once it lands.
+fn pack_file_path(mount: &Path, rel: &str) -> Result<PathBuf, String> {
+    let refused = || "its path in the drive's index is not allowed".to_string();
+    if rel.is_empty() || rel.contains(['\\', ':', '\0']) {
+        return Err(refused());
+    }
+    let rel_path = Path::new(rel);
+    for component in rel_path.components() {
+        match component {
+            Component::Normal(part) if part.len() <= 255 => {}
+            _ => return Err(refused()),
+        }
+    }
+    let root = mount.join(PACK_DIR);
+    let joined = root.join(rel_path);
+    let root = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
+    let real = std::fs::canonicalize(&joined).map_err(|e| e.to_string())?;
+    if !real.starts_with(&root) || !real.is_file() {
+        return Err(refused());
+    }
+    Ok(real)
+}
+
 /// Downloads and installs `platform_id`'s server firmware into `targets`
 /// (`install_platform_firmware`, firmware_install.py:83-221; steps 1-9 of
 /// `docs/porting/03-library-install.md` §18). Firmware files are small, so
@@ -199,17 +338,29 @@ pub async fn install_platform_firmware_recorded(
     opts: FirmwareOptions,
     manifest: Option<&Path>,
 ) -> Vec<String> {
+    let source = ServerFirmware {
+        client,
+        platform_id,
+    };
+    install_platform_firmware_from(&source, targets, opts, manifest).await
+}
+
+/// [`install_platform_firmware_recorded`] with the files taken from any
+/// [`FirmwareSource`]: the server, or a drive's gridpack. Routing,
+/// verification and writes do not depend on the source.
+pub async fn install_platform_firmware_from<S: FirmwareSource>(
+    source: &S,
+    targets: &[FirmwareTarget],
+    opts: FirmwareOptions,
+    manifest: Option<&Path>,
+) -> Vec<String> {
     if targets.is_empty() {
         return Vec::new();
     }
 
-    let records = match client.firmware(platform_id).await {
+    let records = match source.records().await {
         Ok(records) => records,
-        Err(e) => {
-            return vec![format!(
-                "Firmware fetch failed for platform {platform_id}: {e}"
-            )];
-        }
+        Err(warning) => return vec![warning],
     };
     if records.is_empty() {
         return Vec::new();
@@ -257,7 +408,7 @@ pub async fn install_platform_firmware_recorded(
         }
 
         if route_inside {
-            let data = match client.firmware_bytes(record.id, &file_name).await {
+            let data = match source.bytes(&record).await {
                 Ok(data) => data,
                 Err(e) => {
                     warnings.push(format!("Failed to download firmware {file_name}: {e}"));
@@ -314,7 +465,7 @@ pub async fn install_platform_firmware_recorded(
             && lower.ends_with(".zip")
             && should_keep_zip(&file_name, targets, &applicable);
 
-        let data = match client.firmware_bytes(record.id, &file_name).await {
+        let data = match source.bytes(&record).await {
             Ok(data) => data,
             Err(e) => {
                 warnings.push(format!("Failed to download firmware {file_name}: {e}"));
@@ -412,6 +563,59 @@ mod tests {
         let err =
             verify_download(&stated(4, "00000000000000000000000000000000"), b"BIOS").unwrap_err();
         assert!(err.contains("MD5"), "{err}");
+    }
+
+    // --- pack_file_path: the drive's index is untrusted ---------------------
+
+    #[test]
+    fn a_pack_path_must_be_plain_relative_and_inside_gridpack() {
+        let drive = tempfile::tempdir().unwrap();
+        let fw = drive.path().join(PACK_DIR).join("firmware");
+        std::fs::create_dir_all(&fw).unwrap();
+        std::fs::write(fw.join("bios.bin"), b"BIOS").unwrap();
+        std::fs::write(drive.path().join("outside.bin"), b"NO").unwrap();
+
+        let found = pack_file_path(drive.path(), "firmware/bios.bin").unwrap();
+        assert_eq!(std::fs::read(found).unwrap(), b"BIOS");
+        let long = "a".repeat(256);
+        for rel in [
+            "",
+            "../outside.bin",
+            "firmware/../../outside.bin",
+            "/etc/passwd",
+            "C:/outside.bin",
+            "firmware\\bios.bin",
+            "./firmware/bios.bin",
+            "firmware",
+            long.as_str(),
+        ] {
+            assert!(pack_file_path(drive.path(), rel).is_err(), "{rel:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_out_of_gridpack_is_refused() {
+        let drive = tempfile::tempdir().unwrap();
+        let root = drive.path().join(PACK_DIR);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(drive.path().join("outside.bin"), b"NO").unwrap();
+        std::os::unix::fs::symlink(drive.path().join("outside.bin"), root.join("link.bin"))
+            .unwrap();
+        assert!(pack_file_path(drive.path(), "link.bin").is_err());
+    }
+
+    #[test]
+    fn a_pack_file_of_another_size_than_listed_is_not_read() {
+        let drive = tempfile::tempdir().unwrap();
+        let root = drive.path().join(PACK_DIR);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("bios.bin"), b"BIOS").unwrap();
+        assert_eq!(
+            read_pack_file(drive.path(), "bios.bin", 4).unwrap(),
+            b"BIOS"
+        );
+        assert!(read_pack_file(drive.path(), "bios.bin", 5).is_err());
     }
 
     #[test]
