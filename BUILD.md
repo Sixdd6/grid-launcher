@@ -103,6 +103,9 @@ in its order. All of them must pass before work is considered done.
     cargo test --workspace
     cd app && npm test
 
+`npm run check` type-checks the frontend: `svelte-check` against `tsconfig.app.json`,
+then `tsc` against `tsconfig.node.json`.
+
 On Windows, run the same commands, in the same order, from Git Bash at the repository
 root. `scripts/check_secret_hygiene.sh` calls `cargo tree`, so Rust must be on the Git
 Bash `PATH`.
@@ -152,6 +155,20 @@ installs itself on the first run.
 Stage groups are defined in `scripts/e2e.sh` (`STAGE_GROUPS`); their specs live in
 `e2e/specs/`, fixtures in `e2e/fixtures*/`, seeds in `e2e/seed/`, and the mock servers in
 `e2e/mock-romm/`.
+
+The `backups` group tests game backups on fake drives, so it needs no USB drive and no
+mount rights. `e2e.sh` creates `<data dir>/media` for that group only and exports it as
+`E2E_DRIVE_ROOTS`; `wdio.conf.ts` hands it to the app as `GRID_LAUNCHER_E2E_DRIVE_ROOTS`.
+An e2e build then treats every child folder of that root (dot-folders excepted) as a
+mounted drive, keyed by its path. A spec plugs a drive in with `mkdir` and unplugs it by
+renaming it to `.<name>` (`e2e/helpers/drives.ts`). An optional `.e2e-drive.json` in the
+drive folder fakes its label, file system, size or read-only flag. A release build
+ignores the variable. The group's seed (`e2e/seed/backups-seed.mjs`) runs before each
+spec: `backups-a` sets up a drive and backs up two games with their emulator and
+firmware, `backups-b` pulls the drive mid-backup and plugs it back in, and `backups-c`
+starts a fresh profile, uses it without a server and installs from a seeded pack.
+
+    scripts/e2e.sh backups
 
 ### Performance probe
 

@@ -1,6 +1,6 @@
 A proposal: back up games from the server to a USB flash drive or SSD, with their art, details, emulators and firmware. Then install them from that drive on any computer with GRID, with or without a network. The card is built on Proposed app and starts in Library on a connected drive. Everything not listed here matches Proposed app.
 
-Not built yet. Branch `feat/game-backups`.
+Built on branch `feat/game-backups`. `SPEC.md` ("Game backups") describes what shipped.
 
 - **One folder per drive.** A drive is set up once. GRID makes a `gridpack` folder at the drive's root and never reads, writes or deletes anything outside it. A drive is a backup drive when `gridpack/gridpack.json` is on it, so GRID recognises it on any computer. A drive is identified by where it is mounted (its mount path, or its drive letter on Windows); a pack has no id of its own. GRID watches for removable drives (on Linux `/run/media/<user>` and `/media`, on Windows removable drive letters, on macOS `/Volumes`). A drive shows up within a few seconds of being plugged in and goes away when it is removed.
 - **Settings › Backup drives** is a new pane, second in the alphabetical rail (Appearance, Backup drives, Cloud saves, …). It lists the drives that are connected, then the drives that GRID remembers but are not connected.
@@ -40,14 +40,15 @@ Not built yet. Branch `feat/game-backups`.
 
 ```
 gridpack/
-  gridpack.json                  pack name, OS list, format version, created/updated, game index
-  games/<platform>/<file>        exactly what the server gives: zip, 7z, iso, chd, or a folder
-  assets/<platform>/<game>/      cover.jpg, fanart.jpg, logo.png, screenshots/1.jpg …
+  gridpack.json                          pack name, OS list, format version, created/updated, the index
+  games/<platform>/<file>                a single-file game, exactly what the server gives: zip, 7z, iso, chd …
+  games/<platform>/<fs name>/<file> …    a multi-file or native game
+  assets/<platform>/<game>/              cover.jpg, fanart.jpg, logo.png, screenshot-01.jpg … (up to 8)
   emulators/<emulator>/<version>/<os>/   the release archive GRID would download, one per computer the pack is for
-  firmware/<platform>/           the firmware files as the server serves them
+  firmware/<platform>/<file>             the firmware files as the server serves them
 ```
 
-`<platform>` is RomM's platform slug (`genesis`, `snes`, `ngc`, `win`), as in the ClasPlatf example drive. `<game>` is the file or folder name without its extension. The paths in `gridpack.json` are relative to `gridpack/`, so the drive works under any mount point. A draft:
+`<platform>` is RomM's platform slug (`genesis`, `snes`, `ngc`, `win`), as in the ClasPlatf example drive. `<game>` is the file or folder name without its extension. `<emulator>` is the lowercased profile name and `<os>` is `linux-x86_64` or `windows-x86_64`. Every name is made safe for FAT, exFAT and NTFS, and two games that would share a path get ` [rom <id>]`. The paths in `gridpack.json` are relative to `gridpack/`, so the drive works under any mount point. The shape, as the `Pack` types in `crates/grid-core/src/backup/pack.rs` read and write it:
 
 ```json
 {
@@ -59,20 +60,49 @@ gridpack/
   "games": [
     {
       "platform": "genesis", "platform_name": "Sega Genesis",
-      "source": { "server": "https://romm.home.lan", "rom_id": 1234, "igdb_id": 1991 },
-      "name": "Aladdin", "summary": "…", "region": "USA",
+      "source": {
+        "server": "https://romm.home.lan", "rom_id": 1234, "igdb_id": 1991,
+        "fs_name": "Aladdin (USA).zip", "server_updated_at": "2026-10-01T12:00:00Z",
+        "cover_small_path": "…", "cover_large_path": "…",
+        "screenshot_urls": ["…"], "fanart_urls": ["…"], "logo_url": "…"
+      },
+      "name": "Aladdin", "summary": "…", "region": "USA", "languages": "En",
+      "tags": "", "revision": "", "rating": "",
       "companies": ["Virgin Games"], "release_date": "1993-11-11",
-      "genres": ["Platform"], "game_modes": ["Single player"], "players": "1",
-      "version": "1.0", "size": 2097152, "sha1": "…",
-      "files": [ { "path": "games/genesis/Aladdin (USA).zip", "size": 2097152, "server_file_id": 5678, "name": "Aladdin (USA).zip", "category": "game" } ],
-      "assets": { "cover": "assets/genesis/Aladdin (USA)/cover.jpg", "fanart": "…", "logo": "…", "screenshots": ["…"] },
+      "genres": ["Platform"], "game_modes": ["Single player"], "franchises": ["Aladdin"],
+      "players": "1", "version": "1.0", "size": 2097152, "sha1": "…",
+      "files": [
+        { "path": "games/genesis/Aladdin (USA).zip", "size": 2097152, "server_file_id": 5678,
+          "name": "Aladdin (USA).zip", "category": "game", "top_level": true, "md5": "…", "sha1": "…" }
+      ],
+      "assets": {
+        "cover": "assets/genesis/Aladdin (USA)/cover.jpg",
+        "fanart": "assets/genesis/Aladdin (USA)/fanart.jpg",
+        "logo": "assets/genesis/Aladdin (USA)/logo.png",
+        "screenshots": ["assets/genesis/Aladdin (USA)/screenshot-01.jpg"]
+      },
       "added": "2026-11-07T09:01:00Z"
     }
   ],
-  "emulators": [ { "name": "DuckStation", "version": "v0.1-9226", "os": "linux-x86_64", "platforms": ["psx"], "path": "emulators/duckstation/v0.1-9226/linux-x86_64/DuckStation.AppImage" } ],
-  "firmware": [ { "platform": "psx", "files": [ { "name": "scph5501.bin", "size": 524288, "md5": "…" } ] } ]
+  "emulators": [
+    { "name": "DuckStation", "kind": "emulator", "source_id": "stenzek/duckstation", "version": "v0.1-9226",
+      "os": "linux-x86_64", "platforms": ["psx"],
+      "path": "emulators/duckstation/v0.1-9226/linux-x86_64/DuckStation.AppImage",
+      "supplementals": [], "asset_name": "DuckStation.AppImage", "size": 40000000 }
+  ],
+  "firmware": [
+    { "platform": "psx", "platform_name": "Sony PlayStation",
+      "files": [ { "name": "scph5501.bin", "path": "firmware/psx/scph5501.bin", "size": 524288, "md5": "…" } ] }
+  ]
 }
 ```
+
+Required: `format`, `name`, `os`, `created`, `updated`; per game `platform`, `platform_name`, `source` (`server`, `rom_id`), `name`, `size`, `files` and `added`; per file `path`, `size`, `server_file_id` and `name` (`top_level` defaults to true); per emulator `name`, `kind`, `source_id`, `version`, `os`, `platforms`, `path`, `asset_name` and `size`; per firmware set `platform`, `platform_name` and `files`, each with `name`, `path` and `size`. Everything else defaults when missing. An asset field with no file is left out (`cover_small` is the small cover when there is no large one).
+
+- `source.server` is the server URL without userinfo. The other `source` fields rebuild the game's details and its image cache keys, so its art shows offline.
+- `emulators[].kind` is `emulator` or `compat_tool` (Proton, umu-launcher and the Steam Linux Runtime). `source_id` is a catalog `owner/repo`, `romm:<folder>/<emulator>` for a server build, or `local:<name>` for a manually added emulator zipped from its program folder; a `local:` entry also has `program` (the program's path inside the zip) and `args` (its launch options). `supplementals` are the pack paths of the release's extra files, stored beside the archive.
+- `os` holds only `linux` and `windows`; any other value makes the file unreadable.
+- Keys GRID does not know are kept when it rewrites the file. A `format` greater than 1 is read-only.
 
 Unlike the example drive, `games` is an array (not keyed by "0", "1" …), every game carries its server source, numbers are numbers, and each file is an object (path, size, server file id, name, category) so a drive install plans exactly like a server install. GRID rewrites `gridpack.json` through a temporary file and a rename after each finished item, so a removed drive always leaves a valid index.
 

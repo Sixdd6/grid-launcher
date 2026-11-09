@@ -30,15 +30,38 @@ Modules as declared in `src/lib.rs`:
   where GRID expects them. Per-emulator submodules (`azahar`, `cemu`, `dolphin`,
   `duckstation`, `eden`, `pcsx2`, `ppsspp`, `redream`, `retroarch`, `rpcs3`, `xemu`) sit
   on shared `readers`/`writers`/`paths` helpers; `cores` owns RetroArch core lookup.
+- `backup` — game backups to removable drives (SPEC "Game backups"). A drive is keyed by
+  its mount path, or its drive letter on Windows; a pack has no id. `pack` owns the
+  `gridpack/gridpack.json` schema (`Pack` and its serde types), reading it as untrusted
+  input (size cap, unknown OS or old prototype shape refused, `validate_rel` and
+  `resolve` for every relative path, links refused), the atomic index write, leftover
+  `*.gridtmp` cleanup, the folder layout helpers, `pack_game_detail` (a pack game back to
+  a `RomDetail`, so a drive install plans like a server install), `server_key`, and
+  `edit_pack`, the per-drive locked read-modify-write. `drives` answers what is mounted
+  now (`scan`) and diffs scans; the per-OS probes are `drives/linux.rs`
+  (`/proc/self/mountinfo` under `/run/media` and `/media`), `drives/windows.rs` (the
+  Win32 volume APIs: removable letters plus fixed drives on an external bus) and
+  `drives/macos.rs` (`/Volumes`, best effort). `write` is the write engine: every file
+  goes to `<name>.gridtmp`, is synced and renamed; `classify_io` tells a removed drive
+  from another I/O error; `guard_grid_root` and `remove_all_grid_files` are the only
+  whole-folder delete. `plan` is pure: what a backup writes, skips and whether it fits
+  (`BackupPlan` for the dialog, `BackupItems` for the queue), the per-system emulator
+  choice, the compat tool and umu-launcher picks, and the manual-emulator archive
+  refusals. `steam_runtime` fetches the Steam Linux Runtime the way umu does and places
+  it where umu looks.
 - `cloud` — the cloud save/state sync engine: scope classification, sync candidates,
   per-emulator directories, archive transfer, restore, retention, session windows, and
   xemu's raw-disk sync.
 - `config` — `Config` and its TOML load/atomic save, the emulator entries and UI
-  settings it holds, and `data_dir_override()`.
+  settings it holds, and `data_dir_override()`. `offline` is "Use without a server";
+  `[backup]` holds the firmware default and the remembered drives (`RememberedDrive`,
+  keyed by mount).
 - `fatx` — clean-room FATX reader/writer for the `E:` partition of a raw xemu Xbox HDD
   image, so cloud sync can pull `E:/UDATA` and `E:/TDATA` out and put them back.
 - `firmware` — server firmware download and install: keyword-based target routing, the
-  zip keep-vs-extract decision, and the RPCS3 PS3 firmware path.
+  zip keep-vs-extract decision, and the RPCS3 PS3 firmware path. The install pass reads a
+  `FirmwareSource`: `ServerFirmware`, or `PackFirmwareSource` for a drive's `firmware/`
+  (`install_platform_firmware_from`); both verify size and MD5 the same way.
 - `images` — the image pipeline: URL resolution rules, the on-disk cache, the startup
   sweep, the replenish job, background art, cached video, and `shade` (a cached image's
   dominant shade, remembered per process, for Discover's generated logos).
@@ -75,6 +98,24 @@ Modules as declared in `src/lib.rs`:
   inside a library root → re-point the row / missing, computed and never stored) and
   the Locate… folder check; `InstallService::reconcile_library` applies it at startup
   and on every `list_installed`.
+  Game backups add three modules. `backup_job` runs a backup row through the same queue
+  and slots as an install (`JobPayload::Backup`): the download phase fetches the game,
+  its art, an emulator release (or zips a manual emulator's folder) or a firmware set
+  into `<library>/.grid-staging/backup-<id>/`; the write phase writes it to the drive
+  through `backup::write` and records it in the index under the drive's lock. Staging is
+  always deleted. `drive_copy` is the byte source of an install from a drive
+  (`GameSource::Drive`): same progress, cancel and skip rules as a download, and a lost
+  drive is `LibraryError::DriveRemoved`. `drive_install` plans a drive game with
+  `plan_install` over `pack::pack_game_detail` and finalizes it like a server install,
+  and installs an emulator, Proton, umu-launcher or the Steam Linux Runtime from the
+  drive as an ordinary `EmulatorJob` whose download step copies the backed-up archive.
+  `InstallService::abort_drive` (with `QueueState::cancel_drive_queue` in `queue.rs`)
+  fails the current row and folds a removed drive's waiting rows into one
+  `backup_cancelled` row.
+  The registry is at v10: `source_server` records the server a row came from when that
+  was not the live session (an install from a drive), `""` otherwise.
+  `Registry::clear_foreign_rom_ids` is the relink guard: it clears `rom_id` on rows whose
+  `source_server` names another server (compared by `pack::server_key`).
 - `pcgw` — PCGamingWiki client that resolves a Windows game's save paths.
 - `platform` — host-platform lookups that need OS APIs (for example the Shell-resolved
   Windows Documents folder).
@@ -94,7 +135,9 @@ Modules as declared in `src/lib.rs`:
   the OS keyring implementation. Secrets are `SecretString` values that cannot be
   formatted or logged.
 - `session` — `SessionManager`: connect, restore, disconnect, and the shared
-  `RommClient` and image cache handles the rest of the app reads.
+  `RommClient` and image cache handles the rest of the app reads. `use_offline` turns on
+  offline mode; with `Config.offline` set, restore answers `RestoreOutcome::Offline` with
+  no keyring read and no probe. A connect, or a retry that connects, clears it.
 
 Data files are compiled in with `include_str!` from the repository root:
 `emulator-autoprofiles.json` (`launch/profiles.rs`), `retroarch-core-list.json` and
@@ -113,7 +156,8 @@ The shell owns *when* things run; grid-core owns *what* they do.
   `relocate::recover` (finishes a Commit) → gates handed to the services → `.setup()`,
   which resumes a Copy or Cleanup in the background.
 - `commands.rs` (+ `commands/cloud.rs`, `commands/specials.rs`, `commands/updates.rs`,
-  `commands/logging.rs`, `commands/setup.rs`, `commands/discover.rs`) — the `#[tauri::command]` surface. Thin
+  `commands/logging.rs`, `commands/setup.rs`, `commands/discover.rs`,
+  `commands/backups.rs`) — the `#[tauri::command]` surface. Thin
   wrappers: they build a context, call a service or grid-core, and map the result to a
   serializable DTO. `commands/setup.rs` owns first-run setup and Settings › Systems'
   installs: `start_platform_setup` and `install_for_systems` share one body
@@ -130,7 +174,15 @@ The shell owns *when* things run; grid-core owns *what* they do.
   `romm::discover`, plus Recently added's platform filters), `discover_recently_added`
   (Recently added on one platform, asked for when a filter is clicked) and
   `image_dominant_shade` (`ensure_image`'s host filter, then
-  `images::shade`).
+  `images::shade`). `commands/backups.rs` owns the drive commands (`list_drives`,
+  `setup_drive`, `rename_drive`, `set_drive_os`, `remove_grid_files`, `forget_drive`,
+  `drive_games`, `drive_asset`, `plan_backup`, `start_backup`, `install_from_drive`,
+  `remove_from_drive`, the firmware default). Each names a drive by its key and resolves
+  it against the latest scan; none takes a raw path to write to. `install_from_drive`
+  also decides what the drive brings beside the game (emulator, Proton, firmware) and
+  answers with the notices it words. `use_without_server` (commands.rs) turns on offline
+  mode. `ensure_image` checks the image cache before the host filter, so a row installed
+  from a drive shows its art whatever server it came from.
 - Services — `cloud_service.rs` (sync caches, auto-restore before launch, auto-upload
   after exit), `firmware_service.rs` (the background firmware triggers and their
   one-job-per-pass guard), `update_service.rs` (when the library is re-checked for server
@@ -141,10 +193,15 @@ The shell owns *when* things run; grid-core owns *what* they do.
   check for a Python-era config), `config_write.rs` (one config writer at a time, so two
   load-modify-save cycles cannot lose an update), `logging.rs` (the tracing filter and
   the `debug_prints` toggle),
+  `drive_service.rs` (backup drives: the 2 s scan on the blocking pool, the
+  `drives-changed` event when the snapshot changes, the remembered list in config,
+  leftover cleanup when a drive appears, `abort_drive` when one disappears, and the
+  drive firmware a drive install waits to place once the emulator-installed hook has
+  applied the defaults),
   `play_session_service.rs` (play activity: queues a finished session in the registry
   outbox and flushes it on session end and after connect, restore or retry; offline, the
-  queue waits), `relink_service.rs` (after connect, restore or retry: the relink pass, the
-  platform-slug backfill, then the image replenish and the update recompute; `installed-changed` tells the frontend),
+  queue waits), `relink_service.rs` (after connect, restore or retry: the relink guard
+  `guard_foreign_rows`, then the relink pass, the platform-slug backfill, then the image replenish and the update recompute; `installed-changed` tells the frontend),
   `library_move_service.rs` (9b: when the library move runs — plan, Downloads row, close
   the `LibraryGate`, wait for launch tickets, re-check what runs, start, run on the
   blocking pool with a throttled row detail; cancel, resume, finish events; the startup
@@ -164,7 +221,12 @@ a cover prefetch and an update recompute without grid-core knowing any of them e
 
 **The `e2e` cargo feature.** `app` builds with an embedded WebDriver server behind the
 `e2e` feature, and redirects forge requests to `GRID_LAUNCHER_E2E_FORGE_BASE` at request
-time. Every other URL stays real. CI clippy-checks that feature separately.
+time. Every other URL stays real. The feature turns on `grid-core/e2e`, where
+`GRID_LAUNCHER_E2E_DRIVE_ROOTS` replaces the removable-drive probe
+(`backup::drives::scan`): every child folder of its roots, dot-folders excepted, is a
+mounted drive, and an optional `.e2e-drive.json` inside it fakes the label, file system,
+size or read-only flag. A release build has no such override. CI clippy-checks that
+feature separately.
 
 ## `app/src`
 
@@ -176,6 +238,8 @@ session exists and `Shell.svelte` afterwards.
   exactly, with no cosmetic renames.
 - `lib/stores/*.svelte.ts` — rune-based state shared across views: `session`,
   `installed`, `downloads`, `sessions`, `updates`, `appUpdate`, `uiSettings`, `toasts`,
+  `drives` (the latest drives snapshot from `list_drives` and `drives-changed`, and the
+  `backup-notice` cards; its reads are pure functions in `lib/backups/drives.ts`),
   `inputMode`, `lastViewed`, `compatTools`, `pythonImport`, `libraryMove` (the 9b move status and its toasts),
   `libraryUnreachable` (while it says unreachable, `App.svelte` shows only
   `LibraryUnreachableDialog.svelte`, whose pure half is `lib/libraryUnreachable.ts`).
@@ -190,7 +254,18 @@ session exists and `Shell.svelte` afterwards.
   `Ctrl+1`..`Ctrl+4` accelerators) and the session-phase mapping. Emulators live in
   Settings › Systems; `Shell.svelte` routes the Server header's chips there with
   `Settings.show('systems', { system })`.
-- Feature folders — `lib/discover/`, `lib/details/`, `lib/downloads/`, `lib/emulators/`, `lib/settings/`,
+- Game backups — `lib/backups/`: `BackupDialog.svelte` (one instance, mounted by
+  `Shell.svelte`, opened through `dialogState.svelte.ts`) with `dialog.ts`;
+  `DriveCard.svelte` (Settings › Backup drives, page `lib/settings/BackupDrivesPage.svelte`)
+  with `drives.ts`; `SelectionBar.svelte` with `selection.ts` (select mode on the Server
+  and Library grids); `notices.ts` (one card per backup batch, keyed by
+  `DownloadEntry.batch`, fed by `notifications/notifier.ts`); `install.ts` (Install from a
+  drive and its notices); `driveArt.ts` (a drive asset as a `gridpack-asset:` URL that
+  `drive_asset` copies into the image cache). Library's drive rows are `lib/library/rail.ts`
+  and `lib/library/drive.ts`; Details' drive actions are in `lib/details/actions.ts` and
+  `subject.ts`. Offline mode is `session.offline` (`stores/session.svelte.ts`) and the
+  `initialView`/`chipLabel` rules in `shell.ts`.
+- Feature folders — `lib/backups/`, `lib/discover/`, `lib/details/`, `lib/downloads/`, `lib/emulators/`, `lib/settings/`,
   `lib/systems/`, `lib/library/`, `lib/server/`, `lib/cards/`, `lib/focus/`. Each pairs a `.svelte`
   component with a pure `.ts` module holding the logic, and a `.test.ts` beside it. Put
   new logic in the pure module: that is what vitest can reach.
@@ -239,12 +314,17 @@ mock RomM server. Structure:
   throttling, an offline switch, a request-introspection endpoint).
   `e2e/mock-romm/mock-forge.mjs` — stands in for GitHub and a direct-download provider,
   so catalog scraping runs against genuine markup.
+- Fake drives — the `backups` group sets `E2E_DRIVE_ROOTS` to `<data dir>/media`, which
+  `wdio.conf.ts` passes to the app as `GRID_LAUNCHER_E2E_DRIVE_ROOTS`.
+  `e2e/helpers/drives.ts` plugs a drive in with `mkdir` and unplugs it by renaming it to
+  a dot-folder; `e2e/seed/backups-seed.mjs` seeds each spec.
 
 Usage and exit codes are in `BUILD.md`.
 
 ## Library layout
 
-The library root has three folders: `games/<Platform>/` (game installs), `emulators/<Emulator>/`
+The library root has three folders (plus `.grid-staging/`, where a backup waits between
+download and write): `games/<Platform>/` (game installs), `emulators/<Emulator>/`
 (an emulator's binaries), and `saves/<Emulator>/<dir>/` (every directory the emulator writes
 beside its binary). `<Emulator>` is the sanitized catalog PROFILE name, with no release tag, so
 several config entries can share one emulator and one saves folder. The `user_data` entries of a
