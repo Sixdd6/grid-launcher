@@ -203,6 +203,12 @@ pub const NOT_A_NATIVE_GAME: &str =
 pub const NATIVE_UPDATE_REQUIRED: &str = "Native games update through the merge path.";
 /// Locate… refuses a row an install is writing right now.
 const LOCATE_WHILE_INSTALLING: &str = "This game is installing. Wait for it to finish.";
+/// Uninstall, update and Locate… refuse a game a backup is copying from
+/// this computer.
+pub const BACKING_UP_LOCAL: &str = "This game is being backed up. Wait for it to finish.";
+/// How long a plan-time scan of an installed game stays fresh
+/// ([`InstallService::local_states`]).
+const LOCAL_SCAN_TTL: Duration = Duration::from_secs(60);
 
 /// One installed game as the Library lists it (9c): the registry row,
 /// flattened, plus `missing` — its files are not on disk. Computed by the
@@ -220,12 +226,24 @@ pub struct InstalledRow {
 fn row_is_busy(snapshot: &DownloadsSnapshot, row: &InstalledGame) -> bool {
     let title = identity_key(&row.title);
     let platform = identity_key(&row.platform);
+    row.rom_id
+        .is_some_and(|rom_id| local_backup_live(snapshot, rom_id))
+        || snapshot.entries.iter().any(|entry| {
+            entry.status.is_live()
+                && entry.job == "game"
+                && (row.rom_id == Some(entry.rom_id)
+                    || (identity_key(&entry.title) == title
+                        && identity_key(&entry.platform) == platform))
+        })
+}
+
+/// True while a live backup row copies `rom_id` from this computer's
+/// install (queued, reading the server, or archiving).
+fn local_backup_live(snapshot: &DownloadsSnapshot, rom_id: i64) -> bool {
     snapshot.entries.iter().any(|entry| {
         entry.status.is_live()
-            && entry.job == "game"
-            && (row.rom_id == Some(entry.rom_id)
-                || (identity_key(&entry.title) == title
-                    && identity_key(&entry.platform) == platform))
+            && entry.kind == backup_job::LOCAL_GAME_KIND
+            && entry.rom_id == rom_id
     })
 }
 
@@ -1005,6 +1023,14 @@ pub struct EmulatorInstalled {
 /// imports Tauri.
 pub type EmulatorInstalledHook = Arc<dyn Fn(EmulatorInstalled) + Send + Sync>;
 
+/// One cached plan-time scan ([`InstallService::local_states`]).
+struct LocalScan {
+    at: Instant,
+    root: PathBuf,
+    for_windows: bool,
+    state: crate::backup::plan::LocalState,
+}
+
 /// Owns the install queue and drives one download task and one finalize task
 /// at a time. Every method takes `&self`; the async entry points take
 /// `&Arc<Self>` because they spawn tasks that outlive the call.
@@ -1086,8 +1112,12 @@ pub struct InstallService {
     /// Every backup row admitted this session, by entry id: what `retry`
     /// rebuilds the row from.
     backup_rows: Mutex<HashMap<u64, (backup_job::DriveTarget, backup_job::BackupItem)>>,
-    /// Test hook run before each file a backup writes to its drive.
+    /// Test hook run before each file (and archive part) a backup writes
+    /// to its drive.
     backup_write_hook: RwLock<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// Plan-time tree scans of installed games, by rom id
+    /// ([`Self::local_states`]); fresh for [`LOCAL_SCAN_TTL`].
+    local_scans: Mutex<HashMap<i64, LocalScan>>,
     /// Every install-from-drive row admitted this session, by entry id: what
     /// `retry` rebuilds the row from.
     drive_rows: Mutex<HashMap<u64, drive_install::DriveRow>>,
@@ -1146,6 +1176,7 @@ impl InstallService {
             resolved_sizes: Mutex::new(HashMap::new()),
             backup_rows: Mutex::new(HashMap::new()),
             backup_write_hook: RwLock::new(None),
+            local_scans: Mutex::new(HashMap::new()),
             drive_rows: Mutex::new(HashMap::new()),
             drive_copy_hook: RwLock::new(None),
         })
@@ -1383,7 +1414,14 @@ impl InstallService {
             .registry
             .find(None, title, platform)?
             .ok_or_else(|| LibraryError::Registry(NOT_INSTALLED.to_string()))?;
-        if row_is_busy(&self.snapshot(), &row) {
+        let snapshot = self.snapshot();
+        if row
+            .rom_id
+            .is_some_and(|rom_id| local_backup_live(&snapshot, rom_id))
+        {
+            return Err(LibraryError::Extract(BACKING_UP_LOCAL.to_string()));
+        }
+        if row_is_busy(&snapshot, &row) {
             return Err(LibraryError::Extract(LOCATE_WHILE_INSTALLING.to_string()));
         }
         let home = crate::platform::home_dir();
@@ -1501,6 +1539,7 @@ impl InstallService {
         rom_id: i64,
     ) -> Result<(), LibraryError> {
         self.check_library_gate()?;
+        self.refuse_while_backing_up(rom_id)?;
         let row = self.current_row(rom_id)?;
         let extracted_dir = row.extracted_dir.trim();
         if !row.is_native() || extracted_dir.is_empty() || !Path::new(extracted_dir).is_dir() {
@@ -1724,6 +1763,7 @@ impl InstallService {
         rom_id: i64,
     ) -> Result<(), LibraryError> {
         self.check_library_gate()?;
+        self.refuse_while_backing_up(rom_id)?;
         let library = self.library_root()?;
         let row = self.current_row(rom_id)?;
         if row.is_native() {
@@ -2471,6 +2511,95 @@ impl InstallService {
             .map_err(|busy| LibraryError::LibraryBusy(busy.reason))
     }
 
+    /// True while a backup copies `rom_id` from this computer's install:
+    /// a live `backup_game_local` row for it (queued, reading the server
+    /// or archiving). Uninstall, update and Locate… refuse the game then.
+    pub fn local_backup_busy(&self, rom_id: i64) -> bool {
+        local_backup_live(&self.snapshot(), rom_id)
+    }
+
+    /// `Err(`[`BACKING_UP_LOCAL`]`)` while [`Self::local_backup_busy`].
+    fn refuse_while_backing_up(&self, rom_id: i64) -> Result<(), LibraryError> {
+        if self.local_backup_busy(rom_id) {
+            return Err(LibraryError::Extract(BACKING_UP_LOCAL.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Whether each of `rom_ids` can be copied from this computer's install
+    /// ([`crate::backup::local::assess`]), for the Backup dialog's plan:
+    /// - one registry pass ([`Self::installed_rows`], so Missing is fresh);
+    /// - the row for each rom id judged by [`crate::backup::local::locate`]
+    ///   against `live_server` (no userinfo needed);
+    /// - an eligible tree scanned, or its scan reused when the same tree
+    ///   was scanned for the same `for_windows` within the last minute (the
+    ///   dialog plans every ready drive).
+    ///
+    /// `outdated` is always `None`: the caller fills it from the update set.
+    /// A rom id with no row is [`LocalState::NotInstalled`].
+    pub fn local_states(
+        &self,
+        rom_ids: &[i64],
+        live_server: &str,
+        for_windows: bool,
+    ) -> Result<HashMap<i64, crate::backup::plan::LocalState>, LibraryError> {
+        use crate::backup::local::{self, Located};
+        use crate::backup::plan::LocalState;
+        let library = self.library_root()?;
+        let rows = self.installed_rows()?;
+        let home = crate::platform::home_dir();
+        let home = home.as_deref();
+        let now = Instant::now();
+        let mut states = HashMap::new();
+        for &rom_id in rom_ids {
+            let row = rows.iter().find(|row| row.game.rom_id == Some(rom_id));
+            let located = local::locate(
+                rom_id,
+                row.map(|row| &row.game),
+                row.is_some_and(|row| row.missing),
+                &library,
+                home,
+                live_server,
+            );
+            let state = match located {
+                Located::NotInstalled => LocalState::NotInstalled,
+                Located::Ineligible(reason) => LocalState::Ineligible { reason },
+                Located::Eligible(source) => {
+                    let cached = self
+                        .local_scans
+                        .lock()
+                        .unwrap()
+                        .get(&rom_id)
+                        .filter(|scan| {
+                            scan.root == source.root
+                                && scan.for_windows == for_windows
+                                && now.saturating_duration_since(scan.at) < LOCAL_SCAN_TTL
+                        })
+                        .map(|scan| scan.state.clone());
+                    match cached {
+                        Some(state) => state,
+                        None => {
+                            let state =
+                                local::scanned_state(&local::scan_tree(&source, for_windows));
+                            self.local_scans.lock().unwrap().insert(
+                                rom_id,
+                                LocalScan {
+                                    at: now,
+                                    root: source.root.clone(),
+                                    for_windows,
+                                    state: state.clone(),
+                                },
+                            );
+                            state
+                        }
+                    }
+                }
+            };
+            states.insert(rom_id, state);
+        }
+        Ok(states)
+    }
+
     /// Creates the library move's Downloads row
     /// ([`QueueState::admit_library_move`]). `None` while one is live.
     pub fn begin_library_move(&self, title: &str, platform: &str) -> Option<u64> {
@@ -2656,6 +2785,7 @@ impl InstallService {
     /// disk, with its reason, so the user is told what stayed.
     pub fn uninstall(&self, rom_id: i64) -> Result<UninstallReport, LibraryError> {
         self.check_library_gate()?;
+        self.refuse_while_backing_up(rom_id)?;
         let library = self.library_root()?;
         // `find` falls back to the (title, platform) identity when no row
         // carries the rom id, but never for this call: title and platform
@@ -2691,6 +2821,9 @@ impl InstallService {
         }
 
         self.registry.remove(&record.title, &record.platform)?;
+        if let Some(rom_id) = record.rom_id {
+            self.local_scans.lock().unwrap().remove(&rom_id);
+        }
         Ok(UninstallReport {
             skipped: plan.skipped,
         })
@@ -3287,15 +3420,23 @@ impl InstallService {
                 hook();
             }
         };
+        // A game copied from this computer reads the library while it
+        // writes: a gate ticket held for the whole write keeps a library
+        // move from starting under it.
+        let reads_library = matches!(&job.item, backup_job::BackupItem::Game(game) if game.local);
+        let gate = self.library_gate.read().unwrap().clone();
         let result = match self.removed_reason(&job.drive.key) {
             Some(reason) => Err(LibraryError::DriveRemoved(reason)),
-            None => backup_job::write(
-                job,
-                cancel,
-                &mut |done, total| self.on_install_progress(id, done, total),
-                &before_file,
-                &mut warnings,
-            ),
+            None => match reads_library.then(|| gate.enter()).transpose() {
+                Err(busy) => Err(LibraryError::LibraryBusy(busy.reason)),
+                Ok(_ticket) => backup_job::write(
+                    job,
+                    cancel,
+                    &mut |done, total| self.on_install_progress(id, done, total),
+                    &before_file,
+                    &mut warnings,
+                ),
+            },
         };
         backup_job::remove_staging(&job.staging);
         for line in &warnings {

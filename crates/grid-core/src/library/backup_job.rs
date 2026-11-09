@@ -17,10 +17,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use crate::backup::archive;
+use crate::backup::local::{self, LocalSource, Located, TreePlan};
 use crate::backup::pack::{
     self, asset_dir_rel, emulator_dir_rel, firmware_dir_rel, game_dir_rel, game_file_rel,
-    pack_component, unique_rel, PackAssets, PackEmulator, PackError, PackFile, PackFirmware,
-    PackFirmwareFile, PackGame, PackOs, PackSource, PackState,
+    pack_component, unique_rel, ArchiveKind, InstalledLayout, Pack, PackAssets, PackEmulator,
+    PackError, PackFile, PackFirmware, PackFirmwareFile, PackGame, PackInstalled, PackOs,
+    PackSource, PackState,
 };
 use crate::backup::plan::{
     os_name, EmulatorItem, EmulatorKind, EmulatorSource, FirmwareItem, GameItem,
@@ -34,8 +37,14 @@ use crate::launch::setup::{newest_server_build, recommendations, ServerPackage};
 use crate::romm::{strip_userinfo, RomDetail, RomFile, RommClient};
 
 use super::download::{download_targets, FileTarget, RommProvider};
+use super::paths::archive_name;
 use super::queue::BackupItemKey;
-use super::update_detection::is_emulators_platform;
+use super::reconcile::{anchor, fs_probe};
+use super::registry::{installed_match, InstalledGame};
+use super::update_detection::{
+    format_version_tag, game_has_server_update, is_emulators_platform, rom_file_name_version,
+    ServerVersion,
+};
 use super::{content_target, download_set, encode_file_segment, DownloadSet, LibraryError};
 use super::{InstallService, COMPAT_TOOL_PLATFORM, EMULATOR_PLATFORM};
 
@@ -44,6 +53,9 @@ pub const STAGING_DIR: &str = ".grid-staging";
 
 /// The most screenshots a backed-up game carries.
 const MAX_SCREENSHOTS: usize = 8;
+
+/// The Downloads row kind of a game copied from this computer's install.
+pub const LOCAL_GAME_KIND: &str = "backup_game_local";
 
 /// The drive a backup writes to, resolved from a drive the current scan
 /// found. A queued job keeps the mount path from its admission.
@@ -96,7 +108,15 @@ impl BackupItem {
     /// The row's title, platform column and kind.
     pub(crate) fn row(&self) -> (String, String, &'static str) {
         match self {
-            Self::Game(game) => (game.name.clone(), game.platform_name.clone(), "backup_game"),
+            Self::Game(game) => (
+                game.name.clone(),
+                game.platform_name.clone(),
+                if game.local {
+                    LOCAL_GAME_KIND
+                } else {
+                    "backup_game"
+                },
+            ),
             Self::Emulator(item)
                 if item.pick.name == crate::backup::steam_runtime::RUNTIME_NAME =>
             {
@@ -203,6 +223,14 @@ pub(crate) enum Staged {
         entry: PackFirmware,
         files: Vec<StagedFile>,
     },
+    /// A game copied from this computer's install as a tar archive, written
+    /// straight to the drive in the write phase.
+    Installed {
+        /// The entry, with `installed.parts` empty and every `path` blank.
+        game: Box<PackGame>,
+        tree: Box<TreePlan>,
+        assets: Vec<(AssetKind, StagedFile)>,
+    },
 }
 
 /// `<library>/.grid-staging/backup-<id>`.
@@ -239,6 +267,9 @@ pub(crate) async fn download(
 ) -> Result<(), LibraryError> {
     fs::create_dir_all(&job.staging)?;
     match job.item.clone() {
+        BackupItem::Game(item) if item.local => {
+            download_local_game(service, job, item.rom_id, cancel).await
+        }
         BackupItem::Game(item) => download_game(job, item.rom_id, cancel, on_progress).await,
         BackupItem::Emulator(item) => {
             download_emulator(service, job, &item, cancel, on_progress).await
@@ -310,6 +341,208 @@ async fn download_game(
         assets,
     });
     Ok(())
+}
+
+/// The download phase of a game copied from this computer (§3.3 of the
+/// local-copies plan):
+/// 1. the detail, still needed for the metadata and the art;
+/// 2. the registry row, read and judged again ([`local::locate`] with the
+///    anchor probed now): a game no longer eligible fails the row, and
+///    never silently downloads instead;
+/// 3. the art, into staging as for a download;
+/// 4. either the library files themselves, when the install is exactly the
+///    server's files (an archive as downloaded, or a multi-file game, not
+///    out of date, every file present with its name and size), or the
+///    scanned tree, archived to the drive by the write phase.
+async fn download_local_game(
+    service: &InstallService,
+    job: &mut BackupJob,
+    rom_id: i64,
+    cancel: &AtomicBool,
+) -> Result<(), LibraryError> {
+    let detail = job.client.rom_detail(rom_id).await?;
+    let gone = || {
+        LibraryError::Extract(format!(
+            "{} is no longer installed on this computer; backup again",
+            detail.name
+        ))
+    };
+    let home = crate::platform::home_dir();
+    let home = home.as_deref();
+    let row = service
+        .registry
+        .find(Some(rom_id), "", "")?
+        .filter(|row| installed_match(row, rom_id));
+    let missing = row
+        .as_ref()
+        .and_then(|row| anchor(row, home))
+        .is_some_and(|anchor| fs_probe(&anchor.path) != Some(anchor.kind));
+    let (row, source) = match (
+        local::locate(
+            rom_id,
+            row.as_ref(),
+            missing,
+            &job.library,
+            home,
+            &job.server,
+        ),
+        row,
+    ) {
+        (Located::Eligible(source), Some(row)) => (row, source),
+        _ => return Err(gone()),
+    };
+    let for_windows = matches!(
+        pack::read_pack(&job.drive.mount),
+        Ok(PackState::Ready(pack)) if pack.os.contains(&PackOs::Windows)
+    );
+    let outdated = game_has_server_update(
+        &row,
+        &ServerVersion {
+            platform: &detail.platform_name,
+            platform_slug: &detail.platform_slug,
+            rom_file_name: &detail.fs_name,
+            updated_at: &detail.server_updated_at,
+        },
+    );
+    let version = rom_file_name_version(&row.rom_file_name)
+        .map(|tag| format_version_tag(&tag))
+        .unwrap_or_default();
+
+    let assets = download_assets(job, &detail, cancel).await?;
+    if cancel.load(Ordering::Relaxed) {
+        return Err(LibraryError::Cancelled);
+    }
+    let mut game = pack_game(&detail, &job.server, Vec::new(), 0);
+    game.source.server_updated_at = row.server_updated_at.clone();
+    game.version = version.clone();
+
+    if !outdated {
+        if let Some(exact) = exact_copy(&detail, &source, &row) {
+            let single = matches!(download_set(&detail)?, DownloadSet::Single(_));
+            let mut files = Vec::new();
+            for (file, src, len) in exact {
+                game.size = game.size.saturating_add(len);
+                game.files.push(PackFile {
+                    path: String::new(),
+                    size: len,
+                    server_file_id: file.id,
+                    name: file.file_name.clone(),
+                    category: file.category.clone(),
+                    top_level: file.is_top_level,
+                    md5: file.md5_hash.clone(),
+                    sha1: file.sha1_hash.clone(),
+                    extra: Default::default(),
+                });
+                files.push(StagedFile {
+                    src,
+                    name: file.file_name.clone(),
+                });
+            }
+            job.staged = Some(Staged::Game {
+                game: Box::new(game),
+                files,
+                single,
+                assets,
+            });
+            return Ok(());
+        }
+    }
+
+    // The scan reads only metadata, but a big tree is many calls.
+    let scanned = source.clone();
+    let tree = tokio::task::spawn_blocking(move || local::scan_tree(&scanned, for_windows))
+        .await
+        .map_err(|e| LibraryError::Extract(format!("the scan did not finish: {e}")))?
+        .map_err(|refusal| {
+            LibraryError::Extract(format!(
+                "{} can't be copied from this computer: {}; backup again",
+                detail.name,
+                lower_first(refusal.reason())
+            ))
+        })?;
+    if cancel.load(Ordering::Relaxed) {
+        return Err(LibraryError::Cancelled);
+    }
+    game.installed = Some(PackInstalled {
+        archive: ArchiveKind::Tar,
+        layout: source.layout,
+        name: source.name.clone(),
+        parts: Vec::new(),
+        tree_bytes: tree.tree_bytes,
+        tree_files: tree.tree_files,
+        launch: source.launch.clone(),
+        rom_file_name: row.rom_file_name.clone(),
+        server_updated_at: row.server_updated_at.clone(),
+        version,
+        outdated,
+        from_os: PackOs::host(),
+        row: local::snapshot_row(&row, &source.root, home),
+    });
+    job.staged = Some(Staged::Installed {
+        game: Box::new(game),
+        tree: Box::new(tree),
+        assets,
+    });
+    Ok(())
+}
+
+/// "Its install contains links" as "its install contains links".
+fn lower_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
+/// The library files to copy as they are (§1.3), when the install is
+/// exactly the server's files: a single file installed as downloaded (the
+/// row's `archive_path` is the anchor) or a multi-file game, with every
+/// file [`download_set`] picks present under its name and with its size.
+/// `None` sends the game to the tar archive. Each item is the server file,
+/// the library file and its length.
+fn exact_copy<'a>(
+    detail: &'a RomDetail,
+    source: &LocalSource,
+    row: &InstalledGame,
+) -> Option<Vec<(&'a RomFile, PathBuf, u64)>> {
+    let regular_len = |path: &Path| {
+        fs::symlink_metadata(path)
+            .ok()
+            .filter(|meta| meta.file_type().is_file())
+            .map(|meta| meta.len())
+    };
+    let known = |size: i64| u64::try_from(size).ok().filter(|size| *size > 0);
+    match (source.layout, download_set(detail).ok()?) {
+        (InstalledLayout::File, DownloadSet::Single(file))
+            if !row.archive_path.trim().is_empty() =>
+        {
+            let expected = known(file.file_size_bytes).or_else(|| known(detail.filesize_bytes))?;
+            let name = source.root.file_name()?.to_str()?;
+            let installed_as = archive_name(&file.file_name, &detail.name, &detail.platform_name);
+            if name != file.file_name && name != installed_as {
+                return None;
+            }
+            (regular_len(&source.root)? == expected)
+                .then(|| vec![(file, source.root.clone(), expected)])
+        }
+        (InstalledLayout::Multi, DownloadSet::Multi { files, .. }) => files
+            .into_iter()
+            .map(|file| {
+                let expected = known(file.file_size_bytes)?;
+                let plain = !file.file_name.is_empty()
+                    && !file.file_name.contains(['/', '\\'])
+                    && file.file_name != "."
+                    && file.file_name != "..";
+                if !plain {
+                    return None;
+                }
+                let path = source.root.join(&file.file_name);
+                (regular_len(&path)? == expected).then_some((file, path, expected))
+            })
+            .collect(),
+        _ => None,
+    }
 }
 
 /// Fetches the game's art into staging: the cover (large, else small), the
@@ -901,7 +1134,13 @@ async fn download_firmware(
 /// index under the drive's lock. A file written before a failure is removed
 /// again, so an item is either fully indexed or absent.
 ///
-/// `before_file` runs before each file (a test hook).
+/// A game copied from this computer as an archive
+/// ([`Staged::Installed`]) is written first, straight from the library
+/// through [`archive::write_installed_tree_with`], then its art; the
+/// caller holds a library-gate ticket meanwhile.
+///
+/// `before_file` runs before each file, and before each archive part (a
+/// test hook).
 pub(crate) fn write(
     job: &BackupJob,
     cancel: &AtomicBool,
@@ -938,7 +1177,9 @@ pub(crate) fn write(
 
     // Place every file, then write them.
     let mut writes: Vec<(&StagedFile, String)> = Vec::new();
-    let entry: Entry = match staged {
+    // An installed copy's tree and the pack folder its parts go in.
+    let mut tree_write: Option<(&TreePlan, String)> = None;
+    let mut entry: Entry = match staged {
         Staged::Game {
             game,
             files,
@@ -977,23 +1218,27 @@ pub(crate) fn write(
                     writes.push((file, rel));
                 }
             }
-            let asset_dir = unique_rel(
+            place_assets(&pack, &mut game, &stem, assets, &mut writes);
+            Entry::Game(Box::new(game))
+        }
+        Staged::Installed { game, tree, assets } => {
+            if pack.has_game(&game.source.server, game.source.rom_id) {
+                warnings.push(already());
+                return Ok(());
+            }
+            let mut game = (**game).clone();
+            let leaf = installed_leaf(&game);
+            let candidate = game_dir_rel(&game.platform, &leaf, None);
+            let dir = unique_rel(
                 &pack,
-                &asset_dir_rel(&game.platform, &stem),
-                &server,
-                rom_id,
+                &candidate,
+                &game.source.server,
+                game.source.rom_id,
                 false,
             );
-            for (kind, file) in assets {
-                let rel = format!("{asset_dir}/{}", pack_component(&file.name, "image"));
-                match kind {
-                    AssetKind::Cover => game.assets.cover = Some(rel.clone()),
-                    AssetKind::Fanart => game.assets.fanart = Some(rel.clone()),
-                    AssetKind::Logo => game.assets.logo = Some(rel.clone()),
-                    AssetKind::Screenshot => game.assets.screenshots.push(rel.clone()),
-                }
-                writes.push((file, rel));
-            }
+            let stem = dir.rsplit('/').next().unwrap_or(&leaf).to_string();
+            place_assets(&pack, &mut game, &stem, assets, &mut writes);
+            tree_write = Some((&**tree, dir));
             Entry::Game(Box::new(game))
         }
         Staged::Emulator {
@@ -1050,7 +1295,7 @@ pub(crate) fn write(
         }
     };
 
-    let total: u64 = writes
+    let files_total: u64 = writes
         .iter()
         .filter_map(|(file, _)| fs::metadata(&file.src).ok())
         .map(|meta| meta.len())
@@ -1061,9 +1306,44 @@ pub(crate) fn write(
         fat32: drive.fat32,
     };
     let mut done: u64 = 0;
+    let mut total = files_total;
+    // How much of `total` a written byte counts for: an installed copy's
+    // total counts each file's write and read-back.
+    let mut file_weight = 1;
     let mut written: Vec<String> = Vec::new();
     let mut outcome = Ok(());
-    for (file, rel) in &writes {
+    if let Some((tree, dir)) = tree_write {
+        // The archive and each file count their write and read-back.
+        let tree_total = tree.archive_bytes.saturating_mul(2);
+        total = tree_total.saturating_add(files_total.saturating_mul(2));
+        file_weight = 2;
+        let result = archive::write_installed_tree_with(
+            &target,
+            tree,
+            &dir,
+            archive::part_bytes(),
+            cancel,
+            &mut |bytes, _| progress(bytes.min(tree_total), total),
+            &mut || before_file(),
+        );
+        match result {
+            Ok(parts) => {
+                done = tree_total;
+                written.extend(parts.iter().map(|part| part.path.clone()));
+                if let Entry::Game(game) = &mut entry {
+                    game.size = parts
+                        .iter()
+                        .fold(0, |sum, part| sum.saturating_add(part.size));
+                    if let Some(installed) = game.installed.as_mut() {
+                        installed.parts = parts;
+                    }
+                }
+            }
+            Err(error) => outcome = Err(write_error(error, drive)),
+        }
+    }
+    let pending: &[(&StagedFile, String)] = if outcome.is_ok() { &writes } else { &[] };
+    for (file, rel) in pending {
         before_file();
         // Checked against the staged bytes, never the server's hash: RomM
         // hashes an archive's decompressed contents, not the archive.
@@ -1078,7 +1358,7 @@ pub(crate) fn write(
         );
         match result {
             Ok(bytes) => {
-                done += bytes;
+                done += bytes.saturating_mul(file_weight);
                 written.push(rel.clone());
             }
             Err(error) => {
@@ -1109,6 +1389,57 @@ pub(crate) fn write(
         }
     }
     outcome
+}
+
+/// Places a game's staged art in its pack folder (`assets/<slug>/<stem>`)
+/// and records each path in `game.assets`.
+fn place_assets<'a>(
+    pack: &Pack,
+    game: &mut PackGame,
+    stem: &str,
+    assets: &'a [(AssetKind, StagedFile)],
+    writes: &mut Vec<(&'a StagedFile, String)>,
+) {
+    let asset_dir = unique_rel(
+        pack,
+        &asset_dir_rel(&game.platform, stem),
+        &game.source.server,
+        game.source.rom_id,
+        false,
+    );
+    for (kind, file) in assets {
+        let rel = format!("{asset_dir}/{}", pack_component(&file.name, "image"));
+        match kind {
+            AssetKind::Cover => game.assets.cover = Some(rel.clone()),
+            AssetKind::Fanart => game.assets.fanart = Some(rel.clone()),
+            AssetKind::Logo => game.assets.logo = Some(rel.clone()),
+            AssetKind::Screenshot => game.assets.screenshots.push(rel.clone()),
+        }
+        writes.push((file, rel));
+    }
+}
+
+/// The folder an installed copy's parts go in (before [`unique_rel`]):
+/// the install's own name (a file's without its extension), else the
+/// server's `fs_name`, else the game's name.
+fn installed_leaf(game: &PackGame) -> String {
+    let installed = game.installed.as_ref().map(|installed| {
+        let name = Path::new(&installed.name);
+        match installed.layout {
+            InstalledLayout::File => name.file_stem().unwrap_or(name.as_os_str()),
+            _ => name.as_os_str(),
+        }
+        .to_string_lossy()
+        .trim()
+        .to_string()
+    });
+    [
+        installed.unwrap_or_default(),
+        game.source.fs_name.trim().to_string(),
+    ]
+    .into_iter()
+    .find(|leaf| !leaf.is_empty())
+    .unwrap_or_else(|| game.name.clone())
 }
 
 /// The item a write records in the index.
