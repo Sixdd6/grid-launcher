@@ -157,8 +157,11 @@ export function osChangeHelp(emulatorCount: number): string {
 
 /**
  * The toasts after `set_drive_os` answered: one line for the builds it
- * removed, one for the builds it queued, or a plain confirmation when
- * neither happened (no emulators on the drive yet).
+ * removed, or a plain confirmation when no builds moved (no emulators on
+ * the drive yet). The builds it queued are not toasted here: the backup
+ * batch's notifications word them ("Windows builds of 2 emulators added to
+ * the backup queue for Couch kit") once the card calls
+ * `expectOsChangeBatch`, so the change is announced once.
  */
 export function osChangeToasts(
   packName: string,
@@ -172,13 +175,14 @@ export function osChangeToasts(
   if (removed.length > 0 && outcome.removed > 0) {
     lines.push(`Removed the ${osNames(removed)} builds of ${plural(outcome.removed, 'emulator')} from ${packName}`);
   }
-  if (added.length > 0 && outcome.queued > 0) {
-    lines.push(
-      `${osNames(added)} builds of ${plural(outcome.queued, 'emulator')} added to the backup queue for ${packName}`,
-    );
-  }
-  if (lines.length === 0) lines.push(`${packName} is now for ${osNames(after)}`);
+  const queued = added.length > 0 && outcome.queued > 0;
+  if (lines.length === 0 && !queued) lines.push(`${packName} is now for ${osNames(after)}`);
   return lines;
+}
+
+/** The OSes `after` adds to `before`: what `expectOsChangeBatch` words the queued builds with. */
+export function addedOses(before: readonly PackOs[], after: readonly PackOs[]): PackOs[] {
+  return after.filter((o) => !before.includes(o));
 }
 
 /** The setup form's warning on a FAT32 drive. GRID never formats a drive, so it only suggests exFAT. */

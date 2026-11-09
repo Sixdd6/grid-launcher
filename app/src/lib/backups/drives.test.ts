@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DriveInfo, DrivesSnapshot, PackSummary, RememberedDrive } from '../api';
 import {
+  addedOses,
   defaultPackName,
   driveByKey,
   driveCardModel,
@@ -177,18 +178,19 @@ describe('OS change', () => {
     expect(osChangeHelp(1)).toContain('the 1 emulator on');
     expect(osChangeHelp(0)).toMatch(/^No emulators are on this drive yet/);
   });
-  it('toasts the queued builds of an added computer', () => {
-    expect(osChangeToasts('Couch kit', ['linux'], ['linux', 'windows'], { batch: 4, queued: 2, removed: 0 })).toEqual([
-      'Windows builds of 2 emulators added to the backup queue for Couch kit',
-    ]);
+  it('leaves the queued builds of an added computer to the batch notifications', () => {
+    expect(osChangeToasts('Couch kit', ['linux'], ['linux', 'windows'], { batch: 4, queued: 2, removed: 0 })).toEqual([]);
   });
-  it('toasts the removed builds, and both lines on a swap', () => {
+  it('names the OSes a change adds', () => {
+    expect(addedOses(['linux'], ['windows', 'linux'])).toEqual(['windows']);
+    expect(addedOses(['linux', 'windows'], ['linux'])).toEqual([]);
+  });
+  it('toasts the removed builds, and only those on a swap', () => {
     expect(osChangeToasts('Couch kit', ['linux', 'windows'], ['linux'], { batch: 0, queued: 0, removed: 1 })).toEqual([
       'Removed the Windows builds of 1 emulator from Couch kit',
     ]);
     expect(osChangeToasts('Kit', ['linux'], ['windows'], { batch: 2, queued: 3, removed: 3 })).toEqual([
       'Removed the Linux builds of 3 emulators from Kit',
-      'Windows builds of 3 emulators added to the backup queue for Kit',
     ]);
   });
   it('confirms the change when no emulator builds moved', () => {

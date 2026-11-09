@@ -8,9 +8,11 @@
   // the card re-renders from the new snapshot.
   import { api, type DriveInfo, type PackOs, type RememberedDrive } from '../api';
   import Icon from '../Icon.svelte';
+  import { expectOsChangeBatch } from '../notifications/notifier';
   import { refresh } from '../stores/drives.svelte';
   import { pushToast } from '../stores/toasts.svelte';
   import {
+    addedOses,
     defaultPackName,
     driveCardModel,
     emulatorNames,
@@ -162,6 +164,8 @@
       // Adding a computer needs a server; the backend's refusal ("Adding a
       // computer needs a server") stays on the form as its error line.
       const outcome = await api.setDriveOs(d.key, after);
+      // The queued builds are announced by the backup batch's own cards.
+      expectOsChangeBatch(outcome, addedOses(before, after));
       mode = 'idle';
       for (const line of osChangeToasts(pack.name, before, after, outcome)) pushToast(line);
       await refresh();
