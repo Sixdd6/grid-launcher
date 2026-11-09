@@ -44,7 +44,8 @@ transferring; otherwise it reads `⬇ <title> · <percent> · <speed>` beside a 
 sparkline of the current transfer's last 60 seconds (network in the primary colour, disk
 in teal) and an "Open Downloads" link. Clicking anywhere on the strip opens the Downloads
 view. A backup reads `Backing up <title> to <pack> · <percent> · downloading` (then
-`writing`), and an install from a backup drive shows "Copying from <label>" in place of
+`writing`); a game copied from this computer reads `getting details`, then `copying from
+this computer`. An install from a backup drive shows "Copying from <label>" in place of
 the network rate.
 
 **Notifications.** Every message (install results, launches, firmware, cloud saves,
@@ -265,7 +266,10 @@ There are several main sections to the application with buttons across the top b
   with the kind badge **Backup**. A queued row reads "Waiting · to <pack>"; then
   "Downloading from server 45%" (network sparkline), then "Writing to <label> 70%" (disk
   sparkline); a finished row goes to Completed as "Written to <pack>"; a failed one reads
-  "Failed — <reason>". Cancel works while it downloads and while it writes. A backup's
+  "Failed — <reason>". A game copied from this computer reads "Getting details from
+  server" (its details and art still come from the server), then "Copying from this
+  computer to <label> 45%" (disk sparkline), and finishes as "Copied from this computer ·
+  Written to <pack>". Cancel works while it downloads and while it writes. A backup's
   game rows run first, then its emulators, then its firmware; backups and installs share
   one queue, first in, first out. When the drive is removed, the row being written fails
   ("Failed — SAMSUNG T7 was removed") and the drive's waiting rows fold into one
@@ -603,7 +607,11 @@ hold the game already (same server and ROM id), a line under the actions reads "
 <pack>" ("On Couch kit, Travel kit" for several). Details opened from a drive's grid adds
 "From <pack>" to the header line. It offers **Install from drive** in place of Install
 when the game is not installed here, and **Remove from drive…** in place of Backup
-(two clicks; the second reads "Remove from <pack>").
+(two clicks; the second reads "Remove from <pack>"). A drive game backed up from a
+computer's install adds "A copy of an installed game · v1.1", with "(the server had newer
+files)" when it was out of date at backup time (no version part when the copy has no
+version tag). A Windows one adds "Its Wine prefix wasn't copied, so saves kept there
+aren't on the drive".
 
 Uninstall never removes a protected folder (a filesystem root, home, a library folder, its
 top-level and platform folders, a folder that holds the game's install folder, a path with
@@ -714,8 +722,9 @@ Rules:
 - The archive itself is never read or changed for this.
 
 # Game backups
-GRID backs up games from the server to a removable drive (a USB flash drive or SSD),
-with their art, details, emulators and firmware. Any computer with GRID can then install
+GRID backs up games to a removable drive (a USB flash drive or SSD), with their art,
+details, emulators and firmware. A game installed on this computer is copied from the
+library; any other game downloads from the server. Any computer with GRID can then install
 them from that drive, with or without a network. The design is
 `docs/design/system/components/GameBackups/README.md`.
 
@@ -768,16 +777,60 @@ Opened by Details › Backup to drive…, the select bar's Backup to drive…, a
 all N… (Server platform header, Library platform row). It opens over every view and over
 Details.
 - **Title:** "Backup Cinder Peaks", "Backup 3 games" or "Backup PlayStation · 4
-  games". The lede says GRID downloads each game from the server and writes it, with its
-  art and details, to the drive's gridpack folder. A backup always downloads the game
-  from the server, even when it is installed here, so the drive gets the server's
-  original file.
+  games". The lede reads "GRID copies games installed on this computer and downloads the
+  rest from <host>, then writes each one, with its art and details, to the drive's
+  gridpack folder." When no game is copied from this computer it reads "GRID downloads
+  each game from <host> and writes it, with its art and details, to the drive's gridpack
+  folder."
 - **Drive:** one radio row per connected, set-up, writable drive: the pack name, "<label>
   · <file system>", the free space, and a usage bar where this backup's share is hatched.
   A drive without room reads "Needs 76 GB · 61.4 GB free" in the danger colour, and the
   main button reads "Not enough space". With none connected, the dialog says "No backup
   drive connected", names any connected drive that is not set up, and offers **Set up a
   drive…**, which opens Settings › Backup drives (and closes Details).
+- **Source** sits between Drive and Also copy. It shows only when at least one requested
+  game can be copied from this computer.
+  - **Copy installed games from this computer** is a checkbox, ticked by default. Its note
+    counts the sources: "4 games from this computer (12.3 GB) · 2 downloaded · 2 to
+    choose". Unticked, the note reads "Every game downloads from <host>", and the rows
+    and the out-of-date choice are hidden.
+  - **One row per game being written**, with its platform and a tag: **From this
+    computer** (drive icon) or **Download** (download icon). A game that is installed but
+    downloads says why: "Its files weren't found on this computer" (Missing), "Installed
+    outside the library folder" (a native game moved with Locate…, a PS3 game in RPCS3's
+    `dev_hdd0`, a launch file outside the game's folder), "Its install contains links",
+    "Its install has a file name Windows can't use" (on a pack for Windows), "Its install
+    has a file name that isn't valid text", "Its install contains a file GRID can't
+    copy" (a FIFO, socket or device file), "Its files couldn't be read on this computer",
+    "Xbox 360 games always download from the server", "Emulator packages always download
+    from the server", "It was installed from another server", "It isn't linked to this
+    server's game" (a row with no ROM id), or "It's running right now; close it to copy
+    it". A game that is not installed has no note. With more than 6 games the rows sit in
+    a collapsed **Show each game** (with the count).
+  - **Which installs are copied.** The install must be for this ROM id and this server,
+    present, and sit directly in the library's platform folder for its platform
+    (`games/<Platform>/`, or the legacy `<library>/<Platform>/`), with its launch files
+    inside it. Its tree is scanned when the dialog plans; the scan is reused for a minute.
+  - **What is copied.** An install that is exactly the server's files (a single file
+    installed as downloaded, or a multi-file game whose files are all there with the
+    server's names and sizes) goes on the drive as those files, the same as a download.
+    This applies only when the game is not out of date. Any other install (an extracted
+    game, a PS4 tree, a native Linux or Windows game) goes as an uncompressed tar in parts
+    (see The gridpack folder). A native game's Wine prefix is never copied. When a Windows
+    game is copied, the section says "Windows games are copied without their Wine prefix,
+    so saves kept in the prefix stay on this computer."
+  - **Out of date.** When the server has newer files for a game that can be copied, its
+    tag reads **Choose below** ("the server has newer files"). A block titled "The server
+    has newer files" ("… for 2 games" with more than one) says "Backup the copy installed
+    here, or download the newer version." Each game reads "<Game>: the server has newer
+    files (v1.2; this computer has v1.1)" ("an older copy" when the install has no version
+    tag), with two radios, **Use this computer's copy** and **Download v1.2 from the
+    server** ("Download the newer version from the server" when the server's file has no
+    version tag). With more than one game, two buttons set every choice: **Use this
+    computer's copies** and **Download all**. A pick changes the row's note to "an older
+    copy than the server's" or "the newer version". Out-of-date comes from the update
+    check when one has finished this session, else from each game's details (4 at a
+    time); a game whose details fail to load counts as up to date.
 - **Also copy:** Emulators is always included, with a fixed tick: "PCSX2 for Linux and
   Windows · 120 MB", "Already on the drive" or "None needed". Each system brings its
   default emulator (else the first recommendation) for every computer the pack is for. A
@@ -791,15 +844,38 @@ Details.
   default) adds the Steam Linux Runtime that umu-run otherwise downloads on its first
   launch.
 - **Notes:** games already on the drive (same server and ROM id) are skipped ("1 game is
-  already on Couch kit and will be skipped: Moss & Marrow"). On a FAT32 drive, games with
-  a file over 4 GB are listed as not possible.
-- **Footer:** "11.1 GB to write", Cancel and **Backup 3 games** ("Nothing to backup"
-  when there is nothing new). The bytes to write plus a safety margin must fit the free
-  space.
+  already on Couch kit and will be skipped: Moss & Marrow"). On a FAT32 drive, games that
+  download and have a file over 4 GB are listed as not possible. A game copied from this
+  computer is split into parts, so the limit does not apply to it.
+- **Footer:** "11.1 GB to write · 3.2 GB to download", Cancel and **Backup 3 games**. The
+  second half shows only when some game is copied from this computer and something
+  downloads; emulators and firmware count as downloads. A copied game counts the exact
+  size of its archive. The button reads "Choose for 2 games" (disabled) while an
+  out-of-date game has no pick, "Nothing to backup" when there is nothing new, and "Not
+  enough space" when it does not fit. The bytes to write plus a safety margin must fit
+  the free space. `start_backup` refuses a plan that still waits on a pick ("Choose
+  which copy to backup for 2 games").
 
 Backups run in Downloads (see Downloads above): each item downloads into a staging
 folder in the library (`<library>/.grid-staging/backup-<id>/`), then is written to the
-drive. The staging folder is always deleted afterwards.
+drive. The staging folder is always deleted afterwards. A game copied from this computer
+puts only its art in staging; its files are written straight from the library to the
+drive.
+
+When the row starts, GRID judges the install again. A game no longer eligible fails the
+row ("<Game> is no longer installed on this computer; backup again", or "<Game> can't be
+copied from this computer: <reason>; backup again"); it never downloads instead. A file
+whose length changed since the scan fails the row ("<file> changed while it was being
+copied; close the game and backup again").
+
+While a game copied from this computer has a live row (queued, getting details or
+copying):
+- Uninstall, Update and Locate… on that game are refused ("This game is being backed up.
+  Wait for it to finish.").
+- The library folder can't be moved while the copy is being written.
+- A game that is running is not copied: the plan lists it as downloading ("It's running
+  right now; close it to copy it"), and a queued copy of a game launched since fails with
+  that reason. Only games GRID launched are detected.
 
 ## Install from a drive
 **Install** on a drive's game copies it off the drive and installs it exactly like a
@@ -810,6 +886,33 @@ cloud saves and play activity work once the computer connects to that server. On
 connect to another server, such games lose their ROM id before the re-link pass (which
 may link them again to that server's game), so cloud saves and play activity never
 reach the wrong ROM.
+
+**A copy of an installed game** (a game with an `installed` block) is restored, not
+planned like a server install. A copy written as the server's files has no such block
+and installs like any other drive game.
+- **Before it is queued,** GRID refuses a copy it cannot restore ("This backup needs a
+  newer GRID": an unknown `archive` or `layout`), a pack path that is not safe, and a
+  library without room for the tree plus the safety margin ("There isn't enough free
+  space in the library folder for <Game>").
+- **Where it goes:** always the modern platform folder, `games/<Platform>/`. An
+  `extracted` copy goes to `<platform>/<copy name>`; a `native` or `multi` copy to
+  `<platform>/<game name>`, where a server install puts it; a `file` copy to
+  `<platform>/<file name>`.
+- **The copy:** the parts are read off the drive in order into
+  `<platform folder>/.grid-restore-<rom id>`, then moved into place. The Downloads row
+  reads "Copying from <label> 45%". A folder already at the destination is replaced only
+  when no installed game uses it ("<path> is already used by another game"). A removed
+  drive fails the row ("<label> was removed"); a part with the wrong size or MD5, a
+  missing part or a refused entry fails it as "The backup of <Game> on <label> is
+  damaged". The temporary folder is removed on any failure or cancel.
+- **The row:** the launch file must be inside the tree ("The backup of <Game> has no
+  launch file at <path>"). Launch parameters, working folder, PS4 ids, included DLC and
+  the RetroAchievements id come from the copy. A native game that kept its archive
+  inside its folder gets that archive back as its kept archive. A native game restored
+  on Linux or macOS gets a new, empty `prefix/` as its Wine prefix, and the default
+  compat tool. The ROM file name and the server timestamp are the copy's, so a copy that
+  was out of date at backup time shows Update once the computer is connected to that
+  server.
 
 Installing a game also sets up its system from the drive:
 - When the system has no emulator and the drive has one for this computer, that
@@ -834,6 +937,7 @@ gridpack/
   gridpack.json                             the index
   games/<platform>/<file>                   a single-file game, exactly as the server gives it
   games/<platform>/<fs name>/<file>…        a multi-file or native game
+  games/<platform>/<name>/installed.tar.001…  a copy of a computer's install, in parts
   assets/<platform>/<game>/                 cover, fanart, logo, screenshot-01 … (up to 8)
   emulators/<emulator>/<version>/<os>/      the release archive GRID would download, per computer
   firmware/<platform>/<file>                the firmware files as the server serves them
@@ -848,7 +952,9 @@ when it was created and last updated, and three arrays:
   id, and what rebuilds its details and image keys), the details Details shows, its size,
   its files (path, size, server file id, name, category, whether it is top level,
   hashes) and its asset paths. A game file's hashes are RomM's, kept for identification
-  only: for an archive they describe its contents, so nothing checks a file against them;
+  only: for an archive they describe its contents, so nothing checks a file against them.
+  A game copied from a computer's install has an `installed` block and may have no
+  `files` (see below);
 - `emulators`: one entry per emulator per OS, with its kind (`emulator` or
   `compat_tool`, which covers Proton, umu-launcher and the Steam Linux Runtime), source,
   version, platforms, archive path and size;
@@ -858,17 +964,51 @@ when it was created and last updated, and three arrays:
 Every path is relative to `gridpack/`, so the drive works under any mount point. Unknown
 keys are kept when GRID rewrites the file. The full shape is in the design README.
 
+**Copies of an installed game.** An install that is exactly the server's files is
+written as those files, with no `installed` block, the same as a download. Any other
+install is one uncompressed GNU tar, cut into `installed.tar.001`, `.002`, … parts of at
+most 4095 MiB on every drive, so each part fits FAT32. The folder is named after the
+install's folder (a file's name without its extension), else the server file name. The
+`installed` block holds:
+- `archive` (`tar`) and `layout` (`extracted`, `native`, `multi` or `file`);
+- `name`, the folder or file name in the platform folder;
+- `parts`, in order, each with its path, size and the MD5 of the bytes GRID wrote; the
+  game's `size` is their sum;
+- `tree_bytes` (the space a restore needs) and `tree_files`;
+- `launch`, the launch file relative to the tree;
+- `rom_file_name`, `server_updated_at` and `version` of the installed copy, and
+  `outdated` when the server had newer files at backup time;
+- `from_os`, the OS the copy was made on (an unknown value reads as none);
+- `row`: the native executable and a kept archive as paths inside the tree, the launch
+  parameters and source, the working folder (only when relative), PS4 ids, included DLC
+  and the RetroAchievements id. Never an absolute path.
+
+A native game's Wine prefix (`prefix/`, and a recorded prefix inside the game's folder)
+is left out. An unknown `archive` or `layout` keeps the pack readable; Install says
+"This backup needs a newer GRID". The parts rebuild without GRID:
+`cat installed.tar.* | tar x`.
+
 ## Safety rules
 - GRID never reads, writes or deletes anything outside `gridpack/` on a drive. The one
   delete of the whole folder is Remove GRID files…, behind a check that the target is
   exactly that folder.
 - Every file is written to `<name>.gridtmp`, synced, checked, and only then renamed into
-  place. The check is against what GRID downloaded: the file's size, then the file is read
-  back from the drive (past the system's cache where the OS allows) and its MD5 must match
-  the MD5 of the staged bytes. The server's hashes are never used for this, because RomM
+  place. The check is against the bytes GRID copied (from staging, or from the library
+  for a game copied from this computer): the file's size, then the file is read back from
+  the drive (past the system's cache where the OS allows) and its MD5 must match the MD5
+  of the bytes copied. The server's hashes are never used for this, because RomM
   hashes an archive's decompressed contents, not the archive. The read-back adds about a
   third to a half to each file's write time. `gridpack.json` is rewritten the same way after each finished item, so a drive
   pulled mid-write always holds a valid index and at most a `.gridtmp` leftover.
+- Each part of an installed copy follows the same rule: it is written to
+  `<part>.gridtmp`, hashed as it is written, synced and read back from the drive. Only
+  when every part is checked are they all renamed. On any failure the parts written are
+  removed (unless the drive is gone).
+- On restore, every part's size and MD5 is checked, the last part's padding included.
+  Only regular files and folders are accepted. Links (symbolic or hard), devices, FIFOs
+  and any entry name that is not a plain relative path (absolute, `..`, `.`, an empty
+  part) are refused, and the restore fails. Unix permission bits are kept, masked with
+  `0o777`.
 - Leftover `.gridtmp` files are removed the next time the drive is connected (not while
   a row is writing to it).
 - A drive's `gridpack.json` is untrusted. A file over 64 MiB, one that does not parse, an

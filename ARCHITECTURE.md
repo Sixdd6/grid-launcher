@@ -49,8 +49,23 @@ Modules as declared in `src/lib.rs`:
   from another I/O error; `guard_grid_root` and `remove_all_grid_files` are the only
   whole-folder delete. `plan` is pure: what a backup writes, skips and whether it fits
   (`BackupPlan` for the dialog, `BackupItems` for the queue), the per-system emulator
-  choice, the compat tool and umu-launcher picks, and the manual-emulator archive
-  refusals. `steam_runtime` fetches the Steam Linux Runtime the way umu does and places
+  choice, the compat tool and umu-launcher picks, the manual-emulator archive
+  refusals, and where each game comes from (`LocalState` in, `sources`, `outdated` and
+  `needs_choice` out). `local` decides whether an installed game can be copied instead of
+  downloaded: `locate` is the pure rule set over the registry row (same rom id and server,
+  present, not Xbox 360, the Emulators platform or RPCS3's `dev_hdd0`, anchored directly
+  in the library's platform folder) and returns the tree, its layout and its excludes
+  (a native game's Wine prefix); `scan_tree` walks it without following links, refuses
+  links, special files and names that are not UTF-8 or (on a pack for Windows) not
+  portable, and returns the `TreePlan` with the exact tar size; `snapshot_row` keeps the
+  row values a restore needs, relative to the tree. Each reason is a `REASON_*`
+  constant, the text the dialog shows. `archive` writes and reads the installed copy:
+  `write_installed_tree` streams the `TreePlan` through `tar::Builder` into a
+  `TarPartWriter` that cuts `installed.tar.NNN` parts of at most `pack::PART_BYTES`
+  (4095 MiB, under FAT32's limit, checked at compile time), each written to `.gridtmp`,
+  hashed, synced, read back and renamed only when all are checked; `restore_tree` chains
+  the parts through `TarPartReader`, checks each part's size and MD5, and accepts only
+  regular files and folders with plain relative names. `steam_runtime` fetches the Steam Linux Runtime the way umu does and places
   it where umu looks.
 - `cloud` — the cloud save/state sync engine: scope classification, sync candidates,
   per-emulator directories, archive transfer, restore, retention, session windows, and
@@ -115,6 +130,26 @@ Modules as declared in `src/lib.rs`:
   `InstallService::abort_drive` (with `QueueState::cancel_drive_queue` in `queue.rs`)
   fails the current row and folds a removed drive's waiting rows into one
   `backup_cancelled` row.
+  A game copied from this computer is a `backup_game_local` row: its download phase
+  judges the row again with `backup::local::locate`, fetches the details and art, and
+  either stages the library files themselves (`exact_copy`: an install that is exactly
+  the server's files, not out of date) or scans the tree; the write phase then writes
+  the files, or the archive straight from the library to the drive. It holds a
+  `LibraryGate` ticket while it writes, so a library move can't start under it.
+  `drive_restore` restores a pack game with an `installed` block: `plan_restore` refuses
+  an unsupported copy (`NEEDS_NEWER_GRID`) or a library without room before admission and
+  builds a target-less `InstallJob` carrying a `RestorePlan`; `restore_from_drive` is its
+  download step (the parts into `<platform folder>/.grid-restore-<rom id>`); and
+  `InstallService::finalize_restore` moves the tree into place and writes the row
+  (`restored_record`, which keeps the copy's ROM file name and server timestamp so
+  update detection works). `drive_install` routes a pack game to it when the game has an
+  `installed` block. `InstallService::local_states` answers the dialog's plan: one
+  registry pass, `locate` per rom id, and a scan cache keyed by rom id (fresh for 60 s,
+  for the same tree and the same Windows flag; an uninstall drops its entry). The
+  app installs a `RunningCheck` (`set_running_check`, wired in `lib.rs` to the launch
+  service's sessions), so a game GRID launched is not copied (`RUNNING_NOW`).
+  `local_backup_busy` makes uninstall, update and Locate… refuse a game a live local row
+  is copying (`BACKING_UP_LOCAL`).
   The registry is at v10: `source_server` records the server a row came from when that
   was not the live session (an install from a drive), `""` otherwise.
   `Registry::clear_foreign_rom_ids` is the relink guard: it clears `rom_id` on rows whose
@@ -181,7 +216,11 @@ The shell owns *when* things run; grid-core owns *what* they do.
   `setup_drive`, `rename_drive`, `set_drive_os`, `remove_grid_files`, `forget_drive`,
   `drive_games`, `drive_asset`, `plan_backup`, `start_backup`, `install_from_drive`,
   `remove_from_drive`, the firmware default). Each names a drive by its key and resolves
-  it against the latest scan; none takes a raw path to write to. `install_from_drive`
+  it against the latest scan; none takes a raw path to write to. `plan_backup` and
+  `start_backup` take "Copy installed games from this computer" (`use_local`) and the
+  per-game picks; they fill each eligible game's out-of-date state from the update set
+  when a pass has finished this session, else from each game's details (4 at a time),
+  and `start_backup` refuses a plan that still waits on a pick. `install_from_drive`
   also decides what the drive brings beside the game (emulator, Proton, firmware) and
   answers with the notices it words. `use_without_server` (commands.rs) turns on offline
   mode. `ensure_image` checks the image cache before the host filter, so a row installed
@@ -327,7 +366,8 @@ Usage and exit codes are in `BUILD.md`.
 ## Library layout
 
 The library root has three folders (plus `.grid-staging/`, where a backup waits between
-download and write): `games/<Platform>/` (game installs), `emulators/<Emulator>/`
+download and write, and `.grid-restore-<rom id>` in a platform folder while a copy of an
+installed game is restored from a drive): `games/<Platform>/` (game installs), `emulators/<Emulator>/`
 (an emulator's binaries), and `saves/<Emulator>/<dir>/` (every directory the emulator writes
 beside its binary). `<Emulator>` is the sanitized catalog PROFILE name, with no release tag, so
 several config entries can share one emulator and one saves folder. The `user_data` entries of a
