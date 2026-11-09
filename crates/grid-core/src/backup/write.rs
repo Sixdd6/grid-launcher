@@ -73,6 +73,11 @@ pub enum WriteError {
     /// An unsafe pack-relative path, or a `gridpack` folder that is a link.
     #[error(transparent)]
     Pack(#[from] PackError),
+    /// A local file being archived could not be read, or its length is not
+    /// what the tree scan saw: the game changed it while it was copied.
+    /// Never a drive error. Holds the file's path inside the tree.
+    #[error("{0} changed while it was being copied; close the game and back up again")]
+    SourceChanged(String),
     /// A guarded delete refused its target.
     #[error("{0}")]
     Refused(String),
@@ -225,7 +230,7 @@ fn copy_checked(
 /// system's private cache, can still answer the read. The cost is one full
 /// read of every file from the drive, which on a typical USB stick adds
 /// roughly a third to a half of the copy time.
-fn verify_on_drive(
+pub(super) fn verify_on_drive(
     tmp: &Path,
     size: u64,
     mount: &Path,
@@ -351,7 +356,7 @@ fn check_fat32(size: u64, fat32: bool, name: &str, label: &str) -> Result<(), Wr
 }
 
 /// Refuses a write that would leave less than [`SPACE_MARGIN`] free.
-fn check_space(free: u64, size: u64) -> Result<(), WriteError> {
+pub(super) fn check_space(free: u64, size: u64) -> Result<(), WriteError> {
     if free < size.saturating_add(SPACE_MARGIN) {
         return Err(WriteError::NoSpace);
     }
@@ -361,7 +366,7 @@ fn check_space(free: u64, size: u64) -> Result<(), WriteError> {
 /// `<dest>.gridtmp`. When that name would exceed [`MAX_COMPONENT_BYTES`],
 /// the name is cut first so the temporary name stays legal on FAT, exFAT
 /// and NTFS. It always ends in [`TMP_SUFFIX`], so cleanup still finds it.
-fn tmp_path(dest: &Path) -> PathBuf {
+pub(super) fn tmp_path(dest: &Path) -> PathBuf {
     let name = file_name(dest);
     let room = MAX_COMPONENT_BYTES - TMP_SUFFIX.len();
     let mut cut = name.len().min(room);
@@ -379,7 +384,7 @@ fn file_name(path: &Path) -> String {
 
 /// Syncs a folder after a rename, on unix. Some file systems refuse; the
 /// rename is done either way.
-fn sync_folder(dir: Option<&Path>) {
+pub(super) fn sync_folder(dir: Option<&Path>) {
     #[cfg(unix)]
     if let Some(folder) = dir.and_then(|dir| File::open(dir).ok()) {
         let _ = folder.sync_all();
@@ -403,7 +408,7 @@ pub fn classify_io(error: io::Error, mount: &Path) -> WriteError {
 }
 
 /// The mount folder is gone, or its index can't be opened for reading.
-fn drive_gone(mount: &Path) -> bool {
+pub(super) fn drive_gone(mount: &Path) -> bool {
     if !mount.is_dir() {
         return true;
     }

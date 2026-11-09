@@ -224,7 +224,7 @@ fn is_zip_signature(archive: &Path) -> Result<bool, LibraryError> {
 
 /// Builds the unsafe-path error text shared by every format's traversal
 /// guard.
-fn unsafe_path_error(raw_name: &str) -> LibraryError {
+pub(crate) fn unsafe_path_error(raw_name: &str) -> LibraryError {
     LibraryError::Extract(format!("archive contains an unsafe path: {raw_name}"))
 }
 
