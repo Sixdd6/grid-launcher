@@ -24,7 +24,7 @@
 
 import { execFileSync } from 'node:child_process';
 
-export const USER_VERSION = 9;
+export const USER_VERSION = 10;
 
 export const SCHEMA_SQL = `
 CREATE TABLE installed_games (
@@ -72,6 +72,7 @@ CREATE TABLE installed_games (
     platform_slug       TEXT NOT NULL DEFAULT '',
     native_launch_source     TEXT NOT NULL DEFAULT '',
     native_working_dir       TEXT NOT NULL DEFAULT '',
+    source_server            TEXT NOT NULL DEFAULT '',
     UNIQUE (title_key, platform_key)
 );
 CREATE TABLE IF NOT EXISTS pending_play_sessions (
