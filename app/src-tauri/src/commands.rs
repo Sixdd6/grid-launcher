@@ -1,3 +1,4 @@
+pub mod backups;
 pub mod cloud;
 pub mod discover;
 pub mod library_move;
@@ -98,6 +99,9 @@ pub struct AppState {
     /// The library move job (9b), its gate and the unreachable-library
     /// state. See `library_move_service.rs`.
     pub library_move: Arc<crate::library_move_service::LibraryMoveService>,
+    /// Backup drives: the 2 s scan, the remembered list and the firmware a
+    /// drive install waits on. See `drive_service.rs`.
+    pub drives: Arc<crate::drive_service::DriveService>,
 }
 
 /// Refuses a command that touches the library while a library move runs
@@ -154,10 +158,34 @@ pub async fn restore_session(
     app: tauri::AppHandle,
 ) -> Result<RestoreOutcome, String> {
     let outcome = state.session.restore().await.map_err(err)?;
-    if matches!(outcome, RestoreOutcome::Connected { .. }) {
-        crate::relink_service::spawn_connected_jobs(&state, app);
+    match &outcome {
+        RestoreOutcome::Connected { .. } => {
+            crate::relink_service::spawn_connected_jobs(&state, app);
+        }
+        // "Use without a server": no probe ran and no client exists, so no
+        // server job starts. Drives, the library and play keep working.
+        RestoreOutcome::Offline { .. } => tracing::info!("starting without a server"),
+        _ => {}
     }
     Ok(outcome)
+}
+
+/// "Use without a server": remembers the choice (`Config.offline`), drops
+/// any live client and clears what described the server. The keyring
+/// credential stays, so Connect or Retry can use it later; a successful
+/// connect clears the choice.
+#[tauri::command]
+pub async fn use_without_server(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let session = state.session.clone();
+    tokio::task::spawn_blocking(move || session.use_offline())
+        .await
+        .map_err(|e| format!("use_without_server did not finish: {e}"))?
+        .map_err(err)?;
+    state.updates.clear(&app);
+    Ok(())
 }
 
 /// Event emitted the first time a live session gets a 401 (Q6). Payload:

@@ -40,6 +40,36 @@ pub async fn relink_now(app: &AppHandle, session: &SessionManager, install: &Ins
     }
 }
 
+/// The relink guard (game backups): before the relink pass, rows installed
+/// from a backup of ANOTHER server lose their rom id, since this server's
+/// ids mean other games; the pass that follows may link them again.
+/// grid-core's `Registry::clear_foreign_rom_ids` decides which rows. Logs
+/// titles and counts only.
+pub async fn guard_foreign_rows(
+    app: &AppHandle,
+    session: &SessionManager,
+    install: &InstallService,
+) {
+    if session.client().is_none() {
+        return;
+    }
+    let server = session.server_url();
+    let registry = install.registry();
+    let cleared =
+        tokio::task::spawn_blocking(move || registry.clear_foreign_rom_ids(&server)).await;
+    match cleared {
+        Ok(Ok(rows)) if !rows.is_empty() => {
+            for (title, _) in &rows {
+                tracing::info!(title = %title, "relink guard: unlinked a game backed up from another server");
+            }
+            let _ = app.emit(INSTALLED_CHANGED_EVENT, rows.len());
+        }
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => tracing::warn!("relink guard did not finish: {e}"),
+        Err(e) => tracing::warn!("relink guard did not finish: {e}"),
+    }
+}
+
 /// Runs the registry v8 platform-slug backfill once (user bug 2026-10-10):
 /// rows with a rom id and no stored slug get the slug from their ROM detail,
 /// so nativeness follows the server platform identity. Offline it does
@@ -79,6 +109,7 @@ pub fn spawn_connected_jobs(state: &AppState, app: AppHandle) {
     let images = state.images.clone();
     let updates = state.updates.clone();
     tauri::async_runtime::spawn(async move {
+        guard_foreign_rows(&app, &session, &install).await;
         relink_now(&app, &session, &install).await;
         backfill_slugs_now(&app, &session, &install).await;
         images.spawn_replenish(app.clone(), session.clone(), install.clone());

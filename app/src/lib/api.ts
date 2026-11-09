@@ -416,7 +416,8 @@ export type PackOs = 'linux' | 'windows';
 /** What GRID found on a connected drive. */
 export type DriveStatus = 'ready' | 'not_set_up' | 'read_only' | 'unreadable' | 'newer_format';
 
-export type PackSummaryEmulator = { name: string; version: string; os: string };
+/** `os` is `null` for an OS tag this build does not know. */
+export type PackSummaryEmulator = { name: string; version: string; os: PackOs | null };
 
 /** A game on a drive, by the server it came from (Details' "On <pack>" line). */
 export type PackRomRef = { server: string; rom_id: number };
@@ -446,6 +447,8 @@ export type DriveInfo = {
   free_bytes: number;
   read_only: boolean;
   status: DriveStatus;
+  /** Why the drive's index can't be read (`unreadable`), else `''`. */
+  problem: string;
   pack: PackSummary | null;
 };
 
@@ -461,7 +464,7 @@ export type RememberedDrive = {
   last_seen: string;
 };
 
-/** `list_drives` and the `drives-changed` event payload. */
+/** `list_drives` and the `drives-changed` event payload. `remembered` lists only the drives that are not connected. */
 export type DrivesSnapshot = { connected: DriveInfo[]; remembered: RememberedDrive[] };
 
 /** One game on a drive (Library › Backup drives and Details). Paths are relative to `gridpack/`. */
@@ -492,9 +495,16 @@ export type DriveGame = {
   fanart: string;
   logo: string;
   screenshots: string[];
+  /** RFC 3339 UTC: when it was backed up. */
+  added: string;
 };
 
-export type BackupRequest = { rom_ids: number[]; title: string };
+/**
+ * What to back up. `platform_ids` (optional) are the platforms the games are
+ * on, when the caller knows them: the plan then reads one game list per
+ * platform instead of one detail per game.
+ */
+export type BackupRequest = { rom_ids: number[]; platform_ids?: number[]; title: string };
 
 /** A game a backup plan names without writing it. Mirrors `grid_core::backup::plan::PlanGameRef`. */
 export type PlanGameRef = { rom_id: number; name: string };
@@ -531,6 +541,15 @@ export type BackupQueued = { batch: number; games: number; emulators: number; fi
 
 /** `set_drive_os`'s answer. `batch` is 0 when nothing was queued. */
 export type OsChangeOutcome = { batch: number; queued: number; removed: number };
+
+/** `install_from_drive`'s answer: one toast line per extra item it queued ("DuckStation from Couch kit added to download queue"). */
+export type DriveInstallOutcome = { notices: string[] };
+
+/** The `backup-notice` event payload: a toast the backend raised ("PlayStation firmware installed from Couch kit"). */
+export type BackupNotice = { message: string; error: boolean };
+
+/** `get_backup_settings`'s answer. */
+export type BackupSettings = { include_firmware: boolean };
 
 export type GameSession = {
   id: number;
