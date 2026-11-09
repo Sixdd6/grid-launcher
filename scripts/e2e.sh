@@ -115,8 +115,11 @@ STAGE_GROUPS=(
   # drive (GRID_LAUNCHER_E2E_DRIVE_ROOTS, e2e feature only). (a) set up a
   # drive and back up two games with their emulator and firmware, (b) pull
   # the drive mid-backup, then plug it back in, (c) a fresh profile used
-  # without a server installs from a seeded pack. Seeded per spec.
-  "backups:specs/backups-a.spec.ts specs/backups-b.spec.ts specs/backups-c.spec.ts"
+  # without a server installs from a seeded pack, (d) three installed games
+  # (docs/superpowers/plans/2026-11-09-game-backups-local-copies.md §6.4)
+  # are copied from this computer, one out of date, and one is restored
+  # from the drive. Seeded per spec.
+  "backups:specs/backups-a.spec.ts specs/backups-b.spec.ts specs/backups-c.spec.ts specs/backups-d.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -718,10 +721,11 @@ EOF
     wdio_log="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.log"
     out_dir="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.d"
     say "running $stage (attempt $attempt)"
-    # backups-c starts from a fresh profile: the credential backups-a saved
-    # in this run's private keyring must go too, or the app would restore
-    # that session. Same best-effort clear as the python-import group.
-    if [[ "$spec" == */backups-c.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
+    # backups-c and backups-d start from a fresh profile: the credential an
+    # earlier spec saved in this run's private keyring must go too, or the
+    # app would restore that session. Same best-effort clear as the
+    # python-import group.
+    if [[ "$spec" == */backups-[cd].spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
       secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
     fi
     if [[ -n "$seed_script" ]] && group_seeds_per_spec "$name"; then

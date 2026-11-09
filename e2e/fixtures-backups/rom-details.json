@@ -223,5 +223,40 @@
       }
     ],
     "metadatum": null
+  },
+  "961": {
+    "id": 961,
+    "name": "Tux Trail",
+    "fs_name_no_ext": "tuxtrail",
+    "platform_id": 3,
+    "platform_display_name": "Linux",
+    "platform_slug": "linux",
+    "fs_name": "tuxtrail.zip",
+    "summary": "A Linux game with a game.json sidecar (backups-d: copied from this computer).",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 9611,
+        "file_name": "tuxtrail.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      },
+      {
+        "id": 9612,
+        "file_name": "game.json",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
   }
 }

@@ -10,5 +10,11 @@
     "name": "Emulators",
     "slug": "emulators",
     "rom_count": 1
+  },
+  {
+    "id": 3,
+    "name": "Linux",
+    "slug": "linux",
+    "rom_count": 1
   }
 ]

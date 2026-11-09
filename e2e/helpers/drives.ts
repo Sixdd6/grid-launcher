@@ -76,6 +76,21 @@ export function discard(label: string): void {
 /** A file entry of a `gridpack.json` game. */
 export type PackFile = { path: string; size: number; server_file_id: number; name: string; category: string };
 
+/** A game's `installed` entry: a copy of the install it was backed up from. */
+export type PackInstalled = {
+  archive: string;
+  layout: 'extracted' | 'native' | 'multi' | 'file' | string;
+  name: string;
+  parts: { path: string; size: number; md5: string }[];
+  tree_bytes: number;
+  tree_files: number;
+  launch: string;
+  rom_file_name: string;
+  server_updated_at: string;
+  outdated: boolean;
+  row: Record<string, unknown>;
+};
+
 /** The parts of `gridpack.json` the specs read. */
 export type PackIndex = {
   format: number;
@@ -88,6 +103,7 @@ export type PackIndex = {
     source: { server: string; rom_id: number };
     files: PackFile[];
     assets: Record<string, unknown>;
+    installed?: PackInstalled;
   }[];
   emulators: { name: string; os: string; path: string; source_id: string }[];
   firmware: { platform: string; files: { name: string; path: string; size: number }[] }[];
