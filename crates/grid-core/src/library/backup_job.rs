@@ -614,15 +614,21 @@ pub(crate) async fn resolve_catalog(
     name: &str,
     os: PackOs,
 ) -> Result<(ResolvedDownload, Vec<ResolvedDownload>), LibraryError> {
-    let profile = service
-        .profiles
-        .iter()
-        .find(|profile| profile.name == name)
-        .ok_or_else(|| LibraryError::Registry(format!("unknown emulator: {name}")))?;
-    let raw = profile
-        .source
-        .clone()
-        .ok_or_else(|| LibraryError::Registry(format!("unknown emulator: {name}")))?;
+    // umu-launcher has no catalog profile: it resolves the source
+    // `install_umu_launcher` uses, so the pack holds the same release.
+    let raw = if name == crate::launch::umu::UMU_TITLE {
+        service.umu_source.read().unwrap().clone()
+    } else {
+        let profile = service
+            .profiles
+            .iter()
+            .find(|profile| profile.name == name)
+            .ok_or_else(|| LibraryError::Registry(format!("unknown emulator: {name}")))?;
+        profile
+            .source
+            .clone()
+            .ok_or_else(|| LibraryError::Registry(format!("unknown emulator: {name}")))?
+    };
     let host = os.forge_host();
     let primary = forge
         .resolve_for_host(&raw, name, host)

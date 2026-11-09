@@ -36,7 +36,7 @@ use crate::backup::pack::{self, PackEmulator, PackError, PackGame, PackOs};
 use crate::config::Config;
 use crate::images::urls::resolve_image_url;
 use crate::launch::forge::ResolvedDownload;
-use crate::launch::{catalog, compat, emu_install};
+use crate::launch::{catalog, compat, emu_install, umu};
 use crate::library::extract::should_extract;
 
 /// The `source_id` prefix of an archived manual emulator in a pack.
@@ -107,6 +107,18 @@ fn game_files(
                 .map_err(|e| damaged(&drive.label, e))
         })
         .collect()
+}
+
+/// The umu-launcher entry a drive's pack holds for the OS tag `os`, if any.
+fn pack_umu_entry(mount: &Path, os: &str) -> Option<PackEmulator> {
+    match pack::read_pack(mount) {
+        Ok(pack::PackState::Ready(pack)) => pack.emulators.into_iter().find(|emulator| {
+            emulator.kind == "compat_tool"
+                && emulator.os == os
+                && crate::backup::plan::is_umu_entry(&emulator.source_id)
+        }),
+        _ => None,
+    }
 }
 
 /// Whether a drive install keeps the pack's rom id: always offline, and
@@ -266,9 +278,28 @@ impl InstallService {
         let unknown = || LibraryError::Registry(format!("unknown emulator: {}", entry.source_id));
 
         let compat_tool = entry.kind == "compat_tool";
-        let (job, platform, kind) = if compat_tool {
+        let umu_launcher = compat_tool && crate::backup::plan::is_umu_entry(&entry.source_id);
+        let mut needs_umu = false;
+        let (job, platform, kind) = if umu_launcher {
+            let job = EmulatorJob {
+                source_id: umu::UMU_SOURCE_ID.to_string(),
+                profile_name: umu::UMU_TITLE.to_string(),
+                profile_args: String::new(),
+                configured_tag: entry.version.clone(),
+                raw_source: Value::Null,
+                library: compat::managed_root(),
+                forge: self.forge()?,
+                resolved: None,
+                target: JobTarget::UmuLauncher,
+                entry_name: umu::UMU_TITLE.to_string(),
+                romm: None,
+                local: Some(local),
+            };
+            (job, COMPAT_TOOL_PLATFORM, "compat_tool")
+        } else if compat_tool {
             let profile = catalog::find_compat_profile(&self.profiles, &entry.source_id)
                 .ok_or_else(unknown)?;
+            needs_umu = profile.compat_tool_type == "proton";
             let configured_tag = configured_tag(profile.source.as_ref(), &entry.version);
             let job = EmulatorJob {
                 source_id: entry.source_id.clone(),
@@ -348,10 +379,23 @@ impl InstallService {
             self.drive_rows.lock().unwrap().insert(
                 id,
                 DriveRow::Emulator {
-                    drive,
+                    drive: drive.clone(),
                     entry: Box::new(entry.clone()),
                 },
             );
+        }
+        // A Proton tool runs through umu-run. With none on this computer,
+        // the drive's own umu-launcher (backed up beside the tool) goes
+        // behind it as its own row; its failure is that row's.
+        if needs_umu && cfg!(target_os = "linux") && !self.umu_available() {
+            match pack_umu_entry(&drive.mount, &entry.os) {
+                Some(umu_entry) => {
+                    if let Err(error) = self.install_emulator_from_drive(drive, &umu_entry) {
+                        tracing::warn!(%error, "umu-launcher from the drive could not be queued");
+                    }
+                }
+                None => tracing::info!("the drive holds no umu-launcher for this computer"),
+            }
         }
         Ok(())
     }
@@ -462,9 +506,8 @@ pub(super) async fn copy_local_emulator(
                 emu_install::archive_file_name(&job.profile_name, &job.configured_tag, "");
             emu_install::compat_tool_install_dir(&job.library, &file_stem_of(&dir_name))
         }
-        JobTarget::UmuLauncher | JobTarget::Emulator => {
-            emu_install::emulator_install_dir(&job.library, &job.entry_name)
-        }
+        JobTarget::UmuLauncher => umu::install_dir(&job.library),
+        JobTarget::Emulator => emu_install::emulator_install_dir(&job.library, &job.entry_name),
     };
     let server_build = job.source_id.starts_with(SERVER_SOURCE_PREFIX);
     let archive_name = if local.manual.is_some() || server_build {

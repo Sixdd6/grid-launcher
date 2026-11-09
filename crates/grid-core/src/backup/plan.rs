@@ -287,6 +287,28 @@ pub fn choose_compat_tool(config: &Config, profiles: &[EmulatorProfile]) -> Opti
     }
 }
 
+/// The umu-launcher a pack carries beside its compat tool: the release
+/// `InstallService::install_umu_launcher` would fetch
+/// ([`crate::launch::umu::default_source`]), for Linux only. Recorded with
+/// kind `compat_tool` and `source_id` [`crate::launch::umu::UMU_SOURCE_ID`].
+pub fn umu_pick() -> EmulatorPick {
+    EmulatorPick {
+        name: crate::launch::umu::UMU_TITLE.to_string(),
+        kind: EmulatorKind::CompatTool,
+        source: EmulatorSource::Catalog {
+            source_id: crate::launch::umu::UMU_SOURCE_ID.to_string(),
+        },
+        platforms: Vec::new(),
+    }
+}
+
+/// Whether a pack emulator entry is the umu-launcher [`umu_pick`] adds.
+pub fn is_umu_entry(source_id: &str) -> bool {
+    source_id
+        .trim()
+        .eq_ignore_ascii_case(crate::launch::umu::UMU_SOURCE_ID)
+}
+
 fn profile_named<'a>(
     profiles: &'a [EmulatorProfile],
     name: &str,
@@ -624,6 +646,12 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
         if let Some(tool) = input.compat_tool {
             if !picks.iter().any(|known| known.name == tool.name) {
                 picks.push(tool.clone());
+            }
+            // A Proton tool runs through umu-run, which a computer with no
+            // network may not have: the pack carries GRID's own copy too.
+            let umu = umu_pick();
+            if !picks.iter().any(|known| known.name == umu.name) {
+                picks.push(umu);
             }
         }
     }
@@ -986,8 +1014,12 @@ mod tests {
                 ("DuckStation".into(), PackOs::Linux),
                 ("DuckStation".into(), PackOs::Windows),
                 ("GE-Proton".into(), PackOs::Linux),
+                ("umu-launcher".into(), PackOs::Linux),
             ]
         );
+        let umu = &planned.items.emulators[3].pick;
+        assert_eq!(umu.kind, EmulatorKind::CompatTool);
+        assert_eq!(umu.source_id(), crate::launch::umu::UMU_SOURCE_ID);
         // A Windows-only pack carries no compat tool.
         fx.pack.os = vec![PackOs::Windows];
         let planned = plan(&PlanInput {
@@ -1008,7 +1040,57 @@ mod tests {
             .items
             .emulators
             .iter()
-            .all(|item| item.pick.name != "GE-Proton"));
+            .all(|item| item.pick.name != "GE-Proton" && item.pick.name != "umu-launcher"));
+    }
+
+    #[test]
+    fn umu_launcher_already_on_the_drive_is_not_queued_again() {
+        let mut fx = Fixture::new();
+        fx.pack.os = vec![PackOs::Linux];
+        fx.games = vec![game(5, "win", 10, 10)];
+        fx.pack.emulators.push(PackEmulator {
+            name: "umu-launcher".into(),
+            kind: "compat_tool".into(),
+            source_id: crate::launch::umu::UMU_SOURCE_ID.into(),
+            version: "1.2.6".into(),
+            program: String::new(),
+            args: String::new(),
+            os: PackOs::Linux.arch_tag().into(),
+            platforms: Vec::new(),
+            path: "emulators/umu-launcher/1.2.6/linux-x86_64/umu.tar".into(),
+            supplementals: Vec::new(),
+            asset_name: "umu.tar".into(),
+            size: 10,
+        });
+        let mut tool = pick("GE-Proton", "");
+        tool.kind = EmulatorKind::CompatTool;
+        let planned = plan(&PlanInput {
+            drive: "E:",
+            pack: &fx.pack,
+            server: SERVER,
+            fat32: false,
+            free_bytes: 1 << 40,
+            games: &fx.games,
+            emulators: &[],
+            compat_tool: Some(&tool),
+            firmware: &[],
+            include_firmware: true,
+            host: Some(PackOs::Linux),
+            sizes: &fx.sizes,
+        });
+        let names: Vec<&str> = planned
+            .items
+            .emulators
+            .iter()
+            .map(|item| item.pick.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["GE-Proton"]);
+        assert!(planned
+            .plan
+            .emulators
+            .iter()
+            .any(|row| row.name == "umu-launcher" && row.already));
+        assert!(is_umu_entry(&fx.pack.emulators[0].source_id));
     }
 
     #[test]
