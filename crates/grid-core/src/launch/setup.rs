@@ -131,9 +131,10 @@ fn server_builds<'a>(
     profiles: &'a [EmulatorProfile],
     config: &Config,
     host: &str,
+    cpu: Option<Cpu>,
     table: &Recommendations,
 ) -> Vec<ServerBuild<'a>> {
-    let (Some(os), Some(cpu)) = (PackageOs::for_host(host), Cpu::host()) else {
+    let (Some(os), Some(cpu)) = (PackageOs::for_host(host), cpu) else {
         return Vec::new();
     };
     let mut builds = Vec::new();
@@ -183,16 +184,21 @@ fn server_builds<'a>(
 /// `source_id` names (`romm:<folder>/<emulator>`), as the request that
 /// installs it: what Settings › Systems compares with the version on disk,
 /// and what its Update installs. `None` when that folder no longer has a build
-/// of the emulator for this system.
+/// of the emulator for that system.
+///
+/// `host` and `cpu` name the system the build is for: this computer
+/// (`HOST_PLATFORM`, [`Cpu::host`]) for an install, or another one for a
+/// backup that carries builds for another OS. `None` for `cpu` finds nothing.
 pub fn newest_server_build(
     packages: &[ServerPackage],
     profiles: &[EmulatorProfile],
     config: &Config,
     host: &str,
+    cpu: Option<Cpu>,
     table: &Recommendations,
     source_id: &str,
 ) -> Option<ServerEmulatorRequest> {
-    server_builds(packages, profiles, config, host, table)
+    server_builds(packages, profiles, config, host, cpu, table)
         .into_iter()
         .find(|build| build.source_id == source_id)
         .map(ServerBuild::into_request)
@@ -209,10 +215,31 @@ pub fn server_folder_builds(
     host: &str,
     table: &Recommendations,
 ) -> Vec<ServerEmulatorRequest> {
-    server_builds(std::slice::from_ref(package), profiles, config, host, table)
-        .into_iter()
-        .map(ServerBuild::into_request)
-        .collect()
+    server_folder_builds_for(package, profiles, config, host, Cpu::host(), table)
+}
+
+/// [`server_folder_builds`] for the system `host` and `cpu` name instead of
+/// this computer's processor: a backup asks for `("win32", X64)` and
+/// `("linux", X64)` whatever it runs on.
+pub fn server_folder_builds_for(
+    package: &ServerPackage,
+    profiles: &[EmulatorProfile],
+    config: &Config,
+    host: &str,
+    cpu: Option<Cpu>,
+    table: &Recommendations,
+) -> Vec<ServerEmulatorRequest> {
+    server_builds(
+        std::slice::from_ref(package),
+        profiles,
+        config,
+        host,
+        cpu,
+        table,
+    )
+    .into_iter()
+    .map(ServerBuild::into_request)
+    .collect()
 }
 
 impl ServerBuild<'_> {
@@ -301,7 +328,7 @@ pub fn platform_setup(
         })
         .collect();
 
-    let builds = server_builds(packages, profiles, config, host, table);
+    let builds = server_builds(packages, profiles, config, host, Cpu::host(), table);
 
     let assignable = assignable_server_platforms(platforms);
     platforms
@@ -1379,6 +1406,7 @@ mod tests {
             load_profiles(),
             &Config::default(),
             "linux",
+            Cpu::host(),
             recommendations(),
             "romm:pico/pico-8",
         )
@@ -1392,6 +1420,7 @@ mod tests {
                 load_profiles(),
                 &Config::default(),
                 "darwin",
+                Cpu::host(),
                 recommendations(),
                 "romm:pico/pico-8",
             ),
@@ -1431,6 +1460,54 @@ mod tests {
             &Config::default(),
             "linux",
             recommendations()
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn a_backup_finds_the_windows_x64_build_whatever_the_host() {
+        let ps2 = folder(
+            700,
+            "ps2",
+            &[
+                (2, "PCSX2 (v2.0.2) (arch-linux-x64).AppImage"),
+                (3, "PCSX2 (v2.0.2) (arch-windows-x64).zip"),
+                (4, "PCSX2 (v2.0.2) (arch-windows-arm64).zip"),
+            ],
+        );
+        let packages = [ps2.clone()];
+        let windows = newest_server_build(
+            &packages,
+            load_profiles(),
+            &Config::default(),
+            "win32",
+            Some(Cpu::X64),
+            recommendations(),
+            "romm:ps2/pcsx2 (playstation 2)",
+        )
+        .unwrap();
+        assert_eq!(
+            (windows.file_id, windows.file_name.as_str()),
+            (3, "PCSX2 (v2.0.2) (arch-windows-x64).zip")
+        );
+        let linux = server_folder_builds_for(
+            &ps2,
+            load_profiles(),
+            &Config::default(),
+            "linux",
+            Some(Cpu::X64),
+            recommendations(),
+        );
+        let picked: Vec<i64> = linux.iter().map(|b| b.file_id).collect();
+        assert_eq!(picked, [2]);
+        // No processor finds nothing.
+        assert!(server_folder_builds_for(
+            &ps2,
+            load_profiles(),
+            &Config::default(),
+            "win32",
+            None,
+            recommendations(),
         )
         .is_empty());
     }

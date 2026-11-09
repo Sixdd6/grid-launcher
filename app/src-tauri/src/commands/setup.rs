@@ -5,6 +5,7 @@ use std::path::Path;
 use grid_core::autoconfig::installed_compatible_cores;
 use grid_core::cloud::scope::is_emulators_platform;
 use grid_core::config::Config;
+use grid_core::launch::binary_target::Cpu;
 use grid_core::launch::catalog::compat_tool_catalog_entries;
 use grid_core::launch::compat::{
     apply_setup_compat_choice, clear_pending_compat_default, SetupCompatChoice, SetupCompatPlan,
@@ -64,6 +65,7 @@ pub(crate) async fn server_emulator_update(
         load_profiles(),
         &config,
         HOST_PLATFORM,
+        Cpu::host(),
         recommendations(),
         source_id,
     )
