@@ -15,7 +15,7 @@ function subject(overrides: Partial<BackgroundSubject> = {}): BackgroundSubject 
 
 function row(overrides: Partial<InstalledGame>): InstalledGame {
   return {
-    title: 'Chrono Trigger', platform: 'SNES', rom_id: 42, rom_file_name: '', archive_path: '',
+    title: 'Chrono Trigger', platform: 'SNES', platform_slug: '', rom_id: 42, rom_file_name: '', archive_path: '',
     extracted_path: '', extracted_dir: '', multi_file_game_dir: '', description: '', rating: '',
     genres: '', regions: '', languages: '', tags: '', revision: '', companies: '',
     first_release_date: '', filesize_bytes: 0, server_updated_at: '', installed_at: 0,

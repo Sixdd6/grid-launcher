@@ -88,6 +88,14 @@ export function summaryOf(subject: DetailsSubject): GameSummary {
     path_cover_large: subject.coverLarge,
     screenshot_urls: subject.screenshotUrls,
     fanart_urls: subject.fanartUrls,
+    // Server-grid fields neither call site reads: their "unknown" values.
+    platform_display_name: '',
+    genres: [],
+    created_at: '',
+    first_release_date: null,
+    logo_url: '',
+    fs_size_bytes: 0,
+    largest_file_bytes: 0,
   };
 }
 

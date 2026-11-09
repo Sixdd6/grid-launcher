@@ -17,7 +17,7 @@ function row(overrides: Partial<InstalledGame>): InstalledGame {
   // Only the art fields and `installed_at` are meaningful; the rest are
   // filled from the registry's own "blank, never null" convention.
   return {
-    title: 'Chrono Trigger', platform: 'SNES', rom_id: 42, rom_file_name: '', archive_path: '',
+    title: 'Chrono Trigger', platform: 'SNES', platform_slug: '', rom_id: 42, rom_file_name: '', archive_path: '',
     extracted_path: '', extracted_dir: '', multi_file_game_dir: '', description: '', rating: '',
     genres: '', regions: '', languages: '', tags: '', revision: '', companies: '',
     first_release_date: '', filesize_bytes: 0, server_updated_at: '', installed_at: 0,
@@ -219,6 +219,13 @@ describe('subjectFromInstalled / subjectFromSummary', () => {
         path_cover_large: 'https://romm/l.png',
         screenshot_urls: ['https://romm/s1.png'],
         fanart_urls: [],
+        platform_display_name: '',
+        genres: [],
+        created_at: '',
+        first_release_date: null,
+        logo_url: '',
+        fs_size_bytes: 0,
+        largest_file_bytes: 0,
       })
     ).toEqual({ fanart: [], screenshots: ['https://romm/s1.png'], cover: 'https://romm/l.png' });
   });

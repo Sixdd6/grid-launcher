@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import type { InstalledGame } from './api';
+  import { api, type InstalledGame } from './api';
   import UmuInstallOffer from './UmuInstallOffer.svelte';
   import { isUmuMissing } from './launchError';
   import { launchGame } from './notifications/notifier';

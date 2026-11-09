@@ -131,9 +131,9 @@ describe('initialView / viewLabel / viewForDigit / chipLabel / hostOf', () => {
   });
   it('labels the chip', () => {
     expect(
-      chipLabel({ phase: 'shell', connected: true, serverUrl: 'https://romm.example:8080/base', username: 'six', lastError: null, offline: false }),
+      chipLabel({ connected: true, serverUrl: 'https://romm.example:8080/base', username: 'six', offline: false }),
     ).toBe('six @ romm.example:8080');
-    expect(chipLabel({ phase: 'shell', connected: false, serverUrl: 'https://x', username: 'six', lastError: 'e', offline: false })).toBe(
+    expect(chipLabel({ connected: false, serverUrl: 'https://x', username: 'six', offline: false })).toBe(
       'Not connected',
     );
     expect(chipLabel(offlineSession('https://x', 'six'))).toBe('Offline · no server');

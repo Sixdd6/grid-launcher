@@ -3,7 +3,7 @@ import { installedKey, isHiddenLibraryPlatform, visibleLibraryGames } from './li
 import type { InstalledGame } from './api';
 
 const row = (title: string, platform: string): InstalledGame => ({
-  title, platform, rom_id: 1, rom_file_name: '', archive_path: '', extracted_path: '', extracted_dir: '',
+  title, platform, platform_slug: '', rom_id: 1, rom_file_name: '', archive_path: '', extracted_path: '', extracted_dir: '',
   multi_file_game_dir: '', description: '', rating: '', genres: '', regions: '', languages: '', tags: '',
   revision: '', companies: '', first_release_date: '', filesize_bytes: 0, server_updated_at: '', installed_at: 0,
   cover_small_path: '', cover_large_path: '', screenshot_urls: '', fanart_urls: '',
