@@ -12,6 +12,7 @@ pub mod content;
 pub mod download;
 pub mod drive_copy;
 pub mod drive_install;
+pub mod drive_restore;
 pub mod emulator_package;
 pub mod emulator_removal;
 pub mod extract;
@@ -330,6 +331,10 @@ struct InstallJob {
     /// Where the bytes come from, carried on the job so a queued install can
     /// start after its caller has gone away.
     source: GameSource,
+    /// `Some` only for an installed copy restored from a backup drive
+    /// ([`drive_restore::plan_restore`]): the job then has no targets, and
+    /// its download and finalize steps are the restore's own.
+    restore: Option<drive_restore::RestorePlan>,
 }
 
 /// Where an install's bytes come from. The plan and the finalize route are
@@ -743,6 +748,7 @@ fn plan_install(
                 native_game_dir: None,
                 game_json_target: None,
                 source,
+                restore: None,
             }
         }
         DownloadSet::Multi { files, launch } => {
@@ -771,6 +777,7 @@ fn plan_install(
                 native_game_dir: None,
                 game_json_target: None,
                 source,
+                restore: None,
             }
         }
     };
@@ -832,6 +839,7 @@ fn plan_native_install(
         native_game_dir: Some(game_dir),
         game_json_target,
         source,
+        restore: None,
     }
 }
 
@@ -947,6 +955,7 @@ fn content_job(
         native_game_dir: None,
         game_json_target: None,
         source: GameSource::Server(client),
+        restore: None,
     };
     job.targets.push(FileTarget {
         url_path: format!(
@@ -1601,6 +1610,7 @@ impl InstallService {
             game_json_target,
             detail: detail.clone(),
             source: GameSource::Server(client),
+            restore: None,
         };
         self.admit(
             JobKey::NativeUpdate(rom_id),
@@ -3151,16 +3161,29 @@ impl InstallService {
                             )
                             .await
                         }
-                        GameSource::Drive(drive) => {
-                            copy_from_drive(
-                                drive,
-                                job,
-                                cancel.clone(),
-                                owner.drive_copy_hook(),
-                                on_progress,
-                            )
-                            .await
-                        }
+                        GameSource::Drive(drive) => match &job.restore {
+                            Some(plan) => {
+                                drive_restore::restore_from_drive(
+                                    drive,
+                                    &job.detail.name,
+                                    plan,
+                                    cancel.clone(),
+                                    owner.drive_copy_hook(),
+                                    on_progress,
+                                )
+                                .await
+                            }
+                            None => {
+                                copy_from_drive(
+                                    drive,
+                                    job,
+                                    cancel.clone(),
+                                    owner.drive_copy_hook(),
+                                    on_progress,
+                                )
+                                .await
+                            }
+                        },
                     },
                     JobPayload::Emulator(job) if job.local.is_some() => {
                         drive_install::copy_local_emulator(
@@ -3258,6 +3281,16 @@ impl InstallService {
         };
         if let (JobPayload::Backup(job), Err(_)) = (&payload, &result) {
             backup_job::remove_staging(&job.staging);
+        }
+        // A restore that will not be finalized leaves no temporary tree.
+        if let JobPayload::Game(InstallJob {
+            restore: Some(plan),
+            ..
+        }) = &payload
+        {
+            if skip_finalize || result.is_err() {
+                drive_restore::remove_path(&plan.tmp);
+            }
         }
         // A cancel that lands after the last chunk arrived is too late: the
         // download succeeded, so `Cancelling` gives way to `Installing` here
@@ -3479,6 +3512,9 @@ impl InstallService {
         job: &InstallJob,
         warning: &mut String,
     ) -> Result<(), LibraryError> {
+        if let Some(plan) = &job.restore {
+            return self.finalize_restore(job, plan, warning);
+        }
         let detail = &job.detail;
         let platform = detail.platform_name.as_str();
         let mut record = new_record(detail, &job.launch_entry);

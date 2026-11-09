@@ -489,3 +489,429 @@ async fn a_local_zip_emulator_installs_as_a_manual_entry() {
         assert_ne!(fs::metadata(&exe).unwrap().permissions().mode() & 0o111, 0);
     }
 }
+
+// --- Installed copies (an archive in parts) -----------------------------------
+
+/// One entry of a hand-built installed-copy archive: a folder (`body` is
+/// `None`) or a file with its unix mode.
+struct TreeItem {
+    name: &'static str,
+    body: Option<&'static [u8]>,
+    mode: u32,
+}
+
+fn dir(name: &'static str) -> TreeItem {
+    TreeItem {
+        name,
+        body: None,
+        mode: 0o755,
+    }
+}
+
+fn file(name: &'static str, body: &'static [u8]) -> TreeItem {
+    // 0o644 on purpose: the restore must mark the launch file executable.
+    TreeItem {
+        name,
+        body: Some(body),
+        mode: 0o644,
+    }
+}
+
+/// The part size the hand-built archives are cut at, so every copy below
+/// spans several parts. The archives are cut here, not by the backup
+/// writer, so the process-wide part-size override is never touched.
+const PART: usize = 1024;
+
+fn md5_hex(bytes: &[u8]) -> String {
+    use md5::{Digest, Md5};
+    Md5::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Writes `items` as an uncompressed tar cut into [`PART`]-byte parts at
+/// `<rel_base>/installed.tar.NNN` on the drive, and returns the pack's
+/// `parts` entries.
+fn put_installed(h: &Harness, rel_base: &str, items: &[TreeItem]) -> Vec<serde_json::Value> {
+    let mut builder = tar::Builder::new(Vec::new());
+    for item in items {
+        let mut header = tar::Header::new_gnu();
+        header.set_mode(item.mode);
+        header.set_mtime(0);
+        match item.body {
+            None => {
+                header.set_entry_type(tar::EntryType::Directory);
+                header.set_size(0);
+                builder
+                    .append_data(&mut header, item.name, io::empty())
+                    .unwrap();
+            }
+            Some(body) => {
+                header.set_entry_type(tar::EntryType::Regular);
+                header.set_size(body.len() as u64);
+                builder.append_data(&mut header, item.name, body).unwrap();
+            }
+        }
+    }
+    let archive = builder.into_inner().unwrap();
+    assert!(archive.len() > PART, "the copy spans several parts");
+    archive
+        .chunks(PART)
+        .enumerate()
+        .map(|(index, chunk)| {
+            let rel = format!("{rel_base}/installed.tar.{:03}", index + 1);
+            h.put(&rel, chunk);
+            json!({ "path": rel, "size": chunk.len(), "md5": md5_hex(chunk) })
+        })
+        .collect()
+}
+
+/// A pack entry for an installed copy of `layout` named `name`, whose
+/// parts are `parts`.
+#[allow(clippy::too_many_arguments)]
+fn installed_game(
+    rom_id: i64,
+    title: &str,
+    platform: &str,
+    platform_name: &str,
+    layout: &str,
+    name: &str,
+    launch: &str,
+    parts: Vec<serde_json::Value>,
+    row: serde_json::Value,
+) -> PackGame {
+    let size: u64 = parts.iter().map(|p| p["size"].as_u64().unwrap()).sum();
+    serde_json::from_value(json!({
+        "platform": platform,
+        "platform_name": platform_name,
+        "source": {
+            "server": SERVER,
+            "rom_id": rom_id,
+            "fs_name": title,
+            "server_updated_at": "2026-06-01T00:00:00Z",
+            "cover_small_path": "/assets/romm/resources/roms/1/cover/small.png",
+        },
+        "name": title,
+        "size": size,
+        "added": "2026-11-09T00:00:00Z",
+        "installed": {
+            "archive": "tar",
+            "layout": layout,
+            "name": name,
+            "parts": parts,
+            "tree_bytes": 4096,
+            "tree_files": 3,
+            "launch": launch,
+            "rom_file_name": format!("{title} (v1.01).zip"),
+            "server_updated_at": "2026-01-01T00:00:00Z",
+            "version": "v1.01",
+            "outdated": true,
+            "row": row,
+        },
+    }))
+    .unwrap()
+}
+
+#[cfg(unix)]
+fn assert_executable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = fs::metadata(path).unwrap().permissions().mode();
+    assert_ne!(mode & 0o111, 0, "{} is executable", path.display());
+}
+
+#[cfg(not(unix))]
+fn assert_executable(path: &Path) {
+    assert!(path.is_file());
+}
+
+async fn install_and_wait(h: &Harness, game: &PackGame) -> DownloadEntry {
+    h.service.install_from_drive(h.drive(), game, None).unwrap();
+    h.wait_terminal(h.newest_entry_id()).await
+}
+
+#[tokio::test]
+async fn an_extracted_copy_restores_into_the_platform_folder() {
+    let h = Harness::new();
+    let parts = put_installed(
+        &h,
+        "games/n64/Ember Run/Ember Run",
+        &[
+            dir("data/"),
+            file("data/levels.bin", &[7u8; 1500]),
+            file("Ember Run.z64", &[1u8; 900]),
+        ],
+    );
+    let game = installed_game(
+        8,
+        "Ember Run",
+        "n64",
+        "Nintendo 64",
+        "extracted",
+        "Ember Run",
+        "Ember Run.z64",
+        parts,
+        json!({ "ra_id": "123" }),
+    );
+    let entry = install_and_wait(&h, &game).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    assert_eq!(entry.kind, "base");
+    assert_eq!(entry.drive_label, LABEL);
+
+    let platform = h.library.join("games").join("Nintendo 64");
+    let dest = platform.join("Ember Run");
+    let launch = dest.join("Ember Run.z64");
+    assert_eq!(fs::read(&launch).unwrap(), vec![1u8; 900]);
+    assert_eq!(
+        fs::read(dest.join("data/levels.bin")).unwrap(),
+        vec![7u8; 1500]
+    );
+    assert_executable(&launch);
+    assert!(!platform.join(".grid-restore-8").exists());
+
+    let row = h.registry.find(Some(8), "", "").unwrap().unwrap();
+    assert_eq!(row.rom_id, Some(8));
+    assert_eq!(row.source_server, SERVER);
+    assert_eq!(row.extracted_dir, dest.to_string_lossy());
+    assert_eq!(row.extracted_path, launch.to_string_lossy());
+    assert_eq!(row.rom_file_name, "Ember Run (v1.01).zip");
+    assert_eq!(row.server_updated_at, "2026-01-01T00:00:00Z");
+    assert_eq!(row.ra_id, "123");
+    assert_eq!(
+        row.cover_small_path,
+        format!("{SERVER}/assets/romm/resources/roms/1/cover/small.png")
+    );
+    assert!(row.archive_path.is_empty());
+}
+
+#[tokio::test]
+async fn a_ps4_copy_restores_with_its_eboot_and_title_id() {
+    let h = Harness::new();
+    let parts = put_installed(
+        &h,
+        "games/ps4/Velvet Static/CUSA00001",
+        &[
+            dir("CUSA00001/"),
+            dir("CUSA00001/sce_sys/"),
+            file("CUSA00001/sce_sys/param.sfo", &[3u8; 700]),
+            file("CUSA00001/eboot.bin", &[4u8; 1200]),
+        ],
+    );
+    let game = installed_game(
+        9,
+        "Velvet Static",
+        "ps4",
+        "PlayStation 4",
+        "extracted",
+        "CUSA00001",
+        "CUSA00001/eboot.bin",
+        parts,
+        json!({ "ps4_game_id": "CUSA00001", "ps4_content": "{\"update\":\"1.01\"}" }),
+    );
+    let entry = install_and_wait(&h, &game).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let dest = h
+        .library
+        .join("games")
+        .join("PlayStation 4")
+        .join("CUSA00001");
+    let eboot = dest.join("CUSA00001").join("eboot.bin");
+    assert_executable(&eboot);
+    let row = h.registry.find(Some(9), "", "").unwrap().unwrap();
+    assert_eq!(row.extracted_dir, dest.to_string_lossy());
+    assert_eq!(row.extracted_path, eboot.to_string_lossy());
+    assert_eq!(row.ps4_game_id, "CUSA00001");
+    assert_eq!(row.ps4_content, "{\"update\":\"1.01\"}");
+}
+
+#[tokio::test]
+async fn a_native_copy_keeps_its_sidecar_and_gets_a_fresh_prefix() {
+    let h = Harness::new();
+    let parts = put_installed(
+        &h,
+        "games/win/My Game/My Game",
+        &[
+            file("game.json", br#"{"version": "1.2"}"#),
+            dir("game/"),
+            dir("game/MyGame/"),
+            file("game/MyGame/mygame.exe", &[0x4du8; 1400]),
+            file("game/MyGame/data.pak", &[9u8; 600]),
+        ],
+    );
+    let game = installed_game(
+        5,
+        "My Game",
+        "win",
+        "Windows",
+        "native",
+        "My Game",
+        "game/MyGame/mygame.exe",
+        parts,
+        json!({
+            "native_executable": "game/MyGame/mygame.exe",
+            "native_launch_parameters": "-windowed",
+            "native_launch_source": "sidecar",
+            "native_working_dir": "game/MyGame",
+        }),
+    );
+    let entry = install_and_wait(&h, &game).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let game_dir = h.library.join("games").join("Windows").join("My Game");
+    let exe = game_dir.join("game").join("MyGame").join("mygame.exe");
+    assert!(game_dir.join("game.json").is_file(), "the sidecar is kept");
+    assert_executable(&exe);
+    let row = h.registry.find(Some(5), "", "").unwrap().unwrap();
+    assert!(row.is_native());
+    assert_eq!(row.native_game_dir, game_dir.to_string_lossy());
+    assert_eq!(row.extracted_dir, game_dir.join("game").to_string_lossy());
+    assert_eq!(row.extracted_path, exe.to_string_lossy());
+    assert_eq!(row.native_executable_path, exe.to_string_lossy());
+    assert_eq!(row.native_launch_parameters, "-windowed");
+    assert_eq!(row.native_launch_source, "sidecar");
+    assert_eq!(row.native_working_dir, "game/MyGame");
+    assert_eq!(row.native_compat_tool, "");
+    assert_eq!(row.revision, "1.2", "the sidecar's metadata applies");
+    if cfg!(windows) {
+        assert_eq!(row.native_wineprefix, "");
+    } else {
+        let prefix = game_dir.join("prefix");
+        assert!(prefix.is_dir(), "a fresh prefix is created");
+        assert_eq!(row.native_wineprefix, prefix.to_string_lossy());
+    }
+}
+
+#[tokio::test]
+async fn a_restored_out_of_date_copy_shows_a_server_update() {
+    use grid_core::library::update_detection::{game_has_server_update, ServerVersion};
+    let h = Harness::new();
+    let parts = put_installed(
+        &h,
+        "games/n64/Ember Run/Ember Run",
+        &[file("Ember Run.z64", &[1u8; 2000])],
+    );
+    let game = installed_game(
+        8,
+        "Ember Run",
+        "n64",
+        "Nintendo 64",
+        "extracted",
+        "Ember Run",
+        "Ember Run.z64",
+        parts,
+        json!({}),
+    );
+    let entry = install_and_wait(&h, &game).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    let row = h.registry.find(Some(8), "", "").unwrap().unwrap();
+    let server = ServerVersion {
+        platform: "Nintendo 64",
+        platform_slug: "n64",
+        rom_file_name: "Ember Run (v1.02).zip",
+        updated_at: &game.source.server_updated_at,
+    };
+    assert!(game_has_server_update(&row, &server));
+}
+
+#[tokio::test]
+async fn a_damaged_part_fails_the_row_and_leaves_nothing_behind() {
+    let h = Harness::new();
+    let mut parts = put_installed(
+        &h,
+        "games/n64/Ember Run/Ember Run",
+        &[
+            file("data.bin", &[2u8; 1500]),
+            file("Ember Run.z64", &[1u8; 900]),
+        ],
+    );
+    parts[1]["md5"] = json!("0".repeat(32));
+    let game = installed_game(
+        8,
+        "Ember Run",
+        "n64",
+        "Nintendo 64",
+        "extracted",
+        "Ember Run",
+        "Ember Run.z64",
+        parts,
+        json!({}),
+    );
+    let entry = install_and_wait(&h, &game).await;
+    assert_eq!(entry.status, DownloadStatus::Failed);
+    assert_eq!(
+        entry.error,
+        format!("The backup of Ember Run on {LABEL} is damaged")
+    );
+    assert!(h.registry.all().unwrap().is_empty(), "no registry row");
+    assert_eq!(
+        files_under(&h.library),
+        Vec::<PathBuf>::new(),
+        "no tree in the library"
+    );
+    let platform = h.library.join("games").join("Nintendo 64");
+    assert!(!platform.join("Ember Run").exists());
+    assert!(!platform.join(".grid-restore-8").exists());
+}
+
+#[tokio::test]
+async fn a_copy_from_a_newer_grid_is_refused_before_admission() {
+    let h = Harness::new();
+    let parts = put_installed(
+        &h,
+        "games/n64/Ember Run/Ember Run",
+        &[file("Ember Run.z64", &[1u8; 2000])],
+    );
+    let game = installed_game(
+        8,
+        "Ember Run",
+        "n64",
+        "Nintendo 64",
+        "squashfs",
+        "Ember Run",
+        "Ember Run.z64",
+        parts,
+        json!({}),
+    );
+    let error = h
+        .service
+        .install_from_drive(h.drive(), &game, None)
+        .unwrap_err();
+    assert_eq!(error.to_string(), "This backup needs a newer GRID");
+    assert!(h.service.snapshot().entries.is_empty());
+}
+
+/// The drive goes away in the middle of a restore (Unix only: Windows
+/// refuses to delete a folder holding an open file).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_drive_removed_mid_restore_fails_the_row_and_leaves_nothing_behind() {
+    let h = Harness::new();
+    let parts = put_installed(
+        &h,
+        "games/n64/Ember Run/Ember Run",
+        &[file("Ember Run.z64", &[1u8; 3000])],
+    );
+    let game = installed_game(
+        8,
+        "Ember Run",
+        "n64",
+        "Nintendo 64",
+        "extracted",
+        "Ember Run",
+        "Ember Run.z64",
+        parts,
+        json!({}),
+    );
+    let mount = h.mount.clone();
+    h.service.set_drive_copy_hook(Some(Arc::new(move || {
+        let _ = fs::remove_dir_all(&mount);
+        Err(io::Error::other("Input/output error"))
+    })));
+    let entry = install_and_wait(&h, &game).await;
+    assert_eq!(entry.status, DownloadStatus::Failed);
+    assert_eq!(entry.error, format!("{LABEL} was removed"));
+    assert!(h.registry.all().unwrap().is_empty(), "no registry row");
+    assert_eq!(files_under(&h.library), Vec::<PathBuf>::new());
+    assert!(!h.library.join("games/Nintendo 64/.grid-restore-8").exists());
+}
