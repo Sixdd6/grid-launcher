@@ -294,6 +294,7 @@ describe('kindLabel', () => {
       'firmware',
       'library_move',
       'backup_game',
+      'backup_game_local',
       'backup_emulator',
       'backup_firmware',
       'backup_cancelled',
@@ -523,7 +524,7 @@ describe('backup rows', () => {
   });
 
   it('badges every backup kind Backup', () => {
-    for (const kind of ['backup_game', 'backup_emulator', 'backup_firmware', 'backup_cancelled'] as const) {
+    for (const kind of ['backup_game', 'backup_game_local', 'backup_emulator', 'backup_firmware', 'backup_cancelled'] as const) {
       expect(kindLabel(kind)).toBe('Backup');
     }
   });
@@ -546,6 +547,42 @@ describe('backup rows', () => {
 
   it('captions the write as going to the drive', () => {
     expect(graphCaption(backup({ status: 'installing' }))).toBe('Writing to drive');
+  });
+
+  describe('a game copied from this computer', () => {
+    const local = (overrides: Partial<DownloadEntry>) => backup({ kind: 'backup_game_local', ...overrides });
+
+    it('gets its details from the server, then copies to the drive', () => {
+      expect(entryDetail(local({ status: 'queued' }))).toBe('Waiting · to Couch kit');
+      expect(entryDetail(local({ status: 'downloading', downloaded_bytes: 4, total_bytes: 10 }))).toBe(
+        'Getting details from server',
+      );
+      expect(
+        entryDetail(local({ status: 'installing', install_processed_bytes: 45, install_total_bytes: 100 })),
+      ).toBe('Copying from this computer to SAMSUNG T7 45%');
+      expect(entryDetail(local({ status: 'installing' }))).toBe('Copying from this computer to SAMSUNG T7');
+    });
+
+    it('finishes as Copied from this computer · Written to <pack>', () => {
+      expect(entryDetail(local({ status: 'completed' }))).toBe('Copied from this computer · Written to Couch kit');
+      expect(entryDetail(local({ status: 'failed', error: 'SAMSUNG T7 was removed' }))).toBe(
+        'Failed — SAMSUNG T7 was removed',
+      );
+    });
+
+    it('ends the strip with copying from this computer', () => {
+      expect(footerLine([local({ status: 'downloading' })])).toBe(
+        'Backing up Velvet Static to Couch kit · — · getting details',
+      );
+      expect(
+        footerLine([local({ status: 'installing', install_processed_bytes: 45, install_total_bytes: 100 })]),
+      ).toBe('Backing up Velvet Static to Couch kit · 45% · copying from this computer');
+    });
+
+    it('is a backup row: Cancel while copying, Retry once it ends', () => {
+      expect(actionFor('installing', 'backup_game_local')).toBe('cancel');
+      expect(actionFor('failed', 'backup_game_local')).toBe('retry-dismiss');
+    });
   });
 });
 

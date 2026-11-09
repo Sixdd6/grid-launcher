@@ -90,6 +90,14 @@ describe('BackupBatches', () => {
     ]);
   });
 
+  it('counts a game copied from this computer as a game', () => {
+    const local = (id: number, status: DownloadEntry['status']) => game(id, status, { kind: 'backup_game_local' });
+    expect(run([[], [local(2, 'queued'), game(1, 'downloading')], [local(2, 'completed'), game(1, 'completed')]])).toEqual([
+      '2 games added to the backup queue for Couch kit',
+      '2 games backed up to Couch kit',
+    ]);
+  });
+
   it('counts an emulator built for two computers once, and names the compat tools apart', () => {
     const done = (rows: DownloadEntry[]) => rows.map((r) => ({ ...r, status: 'completed' as const }));
     const rows = [

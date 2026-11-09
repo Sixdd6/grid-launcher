@@ -80,7 +80,7 @@ type Counts = { games: string[]; emulators: Set<string>; tools: Set<string>; fir
 function countRows(rows: Iterable<Row>): Counts {
   const c: Counts = { games: [], emulators: new Set(), tools: new Set(), firmware: [] };
   for (const r of rows) {
-    if (r.kind === 'backup_game') c.games.push(r.title);
+    if (r.kind === 'backup_game' || r.kind === 'backup_game_local') c.games.push(r.title);
     else if (r.kind === 'backup_firmware') c.firmware.push(r.title);
     else if (r.kind === 'backup_emulator') {
       (r.platform === COMPAT_TOOL_PLATFORM ? c.tools : c.emulators).add(emulatorName(r.title));
