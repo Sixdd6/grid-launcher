@@ -9,6 +9,9 @@
   import ThemeToggle from './ThemeToggle.svelte';
   import BackupDialog from './backups/BackupDialog.svelte';
   import { backupDialog, closeBackup } from './backups/dialogState.svelte';
+  import { drives } from './stores/drives.svelte';
+  import { driveRailKey } from './library/rail';
+  import { librarySelection, selectRail } from './library/selection.svelte';
   import { listen } from '@tauri-apps/api/event';
   import { initEmulatorEvents } from './systems/events';
   import { initNotifications } from './notifications/notifier';
@@ -36,9 +39,29 @@
   // Set once when the shell first mounts (R2): Server when the restored/just
   // -connected session is online, Library when it came up offline. Switching
   // views afterward is a user action — a pill, Ctrl+1..4, or `show()`.
-  // The `drive` half (offline: Library on the first drive) is for Library ›
-  // Backup drives, which does not exist yet.
-  let view = $state<View>(initialView(session.connected, session.offline).view);
+  // Offline mode opens Library on the first connected backup drive
+  // (GameBackups README, "Use without a server").
+  const start = initialView(session.connected, session.offline, drives.firstLibraryDrive);
+  let view = $state<View>(start.view);
+  if (start.drive !== null) selectRail(driveRailKey(start.drive));
+
+  // The drives store may not have its first snapshot when the shell mounts.
+  // Offline, apply the drive half once it arrives, unless the user has moved
+  // on (another view, or another Library row) by then.
+  const startRail = librarySelection.key;
+  let driveStartSettled = start.drive !== null || !session.offline || session.connected;
+  $effect(() => {
+    if (driveStartSettled || !drives.loaded) return;
+    driveStartSettled = true;
+    const first = drives.firstLibraryDrive;
+    if (first !== null && view === 'library' && librarySelection.key === startRail) selectRail(driveRailKey(first));
+  });
+
+  /** Library on a backup drive (Settings › Backup drives' Show in Library). */
+  function showDriveInLibrary(key: string) {
+    selectRail(driveRailKey(key));
+    view = 'library';
+  }
 
   let settings = $state<ReturnType<typeof Settings> | null>(null);
   let serverMenuOpen = $state(false);
@@ -276,7 +299,7 @@
   <Downloads />
 </div>
 <div data-testid="settings-view" class="view" hidden={view !== 'settings'}>
-  <Settings active={view === 'settings'} bind:this={settings} />
+  <Settings active={view === 'settings'} bind:this={settings} onShowDriveInLibrary={showDriveInLibrary} />
 </div>
 
 <!-- Mounted outside the view roots, and never hidden: `hidden` on an
@@ -293,6 +316,9 @@
       open={backupDialog.current}
       onClose={closeBackup}
       onSetUp={() => {
+        // Details (when it opened the dialog) closes too: Settings is not
+        // behind it.
+        backupDialog.current?.onLeave?.();
         closeBackup();
         view = 'settings';
         settings?.show('backup-drives');

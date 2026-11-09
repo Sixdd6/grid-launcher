@@ -28,8 +28,7 @@
     active?: boolean;
     /**
      * Opens Library on a backup drive (Backup drives' "Show in Library").
-     * TODO(Task 20): Shell passes this once Library › Backup drives exists;
-     * until then the button is left out.
+     * Without it the button is left out.
      */
     onShowDriveInLibrary?: (key: string) => void;
   } = $props();

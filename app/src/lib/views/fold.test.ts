@@ -65,6 +65,11 @@ describe('librarySearchPlaceholder', () => {
     expect(librarySearchPlaceholder(true, 'updates', 'Updates')).toBe('Search games with updates…');
     expect(librarySearchPlaceholder(true, 'platform:sega-saturn', 'Sega Saturn')).toBe('Search Sega Saturn…');
   });
+
+  it('searches a backup drive\'s games, by pack name once folded', () => {
+    expect(librarySearchPlaceholder(false, 'drive:/m/T7', 'Couch kit')).toBe('Search games on this drive');
+    expect(librarySearchPlaceholder(true, 'drive:/m/T7', 'Couch kit')).toBe('Search Couch kit…');
+  });
 });
 
 describe('gameCountLine', () => {

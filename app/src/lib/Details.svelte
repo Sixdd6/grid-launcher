@@ -37,7 +37,15 @@
   import { removedFromLibraryNotice, uninstalledNotice } from './notifications/notices';
   import { SKIPPED_TOAST_MS, skippedRemovalText } from './uninstallSkips';
   import { fullIndex, galleryItems, viewableIndex, viewableItems } from './details/media';
-  import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
+  import {
+    detailApplies,
+    fromDriveText,
+    mergeDetail,
+    summaryOf,
+    versionSource,
+    type DetailsSubject,
+  } from './details/subject';
+  import { installFromDrive, removeFromDrive } from './backups/install';
   import { syntheticCloudGame, type CloudMode } from './details/cloud';
   import {
     backupAction,
@@ -142,6 +150,8 @@
   // place fanart is ever known. Reporting again is idempotent when nothing
   // changed, because `noteViewed` just replaces the subject.
   $effect(() => {
+    // A drive's art is not on a server the background layer can build from.
+    if (subject.source === 'drive') return;
     noteViewed(subjectFromDetails(merged));
   });
   let coverSmall = $derived(merged.coverSmall);
@@ -197,6 +207,8 @@
   $effect(() => {
     if (subject.romId === null) return; // no server id: nothing to overlay
     if (!session.connected) return;
+    // A drive game's id belongs to the server it was backed up from.
+    if (!detailApplies(subject, session.serverUrl)) return;
     api
       .getRomDetail(subject.romId)
       .then((fetched) => {
@@ -259,7 +271,9 @@
   // comes from the backend; a failure leaves it blank rather than guessing.
   let installBlocked = $state('');
   $effect(() => {
-    if (installedNow) {
+    // A drive install brings the system's emulator from the drive when it
+    // has one, so the server-side reason would not hold.
+    if (installedNow || subject.drive !== undefined) {
       installBlocked = '';
       return;
     }
@@ -379,7 +393,7 @@
   let version = $derived(
     versionLabel(
       subject.platformName,
-      romFileNamesFor(subject.source, installedRow?.rom_file_name ?? '', detail?.fs_name ?? ''),
+      romFileNamesFor(versionSource(subject), installedRow?.rom_file_name ?? '', detail?.fs_name ?? ''),
       detail?.revision || installedRow?.revision || ''
     )
   );
@@ -568,14 +582,49 @@
 
   function backUp() {
     if (subject.romId === null || backup.disabled) return;
-    openBackup({ request: backupRequest({ kind: 'game', name: subject.name }, [subject.romId]) });
+    // "Set up a drive…" leaves for Settings: Details closes behind it.
+    openBackup({ request: backupRequest({ kind: 'game', name: subject.name }, [subject.romId]), onLeave: onClose });
+  }
+
+  // Details from a drive (GameBackups README): Install from drive copies the
+  // game from the drive, and Remove from drive… (two clicks) takes it off.
+  let fromDrive = $derived(fromDriveText(subject));
+  let confirmingDriveRemove = $state(false);
+
+  async function handleDriveInstall() {
+    const from = subject.drive;
+    if (from === undefined || subject.romId === null) return;
+    error = null;
+    pendingAction = 'install';
+    try {
+      await installFromDrive(from.key, { rom_id: subject.romId, name: subject.name, server: from.server });
+    } finally {
+      pendingAction = null;
+    }
+  }
+
+  async function handleDriveRemove() {
+    const from = subject.drive;
+    if (from === undefined || subject.romId === null) return;
+    if (!confirmingDriveRemove) {
+      confirmingDriveRemove = true;
+      return;
+    }
+    error = null;
+    try {
+      await removeFromDrive(from.key, from.name, [{ rom_id: subject.romId, name: subject.name, server: from.server }]);
+      onClose();
+    } catch (err) {
+      error = errorMessage(err);
+      confirmingDriveRemove = false;
+    }
   }
 
   let header = $derived(
     headerLine({
       platformName: subject.platformName,
-      firstReleaseDate: detail?.first_release_date ?? '',
-      companies: detail?.companies ?? '',
+      firstReleaseDate: detail?.first_release_date || subject.releaseDate || '',
+      companies: detail?.companies || subject.companies || '',
       genres,
     })
   );
@@ -772,12 +821,27 @@
                 <!-- The buttons' `title` is hover-only; this line is the visible reason. -->
                 <p id="details-blocked-note" class="meta-line offline-note">Play and Uninstall are unavailable until the files are found.</p>
               {/if}
+            {:else if subject.drive !== undefined}
+              <button data-testid="details-install" disabled={pending} onclick={handleDriveInstall}>
+                {pendingAction === 'install' ? 'Installing…' : 'Install from drive'}
+              </button>
             {:else}
               <button data-testid="details-install" title={installBlocked} disabled={pending} onclick={handleInstall}>
                 {pendingAction === 'install' ? 'Installing…' : installLabel(platformSlug, subject.platformName)}
               </button>
             {/if}
-            {#if !missing.showMissing}
+            {#if subject.drive !== undefined}
+              <!-- Two clicks; the second names the pack. -->
+              <button
+                data-testid="details-drive-remove"
+                class="secondary"
+                class:destructive={!confirmingDriveRemove}
+                class:confirm={confirmingDriveRemove}
+                onclick={handleDriveRemove}
+              >
+                {confirmingDriveRemove ? `Remove from ${subject.drive.name}` : 'Remove from drive…'}
+              </button>
+            {:else if !missing.showMissing}
               <button
                 data-testid="details-backup"
                 class="secondary"
@@ -794,7 +858,7 @@
               {/if}
             {/if}
           </div>
-          {#if onDrives !== ''}
+          {#if onDrives !== '' && subject.drive === undefined}
             <p class="meta-line on-drives" data-testid="details-on-drives"><Icon name="drive" size={12} />{onDrives}</p>
           {/if}
         {/if}
@@ -810,7 +874,7 @@
       <section class="right">
         <header class="head">
           <h2>{subject.name}</h2>
-          <p class="header-line" data-testid="details-header-line">{header}{#if ratingNumber !== ''}{#if header !== ''}{' · '}{/if}<span class="rating"><span class="star"><Icon name="star" size={14} /></span>{ratingNumber}</span>{/if}</p>
+          <p class="header-line" data-testid="details-header-line">{header}{#if fromDrive !== ''}{#if header !== ''}{' · '}{/if}<span class="from-drive" data-testid="details-from-drive">{fromDrive}</span>{/if}{#if ratingNumber !== ''}{#if header !== ''}{' · '}{/if}<span class="rating"><span class="star"><Icon name="star" size={14} /></span>{ratingNumber}</span>{/if}</p>
           <div class="chips">
             {#if liveSession}
               <span data-testid="details-playing-chip" class="chip playing">Playing</span>
@@ -1263,6 +1327,11 @@
 
   .offline-note {
     text-align: center;
+  }
+
+  /* "From Couch kit" in the header line (GameBackups prototype `.bk-src`). */
+  .from-drive {
+    color: var(--primary);
   }
 
   .on-drives {

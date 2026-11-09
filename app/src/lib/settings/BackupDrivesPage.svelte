@@ -15,7 +15,7 @@
     onShowInLibrary = undefined,
   }: {
     active?: boolean;
-    /** Opens Library on a drive. TODO(Task 20): Shell passes this once Library › Backup drives exists. */
+    /** Opens Library on a drive (Shell). */
     onShowInLibrary?: (key: string) => void;
   } = $props();
 

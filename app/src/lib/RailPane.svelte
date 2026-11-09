@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import type { IconName } from './icons';
   /** One row of a view's left rail. The caller owns the labels, counts and
    *  test ids; this component owns the markup and the 220px column. */
   export type RailPaneEntry<K extends string = string> = {
@@ -17,10 +18,15 @@
     dataRail?: string;
     /** A divider under this row (Server's Discover row). */
     divider?: boolean;
+    /** An icon before the label (Library's backup drive rows). */
+    icon?: IconName;
+    /** The row's tooltip (a drive row's volume label). */
+    title?: string;
   };
 </script>
 
 <script lang="ts" generics="K extends string">
+  import Icon from './Icon.svelte';
   // Design §5: the Library, Server, Emulators and Settings views share one
   // rail — 220px, a list of labelled counts, optional section headings.
   // Only the entries differ, so the markup and the CSS live here once.
@@ -48,8 +54,12 @@
       class="rail-item"
       class:active={entry.selected}
       aria-current={entry.selected ? 'page' : undefined}
+      title={entry.title}
       onclick={() => onSelect(entry.key)}
     >
+      {#if entry.icon}
+        <span class="rail-icon" aria-hidden="true"><Icon name={entry.icon} size={14} /></span>
+      {/if}
       <span class="rail-label">{entry.label}</span>
       {#if entry.count !== undefined}
         <span data-testid={entry.countTestId} class="rail-count">{entry.count}</span>
@@ -119,7 +129,21 @@
     font-weight: 600;
   }
 
+  /* GameBackups prototype `.bk-rail-icon`: muted, the row's colour when selected. */
+  .rail-icon {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    color: var(--text-muted);
+  }
+
+  .rail-item.active .rail-icon {
+    color: inherit;
+  }
+
   .rail-label {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

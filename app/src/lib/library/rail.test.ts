@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { InstalledGame } from '../api';
+import type { DriveInfo, InstalledGame, PackSummary } from '../api';
 import {
+  DRIVE_EMPTY_TEXT,
+  driveKeyOf,
+  driveRailEntries,
+  driveRailKey,
   emptyText,
   entryForKey,
   matchesRail,
@@ -138,5 +142,62 @@ describe('emptyText (design section 5, verbatim)', () => {
         count: 0,
       }),
     ).toBe('No games installed for SNES');
+  });
+});
+
+const pack = (overrides: Partial<PackSummary> = {}): PackSummary => ({
+  name: 'Couch kit', os: ['linux'], game_count: 8, gridpack_bytes: 0, emulators: [], firmware: [],
+  updated: '2026-11-09T00:00:00Z', rom_ids: [], ...overrides,
+});
+
+const drive = (key: string, overrides: Partial<DriveInfo> = {}): DriveInfo => ({
+  key, mount: key, label: 'SAMSUNG T7', fs: 'exFAT', fat32: false, total_bytes: 1, free_bytes: 1,
+  read_only: false, status: 'ready', problem: '', pack: pack(), ...overrides,
+});
+
+describe('Library › Backup drives rail rows (GameBackups README)', () => {
+  const rows = [row({ rom_id: 1, platform: 'SNES' })];
+  const t7 = drive('/run/media/me/T7');
+  const stick = drive('/run/media/me/STICK', { label: 'STICK', read_only: true, status: 'read_only', pack: pack({ name: 'Old stick', game_count: 1 }) });
+
+  it('adds one row per drive after the platforms: pack name, game count, label tooltip', () => {
+    const entries = railEntries(rows, new Set(), NOW, [t7, stick]);
+    expect(entries.map((e) => e.key)).toEqual([
+      'all', 'recent', 'updates', 'platform:snes', 'drive:/run/media/me/T7', 'drive:/run/media/me/STICK',
+    ]);
+    const row7 = entries[4];
+    expect(row7.label).toBe('Couch kit');
+    expect(row7.count).toBe(8);
+    expect(row7.title).toBe('SAMSUNG T7');
+    expect(row7.testId).toBe('library-rail-drive-run-media-me-t7');
+  });
+
+  it('leaves out a drive with no readable pack', () => {
+    expect(driveRailEntries([drive('/m/x', { pack: null, status: 'not_set_up' })])).toEqual([]);
+  });
+
+  it('falls back to the mount for the tooltip when the drive has no label', () => {
+    expect(driveRailEntries([drive('E:', { label: ' ' })])[0].title).toBe('E:');
+  });
+
+  it('falls back to All games once the selected drive is unplugged', () => {
+    const entries = railEntries(rows, new Set(), NOW, []);
+    expect(entryForKey(entries, driveRailKey('/run/media/me/T7')).key).toBe('all');
+  });
+
+  it('round-trips a drive key through the rail key, colons and slashes included', () => {
+    expect(driveKeyOf(driveRailKey('E:'))).toBe('E:');
+    expect(driveKeyOf(driveRailKey('/run/media/me/T7'))).toBe('/run/media/me/T7');
+    expect(driveKeyOf('platform:snes')).toBeNull();
+    expect(driveKeyOf('all')).toBeNull();
+  });
+
+  it('matches no installed row: the drive grid is the drive\'s games', () => {
+    expect(matchesRail(row({}), driveRailKey('/m/x'), new Set(), NOW)).toBe(false);
+  });
+
+  it('says the drive is empty in the empty state', () => {
+    expect(emptyText(driveRailEntries([t7])[0])).toBe(DRIVE_EMPTY_TEXT);
+    expect(DRIVE_EMPTY_TEXT).toBe('Nothing on this drive yet. Back up games from Server or Library.');
   });
 });

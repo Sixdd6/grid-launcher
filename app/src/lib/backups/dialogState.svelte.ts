@@ -9,6 +9,9 @@ export type BackupDialogOpen = {
   request: BackupRequest;
   /** Runs once the backup is queued: the select bar clears its selection. */
   onQueued?: () => void;
+  /** Runs when the dialog sends the user elsewhere ("Set up a drive…"):
+   *  Details closes, so it is not left open behind Settings. */
+  onLeave?: () => void;
 };
 
 const state = $state<{ current: BackupDialogOpen | null }>({ current: null });

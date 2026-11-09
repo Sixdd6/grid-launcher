@@ -1,9 +1,23 @@
 // The Details overlay's single input contract (task-9-brief.md). It can be
-// opened from either the Server grid (a `GameSummary` fetched live from the
-// RomM server) or the Library grid (an `InstalledGame` registry row already
-// on disk) — `DetailsSubject` normalizes both into one shape so Details.svelte
-// itself never has to branch on which grid opened it.
-import type { GameSummary, InstalledGame, RomDetail } from '../api';
+// opened from the Server grid (a `GameSummary` fetched live from the RomM
+// server), the Library grid (an `InstalledGame` registry row already on
+// disk) or a backup drive's grid (a `DriveGame` from the drive's pack) —
+// `DetailsSubject` normalizes all three into one shape.
+import type { DriveGame, DriveInfo, GameSummary, InstalledGame, RomDetail } from '../api';
+import { driveAssetUrl } from '../backups/driveArt';
+import { serverKey } from '../backups/drives';
+
+/** The drive a drive subject was opened from (GameBackups README, "Details from a drive"). */
+export type SubjectDrive = {
+  /** The drive key: its mount path, or its drive letter on Windows. */
+  key: string;
+  /** The pack name: "From Couch kit". */
+  name: string;
+  /** The volume label. */
+  label: string;
+  /** The server the game was backed up from (`DriveGame.server`). */
+  server: string;
+};
 
 export type DetailsSubject = {
   romId: number | null;
@@ -22,7 +36,13 @@ export type DetailsSubject = {
   description: string;
   rating: string;
   genres: string;
-  source: 'server' | 'installed';
+  source: 'server' | 'installed' | 'drive';
+  /** Set only for `source: 'drive'`. */
+  drive?: SubjectDrive;
+  /** The release date and companies a drive's pack carries, for the header
+   *  line before (or without) a server detail. */
+  releaseDate?: string;
+  companies?: string;
 };
 
 export function fromSummary(game: GameSummary, platformName: string, platformSlug: string): DetailsSubject {
@@ -71,6 +91,72 @@ export function fromInstalled(row: InstalledGame): DetailsSubject {
     genres: row.genres,
     source: 'installed',
   };
+}
+
+/**
+ * A game on a backup drive. Its art is the drive's own copy, loaded through
+ * `drive_asset` (`backups/driveArt.ts`), so it shows with no network.
+ */
+export function fromDriveGame(game: DriveGame, drive: Pick<DriveInfo, 'key' | 'label' | 'mount' | 'pack'>): DetailsSubject {
+  const asset = (rel: string) => driveAssetUrl(drive.key, rel);
+  const cover = asset(game.cover);
+  const urls = (rels: readonly string[]) => rels.flatMap((rel) => asset(rel) ?? []);
+  return {
+    romId: game.rom_id,
+    name: game.name,
+    platformName: game.platform_name,
+    platformSlug: game.platform,
+    coverSmall: cover,
+    coverLarge: cover,
+    screenshotUrls: urls(game.screenshots),
+    fanartUrls: urls([game.fanart]),
+    description: game.summary,
+    rating: game.rating,
+    genres: game.genres.join(', '),
+    source: 'drive',
+    drive: {
+      key: drive.key,
+      name: drive.pack?.name ?? (drive.label.trim() || drive.mount),
+      label: drive.label.trim() || drive.mount,
+      server: game.server,
+    },
+    releaseDate: releaseSeconds(game.release_date),
+    companies: game.companies.join(', '),
+  };
+}
+
+/**
+ * A pack's release date ("1993-11-11") as the epoch-seconds string the
+ * header reads from a server detail (`releaseYear`), mirroring grid-core's
+ * `release_date_seconds`. Seconds pass through; anything else is `''`.
+ */
+export function releaseSeconds(raw: string): string {
+  const t = raw.trim();
+  if (/^\d+$/.test(t)) return t;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (m === null) return '';
+  return String(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 1000);
+}
+
+/** "From Couch kit", the drive part of the header line; `''` for any other subject. */
+export function fromDriveText(subject: DetailsSubject): string {
+  return subject.drive ? `From ${subject.drive.name}` : '';
+}
+
+/**
+ * Whether the server's detail for `subject.romId` describes this game. A
+ * drive game's rom id belongs to the server it was backed up from: from any
+ * other server the same id is a different game, so its detail must not be
+ * merged over the drive's.
+ */
+export function detailApplies(subject: DetailsSubject, serverUrl: string): boolean {
+  if (subject.drive === undefined) return true;
+  return serverUrl.trim() !== '' && serverKey(subject.drive.server) === serverKey(serverUrl);
+}
+
+/** The version-label source order (`details/version.ts`): a drive game reads like a server one. */
+export function versionSource(subject: DetailsSubject): 'server' | 'installed' {
+  return subject.source === 'installed' ? 'installed' : 'server';
 }
 
 /**

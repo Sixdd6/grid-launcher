@@ -53,6 +53,7 @@ export function serverSearchPlaceholder(folded: boolean, platformLabel: string):
 /** The Library search field's placeholder; folded, it names the rail entry
  *  in view, since the title row that did is hidden. */
 export function librarySearchPlaceholder(folded: boolean, key: RailKey, label: string): string {
+  if (key.startsWith('drive:')) return folded ? `Search ${label.trim()}…` : 'Search games on this drive';
   if (!folded) return 'Search installed games';
   if (key === 'all') return 'Search your library…';
   if (key === 'recent') return 'Search recent games…';
