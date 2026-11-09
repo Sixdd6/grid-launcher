@@ -117,7 +117,7 @@ GATE='set -euo pipefail
 step() { printf "\n== gate: %s\n" "$*"; }
 step secret hygiene; scripts/check_secret_hygiene.sh
 step cargo fmt;      cargo fmt --check
-step frontend;       (cd app && npm ci && npx svelte-check && npm run build)
+step frontend;       (cd app && npm ci && npm run check && npm run build)
 step clippy;         cargo clippy --workspace --all-targets -- -D warnings
 step clippy e2e;     cargo clippy -p app --all-targets --features e2e -- -D warnings
 step cargo test;     cargo test --workspace
