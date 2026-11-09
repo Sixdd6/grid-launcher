@@ -16,11 +16,11 @@ pub mod rpcs3;
 mod write;
 
 use std::future::Future;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
 
-use crate::backup::pack::{PackFirmware, PACK_DIR};
+use crate::backup::pack::{self, PackFirmware};
 use crate::romm::{FirmwareRecord, RommClient};
 
 /// One destination directory a firmware file may be routed to.
@@ -283,33 +283,17 @@ fn read_pack_file(mount: &Path, rel: &str, stated: u64) -> Result<Vec<u8>, Strin
 }
 
 /// `rel` (a path from a drive's `gridpack.json`) as a regular file under
-/// `<mount>/gridpack/`, or why it is refused: it must be relative, made of
-/// plain components only (no `..`, no root, no drive prefix, no backslash or
-/// colon), each at most 255 bytes, and once symlinks are resolved it must
-/// still lie under `<mount>/gridpack/`.
-///
-/// A local guard: `backup::pack::resolve` (Task 1) is being written in
-/// parallel and should replace the lexical half of this once it lands.
+/// `<mount>/gridpack/`, or why it is refused. The path check is
+/// [`pack::resolve`]: plain relative components only, a `gridpack` folder
+/// that is not a link, and nothing that resolves through a link to outside
+/// the pack folder. On top of that the path must name a regular file.
 fn pack_file_path(mount: &Path, rel: &str) -> Result<PathBuf, String> {
     let refused = || "its path in the drive's index is not allowed".to_string();
-    if rel.is_empty() || rel.contains(['\\', ':', '\0']) {
+    let path = pack::resolve(mount, rel).map_err(|_| refused())?;
+    if !path.is_file() {
         return Err(refused());
     }
-    let rel_path = Path::new(rel);
-    for component in rel_path.components() {
-        match component {
-            Component::Normal(part) if part.len() <= 255 => {}
-            _ => return Err(refused()),
-        }
-    }
-    let root = mount.join(PACK_DIR);
-    let joined = root.join(rel_path);
-    let root = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
-    let real = std::fs::canonicalize(&joined).map_err(|e| e.to_string())?;
-    if !real.starts_with(&root) || !real.is_file() {
-        return Err(refused());
-    }
-    Ok(real)
+    Ok(path)
 }
 
 /// Downloads and installs `platform_id`'s server firmware into `targets`
@@ -509,6 +493,7 @@ pub async fn install_platform_firmware_from<S: FirmwareSource>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backup::pack::PACK_DIR;
 
     #[test]
     fn an_ipl_fits_the_region_folders_of_its_tv_standard() {
