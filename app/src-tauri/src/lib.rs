@@ -318,6 +318,21 @@ pub fn run() {
         launch.set_library_gate(library_move.gate().clone());
         launch
     });
+    // A game running right now is not copied from this computer by a
+    // backup: its files may change while they are read. Weak, so the
+    // install service never keeps the launch service alive.
+    if let (Ok(install), Ok(launch)) = (&install, &launch) {
+        let launch = Arc::downgrade(launch);
+        install.set_running_check(Some(Arc::new(move |rom_id| {
+            launch.upgrade().is_some_and(|launch| {
+                launch
+                    .snapshot()
+                    .sessions
+                    .iter()
+                    .any(|session| session.rom_id == rom_id)
+            })
+        })));
+    }
     let builder = tauri::Builder::default().manage(AppState {
         session,
         install,

@@ -391,6 +391,9 @@ async fn download_local_game(
         (Located::Eligible(source), Some(row)) => (row, source),
         _ => return Err(gone()),
     };
+    if service.game_running(rom_id) {
+        return Err(LibraryError::Extract(super::RUNNING_NOW.to_string()));
+    }
     let for_windows = matches!(
         pack::read_pack(&job.drive.mount),
         Ok(PackState::Ready(pack)) if pack.os.contains(&PackOs::Windows)

@@ -1286,3 +1286,53 @@ async fn a_local_game_gone_from_the_library_fails_and_retries_as_a_local_copy() 
     assert_eq!(game.installed.unwrap().tree_files, tree.len() as u64);
     h.server.verify().await;
 }
+
+/// A game running right now is not copied from this computer: the plan
+/// lists it as downloading, and a queued copy fails without downloading.
+#[tokio::test]
+async fn a_running_game_is_not_copied_from_this_computer() {
+    let _turn = PART_SIZE.lock().await;
+    let _parts = SmallParts::on();
+    let h = Harness::new().await;
+    local_extracted_game(&h, SERVER_UPDATED).await;
+    let running = Arc::new(AtomicBool::new(true));
+    let flag = running.clone();
+    h.service.set_running_check(Some(Arc::new(move |rom_id| {
+        rom_id == 1 && flag.load(Ordering::SeqCst)
+    })));
+
+    let states = h
+        .service
+        .local_states(&[1], &h.server.uri(), false)
+        .unwrap();
+    assert_eq!(
+        states[&1],
+        grid_core::backup::plan::LocalState::Ineligible {
+            reason: grid_core::library::RUNNING_NOW.to_string()
+        }
+    );
+
+    h.service
+        .start_backup(
+            h.client.clone(),
+            h.drive(),
+            Harness::local_items(&[(1, "Zip Game")]),
+        )
+        .unwrap();
+    let failed = h.wait_terminal(1).await;
+    assert_eq!(failed.status, DownloadStatus::Failed, "{failed:#?}");
+    assert_eq!(failed.error, grid_core::library::RUNNING_NOW);
+    assert!(h.pack().games.is_empty());
+
+    // Closed: the plan sees it again.
+    running.store(false, Ordering::SeqCst);
+    let states = h
+        .service
+        .local_states(&[1], &h.server.uri(), false)
+        .unwrap();
+    assert!(matches!(
+        states[&1],
+        grid_core::backup::plan::LocalState::Eligible { .. }
+    ));
+    h.server.verify().await;
+}

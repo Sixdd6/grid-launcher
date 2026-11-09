@@ -207,6 +207,12 @@ const LOCATE_WHILE_INSTALLING: &str = "This game is installing. Wait for it to f
 /// Uninstall, update and Locate… refuse a game a backup is copying from
 /// this computer.
 pub const BACKING_UP_LOCAL: &str = "This game is being backed up. Wait for it to finish.";
+/// Why a game that is running is not copied from this computer: its files
+/// may change while they are read.
+pub const RUNNING_NOW: &str = "It's running right now; close it to copy it";
+/// Whether a game (by rom id) is running right now. Installed by the app
+/// layer, which owns the launch sessions.
+pub type RunningCheck = Arc<dyn Fn(i64) -> bool + Send + Sync>;
 /// How long a plan-time scan of an installed game stays fresh
 /// ([`InstallService::local_states`]).
 const LOCAL_SCAN_TTL: Duration = Duration::from_secs(60);
@@ -1132,6 +1138,9 @@ pub struct InstallService {
     drive_rows: Mutex<HashMap<u64, drive_install::DriveRow>>,
     /// Test hook run after each chunk an install copies off a drive.
     drive_copy_hook: RwLock<Option<drive_install::DriveCopyHook>>,
+    /// Whether a game is running ([`Self::set_running_check`]). `None`
+    /// (grid-core tests that do not opt in): nothing counts as running.
+    running_check: RwLock<Option<RunningCheck>>,
 }
 
 impl InstallService {
@@ -1188,6 +1197,7 @@ impl InstallService {
             local_scans: Mutex::new(HashMap::new()),
             drive_rows: Mutex::new(HashMap::new()),
             drive_copy_hook: RwLock::new(None),
+            running_check: RwLock::new(None),
         })
     }
 
@@ -2338,6 +2348,19 @@ impl InstallService {
         self.removed_drives.lock().unwrap().get(drive_id).cloned()
     }
 
+    /// Installs the check that tells whether a game is running. A running
+    /// game is not copied from this computer ([`RUNNING_NOW`]): the plan
+    /// lists it as downloading, and a queued copy fails.
+    pub fn set_running_check(&self, check: Option<RunningCheck>) {
+        *self.running_check.write().unwrap() = check;
+    }
+
+    /// Whether `rom_id` is running right now, per [`Self::set_running_check`].
+    pub(crate) fn game_running(&self, rom_id: i64) -> bool {
+        let check = self.running_check.read().unwrap().clone();
+        check.is_some_and(|check| check(rom_id))
+    }
+
     /// Installs a hook run before each file a backup writes to its drive.
     /// Tests use it to hold a write open; production never sets one.
     #[doc(hidden)]
@@ -2545,6 +2568,9 @@ impl InstallService {
     ///   was scanned for the same `for_windows` within the last minute (the
     ///   dialog plans every ready drive).
     ///
+    /// A game running right now ([`Self::set_running_check`]) is
+    /// [`LocalState::Ineligible`] with [`RUNNING_NOW`], unscanned.
+    ///
     /// `outdated` is always `None`: the caller fills it from the update set.
     /// A rom id with no row is [`LocalState::NotInstalled`].
     pub fn local_states(
@@ -2574,6 +2600,9 @@ impl InstallService {
             let state = match located {
                 Located::NotInstalled => LocalState::NotInstalled,
                 Located::Ineligible(reason) => LocalState::Ineligible { reason },
+                Located::Eligible(_) if self.game_running(rom_id) => LocalState::Ineligible {
+                    reason: RUNNING_NOW.to_string(),
+                },
                 Located::Eligible(source) => {
                     let cached = self
                         .local_scans
@@ -3457,9 +3486,15 @@ impl InstallService {
         // writes: a gate ticket held for the whole write keeps a library
         // move from starting under it.
         let reads_library = matches!(&job.item, backup_job::BackupItem::Game(game) if game.local);
+        let running = match &job.item {
+            backup_job::BackupItem::Game(game) if game.local => self.game_running(game.rom_id),
+            _ => false,
+        };
         let gate = self.library_gate.read().unwrap().clone();
         let result = match self.removed_reason(&job.drive.key) {
             Some(reason) => Err(LibraryError::DriveRemoved(reason)),
+            // Launched while it waited for the write slot.
+            None if running => Err(LibraryError::Extract(RUNNING_NOW.to_string())),
             None => match reads_library.then(|| gate.enter()).transpose() {
                 Err(busy) => Err(LibraryError::LibraryBusy(busy.reason)),
                 Ok(_ticket) => backup_job::write(
