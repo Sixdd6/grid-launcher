@@ -575,6 +575,9 @@ export type BackupPlan = {
 /** Where a game in a backup comes from. Mirrors `grid_core::backup::plan::SourceChoice`. */
 export type SourceChoice = 'local' | 'download';
 
+/** The user's pick for one out-of-date local game. Mirrors `commands::backups::SourcePick`. */
+export type SourcePick = { rom_id: number; source: SourceChoice };
+
 /** One game being written and where it comes from. Mirrors `grid_core::backup::plan::PlanSource`. */
 export type PlanSource = {
   rom_id: number;
@@ -1303,12 +1306,47 @@ export const api = {
   driveGames: (key: string) => invoke<DriveGame[]>('drive_games', { key }),
   /** Seeds the image cache from a pack-relative art path; answers the cache path. */
   driveAsset: (key: string, rel: string) => invoke<string>('drive_asset', { key, rel }),
-  /** `includeRuntime`: carry the Steam Linux Runtime ("Make Windows games work offline"); omitted, false. */
-  planBackup: (key: string, request: BackupRequest, includeFirmware: boolean, includeRuntime?: boolean) =>
-    invoke<BackupPlan>('plan_backup', { key, request, includeFirmware, includeRuntime: includeRuntime ?? null }),
-  /** Needs a server ("Backing up needs a server"). */
-  startBackup: (key: string, request: BackupRequest, includeFirmware: boolean, includeRuntime?: boolean) =>
-    invoke<BackupQueued>('start_backup', { key, request, includeFirmware, includeRuntime: includeRuntime ?? null }),
+  /**
+   * `includeRuntime`: carry the Steam Linux Runtime ("Make Windows games work offline"); omitted, false.
+   * `useLocal`: "Copy installed games from this computer"; omitted, true.
+   * `choices`: the picks for out-of-date local games (a rom id picked twice keeps the last pick).
+   */
+  planBackup: (
+    key: string,
+    request: BackupRequest,
+    includeFirmware: boolean,
+    includeRuntime?: boolean,
+    useLocal?: boolean,
+    choices?: SourcePick[],
+  ) =>
+    invoke<BackupPlan>('plan_backup', {
+      key,
+      request,
+      includeFirmware,
+      includeRuntime: includeRuntime ?? null,
+      useLocal: useLocal ?? null,
+      choices: choices ?? null,
+    }),
+  /**
+   * Same options as `planBackup`. Needs a server ("Backing up needs a server"); refused while an
+   * out-of-date local game has no pick ("Choose which copy to backup for 2 games").
+   */
+  startBackup: (
+    key: string,
+    request: BackupRequest,
+    includeFirmware: boolean,
+    includeRuntime?: boolean,
+    useLocal?: boolean,
+    choices?: SourcePick[],
+  ) =>
+    invoke<BackupQueued>('start_backup', {
+      key,
+      request,
+      includeFirmware,
+      includeRuntime: includeRuntime ?? null,
+      useLocal: useLocal ?? null,
+      choices: choices ?? null,
+    }),
   /** `server` is the game's `DriveGame.server`; omitted, the first game on the drive with that rom id. */
   installFromDrive: (key: string, romId: number, server?: string) =>
     invoke<DriveInstallOutcome>('install_from_drive', { key, romId, server: server ?? null }),

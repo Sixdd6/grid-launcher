@@ -128,7 +128,6 @@ impl UpdateService {
     }
 
     /// The update known for one rom, if the last pass found one.
-    #[allow(dead_code)] // read by commands/backups.rs (game backups, local copies)
     pub fn info(&self, rom_id: i64) -> Option<UpdateInfo> {
         self.available.lock().unwrap().get(&rom_id).cloned()
     }
@@ -136,9 +135,27 @@ impl UpdateService {
     /// Whether a pass has committed its result since the set was last
     /// cleared. Until then an absent entry means "not checked yet", not
     /// "up to date".
-    #[allow(dead_code)] // read by commands/backups.rs (game backups, local copies)
     pub fn has_completed_pass(&self) -> bool {
         self.completed_pass.load(Ordering::SeqCst)
+    }
+
+    /// Test seam: commits `available` (rom id to the server's ROM file
+    /// name) as if a pass had just finished.
+    #[cfg(test)]
+    pub(crate) fn commit_for_test(&self, available: HashMap<i64, String>) {
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let next = available
+            .into_iter()
+            .map(|(rom_id, server_rom_file_name)| {
+                (
+                    rom_id,
+                    UpdateInfo {
+                        server_rom_file_name,
+                    },
+                )
+            })
+            .collect();
+        self.store_if_current(generation, next, &[]);
     }
 
     /// The rows the frontend renders, in ascending rom id order.
@@ -351,7 +368,6 @@ impl Drop for PassGuard {
 
 /// The installed copy's version tag, formatted ("v1.1"), or "" when its file
 /// name carries none.
-#[allow(dead_code)] // read by commands/backups.rs (game backups, local copies)
 pub fn local_version_label(installed_rom_file_name: &str) -> String {
     rom_file_name_version(installed_rom_file_name)
         .map(|tag| format_version_tag(&tag))

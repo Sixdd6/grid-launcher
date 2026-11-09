@@ -10,14 +10,14 @@
 //! Errors and logs carry drive labels, paths and game names, never a server
 //! URL with userinfo or a header.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use grid_core::backup::pack::{self, Pack, PackEmulator, PackGame, PackOs, PackState, TMP_SUFFIX};
 use grid_core::backup::plan::{
     self, BackupPlan, BackupQueued, EmulatorItem, EmulatorKind, EmulatorPick, EmulatorSource,
-    PlanFirmwareSet, PlanGame, PlanInput, Planned,
+    LocalState, Outdated, PlanFirmwareSet, PlanGame, PlanInput, Planned, SourceChoice,
 };
 use grid_core::backup::write;
 use grid_core::config::{Config, PendingDefault};
@@ -26,6 +26,7 @@ use grid_core::launch::compat::{discover, request_compat_default, which_on_path}
 use grid_core::launch::profiles::load_profiles;
 use grid_core::library::platforms::{is_native_platform, is_windows_platform};
 use grid_core::library::registry::InstalledGame;
+use grid_core::library::update_detection::{game_has_server_update, ServerVersion};
 use grid_core::library::InstallService;
 use grid_core::romm::{strip_userinfo, RommClient};
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,7 @@ use crate::commands::{ensure_library_idle, err, AppState};
 use crate::drive_service::{
     drive_info, DriveInfo, DrivesSnapshot, PendingDriveFirmware, ScannedDrive,
 };
+use crate::update_service::{local_version_label, server_version_label, UpdateService};
 
 /// Why a backup command needs a live session.
 const NEEDS_SERVER: &str = "Backing up needs a server";
@@ -55,6 +57,24 @@ pub struct BackupRequest {
     #[serde(default)]
     #[allow(dead_code)]
     pub title: String,
+}
+
+/// The user's pick for one out-of-date local game: this computer's copy
+/// or the server's newer files.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+pub struct SourcePick {
+    pub rom_id: i64,
+    pub source: SourceChoice,
+}
+
+/// What the Backup dialog chose besides the games: the "Also copy" boxes,
+/// "Copy installed games from this computer" and the per-game picks.
+#[derive(Debug, Clone, Default)]
+struct PlanOptions {
+    include_firmware: bool,
+    include_runtime: bool,
+    use_local: bool,
+    choices: HashMap<i64, SourceChoice>,
 }
 
 /// What changing a pack's computers did.
@@ -124,6 +144,107 @@ pub struct BackupSettingsDto {
 }
 
 // --- pure helpers ---------------------------------------------------------------
+
+/// The picks by rom id. Pure. A rom id picked twice keeps the last pick.
+pub fn choices_map(picks: Option<Vec<SourcePick>>) -> HashMap<i64, SourceChoice> {
+    picks
+        .unwrap_or_default()
+        .into_iter()
+        .map(|pick| (pick.rom_id, pick.source))
+        .collect()
+}
+
+/// Why `start_backup` refuses a plan that still waits on picks, or `None`.
+/// Pure.
+pub fn needs_choice_refusal(needs_choice: u32) -> Option<String> {
+    match needs_choice {
+        0 => None,
+        1 => Some("Choose which copy to backup for 1 game".to_string()),
+        n => Some(format!("Choose which copy to backup for {n} games")),
+    }
+}
+
+/// Fills `outdated` on each eligible local game that has newer files on the
+/// server. Pure. `newer` maps a rom id to the server's ROM file name, for
+/// the games known to have an update; `rows` are the registry rows, whose
+/// ROM file name gives this computer's version.
+pub fn fill_outdated(
+    states: &mut HashMap<i64, LocalState>,
+    rows: &[InstalledGame],
+    newer: &HashMap<i64, String>,
+) {
+    for (rom_id, state) in states.iter_mut() {
+        let LocalState::Eligible { outdated, .. } = state else {
+            continue;
+        };
+        let Some(server_file) = newer.get(rom_id) else {
+            *outdated = None;
+            continue;
+        };
+        let installed_file = rows
+            .iter()
+            .find(|row| row.rom_id == Some(*rom_id))
+            .map(|row| row.rom_file_name.as_str())
+            .unwrap_or_default();
+        *outdated = Some(Outdated {
+            installed_version: local_version_label(installed_file),
+            server_version: server_version_label(installed_file, server_file),
+        });
+    }
+}
+
+/// The eligible local games among `states` with a newer server copy, as
+/// the update set has them: rom id to the server's ROM file name. `None`
+/// while no update pass has finished this session (an absent entry then
+/// means "not checked yet").
+pub fn newer_from_updates(
+    updates: &UpdateService,
+    states: &HashMap<i64, LocalState>,
+) -> Option<HashMap<i64, String>> {
+    if !updates.has_completed_pass() {
+        return None;
+    }
+    Some(
+        eligible_ids(states)
+            .filter_map(|rom_id| {
+                updates
+                    .info(rom_id)
+                    .map(|info| (rom_id, info.server_rom_file_name))
+            })
+            .collect(),
+    )
+}
+
+fn eligible_ids(states: &HashMap<i64, LocalState>) -> impl Iterator<Item = i64> + '_ {
+    states
+        .iter()
+        .filter(|(_, state)| matches!(state, LocalState::Eligible { .. }))
+        .map(|(rom_id, _)| *rom_id)
+}
+
+/// Every art path `game` names on the drive: cover, small cover, fanart,
+/// logo and screenshots. Never a game file or archive part.
+pub fn art_paths(game: &PackGame) -> impl Iterator<Item = &str> {
+    let assets = &game.assets;
+    [
+        &assets.cover,
+        &assets.cover_small,
+        &assets.fanart,
+        &assets.logo,
+    ]
+    .into_iter()
+    .flatten()
+    .map(String::as_str)
+    .chain(assets.screenshots.iter().map(String::as_str))
+}
+
+/// The game in `pack` whose art `rel` is. Pure. `None` for anything else,
+/// a game file or an archive part included.
+pub fn art_owner<'a>(pack: &'a Pack, rel: &str) -> Option<&'a PackGame> {
+    pack.games
+        .iter()
+        .find(|game| art_paths(game).any(|path| path == rel))
+}
 
 /// Whether `game` from a pack is installed on this computer. Pure. A row
 /// matches by rom id when it was installed from the pack's server: its own
@@ -714,10 +835,7 @@ pub async fn drive_asset(
 ) -> Result<String, String> {
     let scanned = connected(&state, &app, &key).await?;
     let pack = readable_pack(&scanned)?;
-    let game = pack
-        .games
-        .iter()
-        .find(|game| game.paths().any(|path| path == rel))
+    let game = art_owner(&pack, &rel)
         .cloned()
         .ok_or_else(|| "That file is not a game's art on the drive".to_string())?;
     let session = state.session.clone();
@@ -814,19 +932,127 @@ async fn plan_games(
     Ok((games, ids))
 }
 
+/// How many detail requests the out-of-date fallback runs at once.
+const DETAIL_FETCHES: usize = 4;
+
+/// Whether each requested game can be copied from this computer
+/// ([`InstallService::local_states`], once per request), with `outdated`
+/// filled for the eligible ones: from the update set when a pass has
+/// finished this session, else from each eligible game's detail (4 at a
+/// time) and [`game_has_server_update`]. A failure here never fails the
+/// plan: the games then simply download.
+async fn local_states(
+    install: &Arc<InstallService>,
+    updates: &UpdateService,
+    client: &Arc<RommClient>,
+    server: &str,
+    rom_ids: &[i64],
+    for_windows: bool,
+) -> HashMap<i64, LocalState> {
+    let assessed = {
+        let install = install.clone();
+        let rom_ids = rom_ids.to_vec();
+        let server = server.to_string();
+        tokio::task::spawn_blocking(move || {
+            let states = install.local_states(&rom_ids, &server, for_windows)?;
+            let rows = install.registry().all()?;
+            Ok::<_, grid_core::library::LibraryError>((states, rows))
+        })
+        .await
+    };
+    let (mut states, rows) = match assessed {
+        Ok(Ok(found)) => found,
+        Ok(Err(e)) => {
+            tracing::warn!("backup plan: installed games not checked: {e}");
+            return HashMap::new();
+        }
+        Err(e) => {
+            tracing::warn!("backup plan: installed games not checked: {e}");
+            return HashMap::new();
+        }
+    };
+    let newer = match newer_from_updates(updates, &states) {
+        Some(newer) => newer,
+        None => newer_from_details(client, &states, &rows).await,
+    };
+    fill_outdated(&mut states, &rows, &newer);
+    states
+}
+
+/// The out-of-date fallback: each eligible game's detail, 4 at a time,
+/// judged by [`game_has_server_update`]. A detail that fails to load counts
+/// as up to date (the backup job checks again and records the truth).
+async fn newer_from_details(
+    client: &Arc<RommClient>,
+    states: &HashMap<i64, LocalState>,
+    rows: &[InstalledGame],
+) -> HashMap<i64, String> {
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(DETAIL_FETCHES));
+    let mut tasks = Vec::new();
+    for rom_id in eligible_ids(states) {
+        let Some(row) = rows.iter().find(|row| row.rom_id == Some(rom_id)).cloned() else {
+            continue;
+        };
+        let client = client.clone();
+        let semaphore = semaphore.clone();
+        tasks.push(tokio::spawn(async move {
+            let _permit = semaphore.acquire_owned().await.ok()?;
+            let detail = match client.rom_detail(rom_id).await {
+                Ok(detail) => detail,
+                Err(_) => {
+                    tracing::debug!("backup plan: rom {rom_id} detail fetch failed");
+                    return None;
+                }
+            };
+            let server = ServerVersion {
+                platform: &detail.platform_name,
+                platform_slug: &detail.platform_slug,
+                rom_file_name: &detail.fs_name,
+                updated_at: &detail.server_updated_at,
+            };
+            game_has_server_update(&row, &server).then(|| (rom_id, detail.fs_name.clone()))
+        }));
+    }
+    let mut newer = HashMap::new();
+    for task in tasks {
+        if let Ok(Some((rom_id, name))) = task.await {
+            newer.insert(rom_id, name);
+        }
+    }
+    newer
+}
+
 /// Plans a backup of `request` to `scanned`. With `resolve_sizes`, the
 /// emulator sizes not known yet are looked up first (dialog only).
 async fn make_plan(
     install: &Arc<InstallService>,
+    updates: &UpdateService,
     client: Arc<RommClient>,
     scanned: &ScannedDrive,
     request: &BackupRequest,
-    include_firmware: bool,
-    include_runtime: bool,
+    options: &PlanOptions,
     resolve_sizes: bool,
 ) -> Result<Planned, String> {
     let pack = writable_pack(scanned)?;
-    let (games, platform_ids) = plan_games(&client, request, scanned.drive.fat32).await?;
+    let include_firmware = options.include_firmware;
+    let include_runtime = options.include_runtime;
+    let (mut games, platform_ids) = plan_games(&client, request, scanned.drive.fat32).await?;
+    let server = strip_userinfo(client.server_url());
+    let rom_ids: Vec<i64> = games.iter().map(|game| game.rom_id).collect();
+    let mut states = local_states(
+        install,
+        updates,
+        &client,
+        &server,
+        &rom_ids,
+        pack.os.contains(&PackOs::Windows),
+    )
+    .await;
+    for game in &mut games {
+        if let Some(state) = states.remove(&game.rom_id) {
+            game.local = state;
+        }
+    }
     let mut firmware = Vec::new();
     for game in &games {
         if firmware
@@ -850,9 +1076,8 @@ async fn make_plan(
         }
     }
     let (emulators, compat) = install.backup_emulator_choices(&games);
-    let server = strip_userinfo(client.server_url());
     let key = scanned.key();
-    let run = |sizes: &std::collections::HashMap<(String, PackOs), u64>| {
+    let run = |sizes: &HashMap<(String, PackOs), u64>| {
         plan::plan(&PlanInput {
             drive: &key,
             pack: &pack,
@@ -867,8 +1092,8 @@ async fn make_plan(
             include_runtime,
             host: PackOs::host(),
             sizes,
-            choices: &std::collections::HashMap::new(),
-            use_local: false,
+            choices: &options.choices,
+            use_local: options.use_local,
         })
     };
     let planned = run(&install.emulator_sizes());
@@ -894,7 +1119,11 @@ async fn make_plan(
     Ok(run(&install.emulator_sizes()))
 }
 
+/// Plans a backup for the dialog. `use_local` ("Copy installed games from
+/// this computer") defaults to on; `choices` are the user's picks for
+/// out-of-date local games.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn plan_backup(
     state: State<'_, AppState>,
     app: AppHandle,
@@ -902,24 +1131,35 @@ pub async fn plan_backup(
     request: BackupRequest,
     include_firmware: bool,
     include_runtime: Option<bool>,
+    use_local: Option<bool>,
+    choices: Option<Vec<SourcePick>>,
 ) -> Result<BackupPlan, String> {
     let install = install(&state)?.clone();
     let client = state.session.client().ok_or(NEEDS_SERVER)?;
     let scanned = connected(&state, &app, &key).await?;
+    let options = PlanOptions {
+        include_firmware,
+        include_runtime: include_runtime.unwrap_or(false),
+        use_local: use_local.unwrap_or(true),
+        choices: choices_map(choices),
+    };
     let planned = make_plan(
         &install,
+        &state.updates,
         client,
         &scanned,
         &request,
-        include_firmware,
-        include_runtime.unwrap_or(false),
+        &options,
         true,
     )
     .await?;
     Ok(planned.plan)
 }
 
+/// Queues the backup `plan_backup` showed, planned again with the same
+/// options. Refused while an out-of-date local game has no pick.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn start_backup(
     state: State<'_, AppState>,
     app: AppHandle,
@@ -927,21 +1167,32 @@ pub async fn start_backup(
     request: BackupRequest,
     include_firmware: bool,
     include_runtime: Option<bool>,
+    use_local: Option<bool>,
+    choices: Option<Vec<SourcePick>>,
 ) -> Result<BackupQueued, String> {
     ensure_library_idle(&state)?;
     let install = install(&state)?.clone();
     let client = state.session.client().ok_or(NEEDS_SERVER)?;
     let scanned = connected(&state, &app, &key).await?;
+    let options = PlanOptions {
+        include_firmware,
+        include_runtime: include_runtime.unwrap_or(false),
+        use_local: use_local.unwrap_or(true),
+        choices: choices_map(choices),
+    };
     let planned = make_plan(
         &install,
+        &state.updates,
         client.clone(),
         &scanned,
         &request,
-        include_firmware,
-        include_runtime.unwrap_or(false),
+        &options,
         false,
     )
     .await?;
+    if let Some(refusal) = needs_choice_refusal(planned.plan.needs_choice) {
+        return Err(refusal);
+    }
     if planned.items.is_empty() {
         return Err("Nothing to backup".to_string());
     }
@@ -1306,6 +1557,154 @@ mod tests {
         );
         // Not an asset of this game: refused.
         assert!(asset_cache_urls("E:", &game, "gridpack.json").is_none());
+    }
+
+    #[test]
+    fn choices_arrive_as_picks_and_the_last_pick_wins() {
+        let picks: Vec<SourcePick> = serde_json::from_value(serde_json::json!([
+            { "rom_id": 7, "source": "local" },
+            { "rom_id": 8, "source": "download" },
+            { "rom_id": 7, "source": "download" },
+        ]))
+        .unwrap();
+        let map = choices_map(Some(picks));
+        assert_eq!(map.len(), 2);
+        assert_eq!(map[&7], SourceChoice::Download);
+        assert_eq!(map[&8], SourceChoice::Download);
+        assert!(choices_map(None).is_empty());
+        assert!(serde_json::from_value::<SourcePick>(
+            serde_json::json!({ "rom_id": 1, "source": "elsewhere" })
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_plan_waiting_on_picks_is_refused() {
+        assert_eq!(needs_choice_refusal(0), None);
+        assert_eq!(
+            needs_choice_refusal(1).unwrap(),
+            "Choose which copy to backup for 1 game"
+        );
+        assert_eq!(
+            needs_choice_refusal(3).unwrap(),
+            "Choose which copy to backup for 3 games"
+        );
+    }
+
+    fn eligible() -> LocalState {
+        LocalState::Eligible {
+            layout: pack::InstalledLayout::Extracted,
+            archive_bytes: 4096,
+            outdated: None,
+        }
+    }
+
+    fn installed_row(rom_id: i64, rom_file_name: &str) -> InstalledGame {
+        InstalledGame {
+            rom_id: Some(rom_id),
+            rom_file_name: rom_file_name.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn outdated_comes_from_the_update_set_once_a_pass_finished() {
+        let mut states: HashMap<i64, LocalState> = HashMap::from([
+            (1, eligible()),
+            (2, eligible()),
+            (3, LocalState::NotInstalled),
+            (
+                4,
+                LocalState::Ineligible {
+                    reason: "Its files weren't found on this computer".into(),
+                },
+            ),
+            (5, eligible()),
+        ]);
+        let updates = UpdateService::new();
+        assert!(
+            newer_from_updates(&updates, &states).is_none(),
+            "no pass yet: the caller falls back to the details"
+        );
+        updates.commit_for_test(HashMap::from([
+            (1, "Velvet Static (v1.3).zip".to_string()),
+            (3, "Not Here (v2).zip".to_string()),
+            (4, "Missing (v2).zip".to_string()),
+            (5, "Untagged.zip".to_string()),
+        ]));
+        let newer = newer_from_updates(&updates, &states).unwrap();
+        assert_eq!(
+            newer
+                .keys()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>(),
+            [1, 5].into(),
+            "only eligible games"
+        );
+
+        let rows = [
+            installed_row(1, "Velvet Static (v1.2).zip"),
+            installed_row(2, "Moss (v1.0).zip"),
+            installed_row(5, "Untagged.zip"),
+        ];
+        fill_outdated(&mut states, &rows, &newer);
+        let outdated = |id: i64| match &states[&id] {
+            LocalState::Eligible { outdated, .. } => outdated.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            outdated(1),
+            Some(Outdated {
+                installed_version: "v1.2".into(),
+                server_version: "v1.3".into(),
+            })
+        );
+        assert_eq!(outdated(2), None, "no update known");
+        assert_eq!(
+            outdated(5),
+            Some(Outdated {
+                installed_version: String::new(),
+                server_version: String::new(),
+            }),
+            "no version tags: an older copy"
+        );
+        assert_eq!(states[&3], LocalState::NotInstalled);
+    }
+
+    #[test]
+    fn only_art_is_served_from_the_drive() {
+        let mut copy = game(7, "https://romm.home.lan");
+        copy.installed = Some(
+            serde_json::from_value(serde_json::json!({
+                "archive": "tar", "layout": "extracted", "name": "Velvet Static",
+                "parts": [{ "path": "games/psx/Velvet Static/installed.tar.001",
+                            "size": 10, "md5": "00000000000000000000000000000000" }],
+                "tree_bytes": 10, "tree_files": 1,
+            }))
+            .unwrap(),
+        );
+        let mut file = game(8, "https://romm.home.lan");
+        file.files = vec![serde_json::from_value(serde_json::json!({
+            "path": "games/psx/Other.chd", "size": 10, "server_file_id": 1, "name": "Other.chd"
+        }))
+        .unwrap()];
+        let mut kit = new_pack("Couch kit", &[PackOs::Linux]);
+        kit.games = vec![copy, file];
+
+        let owner = art_owner(&kit, "games/psx/Velvet Static/cover.png").unwrap();
+        assert_eq!(owner.source.rom_id, 7);
+        assert!(art_owner(&kit, "games/psx/Velvet Static/screenshot-02.png").is_some());
+        assert!(
+            art_owner(&kit, "games/psx/Velvet Static/installed.tar.001").is_none(),
+            "an archive part is not art"
+        );
+        assert!(
+            art_owner(&kit, "games/psx/Other.chd").is_none(),
+            "a game file is not art"
+        );
+        assert!(kit.games[0]
+            .paths()
+            .any(|path| path == "games/psx/Velvet Static/installed.tar.001"));
     }
 
     fn emulator(name: &str, source_id: &str, kind: &str, os: PackOs) -> PackEmulator {
