@@ -42,7 +42,10 @@ Modules as declared in `src/lib.rs`:
   (`/proc/self/mountinfo` under `/run/media` and `/media`), `drives/windows.rs` (the
   Win32 volume APIs: removable letters plus fixed drives on an external bus) and
   `drives/macos.rs` (`/Volumes`, best effort). `write` is the write engine: every file
-  goes to `<name>.gridtmp`, is synced and renamed; `classify_io` tells a removed drive
+  goes to `<name>.gridtmp`, is synced, is read back (past the page cache where the OS
+  allows) and checked against the MD5 of the staged bytes it copied, and is renamed. It
+  never checks against a server hash: RomM hashes an archive's contents, so a pack
+  file's `md5`/`sha1` are informational; `classify_io` tells a removed drive
   from another I/O error; `guard_grid_root` and `remove_all_grid_files` are the only
   whole-folder delete. `plan` is pure: what a backup writes, skips and whether it fits
   (`BackupPlan` for the dialog, `BackupItems` for the queue), the per-system emulator

@@ -101,6 +101,7 @@ Required: `format`, `name`, `os`, `created`, `updated`; per game `platform`, `pl
 
 - `source.server` is the server URL without userinfo. The other `source` fields rebuild the game's details and its image cache keys, so its art shows offline.
 - `emulators[].kind` is `emulator` or `compat_tool` (Proton, umu-launcher and the Steam Linux Runtime). `source_id` is a catalog `owner/repo`, `romm:<folder>/<emulator>` for a server build, or `local:<name>` for a manually added emulator zipped from its program folder; a `local:` entry also has `program` (the program's path inside the zip) and `args` (its launch options). `supplementals` are the pack paths of the release's extra files, stored beside the archive.
+- `files[].md5` and `sha1` are RomM's hashes, kept for identification. For an archive RomM hashes the decompressed contents, not the archive, so GRID never checks a file's bytes against them; each write is checked by reading it back against the bytes GRID downloaded. `firmware[].files[].md5` is the raw file's MD5 (RomM serves firmware as is), and an install from the drive checks it.
 - `os` holds only `linux` and `windows`; any other value makes the file unreadable.
 - Keys GRID does not know are kept when it rewrites the file. A `format` greater than 1 is read-only.
 

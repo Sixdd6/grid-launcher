@@ -847,11 +847,13 @@ when it was created and last updated, and three arrays:
 - `games`: each with its platform, its server source (server URL without userinfo, ROM
   id, and what rebuilds its details and image keys), the details Details shows, its size,
   its files (path, size, server file id, name, category, whether it is top level,
-  hashes) and its asset paths;
+  hashes) and its asset paths. A game file's hashes are RomM's, kept for identification
+  only: for an archive they describe its contents, so nothing checks a file against them;
 - `emulators`: one entry per emulator per OS, with its kind (`emulator` or
   `compat_tool`, which covers Proton, umu-launcher and the Steam Linux Runtime), source,
   version, platforms, archive path and size;
-- `firmware`: per platform, each file's name, path, size and MD5.
+- `firmware`: per platform, each file's name, path, size and MD5. RomM serves firmware
+  as is, so this MD5 is the file's own and an install from the drive checks it.
 
 Every path is relative to `gridpack/`, so the drive works under any mount point. Unknown
 keys are kept when GRID rewrites the file. The full shape is in the design README.
@@ -861,7 +863,11 @@ keys are kept when GRID rewrites the file. The full shape is in the design READM
   delete of the whole folder is Remove GRID files…, behind a check that the target is
   exactly that folder.
 - Every file is written to `<name>.gridtmp`, synced, checked, and only then renamed into
-  place. `gridpack.json` is rewritten the same way after each finished item, so a drive
+  place. The check is against what GRID downloaded: the file's size, then the file is read
+  back from the drive (past the system's cache where the OS allows) and its MD5 must match
+  the MD5 of the staged bytes. The server's hashes are never used for this, because RomM
+  hashes an archive's decompressed contents, not the archive. The read-back adds about a
+  third to a half to each file's write time. `gridpack.json` is rewritten the same way after each finished item, so a drive
   pulled mid-write always holds a valid index and at most a `.gridtmp` leftover.
 - Leftover `.gridtmp` files are removed the next time the drive is connected (not while
   a row is writing to it).
