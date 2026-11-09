@@ -109,7 +109,12 @@ pub fn anchor(row: &InstalledGame, home: Option<&Path>) -> Option<Anchor> {
 /// True when `path` sits directly in one of the places a library root
 /// keeps installs for `platform`: `games/<Platform>/`, the legacy
 /// `<root>/<Platform>/`, or the root itself.
-fn at_layout_location(path: &Path, root: &Path, platform: &str, home: Option<&Path>) -> bool {
+pub(crate) fn at_layout_location(
+    path: &Path,
+    root: &Path,
+    platform: &str,
+    home: Option<&Path>,
+) -> bool {
     let Some(parent) = path.parent().and_then(|p| removal_key(p, home)) else {
         return false;
     };

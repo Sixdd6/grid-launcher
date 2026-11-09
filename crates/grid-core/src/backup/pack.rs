@@ -163,6 +163,9 @@ pub struct PackGame {
     pub players: String,
     #[serde(default)]
     pub version: String,
+    /// The bytes this entry holds on the drive, art aside: the sum of
+    /// [`Self::files`], or for an installed copy the sum of its parts
+    /// ([`PackInstalled::parts_bytes`]). [`Pack::pack_bytes`] adds these up.
     pub size: u64,
     #[serde(default)]
     pub sha1: String,
@@ -209,10 +212,39 @@ pub struct PackInstalled {
     /// The server had newer files at backup time.
     #[serde(default)]
     pub outdated: bool,
-    #[serde(default)]
+    /// The OS the copy was made on. An OS this build does not know (a
+    /// newer GRID's) reads as `None` rather than making the pack unreadable.
+    #[serde(default, deserialize_with = "lenient_os")]
     pub from_os: Option<PackOs>,
     #[serde(default)]
     pub row: PackInstalledRow,
+}
+
+impl PackInstalled {
+    /// The bytes the parts take on the drive: what [`PackGame::size`] holds
+    /// for an installed copy.
+    pub fn parts_bytes(&self) -> u64 {
+        self.parts
+            .iter()
+            .fold(0_u64, |sum, part| sum.saturating_add(part.size))
+    }
+
+    /// Whether this build can restore the copy: a known archive kind and
+    /// layout. A copy it cannot restore is still listed; Install says it
+    /// needs a newer GRID.
+    pub fn is_supported(&self) -> bool {
+        self.archive != ArchiveKind::Unknown && self.layout != InstalledLayout::Unknown
+    }
+}
+
+/// `from_os` read leniently: any value that is not a known [`PackOs`]
+/// (another string, a number, `null`) is `None`.
+fn lenient_os<'de, D>(deserializer: D) -> Result<Option<PackOs>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
 }
 
 /// How an installed copy is archived.
@@ -630,6 +662,20 @@ const RESERVED_NAMES: [&str; 22] = [
     "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
+/// Whether `stem` (a name up to its first `.`) is a Windows reserved
+/// device name, ignoring case and trailing spaces.
+fn is_reserved_stem(stem: &str) -> bool {
+    RESERVED_NAMES
+        .iter()
+        .any(|reserved| stem.trim_end().eq_ignore_ascii_case(reserved))
+}
+
+/// Whether a file name is a Windows reserved device name (`CON`,
+/// `aux.txt`, `Com1.tar.gz`…), which no FAT, exFAT or NTFS file may use.
+pub(crate) fn is_reserved_name(name: &str) -> bool {
+    is_reserved_stem(name.split('.').next().unwrap_or(name))
+}
+
 /// One path component as a pack writes it: [`sanitize_component`], then a
 /// Windows reserved device name (`CON`, `aux.txt`…) gets `_` after its stem,
 /// then the name is cut to [`MAX_COMPONENT_BYTES`], keeping a short extension.
@@ -639,9 +685,7 @@ pub fn pack_component(raw: &str, fallback: &str) -> String {
         Some(dot) => name.split_at(dot),
         None => (name.as_str(), ""),
     };
-    let reserved = RESERVED_NAMES
-        .iter()
-        .any(|reserved| stem.trim_end().eq_ignore_ascii_case(reserved));
+    let reserved = is_reserved_stem(stem);
     let name = if reserved {
         format!("{}_{rest}", stem.trim_end())
     } else {
@@ -687,6 +731,15 @@ pub fn game_dir_rel(platform_slug: &str, fs_name: &str, single_file_name: Option
         None => pack_component(fs_name, "game"),
     };
     format!("games/{slug}/{leaf}")
+}
+
+/// Part `index` (zero-based: the position in [`PackInstalled::parts`]) of
+/// an installed copy's archive: `<game folder>/installed.tar.001` for index
+/// 0, `.002` for index 1, and so on. The game folder comes from
+/// [`game_dir_rel`] with no single file, through [`unique_rel`] with
+/// `is_file = false`.
+pub fn installed_part_rel(game_dir: &str, index: usize) -> String {
+    format!("{game_dir}/installed.tar.{:03}", index.saturating_add(1))
 }
 
 /// A file of a multi-file or native game: `<game folder>/<file>`.
@@ -851,12 +904,18 @@ pub fn pack_game_detail(game: &PackGame) -> RomDetail {
 }
 
 impl PackGame {
-    /// Every pack-relative path this game's entry names: files and art.
+    /// Every pack-relative path this game's entry names: files, an
+    /// installed copy's archive parts, and art.
     pub fn paths(&self) -> impl Iterator<Item = &str> {
         let assets = &self.assets;
         self.files
             .iter()
             .map(|file| file.path.as_str())
+            .chain(
+                self.installed
+                    .iter()
+                    .flat_map(|copy| copy.parts.iter().map(|part| part.path.as_str())),
+            )
             .chain(
                 [
                     &assets.cover,
@@ -869,6 +928,12 @@ impl PackGame {
                 .map(String::as_str),
             )
             .chain(assets.screenshots.iter().map(String::as_str))
+    }
+
+    /// Whether the entry is a copy of an install (an archive in parts)
+    /// rather than the server's files.
+    pub fn is_installed_copy(&self) -> bool {
+        self.installed.is_some()
     }
 
     fn is(&self, key: &str, rom_id: i64) -> bool {
@@ -1181,6 +1246,169 @@ mod tests {
         let copy = game.installed.unwrap();
         assert_eq!(copy.archive, ArchiveKind::Unknown);
         assert_eq!(copy.layout, InstalledLayout::Unknown);
+    }
+
+    /// A pack whose only game is [`installed_game`], as `gridpack.json` bytes.
+    fn installed_pack(game: serde_json::Value) -> Vec<u8> {
+        let mut value: serde_json::Value = serde_json::from_str(DRAFT).unwrap();
+        value["games"] = serde_json::json!([game]);
+        serde_json::to_vec(&value).unwrap()
+    }
+
+    #[test]
+    fn an_unknown_from_os_reads_as_none() {
+        for odd in [
+            serde_json::json!("macos"),
+            serde_json::json!(7),
+            serde_json::Value::Null,
+        ] {
+            let mut value = installed_game();
+            value["installed"]["from_os"] = odd.clone();
+            let PackState::Ready(pack) = parse_pack(&installed_pack(value)) else {
+                panic!("from_os {odd} made the pack unreadable");
+            };
+            assert_eq!(pack.games[0].installed.as_ref().unwrap().from_os, None);
+        }
+        let mut value = installed_game();
+        value["installed"]
+            .as_object_mut()
+            .unwrap()
+            .remove("from_os");
+        let game: PackGame = serde_json::from_value(value).unwrap();
+        assert_eq!(game.installed.unwrap().from_os, None);
+        let mut value = installed_game();
+        value["installed"]["from_os"] = serde_json::json!("windows");
+        let game: PackGame = serde_json::from_value(value).unwrap();
+        assert_eq!(game.installed.unwrap().from_os, Some(PackOs::Windows));
+    }
+
+    #[test]
+    fn an_unknown_archive_or_layout_keeps_the_pack_ready() {
+        let mut value = installed_game();
+        value["installed"]["archive"] = serde_json::json!("zstd-tar");
+        value["installed"]["layout"] = serde_json::json!("hologram");
+        let PackState::Ready(pack) = parse_pack(&installed_pack(value)) else {
+            panic!("an unknown archive or layout made the pack unreadable");
+        };
+        let game = &pack.games[0];
+        assert!(game.is_installed_copy());
+        assert!(!game.installed.as_ref().unwrap().is_supported());
+        assert_eq!(game.paths().count(), 2, "its parts are still known");
+
+        let PackState::Ready(pack) = parse_pack(&installed_pack(installed_game())) else {
+            panic!("ready");
+        };
+        assert!(pack.games[0].installed.as_ref().unwrap().is_supported());
+    }
+
+    #[test]
+    fn an_unsafe_part_path_is_unreadable() {
+        for bad in [
+            "../../etc/passwd",
+            "/abs/installed.tar.001",
+            "games\\x.tar.001",
+            "",
+        ] {
+            let mut value = installed_game();
+            value["installed"]["parts"][1]["path"] = serde_json::json!(bad);
+            assert!(
+                matches!(parse_pack(&installed_pack(value)), PackState::Unreadable(_)),
+                "part path {bad:?} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn paths_include_the_installed_parts() {
+        let mut game: PackGame = serde_json::from_value(installed_game()).unwrap();
+        game.assets.cover = Some("assets/ps4/Ember Run/cover.jpg".to_string());
+        let paths: Vec<&str> = game.paths().collect();
+        assert_eq!(
+            paths,
+            [
+                "games/ps4/Ember Run/installed.tar.001",
+                "games/ps4/Ember Run/installed.tar.002",
+                "assets/ps4/Ember Run/cover.jpg",
+            ]
+        );
+        let mut pack = new_pack("Couch kit", &[PackOs::Linux]);
+        pack.games.push(game.clone());
+        assert_eq!(pack.paths().count(), 3);
+        assert!(!draft().games[0].is_installed_copy());
+        assert!(game.is_installed_copy());
+    }
+
+    #[test]
+    fn parts_collide_like_a_folder_game() {
+        let mut pack = new_pack("Couch kit", &[PackOs::Linux]);
+        pack.games
+            .push(serde_json::from_value(installed_game()).unwrap());
+        let candidate = game_dir_rel("ps4", "Ember Run", None);
+        assert_eq!(
+            unique_rel(&pack, &candidate, "https://other.lan", 9, false),
+            "games/ps4/Ember Run [rom 9]"
+        );
+        assert_eq!(
+            unique_rel(&pack, &candidate, "https://romm.home.lan", 77, false),
+            candidate,
+            "a game's own parts never collide with it"
+        );
+    }
+
+    #[test]
+    fn installed_part_names() {
+        let dir = game_dir_rel("ps4", "Ember Run", None);
+        assert_eq!(
+            installed_part_rel(&dir, 0),
+            "games/ps4/Ember Run/installed.tar.001"
+        );
+        assert_eq!(
+            installed_part_rel(&dir, 1),
+            "games/ps4/Ember Run/installed.tar.002"
+        );
+        assert_eq!(
+            installed_part_rel(&dir, 998),
+            "games/ps4/Ember Run/installed.tar.999"
+        );
+        assert_eq!(
+            installed_part_rel(&dir, 999),
+            "games/ps4/Ember Run/installed.tar.1000"
+        );
+        assert!(validate_rel(&installed_part_rel(&dir, 0)).is_ok());
+        const { assert!(PART_BYTES < FAT32_MAX_FILE) };
+    }
+
+    #[test]
+    fn an_installed_copy_counts_its_parts() {
+        let game: PackGame = serde_json::from_value(installed_game()).unwrap();
+        let copy = game.installed.as_ref().unwrap();
+        assert_eq!(copy.parts_bytes(), 4293918720 + 2148532224);
+        assert_eq!(
+            copy.parts_bytes(),
+            game.size,
+            "the fixture's size is the parts' sum"
+        );
+        let mut pack = new_pack("Couch kit", &[PackOs::Linux]);
+        pack.games.push(game);
+        assert_eq!(pack.pack_bytes(), 4293918720 + 2148532224);
+    }
+
+    #[test]
+    fn edit_pack_keeps_installed_blocks_and_unknown_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut game = installed_game();
+        game["future_game"] = serde_json::json!({ "kept": true });
+        write_index(
+            dir.path(),
+            std::str::from_utf8(&installed_pack(game)).unwrap(),
+        );
+        edit_pack(dir.path(), |pack| pack.name = "Renamed".to_string()).unwrap();
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(index_path(dir.path())).unwrap()).unwrap();
+        assert_eq!(written["name"], "Renamed");
+        assert_eq!(written["games"][0]["future_game"]["kept"], true);
+        assert_eq!(written["games"][0]["installed"]["parts"][1]["md5"], "bb");
+        assert_eq!(written["future_key"]["kept"][0], 1);
     }
 
     #[test]
