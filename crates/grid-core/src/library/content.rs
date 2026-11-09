@@ -94,6 +94,8 @@ mod tests {
             is_top_level: true,
             last_modified: String::new(),
             category: category.to_string(),
+            md5_hash: String::new(),
+            sha1_hash: String::new(),
         }
     }
 

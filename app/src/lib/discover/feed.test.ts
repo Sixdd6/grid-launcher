@@ -29,6 +29,8 @@ function game(over: Partial<GameSummary> = {}): GameSummary {
     created_at: '',
     first_release_date: null,
     logo_url: '',
+    fs_size_bytes: 0,
+    largest_file_bytes: 0,
     ...over,
   };
 }

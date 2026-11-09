@@ -72,6 +72,10 @@ export type GameSummary = {
   first_release_date: number | null;
   /** The server's clear logo, resolved + host-filtered; `''` when none. */
   logo_url: string;
+  /** The ROM's size on the server's disk (`fs_size_bytes`), all files; 0 when unknown. */
+  fs_size_bytes: number;
+  /** The largest top-level game file, in bytes; 0 when unknown. */
+  largest_file_bytes: number;
 };
 
 /** `discover_feed`: Server › Discover's two lists, already filtered and
@@ -103,6 +107,10 @@ export type RomFile = {
   last_modified: string;
   /** RomM's file category (e.g. `"update"`, `"dlc"`); `''` for an ordinary game file. */
   category: string;
+  /** The file's MD5 as the server states it; `''` when none. */
+  md5_hash: string;
+  /** The file's SHA-1 as the server states it; `''` when none. */
+  sha1_hash: string;
 };
 
 /** One Overview "Related" chip. Mirrors `grid_core::romm::RelatedGame`. */
@@ -142,6 +150,8 @@ export type RomDetail = {
   /** How many achievements RomM lists for the ROM; the Achievements tab
    *  shows only when this is above zero. */
   achievement_count: number;
+  /** The game's clear logo, resolved + host-filtered; `''` when none. */
+  logo_url: string;
 };
 
 /** One Achievements tab row. Mirrors `grid_core::romm::achievements::AchievementRow`. */

@@ -157,6 +157,8 @@ describe('syntheticCloudGame', () => {
       created_at: '',
       first_release_date: null,
       logo_url: '',
+      fs_size_bytes: 0,
+      largest_file_bytes: 0,
     };
     const synthetic = syntheticCloudGame(game, 'Emulators', '');
     expect(synthetic.title).toBe('Portal');

@@ -759,6 +759,13 @@ pub struct RomFile {
     /// game file. The server sends `null` for no category.
     #[serde(default, deserialize_with = "null_to_empty")]
     pub category: String,
+    /// The file's MD5 as the server states it, lowercase hex; `""` when the
+    /// server sends none (absent or `null`).
+    #[serde(default, deserialize_with = "null_to_empty")]
+    pub md5_hash: String,
+    /// The file's SHA-1 as the server states it; `""` when absent or `null`.
+    #[serde(default, deserialize_with = "null_to_empty")]
+    pub sha1_hash: String,
 }
 
 /// Deserializes a nullable string field as an empty string when absent or
@@ -856,6 +863,9 @@ pub struct RomDetail {
     /// Details Achievements tab shows only when this is above zero: many
     /// RA-linked ROMs (`ra_id` set) have an empty list.
     pub achievement_count: usize,
+    /// The game's clear logo, already resolved and host-filtered
+    /// (`ss_metadata.logo_path`, else `ss_metadata.logo_url`); `""` when none.
+    pub logo_url: String,
 }
 
 /// Wire shape of `RomMetadataSchema` fields we use. Every field defaulted so
@@ -1002,6 +1012,7 @@ impl RawRomDetail {
         let extra = serde_json::Value::Object(self.extra);
         let screenshot_urls = crate::images::urls::screenshot_urls_from_payload(&extra, &resolver);
         let fanart_urls = crate::images::urls::fanart_urls_from_payload(&extra, &resolver);
+        let logo_url = logo_url_from_payload(&extra, &resolver);
         RomDetail {
             id: self.id,
             name,
@@ -1042,6 +1053,7 @@ impl RawRomDetail {
                 .merged_ra_metadata
                 .map(|m| m.achievements.len())
                 .unwrap_or(0),
+            logo_url,
         }
     }
 }
@@ -1322,6 +1334,63 @@ mod detail_fanart_tests {
         }))
         .expect("detail decodes");
         assert_eq!(raw.into_detail("https://romm.example").achievement_count, 2);
+    }
+
+    #[test]
+    fn a_detail_carries_its_logo_and_file_hashes() {
+        let raw: RawRomDetail = serde_json::from_value(serde_json::json!({
+            "id": 7,
+            "platform_id": 1,
+            "ss_metadata": { "logo_path": "/assets/romm/resources/logo.png" },
+            "files": [{
+                "id": 70,
+                "file_name": "game.sfc",
+                "md5_hash": "0123456789abcdef0123456789abcdef",
+                "sha1_hash": "0123456789abcdef0123456789abcdef01234567"
+            }]
+        }))
+        .expect("detail decodes");
+        let detail = raw.into_detail("https://romm.example");
+        assert_eq!(
+            detail.logo_url,
+            "https://romm.example/assets/romm/resources/logo.png"
+        );
+        assert_eq!(detail.files[0].md5_hash, "0123456789abcdef0123456789abcdef");
+        assert_eq!(
+            detail.files[0].sha1_hash,
+            "0123456789abcdef0123456789abcdef01234567"
+        );
+    }
+
+    #[test]
+    fn missing_or_null_logo_and_hashes_decode_to_empty() {
+        let raw: RawRomDetail = serde_json::from_value(serde_json::json!({
+            "id": 8,
+            "platform_id": 1,
+            "ss_metadata": null,
+            "files": [
+                { "id": 80, "file_name": "a.sfc" },
+                { "id": 81, "file_name": "b.sfc", "md5_hash": null, "sha1_hash": null }
+            ]
+        }))
+        .expect("detail decodes");
+        let detail = raw.into_detail("https://romm.example");
+        assert_eq!(detail.logo_url, "");
+        for file in &detail.files {
+            assert_eq!(file.md5_hash, "");
+            assert_eq!(file.sha1_hash, "");
+        }
+    }
+
+    #[test]
+    fn a_logo_on_another_host_is_dropped() {
+        let raw: RawRomDetail = serde_json::from_value(serde_json::json!({
+            "id": 9,
+            "platform_id": 1,
+            "ss_metadata": { "logo_url": "https://elsewhere.example/logo.png" }
+        }))
+        .expect("detail decodes");
+        assert_eq!(raw.into_detail("https://romm.example").logo_url, "");
     }
 }
 

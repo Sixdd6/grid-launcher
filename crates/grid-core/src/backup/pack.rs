@@ -713,6 +713,8 @@ pub fn pack_game_detail(game: &PackGame) -> RomDetail {
                 is_top_level: file.top_level,
                 last_modified: String::new(),
                 category: file.category.clone(),
+                md5_hash: file.md5.clone(),
+                sha1_hash: file.sha1.clone(),
             })
             .collect(),
         cover_small_path: source.cover_small_path.clone(),
@@ -724,6 +726,7 @@ pub fn pack_game_detail(game: &PackGame) -> RomDetail {
         is_identified: source.igdb_id.is_some(),
         related: Vec::new(),
         achievement_count: 0,
+        logo_url: source.logo_url.clone(),
     }
 }
 
