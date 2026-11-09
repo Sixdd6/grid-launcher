@@ -338,8 +338,10 @@ export type DownloadStatus =
 
 // Which half of the install pipeline owns an entry. `'firmware'` is an
 // EXTERNAL row: the background firmware installer moves its own bytes, so
-// the entry takes no queue slot and reports no progress.
-export type DownloadJob = 'game' | 'emulator' | 'firmware' | 'library';
+// the entry takes no queue slot and reports no progress. `'backup'` is one
+// item of a backup to a drive: `downloading` from the server into staging,
+// then `installing` while it writes to the drive.
+export type DownloadJob = 'game' | 'emulator' | 'firmware' | 'library' | 'backup';
 
 // What an entry installs — finer-grained than `job`.
 export type DownloadKind =
@@ -355,7 +357,15 @@ export type DownloadKind =
   // row. It takes no queue slot; its Cancel and Retry are the move's own
   // commands. `downloading` while it copies (cancellable), `installing`
   // while it commits and cleans up (not cancellable).
-  | 'library_move';
+  | 'library_move'
+  // Game backups (`job: 'backup'`): one game, one emulator release for one
+  // OS, or one platform's firmware written to a drive.
+  | 'backup_game'
+  | 'backup_emulator'
+  | 'backup_firmware'
+  // The one `cancelled` row that stands for the waiting backup rows of a
+  // removed drive ("13 more items"). Dismiss only, never Retry.
+  | 'backup_cancelled';
 
 export type DownloadEntry = {
   id: number;
@@ -374,6 +384,14 @@ export type DownloadEntry = {
   error: string;
   /** One line of free text: what a library move is doing ("games/ · 1.2 of 5.6 GB"). Empty for every other row. */
   detail: string;
+  /** The drive a backup row writes to, or an install-from-drive row copies from: its mount path, or its drive letter on Windows. `''` for every other row. */
+  drive_id: string;
+  /** That drive's pack name. `''` when `drive_id` is. */
+  drive_name: string;
+  /** That drive's volume label. Non-empty on a `game` row: it installs from the drive ("Copying from <label>"). */
+  drive_label: string;
+  /** The backup batch, for one notification per batch. `0` for none. */
+  batch: number;
 };
 
 export type DownloadsSnapshot = { entries: DownloadEntry[] };

@@ -103,6 +103,9 @@ pub enum LibraryError {
     /// The library gate is closed (a library move runs): the reason.
     #[error("{0}")]
     LibraryBusy(String),
+    /// A backup drive went away mid-job: "<label> was removed".
+    #[error("{0}")]
+    DriveRemoved(String),
 }
 
 // --- constants --------------------------------------------------------------
@@ -1889,11 +1892,12 @@ impl InstallService {
 
     /// Cancels `entry_id`: an active download gets its flag flipped and ends
     /// as `Cancelled` once the task observes it; a queued entry is dropped
-    /// immediately. Anything else is ignored.
+    /// immediately. A backup row writing to its drive gets its flag flipped
+    /// too ([`CancelAction::ActiveWrite`]). Anything else is ignored.
     pub fn cancel(&self, entry_id: u64) {
         let action = self.queue.lock().unwrap().request_cancel(entry_id);
         match action {
-            CancelAction::ActiveDownload => {
+            CancelAction::ActiveDownload | CancelAction::ActiveWrite => {
                 if let Some(flag) = self.cancel_flags.lock().unwrap().get(&entry_id) {
                     flag.store(true, Ordering::Relaxed);
                 }
@@ -2084,6 +2088,9 @@ impl InstallService {
             Some(JobKey::External(_)) => Ok(()),
             // A library move is resumed or restarted by its own service.
             Some(JobKey::LibraryMove) => Ok(()),
+            // Backup jobs are not run by this service yet; a summary row is
+            // never retryable.
+            Some(JobKey::Backup { .. }) | Some(JobKey::BackupSummary(_)) => Ok(()),
             None => Ok(()),
         }
     }
