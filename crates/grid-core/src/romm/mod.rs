@@ -371,6 +371,54 @@ pub struct GameSummary {
     /// `""` when the server has none on its own host.
     #[serde(default)]
     pub logo_url: String,
+    /// The ROM's size on the server's disk (`fs_size_bytes`), all its files
+    /// together; `0` when the payload has none. The Server select bar sums
+    /// it ("3 selected · 4.2 GB").
+    #[serde(default)]
+    pub fs_size_bytes: i64,
+    /// The largest single file of the game (see
+    /// [`largest_file_from_payload`]); `0` when the payload lists no files.
+    /// The backup dialog warns with it about files too big for FAT32,
+    /// without a per-game request.
+    #[serde(default)]
+    pub largest_file_bytes: i64,
+}
+
+/// An integer field of a payload, lenient: absent, null or a non-number is
+/// `None`; a float is truncated.
+fn lenient_i64(value: Option<&serde_json::Value>) -> Option<i64> {
+    let value = value?;
+    value.as_i64().or_else(|| value.as_f64().map(|f| f as i64))
+}
+
+/// The largest `file_size_bytes` among a `SimpleRomSchema` entry's
+/// top-level game files (`is_top_level` true, `category` null or `"game"`):
+/// the files an install downloads. When no file qualifies (the server
+/// lists only nested or categorized files) the largest of every file is
+/// taken instead, so the FAT32 check errs on the safe side. Lenient: a
+/// missing or malformed `files` list is `0`, and an entry without a size
+/// counts as `0`.
+fn largest_file_from_payload(payload: &serde_json::Value) -> i64 {
+    let Some(files) = payload.get("files").and_then(|f| f.as_array()) else {
+        return 0;
+    };
+    let size = |file: &serde_json::Value| lenient_i64(file.get("file_size_bytes")).unwrap_or(0);
+    let is_game = |file: &serde_json::Value| {
+        let top_level = file
+            .get("is_top_level")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let category = file.get("category").and_then(|v| v.as_str()).unwrap_or("");
+        top_level && (category.is_empty() || category.eq_ignore_ascii_case("game"))
+    };
+    files
+        .iter()
+        .filter(|file| is_game(file))
+        .map(size)
+        .max()
+        .or_else(|| files.iter().map(size).max())
+        .unwrap_or(0)
+        .max(0)
 }
 
 /// `metadatum.first_release_date` of a list payload, in seconds. Lenient: a
@@ -495,6 +543,8 @@ impl RawGameSummary {
             created_at: self.created_at.unwrap_or_default(),
             first_release_date: release_date_from_payload(&extra),
             logo_url: logo_url_from_payload(&extra, &resolver),
+            fs_size_bytes: lenient_i64(extra.get("fs_size_bytes")).unwrap_or(0).max(0),
+            largest_file_bytes: largest_file_from_payload(&extra),
         }
     }
 }
@@ -1109,6 +1159,74 @@ mod summary_tests {
         assert_eq!(summary.logo_url, "");
         assert_eq!(summary.first_release_date, None);
         assert_eq!(summary.created_at, "");
+    }
+
+    /// `fs_size_bytes` and the largest top-level game file come from the
+    /// list payload (`SimpleRomSchema.files`): updates, DLC, nested files and
+    /// manuals do not count when a game file is listed.
+    #[test]
+    fn a_summary_carries_its_size_and_largest_game_file() {
+        let summary = parse(serde_json::json!({
+            "id": 106,
+            "name": "Wario World",
+            "platform_id": 9,
+            "fs_size_bytes": 6_500_000_000_i64,
+            "files": [
+                { "id": 1, "file_name": "disc.iso", "file_size_bytes": 1_459_978_240_i64,
+                  "is_top_level": true, "category": null, "md5_hash": null },
+                { "id": 2, "file_name": "big.iso", "file_size_bytes": 4_700_000_000_i64,
+                  "is_top_level": true, "category": "game" },
+                { "id": 3, "file_name": "update.wua", "file_size_bytes": 9_000_000_000_i64,
+                  "is_top_level": true, "category": "update" },
+                { "id": 4, "file_name": "sub/nested.bin", "file_size_bytes": 8_000_000_000_i64,
+                  "is_top_level": false, "category": null },
+                { "id": 5, "file_name": "manual.pdf", "file_size_bytes": 7_000_000_000_i64,
+                  "is_top_level": true, "category": "manual" }
+            ]
+        }));
+        assert_eq!(summary.fs_size_bytes, 6_500_000_000);
+        assert_eq!(summary.largest_file_bytes, 4_700_000_000);
+    }
+
+    /// No top-level game file listed: the largest file of any kind is used,
+    /// so a FAT32 check never under-counts.
+    #[test]
+    fn with_no_top_level_game_file_the_largest_file_counts() {
+        let summary = parse(serde_json::json!({
+            "id": 107,
+            "name": "Folder Game",
+            "platform_id": 9,
+            "files": [
+                { "id": 1, "file_name": "a/game.bin", "file_size_bytes": 300, "is_top_level": false },
+                { "id": 2, "file_name": "a/game.cue", "file_size_bytes": 2 }
+            ]
+        }));
+        assert_eq!(summary.largest_file_bytes, 300);
+    }
+
+    /// Lenient: no `fs_size_bytes`, a null or malformed `files`, an entry with
+    /// no size, all decode to `0` instead of failing the page.
+    #[test]
+    fn missing_or_malformed_sizes_are_zero() {
+        let bare = parse(serde_json::json!({
+            "id": 108, "name": "Old", "platform_id": 1
+        }));
+        assert_eq!((bare.fs_size_bytes, bare.largest_file_bytes), (0, 0));
+        let odd = parse(serde_json::json!({
+            "id": 109, "name": "Odd", "platform_id": 1,
+            "fs_size_bytes": null,
+            "files": "not a list"
+        }));
+        assert_eq!((odd.fs_size_bytes, odd.largest_file_bytes), (0, 0));
+        let sizeless = parse(serde_json::json!({
+            "id": 110, "name": "Sizeless", "platform_id": 1,
+            "fs_size_bytes": 12.0,
+            "files": [ { "id": 1, "file_name": "x.bin", "is_top_level": true }, 5 ]
+        }));
+        assert_eq!(
+            (sizeless.fs_size_bytes, sizeless.largest_file_bytes),
+            (12, 0)
+        );
     }
 
     #[test]
