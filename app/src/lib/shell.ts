@@ -36,6 +36,10 @@ export function applyRestore(outcome: RestoreOutcome): ShellSession {
       };
     case 'unreachable':
       return { phase: 'shell', connected: false, serverUrl: outcome.server_url, username: outcome.username, lastError: outcome.error };
+    case 'offline':
+      // Offline mode: the same not-connected shell as `unreachable`, with no
+      // error. Its own chip and menu come with the offline-mode UI.
+      return { phase: 'shell', connected: false, serverUrl: outcome.server_url, username: outcome.username, lastError: null };
   }
 }
 
