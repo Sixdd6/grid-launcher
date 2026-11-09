@@ -378,6 +378,128 @@ export type DownloadEntry = {
 
 export type DownloadsSnapshot = { entries: DownloadEntry[] };
 
+// ── Game backups (plan §1.3). Types only: the command wrappers land in Task 15. ──
+
+/** An OS a backup drive carries emulators for. Mirrors `grid_core::backup::pack::PackOs`. */
+export type PackOs = 'linux' | 'windows';
+
+/** What GRID found on a connected drive. */
+export type DriveStatus = 'ready' | 'not_set_up' | 'read_only' | 'unreadable' | 'newer_format';
+
+export type PackSummaryEmulator = { name: string; version: string; os: string };
+
+/** A game on a drive, by the server it came from (Details' "On <pack>" line). */
+export type PackRomRef = { server: string; rom_id: number };
+
+export type PackSummary = {
+  name: string;
+  os: PackOs[];
+  game_count: number;
+  gridpack_bytes: number;
+  emulators: PackSummaryEmulator[];
+  /** Platform names. */
+  firmware: string[];
+  /** RFC 3339 UTC. */
+  updated: string;
+  rom_ids: PackRomRef[];
+};
+
+/** A connected drive. `key` is the mount path, or the drive letter on Windows; a pack has no id. */
+export type DriveInfo = {
+  key: string;
+  mount: string;
+  label: string;
+  /** The display file system name: FAT32, exFAT, NTFS, ext4… */
+  fs: string;
+  fat32: boolean;
+  total_bytes: number;
+  free_bytes: number;
+  read_only: boolean;
+  status: DriveStatus;
+  pack: PackSummary | null;
+};
+
+/** A set-up drive GRID has seen, keyed by its mount path or drive letter. */
+export type RememberedDrive = {
+  mount: string;
+  name: string;
+  label: string;
+  fs: string;
+  total_bytes: number;
+  game_count: number;
+  /** RFC 3339 UTC. */
+  last_seen: string;
+};
+
+/** `list_drives` and the `drives-changed` event payload. */
+export type DrivesSnapshot = { connected: DriveInfo[]; remembered: RememberedDrive[] };
+
+/** One game on a drive (Library › Backup drives and Details). Paths are relative to `gridpack/`. */
+export type DriveGame = {
+  rom_id: number;
+  server: string;
+  name: string;
+  platform: string;
+  platform_name: string;
+  size: number;
+  /** The largest single file, for the FAT32 limit. */
+  files_max: number;
+  cover: string;
+  installed: boolean;
+  summary: string;
+  region: string;
+  languages: string;
+  tags: string;
+  revision: string;
+  rating: string;
+  companies: string[];
+  release_date: string;
+  genres: string[];
+  game_modes: string[];
+  franchises: string[];
+  players: string;
+  version: string;
+  fanart: string;
+  logo: string;
+  screenshots: string[];
+};
+
+export type BackupRequest = { rom_ids: number[]; title: string };
+
+/** A game a backup plan names without writing it. Mirrors `grid_core::backup::plan::PlanGameRef`. */
+export type PlanGameRef = { rom_id: number; name: string };
+
+export type PlanEmulator = {
+  name: string;
+  os: PackOs[];
+  /** `null` when the size is not known before the download. */
+  bytes: number | null;
+  already: boolean;
+};
+
+export type PlanFirmware = { platform_name: string; files: number; bytes: number; already: boolean };
+
+/** `plan_backup`'s answer. Mirrors `grid_core::backup::plan::BackupPlan`. */
+export type BackupPlan = {
+  /** The drive key. */
+  drive: string;
+  games_to_write: number[];
+  skipped: PlanGameRef[];
+  too_big: PlanGameRef[];
+  emulators: PlanEmulator[];
+  firmware: PlanFirmware[];
+  /** Why the firmware checkbox is disabled, else `''`. */
+  firmware_reason: string;
+  bytes_to_write: number;
+  free_bytes: number;
+  fits: boolean;
+};
+
+export type BackupQueued = { batch: number; games: number; emulators: number; firmware: number };
+
+/** `set_drive_os`'s answer. `batch` is 0 when nothing was queued. */
+export type OsChangeOutcome = { batch: number; queued: number; removed: number };
+
 export type GameSession = {
   id: number;
   rom_id: number;
