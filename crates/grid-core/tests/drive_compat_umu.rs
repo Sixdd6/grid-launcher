@@ -1,9 +1,11 @@
 //! A Proton compat tool installed from a backup drive brings the drive's
-//! umu-launcher when this computer has no `umu-run`, with no network at all.
+//! umu-launcher when this computer has no `umu-run`, and the drive's Steam
+//! Linux Runtime when umu has none, with no network at all.
 //!
 //! Its own test binary, on purpose (same pattern as `umu_launcher_install.rs`):
-//! `compat::managed_root` reads `GRID_LAUNCHER_DATA_DIR` and the "is a umu-run
-//! available" check reads `PATH`, and `std::env::set_var` is process-global.
+//! `compat::managed_root` reads `GRID_LAUNCHER_DATA_DIR`, the "is a umu-run
+//! available" check reads `PATH`, umu's data folder comes from `HOME`, and
+//! `std::env::set_var` is process-global.
 //! One test in one binary means no sibling test can observe them.
 #![cfg(target_os = "linux")]
 
@@ -57,6 +59,37 @@ fn proton_profile() -> EmulatorProfile {
         compat_tool_type: "proton".to_string(),
         ..Default::default()
     }
+}
+
+/// A `SteamLinuxRuntime_sniper.tar.xz` stand-in: the top folder with the
+/// entry point umu links to, its VERSIONS.txt and pressure-vessel.
+fn runtime_tar_xz() -> Vec<u8> {
+    let mut builder = tar::Builder::new(Vec::new());
+    for (path, body) in [
+        (
+            "SteamLinuxRuntime_sniper/_v2-entry-point",
+            &b"#!/bin/sh\n"[..],
+        ),
+        (
+            "SteamLinuxRuntime_sniper/VERSIONS.txt",
+            &b"#Name\tVersion\nsniper\t3.0.1\n"[..],
+        ),
+        (
+            "SteamLinuxRuntime_sniper/pressure-vessel/bin/pv-verify",
+            &b"#!/bin/sh\n"[..],
+        ),
+    ] {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(body.len() as u64);
+        header.set_mode(0o755);
+        header.set_path(path).unwrap();
+        header.set_cksum();
+        builder.append(&header, body).unwrap();
+    }
+    let tar = builder.into_inner().unwrap();
+    let mut encoder = liblzma::write::XzEncoder::new(Vec::new(), 1);
+    std::io::Write::write_all(&mut encoder, &tar).unwrap();
+    encoder.finish().unwrap()
 }
 
 fn put(mount: &Path, rel: &str, body: &[u8]) {
@@ -118,6 +151,15 @@ async fn a_proton_tool_from_a_drive_brings_the_drives_umu_launcher() {
     // process reads or mutates these concurrently.
     std::env::set_var("GRID_LAUNCHER_DATA_DIR", &data_dir);
     std::env::set_var("PATH", &empty_path);
+    // umu's data folder: <HOME>/.local/share/umu, in a temp HOME.
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::remove_var("XDG_DATA_HOME");
+    std::env::remove_var("UMU_FOLDERS_PATH");
+    let umu_local = home.join(".local").join("share").join("umu");
+    // umu-run makes an empty steamrt3 before it downloads: still missing.
+    fs::create_dir_all(umu_local.join("steamrt3")).unwrap();
 
     let library = tmp.path().join("library");
     fs::create_dir_all(&library).unwrap();
@@ -160,7 +202,16 @@ async fn a_proton_tool_from_a_drive_brings_the_drives_umu_launcher() {
         umu_rel,
         "umu-launcher-1.2.6-zipapp.tar",
     );
-    kit.emulators = vec![proton.clone(), umu];
+    let runtime_rel = "emulators/steam-runtime/3.0.1/linux-x86_64/SteamLinuxRuntime_sniper.tar.xz";
+    put(&mount, runtime_rel, &runtime_tar_xz());
+    let runtime = entry(
+        "steam-runtime",
+        grid_core::backup::steam_runtime::RUNTIME_SOURCE_ID,
+        "3.0.1",
+        runtime_rel,
+        "SteamLinuxRuntime_sniper.tar.xz",
+    );
+    kit.emulators = vec![proton.clone(), umu, runtime];
     pack::write_pack_atomic(&mount, &kit).unwrap();
 
     let registry = Arc::new(Registry::open(&tmp.path().join("registry.db")).unwrap());
@@ -211,6 +262,38 @@ async fn a_proton_tool_from_a_drive_brings_the_drives_umu_launcher() {
     assert!(umu_run.is_file());
     assert_eq!(record.release_tag, "1.2.6");
 
+    // The runtime went where umu-run looks, laid out as umu lays it out.
+    let runtime_row = newest_row(
+        &service,
+        grid_core::backup::steam_runtime::RUNTIME_SOURCE_ID,
+    )
+    .expect("the Steam Linux Runtime from the drive");
+    assert!(umu_row.id < runtime_row.id);
+    assert_eq!(runtime_row.title, "Steam Linux Runtime");
+    let runtime_done = wait_terminal(&service, runtime_row.id).await;
+    assert_eq!(
+        runtime_done.status,
+        DownloadStatus::Completed,
+        "{}",
+        runtime_done.error
+    );
+    let steamrt3 = umu_local.join("steamrt3");
+    assert!(steamrt3.join("_v2-entry-point").is_file());
+    assert!(steamrt3.join("VERSIONS.txt").is_file());
+    assert!(steamrt3.join("pressure-vessel/bin/pv-verify").is_file());
+    assert_eq!(
+        fs::read_link(steamrt3.join("umu")).unwrap(),
+        Path::new("_v2-entry-point")
+    );
+    // umu writes its marker itself, after pv-verify passes.
+    assert!(!steamrt3.join(".installed.ok").exists());
+    let leftovers: Vec<_> = fs::read_dir(&umu_local)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(leftovers, vec!["steamrt3".to_string()]);
+
     // With umu-run now present, a second install of the tool brings nothing.
     let before = service.snapshot().entries.len();
     let again = DriveTarget {
@@ -228,5 +311,12 @@ async fn a_proton_tool_from_a_drive_brings_the_drives_umu_launcher() {
         .filter(|e| e.source_id == UMU_SOURCE_ID)
         .collect();
     assert_eq!(rows.len(), 1, "no second umu-launcher row");
+    let runtime_rows = service
+        .snapshot()
+        .entries
+        .into_iter()
+        .filter(|e| e.source_id == grid_core::backup::steam_runtime::RUNTIME_SOURCE_ID)
+        .count();
+    assert_eq!(runtime_rows, 1, "no second runtime row");
     assert!(service.snapshot().entries.len() > before);
 }

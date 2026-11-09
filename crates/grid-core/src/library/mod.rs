@@ -502,6 +502,10 @@ enum JobTarget {
     /// The managed umu-launcher: [`umu::install_dir`], the
     /// `Config.umu_launcher` record, and a checksum check before extraction.
     UmuLauncher,
+    /// The Steam Linux Runtime from a backup drive, placed where umu-run
+    /// looks for it ([`crate::backup::steam_runtime::place_runtime`]).
+    /// `EmulatorJob::library` is umu's data folder.
+    SteamRuntime,
 }
 
 /// What the download task resolved an [`EmulatorJob`] down to.
@@ -1065,6 +1069,10 @@ pub struct InstallService {
     /// The forge source a managed umu-launcher install resolves
     /// ([`umu::default_source`]; [`Self::set_umu_source`] in tests).
     umu_source: RwLock<Value>,
+    /// Where a backup fetches the Steam Linux Runtime from
+    /// ([`crate::backup::steam_runtime::DEFAULT_BASE`];
+    /// [`Self::set_steam_runtime_base`] in tests).
+    steam_runtime_base: RwLock<String>,
     /// The last backup batch id handed out ([`Self::start_backup`]).
     next_batch: AtomicU64,
     /// Drives [`Self::abort_drive`] marked removed, with the reason their
@@ -1132,6 +1140,7 @@ impl InstallService {
             emulator_installed_hook: RwLock::new(None),
             library_gate: RwLock::new(LibraryGate::default()),
             umu_source: RwLock::new(umu::default_source()),
+            steam_runtime_base: RwLock::new(crate::backup::steam_runtime::DEFAULT_BASE.to_string()),
             next_batch: AtomicU64::new(0),
             removed_drives: Mutex::new(HashMap::new()),
             resolved_sizes: Mutex::new(HashMap::new()),
@@ -2064,6 +2073,12 @@ impl InstallService {
     /// tests point it at a local server.
     pub fn set_umu_source(&self, source: Value) {
         *self.umu_source.write().unwrap() = source;
+    }
+
+    /// Replaces the host a backup fetches the Steam Linux Runtime from
+    /// (default [`crate::backup::steam_runtime::DEFAULT_BASE`]). A test seam.
+    pub fn set_steam_runtime_base(&self, base: &str) {
+        *self.steam_runtime_base.write().unwrap() = base.to_string();
     }
 
     /// Cancels `entry_id`: an active download gets its flag flipped and ends
@@ -3936,6 +3951,16 @@ impl InstallService {
         };
         let install_dir = paths.install_dir.as_path();
         let archive = paths.archive.as_path();
+        if job.target == JobTarget::SteamRuntime {
+            let mut progress = |processed, total| self.on_install_progress(id, processed, total);
+            let placed =
+                crate::backup::steam_runtime::place_runtime(archive, &job.library, &mut progress);
+            let _ = fs::remove_dir_all(install_dir);
+            if !placed? {
+                append_warning(warning, "A Steam Linux Runtime was already in place");
+            }
+            return Ok(());
+        }
         if job.target == JobTarget::UmuLauncher {
             check_umu_digest(archive, &paths.resolved)?;
         }
@@ -4533,6 +4558,7 @@ async fn download_emulator(
             emu_install::compat_tool_install_dir(&job.library, &file_stem_of(&dir_name))
         }
         JobTarget::UmuLauncher => umu::install_dir(&job.library),
+        JobTarget::SteamRuntime => crate::backup::steam_runtime::download_dir(&job.library),
         JobTarget::Emulator => emu_install::emulator_install_dir(&job.library, &job.entry_name),
     };
 

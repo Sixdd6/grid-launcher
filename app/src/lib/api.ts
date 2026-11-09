@@ -521,6 +521,17 @@ export type PlanEmulator = {
 
 export type PlanFirmware = { platform_name: string; files: number; bytes: number; already: boolean };
 
+/** The Steam Linux Runtime a backup can carry. Mirrors `grid_core::backup::plan::PlanRuntime`. */
+export type PlanRuntime = {
+  /** "Steam Linux Runtime". */
+  name: string;
+  /** `null` when the size is not known. */
+  bytes: number | null;
+  already: boolean;
+  /** `include_runtime` was set: it is in this backup. */
+  included: boolean;
+};
+
 /** `plan_backup`'s answer. Mirrors `grid_core::backup::plan::BackupPlan`. */
 export type BackupPlan = {
   /** The drive key. */
@@ -532,6 +543,8 @@ export type BackupPlan = {
   firmware: PlanFirmware[];
   /** Why the firmware checkbox is disabled, else `''`. */
   firmware_reason: string;
+  /** The "Make Windows games work offline" line: set when the pack is for Linux and Windows games are being written, ticked or not. */
+  runtime: PlanRuntime | null;
   bytes_to_write: number;
   free_bytes: number;
   fits: boolean;

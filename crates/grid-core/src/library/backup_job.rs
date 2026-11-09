@@ -97,6 +97,15 @@ impl BackupItem {
     pub(crate) fn row(&self) -> (String, String, &'static str) {
         match self {
             Self::Game(game) => (game.name.clone(), game.platform_name.clone(), "backup_game"),
+            Self::Emulator(item)
+                if item.pick.name == crate::backup::steam_runtime::RUNTIME_NAME =>
+            {
+                (
+                    crate::backup::steam_runtime::RUNTIME_TITLE.to_string(),
+                    COMPAT_TOOL_PLATFORM.to_string(),
+                    "backup_emulator",
+                )
+            }
             Self::Emulator(item) => {
                 let platform = match item.pick.kind {
                     EmulatorKind::Emulator => EMULATOR_PLATFORM,
@@ -510,6 +519,9 @@ async fn download_emulator(
             }
             let provider = ForgeProvider::new(&forge, headers);
             download_targets(&provider, &targets, cancel, on_progress).await?;
+            // A published SHA-256 is checked before the file goes to the
+            // drive (the Steam Linux Runtime always has one, from SHA256SUMS).
+            super::download::verify_sha256_digest(&files[0].src, &primary.digest)?;
             let primary_file = files.remove(0);
             Staged::Emulator {
                 entry: Box::new(entry(&primary.release_tag, &primary.asset_name)),
@@ -614,6 +626,15 @@ pub(crate) async fn resolve_catalog(
     name: &str,
     os: PackOs,
 ) -> Result<(ResolvedDownload, Vec<ResolvedDownload>), LibraryError> {
+    // The Steam Linux Runtime: the archive umu-run would download, pinned
+    // to the version Valve publishes now and its SHA256SUMS digest.
+    if name == crate::backup::steam_runtime::RUNTIME_NAME {
+        let base = service.steam_runtime_base.read().unwrap().clone();
+        let primary = crate::backup::steam_runtime::resolve(forge, &base)
+            .await
+            .map_err(LibraryError::Extract)?;
+        return Ok((primary, Vec::new()));
+    }
     // umu-launcher has no catalog profile: it resolves the source
     // `install_umu_launcher` uses, so the pack holds the same release.
     let raw = if name == crate::launch::umu::UMU_TITLE {

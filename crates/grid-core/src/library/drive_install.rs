@@ -109,13 +109,12 @@ fn game_files(
         .collect()
 }
 
-/// The umu-launcher entry a drive's pack holds for the OS tag `os`, if any.
-fn pack_umu_entry(mount: &Path, os: &str) -> Option<PackEmulator> {
+/// The compat-tool entry a drive's pack holds for the OS tag `os` whose
+/// `source_id` passes `is`, if any (umu-launcher, the Steam Linux Runtime).
+fn pack_entry(mount: &Path, os: &str, is: fn(&str) -> bool) -> Option<PackEmulator> {
     match pack::read_pack(mount) {
         Ok(pack::PackState::Ready(pack)) => pack.emulators.into_iter().find(|emulator| {
-            emulator.kind == "compat_tool"
-                && emulator.os == os
-                && crate::backup::plan::is_umu_entry(&emulator.source_id)
+            emulator.kind == "compat_tool" && emulator.os == os && is(&emulator.source_id)
         }),
         _ => None,
     }
@@ -279,8 +278,29 @@ impl InstallService {
 
         let compat_tool = entry.kind == "compat_tool";
         let umu_launcher = compat_tool && crate::backup::plan::is_umu_entry(&entry.source_id);
+        let steam_runtime =
+            compat_tool && crate::backup::steam_runtime::is_runtime_entry(&entry.source_id);
         let mut needs_umu = false;
-        let (job, platform, kind) = if umu_launcher {
+        let (job, platform, kind) = if steam_runtime {
+            let umu_local = crate::backup::steam_runtime::umu_local_here().ok_or_else(|| {
+                LibraryError::Extract("No home folder for the Steam Linux Runtime".to_string())
+            })?;
+            let job = EmulatorJob {
+                source_id: crate::backup::steam_runtime::RUNTIME_SOURCE_ID.to_string(),
+                profile_name: crate::backup::steam_runtime::RUNTIME_TITLE.to_string(),
+                profile_args: String::new(),
+                configured_tag: entry.version.clone(),
+                raw_source: Value::Null,
+                library: umu_local,
+                forge: self.forge()?,
+                resolved: None,
+                target: JobTarget::SteamRuntime,
+                entry_name: crate::backup::steam_runtime::RUNTIME_TITLE.to_string(),
+                romm: None,
+                local: Some(local),
+            };
+            (job, COMPAT_TOOL_PLATFORM, "compat_tool")
+        } else if umu_launcher {
             let job = EmulatorJob {
                 source_id: umu::UMU_SOURCE_ID.to_string(),
                 profile_name: umu::UMU_TITLE.to_string(),
@@ -388,13 +408,30 @@ impl InstallService {
         // the drive's own umu-launcher (backed up beside the tool) goes
         // behind it as its own row; its failure is that row's.
         if needs_umu && cfg!(target_os = "linux") && !self.umu_available() {
-            match pack_umu_entry(&drive.mount, &entry.os) {
+            match pack_entry(&drive.mount, &entry.os, crate::backup::plan::is_umu_entry) {
                 Some(umu_entry) => {
-                    if let Err(error) = self.install_emulator_from_drive(drive, &umu_entry) {
+                    if let Err(error) = self.install_emulator_from_drive(drive.clone(), &umu_entry)
+                    {
                         tracing::warn!(%error, "umu-launcher from the drive could not be queued");
                     }
                 }
                 None => tracing::info!("the drive holds no umu-launcher for this computer"),
+            }
+        }
+        // umu-run downloads the Steam Linux Runtime on first use. With none
+        // here, the drive's copy (when the backup carried one) is placed
+        // where umu looks, so a first launch with no network works.
+        let runtime_missing = crate::backup::steam_runtime::umu_local_here()
+            .is_some_and(|local| !crate::backup::steam_runtime::runtime_present(&local));
+        if needs_umu && cfg!(target_os = "linux") && runtime_missing {
+            if let Some(runtime) = pack_entry(
+                &drive.mount,
+                &entry.os,
+                crate::backup::steam_runtime::is_runtime_entry,
+            ) {
+                if let Err(error) = self.install_emulator_from_drive(drive, &runtime) {
+                    tracing::warn!(%error, "the Steam Linux Runtime from the drive could not be queued");
+                }
             }
         }
         Ok(())
@@ -507,6 +544,7 @@ pub(super) async fn copy_local_emulator(
             emu_install::compat_tool_install_dir(&job.library, &file_stem_of(&dir_name))
         }
         JobTarget::UmuLauncher => umu::install_dir(&job.library),
+        JobTarget::SteamRuntime => crate::backup::steam_runtime::download_dir(&job.library),
         JobTarget::Emulator => emu_install::emulator_install_dir(&job.library, &job.entry_name),
     };
     let server_build = job.source_id.starts_with(SERVER_SOURCE_PREFIX);

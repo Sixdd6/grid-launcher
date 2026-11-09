@@ -793,6 +793,7 @@ async fn make_plan(
     scanned: &ScannedDrive,
     request: &BackupRequest,
     include_firmware: bool,
+    include_runtime: bool,
     resolve_sizes: bool,
 ) -> Result<Planned, String> {
     let pack = writable_pack(scanned)?;
@@ -834,16 +835,30 @@ async fn make_plan(
             compat_tool: compat.as_ref(),
             firmware: &firmware,
             include_firmware,
+            include_runtime,
             host: PackOs::host(),
             sizes,
         })
     };
     let planned = run(&install.emulator_sizes());
-    if !resolve_sizes || planned.items.emulators.is_empty() {
+    let mut to_size: Vec<EmulatorItem> = planned.items.emulators.clone();
+    // The runtime line shows its size even while its box is unticked.
+    if planned
+        .plan
+        .runtime
+        .as_ref()
+        .is_some_and(|line| line.bytes.is_none() && !line.included)
+    {
+        to_size.push(EmulatorItem {
+            pick: grid_core::backup::steam_runtime::runtime_pick(),
+            os: PackOs::Linux,
+        });
+    }
+    if !resolve_sizes || to_size.is_empty() {
         return Ok(planned);
     }
     install
-        .resolve_emulator_sizes(Some(client.clone()), &planned.items.emulators)
+        .resolve_emulator_sizes(Some(client.clone()), &to_size)
         .await;
     Ok(run(&install.emulator_sizes()))
 }
@@ -855,11 +870,21 @@ pub async fn plan_backup(
     key: String,
     request: BackupRequest,
     include_firmware: bool,
+    include_runtime: Option<bool>,
 ) -> Result<BackupPlan, String> {
     let install = install(&state)?.clone();
     let client = state.session.client().ok_or(NEEDS_SERVER)?;
     let scanned = connected(&state, &app, &key).await?;
-    let planned = make_plan(&install, client, &scanned, &request, include_firmware, true).await?;
+    let planned = make_plan(
+        &install,
+        client,
+        &scanned,
+        &request,
+        include_firmware,
+        include_runtime.unwrap_or(false),
+        true,
+    )
+    .await?;
     Ok(planned.plan)
 }
 
@@ -870,6 +895,7 @@ pub async fn start_backup(
     key: String,
     request: BackupRequest,
     include_firmware: bool,
+    include_runtime: Option<bool>,
 ) -> Result<BackupQueued, String> {
     ensure_library_idle(&state)?;
     let install = install(&state)?.clone();
@@ -881,6 +907,7 @@ pub async fn start_backup(
         &scanned,
         &request,
         include_firmware,
+        include_runtime.unwrap_or(false),
         false,
     )
     .await?;

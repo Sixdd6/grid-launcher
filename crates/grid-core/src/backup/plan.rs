@@ -52,6 +52,20 @@ pub struct PlanFirmware {
     pub already: bool,
 }
 
+/// The dialog's "Make Windows games work offline" line: the Steam Linux
+/// Runtime umu-run would otherwise download on first use.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PlanRuntime {
+    /// "Steam Linux Runtime".
+    pub name: String,
+    /// `None` when the size is not known yet.
+    pub bytes: Option<u64>,
+    /// Already on the drive: nothing to write.
+    pub already: bool,
+    /// The box is ticked (`include_runtime`): it is in this backup.
+    pub included: bool,
+}
+
 /// The answer to `plan_backup`: what the Backup dialog shows before it starts.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct BackupPlan {
@@ -64,6 +78,10 @@ pub struct BackupPlan {
     pub firmware: Vec<PlanFirmware>,
     /// Why the firmware checkbox is disabled, else empty.
     pub firmware_reason: String,
+    /// Set when the runtime can go with this backup (the pack is for Linux
+    /// and Windows games are being written), whether or not it is ticked.
+    #[serde(default)]
+    pub runtime: Option<PlanRuntime>,
     pub bytes_to_write: u64,
     pub free_bytes: u64,
     pub fits: bool,
@@ -547,6 +565,8 @@ pub struct PlanInput<'a> {
     /// The server's firmware for the requested systems.
     pub firmware: &'a [PlanFirmwareSet],
     pub include_firmware: bool,
+    /// Carry the Steam Linux Runtime for Windows games on Linux.
+    pub include_runtime: bool,
     /// This computer's OS ([`PackOs::host`]).
     pub host: Option<PackOs>,
     /// Known emulator sizes, per name and OS (the service's cache).
@@ -697,6 +717,33 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
         }
     }
 
+    let runtime = if needs_compat && input.pack.os.contains(&PackOs::Linux) {
+        let pick = super::steam_runtime::runtime_pick();
+        let already = input.pack.emulators.iter().any(|have| {
+            super::steam_runtime::is_runtime_entry(&have.source_id)
+                && have.os == PackOs::Linux.arch_tag()
+        });
+        let size = input
+            .sizes
+            .get(&(pick.name.clone(), PackOs::Linux))
+            .copied();
+        if input.include_runtime && !already {
+            bytes = bytes.saturating_add(size.unwrap_or(0));
+            items.emulators.push(EmulatorItem {
+                pick,
+                os: PackOs::Linux,
+            });
+        }
+        Some(PlanRuntime {
+            name: super::steam_runtime::RUNTIME_TITLE.to_string(),
+            bytes: if already { Some(0) } else { size },
+            already,
+            included: input.include_runtime,
+        })
+    } else {
+        None
+    };
+
     let mut firmware = Vec::new();
     let mut slugs_done = BTreeSet::new();
     for game in &systems {
@@ -751,6 +798,7 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
             emulators,
             firmware,
             firmware_reason,
+            runtime,
             bytes_to_write: bytes,
             free_bytes: input.free_bytes,
             fits,
@@ -852,6 +900,7 @@ mod tests {
                 compat_tool: None,
                 firmware: &self.firmware,
                 include_firmware: self.include_firmware,
+                include_runtime: false,
                 host: Some(PackOs::Linux),
                 sizes: &self.sizes,
             })
@@ -999,6 +1048,7 @@ mod tests {
             compat_tool: Some(&tool),
             firmware: &[],
             include_firmware: true,
+            include_runtime: false,
             host: Some(PackOs::Linux),
             sizes: &fx.sizes,
         });
@@ -1033,6 +1083,7 @@ mod tests {
             compat_tool: Some(&tool),
             firmware: &[],
             include_firmware: true,
+            include_runtime: false,
             host: Some(PackOs::Linux),
             sizes: &fx.sizes,
         });
@@ -1041,6 +1092,84 @@ mod tests {
             .emulators
             .iter()
             .all(|item| item.pick.name != "GE-Proton" && item.pick.name != "umu-launcher"));
+    }
+
+    #[test]
+    fn the_steam_runtime_goes_only_when_ticked_for_a_linux_pack_with_windows_games() {
+        let fx = Fixture::new();
+        let mut tool = pick("GE-Proton", "");
+        tool.kind = EmulatorKind::CompatTool;
+        let mut sizes = HashMap::new();
+        sizes.insert(("steam-runtime".to_string(), PackOs::Linux), 300u64);
+        let run = |pack: &Pack, games: &[PlanGame], include_runtime: bool| {
+            plan(&PlanInput {
+                drive: "E:",
+                pack,
+                server: SERVER,
+                fat32: false,
+                free_bytes: 1 << 40,
+                games,
+                emulators: &[],
+                compat_tool: Some(&tool),
+                firmware: &[],
+                include_firmware: false,
+                include_runtime,
+                host: Some(PackOs::Linux),
+                sizes: &sizes,
+            })
+        };
+        let has_runtime = |planned: &Planned| {
+            planned
+                .items
+                .emulators
+                .iter()
+                .any(|item| item.pick.name == "steam-runtime" && item.os == PackOs::Linux)
+        };
+        let windows = vec![game(5, "win", 10, 10)];
+        let linux_pack = new_pack("Kit", &[PackOs::Linux, PackOs::Windows]);
+
+        // Ticked, Linux pack, Windows game: one item, counted, sized.
+        let ticked = run(&linux_pack, &windows, true);
+        assert!(has_runtime(&ticked));
+        let line = ticked.plan.runtime.clone().expect("the dialog line");
+        assert_eq!(line.name, "Steam Linux Runtime");
+        assert_eq!(line.bytes, Some(300));
+        assert!(line.included && !line.already);
+        let unticked = run(&linux_pack, &windows, false);
+        assert!(!has_runtime(&unticked));
+        assert!(!unticked.plan.runtime.as_ref().unwrap().included);
+        assert_eq!(
+            ticked.plan.bytes_to_write,
+            unticked.plan.bytes_to_write + 300
+        );
+
+        // No Windows games, or a Windows-only pack: no line, no item.
+        let psx = run(&linux_pack, &fx.games, true);
+        assert!(!has_runtime(&psx) && psx.plan.runtime.is_none());
+        let windows_pack = new_pack("Kit", &[PackOs::Windows]);
+        let win_only = run(&windows_pack, &windows, true);
+        assert!(!has_runtime(&win_only) && win_only.plan.runtime.is_none());
+
+        // Already on the drive: shown as such, not queued.
+        let mut have = linux_pack.clone();
+        have.emulators.push(PackEmulator {
+            name: "steam-runtime".into(),
+            kind: "compat_tool".into(),
+            source_id: crate::backup::steam_runtime::RUNTIME_SOURCE_ID.into(),
+            version: "3.0.1".into(),
+            program: String::new(),
+            args: String::new(),
+            os: PackOs::Linux.arch_tag().into(),
+            platforms: Vec::new(),
+            path: "emulators/steam-runtime/3.0.1/linux-x86_64/SteamLinuxRuntime_sniper.tar.xz"
+                .into(),
+            supplementals: Vec::new(),
+            asset_name: "SteamLinuxRuntime_sniper.tar.xz".into(),
+            size: 300,
+        });
+        let already = run(&have, &windows, true);
+        assert!(!has_runtime(&already));
+        assert!(already.plan.runtime.unwrap().already);
     }
 
     #[test]
@@ -1075,6 +1204,7 @@ mod tests {
             compat_tool: Some(&tool),
             firmware: &[],
             include_firmware: true,
+            include_runtime: false,
             host: Some(PackOs::Linux),
             sizes: &fx.sizes,
         });

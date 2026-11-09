@@ -8,4 +8,5 @@
 pub mod drives;
 pub mod pack;
 pub mod plan;
+pub mod steam_runtime;
 pub mod write;
