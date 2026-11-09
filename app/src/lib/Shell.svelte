@@ -7,6 +7,8 @@
   import Icon from './Icon.svelte';
   import Settings from './Settings.svelte';
   import ThemeToggle from './ThemeToggle.svelte';
+  import BackupDialog from './backups/BackupDialog.svelte';
+  import { backupDialog, closeBackup } from './backups/dialogState.svelte';
   import { listen } from '@tauri-apps/api/event';
   import { initEmulatorEvents } from './systems/events';
   import { initNotifications } from './notifications/notifier';
@@ -282,6 +284,22 @@
      vanish from every other view. It is the last row of `#app`'s column,
      so the views end where it starts. -->
 <DownloadsFooter onOpen={() => (view = 'downloads')} />
+
+<!-- The one Backup dialog (GameBackups README), over every view and over
+     Details. "Set up a drive…" goes to Settings › Backup drives. -->
+{#if backupDialog.current}
+  {#key backupDialog.current}
+    <BackupDialog
+      open={backupDialog.current}
+      onClose={closeBackup}
+      onSetUp={() => {
+        closeBackup();
+        view = 'settings';
+        settings?.show('backup-drives');
+      }}
+    />
+  {/key}
+{/if}
 
 <style>
   .topbar {

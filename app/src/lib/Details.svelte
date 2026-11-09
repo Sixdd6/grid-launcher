@@ -39,7 +39,17 @@
   import { fullIndex, galleryItems, viewableIndex, viewableItems } from './details/media';
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
   import { syntheticCloudGame, type CloudMode } from './details/cloud';
-  import { contentButtons, installLabel, isContentPlatform, isNativePlatform } from './details/actions';
+  import {
+    backupAction,
+    contentButtons,
+    installLabel,
+    isContentPlatform,
+    isNativePlatform,
+    onDrivesLine,
+  } from './details/actions';
+  import { drives } from './stores/drives.svelte';
+  import { openBackup } from './backups/dialogState.svelte';
+  import { backupRequest } from './backups/dialog';
   import { contentBlockReason } from './details/blocked';
   import {
     fileVersionLabel,
@@ -547,6 +557,20 @@
     if (e.target === e.currentTarget) onClose();
   }
 
+  // GameBackups README: "Back up to drive…" under the install actions, and
+  // "On Couch kit" when a connected drive holds the game already.
+  let backup = $derived(backupAction(session.connected));
+  let onDrives = $derived(
+    subject.romId === null
+      ? ''
+      : onDrivesLine(drives.holdingRom(session.serverUrl, subject.romId).map((d) => d.pack?.name ?? d.label)),
+  );
+
+  function backUp() {
+    if (subject.romId === null || backup.disabled) return;
+    openBackup({ request: backupRequest({ kind: 'game', name: subject.name }, [subject.romId]) });
+  }
+
   let header = $derived(
     headerLine({
       platformName: subject.platformName,
@@ -753,7 +777,26 @@
                 {pendingAction === 'install' ? 'Installing…' : installLabel(platformSlug, subject.platformName)}
               </button>
             {/if}
+            {#if !missing.showMissing}
+              <button
+                data-testid="details-backup"
+                class="secondary"
+                disabled={backup.disabled}
+                aria-describedby={backup.disabled ? 'details-backup-offline' : undefined}
+                title={backup.reason || undefined}
+                onclick={backUp}
+              >
+                Back up to drive…
+              </button>
+              {#if backup.disabled}
+                <!-- The button's `title` is hover-only; this line is the visible reason. -->
+                <p id="details-backup-offline" class="meta-line offline-note">{backup.reason}.</p>
+              {/if}
+            {/if}
           </div>
+          {#if onDrives !== ''}
+            <p class="meta-line on-drives" data-testid="details-on-drives"><Icon name="drive" size={12} />{onDrives}</p>
+          {/if}
         {/if}
 
         <p class="meta-line" data-testid="details-last-played">
@@ -1220,6 +1263,13 @@
 
   .offline-note {
     text-align: center;
+  }
+
+  .on-drives {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
   }
 
   .meta-line {

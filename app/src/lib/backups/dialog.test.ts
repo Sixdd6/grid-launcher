@@ -1,0 +1,288 @@
+import { describe, expect, it } from 'vitest';
+import type { BackupPlan, DriveInfo, PackSummary } from '../api';
+import {
+  backupRequest,
+  backupTitle,
+  chooseDrive,
+  dialogLede,
+  driveRow,
+  emulatorLine,
+  firmwareLine,
+  footerModel,
+  noDrivesText,
+  planNotes,
+  runtimeLine,
+  sizeText,
+} from './dialog';
+
+const GB = 1024 ** 3;
+const MB = 1024 ** 2;
+
+function pack(overrides: Partial<PackSummary> = {}): PackSummary {
+  return {
+    name: 'Couch kit',
+    os: ['linux', 'windows'],
+    game_count: 6,
+    gridpack_bytes: 100 * GB,
+    emulators: [],
+    firmware: [],
+    updated: '2026-11-02T10:00:00Z',
+    rom_ids: [],
+    ...overrides,
+  };
+}
+
+function drive(overrides: Partial<DriveInfo> = {}): DriveInfo {
+  return {
+    key: '/run/media/p/SAMSUNG T7',
+    mount: '/run/media/p/SAMSUNG T7',
+    label: 'SAMSUNG T7',
+    fs: 'exFAT',
+    fat32: false,
+    total_bytes: 1000 * GB,
+    free_bytes: 61.4 * GB,
+    read_only: false,
+    status: 'ready',
+    problem: '',
+    pack: pack(),
+    ...overrides,
+  };
+}
+
+function plan(overrides: Partial<BackupPlan> = {}): BackupPlan {
+  return {
+    drive: '/run/media/p/SAMSUNG T7',
+    games_to_write: [1, 2, 3],
+    skipped: [],
+    too_big: [],
+    emulators: [],
+    firmware: [],
+    firmware_reason: '',
+    runtime: null,
+    bytes_to_write: 11.1 * GB,
+    free_bytes: 61.4 * GB,
+    fits: true,
+    ...overrides,
+  };
+}
+
+describe('sizeText', () => {
+  it('keeps one decimal and drops a whole number’s ".0"', () => {
+    expect(sizeText(11.1 * GB)).toBe('11.1 GB');
+    expect(sizeText(76 * GB)).toBe('76 GB');
+    expect(sizeText(120 * MB)).toBe('120 MB');
+  });
+});
+
+describe('titles and requests', () => {
+  it('titles each way of starting a backup', () => {
+    expect(backupTitle({ kind: 'games', count: 3 })).toBe('Back up 3 games');
+    expect(backupTitle({ kind: 'games', count: 1 })).toBe('Back up 1 game');
+    expect(backupTitle({ kind: 'game', name: 'Cinder Peaks' })).toBe('Back up Cinder Peaks');
+    expect(backupTitle({ kind: 'platform', platform: 'PlayStation', count: 4 })).toBe('Back up PlayStation · 4 games');
+  });
+
+  it('builds the request, with platform ids only when given', () => {
+    expect(backupRequest({ kind: 'game', name: 'Cinder Peaks' }, [7])).toEqual({
+      rom_ids: [7],
+      title: 'Back up Cinder Peaks',
+    });
+    expect(backupRequest({ kind: 'platform', platform: 'PlayStation', count: 2 }, [1, 2], [5])).toEqual({
+      rom_ids: [1, 2],
+      platform_ids: [5],
+      title: 'Back up PlayStation · 2 games',
+    });
+  });
+
+  it('names the server in the lede', () => {
+    expect(dialogLede('romm.home.lan')).toContain('from romm.home.lan and writes it');
+    expect(dialogLede('')).toContain('from the server');
+  });
+});
+
+describe('driveRow', () => {
+  it('shows the pack, label, file system and free space', () => {
+    const row = driveRow(drive(), plan(), true);
+    expect(row.name).toBe('Couch kit');
+    expect(row.sub).toBe('SAMSUNG T7 · exFAT');
+    expect(row.freeText).toBe('61.4 GB free');
+    expect(row.over).toBe(false);
+  });
+
+  it('reads "Needs 76 GB · 61.4 GB free" when the backup does not fit', () => {
+    const row = driveRow(drive(), plan({ bytes_to_write: 76 * GB, fits: false }), false);
+    expect(row.freeText).toBe('Needs 76 GB · 61.4 GB free');
+    expect(row.over).toBe(true);
+  });
+
+  it('hatches this backup’s share into the chosen row only, taken from free space', () => {
+    const chosen = driveRow(drive(), plan({ bytes_to_write: 10 * GB }), true);
+    const adding = chosen.segments.find((s) => s.kind === 'adding')!;
+    expect(adding.pct).toBeCloseTo(1, 5);
+    const free = chosen.segments.find((s) => s.kind === 'free')!;
+    expect(free.pct).toBeCloseTo(5.14, 1);
+    const other = driveRow(drive(), plan({ bytes_to_write: 10 * GB }), false);
+    expect(other.segments.some((s) => s.kind === 'adding')).toBe(false);
+    const total = chosen.segments.reduce((s, x) => s + x.pct, 0);
+    expect(total).toBeCloseTo(100, 5);
+  });
+
+  it('shows only the free space while the plan is being made', () => {
+    const row = driveRow(drive(), null, true);
+    expect(row.freeText).toBe('61.4 GB free');
+    expect(row.segments.some((s) => s.kind === 'adding')).toBe(false);
+  });
+
+  it('chooses the current drive while it is still ready, else the first', () => {
+    const a = drive({ key: 'a' });
+    const b = drive({ key: 'b' });
+    expect(chooseDrive([a, b], 'b')).toBe('b');
+    expect(chooseDrive([a, b], 'gone')).toBe('a');
+    expect(chooseDrive([], 'a')).toBeNull();
+  });
+});
+
+describe('no drives', () => {
+  it('names connected drives that are not set up', () => {
+    const fresh = drive({ label: 'KINGSTON', status: 'not_set_up', pack: null });
+    const text = noDrivesText([fresh]);
+    expect(text.title).toBe('No backup drive connected');
+    expect(text.body).toBe(
+      'Plug in a drive you set up for GRID, or set up KINGSTON (connected now). Set up a drive once in Settings › Backup drives.',
+    );
+  });
+
+  it('skips read-only drives and says only how to set one up when none is connected', () => {
+    const ro = drive({ label: 'CDROM', status: 'not_set_up', read_only: true, pack: null });
+    expect(noDrivesText([ro]).body).toBe(
+      'Plug in a drive you set up for GRID. Set up a drive once in Settings › Backup drives.',
+    );
+  });
+});
+
+describe('emulatorLine', () => {
+  it('names the emulators, the computers and the size', () => {
+    const line = emulatorLine(
+      plan({ emulators: [{ name: 'PCSX2', os: ['linux', 'windows'], bytes: 120 * MB, already: false, note: '' }] }),
+    );
+    expect(line.text).toBe('PCSX2 for Linux and Windows · 120 MB');
+  });
+
+  it('groups emulators by computers and leaves out an unknown size', () => {
+    const line = emulatorLine(
+      plan({
+        emulators: [
+          { name: 'DuckStation', os: ['linux', 'windows'], bytes: 50 * MB, already: false, note: '' },
+          { name: 'GE-Proton10-17', os: ['linux'], bytes: null, already: false, note: '' },
+        ],
+      }),
+    );
+    expect(line.text).toBe('DuckStation for Linux and Windows; GE-Proton10-17 for Linux');
+  });
+
+  it('reads "Already on the drive" and passes the notes on', () => {
+    const line = emulatorLine(
+      plan({
+        emulators: [
+          { name: 'Dolphin', os: ['linux'], bytes: 0, already: true, note: '' },
+          { name: 'Cemu', os: [], bytes: null, already: false, note: 'Cemu is only for Linux' },
+        ],
+      }),
+    );
+    expect(line.text).toBe('Already on the drive');
+    expect(line.notes).toEqual(['Cemu is only for Linux']);
+  });
+
+  it('reads "None needed" with no emulators', () => {
+    expect(emulatorLine(plan()).text).toBe('None needed');
+  });
+});
+
+describe('firmwareLine', () => {
+  it('lists the systems and file counts', () => {
+    const line = firmwareLine(
+      plan({
+        firmware: [
+          { platform_name: 'PlayStation', files: 3, bytes: 1500000, already: false },
+          { platform_name: 'Saturn', files: 1, bytes: 500000, already: true },
+        ],
+      }),
+    );
+    expect(line).toEqual({ text: 'PlayStation (3 files)', disabled: false });
+  });
+
+  it('is disabled with the backend’s reason', () => {
+    expect(firmwareLine(plan({ firmware_reason: 'Your server has no firmware for these systems' }))).toEqual({
+      text: 'Your server has no firmware for these systems',
+      disabled: true,
+    });
+  });
+});
+
+describe('runtimeLine', () => {
+  it('is absent when the plan offers no runtime', () => {
+    expect(runtimeLine(plan())).toBeNull();
+  });
+
+  it('offers the runtime with its size', () => {
+    const line = runtimeLine(
+      plan({ runtime: { name: 'Steam Linux Runtime', bytes: 300 * MB, already: false, included: false } }),
+    )!;
+    expect(line.label).toBe('Make Windows games work offline');
+    expect(line.text).toBe('Adds the Steam Linux Runtime (300 MB) that umu-run otherwise downloads on its first launch');
+    expect(line.disabled).toBe(false);
+  });
+
+  it('is disabled when the drive has it already', () => {
+    const line = runtimeLine(
+      plan({ runtime: { name: 'Steam Linux Runtime', bytes: 0, already: true, included: false } }),
+    )!;
+    expect(line.disabled).toBe(true);
+    expect(line.text).toBe('The Steam Linux Runtime is already on the drive');
+  });
+});
+
+describe('planNotes', () => {
+  it('names skipped games, up to three', () => {
+    const notes = planNotes(plan({ skipped: [{ rom_id: 4, name: 'Moss & Marrow' }] }), drive());
+    expect(notes).toEqual([
+      { text: '1 game is already on Couch kit and will be skipped: Moss & Marrow', warn: false },
+    ]);
+    const many = planNotes(
+      plan({ skipped: [1, 2, 3, 4].map((id) => ({ rom_id: id, name: `G${id}` })) }),
+      drive(),
+    );
+    expect(many[0].text).toBe('4 games are already on Couch kit and will be skipped');
+  });
+
+  it('lists games too big for a FAT32 drive as a warning', () => {
+    const fat = drive({ label: 'KINGSTON', fs: 'FAT32', fat32: true });
+    const notes = planNotes(plan({ too_big: [{ rom_id: 9, name: 'Big Game' }] }), fat);
+    expect(notes).toEqual([
+      { text: '1 game has a file over 4 GB, which KINGSTON (FAT32) can’t hold: Big Game', warn: true },
+    ]);
+  });
+});
+
+describe('footerModel', () => {
+  it('shows the bytes to write and the game count', () => {
+    expect(footerModel(plan())).toEqual({ note: '11.1 GB to write', button: 'Back up 3 games', disabled: false });
+  });
+
+  it('reads "Nothing to back up" when every game is on the drive', () => {
+    expect(footerModel(plan({ games_to_write: [], bytes_to_write: 0 }))).toEqual({
+      note: 'Nothing new to write',
+      button: 'Nothing to back up',
+      disabled: true,
+    });
+  });
+
+  it('reads "Not enough space" when it does not fit', () => {
+    const f = footerModel(plan({ fits: false, bytes_to_write: 76 * GB }));
+    expect(f).toEqual({ note: '76 GB to write', button: 'Not enough space', disabled: true });
+  });
+
+  it('waits while the plan is being made', () => {
+    expect(footerModel(null).disabled).toBe(true);
+  });
+});

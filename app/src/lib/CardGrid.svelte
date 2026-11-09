@@ -27,6 +27,7 @@
     labels,
     display,
     gridId,
+    selecting = false,
   }: {
     /** The view's whole list. Only the cards near the visible part render. */
     items: readonly T[];
@@ -44,6 +45,9 @@
     /** The "Game card display" setting: Equal height or Equal width. */
     display: CardDisplay;
     gridId: string;
+    /** Select mode (GameBackups README): the grid is a multi-select list of
+     *  its cards, which pick instead of opening Details (`GameCard`). */
+    selecting?: boolean;
   } = $props();
 
   /** The grid's own padding above the first card and below the last. */
@@ -188,6 +192,10 @@
   data-testid={gridId}
   class="grid"
   data-display={display}
+  data-selecting={selecting}
+  role={selecting ? 'listbox' : undefined}
+  aria-multiselectable={selecting ? 'true' : undefined}
+  aria-label={selecting ? 'Games to select' : undefined}
   bind:this={el}
   style="--height: {layout.height}px; --pad-top: {PAD_TOP_PX}px; --pad-bottom: {PAD_BOTTOM_PX}px; --pad-side: {PAD_SIDE_PX}px"
 >

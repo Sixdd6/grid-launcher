@@ -51,6 +51,20 @@
   import { savedDefaultFor } from './emulators/defaults';
   import { chordBlocked, chordContext, shouldFocusSearch } from './views/searchKeys';
   import { pickFolder } from './pickers';
+  import SelectionBar from './backups/SelectionBar.svelte';
+  import { openBackup } from './backups/dialogState.svelte';
+  import { backupRequest, sizeText } from './backups/dialog';
+  import {
+    allPicked,
+    EMPTY_SELECTION,
+    isPicked,
+    keepOnly,
+    leavesSelectMode,
+    pick,
+    selectAll,
+    totalBytes,
+    type Selection,
+  } from './backups/selection';
 
   let {
     active,
@@ -108,6 +122,15 @@
   let activePlatformRow = $derived(platforms.find((p) => p.id === activePlatform) ?? null);
   let activePlatformName = $derived(activePlatformRow ? platformLabel(activePlatformRow) : '');
   let visible = $derived(filterServerGames(games, search));
+  // Select mode (GameBackups README): Select in the toolbar turns it on, a
+  // click on a cover picks it, and the selection bar backs the picks up.
+  // Leaving the platform, or Discover, leaves it.
+  let selecting = $state(false);
+  let selection = $state.raw<Selection>(EMPTY_SELECTION);
+  let visibleIds = $derived(visible.map((g) => g.id));
+  let sizeById = $derived(new Map(games.map((g) => [g.id, g.fs_size_bytes])));
+  let pickedBytes = $derived(totalBytes(selection, (id) => sizeById.get(id) ?? 0));
+
   let installedCount = $derived(
     games.filter((game) => isInstalled(game, activePlatformName)).length,
   );
@@ -262,9 +285,49 @@
   function showDiscover() {
     discover = true;
     search = '';
+    leaveSelectMode();
+  }
+
+  function leaveSelectMode() {
+    selecting = false;
+    selection = EMPTY_SELECTION;
+  }
+
+  function toggleSelectMode() {
+    if (selecting) leaveSelectMode();
+    else selecting = true;
+  }
+
+  // A reload can drop a game: the selection never counts one off screen.
+  $effect(() => {
+    const ids = games.map((g) => g.id);
+    const next = keepOnly(untrack(() => selection), ids);
+    if (next !== untrack(() => selection)) selection = next;
+  });
+
+  /** "Back up to drive…" on the selection bar. */
+  function backUpSelection() {
+    if (selection.ids.length === 0 || activePlatform === null) return;
+    openBackup({
+      request: backupRequest({ kind: 'games', count: selection.ids.length }, selection.ids, [activePlatform]),
+      onQueued: leaveSelectMode,
+    });
+  }
+
+  /** "Back up all N…" in the platform header: every game of the platform. */
+  function backUpPlatform() {
+    if (activePlatform === null || games.length === 0) return;
+    openBackup({
+      request: backupRequest(
+        { kind: 'platform', platform: activePlatformName, count: games.length },
+        games.map((g) => g.id),
+        [activePlatform],
+      ),
+    });
   }
 
   async function selectPlatform(id: number) {
+    if (id !== activePlatform) leaveSelectMode();
     discover = false;
     activePlatform = id;
     search = '';
@@ -459,6 +522,11 @@
       if (discoverView?.handleKey(e)) noteDirectional('keyboard');
       return;
     }
+    if (leavesSelectMode(e.key, selecting, chordBlocked(ctx) || detailsGame !== null)) {
+      e.preventDefault();
+      leaveSelectMode();
+      return;
+    }
     if (shouldFocusSearch(e, ctx)) {
       e.preventDefault();
       focusSearch();
@@ -593,8 +661,9 @@
                   {platformCountsLine(activePlatformRow?.rom_count ?? 0, installedCount)}
                 </p>
               {/if}
-              {#if chipsShown}
+              {#if chipsShown || (!gamesLoading && games.length > 0)}
                 <div class="chips">
+                  {#if chipsShown}
                   {#if firmwareLinks}
                     <button
                       data-testid="server-firmware-chip"
@@ -610,6 +679,13 @@
                   <button data-testid="server-emulator-chip" class="chip link" onclick={() => onOpenSystems(activePlatformName)}>
                     {emulatorChipLabel(defaultEmulator)}
                   </button>
+                  {/if}
+                  {#if !gamesLoading && games.length > 0}
+                    <!-- GameBackups README: "Back up all 11…" on the right of the header. -->
+                    <button data-testid="server-backup-platform" class="chip link backup-all" onclick={backUpPlatform}>
+                      Back up all {games.length}…
+                    </button>
+                  {/if}
                 </div>
               {/if}
             </header>
@@ -634,6 +710,15 @@
                   {/each}
                 </select>
               </label>
+              <button
+                data-testid="server-select"
+                class="select-btn"
+                class:active={selecting}
+                aria-pressed={selecting}
+                onclick={toggleSelectMode}
+              >
+                {selecting ? 'Done' : 'Select'}
+              </button>
             </div>
           {/snippet}
         </FoldingHeader>
@@ -664,6 +749,7 @@
             size={uiSettings.cardSizeServer}
             items={visible}
             key={(game) => game.id}
+            {selecting}
           >
             {#snippet card(game, i, rect)}
               <GameCard
@@ -680,6 +766,12 @@
                 {rect}
                 showPlatform={false}
                 focused={i === focusIndex && inputMode.directional}
+                {selecting}
+                selected={isPicked(selection, game.id)}
+                onSelect={(shift) => {
+                  focusIndex = i;
+                  selection = pick(selection, game.id, shift, visibleIds);
+                }}
                 onOpen={() => {
                   // A click moves the selection, so keyboard navigation
                   // resumes from the clicked card and the focus dwell that
@@ -697,6 +789,28 @@
           </CardGrid>
         {/if}
         </div>
+        {#if selecting}
+          <SelectionBar
+            testId="server-selection"
+            count={selection.ids.length}
+            size={sizeText(pickedBytes)}
+            visibleCount={visibleIds.length}
+            allSelected={allPicked(selection, visibleIds)}
+            onSelectAll={() => (selection = selectAll(selection, visibleIds))}
+            onClear={() => (selection = EMPTY_SELECTION)}
+          >
+            {#snippet actions()}
+              <button
+                data-testid="server-selection-backup"
+                class="g-btn"
+                disabled={selection.ids.length === 0}
+                onclick={backUpSelection}
+              >
+                Back up to drive…
+              </button>
+            {/snippet}
+          </SelectionBar>
+        {/if}
       </div>
       {/if}
     </div>
@@ -823,6 +937,37 @@
   .chip button:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+
+  /* "Back up all N…" sits at the right end of the header row, after the
+     chips (which take the free space when shown). */
+  .backup-all {
+    white-space: nowrap;
+  }
+
+  /* Select / Done: the size select's height, filled while select mode is on. */
+  .select-btn {
+    font: inherit;
+    font-size: 12px;
+    height: var(--control-h);
+    box-sizing: border-box;
+    padding: 0 12px;
+    border-radius: var(--r-control);
+    border: 1px solid var(--line-strong);
+    background: var(--field);
+    color: var(--text-h);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .select-btn:hover {
+    border-color: var(--primary);
+  }
+
+  .select-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--on-primary);
   }
 
   .toolbar {
