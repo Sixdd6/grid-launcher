@@ -114,8 +114,9 @@ pub struct CloudContext<'a> {
     /// PCGamingWiki-sourced native save paths for this game, in order.
     /// Empty for emulator games.
     pub pcgw_paths: &'a [String],
-    /// The game's `native_wineprefix`, when it has one.
-    pub wine_prefix: Option<&'a Path>,
+    /// The game's `native_wineprefix`, when it has one, with its user
+    /// folder (`crate::cloud::native::row_wine_prefix`).
+    pub wine_prefix: Option<crate::cloud::native::WinePrefix<'a>>,
 }
 
 /// `(emulator name, emulator path, `"save_paths"`/`"state_paths"`)` —

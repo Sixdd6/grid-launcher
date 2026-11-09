@@ -29,7 +29,7 @@ use super::local::{self, ScanRefusal, TreeEntryKind, TreePlan};
 use super::pack::{InstalledLayout, PackSaves};
 use crate::cloud::native::{
     native_save_paths, resolve_native_save_dir, translate_windows_path_to_wine_prefix,
-    visible_native_paths,
+    visible_native_paths, WinePrefix,
 };
 use crate::cloud::ops::native::manual_paths_key_for_title;
 use crate::config::Config;
@@ -171,13 +171,13 @@ fn refusal_text(refusal: &ScanRefusal) -> &'static str {
 }
 
 /// Walks the save `folders` (Windows-token paths) that exist in the Wine
-/// `prefix` ([`translate_windows_path_to_wine_prefix`], this computer's
-/// user name). Folder `i`'s contents are named `i/…`. A folder whose
+/// `prefix` ([`translate_windows_path_to_wine_prefix`], under the user
+/// folder the caller picked). Folder `i`'s contents are named `i/…`. A folder whose
 /// tree [`local::scan_tree`] would refuse (a link inside it, a name a
 /// Windows drive can't hold when `for_windows`…) is left out and listed
 /// in [`SavesScan::refused`]; the others are still copied. A folder that
 /// is itself a link to a folder is followed.
-pub fn scan_saves(folders: &[String], prefix: &Path, for_windows: bool) -> SavesScan {
+pub fn scan_saves(folders: &[String], prefix: WinePrefix<'_>, for_windows: bool) -> SavesScan {
     let mut entries = Vec::new();
     let mut refused = Vec::new();
     for (index, raw) in folders.iter().enumerate() {
@@ -211,7 +211,7 @@ pub fn scan_saves(folders: &[String], prefix: &Path, for_windows: bool) -> Saves
     }
     let tree = (!entries.is_empty()).then(|| {
         local::plan_of(
-            prefix.to_path_buf(),
+            prefix.path.to_path_buf(),
             InstalledLayout::Multi,
             Vec::new(),
             entries,
@@ -257,7 +257,8 @@ pub enum SaveTarget {
 /// goes on this computer. Pure: `probe` reports each target's state.
 ///
 /// - With a Wine `prefix` (Linux, macOS): inside it, through
-///   [`translate_windows_path_to_wine_prefix`] (this computer's user name).
+///   [`translate_windows_path_to_wine_prefix`], under the user folder the
+///   caller picked ([`crate::cloud::native::prefix_user`]).
 /// - Without one (Windows): the real folder, through
 ///   [`resolve_native_save_dir`] with the Shell's `windows_documents`.
 ///
@@ -267,7 +268,7 @@ pub enum SaveTarget {
 pub fn restore_targets(
     folders: &[String],
     present: &[usize],
-    prefix: Option<&Path>,
+    prefix: Option<WinePrefix<'_>>,
     windows_documents: Option<&Path>,
     probe: impl Fn(&Path) -> TargetState,
 ) -> Vec<SaveTarget> {
@@ -333,7 +334,7 @@ pub fn restore_saves(
     parts: &[PartSource],
     folders: &[String],
     tmp: &Path,
-    prefix: Option<&Path>,
+    prefix: Option<WinePrefix<'_>>,
     windows_documents: Option<&Path>,
     cancel: &AtomicBool,
 ) -> Result<SavesRestored, RestoreError> {
@@ -348,7 +349,7 @@ fn restore_saves_via(
     parts: &[PartSource],
     folders: &[String],
     tmp: &Path,
-    prefix: Option<&Path>,
+    prefix: Option<WinePrefix<'_>>,
     windows_documents: Option<&Path>,
     cancel: &AtomicBool,
 ) -> Result<SavesRestored, RestoreError> {
@@ -580,6 +581,10 @@ mod tests {
         fs::write(path, bytes).unwrap();
     }
 
+    fn local(path: &Path) -> WinePrefix<'_> {
+        WinePrefix::new(path, crate::cloud::native::PrefixUser::Local)
+    }
+
     fn user_dir(prefix: &Path) -> PathBuf {
         prefix.join("drive_c").join("users").join("tester")
     }
@@ -601,7 +606,7 @@ mod tests {
             "%USERPROFILE%\\Documents\\Foo",
             "%UNKNOWN%\\Foo",
         ]);
-        let scan = scan_saves(&folders, &prefix, false);
+        let scan = scan_saves(&folders, local(&prefix), false);
         assert!(scan.refused.is_empty());
         let tree = scan.tree.expect("two folders exist");
         let names: Vec<&str> = tree.entries.iter().map(|e| e.name.as_str()).collect();
@@ -618,7 +623,7 @@ mod tests {
         let _lock = lock();
         let _env = EnvGuard::set(&[("LOGNAME", Some("tester"))]);
         let dir = tempfile::tempdir().unwrap();
-        let scan = scan_saves(&strings(&["%APPDATA%\\Foo"]), dir.path(), false);
+        let scan = scan_saves(&strings(&["%APPDATA%\\Foo"]), local(dir.path()), false);
         assert!(scan.tree.is_none());
         assert!(scan.refused.is_empty());
     }
@@ -635,7 +640,7 @@ mod tests {
         write(&user.join("AppData/Roaming/Bar/real"), b"x");
         std::os::unix::fs::symlink("/etc", user.join("AppData/Roaming/Bar/link")).unwrap();
         let folders = strings(&["%APPDATA%\\Bar", "%APPDATA%\\Foo"]);
-        let scan = scan_saves(&folders, &prefix, false);
+        let scan = scan_saves(&folders, local(&prefix), false);
         assert_eq!(
             scan.refused,
             vec![(
@@ -701,7 +706,7 @@ mod tests {
         let targets = restore_targets(
             &strings(&["%APPDATA%\\Foo", "%NOPE%\\Bar"]),
             &[0, 1],
-            Some(prefix),
+            Some(local(prefix)),
             None,
             |_| TargetState::Missing,
         );
@@ -714,6 +719,21 @@ mod tests {
                 },
                 SaveTarget::Unresolved { index: 1 },
             ]
+        );
+        let steam = WinePrefix::new(prefix, crate::cloud::native::PrefixUser::Steam);
+        let targets = restore_targets(
+            &strings(&["%APPDATA%\\Foo"]),
+            &[0],
+            Some(steam),
+            None,
+            |_| TargetState::Missing,
+        );
+        assert_eq!(
+            targets,
+            vec![SaveTarget::Restore {
+                index: 0,
+                path: prefix.join("drive_c/users/steamuser/AppData/Roaming/Foo")
+            }]
         );
     }
 
@@ -733,7 +753,7 @@ mod tests {
             "%USERPROFILE%\\Documents\\Foo",
             "%APPDATA%\\Gone",
         ]);
-        let tree = scan_saves(&folders, &old, false).tree.unwrap();
+        let tree = scan_saves(&folders, local(&old), false).tree.unwrap();
 
         let mount = dir.path().join("drive");
         fs::create_dir_all(mount.join("gridpack")).unwrap();
@@ -772,7 +792,7 @@ mod tests {
             &sources,
             &folders,
             &tmp,
-            Some(&new),
+            Some(local(&new)),
             None,
             &cancel,
         )
@@ -810,7 +830,7 @@ mod tests {
             &sources,
             &strings(&["%APPDATA%\\Foo"]),
             &tmp,
-            Some(&prefix),
+            Some(local(&prefix)),
             None,
             &AtomicBool::new(false),
         );

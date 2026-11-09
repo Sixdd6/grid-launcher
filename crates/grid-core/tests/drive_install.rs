@@ -427,6 +427,60 @@ async fn a_native_copy_gets_its_saves_back_in_its_fresh_prefix() {
     assert_saves_restored(&h, &h.library.join("games").join("Windows").join("My Game"));
 }
 
+/// With Proton as the Windows default, a restored copy's new prefix will
+/// be made by Proton, so `%APPDATA%` saves go under `users/steamuser`.
+#[cfg(not(windows))]
+#[tokio::test]
+async fn saves_restored_for_a_proton_default_go_under_steamuser() {
+    let h = Harness::new();
+    let mut config = fs::read_to_string(&h.config_path).unwrap();
+    config.push_str("default_compat_tool = \"GE-Proton9\"\n");
+    fs::write(&h.config_path, config).unwrap();
+    let parts = put_installed(
+        &h,
+        "games/win/My Game/My Game",
+        &[dir("game/"), file("game/mygame.exe", &[0x4du8; 1400])],
+    );
+    let mut game = installed_game(
+        5,
+        "My Game",
+        "win",
+        "Windows",
+        "native",
+        "My Game",
+        "game/mygame.exe",
+        parts,
+        json!({ "native_executable": "game/mygame.exe" }),
+    );
+    let saves = put_tar(
+        &h,
+        "saves/win/My Game",
+        "saves",
+        &[dir("0/"), file("0/slot1.sav", &[3u8; 1200])],
+    );
+    game.saves = Some(
+        serde_json::from_value(json!({
+            "folders": ["%APPDATA%\\My Game"],
+            "parts": saves,
+            "tree_bytes": 1200,
+            "tree_files": 1,
+        }))
+        .unwrap(),
+    );
+    let entry = install_and_wait(&h, &game).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    let users = h.library.join("games/Windows/My Game/prefix/drive_c/users");
+    assert_eq!(
+        fs::read(users.join("steamuser/AppData/Roaming/My Game/slot1.sav")).unwrap(),
+        [3u8; 1200]
+    );
+    let names: Vec<String> = fs::read_dir(&users)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["steamuser"], "no folder for this computer's user");
+}
+
 #[cfg(not(windows))]
 #[tokio::test]
 async fn a_damaged_saves_archive_still_installs_the_game() {

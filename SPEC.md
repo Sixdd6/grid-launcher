@@ -923,6 +923,15 @@ Windows paths (`%APPDATA%\Foo`, `%USERPROFILE%\Documents\My Games\Foo`); a folde
 user added inside the game's Wine prefix is turned into that form (a folder elsewhere on
 drive C becomes `%SYSTEMDRIVE%\…`), and one outside the prefix is left out. The folders
 are recorded even when none of them exist.
+- **Which user folder a prefix uses.** A Windows save path such as `%APPDATA%\Foo`
+  lives under `drive_c/users/<user>/` in a Wine prefix. Proton (run through umu-run)
+  names that user `steamuser`; plain Wine uses this computer's user name. GRID uses
+  `steamuser` when the prefix has that folder, else this computer's user name when the
+  prefix has that one. A prefix with neither (a new one, such as right after an install
+  from a drive) takes the user of the compat tool that will run the game, picked the way
+  the launcher picks it (the game's own tool, else the Windows default in Settings): a
+  Proton tool gives `steamuser`, `wine` or no tool gives this computer's user name. Cloud
+  saves and backups follow the same rule.
 - **Copy.** When the game is installed on this computer (Linux or macOS) with a Wine
   prefix, the folders that exist in the prefix are copied to the drive as one
   uncompressed tar in parts, checked like every other file. This happens whether the
@@ -935,8 +944,8 @@ are recorded even when none of them exist.
   still on the drive with its folders recorded.
 - **Restore.** Installing the game from the drive, as a copy or as downloaded files,
   puts the saves back once the game is installed. On Linux or macOS they go into the
-  game's new Wine prefix, under this computer's user name; on Windows into the real
-  folders. A folder that already holds files is never written into: it is skipped and
+  game's new Wine prefix, under the Windows user folder that prefix uses (see Which user
+  folder a prefix uses); on Windows into the real folders. A folder that already holds files is never written into: it is skipped and
   the row warns "Saves for <folder> weren't restored: <path> already has files". The
   recorded folders are also given to cloud saves for that game (as its PCGamingWiki
   list when it has none yet, else added to its own list; nothing there is replaced or

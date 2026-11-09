@@ -30,6 +30,7 @@ use crate::backup::plan::{
 };
 use crate::backup::saves;
 use crate::backup::write::{self as drive_write, FileWrite, WriteError, WriteTarget};
+use crate::cloud::native::{row_wine_prefix, OwnedWinePrefix};
 use crate::cloud::ops::native::manual_paths_key_for_title;
 use crate::config::Config;
 use crate::images::urls::{extension_for, filter_to_server_host, magic_extension, server_resolver};
@@ -537,15 +538,18 @@ fn pack_for_windows(mount: &Path) -> bool {
     )
 }
 
-/// The Wine prefix of `row`, a native install on this computer: its
-/// `native_wineprefix`, `~/` expanded. `None` on Windows, where a game has
-/// no prefix, and for a row that records none.
-fn wine_prefix_of(row: &InstalledGame, home: Option<&Path>) -> Option<PathBuf> {
+/// The Wine prefix of `row`, a native install on this computer, with the
+/// user folder its saves are under ([`row_wine_prefix`]). `None` on
+/// Windows, where a game has no prefix, and for a row that records none.
+fn wine_prefix_of(
+    row: &InstalledGame,
+    default_compat_tool: &str,
+    home: Option<&Path>,
+) -> Option<OwnedWinePrefix> {
     if cfg!(windows) {
         return None;
     }
-    let raw = row.native_wineprefix.trim();
-    (!raw.is_empty()).then(|| super::path_change::expand(raw, home))
+    row_wine_prefix(row, default_compat_tool, home)
 }
 
 /// Fills `job.saves` for a Windows game: the save folders GRID knows for
@@ -569,26 +573,26 @@ async fn stage_saves(
     let list = |map: &std::collections::BTreeMap<String, Vec<String>>| {
         map.get(&key).cloned().unwrap_or_default()
     };
-    let prefix = row.and_then(|row| wine_prefix_of(row, home));
+    let prefix = row.and_then(|row| wine_prefix_of(row, &config.default_compat_tool, home));
     let folders = saves::recorded_folders(
         &list(&config.native_pcgw_save_paths),
         &list(&config.native_manual_save_paths),
         &list(&config.native_removed_save_paths),
-        prefix.as_deref(),
+        prefix.as_ref().map(|prefix| prefix.path.as_path()),
         home,
     );
     if folders.is_empty() {
         return;
     }
     let mut tree = None;
-    if let Some(prefix) = prefix.filter(|prefix| prefix.is_dir()) {
+    if let Some(prefix) = prefix.filter(|prefix| prefix.path.is_dir()) {
         if service.game_running(detail.id) {
             job.warnings.push(SAVES_RUNNING.to_string());
         } else {
             let scanned = folders.clone();
             let for_windows = pack_for_windows(&job.drive.mount);
             let scan = tokio::task::spawn_blocking(move || {
-                saves::scan_saves(&scanned, &prefix, for_windows)
+                saves::scan_saves(&scanned, prefix.as_prefix(), for_windows)
             })
             .await
             .unwrap_or_default();

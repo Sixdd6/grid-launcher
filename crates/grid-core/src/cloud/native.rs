@@ -142,6 +142,153 @@ fn passwd_fallback_username() -> Option<String> {
 // Wine prefix path translation
 // ---------------------------------------------------------------------
 
+/// The Windows user folder of a Wine prefix (`drive_c/users/<user>`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrefixUser {
+    /// `steamuser`: every Proton prefix (GRID runs Proton through umu-run).
+    Steam,
+    /// This computer's user name: a prefix plain Wine made.
+    Local,
+}
+
+/// The user folder Proton prefixes use.
+pub const STEAM_USER: &str = "steamuser";
+
+impl PrefixUser {
+    /// The folder name under `drive_c/users`.
+    pub fn name(self) -> String {
+        match self {
+            Self::Steam => STEAM_USER.to_string(),
+            Self::Local => current_username(),
+        }
+    }
+}
+
+/// A Wine prefix and the user folder its saves live under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WinePrefix<'a> {
+    pub path: &'a Path,
+    pub user: PrefixUser,
+}
+
+impl<'a> WinePrefix<'a> {
+    pub fn new(path: &'a Path, user: PrefixUser) -> Self {
+        Self { path, user }
+    }
+}
+
+/// A [`WinePrefix`] that owns its path, for callers that keep it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnedWinePrefix {
+    pub path: PathBuf,
+    pub user: PrefixUser,
+}
+
+impl OwnedWinePrefix {
+    pub fn as_prefix(&self) -> WinePrefix<'_> {
+        WinePrefix::new(&self.path, self.user)
+    }
+}
+
+/// What runs a Windows game on this computer, as the launcher decides it
+/// ([`crate::launch::native::build_native_command`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompatKind {
+    /// Any compat tool but `wine`: Proton through umu-run.
+    Proton,
+    /// `wine`: the system's Wine.
+    Wine,
+    /// No compat tool (a Windows host, a Linux game, or none set).
+    None,
+}
+
+impl CompatKind {
+    /// The user folder a new prefix gets from this tool.
+    pub fn new_prefix_user(self) -> PrefixUser {
+        match self {
+            Self::Proton => PrefixUser::Steam,
+            Self::Wine | Self::None => PrefixUser::Local,
+        }
+    }
+}
+
+/// The compat tool the launcher would pick, as a [`CompatKind`]. Pure, and
+/// the same rule as the launcher's: the row's own tool, else the config's
+/// Windows default (blanked on a Windows host); none for a row whose
+/// platform is not a Windows one.
+pub fn compat_kind(
+    row_tool: &str,
+    default_tool: &str,
+    windows_platform: bool,
+    host_windows: bool,
+) -> CompatKind {
+    if !windows_platform {
+        return CompatKind::None;
+    }
+    let default_tool = if host_windows {
+        ""
+    } else {
+        default_tool.trim()
+    };
+    let tool = match row_tool.trim() {
+        "" => default_tool,
+        own => own,
+    };
+    match tool {
+        "" => CompatKind::None,
+        "wine" => CompatKind::Wine,
+        _ => CompatKind::Proton,
+    }
+}
+
+/// Which user folder `prefix` uses. Pure: `has_user(name)` says whether
+/// `drive_c/users/<name>` exists.
+///
+/// 1. `steamuser` exists: [`PrefixUser::Steam`] (a Proton prefix);
+/// 2. else this computer's user name exists: [`PrefixUser::Local`];
+/// 3. else (a new, empty prefix) the tool that will make it decides
+///    ([`CompatKind::new_prefix_user`]).
+pub fn pick_prefix_user(has_user: impl Fn(&str) -> bool, kind: CompatKind) -> PrefixUser {
+    if has_user(STEAM_USER) {
+        PrefixUser::Steam
+    } else if has_user(&current_username()) {
+        PrefixUser::Local
+    } else {
+        kind.new_prefix_user()
+    }
+}
+
+/// [`pick_prefix_user`] over the folders that exist in `prefix`.
+pub fn prefix_user(prefix: &Path, kind: CompatKind) -> PrefixUser {
+    let users = prefix.join("drive_c").join("users");
+    pick_prefix_user(|name| !name.is_empty() && users.join(name).is_dir(), kind)
+}
+
+/// The Wine prefix `row` runs in, with its user folder: its
+/// `native_wineprefix` (`~/` expanded against `home`) and
+/// [`prefix_user`] with the tool [`compat_kind`] picks from the row and
+/// `default_compat_tool` (the config's Windows default). `None` when the
+/// row records no prefix.
+pub fn row_wine_prefix(
+    row: &crate::library::registry::InstalledGame,
+    default_compat_tool: &str,
+    home: Option<&Path>,
+) -> Option<OwnedWinePrefix> {
+    let raw = row.native_wineprefix.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let path = crate::library::path_change::expand(raw, home);
+    let kind = compat_kind(
+        &row.native_compat_tool,
+        default_compat_tool,
+        row.is_windows(),
+        cfg!(windows),
+    );
+    let user = prefix_user(&path, kind);
+    Some(OwnedWinePrefix { path, user })
+}
+
 /// Translates a Windows env-var save path to its Linux path inside a Wine
 /// `prefix`. Ports `translate_windows_path_to_wine_prefix`
 /// (`grid_launcher/emulator/wine.py:7-42`) exactly: `%USERPROFILE%\AppData\
@@ -152,10 +299,13 @@ fn passwd_fallback_username() -> Option<String> {
 /// `%PROGRAMDATA%`, `%PUBLIC%`, `%WINDIR%`, and (GRID's own addition)
 /// `%SYSTEMDRIVE%` for `drive_c` itself. Matching is case-insensitive;
 /// `None` when no known token prefixes `raw`.
-pub fn translate_windows_path_to_wine_prefix(raw: &str, prefix: &Path) -> Option<PathBuf> {
-    let username = current_username();
-    let drive_c = prefix.join("drive_c");
-    let user_home = drive_c.join("users").join(&username);
+///
+/// The user folder is `prefix.user`'s ([`PrefixUser`]), chosen by the
+/// caller ([`prefix_user`]): the Python original always used this
+/// computer's user name, which is wrong for a Proton prefix.
+pub fn translate_windows_path_to_wine_prefix(raw: &str, prefix: WinePrefix<'_>) -> Option<PathBuf> {
+    let drive_c = prefix.path.join("drive_c");
+    let user_home = drive_c.join("users").join(prefix.user.name());
 
     let mappings: [(&str, PathBuf); 9] = [
         (
@@ -213,7 +363,7 @@ pub fn translate_windows_path_to_wine_prefix(raw: &str, prefix: &Path) -> Option
 pub fn resolve_native_save_dir(
     raw: &str,
     windows_documents: Option<&Path>,
-    wine_prefix: Option<&Path>,
+    wine_prefix: Option<WinePrefix<'_>>,
 ) -> PathBuf {
     if let Some(prefix) = wine_prefix {
         if let Some(translated) = translate_windows_path_to_wine_prefix(raw, prefix) {
@@ -356,7 +506,7 @@ pub fn restore_native_multi_dir_archive(
     payload: &[u8],
     fallback_dirs: &[PathBuf],
     windows_documents: Option<&Path>,
-    wine_prefix: Option<&Path>,
+    wine_prefix: Option<WinePrefix<'_>>,
 ) -> Result<usize, String> {
     if !payload_is_zip(payload) {
         return Err("Downloaded save is not a valid zip archive.".to_string());
@@ -727,6 +877,10 @@ mod tests {
     // resolve_native_save_dir(..., wine_prefix=...)
     // -------------------------------------------------------------
 
+    fn local(path: &Path) -> WinePrefix<'_> {
+        WinePrefix::new(path, PrefixUser::Local)
+    }
+
     fn wine_env() -> EnvGuard {
         EnvGuard::set(&[("LOGNAME", Some("testuser"))])
     }
@@ -738,7 +892,7 @@ mod tests {
         let prefix = Path::new("/home/testuser/.wine");
         let user_home = prefix.join("drive_c").join("users").join("testuser");
 
-        let result = resolve_native_save_dir("%APPDATA%\\Game\\saves", None, Some(prefix));
+        let result = resolve_native_save_dir("%APPDATA%\\Game\\saves", None, Some(local(prefix)));
 
         assert_eq!(
             result,
@@ -757,7 +911,7 @@ mod tests {
         let prefix = Path::new("/home/testuser/.wine");
         let user_home = prefix.join("drive_c").join("users").join("testuser");
 
-        let result = resolve_native_save_dir("%LOCALAPPDATA%\\Game", None, Some(prefix));
+        let result = resolve_native_save_dir("%LOCALAPPDATA%\\Game", None, Some(local(prefix)));
 
         assert_eq!(result, user_home.join("AppData").join("Local").join("Game"));
     }
@@ -769,7 +923,8 @@ mod tests {
         let prefix = Path::new("/home/testuser/.wine");
         let user_home = prefix.join("drive_c").join("users").join("testuser");
 
-        let result = resolve_native_save_dir("%USERPROFILE%\\Documents\\Game", None, Some(prefix));
+        let result =
+            resolve_native_save_dir("%USERPROFILE%\\Documents\\Game", None, Some(local(prefix)));
 
         assert_eq!(result, user_home.join("Documents").join("Game"));
     }
@@ -781,8 +936,11 @@ mod tests {
         let prefix = Path::new("/home/testuser/.wine");
         let user_home = prefix.join("drive_c").join("users").join("testuser");
 
-        let result =
-            resolve_native_save_dir("%USERPROFILE%\\AppData\\LocalLow\\Game", None, Some(prefix));
+        let result = resolve_native_save_dir(
+            "%USERPROFILE%\\AppData\\LocalLow\\Game",
+            None,
+            Some(local(prefix)),
+        );
 
         assert_eq!(
             result,
@@ -796,7 +954,7 @@ mod tests {
         let _guard = wine_env();
         let prefix = Path::new("/home/testuser/.wine");
 
-        let result = resolve_native_save_dir("%PROGRAMDATA%\\Game", None, Some(prefix));
+        let result = resolve_native_save_dir("%PROGRAMDATA%\\Game", None, Some(local(prefix)));
 
         assert_eq!(
             result,
@@ -825,7 +983,7 @@ mod tests {
         let result = resolve_native_save_dir(
             "%GAME_DIR%\\saves",
             None,
-            Some(Path::new("/home/testuser/.wine")),
+            Some(local(Path::new("/home/testuser/.wine"))),
         );
 
         assert_eq!(result, PathBuf::from("%GAME_DIR%\\saves"));
@@ -842,7 +1000,7 @@ mod tests {
         let prefix = Path::new("/home/testuser/.wine");
         let user_home = prefix.join("drive_c").join("users").join("testuser");
 
-        let result = translate_windows_path_to_wine_prefix("%APPDATA%\\Game", prefix);
+        let result = translate_windows_path_to_wine_prefix("%APPDATA%\\Game", local(prefix));
 
         assert_eq!(
             result,
@@ -857,7 +1015,7 @@ mod tests {
         let prefix = Path::new("/home/testuser/.wine");
         let user_home = prefix.join("drive_c").join("users").join("testuser");
 
-        let result = translate_windows_path_to_wine_prefix("%LOCALAPPDATA%\\Game", prefix);
+        let result = translate_windows_path_to_wine_prefix("%LOCALAPPDATA%\\Game", local(prefix));
 
         assert_eq!(
             result,
@@ -874,7 +1032,7 @@ mod tests {
 
         let result = translate_windows_path_to_wine_prefix(
             "%USERPROFILE%\\Documents\\Square Enix\\Game",
-            prefix,
+            local(prefix),
         );
 
         assert_eq!(
@@ -890,8 +1048,10 @@ mod tests {
         let prefix = Path::new("/home/testuser/.wine");
         let user_home = prefix.join("drive_c").join("users").join("testuser");
 
-        let result =
-            translate_windows_path_to_wine_prefix("%USERPROFILE%\\AppData\\LocalLow\\Game", prefix);
+        let result = translate_windows_path_to_wine_prefix(
+            "%USERPROFILE%\\AppData\\LocalLow\\Game",
+            local(prefix),
+        );
 
         assert_eq!(
             result,
@@ -906,7 +1066,7 @@ mod tests {
         let prefix = Path::new("/home/testuser/.wine");
         let user_home = prefix.join("drive_c").join("users").join("testuser");
 
-        let result = translate_windows_path_to_wine_prefix("%USERPROFILE%", prefix);
+        let result = translate_windows_path_to_wine_prefix("%USERPROFILE%", local(prefix));
 
         assert_eq!(result, Some(user_home));
     }
@@ -917,7 +1077,7 @@ mod tests {
         let _guard = wine_env();
         let prefix = Path::new("/home/testuser/.wine");
 
-        let result = translate_windows_path_to_wine_prefix("%PROGRAMDATA%\\Game", prefix);
+        let result = translate_windows_path_to_wine_prefix("%PROGRAMDATA%\\Game", local(prefix));
 
         assert_eq!(
             result,
@@ -931,12 +1091,129 @@ mod tests {
         let _guard = wine_env();
         let prefix = Path::new("/home/testuser/.wine");
 
-        let result = translate_windows_path_to_wine_prefix("%WINDIR%\\Fonts", prefix);
+        let result = translate_windows_path_to_wine_prefix("%WINDIR%\\Fonts", local(prefix));
 
         assert_eq!(
             result,
             Some(prefix.join("drive_c").join("windows").join("Fonts"))
         );
+    }
+
+    // -------------------------------------------------------------
+    // The prefix's user folder (GRID's own: Proton uses steamuser)
+    // -------------------------------------------------------------
+
+    #[test]
+    fn a_steam_prefix_translates_under_steamuser() {
+        let _lock = crate::test_env::lock();
+        let _guard = wine_env();
+        let prefix = Path::new("/games/Foo/prefix");
+        let result = translate_windows_path_to_wine_prefix(
+            "%APPDATA%\\Foo",
+            WinePrefix::new(prefix, PrefixUser::Steam),
+        );
+        assert_eq!(
+            result,
+            Some(prefix.join("drive_c/users/steamuser/AppData/Roaming/Foo"))
+        );
+        let resolved = resolve_native_save_dir(
+            "%USERPROFILE%\\Documents\\Foo",
+            None,
+            Some(WinePrefix::new(prefix, PrefixUser::Steam)),
+        );
+        assert_eq!(
+            resolved,
+            prefix.join("drive_c/users/steamuser/Documents/Foo")
+        );
+    }
+
+    #[test]
+    fn the_compat_kind_follows_the_launchers_rule() {
+        // The row's own tool wins; a blank one takes the default.
+        assert_eq!(
+            compat_kind("wine", "GE-Proton9", true, false),
+            CompatKind::Wine
+        );
+        assert_eq!(
+            compat_kind("GE-Proton9", "wine", true, false),
+            CompatKind::Proton
+        );
+        assert_eq!(
+            compat_kind("  ", "GE-Proton9", true, false),
+            CompatKind::Proton
+        );
+        assert_eq!(compat_kind("", "wine", true, false), CompatKind::Wine);
+        assert_eq!(compat_kind("", "", true, false), CompatKind::None);
+        // A Windows host ignores the default; a Linux game has no tool.
+        assert_eq!(compat_kind("", "GE-Proton9", true, true), CompatKind::None);
+        assert_eq!(
+            compat_kind("GE-Proton9", "", false, false),
+            CompatKind::None
+        );
+    }
+
+    #[test]
+    fn an_existing_user_folder_decides_the_user() {
+        let _lock = crate::test_env::lock();
+        let _guard = wine_env();
+        // steamuser first, whatever the tool.
+        let both = |name: &str| name == "steamuser" || name == "testuser";
+        assert_eq!(pick_prefix_user(both, CompatKind::Wine), PrefixUser::Steam);
+        // Then this computer's user, whatever the tool.
+        let local = |name: &str| name == "testuser";
+        assert_eq!(
+            pick_prefix_user(local, CompatKind::Proton),
+            PrefixUser::Local
+        );
+        // Neither: the tool that will make the prefix decides.
+        let none = |_: &str| false;
+        assert_eq!(
+            pick_prefix_user(none, CompatKind::Proton),
+            PrefixUser::Steam
+        );
+        assert_eq!(pick_prefix_user(none, CompatKind::Wine), PrefixUser::Local);
+        assert_eq!(pick_prefix_user(none, CompatKind::None), PrefixUser::Local);
+    }
+
+    #[test]
+    fn prefix_user_reads_the_users_folder() {
+        let _lock = crate::test_env::lock();
+        let _guard = wine_env();
+        let dir = tempfile::tempdir().unwrap();
+        let prefix = dir.path();
+        assert_eq!(prefix_user(prefix, CompatKind::Proton), PrefixUser::Steam);
+        assert_eq!(prefix_user(prefix, CompatKind::Wine), PrefixUser::Local);
+        std::fs::create_dir_all(prefix.join("drive_c/users/testuser")).unwrap();
+        assert_eq!(prefix_user(prefix, CompatKind::Proton), PrefixUser::Local);
+        std::fs::create_dir_all(prefix.join("drive_c/users/steamuser")).unwrap();
+        assert_eq!(prefix_user(prefix, CompatKind::Wine), PrefixUser::Steam);
+    }
+
+    #[test]
+    fn a_rows_prefix_takes_its_tool_or_the_default() {
+        use crate::library::registry::InstalledGame;
+        let _lock = crate::test_env::lock();
+        let _guard = wine_env();
+        let dir = tempfile::tempdir().unwrap();
+        let mut row = InstalledGame {
+            platform: "Windows".into(),
+            platform_slug: "win".into(),
+            native_wineprefix: dir.path().to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let user =
+            |row: &InstalledGame, default: &str| row_wine_prefix(row, default, None).unwrap().user;
+        let host_default = if cfg!(windows) {
+            PrefixUser::Local
+        } else {
+            PrefixUser::Steam
+        };
+        assert_eq!(user(&row, "GE-Proton9"), host_default);
+        assert_eq!(user(&row, "wine"), PrefixUser::Local);
+        row.native_compat_tool = "wine".into();
+        assert_eq!(user(&row, "GE-Proton9"), PrefixUser::Local);
+        row.native_wineprefix.clear();
+        assert!(row_wine_prefix(&row, "GE-Proton9", None).is_none());
     }
 
     #[test]
@@ -945,7 +1222,8 @@ mod tests {
         let _guard = wine_env();
         let prefix = Path::new("/home/testuser/.wine");
 
-        let result = translate_windows_path_to_wine_prefix("%SystemDrive%\\Games\\Foo", prefix);
+        let result =
+            translate_windows_path_to_wine_prefix("%SystemDrive%\\Games\\Foo", local(prefix));
 
         assert_eq!(
             result,
@@ -959,7 +1237,7 @@ mod tests {
         let _guard = wine_env();
         let prefix = Path::new("/home/testuser/.wine");
 
-        let result = translate_windows_path_to_wine_prefix("%PUBLIC%\\Documents", prefix);
+        let result = translate_windows_path_to_wine_prefix("%PUBLIC%\\Documents", local(prefix));
 
         assert_eq!(
             result,
@@ -979,7 +1257,7 @@ mod tests {
         let _guard = wine_env();
         let prefix = Path::new("/home/testuser/.wine");
 
-        let result = translate_windows_path_to_wine_prefix("%GAME_DIR%\\saves", prefix);
+        let result = translate_windows_path_to_wine_prefix("%GAME_DIR%\\saves", local(prefix));
 
         assert_eq!(result, None);
     }
@@ -991,7 +1269,7 @@ mod tests {
         let prefix = Path::new("/home/testuser/.wine");
         let user_home = prefix.join("drive_c").join("users").join("testuser");
 
-        let result = translate_windows_path_to_wine_prefix("%appdata%\\Game", prefix);
+        let result = translate_windows_path_to_wine_prefix("%appdata%\\Game", local(prefix));
 
         assert_eq!(
             result,

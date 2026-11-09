@@ -35,6 +35,7 @@ use crate::backup::local::WINE_PREFIX_DIR;
 use crate::backup::pack::{self, InstalledLayout, PackGame, PackInstalled};
 use crate::backup::saves;
 use crate::backup::write::SPACE_MARGIN;
+use crate::cloud::native::{row_wine_prefix, OwnedWinePrefix};
 use crate::config::Config;
 use crate::images::ImageFields;
 use crate::romm::RomDetail;
@@ -582,7 +583,10 @@ impl InstallService {
         if drive_saves.folders.is_empty() {
             return;
         }
+        // The Windows default compat tool decides a new prefix's user.
+        let mut default_compat_tool = String::new();
         let seeded = Config::load(&self.config_path).and_then(|mut config| {
+            default_compat_tool = config.default_compat_tool.clone();
             if saves::seed_folders(&mut config, &record.title, &drive_saves.folders) {
                 config.save(&self.config_path)?;
             }
@@ -607,12 +611,14 @@ impl InstallService {
         let prefix = if cfg!(windows) {
             None
         } else {
-            match record.native_wineprefix.trim() {
-                "" => {
+            // Under `steamuser` or this computer's user name, as the prefix
+            // and the compat tool that will run the game say.
+            match row_wine_prefix(record, &default_compat_tool, None) {
+                None => {
                     append_warning(warning, "Its saves weren't restored: it has no Wine prefix");
                     return;
                 }
-                raw => Some(PathBuf::from(raw)),
+                prefix => prefix,
             }
         };
         let tmp = match self.library_root() {
@@ -628,7 +634,7 @@ impl InstallService {
             &drive_saves.parts,
             &drive_saves.folders,
             &tmp,
-            prefix.as_deref(),
+            prefix.as_ref().map(OwnedWinePrefix::as_prefix),
             crate::platform::windows_documents_dir().as_deref(),
             &AtomicBool::new(false),
         );
