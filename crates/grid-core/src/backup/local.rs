@@ -520,9 +520,9 @@ fn portable(name: &str) -> bool {
 }
 
 /// The row values a restore needs, relative to the tree at `root`: the
-/// native executable as a path inside the tree (`""` when it lies outside
-/// or is not set), the working folder only when it is relative, and the
-/// plain values as they are. Never an absolute path.
+/// native executable and a kept archive as paths inside the tree (`""`
+/// when they lie outside or are not set), the working folder only when it
+/// is relative, and the plain values as they are. Never an absolute path.
 pub fn snapshot_row(row: &InstalledGame, root: &Path, home: Option<&Path>) -> PackInstalledRow {
     let working_dir = row.native_working_dir.trim();
     let working_dir = if working_dir.is_empty() {
@@ -541,6 +541,7 @@ pub fn snapshot_row(row: &InstalledGame, root: &Path, home: Option<&Path>) -> Pa
         ps4_content: row.ps4_content.clone(),
         included_dlc: row.included_dlc.clone(),
         ra_id: row.ra_id.clone(),
+        archive_path: relative_to(&row.archive_path, root, home).unwrap_or_default(),
     }
 }
 
@@ -1112,6 +1113,7 @@ mod tests {
                 ps4_content: r#"[{"kind":"update"}]"#.into(),
                 included_dlc: r#"["Pack"]"#.into(),
                 ra_id: "12".into(),
+                archive_path: String::new(),
             }
         );
 
@@ -1131,6 +1133,23 @@ mod tests {
             ..row
         };
         assert_eq!(snapshot_row(&away, &root, None).native_working_dir, "");
+
+        // A native install that kept its archive inside its folder: the
+        // archive travels as a path inside the tree; one beside the
+        // folder (an extracted game's) does not.
+        let kept = InstalledGame {
+            archive_path: text(&root.join("Ember Run.zip")),
+            ..base_row("Windows")
+        };
+        assert_eq!(
+            snapshot_row(&kept, &root, None).archive_path,
+            "Ember Run.zip"
+        );
+        let beside = InstalledGame {
+            archive_path: text(&root.with_extension("zip")),
+            ..base_row("Windows")
+        };
+        assert_eq!(snapshot_row(&beside, &root, None).archive_path, "");
         assert_eq!(
             snapshot_row(&base_row(PS4), &root, None),
             PackInstalledRow::default()

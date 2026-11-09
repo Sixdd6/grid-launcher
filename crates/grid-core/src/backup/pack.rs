@@ -301,6 +301,10 @@ pub struct PackInstalledRow {
     pub included_dlc: String,
     #[serde(default)]
     pub ra_id: String,
+    /// The archive the install kept, relative to the tree (a native game
+    /// that kept its download inside its folder), else empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub archive_path: String,
 }
 
 /// One file of a game, as the server lists it.

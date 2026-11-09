@@ -782,6 +782,73 @@ async fn a_native_copy_keeps_its_sidecar_and_gets_a_fresh_prefix() {
     }
 }
 
+/// A native install that kept its download inside its folder and
+/// extracted nothing: the restored row points at the kept archive, so the
+/// game launches from it as before.
+#[tokio::test]
+async fn a_native_copy_that_kept_its_archive_restores_it() {
+    let h = Harness::new();
+    let parts = put_installed(
+        &h,
+        "games/linux/Kept Game/Kept Game",
+        &[
+            file("Kept Game.AppImage", &[0x7fu8; 900]),
+            file("game.json", br#"{"version": "2.0"}"#),
+        ],
+    );
+    let game = installed_game(
+        6,
+        "Kept Game",
+        "linux",
+        "Linux",
+        "native",
+        "Kept Game",
+        "Kept Game.AppImage",
+        parts,
+        json!({
+            "native_executable": "Kept Game.AppImage",
+            "archive_path": "Kept Game.AppImage",
+        }),
+    );
+    let entry = install_and_wait(&h, &game).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let game_dir = h.library.join("games").join("Linux").join("Kept Game");
+    let kept = game_dir.join("Kept Game.AppImage");
+    let row = h.registry.find(Some(6), "", "").unwrap().unwrap();
+    assert!(row.is_native());
+    assert_eq!(row.archive_path, kept.to_string_lossy());
+    assert_eq!(row.native_executable_path, kept.to_string_lossy());
+    assert_eq!(row.extracted_dir, "", "nothing was extracted");
+    assert_eq!(row.extracted_path, "", "the archive is the install");
+}
+
+/// A kept-archive path that names nothing in the restored tree is dropped.
+#[tokio::test]
+async fn a_native_copy_drops_a_kept_archive_it_does_not_hold() {
+    let h = Harness::new();
+    let parts = put_installed(
+        &h,
+        "games/linux/Lost Game/Lost Game",
+        &[file("run.sh", b"#!/bin/sh\n")],
+    );
+    let game = installed_game(
+        4,
+        "Lost Game",
+        "linux",
+        "Linux",
+        "native",
+        "Lost Game",
+        "run.sh",
+        parts,
+        json!({ "native_executable": "run.sh", "archive_path": "Lost Game.zip" }),
+    );
+    let entry = install_and_wait(&h, &game).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    let row = h.registry.find(Some(4), "", "").unwrap().unwrap();
+    assert_eq!(row.archive_path, "");
+}
+
 #[tokio::test]
 async fn a_restored_out_of_date_copy_shows_a_server_update() {
     use grid_core::library::update_detection::{game_has_server_update, ServerVersion};

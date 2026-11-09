@@ -336,6 +336,14 @@ pub fn restored_record(
             if cfg!(not(windows)) {
                 record.native_wineprefix = path_string(&dest.join(WINE_PREFIX_DIR));
             }
+            // A native install that kept its archive inside its folder: it
+            // extracted nothing, so, as on a server install, the row names
+            // the archive and no extracted launch file (the registry keeps
+            // only one of the two).
+            record.archive_path = tree_path(dest, &row.archive_path);
+            if !record.archive_path.is_empty() {
+                record.extracted_path.clear();
+            }
         }
         InstalledLayout::Multi => {
             record.multi_file_game_dir = path_string(dest);
@@ -491,6 +499,14 @@ impl InstallService {
             }
             if !record.extracted_dir.is_empty() && !dest.join("game").is_dir() {
                 record.extracted_dir.clear();
+            }
+            // The kept archive must be a file inside the restored tree.
+            match file_inside(dest, &installed.row.archive_path) {
+                Some(path) if !installed.row.archive_path.is_empty() => {
+                    record.archive_path = path_string(&path);
+                    record.extracted_path.clear();
+                }
+                _ => record.archive_path.clear(),
             }
             if !record.native_wineprefix.is_empty() {
                 let prefix = dest.join(WINE_PREFIX_DIR);
@@ -752,10 +768,22 @@ mod tests {
             assert_eq!(row.native_wineprefix, at("prefix"));
         }
 
+        assert_eq!(row.archive_path, "", "no kept archive");
+
         // native, an unsafe executable path is dropped
         copy.row.native_executable = "../escape".to_string();
         let row = restored_record(&detail("Linux"), &copy, &dest, true, SERVER);
         assert_eq!(row.native_executable_path, "");
+
+        // native, a kept archive inside the tree comes back; an unsafe one
+        // is dropped
+        copy.row.archive_path = "Ember Run.zip".to_string();
+        let row = restored_record(&detail("Linux"), &copy, &dest, true, SERVER);
+        assert_eq!(row.archive_path, at("Ember Run.zip"));
+        assert_eq!(row.extracted_path, "", "the archive is the install");
+        copy.row.archive_path = "../Ember Run.zip".to_string();
+        let row = restored_record(&detail("Linux"), &copy, &dest, true, SERVER);
+        assert_eq!(row.archive_path, "");
 
         // multi
         let copy = installed(InstalledLayout::Multi, "Game", "Game.m3u");
