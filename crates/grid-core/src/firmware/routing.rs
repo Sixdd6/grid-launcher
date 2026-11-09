@@ -43,7 +43,9 @@ use crate::launch::selection::{
 use crate::romm::RommClient;
 
 use super::manifest::MANIFEST_FILE;
-use super::{install_platform_firmware_recorded, FirmwareOptions, FirmwareTarget};
+use super::{
+    install_platform_firmware_from, FirmwareOptions, FirmwareSource, FirmwareTarget, ServerFirmware,
+};
 
 /// `${VAR}` / `$VAR` / `%VAR%` — the union of `posixpath.expandvars` and
 /// `ntpath.expandvars` this crate needs, since a profile path written for
@@ -476,6 +478,22 @@ pub fn firmware_plan<'a>(ctx: &GameFirmwareContext<'a>) -> Option<FirmwarePlan<'
 /// Returns the accumulated warnings joined by newlines; `""` means either
 /// success or "nothing to do" ([`firmware_plan`]). Never fails.
 pub async fn install_for_game(client: &RommClient, ctx: &GameFirmwareContext<'_>) -> String {
+    let source = ServerFirmware {
+        client,
+        platform_id: ctx.platform_id,
+    };
+    install_for_game_from(&source, ctx).await
+}
+
+/// [`install_for_game`] with the firmware files taken from `source`: the
+/// server, or a drive's gridpack ([`super::PackFirmwareSource`]) when a game
+/// is installed from a drive. `ctx.platform_id` is not read; the source
+/// already names its platform. The plan, the routing and the manifest are
+/// the same for every source.
+pub async fn install_for_game_from<S: FirmwareSource>(
+    source: &S,
+    ctx: &GameFirmwareContext<'_>,
+) -> String {
     let Some(plan) = firmware_plan(ctx) else {
         return String::new();
     };
@@ -483,9 +501,8 @@ pub async fn install_for_game(client: &RommClient, ctx: &GameFirmwareContext<'_>
 
     let mut warnings: Vec<String> = Vec::new();
     for (targets, opts) in &plan.passes {
-        warnings.extend(wrap_install(Ok(install_platform_firmware_recorded(
-            client,
-            ctx.platform_id,
+        warnings.extend(wrap_install(Ok(install_platform_firmware_from(
+            source,
             targets,
             *opts,
             Some(&manifest),
