@@ -259,6 +259,10 @@ impl SessionManager {
     /// as it is known non-empty, before the probe — same placement as
     /// `restore`, so the chip's Retry works even after a fresh start where
     /// `restore` itself already failed to connect.
+    ///
+    /// A retry that connects leaves offline mode, exactly as `connect` does:
+    /// `Config.offline` is cleared and saved, so the next start probes the
+    /// server again. Any other outcome keeps the flag.
     pub async fn retry(&self) -> Result<RestoreOutcome, SessionError> {
         let cfg = Config::load(&self.config_path)?;
         let Some(cred) = self.secrets.load()? else {
@@ -267,7 +271,15 @@ impl SessionManager {
         if cfg.server_url.is_empty() {
             return Err(SessionError::NoStoredSession);
         }
-        Ok(self.reprobe(cfg, cred).await)
+        let was_offline = cfg.offline;
+        let outcome = self.reprobe(cfg, cred).await;
+        if was_offline && matches!(outcome, RestoreOutcome::Connected { .. }) {
+            // Re-read: the probe awaited, and another writer may have saved.
+            let mut cfg = Config::load(&self.config_path)?;
+            cfg.offline = false;
+            cfg.save(&self.config_path)?;
+        }
+        Ok(outcome)
     }
 
     /// "Use without a server": sets `Config.offline` and saves, so later
