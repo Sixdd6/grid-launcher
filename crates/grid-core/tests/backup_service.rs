@@ -16,14 +16,14 @@ use grid_core::backup::pack::{self, PackOs, PackState};
 use grid_core::backup::plan::{BackupItems, GameItem};
 use grid_core::library::backup_job::DriveTarget;
 use grid_core::library::queue::{DownloadEntry, DownloadStatus};
-use grid_core::library::registry::Registry;
-use grid_core::library::InstallService;
+use grid_core::library::registry::{InstalledGame, Registry};
+use grid_core::library::{InstallService, BACKING_UP_LOCAL};
 use grid_core::romm::RommClient;
 use grid_core::secrets::Credential;
 use md5::{Digest, Md5};
 use secrecy::SecretString;
 use serde_json::json;
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{method, path, path_regex, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const LABEL: &str = "SAMSUNG T7";
@@ -64,6 +64,7 @@ struct Harness {
     mount: PathBuf,
     service: Arc<InstallService>,
     client: Arc<RommClient>,
+    registry: Arc<Registry>,
 }
 
 impl Harness {
@@ -86,7 +87,7 @@ impl Harness {
         pack::write_pack_atomic(&mount, &pack::new_pack("Couch kit", &[PackOs::Linux])).unwrap();
 
         let registry = Arc::new(Registry::open(&tmp.path().join("registry.db")).unwrap());
-        let service = InstallService::new(registry, config_path);
+        let service = InstallService::new(registry.clone(), config_path);
         // Userinfo in the typed URL must never reach the pack.
         let typed = server.uri().replace("http://", "http://someone:secret@");
         let client = Arc::new(
@@ -103,6 +104,7 @@ impl Harness {
             mount,
             service,
             client,
+            registry,
         }
     }
 
@@ -227,6 +229,15 @@ impl Harness {
         }
     }
 
+    /// [`Self::items`], each copied from this computer's install.
+    fn local_items(games: &[(i64, &str)]) -> BackupItems {
+        let mut items = Self::items(games);
+        for game in &mut items.games {
+            game.local = true;
+        }
+        items
+    }
+
     fn rows(&self) -> Vec<DownloadEntry> {
         self.service.snapshot().entries
     }
@@ -234,7 +245,7 @@ impl Harness {
     fn row_for(&self, rom_id: i64) -> Option<DownloadEntry> {
         self.rows()
             .into_iter()
-            .find(|e| e.kind == "backup_game" && e.rom_id == rom_id)
+            .find(|e| e.kind.starts_with("backup_game") && e.rom_id == rom_id)
     }
 
     async fn wait_for(&self, what: &str, pred: impl Fn(&Harness) -> bool) {
@@ -267,6 +278,76 @@ impl Harness {
             PackState::Ready(pack) => pack,
             other => panic!("pack not ready: {other:?}"),
         }
+    }
+
+    /// A content route for rom `id`, ahead of the ones [`Self::mount_game`]
+    /// adds, that must be requested exactly `times` times (checked when the
+    /// server drops).
+    async fn expect_content(&self, id: i64, body: &[u8], times: u64) {
+        Mock::given(method("GET"))
+            .and(path_regex(format!("^/api/roms/{id}/content/")))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body.to_vec()))
+            .with_priority(1)
+            .expect(times)
+            .mount(&self.server)
+            .await;
+    }
+
+    /// The library's platform folder for the test platform (`GENESIS`).
+    fn platform_dir(&self) -> PathBuf {
+        self.library.join("games").join("GENESIS")
+    }
+
+    /// Installs rom `rom_id` as an extracted game: `folder` in the platform
+    /// folder holding `files` (the first is the launch file), and its row.
+    fn install_extracted(
+        &self,
+        rom_id: i64,
+        title: &str,
+        folder: &str,
+        files: &[(&str, &[u8])],
+        server_updated_at: &str,
+    ) -> PathBuf {
+        let root = self.platform_dir().join(folder);
+        for (name, body) in files {
+            let path = root.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, body).unwrap();
+        }
+        let text = |path: &Path| path.to_string_lossy().into_owned();
+        self.registry
+            .upsert(&InstalledGame {
+                title: title.to_string(),
+                platform: "GENESIS".to_string(),
+                rom_id: Some(rom_id),
+                rom_file_name: format!("{folder}.zip"),
+                extracted_dir: text(&root),
+                extracted_path: text(&root.join(files[0].0)),
+                server_updated_at: server_updated_at.to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        root
+    }
+
+    /// Installs rom `rom_id` as a single file kept as downloaded.
+    fn install_file(&self, rom_id: i64, title: &str, name: &str, body: &[u8], updated: &str) {
+        let file = self.platform_dir().join(name);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, body).unwrap();
+        let text = file.to_string_lossy().into_owned();
+        self.registry
+            .upsert(&InstalledGame {
+                title: title.to_string(),
+                platform: "GENESIS".to_string(),
+                rom_id: Some(rom_id),
+                rom_file_name: name.to_string(),
+                // As a downloaded file is recorded: the archive path only.
+                archive_path: text,
+                server_updated_at: updated.to_string(),
+                ..Default::default()
+            })
+            .unwrap();
     }
 
     fn staging_is_empty(&self) -> bool {
@@ -777,4 +858,431 @@ async fn backs_up_a_manual_emulator_archive_and_firmware() {
         .service
         .emulator_sizes()
         .contains_key(&("MyEmu".to_string(), host)));
+}
+
+// --- Local copies -------------------------------------------------------------
+
+/// The server's `updated_at` in [`Harness::mount_game`]: an install with this
+/// timestamp is current, one with an older timestamp is out of date.
+const SERVER_UPDATED: &str = "2026-01-01T00:00:00Z";
+const OLDER: &str = "2025-01-01T00:00:00Z";
+/// The archive part size the local-copy tests write with.
+const SMALL_PART: u64 = 4096;
+
+/// The part-size override is process-wide: the tests that set it take
+/// turns, and each sets and resets it itself.
+static PART_SIZE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Resets the part-size override when dropped, even on a failed assert.
+struct SmallParts;
+
+impl SmallParts {
+    fn on() -> Self {
+        grid_core::backup::archive::set_part_bytes_override(Some(SMALL_PART));
+        SmallParts
+    }
+}
+
+impl Drop for SmallParts {
+    fn drop(&mut self) {
+        grid_core::backup::archive::set_part_bytes_override(None);
+    }
+}
+
+fn patterned(len: usize, seed: u8) -> Vec<u8> {
+    (0..len)
+        .map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed))
+        .collect()
+}
+
+/// An extracted game's files: big enough for several small parts.
+fn extracted_tree() -> Vec<(&'static str, Vec<u8>)> {
+    vec![
+        ("game.md", patterned(6000, 1)),
+        ("data/level1.bin", patterned(5000, 2)),
+        ("data/nested/readme.txt", b"read me".to_vec()),
+    ]
+}
+
+/// Mounts rom 1 ("Zip Game") as an extracted install whose content route
+/// must never be requested, and returns its tree.
+async fn local_extracted_game(h: &Harness, updated: &str) -> Vec<(&'static str, Vec<u8>)> {
+    let zipped: &[u8] = b"the server's zip";
+    h.mount_game(
+        1,
+        "Zip Game",
+        "genesis",
+        "Zip Game.zip",
+        &[(11, "Zip Game.zip", zipped)],
+        0,
+    )
+    .await;
+    h.expect_content(1, zipped, 0).await;
+    let tree = extracted_tree();
+    let files: Vec<(&str, &[u8])> = tree.iter().map(|(n, b)| (*n, b.as_slice())).collect();
+    h.install_extracted(1, "Zip Game", "Zip Game", &files, updated);
+    tree
+}
+
+#[tokio::test]
+async fn an_extracted_local_game_is_archived_in_parts_without_downloading_it() {
+    let _turn = PART_SIZE.lock().await;
+    let _parts = SmallParts::on();
+    let h = Harness::new().await;
+    let tree = local_extracted_game(&h, SERVER_UPDATED).await;
+
+    h.service
+        .start_backup(
+            h.client.clone(),
+            h.drive(),
+            Harness::local_items(&[(1, "Zip Game")]),
+        )
+        .unwrap();
+    let row = h.wait_terminal(1).await;
+    assert_eq!(row.status, DownloadStatus::Completed, "{row:#?}");
+    assert_eq!(row.kind, "backup_game_local");
+
+    let game = h.pack().find_game(&h.server.uri(), 1).cloned().unwrap();
+    assert!(game.files.is_empty());
+    assert!(game.is_installed_copy());
+    let installed = game.installed.clone().unwrap();
+    assert!(installed.parts.len() >= 3, "{:#?}", installed.parts);
+    assert_eq!(installed.layout, pack::InstalledLayout::Extracted);
+    assert_eq!(installed.name, "Zip Game");
+    assert_eq!(installed.launch, "game.md");
+    assert_eq!(installed.tree_files, 3);
+    assert_eq!(
+        installed.tree_bytes,
+        tree.iter().map(|(_, b)| b.len() as u64).sum::<u64>()
+    );
+    assert_eq!(installed.server_updated_at, SERVER_UPDATED);
+    assert_eq!(installed.rom_file_name, "Zip Game.zip");
+    assert!(!installed.outdated);
+    assert_eq!(installed.from_os, PackOs::host());
+    assert_eq!(game.source.server_updated_at, SERVER_UPDATED);
+    assert_eq!(game.size, installed.parts_bytes());
+    assert!(game.assets.cover.is_some());
+
+    // The parts, joined in order, untar to the tree.
+    let grid = h.mount.join("gridpack");
+    let mut joined = Vec::new();
+    for (index, part) in installed.parts.iter().enumerate() {
+        assert_eq!(
+            part.path,
+            pack::installed_part_rel("games/genesis/Zip Game", index)
+        );
+        let bytes = fs::read(grid.join(&part.path)).unwrap();
+        assert_eq!(bytes.len() as u64, part.size);
+        assert!(part.size <= SMALL_PART);
+        assert_eq!(md5_hex(&bytes), part.md5);
+        joined.extend(bytes);
+    }
+    let out = tempfile::tempdir().unwrap();
+    tar::Archive::new(std::io::Cursor::new(joined))
+        .unpack(out.path())
+        .unwrap();
+    for (name, body) in &tree {
+        assert_eq!(&fs::read(out.path().join(name)).unwrap(), body, "{name}");
+    }
+    assert!(no_tmp_files(&h.mount));
+    assert!(h.staging_is_empty());
+    h.server.verify().await;
+}
+
+#[tokio::test]
+async fn a_single_file_matching_the_server_is_copied_as_it_is() {
+    let h = Harness::new().await;
+    let rom: &[u8] = b"SEGA GENESIS ROM AS DOWNLOADED";
+    h.mount_game(2, "One", "genesis", "One.md", &[(21, "One.md", rom)], 0)
+        .await;
+    h.expect_content(2, rom, 0).await;
+    h.install_file(2, "One", "One.md", rom, SERVER_UPDATED);
+
+    h.service
+        .start_backup(
+            h.client.clone(),
+            h.drive(),
+            Harness::local_items(&[(2, "One")]),
+        )
+        .unwrap();
+    let row = h.wait_terminal(2).await;
+    assert_eq!(row.status, DownloadStatus::Completed, "{row:#?}");
+    let game = h.pack().find_game(&h.server.uri(), 2).cloned().unwrap();
+    assert!(game.installed.is_none());
+    assert_eq!(game.files.len(), 1);
+    assert_eq!(game.files[0].path, "games/genesis/One.md");
+    assert_eq!(game.files[0].server_file_id, 21);
+    assert_eq!(game.files[0].md5, md5_hex(rom));
+    assert_eq!(game.source.server_updated_at, SERVER_UPDATED);
+    assert_eq!(
+        fs::read(h.mount.join("gridpack/games/genesis/One.md")).unwrap(),
+        rom
+    );
+    // The library's file is still there.
+    assert!(h.platform_dir().join("One.md").is_file());
+    assert!(h.staging_is_empty());
+    h.server.verify().await;
+}
+
+#[tokio::test]
+async fn an_out_of_date_game_chosen_to_download_is_downloaded() {
+    let h = Harness::new().await;
+    let newer: &[u8] = b"THE SERVER'S NEWER ROM";
+    h.mount_game(
+        3,
+        "Three",
+        "genesis",
+        "Three.md",
+        &[(31, "Three.md", newer)],
+        0,
+    )
+    .await;
+    h.expect_content(3, newer, 1).await;
+    h.install_file(3, "Three", "Three.md", b"OLD ROM", OLDER);
+
+    // The dialog's "Download from server" choice: not a local item.
+    h.service
+        .start_backup(h.client.clone(), h.drive(), Harness::items(&[(3, "Three")]))
+        .unwrap();
+    let row = h.wait_terminal(3).await;
+    assert_eq!(row.status, DownloadStatus::Completed, "{row:#?}");
+    assert_eq!(row.kind, "backup_game");
+    let game = h.pack().find_game(&h.server.uri(), 3).cloned().unwrap();
+    assert!(game.installed.is_none());
+    assert_eq!(
+        fs::read(h.mount.join("gridpack/games/genesis/Three.md")).unwrap(),
+        newer
+    );
+    h.server.verify().await;
+}
+
+#[tokio::test]
+async fn a_drive_removed_mid_archive_fails_the_row_and_folds_the_rest() {
+    let _turn = PART_SIZE.lock().await;
+    let _parts = SmallParts::on();
+    let h = Harness::new().await;
+    local_extracted_game(&h, SERVER_UPDATED).await;
+    h.mount_game(2, "Two", "genesis", "Two.md", &[(21, "Two.md", b"two")], 0)
+        .await;
+
+    // Before the second part: row 2 has finished downloading, then the
+    // drive goes away with the first part still under its temporary name.
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = calls.clone();
+    let service = Arc::downgrade(&h.service);
+    let (mount, away) = (h.mount.clone(), h.mount.with_file_name("unplugged"));
+    let target = away.clone();
+    h.service.set_backup_write_hook(Some(Arc::new(move || {
+        if counter.fetch_add(1, Ordering::SeqCst) + 1 != 2 {
+            return;
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            let downloading = service.upgrade().is_some_and(|service| {
+                service
+                    .snapshot()
+                    .entries
+                    .iter()
+                    .any(|e| e.rom_id == 2 && e.status == DownloadStatus::Downloading)
+            });
+            if !downloading {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        fs::rename(&mount, &target).unwrap();
+    })));
+    h.service
+        .start_backup(
+            h.client.clone(),
+            h.drive(),
+            Harness::local_items(&[(1, "Zip Game")]),
+        )
+        .unwrap();
+    h.service
+        .start_backup(h.client.clone(), h.drive(), Harness::items(&[(2, "Two")]))
+        .unwrap();
+
+    let row = h.wait_terminal(1).await;
+    assert_eq!(row.status, DownloadStatus::Failed, "{row:#?}");
+    assert_eq!(row.error, REMOVED);
+    assert!(calls.load(Ordering::SeqCst) >= 2);
+    h.wait_for("the summary row", |h| {
+        h.rows().iter().any(|e| e.kind == "backup_cancelled")
+    })
+    .await;
+    let summaries: Vec<DownloadEntry> = h
+        .rows()
+        .into_iter()
+        .filter(|e| e.kind == "backup_cancelled")
+        .collect();
+    assert_eq!(summaries.len(), 1, "{:#?}", h.rows());
+    assert_eq!(summaries[0].title, "Two");
+    assert_eq!(summaries[0].error, REMOVED);
+    assert!(h.row_for(2).is_none());
+
+    // Only temporary parts were left on the drive.
+    let games = away.join("gridpack/games");
+    let left: Vec<PathBuf> = files_under(&games)
+        .into_iter()
+        .filter(|path| path.is_file())
+        .collect();
+    assert!(!left.is_empty());
+    assert!(
+        left.iter()
+            .all(|path| path.to_string_lossy().ends_with(pack::TMP_SUFFIX)),
+        "{left:#?}"
+    );
+
+    // Plugged back in: cleanup removes them, and nothing was indexed.
+    fs::rename(&away, &h.mount).unwrap();
+    pack::cleanup_leftovers(&h.mount).unwrap();
+    assert!(no_tmp_files(&h.mount));
+    assert!(h.pack().games.is_empty());
+    h.wait_for("staging removed", |h| h.staging_is_empty())
+        .await;
+}
+
+/// Starts a local backup of rom 1 whose archive waits, before its first
+/// part, until `release` is set (bounded). Returns once it waits.
+async fn held_local_backup(h: &Harness, updated: &str) -> Arc<AtomicBool> {
+    local_extracted_game(h, updated).await;
+    let release = Arc::new(AtomicBool::new(false));
+    let held = Arc::new(AtomicUsize::new(0));
+    let (gate, count) = (release.clone(), held.clone());
+    h.service.set_backup_write_hook(Some(Arc::new(move || {
+        if count.fetch_add(1, Ordering::SeqCst) > 0 {
+            return;
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !gate.load(Ordering::SeqCst) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    })));
+    h.service
+        .start_backup(
+            h.client.clone(),
+            h.drive(),
+            Harness::local_items(&[(1, "Zip Game")]),
+        )
+        .unwrap();
+    h.wait_for("the archive to start", |_| held.load(Ordering::SeqCst) > 0)
+        .await;
+    release
+}
+
+#[tokio::test]
+async fn uninstall_and_update_are_refused_while_the_local_backup_runs() {
+    let h = Harness::new().await;
+    let release = held_local_backup(&h, OLDER).await;
+    assert!(h.service.local_backup_busy(1));
+    let uninstall = h.service.uninstall(1).unwrap_err();
+    assert_eq!(uninstall.to_string(), BACKING_UP_LOCAL);
+    let update = h
+        .service
+        .install_update(h.client.clone(), 1)
+        .await
+        .unwrap_err();
+    assert_eq!(update.to_string(), BACKING_UP_LOCAL);
+    let native = h
+        .service
+        .install_native_update(h.client.clone(), 1)
+        .await
+        .unwrap_err();
+    assert_eq!(native.to_string(), BACKING_UP_LOCAL);
+    let located = h
+        .service
+        .locate_row("Zip Game", "GENESIS", &h.platform_dir().join("Zip Game"))
+        .unwrap_err();
+    assert_eq!(located.to_string(), BACKING_UP_LOCAL);
+
+    release.store(true, Ordering::SeqCst);
+    let row = h.wait_terminal(1).await;
+    assert_eq!(row.status, DownloadStatus::Completed, "{row:#?}");
+    assert!(!h.service.local_backup_busy(1));
+    assert!(h.platform_dir().join("Zip Game/game.md").is_file());
+    // The user chose this computer's older copy: the pack says so.
+    let game = h.pack().find_game(&h.server.uri(), 1).cloned().unwrap();
+    let installed = game.installed.unwrap();
+    assert!(installed.outdated);
+    assert_eq!(installed.server_updated_at, OLDER);
+    assert_eq!(game.source.server_updated_at, OLDER);
+    h.server.verify().await;
+}
+
+#[tokio::test]
+async fn a_library_move_cannot_start_while_a_local_game_is_archived() {
+    use grid_core::library::relocate::{LibraryGate, LIBRARY_MOVE_BUSY};
+    let h = Harness::new().await;
+    let gate = LibraryGate::default();
+    h.service.set_library_gate(gate.clone());
+    let release = held_local_backup(&h, SERVER_UPDATED).await;
+
+    // What a library move does: close the gate, then wait for every
+    // ticket. The archive holds one.
+    assert!(gate.close(LIBRARY_MOVE_BUSY));
+    assert!(!gate.wait_no_tickets(Duration::from_millis(100)));
+    gate.open();
+
+    release.store(true, Ordering::SeqCst);
+    let row = h.wait_terminal(1).await;
+    assert_eq!(row.status, DownloadStatus::Completed, "{row:#?}");
+    assert!(gate.wait_no_tickets(Duration::from_secs(5)));
+}
+
+#[tokio::test]
+async fn a_local_game_gone_from_the_library_fails_and_retries_as_a_local_copy() {
+    let _turn = PART_SIZE.lock().await;
+    let _parts = SmallParts::on();
+    let h = Harness::new().await;
+    let tree = local_extracted_game(&h, SERVER_UPDATED).await;
+
+    // The plan sees the install, and a game with no row as not installed.
+    let states = h
+        .service
+        .local_states(&[1, 9], &h.server.uri(), false)
+        .unwrap();
+    assert!(matches!(
+        states[&1],
+        grid_core::backup::plan::LocalState::Eligible { .. }
+    ));
+    assert_eq!(
+        states[&9],
+        grid_core::backup::plan::LocalState::NotInstalled
+    );
+
+    // Its folder goes away after the plan: the row fails, nothing downloads.
+    let root = h.platform_dir().join("Zip Game");
+    let aside = h.platform_dir().join("aside");
+    fs::rename(&root, &aside).unwrap();
+    h.service
+        .start_backup(
+            h.client.clone(),
+            h.drive(),
+            Harness::local_items(&[(1, "Zip Game")]),
+        )
+        .unwrap();
+    let failed = h.wait_terminal(1).await;
+    assert_eq!(failed.status, DownloadStatus::Failed, "{failed:#?}");
+    assert_eq!(
+        failed.error,
+        "Zip Game is no longer installed on this computer; backup again"
+    );
+    assert!(h.pack().games.is_empty());
+
+    // Back in place, a retry copies it from this computer again.
+    fs::rename(&aside, &root).unwrap();
+    h.service
+        .retry(Some(h.client.clone()), failed.id)
+        .await
+        .unwrap();
+    h.wait_for("the retried row", |h| {
+        h.row_for(1)
+            .is_some_and(|e| e.id != failed.id && e.status == DownloadStatus::Completed)
+    })
+    .await;
+    assert_eq!(h.row_for(1).unwrap().kind, "backup_game_local");
+    let game = h.pack().find_game(&h.server.uri(), 1).cloned().unwrap();
+    assert_eq!(game.installed.unwrap().tree_files, tree.len() as u64);
+    h.server.verify().await;
 }
