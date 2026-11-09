@@ -65,8 +65,16 @@ Modules as declared in `src/lib.rs`:
   (4095 MiB, under FAT32's limit, checked at compile time), each written to `.gridtmp`,
   hashed, synced, read back and renamed only when all are checked; `restore_tree` chains
   the parts through `TarPartReader`, checks each part's size and MD5, and accepts only
-  regular files and folders with plain relative names. `steam_runtime` fetches the Steam Linux Runtime the way umu does and places
-  it where umu looks.
+  regular files and folders with plain relative names; `write_saves_tree` writes a
+  game's saves the same way as `saves.tar.NNN`. `saves` owns a Windows game's saves on
+  a drive (`PackSaves`): `recorded_folders` turns the cloud-save folder list from the
+  config into Windows-token paths (`token_for_prefix_path` for a manual folder inside the
+  prefix), `scan_saves` walks the folders that exist in the prefix into a `TreePlan`
+  (folder `i` under `i/`), `restore_targets` is the pure rule for where each folder goes
+  (inside the new prefix, or the real folder on Windows, never into one that holds
+  files), `restore_saves` reads the tar back and copies it there, and `seed_folders`
+  gives the folders to cloud saves without replacing anything. `steam_runtime` fetches
+  the Steam Linux Runtime the way umu does and places it where umu looks.
 - `cloud` — the cloud save/state sync engine: scope classification, sync candidates,
   per-emulator directories, archive transfer, restore, retention, session windows, and
   xemu's raw-disk sync.
@@ -136,6 +144,14 @@ Modules as declared in `src/lib.rs`:
   the server's files, not out of date) or scans the tree; the write phase then writes
   the files, or the archive straight from the library to the drive. It holds a
   `LibraryGate` ticket while it writes, so a library move can't start under it.
+  Any Windows game row (downloaded or local) also runs `stage_saves` in its download
+  phase: the save folders from the config and, when the game is installed here with a
+  Wine prefix, the `backup::saves` scan of that prefix; the write phase writes the
+  saves after the game's files (holding the gate ticket too) and records `saves` in the
+  pack entry. A drive install carries the pack's saves in `DriveSource::saves`, and
+  `InstallService::restore_drive_saves` (in `drive_restore`, called by both
+  `finalize_restore` and `finalize_base`) puts them back and seeds the config before the
+  finalized hook runs; its problems are warnings, never a failed install.
   `drive_restore` restores a pack game with an `installed` block: `plan_restore` refuses
   an unsupported copy (`NEEDS_NEWER_GRID`) or a library without room before admission and
   builds a target-less `InstallJob` carrying a `RestorePlan`; `restore_from_drive` is its

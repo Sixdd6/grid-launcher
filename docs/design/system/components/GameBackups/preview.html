@@ -1891,7 +1891,7 @@ function bkSourceSection(pl, dl) {
        nDl ? nDl + ' downloaded' : '', nAsk ? nAsk + ' to choose' : ''].filter(Boolean).join(' · ');
   var h = '<label class="check bk-also"><input type="checkbox" data-bk-opt="local"' + (pl.useLocal ? ' checked' : '') + '><span><b>Copy installed games from this computer</b><span class="note">' + line + '</span></span></label>';
   if (!pl.useLocal || !pl.sources.length) return '<div class="sub"><h4>Source</h4>' + h + '</div>';
-  if (pl.wine) h += '<p class="note bk-src-wine">Windows games are copied without their Wine prefix, so saves kept in the prefix stay on this computer.</p>';
+  if (pl.wine) h += '<p class="note bk-src-wine">Windows games are copied without their Wine prefix. The save folders GRID knows about are copied from it.</p>';
   var rows = '<ul class="bk-src-list">' + pl.sources.map(function (r) {
     var chose = (dl.choices || {})[r.g.id];
     var why = r.note ? r.note
@@ -1997,7 +1997,7 @@ function bkRun() {
 function bkFinish(it) {
   var d = bkDrive(it.drive), b = BK.batches[it.batch];
   if (it.kind === 'game' && d.games.indexOf(it.id) < 0) d.games.push(it.id);
-  if (it.kind === 'game') { BK.copies[d.id] = BK.copies[d.id] || {}; if (it.local) BK.copies[d.id][it.id] = { ver: it.ver, outdated: it.outdated }; else delete BK.copies[d.id][it.id]; }
+  if (it.kind === 'game') { BK.copies[d.id] = BK.copies[d.id] || {}; if (it.local) BK.copies[d.id][it.id] = { ver: it.ver, outdated: it.outdated, saves: true }; else delete BK.copies[d.id][it.id]; }
   if (it.kind === 'emu' && d.emus.indexOf(it.t) < 0) d.emus.push(it.t);
   if (it.kind === 'fw' && d.fw.indexOf(it.p) < 0) d.fw.push(it.p);
   d.last = TODAY;
@@ -2112,7 +2112,7 @@ renderDetails = function () {
   if (d) $('d-head').querySelector('.g-header-line').insertAdjacentHTML('beforeend', ' · <span class="bk-src">From ' + esc(d.name) + '</span>');
   var cp = d && BK.copies[d.id] && BK.copies[d.id][g.id];
   if (cp) {
-    var wine = g.p === 'WIN' ? '<p class="g-meta-line">Its Wine prefix wasn’t copied, so saves kept there aren’t on the drive</p>' : '';
+    var wine = g.p !== 'WIN' ? '' : '<p class="g-meta-line">' + (cp.saves ? 'Saves from its Wine prefix are included' : 'Its Wine prefix wasn’t copied, so saves kept there aren’t on the drive') + '</p>';
     left.querySelector('.g-meta-line').insertAdjacentHTML('beforebegin', '<p class="g-meta-line bk-copy">A copy of an installed game' + (cp.ver ? ' · ' + esc(cp.ver) : '') + (cp.outdated ? ' (the server had newer files)' : '') + '</p>' + wine);
   }
   gIcons(left);

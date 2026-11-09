@@ -610,8 +610,9 @@ when the game is not installed here, and **Remove from drive…** in place of Ba
 (two clicks; the second reads "Remove from <pack>"). A drive game backed up from a
 computer's install adds "A copy of an installed game · v1.1", with "(the server had newer
 files)" when it was out of date at backup time (no version part when the copy has no
-version tag). A Windows one adds "Its Wine prefix wasn't copied, so saves kept there
-aren't on the drive".
+version tag). A Windows one adds "Saves from its Wine prefix are included" when its saves
+were copied, else "Its Wine prefix wasn't copied, so saves kept there aren't on the
+drive". A downloaded Windows game whose saves were copied adds the first line alone.
 
 Uninstall never removes a protected folder (a filesystem root, home, a library folder, its
 top-level and platform folders, a folder that holds the game's install folder, a path with
@@ -816,9 +817,10 @@ Details.
     server's names and sizes) goes on the drive as those files, the same as a download.
     This applies only when the game is not out of date. Any other install (an extracted
     game, a PS4 tree, a native Linux or Windows game) goes as an uncompressed tar in parts
-    (see The gridpack folder). A native game's Wine prefix is never copied. When a Windows
-    game is copied, the section says "Windows games are copied without their Wine prefix,
-    so saves kept in the prefix stay on this computer."
+    (see The gridpack folder). A native game's Wine prefix is never copied as a whole;
+    only the save folders GRID knows about are (see Saves of a Windows game). When a
+    Windows game is copied, the section says "Windows games are copied without their Wine
+    prefix. The save folders GRID knows about are copied from it."
   - **Out of date.** When the server has newer files for a game that can be copied, its
     tag reads **Choose below** ("the server has newer files"). A block titled "The server
     has newer files" ("… for 2 games" with more than one) says "Backup the copy installed
@@ -909,10 +911,37 @@ and installs like any other drive game.
   launch file at <path>"). Launch parameters, working folder, PS4 ids, included DLC and
   the RetroAchievements id come from the copy. A native game that kept its archive
   inside its folder gets that archive back as its kept archive. A native game restored
-  on Linux or macOS gets a new, empty `prefix/` as its Wine prefix, and the default
-  compat tool. The ROM file name and the server timestamp are the copy's, so a copy that
-  was out of date at backup time shows Update once the computer is connected to that
-  server.
+  on Linux or macOS gets a new `prefix/` as its Wine prefix (holding only the saves the
+  backup copied, see below), and the default compat tool. The ROM file name and the
+  server timestamp are the copy's, so a copy that was out of date at backup time shows
+  Update once the computer is connected to that server.
+
+**Saves of a Windows game.** A backup of a Windows game records every save folder GRID
+knows for it, the list cloud saves use (PCGamingWiki's and the user's own, less the ones
+the user removed), read from the settings with no lookup. The folders are stored as
+Windows paths (`%APPDATA%\Foo`, `%USERPROFILE%\Documents\My Games\Foo`); a folder the
+user added inside the game's Wine prefix is turned into that form (a folder elsewhere on
+drive C becomes `%SYSTEMDRIVE%\…`), and one outside the prefix is left out. The folders
+are recorded even when none of them exist.
+- **Copy.** When the game is installed on this computer (Linux or macOS) with a Wine
+  prefix, the folders that exist in the prefix are copied to the drive as one
+  uncompressed tar in parts, checked like every other file. This happens whether the
+  game itself is copied from this computer or downloaded, with no checkbox. Nothing else
+  in the prefix is copied. A folder holding a link, or a name the drive's systems can't
+  hold, is left out with a warning ("Saves in <folder> weren't copied: it contains
+  links"). While the game is running its saves are not copied; the backup goes ahead
+  and the row warns "Its saves weren't copied because it's running". A failed saves
+  write (other than the drive going away or a cancel) is a warning, and the game is
+  still on the drive with its folders recorded.
+- **Restore.** Installing the game from the drive, as a copy or as downloaded files,
+  puts the saves back once the game is installed. On Linux or macOS they go into the
+  game's new Wine prefix, under this computer's user name; on Windows into the real
+  folders. A folder that already holds files is never written into: it is skipped and
+  the row warns "Saves for <folder> weren't restored: <path> already has files". The
+  recorded folders are also given to cloud saves for that game (as its PCGamingWiki
+  list when it has none yet, else added to its own list; nothing there is replaced or
+  removed), so cloud saves know them without a lookup. A saves problem never fails the
+  install; it is a warning on the row.
 
 Installing a game also sets up its system from the drive:
 - When the system has no emulator and the drive has one for this computer, that
@@ -939,6 +968,7 @@ gridpack/
   games/<platform>/<fs name>/<file>…        a multi-file or native game
   games/<platform>/<name>/installed.tar.001…  a copy of a computer's install, in parts
   assets/<platform>/<game>/                 cover, fanart, logo, screenshot-01 … (up to 8)
+  saves/<platform>/<game>/saves.tar.001…    a Windows game's saves from its Wine prefix, in parts
   emulators/<emulator>/<version>/<os>/      the release archive GRID would download, per computer
   firmware/<platform>/<file>                the firmware files as the server serves them
 ```
@@ -954,7 +984,7 @@ when it was created and last updated, and three arrays:
   hashes) and its asset paths. A game file's hashes are RomM's, kept for identification
   only: for an archive they describe its contents, so nothing checks a file against them.
   A game copied from a computer's install has an `installed` block and may have no
-  `files` (see below);
+  `files` (see below). A Windows game may have a `saves` block (see below);
 - `emulators`: one entry per emulator per OS, with its kind (`emulator` or
   `compat_tool`, which covers Proton, umu-launcher and the Steam Linux Runtime), source,
   version, platforms, archive path and size;
@@ -987,6 +1017,17 @@ A native game's Wine prefix (`prefix/`, and a recorded prefix inside the game's 
 is left out. An unknown `archive` or `layout` keeps the pack readable; Install says
 "This backup needs a newer GRID". The parts rebuild without GRID:
 `cat installed.tar.* | tar x`.
+
+**Saves of a Windows game** (see Install from a drive). The optional `saves` block holds:
+- `folders`: the save folders GRID knew at backup time, as Windows paths
+  (`%APPDATA%\Foo`), recorded even when none existed;
+- `parts`: the saves copied out of the game's Wine prefix, one uncompressed GNU tar in
+  `saves.tar.001`, … parts written like an installed copy's, with the folder at position
+  `i` of `folders` under `i/` (`0/slot1.sav`). Absent when nothing was copied;
+- `tree_bytes` and `tree_files` of the copied saves.
+
+A pack written before `saves` existed reads as having none. The saves count toward the
+pack's share of the drive, and removing the game removes them.
 
 ## Safety rules
 - GRID never reads, writes or deletes anything outside `gridpack/` on a drive. The one
