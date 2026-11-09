@@ -71,6 +71,11 @@ pub type UnauthorizedHook = Arc<dyn Fn(SessionUnauthorized) + Send + Sync>;
 ///
 /// `Unauthorized` keeps the keyring credential (user decision Q6): it is
 /// replaced only when a new connect succeeds.
+///
+/// `Offline` is the user's own choice ("Use without a server",
+/// `Config.offline`): no probe runs and no request is made. It carries the
+/// config's server and username (blank when there are none) so the Connect
+/// entry point can prefill them.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RestoreOutcome {
@@ -90,6 +95,10 @@ pub enum RestoreOutcome {
         server_url: String,
         username: String,
         error: String,
+    },
+    Offline {
+        server_url: String,
+        username: String,
     },
 }
 
@@ -199,6 +208,8 @@ impl SessionManager {
         let mut cfg = Config::load(&self.config_path)?;
         cfg.server_url = server_url.clone();
         cfg.username = state.username.clone();
+        // A connect is the way out of offline mode, in the same save.
+        cfg.offline = false;
         cfg.save(&self.config_path)?;
         self.secrets.save(&cred)?;
         self.install(client, &state, auth_kind);
@@ -210,8 +221,23 @@ impl SessionManager {
     /// rejected (401), or stored-but-unusable with the probe error's text
     /// (SessionError Display is secret-free by construction). Only
     /// config/secret load failures are `Err`.
+    ///
+    /// With `Config.offline` set it answers `Offline` before anything else:
+    /// no keyring read and no probe, so no request reaches any server. The
+    /// stored server URL is still set from config, as image filtering and
+    /// cache lookups need it.
     pub async fn restore(&self) -> Result<RestoreOutcome, SessionError> {
         let cfg = Config::load(&self.config_path)?;
+        if cfg.offline {
+            let server_url = strip_userinfo(&cfg.server_url);
+            if !server_url.is_empty() {
+                *self.server_url.lock().unwrap() = server_url.clone();
+            }
+            return Ok(RestoreOutcome::Offline {
+                server_url,
+                username: cfg.username,
+            });
+        }
         if cfg.server_url.is_empty() {
             return Ok(RestoreOutcome::NoSession {
                 server_url: String::new(),
@@ -242,6 +268,26 @@ impl SessionManager {
             return Err(SessionError::NoStoredSession);
         }
         Ok(self.reprobe(cfg, cred).await)
+    }
+
+    /// "Use without a server": sets `Config.offline` and saves, so later
+    /// restores skip the probe. The keyring credential is left untouched (a
+    /// later connect or retry can still use it). Any live client is dropped,
+    /// so nothing keeps talking to the server in offline mode.
+    pub fn use_offline(&self) -> Result<(), SessionError> {
+        let mut cfg = Config::load(&self.config_path)?;
+        cfg.offline = true;
+        cfg.save(&self.config_path)?;
+        {
+            let mut live = self.live.lock().unwrap();
+            live.client = None;
+            live.generation += 1;
+        }
+        let server_url = strip_userinfo(&cfg.server_url);
+        if !server_url.is_empty() {
+            *self.server_url.lock().unwrap() = server_url;
+        }
+        Ok(())
     }
 
     /// The probe shared by `restore` and `retry`, for a config with a

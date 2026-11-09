@@ -21,6 +21,11 @@ describe('applyRestore', () => {
     expect(s.lastError).toBe('boom');
     expect(s.rejected).toBeUndefined();
   });
+  it('maps offline mode to the shell, not connected, with no error', () => {
+    expect(applyRestore({ kind: 'offline', server_url: 'https://h', username: 'u' })).toEqual({
+      phase: 'shell', connected: false, serverUrl: 'https://h', username: 'u', lastError: null,
+    });
+  });
   // Q6: a rejected credential is not "offline" — it goes to Connect with the
   // server, the username and the credential kind, and no error line.
   it('maps unauthorized to the connect screen with the rejected credential kind', () => {

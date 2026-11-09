@@ -13,6 +13,7 @@ use crate::images::ImageService;
 use grid_core::autoconfig::paths::expand_user;
 use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
 use grid_core::config::{Config, ConfigError, EmulatorEntry, UiSettings};
+use grid_core::images::cache::ImageLookup;
 use grid_core::images::urls::{filter_to_server_host, resolve_image_url, server_resolver};
 use grid_core::import_python::ImportReport;
 use grid_core::launch::catalog::{
@@ -383,10 +384,16 @@ pub async fn sync_ra_username_to_romm(
 #[tauri::command]
 pub async fn ensure_image(state: State<'_, AppState>, url: String) -> Result<String, String> {
     let base = state.session.server_url();
-    let resolved = filter_to_server_host(&resolve_image_url(&url, &base), &base);
-    if resolved.is_empty() {
-        return Err("the image is not hosted on the connected server".to_string());
-    }
+    // The cache is checked before the host filter: a hit makes no request,
+    // so it may serve any host (rows installed from a drive keep their
+    // backup server's URLs). A miss is filtered and fetched as before.
+    let resolved = match state.session.cache().lookup(&url, &base) {
+        ImageLookup::Hit(path) => return Ok(path.to_string_lossy().into_owned()),
+        ImageLookup::Fetch(resolved) => resolved,
+        ImageLookup::Refused => {
+            return Err("the image is not hosted on the connected server".to_string())
+        }
+    };
     let client = state.session.client();
     let path = state
         .session

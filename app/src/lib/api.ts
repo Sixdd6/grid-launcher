@@ -13,7 +13,9 @@ export type RestoreOutcome =
   | { kind: 'no_session'; server_url: string; username: string }
   | { kind: 'connected'; state: SessionState }
   | ({ kind: 'unauthorized' } & SessionUnauthorized)
-  | { kind: 'unreachable'; server_url: string; username: string; error: string };
+  | { kind: 'unreachable'; server_url: string; username: string; error: string }
+  /** `Config.offline`: the user chose to run without a server; no probe ran. */
+  | { kind: 'offline'; server_url: string; username: string };
 /** Emitted once when a live session gets a 401 (commands.rs `SESSION_UNAUTHORIZED_EVENT`). */
 export const SESSION_UNAUTHORIZED_EVENT = 'session-unauthorized';
 export type Platform = {
