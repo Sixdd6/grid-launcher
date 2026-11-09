@@ -9,6 +9,7 @@
 
 pub mod content;
 pub mod download;
+pub mod drive_copy;
 pub mod emulator_package;
 pub mod emulator_removal;
 pub mod extract;
@@ -304,9 +305,72 @@ struct InstallJob {
     /// game: where that sidecar was downloaded to, so finalize can read the
     /// metadata back off disk.
     game_json_target: Option<PathBuf>,
-    /// The client the download runs on, carried on the job so a queued
-    /// install can start after its caller has gone away.
-    client: Arc<RommClient>,
+    /// Where the bytes come from, carried on the job so a queued install can
+    /// start after its caller has gone away.
+    source: GameSource,
+}
+
+/// Where an install's bytes come from. The plan and the finalize route are
+/// the same for both; only the download step differs.
+#[derive(Clone)]
+pub enum GameSource {
+    /// Download from the RomM server.
+    Server(Arc<RommClient>),
+    /// Copy from a backup drive's `gridpack/` folder.
+    Drive(DriveSource),
+}
+
+/// A backup drive an install copies its files from.
+#[derive(Clone, Debug)]
+pub struct DriveSource {
+    /// The drive key: the mount path, or the drive letter on Windows.
+    pub drive_id: String,
+    /// The drive's volume label, for "<label> was removed".
+    pub label: String,
+    /// The drive's mount root (the folder that holds `gridpack/`).
+    pub mount: PathBuf,
+    /// The absolute path on the drive of each backed-up file, keyed by its
+    /// server file id (`PackFile::server_file_id`, resolved with
+    /// `backup::pack::resolve`).
+    pub files: BTreeMap<i64, PathBuf>,
+}
+
+impl DriveSource {
+    /// The copy list for a planned job: each target's source on the drive,
+    /// its destination and its expected size. `file_ids` is one id per
+    /// target, in target order (true of every base and native-update job).
+    /// `Err` names the first file the drive has no copy of.
+    fn copy_files(
+        &self,
+        file_ids: &[i64],
+        targets: &[FileTarget],
+    ) -> Result<Vec<drive_copy::CopyFile>, LibraryError> {
+        if file_ids.len() != targets.len() {
+            return Err(LibraryError::Extract(format!(
+                "this install cannot be copied from {}",
+                self.label
+            )));
+        }
+        file_ids
+            .iter()
+            .zip(targets)
+            .map(|(id, target)| {
+                let src = self.files.get(id).ok_or_else(|| {
+                    let name = target
+                        .dest
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    LibraryError::Extract(format!(
+                        "The backup on {} has no copy of {name}",
+                        self.label
+                    ))
+                })?;
+                let size = u64::try_from(target.expected_size).unwrap_or(0);
+                Ok((src.clone(), target.dest.clone(), size))
+            })
+            .collect()
+    }
 }
 
 /// Everything one admitted emulator acquisition needs. Unlike an
@@ -502,29 +566,47 @@ fn is_nested_game_file(file: &RomFile) -> bool {
         && (!file.is_top_level || file.file_name.contains('/') || file.file_name.contains('\\'))
 }
 
-/// Computes the download plan for `detail` under `library`. Pure apart from
-/// cloning the client handle: no I/O, no queue access.
+/// Which of a game's server files an install downloads, before any
+/// destination is chosen. Shared by [`plan_install`] and the backup planner,
+/// so a backup holds exactly the files an install from it needs.
+pub(crate) enum DownloadSet<'a> {
+    /// One candidate: a single archive.
+    Single(&'a RomFile),
+    /// More than one candidate: a multi-file game. `launch` is the first
+    /// `.m3u` if there is one, else the first candidate.
+    Multi {
+        files: Vec<&'a RomFile>,
+        launch: &'a RomFile,
+    },
+    /// A native (Windows or Linux) game: its archive, and its `game.json`
+    /// sidecar when the server lists one.
+    Native {
+        archive: &'a RomFile,
+        sidecar: Option<&'a RomFile>,
+    },
+}
+
+/// Picks the files [`plan_install`] downloads for `detail`. Pure.
 ///
-/// One candidate ⇒ a single archive at `<platform dir>/<archive name>`.
-/// More than one ⇒ a multi-file game: every candidate lands in
-/// `<platform dir>/<safe title>/`, and the launch entry is the first `.m3u`
-/// if there is one, else the first candidate.
+/// A native game's archive is picked by [`specials::native::select_archive`],
+/// not by the generic candidate filter: a native game's server payload
+/// routinely lists artwork and soundtracks before the archive, and
+/// `game.json` is a metadata sidecar rather than something to launch.
 ///
 /// A PlayStation 5 `.pkg` or folder game is rejected here
 /// ([`KYTY_UNSUPPORTED_GAME`]; see [`ps5_unsupported_download`]).
-fn plan_install(
-    detail: &RomDetail,
-    library: &Path,
-    client: Arc<RommClient>,
-) -> Result<InstallJob, LibraryError> {
-    let platform_root = platform_dir(library, &detail.platform_name);
-
+pub(crate) fn download_set(detail: &RomDetail) -> Result<DownloadSet<'_>, LibraryError> {
     // A native (Windows or Linux) game never becomes a multi-file install: the
     // server lists its archive next to a `game.json` sidecar and any number
-    // of extras, and exactly one of those is the game. Everything lands in
-    // one per-game directory instead of the platform root.
+    // of extras, and exactly one of those is the game.
     if is_native_platform(&detail.platform_slug, &detail.platform_name) {
-        return plan_native_install(detail, &platform_root, client);
+        let Some(archive) = specials::native::select_archive(&detail.files) else {
+            return Err(LibraryError::Extract(
+                NO_NATIVE_DOWNLOADABLE_FILE.to_string(),
+            ));
+        };
+        let sidecar = specials::native::has_game_json(&detail.files);
+        return Ok(DownloadSet::Native { archive, sidecar });
     }
 
     let candidates: Vec<&RomFile> = detail
@@ -539,7 +621,43 @@ fn plan_install(
 
     match candidates.as_slice() {
         [] => Err(LibraryError::Extract(NO_DOWNLOADABLE_FILE.to_string())),
-        [only] => {
+        [only] => Ok(DownloadSet::Single(only)),
+        many => {
+            let launch = many
+                .iter()
+                .copied()
+                .find(|file| file.file_name.to_lowercase().ends_with(".m3u"))
+                .unwrap_or(many[0]);
+            Ok(DownloadSet::Multi {
+                files: many.to_vec(),
+                launch,
+            })
+        }
+    }
+}
+
+/// Computes the download plan for `detail` under `library`. Pure apart from
+/// moving `source` onto the job: no I/O, no queue access.
+///
+/// One candidate ⇒ a single archive at `<platform dir>/<archive name>`.
+/// More than one ⇒ a multi-file game: every candidate lands in
+/// `<platform dir>/<safe title>/`. A native game lands in its own per-game
+/// directory ([`plan_native_install`]). [`download_set`] picks the files.
+///
+/// The plan is the same whatever `source` is. For a
+/// [`GameSource::Drive`], every planned file must have a copy on the drive.
+fn plan_install(
+    detail: &RomDetail,
+    library: &Path,
+    source: GameSource,
+) -> Result<InstallJob, LibraryError> {
+    let platform_root = platform_dir(library, &detail.platform_name);
+
+    let job = match download_set(detail)? {
+        DownloadSet::Native { archive, sidecar } => {
+            plan_native_install(detail, &platform_root, archive, sidecar, source)
+        }
+        DownloadSet::Single(only) => {
             // Named from the FILE, not `detail.fs_name`: for a game stored in
             // a per-game folder on the server, `fs_name` is the folder name
             // with no extension. The file's name is what the record stores
@@ -556,7 +674,7 @@ fn plan_install(
             } else {
                 detail.filesize_bytes
             };
-            Ok(InstallJob {
+            InstallJob {
                 rom_id: detail.id,
                 mode: InstallMode::Base,
                 content_kind: None,
@@ -568,17 +686,12 @@ fn plan_install(
                 launch_entry: only.file_name.clone(),
                 native_game_dir: None,
                 game_json_target: None,
-                client,
-            })
+                source,
+            }
         }
-        many => {
+        DownloadSet::Multi { files, launch } => {
             let game_dir = platform_root.join(sanitize_component(&detail.name, "game"));
-            let launch = many
-                .iter()
-                .copied()
-                .find(|file| file.file_name.to_lowercase().ends_with(".m3u"))
-                .unwrap_or(many[0]);
-            let targets = many
+            let targets = files
                 .iter()
                 .map(|file| {
                     content_target(
@@ -589,11 +702,11 @@ fn plan_install(
                     )
                 })
                 .collect();
-            Ok(InstallJob {
+            InstallJob {
                 rom_id: detail.id,
                 mode: InstallMode::Base,
                 content_kind: None,
-                file_ids: many.iter().map(|file| file.id).collect(),
+                file_ids: files.iter().map(|file| file.id).collect(),
                 detail: detail.clone(),
                 targets,
                 primary_archive: game_dir.join(&launch.file_name),
@@ -601,32 +714,30 @@ fn plan_install(
                 launch_entry: launch.file_name.clone(),
                 native_game_dir: None,
                 game_json_target: None,
-                client,
-            })
+                source,
+            }
         }
+    };
+    if let GameSource::Drive(drive) = &job.source {
+        drive.copy_files(&job.file_ids, &job.targets)?;
     }
+    Ok(job)
 }
 
-/// [`plan_install`]'s native (Windows) branch.
+/// [`plan_install`]'s native (Windows) branch, for the `archive` and
+/// `sidecar` [`download_set`] picked.
 ///
-/// The archive is picked by [`specials::native::select_archive`], not by the
-/// generic candidate filter: a native game's server payload routinely lists
-/// artwork and soundtracks before the archive, and `game.json` is a metadata
-/// sidecar rather than something to launch. Everything is downloaded into
-/// `<platform dir>/<safe title>/` — the game's own home directory, which
-/// later holds the extracted `game/` tree and (on non-Windows hosts) the
-/// Wine prefix. Ports `_download_game_archive`'s native branch
-/// (`install_mixin.py:977-1020`).
+/// Everything is downloaded into `<platform dir>/<safe title>/` — the game's
+/// own home directory, which later holds the extracted `game/` tree and (on
+/// non-Windows hosts) the Wine prefix. Ports `_download_game_archive`'s
+/// native branch (`install_mixin.py:977-1020`).
 fn plan_native_install(
     detail: &RomDetail,
     platform_root: &Path,
-    client: Arc<RommClient>,
-) -> Result<InstallJob, LibraryError> {
-    let Some(archive) = specials::native::select_archive(&detail.files) else {
-        return Err(LibraryError::Extract(
-            NO_NATIVE_DOWNLOADABLE_FILE.to_string(),
-        ));
-    };
+    archive: &RomFile,
+    sidecar: Option<&RomFile>,
+    source: GameSource,
+) -> InstallJob {
     let game_dir = platform_root.join(sanitize_component(&detail.name, "game"));
     let dest = game_dir.join(&archive.file_name);
     let size = if archive.file_size_bytes > 0 {
@@ -640,7 +751,7 @@ fn plan_native_install(
     // The sidecar is fetched as its own request with its own `file_ids`:
     // asking for the content endpoint without one makes the server bundle
     // every listed file into a single zip.
-    let game_json_target = specials::native::has_game_json(&detail.files).map(|sidecar| {
+    let game_json_target = sidecar.map(|sidecar| {
         let sidecar_dest = game_dir.join(METADATA_FILE_NAME);
         file_ids.push(sidecar.id);
         targets.push(content_target(
@@ -652,7 +763,7 @@ fn plan_native_install(
         sidecar_dest
     });
 
-    Ok(InstallJob {
+    InstallJob {
         rom_id: detail.id,
         mode: InstallMode::Base,
         content_kind: None,
@@ -664,8 +775,8 @@ fn plan_native_install(
         launch_entry: archive.file_name.clone(),
         native_game_dir: Some(game_dir),
         game_json_target,
-        client,
-    })
+        source,
+    }
 }
 
 /// Which finalize path a `Base`/`Update` job takes once the multi-file case
@@ -779,7 +890,7 @@ fn content_job(
         launch_entry: detail.fs_name.clone(),
         native_game_dir: None,
         game_json_target: None,
-        client,
+        source: GameSource::Server(client),
     };
     job.targets.push(FileTarget {
         url_path: format!(
@@ -1259,7 +1370,7 @@ impl InstallService {
                 return Ok(());
             }
         }
-        let job = plan_install(&detail, &library, client)?;
+        let job = plan_install(&detail, &library, GameSource::Server(client))?;
         let key = JobKey::Rom(job.rom_id);
         let title = job.detail.name.clone();
         let platform = job.detail.platform_name.clone();
@@ -1380,7 +1491,7 @@ impl InstallService {
             native_game_dir: Some(native_game_dir),
             game_json_target,
             detail: detail.clone(),
-            client,
+            source: GameSource::Server(client),
         };
         self.admit(
             JobKey::NativeUpdate(rom_id),
@@ -1549,7 +1660,7 @@ impl InstallService {
             return Err(LibraryError::Extract(NATIVE_UPDATE_REQUIRED.to_string()));
         }
         let detail = client.rom_detail(rom_id).await?;
-        let mut job = plan_install(&detail, &library, client)?;
+        let mut job = plan_install(&detail, &library, GameSource::Server(client))?;
         job.mode = InstallMode::Update;
         let key = JobKey::Rom(job.rom_id);
         let title = job.detail.name.clone();
@@ -2463,15 +2574,20 @@ impl InstallService {
                     reporter.on_download_progress(id, downloaded, total, speed);
                 };
                 let result = match &mut payload {
-                    JobPayload::Game(job) => {
-                        download_targets(
-                            &RommProvider(&job.client),
-                            &job.targets,
-                            &cancel,
-                            &mut on_progress,
-                        )
-                        .await
-                    }
+                    JobPayload::Game(job) => match &job.source {
+                        GameSource::Server(client) => {
+                            download_targets(
+                                &RommProvider(client),
+                                &job.targets,
+                                &cancel,
+                                &mut on_progress,
+                            )
+                            .await
+                        }
+                        GameSource::Drive(drive) => {
+                            copy_from_drive(drive, job, cancel.clone(), on_progress).await
+                        }
+                    },
                     JobPayload::Emulator(job) => {
                         download_emulator(job, &cancel, &mut on_progress).await
                     }
@@ -2790,7 +2906,13 @@ impl InstallService {
     /// is simply dropped by the queue. This runs while the base entry still
     /// owns the finalize slot, so both content jobs are queued rather than
     /// started, and the FIFO gives base -> update -> DLC.
+    ///
+    /// Only for a server install: the content comes from the server, and a
+    /// game installed from a backup drive has no server to ask.
     fn queue_xbox360_content(self: &Arc<Self>, job: &InstallJob) {
+        let GameSource::Server(client) = &job.source else {
+            return;
+        };
         let Ok(library) = self.library_root() else {
             return;
         };
@@ -2805,7 +2927,7 @@ impl InstallService {
                 kind,
                 InstallMode::Xbox360Content,
                 file_ids,
-                job.client.clone(),
+                client.clone(),
             );
             if let Err(e) = self.admit(
                 key,
@@ -3947,6 +4069,24 @@ async fn download_server_build(
         expected_size: 0,
     }];
     download_targets(&RommProvider(&build.client), &targets, cancel, on_progress).await
+}
+
+/// The download step of an install from a backup drive: copies the job's
+/// targets off the drive on the blocking pool ([`drive_copy::copy_targets`]).
+async fn copy_from_drive(
+    drive: &DriveSource,
+    job: &InstallJob,
+    cancel: Arc<AtomicBool>,
+    mut on_progress: impl FnMut(u64, u64, f64) + Send + 'static,
+) -> Result<(), LibraryError> {
+    let files = drive.copy_files(&job.file_ids, &job.targets)?;
+    let root = crate::backup::pack::pack_dir(&drive.mount);
+    let label = drive.label.clone();
+    tokio::task::spawn_blocking(move || {
+        drive_copy::copy_targets(&root, &label, &files, &cancel, &mut on_progress)
+    })
+    .await
+    .map_err(|e| LibraryError::Extract(format!("the copy did not finish: {e}")))?
 }
 
 /// The install error for a build whose program cannot run on this computer.
@@ -5096,7 +5236,8 @@ mod tests {
             rom_file(2, "nested/rom.bin", true),
             rom_file(3, "inner.bin", false),
         ]);
-        let Err(err) = plan_install(&detail, Path::new("/library"), client()) else {
+        let Err(err) = plan_install(&detail, Path::new("/library"), GameSource::Server(client()))
+        else {
             panic!("expected an error");
         };
         assert!(
@@ -5119,7 +5260,8 @@ mod tests {
         )]);
         detail.fs_name = "The Legend of Zelda - Breath of the Wild (igdb-7346)".to_string();
         detail.platform_name = "Wii U".to_string();
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
 
         assert_eq!(
             job.primary_archive,
@@ -5133,7 +5275,8 @@ mod tests {
     #[test]
     fn plan_single_file_targets_the_platform_dir_archive() {
         let detail = detail(vec![rom_file(11, "chrono.zip", true)]);
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
 
         assert_eq!(job.rom_id, 42);
         assert!(job.multi_file_game_dir.is_none());
@@ -5156,7 +5299,8 @@ mod tests {
     fn plan_single_file_falls_back_to_the_game_size() {
         let mut detail = detail(vec![rom_file(11, "chrono.zip", true)]);
         detail.files[0].file_size_bytes = 0;
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
         assert_eq!(job.targets[0].expected_size, 999);
     }
 
@@ -5167,7 +5311,8 @@ mod tests {
             rom_file(22, "Game.M3U", true),
             rom_file(23, "game.json", true),
         ]);
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
 
         let game_dir = PathBuf::from("/library/games/SNES/Chrono Trigger");
         assert_eq!(job.multi_file_game_dir, Some(game_dir.clone()));
@@ -5185,7 +5330,8 @@ mod tests {
             rom_file(21, "disc1.bin", true),
             rom_file(22, "disc2.bin", true),
         ]);
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
         assert_eq!(job.launch_entry, "disc1.bin");
     }
 
@@ -5204,7 +5350,7 @@ mod tests {
             let Err(err) = plan_install(
                 &ps5_detail(vec![rom_file(1, name, true)]),
                 Path::new("/library"),
-                client(),
+                GameSource::Server(client()),
             ) else {
                 panic!("a PS5 {name} must be rejected");
             };
@@ -5223,7 +5369,7 @@ mod tests {
                 rom_file(2, "libSceFios2.prx", true),
             ]),
             Path::new("/library"),
-            client(),
+            GameSource::Server(client()),
         ) else {
             panic!("a bare PS5 folder must be rejected");
         };
@@ -5240,7 +5386,7 @@ mod tests {
                 rom_file(2, "game.json", true),
             ]),
             Path::new("/library"),
-            client(),
+            GameSource::Server(client()),
         )
         .unwrap();
         assert_eq!(
@@ -5270,7 +5416,7 @@ mod tests {
                     rom_file(2, nested, false),
                 ]),
                 Path::new("/library"),
-                client(),
+                GameSource::Server(client()),
             ) else {
                 panic!("a PS5 folder game ({nested}) must be rejected");
             };
@@ -5287,7 +5433,7 @@ mod tests {
                     rom_file(2, "extras/readme.txt", false),
                 ]),
                 Path::new("/library"),
-                client(),
+                GameSource::Server(client()),
             )
             .unwrap_or_else(|e| panic!("{name} must be accepted: {e}"));
             assert_eq!(job.file_ids, vec![1]);
@@ -5301,7 +5447,7 @@ mod tests {
         let job = plan_install(
             &ps5_detail(vec![rom_file(1, "eboot.bin", true)]),
             Path::new("/library"),
-            client(),
+            GameSource::Server(client()),
         )
         .unwrap();
         assert_eq!(
@@ -5319,7 +5465,7 @@ mod tests {
         let job = plan_install(
             &ps5_detail(vec![rom_file(1, "Astro Bot.zip", true)]),
             Path::new("/library"),
-            client(),
+            GameSource::Server(client()),
         )
         .unwrap();
         assert_eq!(
@@ -5332,13 +5478,13 @@ mod tests {
     fn plan_rejection_applies_to_ps5_only() {
         let mut ps4 = detail(vec![rom_file(1, "game.pkg", true)]);
         ps4.platform_name = "PlayStation 4".to_string();
-        assert!(plan_install(&ps4, Path::new("/library"), client()).is_ok());
+        assert!(plan_install(&ps4, Path::new("/library"), GameSource::Server(client())).is_ok());
 
         let snes = detail(vec![
             rom_file(1, "disc1.bin", true),
             rom_file(2, "disc2.bin", true),
         ]);
-        assert!(plan_install(&snes, Path::new("/library"), client()).is_ok());
+        assert!(plan_install(&snes, Path::new("/library"), GameSource::Server(client())).is_ok());
 
         // A multi-file game on another PlayStation platform still installs.
         let mut ps4_multi = detail(vec![
@@ -5346,7 +5492,12 @@ mod tests {
             rom_file(2, "sce_sys.dat", true),
         ]);
         ps4_multi.platform_name = "PlayStation 4".to_string();
-        assert!(plan_install(&ps4_multi, Path::new("/library"), client()).is_ok());
+        assert!(plan_install(
+            &ps4_multi,
+            Path::new("/library"),
+            GameSource::Server(client())
+        )
+        .is_ok());
     }
 
     // --- install modes -------------------------------------------------------
@@ -5375,7 +5526,8 @@ mod tests {
             rom_file(1, "artwork.png", true),
             rom_file(2, "mygame.zip", true),
         ]);
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
 
         let game_dir = PathBuf::from("/library/games/Windows/My Game");
         assert_eq!(job.mode, InstallMode::Base);
@@ -5398,7 +5550,8 @@ mod tests {
             rom_file(1, "mygame.zip", true),
             rom_file(2, "game.json", true),
         ]);
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
 
         let game_dir = PathBuf::from("/library/games/Windows/My Game");
         assert_eq!(job.game_json_target, Some(game_dir.join("game.json")));
@@ -5424,7 +5577,8 @@ mod tests {
         detail.name = "Tamriel Rebuilt".to_string();
         detail.platform_name = "PC Fangames & Ports".to_string();
         detail.platform_slug = "win".to_string();
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
 
         let game_dir = PathBuf::from("/library/games/PC Fangames & Ports/Tamriel Rebuilt");
         assert_eq!(job.native_game_dir, Some(game_dir.clone()));
@@ -5447,13 +5601,257 @@ mod tests {
     #[test]
     fn plan_native_rejects_a_payload_of_nothing_but_a_sidecar() {
         let detail = native_detail(vec![rom_file(1, "game.json", true)]);
-        let Err(err) = plan_install(&detail, Path::new("/library"), client()) else {
+        let Err(err) = plan_install(&detail, Path::new("/library"), GameSource::Server(client()))
+        else {
             panic!("expected an error");
         };
         assert_eq!(
             err.to_string(),
             "No downloadable file was found for this game"
         );
+    }
+
+    // --- plan_install: from a backup ----------------------------------------
+
+    use crate::backup::pack::{pack_game_detail, resolve, PackGame};
+
+    /// The gridpack entry a backup of `detail` writes when it holds `files`.
+    fn pack_entry(detail: &RomDetail, files: &[RomFile]) -> PackGame {
+        let files: Vec<serde_json::Value> = files
+            .iter()
+            .map(|file| {
+                serde_json::json!({
+                    "path": format!("games/{}/{}", detail.platform_slug, file.id),
+                    "size": file.file_size_bytes,
+                    "server_file_id": file.id,
+                    "name": file.file_name,
+                    "category": file.category,
+                    "top_level": file.is_top_level,
+                })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "platform": detail.platform_slug,
+            "platform_name": detail.platform_name,
+            "source": {
+                "server": "http://romm.local",
+                "rom_id": detail.id,
+                "fs_name": detail.fs_name,
+            },
+            "name": detail.name,
+            "size": detail.filesize_bytes,
+            "files": files,
+            "added": "2026-11-09T00:00:00Z",
+        }))
+        .unwrap()
+    }
+
+    /// The files [`download_set`] picks for `detail`, owned.
+    fn planned_files(detail: &RomDetail) -> Vec<RomFile> {
+        match download_set(detail).unwrap() {
+            DownloadSet::Single(file) => vec![file.clone()],
+            DownloadSet::Multi { files, .. } => files.into_iter().cloned().collect(),
+            DownloadSet::Native { archive, sidecar } => {
+                std::iter::once(archive).chain(sidecar).cloned().collect()
+            }
+        }
+    }
+
+    /// `detail` → gridpack entry → `pack_game_detail` → `plan_install` gives
+    /// the server install's plan, whether the pack holds every server file
+    /// or only the ones the install downloads.
+    fn assert_round_trip(detail: &RomDetail) {
+        let library = Path::new("/library");
+        let server = plan_install(detail, library, GameSource::Server(client())).unwrap();
+        let targets = |job: &InstallJob| {
+            job.targets
+                .iter()
+                .map(|t| {
+                    (
+                        t.url_path.clone(),
+                        t.query.clone(),
+                        t.dest.clone(),
+                        t.expected_size,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let route = |job: &InstallJob| {
+            base_finalize_route(
+                &job.detail.platform_slug,
+                &job.detail.platform_name,
+                &job.primary_archive,
+            )
+        };
+        for files in [detail.files.clone(), planned_files(detail)] {
+            let restored = pack_game_detail(&pack_entry(detail, &files));
+            let job = plan_install(&restored, library, GameSource::Server(client())).unwrap();
+            assert_eq!(targets(&job), targets(&server));
+            assert_eq!(job.file_ids, server.file_ids);
+            assert_eq!(job.primary_archive, server.primary_archive);
+            assert_eq!(job.multi_file_game_dir, server.multi_file_game_dir);
+            assert_eq!(job.native_game_dir, server.native_game_dir);
+            assert_eq!(job.game_json_target, server.game_json_target);
+            assert_eq!(job.launch_entry, server.launch_entry);
+            assert_eq!(route(&job), route(&server));
+        }
+    }
+
+    #[test]
+    fn a_backed_up_single_file_game_plans_like_the_server_install() {
+        assert_round_trip(&detail(vec![
+            rom_file(11, "chrono.zip", true),
+            rom_file(12, "game.json", true),
+        ]));
+        // No size on the file entry: the game's own size is the total.
+        let mut no_size = detail(vec![rom_file(11, "chrono.zip", true)]);
+        no_size.files[0].file_size_bytes = 0;
+        assert_round_trip(&no_size);
+    }
+
+    #[test]
+    fn a_backed_up_multi_file_game_plans_like_the_server_install() {
+        let mut detail = detail(vec![
+            rom_file(1, "Disc 1.cue", true),
+            rom_file(2, "Disc 1.bin", true),
+            rom_file(3, "Game.m3u", true),
+            rom_file(4, "inner.bin", false),
+        ]);
+        detail.platform_name = "PlayStation".to_string();
+        detail.platform_slug = "psx".to_string();
+        assert_round_trip(&detail);
+    }
+
+    #[test]
+    fn a_backed_up_native_game_plans_like_the_server_install() {
+        assert_round_trip(&native_detail(vec![
+            rom_file(1, "artwork.png", true),
+            rom_file(2, "mygame.zip", true),
+            rom_file(3, "game.json", true),
+        ]));
+        let mut fangame = detail(vec![
+            rom_file(1, "TamrielRebuilt.zip", true),
+            rom_file(2, "readme.txt", true),
+        ]);
+        fangame.platform_name = "PC Fangames & Ports".to_string();
+        fangame.platform_slug = "win".to_string();
+        assert_round_trip(&fangame);
+    }
+
+    /// The drive source for `game` on a drive mounted at `mount`.
+    fn drive_source(mount: &Path, game: &PackGame) -> DriveSource {
+        DriveSource {
+            drive_id: mount.display().to_string(),
+            label: "SAMSUNG T7".to_string(),
+            mount: mount.to_path_buf(),
+            files: game
+                .files
+                .iter()
+                .map(|file| (file.server_file_id, resolve(mount, &file.path).unwrap()))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_drive_install_copies_each_target_from_its_backed_up_file() {
+        let detail = native_detail(vec![
+            rom_file(1, "mygame.zip", true),
+            rom_file(2, "game.json", true),
+        ]);
+        let mount = Path::new("/media/T7");
+        let game = pack_entry(&detail, &detail.files);
+        let drive = drive_source(mount, &game);
+        let job = plan_install(
+            &pack_game_detail(&game),
+            Path::new("/library"),
+            GameSource::Drive(drive.clone()),
+        )
+        .unwrap();
+
+        let game_dir = PathBuf::from("/library/games/Windows/My Game");
+        assert_eq!(
+            drive.copy_files(&job.file_ids, &job.targets).unwrap(),
+            vec![
+                (
+                    mount.join("gridpack/games/snes/1"),
+                    game_dir.join("mygame.zip"),
+                    10
+                ),
+                (
+                    mount.join("gridpack/games/snes/2"),
+                    game_dir.join("game.json"),
+                    10
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_drive_install_refuses_a_backup_missing_a_planned_file() {
+        let detail = detail(vec![
+            rom_file(1, "Disc 1.cue", true),
+            rom_file(2, "Disc 1.bin", true),
+        ]);
+        let game = pack_entry(&detail, &detail.files);
+        let mut drive = drive_source(Path::new("/media/T7"), &game);
+        drive.files.remove(&2);
+        let Err(err) = plan_install(
+            &pack_game_detail(&game),
+            Path::new("/library"),
+            GameSource::Drive(drive),
+        ) else {
+            panic!("expected an error");
+        };
+        assert_eq!(
+            err.to_string(),
+            "The backup on SAMSUNG T7 has no copy of Disc 1.bin"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_drive_install_copies_the_files_into_the_library() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mount = tmp.path().join("T7");
+        let library = tmp.path().join("library");
+        let detail = detail(vec![
+            rom_file(1, "Disc 1.cue", true),
+            rom_file(2, "Disc 1.bin", true),
+        ]);
+        let game = pack_entry(&detail, &detail.files);
+        for file in &game.files {
+            let path = resolve(&mount, &file.path).unwrap();
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            // Each name is 10 bytes, the size the entry records.
+            fs::write(&path, file.name.as_bytes()).unwrap();
+        }
+        let drive = drive_source(&mount, &game);
+        let job = plan_install(
+            &pack_game_detail(&game),
+            &library,
+            GameSource::Drive(drive.clone()),
+        )
+        .unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        copy_from_drive(
+            &drive,
+            &job,
+            Arc::new(AtomicBool::new(false)),
+            move |copied, total, _| sink.lock().unwrap().push((copied, total)),
+        )
+        .await
+        .unwrap();
+
+        let game_dir = library.join("games").join("SNES").join("Chrono Trigger");
+        assert_eq!(
+            fs::read(game_dir.join("Disc 1.cue")).unwrap(),
+            b"Disc 1.cue"
+        );
+        assert_eq!(
+            fs::read(game_dir.join("Disc 1.bin")).unwrap(),
+            b"Disc 1.bin"
+        );
+        assert_eq!(*seen.lock().unwrap().last().unwrap(), (20, 20));
     }
 
     // --- ps3_roots_from_config -----------------------------------------------
