@@ -238,6 +238,51 @@ pub struct PendingDefault {
     pub server_source: Option<String>,
 }
 
+/// Game backup settings (`[backup]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupSettings {
+    /// Whether the Backup dialog's "Include firmware" box starts ticked.
+    #[serde(default = "default_true")]
+    pub include_firmware: bool,
+    /// Every drive GRID has set up, so Settings can list it while it is
+    /// unplugged. Keyed by `mount`.
+    #[serde(default)]
+    pub drives: Vec<RememberedDrive>,
+}
+
+impl Default for BackupSettings {
+    fn default() -> Self {
+        Self {
+            include_firmware: true,
+            drives: Vec::new(),
+        }
+    }
+}
+
+/// A set-up backup drive GRID has seen (`[[backup.drives]]`). A pack has no
+/// id: the drive is keyed by its mount path, or its drive letter on Windows.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RememberedDrive {
+    /// The drive key: the mount path, or the drive letter on Windows.
+    pub mount: String,
+    /// The pack name the user gave the drive.
+    #[serde(default)]
+    pub name: String,
+    /// The volume label.
+    #[serde(default)]
+    pub label: String,
+    /// The display file system name: `FAT32`, `exFAT`, `NTFS`, `ext4`…
+    #[serde(default)]
+    pub fs: String,
+    #[serde(default)]
+    pub total_bytes: u64,
+    #[serde(default)]
+    pub game_count: u32,
+    /// When the drive was last connected, RFC 3339 UTC.
+    #[serde(default)]
+    pub last_seen: String,
+}
+
 /// App configuration. Secrets are NEVER part of this struct — they live in
 /// the OS keyring only (see secrets.rs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -373,6 +418,10 @@ pub struct Config {
     /// while empty, so such a config round-trips unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub former_library_paths: Vec<String>,
+    /// "Use without a server": the session runs offline, with no RomM
+    /// server, until the user signs in again. Off by default.
+    #[serde(default)]
+    pub offline: bool,
     /// The GRID-managed umu-launcher, `None` until one is installed. A TOML
     /// table, so it must stay after every scalar key in this struct; not
     /// written while `None`, so an older config round-trips unchanged.
@@ -386,6 +435,10 @@ pub struct Config {
     /// after every scalar key too.
     #[serde(default)]
     pub setup: SetupState,
+    /// Game backups (`[backup]`): the firmware default and the drives GRID
+    /// has set up. A TOML table, so it stays after every scalar key too.
+    #[serde(default)]
+    pub backup: BackupSettings,
     /// Unknown keys survive load/save round trips for forward compatibility.
     #[serde(flatten)]
     pub extra: BTreeMap<String, toml::Value>,
@@ -431,9 +484,11 @@ impl Default for Config {
             debug_prints: true,
             library_layout_version: 0,
             former_library_paths: Vec::new(),
+            offline: false,
             umu_launcher: None,
             ui: UiSettings::default(),
             setup: SetupState::default(),
+            backup: BackupSettings::default(),
             extra: BTreeMap::new(),
         }
     }
@@ -635,6 +690,50 @@ mod tests {
         cfg.save(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("future_key"));
+    }
+
+    #[test]
+    fn backup_settings_and_offline_default_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "schema_version = 1\n").unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert!(!loaded.offline);
+        assert!(loaded.backup.include_firmware);
+        assert!(loaded.backup.drives.is_empty());
+        assert_eq!(loaded.backup, Config::default().backup);
+
+        // A `[backup]` table without `include_firmware` still defaults it on.
+        std::fs::write(&path, "schema_version = 1\n[backup]\n").unwrap();
+        assert!(Config::load(&path).unwrap().backup.include_firmware);
+    }
+
+    #[test]
+    fn backup_settings_and_offline_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            offline: true,
+            backup: BackupSettings {
+                include_firmware: false,
+                drives: vec![RememberedDrive {
+                    mount: "/run/media/samm/SAMSUNG T7".into(),
+                    name: "Couch kit".into(),
+                    label: "SAMSUNG T7".into(),
+                    fs: "exFAT".into(),
+                    total_bytes: 1_000_204_886_016,
+                    game_count: 12,
+                    last_seen: "2026-11-09T10:00:00Z".into(),
+                }],
+            },
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("offline = true"), "written:\n{written}");
+        assert!(written.contains("[backup]"), "written:\n{written}");
+        assert!(written.contains("[[backup.drives]]"), "written:\n{written}");
+        assert_eq!(Config::load(&path).unwrap(), cfg);
     }
 
     #[test]
