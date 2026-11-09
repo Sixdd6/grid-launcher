@@ -14,10 +14,32 @@ export const CREDENTIAL_STORED = 'Stored in the OS keyring';
  * reason. A rejected credential (401) never reaches this page — it opens the
  * Connect form instead (Q6).
  */
-export function credentialStatusLabel(connected: boolean): string {
+export function credentialStatusLabel(connected: boolean, offline = false): string {
+  // Offline mode may have no credential at all (Use without a server on a
+  // fresh profile), and any stored one goes unused: say that, not "stored".
+  if (offline && !connected) return 'Not used offline';
   return connected
     ? `${CREDENTIAL_STORED} · session verified`
     : `${CREDENTIAL_STORED} · not verified`;
+}
+
+/** The Status line. Offline mode is chosen, so it reads as the top bar's
+ *  chip does rather than as a failure. */
+export function statusLabel(connected: boolean, offline: boolean): string {
+  if (connected) return 'Connected';
+  return offline ? 'Offline · no server' : 'Not connected';
+}
+
+export type ConnectionAction = 'edit' | 'reconnect' | 'disconnect' | 'connect';
+
+/**
+ * The page's session buttons, in order (Open Config Folder always follows).
+ * Offline mode mirrors the chip menu: its only way out is Connect to a
+ * server…, back to the Connect screen; there is no session to edit, retry
+ * or end.
+ */
+export function connectionActions(connected: boolean, offline: boolean): ConnectionAction[] {
+  return offline && !connected ? ['connect'] : ['edit', 'reconnect', 'disconnect'];
 }
 
 /** Mirrors the server menu: Reconnect exists only while offline, and not mid-retry. */

@@ -786,3 +786,40 @@ async fn connect_clears_offline() {
         RestoreOutcome::Connected { .. }
     ));
 }
+
+#[tokio::test]
+async fn retry_that_connects_clears_offline() {
+    let server = MockServer::start().await;
+    mount_users_me(&server).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (mgr, store) = stored_session(&dir, &server.uri(), token());
+    mgr.use_offline().unwrap();
+    assert!(matches!(
+        mgr.retry().await.unwrap(),
+        RestoreOutcome::Connected { .. }
+    ));
+    let config_path = dir.path().join("config.toml");
+    let cfg = grid_core::config::Config::load(&config_path).unwrap();
+    assert!(!cfg.offline);
+    // The next start probes the server again instead of answering Offline.
+    let fresh = SessionManager::new(config_path, dir.path().join("covers"), store);
+    assert!(matches!(
+        fresh.restore().await.unwrap(),
+        RestoreOutcome::Connected { .. }
+    ));
+}
+
+#[tokio::test]
+async fn retry_that_fails_keeps_offline() {
+    let server = MockServer::start().await;
+    mount_status(&server, "/api/users/me", 503).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (mgr, _store) = stored_session(&dir, &server.uri(), token());
+    mgr.use_offline().unwrap();
+    assert!(matches!(
+        mgr.retry().await.unwrap(),
+        RestoreOutcome::Unreachable { .. }
+    ));
+    let cfg = grid_core::config::Config::load(&dir.path().join("config.toml")).unwrap();
+    assert!(cfg.offline);
+}

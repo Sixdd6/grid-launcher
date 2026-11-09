@@ -1,10 +1,10 @@
 <script lang="ts">
   import { api } from './api';
-  import { session, connect } from './stores/session.svelte';
+  import { session, connect, useOffline } from './stores/session.svelte';
   import { pickFolder } from './pickers';
   import { untrack } from 'svelte';
   import { connectPrefill, type ConnectPrefill } from './connectPrefill';
-  import { canConnect, libraryField } from './connectForm';
+  import { canConnect, canUseOffline, libraryField } from './connectForm';
   import Icon from './Icon.svelte';
 
   // Seeded from the restored config (blank when there is none): a Python
@@ -32,6 +32,9 @@
   // install without one. `null` until the stored path is known, and when the
   // form does not ask, so the field never flashes on a reconnect.
   let libraryPath = $state<string | null>(null);
+  // Whether `libraryPath` has been settled: "Use without a server" needs a
+  // folder and must not count the initial `null` as "already stored".
+  let libraryKnown = $state(false);
   $effect(() => {
     Promise.all([api.getLibraryPath(), api.suggestedLibraryPath()])
       .then(([stored, suggested]) => {
@@ -42,6 +45,9 @@
         // Unknown: ask, with no suggestion. A folder typed here is stored
         // before connecting either way.
         libraryPath = '';
+      })
+      .finally(() => {
+        libraryKnown = true;
       });
   });
 
@@ -52,6 +58,36 @@
   let libraryError = $state<string | null>(null);
 
   let ready = $derived(canConnect({ serverUrl, username, secret, useToken, libraryPath }));
+  let offlineReady = $derived(canUseOffline(libraryKnown, libraryPath));
+
+  /** Stores a typed library folder. `false` (with `libraryError` set) when
+   *  the backend refuses it; `true` when stored or when none was asked for. */
+  async function saveLibraryPath(): Promise<boolean> {
+    if (libraryPath === null) return true;
+    try {
+      await api.setLibraryPath(libraryPath.trim());
+      return true;
+    } catch (e) {
+      libraryError = `That folder can't be used: ${e}`;
+      return false;
+    }
+  }
+
+  /** "Use without a server": only the library folder is needed. It is
+   *  stored first, then the backend turns offline mode on and the shell
+   *  opens on Library. A typed secret is dropped either way. */
+  async function useWithoutServer() {
+    if (!offlineReady || submitting || session.busy) return;
+    submitting = true;
+    libraryError = null;
+    secret = '';
+    try {
+      if (!(await saveLibraryPath())) return;
+      await useOffline();
+    } finally {
+      submitting = false;
+    }
+  }
 
   async function browseLibraryPath() {
     const picked = await pickFolder('Select Library Folder');
@@ -68,14 +104,7 @@
       // (grid-launcher.py:1689): a rejected credential must not lose the path
       // the user just typed. Safe in either order — `SessionManager::connect`
       // re-reads config.toml and overwrites only `server_url`/`username`.
-      if (libraryPath !== null) {
-        try {
-          await api.setLibraryPath(libraryPath.trim());
-        } catch (e) {
-          libraryError = `That folder can't be used: ${e}`;
-          return;
-        }
-      }
+      if (!(await saveLibraryPath())) return;
       // Fire-and-forget: `connect` sets `session.busy` synchronously, and
       // `secret` clears in the same tick rather than staying in frontend
       // state for the whole network round trip. Token auth identifies the
@@ -131,6 +160,21 @@
   <button data-testid="connect-submit" class="primary" disabled={!ready || session.busy || submitting}>
     {session.busy ? 'Connecting…' : 'Connect'}
   </button>
+  <!-- GameBackups README "Use without a server": an "or" divider, then a
+       secondary button that needs only the library folder. -->
+  <div class="or" aria-hidden="true"><span>or</span></div>
+  <button
+    type="button"
+    data-testid="connect-use-offline"
+    class="secondary"
+    disabled={!offlineReady || session.busy || submitting}
+    onclick={useWithoutServer}
+  >
+    Use without a server
+  </button>
+  <p class="hint center">
+    Install games from a backup drive and play what’s installed. Connect to a server any time from the top bar.
+  </p>
   {#if libraryError}<p data-testid="connect-library-error" class="error" role="alert">{libraryError}</p>{/if}
   {#if session.error}<p data-testid="connect-error" class="error" role="alert">{session.error}</p>{/if}
 </form>
@@ -244,6 +288,46 @@
   .primary:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+
+  .secondary {
+    padding: 10px 16px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-h);
+    transition: background var(--m-fast) ease;
+  }
+
+  .secondary:hover:not(:disabled) {
+    background: var(--surface);
+  }
+
+  .secondary:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .or {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .or::before,
+  .or::after {
+    content: '';
+    flex: 1;
+    border-top: 1px solid var(--line);
+  }
+
+  p.hint {
+    margin: -8px 0 0;
+  }
+
+  .center {
+    text-align: center;
   }
 
   .browse {
