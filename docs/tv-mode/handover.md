@@ -183,19 +183,6 @@
   glides), `toastTitles()`, `waitToast(text|re)`. The spec captures page errors from the start and
   its last test asserts there were none: worth copying into later TV specs.
 
-## Pending for the next phase (consultant, after P7): Search everything states
-- app/src/lib/tv/tabs/server/server.svelte.ts `loadAllGames()`: resolve `{ games: LabelledGame[]; partial: boolean }`;
-  a failed or partial load is dropped from the cache so the next load re-asks.
-- app/src/lib/tv/pages/searchResults.ts (+ tests): `searchingHeading(q)` → `Searching for “<q>”…`;
-  `LOAD_FAILED_TITLE = "Can't reach your server"`; `loadFailedLine(url)` → `<url> isn't answering, so nothing could be searched.`;
-  `PARTIAL_NOTE = "Some systems didn't answer, so their games aren't in these results."`; `RETRY = 'Try again'`.
-- app/src/lib/tv/pages/TvSearchAll.svelte: state `'loading' | 'failed' | { games; partial }`; loading = heading
-  `tv-search-heading` over an empty grid (no spinner, no partial results); failed = `.empty` block
-  (`data-testid="tv-search-failed"`, h2 + line + primary TvButton k="sr-retry" testId="tv-search-retry", focused);
-  partial = `.note.warn` `data-testid="tv-search-partial"` + the same Try again above the grid; retry re-runs the load
-  with the loading heading; remove the `.catch(() => (all = []))` that produced "0 results". `setQuery` keeps the
-  early return on blank (results page: emptied field = nothing typed), comment cites the ruling. Inline only, never cards.
-
 ## After P8: the Library tab
 - **Done from the pending lists:** `reconnect.ts` does nothing while `session.busy`, its TODO(design) is gone
   (card unchanged; `reconnect.test.ts`); `overlays/menu.ts` takes the session: used without a server the
@@ -243,3 +230,50 @@
 - **Not done / for later:** P13 owns the Backup page hooks, select mode, the drive's Install-from-drive
   notices beyond the queue card (425–429) and Details from a drive. Where GRID opens on the first drive in
   TV (item 415) is P12: TvShell doesn't select the drive row yet.
+
+## After P9: Details and its pages
+- **Done from the pending lists:** Search everything's states (consultant rulings): `loadAllGames()`
+  resolves `{games, partial}` and drops a failed or partial load from the cache; `searchResults.ts` has
+  `searchingHeading`, `LOAD_FAILED_TITLE`, `loadFailedLine`, `PARTIAL_NOTE`, `RETRY`; `TvSearchAll` shows
+  the loading heading over an empty grid, the failure block (`tv-search-failed`, Try again `sr-retry`
+  focused) and the partial warning (`tv-search-partial`) with Try again; an emptied field on the results
+  page is still "nothing typed". The Server platform search now follows the Library's rule:
+  `serverHeader.ts` `searching(q)` (blank = no filter, no chip, plain count, no no-match text) and B on
+  the keyboard restores the search it had. The P7 TODOs for the umu-launcher and library-folder prompts
+  are built (`gameActions.ts` `promptFor`), and Play pushes Playing from Details and from X on a cover.
+- **Pages** (`lib/tv/pages/`): `TvDetails` (+ `details/TvOverviewTab|TvMediaTab|TvSavesTab|TvSavesPanel|
+  TvAchievementsTab`), `TvPlaying`, `TvMediaViewer` (a layer: `mediaViewer.svelte.ts` `openViewer`, binds
+  LB / RB / Left / Right), `TvGameSettings`, `TvLinkPage`, `TvFolderBrowser`. Pure rules and words:
+  `details.ts` (button row per state, left lines, header line, tab step, facts, media caption and
+  stepping, Saves words, every confirmation, Playing line and note, link and launch-file lines) and
+  `folderBrowser.ts`. `detailsState.svelte.ts` keeps the tab and the Saves | States choice for the
+  session (a page pushed from Details remounts it).
+- **Entry points** (`gameActions.ts`): `openDetails(subject, sizeBytes?)`, `playGame({romId, title,
+  platform})` (Playing on success, else `promptFor(outcome)`), `installGame`, `promptFor`, `offerUmu`
+  (confirm, then `api.installUmuLauncher`; the desktop offer's note as a card with Open Downloads),
+  `promptLibraryFolder` (confirm, folder browser, `api.setLibraryPath`; the install is pressed again, as
+  on the desktop), `openFolderBrowser({title, start?, files?, onPick})` (P10–P12 reuse it for Change
+  library folder, Relocate, Program, Connect), `openSystem` (still the stub: P11 swaps in TvSystem).
+- **Shared changes:** `DetailsStore.serverGames` (Related's covers; `serverTitles` derives from it).
+  `NoticeAction` gained `{system}`: `launchFailedNotice(title, reason, setUp?)`, `notifier.launchGame(romId,
+  title, platform?)` and `run.playInstalled(..., platform?)` put "Set up <Platform>" on the card when
+  `launchError.ts` `needsEmulatorSetup(message)` (none configured, default missing, no program); the
+  desktop's card shows no action. `navigation.openSystem` (TvShell registers it). The card keeps the
+  desktop's text ("Couldn't launch X: No emulator is configured. Add one in Settings › Systems.").
+- **nav.svelte.ts:** `setPageProps(id, props)` (Link updates the Details page under it to the linked
+  row); `setFocus` scrolls the previous item's `data-read-area` to its top when focus enters a
+  `data-read-reset` row (item 299). Details markup: buttons `#det-btns[data-read-reset]` keys
+  `db-<kind>`, tab body `#det-body[data-read-area][data-scroll=tbody]`, summary `prose[data-read]`,
+  Related `rel<romId>` (track `up="prose"`), media `m<i>`, Saves `sk-save|sk-state`, `up`, rows
+  `sv<recordId>` in `#saves-list`; viewer item `viewer`; Playing `pl-resume|pl-stop`; folder browser
+  `up`, `fs-<name>` in `#fs-list`; link rows `lk<romId>`; Game settings rows `s-exe|s-params|s-compat|
+  s-reload|s-save`.
+- **Not done / for later:** Backup to drive… (Details) does nothing yet: TODO(P13) the Backup page. Item
+  438 (refusals while a game is being backed up) is P13. Details › Saves doesn't manage a native game's
+  save folders (the desktop's PC save-folder list); upload still follows its rules.
+- **e2e:** group `tv-details` (fixtures `fixtures-tv-details`: the cloud-saves games, Link Target,
+  Lost Cart, My Game on Windows, No Emu Game on Nintendo 64; seed `tv-details-seed.mjs`; mock flag
+  `--stateful-saves`, so uploads join and deletes leave a rom's records). `helpers/tvDetails.ts` has
+  `openLibraryDetails(title)`, `detButtons`/`waitButtons`, `bodyScroll`, `captureErrors`/`pageErrors`.
+  The tv-server, tv-library and tv-large-platform specs now wait for `tv-details`.
+
