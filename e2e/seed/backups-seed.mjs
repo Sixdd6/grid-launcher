@@ -19,6 +19,7 @@
  *   one PlayStation 2 game, PCSX2 for Linux (a zip of the mock forge's
  *   AppImage stub, a shell script the header check never refuses) and a
  *   PS2 BIOS.
+ * - `tv-backups-a` … `-d` (TV mode, P13): see the cases at the end.
  * - `backups-d`: a fresh profile again, spec a's PCSX2 setup, and three
  *   games installed in the library, each one copied from this computer by
  *   the backup: Cinder Peaks (rom 901, an extracted zip), Tux Trail (rom
@@ -270,6 +271,29 @@ switch (spec) {
     break;
   case 'backups-d':
     seedD();
+    break;
+  // TV mode's Game backups (docs/tv-mode/plan.md P13): a and b as the
+  // desktop's; c is backups-c's drive on a profile used without a server
+  // (a library folder, `offline = true`); d runs on c's profile and drive.
+  case 'tv-backups-a':
+    seedA();
+    break;
+  case 'tv-backups-b':
+    break;
+  case 'tv-backups-c':
+    seedC();
+    mkdirSync(library, { recursive: true });
+    writeFileSync(
+      path.join(dataDir, 'config.toml'),
+      `schema_version = 1
+library_path = ${tomlString(library)}
+library_layout_version = 2
+offline = true
+`,
+    );
+    writeRegistry(path.join(dataDir, 'grid-launcher.db'));
+    break;
+  case 'tv-backups-d':
     break;
   default:
     console.error(`backups-seed.mjs: unknown spec ${spec}`);

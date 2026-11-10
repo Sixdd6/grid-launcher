@@ -120,7 +120,10 @@ describe('tv-library: the Library tab', () => {
       return parseFloat(getComputedStyle(document.querySelector(`[data-k="${k}"]`)!).paddingLeft) / rem;
     }, SNES);
     expect(pad).toBeCloseTo(2.3, 1);
-    await waitFocused('r-all');
+    // Used without a server, GRID opens on the first Backup drive (item 415,
+    // P12); Up through the rail (which selects as it goes) reaches All games.
+    await waitFocused(drive);
+    await railTo('r-all', 'ArrowUp');
     await waitText('tv-lib-name', 'All games');
     await waitText('tv-lib-count', '3 games');
     // Recently played first; never played last. Platform tags in a mixed list.
