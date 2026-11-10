@@ -512,3 +512,27 @@ Code changes from the consultant's Phase 12 rulings (README § Consultant decisi
   `tv-library` changed: its first test now walks up from the first drive to All games, because GRID used without
   a server opens on the first drive (item 415, built in P12); it had passed only through the observer race fixed
   above. The nav fix commit (d816ecb) imports `select.svelte.ts`, which lands in the next commit (7cbac73).
+
+## Pending for P14 (consultant, after P13)
+
+From the consultant's Phase 13 rulings (README § Consultant decisions, last six bullets):
+1. `tabs/library/TvLibrary.svelte` (~141) and `tabs/server/TvPlatform.svelte` (~68): call `selKeep` with the rail
+   row's whole list (Library: the rows / drive list before `libraryGrid`/`driveGrid` apply `lib.query`; Server:
+   `all`, not `shown`) and register that whole list for sizing; fix the comments that say a search drops picks.
+2. `select.svelte.ts`: `selBar` takes the shown games (X's count) and the whole list (the summary's size);
+   `currentSelHints`'s `all` uses the shown ids; `selAct` passes every pick. `select.svelte.test.ts`: replace "drops
+   hidden picks" with "keeps picks a search hides; the summary counts them; Select all N counts the shown covers".
+3. `pages/backupPage.ts` `firmwareText` (~117–121): remove the "None needed" / "Already on the drive" branches; with
+   no reason and no set to write answer `{ text: '', disabled: true }` like `dialog.ts firmwareLine`;
+   `backupPage.test.ts` asserts the two backend reasons verbatim and disabled.
+4. `e2e/specs/tv-backups-b.spec.ts`, second `it`, after the wait that sees "Big Arcade Game" downloading and before
+   `unplug(DRIVE)`: `expect(await text('tv-topbar-download')).toMatch(/^Big Arcade Game\b.*\d+%$/)`.
+5. New `e2e/specs/tv-backups-e.spec.ts` (checklist 438): seed case `tv-backups-e` → `seedD()` in
+   `e2e/seed/backups-seed.mjs`; add the spec to the `tv-backups` group in `scripts/e2e.sh` (~197) and the variant to
+   the keyring-clear pattern (~811). Flow: Server › PS2 → X on Big Arcade Game (903, throttled ~10 s) → Library ›
+   All games → Details on Cinder Peaks (901) → Backup to drive… → Start (queued behind the install) → Details on
+   Cinder Peaks → Uninstall → A on the confirm → notice "This game is being backed up. Wait for it to finish." →
+   let the queue drain, no page errors.
+6. `docs/tv-mode/checklist.md`: tick 434, 451, 492, 504, 458, 475 "(desktop wording, intro rule)"; mark 452 "also
+   ends on a rail row change (consultant)"; correct "After P13" here: 425 is asserted in tv-backups-c, and the
+   select-mode search note is superseded.

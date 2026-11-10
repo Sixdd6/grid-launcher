@@ -163,6 +163,28 @@ Open questions for the user (not blocking): the order and wording of RetroAchiev
 - The setup card stays pinned through its 10 s countdown, so later cards go under it and never push it out; it
   leaves only when it closes itself.
 
+- Select mode ends when the rail row changes, as the desktop's does (SPEC § Select mode); the prototype's
+  carry-over is not built because platform picks can't be acted on from a drive row. Picks a search hides are kept,
+  as on the desktop and in the prototype: the bar counts and sizes every pick, X counts the covers shown, Y acts on
+  every pick.
+- Where the checklist quotes tvmode.js for a notification or a Backup-page line the desktop already words, TV uses
+  the desktop's words (README § The shell; checklist intro): "Removed <title> from <pack>", "Removed <n> games from
+  <pack>", "<label> was removed. <n> of <m> items were written to <pack>.", "Removed the <OS> builds of <n>
+  emulators from <pack>", the lede "GRID downloads each game from <host> and writes it, with its art and details,
+  to the drive's gridpack folder.", and "Adds the <runtime> (<size>) that umu-run otherwise downloads on its first
+  launch".
+- A game installed from a drive keeps the desktop's two cards: "<title> added to download queue" with "Copying from
+  <label>", then "<title> installed"; the emulator and firmware have their own cards.
+- The Backup page's Firmware switch shows the backend's reason when it is off ("Your server has no firmware for
+  these systems", "<pack> already has the firmware for these systems"); it has no TV-only words. While a drive is
+  still being planned the main button reads "Checking the drive…" and Start or A on it says "GRID is still
+  checking the drive."; the Emulators and Firmware rows read "Checking…".
+- Turning a computer off on a pack asks "Remove the <OS> builds from <pack>?" / "The <OS> builds of the emulators
+  on <pack> are deleted from the drive. Games and firmware stay." with the danger button "Remove <OS> builds"
+  (Cancel focused); turning one on asks nothing.
+- The running backup in the top bar (ruling 21) and the backing-up refusal (438) are asserted end to end in
+  `tv-backups-b` and the new `tv-backups-e`; "Installed from <label>" (425) in `tv-backups-c`.
+
 ## Notes
 
 - **Opening an emulator** on its own from TV mode works, but the emulator's own window needs a mouse or its own controller support.
