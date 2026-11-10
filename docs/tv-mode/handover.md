@@ -338,3 +338,15 @@ app/src/lib/tv/tabs/downloads/downloadRows.ts (+ test) with the ruled text:
 - Library move: "Cancel the move?" / "The files copied so far are removed and the library stays where it is." /
   "Cancel move".
 - Then the card "Cancelled <title>". Danger action button, Cancel focused. Remove the TODO(design) markers.
+
+## Pending for the next phase (consultant, after P10): checklist 532–534
+- app/src/lib/tv/tabs/settings/panes/tv.ts: `ASSIGN_NEEDS_PAD` = "Connect a controller to choose its buttons. Each
+  controller keeps its own choice."; line "For the controller in use", value "Xbox style"; drop TODO(design); tests.
+- app/src/lib/tv/tabs/settings/panes/ra.ts + TvSettings.svelte: dynamic SAVE/LOGIN reasons; `RaState.passwordTyped`,
+  `canLogin`; `RaActions.editPassword`, `login`; rows Password + Log In after Save (order: Username, Token, Save,
+  Password, Log In, Clear); password is a non-reactive local forgotten by `forgetRaTyping`, never logged/echoed;
+  Log In uses raActions.raLogin then blanks the password, resets tokenTyped, refreshes status. Tests; e2e if the mock
+  supports RA login.
+- app/src/lib/tv/tabs/downloads/downloadRows.ts: `rowWhy(e)` by kind (firmware → "Installing firmware — this step
+  cannot be cancelled"; library_move → "Updating paths — this step cannot be cancelled"; else CANCEL_EXTRACTING);
+  `rowA` returns 'Details' when only `open` remains; tests.

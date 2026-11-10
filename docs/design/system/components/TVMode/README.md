@@ -144,8 +144,11 @@ prototype, SPEC.md and the Game backups card. The user can overturn any of them.
 - On the Library and Server platform grids, an emptied live search is no filter: the full list, no Search chip, the plain count and the row's own empty text. On the Search everything results page an emptied field is "nothing typed": the results, heading and breadcrumb keep the last text, and Done just closes the keyboard.
 - The umu-launcher and library-folder refusals open TV confirms whose bodies say what will happen ("<title> runs through Proton, which needs umu-run. umu-launcher downloads as a Downloads row; launch <title> again when it finishes." / "GRID installs games into a library folder, and none is set. Choose one, then press Install again."), with Install umu-launcher / Choose a folder…; the library folder browser is titled "Library folder", a saved folder shows "Library folder set · <path>", and Install is pressed again afterwards, as on the desktop.
 - Details › Saves on a native game lists its save locations under the cloud saves (heading "Save locations", the desktop's status line, raw path over expanded path); A on a row asks "Remove this save location?" (Remove, danger); "Add a save folder…" opens the folder browser "Save folder for <title>", Y adds it ("Save folder added").
+- Button assignments with no controller is disabled, reads "For the controller in use · Xbox style", and A says "Connect a controller to choose its buttons. Each controller keeps its own choice."
+- RetroAchievements in TV mode also has the desktop's Log In: Password (masked, write-only) and Log In rows after Save; Save and Log In are disabled until their fields are filled and A names the missing field ("Enter a token first.").
+- A live firmware row is disabled and A says "Installing firmware — this step cannot be cancelled"; an extracting install's A hint reads "Details" and its list offers only "Open <title>".
 
-Open questions for the user (not blocking): a controller-only way out of TV mode from Connect; whether a controller press should reach Playing when GRID's own window is focused; whether the welcome card shows every time or only the first time.
+Open questions for the user (not blocking): the order and wording of RetroAchievements' Password and Log In rows (not in the prototype); a controller-only way out of TV mode from Connect; whether a controller press should reach Playing when GRID's own window is focused; whether the welcome card shows every time or only the first time.
 
 ## Notes
 
