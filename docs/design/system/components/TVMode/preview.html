@@ -6,7 +6,7 @@
 /* ==== TV mode: a fullscreen, controller-first shell. Every size is in rem, and
    the root font is 1/54 of the screen height, so the layout is the same at 720p,
    1080p and 4K (20px at 1080p). ==== */
-html { font-size: calc(100vh / 54); }
+html { font-size: min(calc(100vh / 54), calc(100vw / 80)); }
 html, body { height: 100%; overflow: hidden; margin: 0; }
 body { padding: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans, 'Segoe UI', system-ui, sans-serif); font-size: 1rem; line-height: 1.4; }
 * { box-sizing: border-box; }
@@ -211,18 +211,24 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .path { font-family: ui-monospace, monospace; font-size: 1rem; color: var(--text-h); background: var(--field); padding: .5rem .8rem; border-radius: .4rem; margin-bottom: 1rem; }
 
 /* ---- Startup screens (Connect, Choose your systems) */
-.start { position: absolute; inset: 0; display: flex; padding: 2rem; overflow-y: auto; }
-.start-box { margin: auto; width: 46rem; background: var(--panel); border: 1px solid var(--line); border-radius: 1.2rem; padding: 2.2rem 2.4rem; }
+/* The box always fits between the top bar and the hint bar: it never scrolls the
+   screen. A long list (many systems) scrolls inside the box, under a fixed title
+   and above fixed buttons. */
+.start { position: absolute; inset: 0; display: flex; padding: 1.2rem 2.4rem; overflow: hidden; }
+.start-box { margin: auto; width: 46rem; max-width: 100%; max-height: 100%; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 1.2rem; padding: 1.8rem 2.2rem; }
 .start-box.wide { width: 64rem; }
-.start-box .brand { font-size: 1.6rem; margin-bottom: 1.4rem; }
-.start-box h1 { margin: 0 0 .4rem; color: var(--text-h); font-size: 1.8rem; }
-.start-box .sub { color: var(--text-muted); margin: 0 0 1.4rem; }
-.field { display: flex; align-items: center; gap: 1rem; min-height: 4rem; padding: .6rem 1.2rem; border-radius: .7rem; background: var(--field); margin-bottom: .7rem; border: 1px solid transparent; }
+.start-box h1 { margin: 0 0 .3rem; color: var(--text-h); font-size: 1.6rem; flex: 0 0 auto; }
+.start-box .sub { color: var(--text-muted); margin: 0 0 1.1rem; flex: 0 0 auto; }
+.start-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none; margin: -.5rem; padding: .5rem; }
+.start-body::-webkit-scrollbar { display: none; }
+.start-foot { flex: 0 0 auto; margin-top: 1.1rem; }
+.start-box .srow { min-height: 3.2rem; padding: .4rem 1.2rem; margin-bottom: .25rem; }
+.field { display: flex; align-items: center; gap: 1rem; min-height: 3.4rem; padding: .5rem 1.2rem; border-radius: .7rem; background: var(--field); margin-bottom: .5rem; border: 1px solid transparent; }
 .field .lab { width: 11rem; color: var(--text-muted); }
 .field .v { flex: 1; color: var(--text-h); font-size: 1.1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .field .v.ph { color: var(--text-muted); font-style: italic; }
 .field.f { background: var(--selected); }
-.errline { color: var(--danger); margin: 0 0 1rem; font-weight: 600; }
+.errline { color: var(--danger); margin: 0 0 .9rem; font-weight: 600; flex: 0 0 auto; }
 
 /* ---- Overlays: sheets, dialogs, the keyboard, the Guide menu */
 .layer { position: absolute; inset: 0 0 3.6rem 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: var(--scrim); backdrop-filter: blur(6px); }
@@ -897,13 +903,13 @@ function connectPage() {
     title: 'Connect', render: function () {
       var ready = F.url && F.token && F.lib;
       function field(k, lab, val, mask, ph) { return '<div class="field" data-f data-k="cf-' + k + '" data-a="cfield" data-key="' + k + '" data-al="Edit"><span class="lab">' + lab + '</span><span class="v' + (val ? '' : ' ph') + '">' + (val ? (mask ? '••••••••••••' : esc(val)) : ph) + '</span></div>'; }
-      return '<div class="start"><div class="start-box" data-nav="v"><div class="brand">' + gIcon('grid', 30) + 'GRID</div><h1>Connect to your RomM server</h1><p class="sub">Everything here works with a controller. A keyboard works too.</p>' +
+      return '<div class="start"><div class="start-box" data-nav="v"><h1>Connect to your RomM server</h1><p class="sub">Everything here works with a controller. A keyboard works too.</p>' +
         (S.connReason ? '<p class="errline">' + esc(S.connReason) + '</p>' : '') +
-        field('url', 'Server', F.url, 0, 'https://…') +
+        '<div class="start-body">' + field('url', 'Server', F.url, 0, 'https://…') +
         '<div class="field" data-f data-k="cf-how" data-a="cfield" data-key="how" data-al="Change"><span class="lab">Sign in with</span><span class="v">' + (F.how === 'token' ? 'API token' : 'Username and password') + '</span></div>' +
         (F.how === 'token' ? field('token', 'API token', F.token, 1, 'Paste or type your token') : field('user', 'Username', F.user || '', 0, 'Your RomM user') + field('token', 'Password', F.token, 1, 'Your password')) +
-        field('lib', 'Library folder', F.lib, 0, '') +
-        '<div class="btns" style="margin-top:1.2rem"><button class="btn pri" data-f data-k="cf-go" data-a="connectGo"' + (ready ? '' : ' disabled') + '>Connect</button></div></div></div>';
+        field('lib', 'Library folder', F.lib, 0, '') + '</div>' +
+        '<div class="btns start-foot"><button class="btn pri" data-f data-k="cf-go" data-a="connectGo"' + (ready ? '' : ' disabled') + '>Connect</button></div></div></div>';
     },
     F: F, hints: function () { return [['VIEW', 'Paste']]; }
   };
@@ -913,9 +919,9 @@ function choosePage() {
   return {
     title: 'Choose your systems', render: function () {
       var n = Object.keys(pick).filter(function (k) { return pick[k].on; }).length;
-      return '<div class="start"><div class="start-box wide"><h1>Choose your systems</h1><p class="sub">Tick the systems you want to play. GRID installs the recommended emulator for each. ' + gl('X') + ' changes the emulator; ' + gl('MENU') + ' skips this step.</p><div data-nav="v">' +
+      return '<div class="start"><div class="start-box wide"><h1>Choose your systems</h1><p class="sub">Tick the systems you want to play. GRID installs the recommended emulator for each. ' + gl('X') + ' changes the emulator; ' + gl('MENU') + ' skips this step. You can change this later in Settings › Systems.</p><div class="start-body" data-nav="v">' +
         SYS.map(function (s) { var p = pick[s.id]; return '<div class="srow" data-f data-k="ch-' + s.id + '" data-a="chTick" data-id="' + s.id + '" data-al="' + (p.on ? 'Untick' : 'Tick') + '" data-xl="Change emulator" data-xa="chEmu"><span class="sw' + (p.on ? ' on' : '') + '"></span><div class="lab"><div class="t">' + s.name + '</div><div class="s">' + (s.id === 'WIN' ? 'Proton for Windows games' : (G.filter(function (g) { return g.p === s.id; }).length * 12) + ' games') + '</div></div><div class="val">' + esc(p.emu) + '</div></div>'; }).join('') +
-        '</div><div class="btns" style="margin-top:1.2rem" data-nav="h"><button class="btn pri" data-f data-k="ch-go" data-a="chGo"' + (n ? '' : ' disabled') + '>' + (n ? 'Install ' + n + ' emulator' + (n === 1 ? '' : 's') : 'Install emulators') + '</button><button class="btn" data-f data-k="ch-skip" data-a="chSkip">' + gl('MENU') + 'Skip for now</button></div><p class="note" style="margin-top:1rem">Change this later in Settings › Systems.</p></div></div>';
+        '</div><div class="btns start-foot" data-nav="h"><button class="btn pri" data-f data-k="ch-go" data-a="chGo"' + (n ? '' : ' disabled') + '>' + (n ? 'Install ' + n + ' emulator' + (n === 1 ? '' : 's') : 'Install emulators') + '</button><button class="btn" data-f data-k="ch-skip" data-a="chSkip">' + gl('MENU') + 'Skip for now</button></div></div></div>';
     },
     pick: pick,
     hints: function () { return [['MENU', 'Skip for now']]; },

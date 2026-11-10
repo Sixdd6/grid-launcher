@@ -576,13 +576,13 @@ function connectPage() {
     title: 'Connect', render: function () {
       var ready = F.url && F.token && F.lib;
       function field(k, lab, val, mask, ph) { return '<div class="field" data-f data-k="cf-' + k + '" data-a="cfield" data-key="' + k + '" data-al="Edit"><span class="lab">' + lab + '</span><span class="v' + (val ? '' : ' ph') + '">' + (val ? (mask ? '••••••••••••' : esc(val)) : ph) + '</span></div>'; }
-      return '<div class="start"><div class="start-box" data-nav="v"><div class="brand">' + gIcon('grid', 30) + 'GRID</div><h1>Connect to your RomM server</h1><p class="sub">Everything here works with a controller. A keyboard works too.</p>' +
+      return '<div class="start"><div class="start-box" data-nav="v"><h1>Connect to your RomM server</h1><p class="sub">Everything here works with a controller. A keyboard works too.</p>' +
         (S.connReason ? '<p class="errline">' + esc(S.connReason) + '</p>' : '') +
-        field('url', 'Server', F.url, 0, 'https://…') +
+        '<div class="start-body">' + field('url', 'Server', F.url, 0, 'https://…') +
         '<div class="field" data-f data-k="cf-how" data-a="cfield" data-key="how" data-al="Change"><span class="lab">Sign in with</span><span class="v">' + (F.how === 'token' ? 'API token' : 'Username and password') + '</span></div>' +
         (F.how === 'token' ? field('token', 'API token', F.token, 1, 'Paste or type your token') : field('user', 'Username', F.user || '', 0, 'Your RomM user') + field('token', 'Password', F.token, 1, 'Your password')) +
-        field('lib', 'Library folder', F.lib, 0, '') +
-        '<div class="btns" style="margin-top:1.2rem"><button class="btn pri" data-f data-k="cf-go" data-a="connectGo"' + (ready ? '' : ' disabled') + '>Connect</button></div></div></div>';
+        field('lib', 'Library folder', F.lib, 0, '') + '</div>' +
+        '<div class="btns start-foot"><button class="btn pri" data-f data-k="cf-go" data-a="connectGo"' + (ready ? '' : ' disabled') + '>Connect</button></div></div></div>';
     },
     F: F, hints: function () { return [['VIEW', 'Paste']]; }
   };
@@ -592,9 +592,9 @@ function choosePage() {
   return {
     title: 'Choose your systems', render: function () {
       var n = Object.keys(pick).filter(function (k) { return pick[k].on; }).length;
-      return '<div class="start"><div class="start-box wide"><h1>Choose your systems</h1><p class="sub">Tick the systems you want to play. GRID installs the recommended emulator for each. ' + gl('X') + ' changes the emulator; ' + gl('MENU') + ' skips this step.</p><div data-nav="v">' +
+      return '<div class="start"><div class="start-box wide"><h1>Choose your systems</h1><p class="sub">Tick the systems you want to play. GRID installs the recommended emulator for each. ' + gl('X') + ' changes the emulator; ' + gl('MENU') + ' skips this step. You can change this later in Settings › Systems.</p><div class="start-body" data-nav="v">' +
         SYS.map(function (s) { var p = pick[s.id]; return '<div class="srow" data-f data-k="ch-' + s.id + '" data-a="chTick" data-id="' + s.id + '" data-al="' + (p.on ? 'Untick' : 'Tick') + '" data-xl="Change emulator" data-xa="chEmu"><span class="sw' + (p.on ? ' on' : '') + '"></span><div class="lab"><div class="t">' + s.name + '</div><div class="s">' + (s.id === 'WIN' ? 'Proton for Windows games' : (G.filter(function (g) { return g.p === s.id; }).length * 12) + ' games') + '</div></div><div class="val">' + esc(p.emu) + '</div></div>'; }).join('') +
-        '</div><div class="btns" style="margin-top:1.2rem" data-nav="h"><button class="btn pri" data-f data-k="ch-go" data-a="chGo"' + (n ? '' : ' disabled') + '>' + (n ? 'Install ' + n + ' emulator' + (n === 1 ? '' : 's') : 'Install emulators') + '</button><button class="btn" data-f data-k="ch-skip" data-a="chSkip">' + gl('MENU') + 'Skip for now</button></div><p class="note" style="margin-top:1rem">Change this later in Settings › Systems.</p></div></div>';
+        '</div><div class="btns start-foot" data-nav="h"><button class="btn pri" data-f data-k="ch-go" data-a="chGo"' + (n ? '' : ' disabled') + '>' + (n ? 'Install ' + n + ' emulator' + (n === 1 ? '' : 's') : 'Install emulators') + '</button><button class="btn" data-f data-k="ch-skip" data-a="chSkip">' + gl('MENU') + 'Skip for now</button></div></div></div>';
     },
     pick: pick,
     hints: function () { return [['MENU', 'Skip for now']]; },
