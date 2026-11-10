@@ -152,26 +152,29 @@ export function listSub(e: DownloadEntry): string {
 export type CancelWords = { title: string; body: string; ok: string };
 
 /**
- * Cancel asks first for every kind of row (ruling 8). An install uses
- * Details' Cancel install wording (tvmode.js `cancelDl`); a backup row and
- * the library move say what stopping them means.
- * TODO(design): the backup and library-move wordings are not in the design.
+ * Cancel asks first for every kind of row, with the ruled words (ruling 8):
+ * an install (game, update, emulator, firmware), a backup row, the library
+ * move. A queued install only leaves the queue. Danger action, Cancel
+ * focused; the card that follows is the notifier's ("Cancelled <title>").
  */
 export function cancelWords(e: DownloadEntry): CancelWords {
   if (e.kind === 'library_move') {
     return {
-      title: 'Cancel the library move?',
-      body: 'The copy stops and your library stays where it is. Nothing changes.',
+      title: 'Cancel the move?',
+      body: 'The files copied so far are removed and the library stays where it is.',
       ok: 'Cancel move',
     };
   }
   if (isBackup(e)) {
-    const pack = e.drive_name.trim() || e.drive_label.trim() || 'the drive';
+    const label = e.drive_label.trim() || e.drive_name.trim() || 'the drive';
     return {
       title: `Cancel ${e.title}?`,
-      body: `It isn't written to ${pack}. Nothing half-written is left on the drive, and you can back it up again later.`,
+      body: `The backup stops and what it wrote to ${label} is removed. You can back it up again later.`,
       ok: 'Cancel backup',
     };
+  }
+  if (e.status === 'queued') {
+    return { title: `Cancel ${e.title}?`, body: 'It leaves the queue. You can install it again later.', ok: 'Cancel install' };
   }
   return cancelConfirm(e.title);
 }

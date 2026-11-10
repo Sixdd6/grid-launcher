@@ -103,14 +103,26 @@ describe('downloadRows', () => {
   });
 
   it('asks before Cancel for every kind of row (ruling 8)', () => {
-    expect(cancelWords(entry({ title: 'Kite Season' }))).toEqual({
+    expect(cancelWords(entry({ title: 'Kite Season', status: 'downloading' }))).toEqual({
       title: 'Cancel Kite Season?',
       body: 'The download stops and its files are removed. You can install it again later.',
       ok: 'Cancel install',
     });
-    expect(cancelWords(entry({ job: 'backup', kind: 'backup_game', title: 'Kite Season', drive_name: 'Couch kit' })).ok).toBe('Cancel backup');
-    expect(cancelWords(entry({ job: 'backup', kind: 'backup_game', title: 'Kite Season', drive_name: 'Couch kit' })).body).toContain('Couch kit');
-    expect(cancelWords(entry({ job: 'library', kind: 'library_move' })).title).toBe('Cancel the library move?');
+    expect(cancelWords(entry({ title: 'Kite Season', status: 'queued' }))).toEqual({
+      title: 'Cancel Kite Season?',
+      body: 'It leaves the queue. You can install it again later.',
+      ok: 'Cancel install',
+    });
+    expect(cancelWords(entry({ job: 'backup', kind: 'backup_game', title: 'Kite Season', drive_name: 'Couch kit', drive_label: 'SAMSUNG T7' }))).toEqual({
+      title: 'Cancel Kite Season?',
+      body: 'The backup stops and what it wrote to SAMSUNG T7 is removed. You can back it up again later.',
+      ok: 'Cancel backup',
+    });
+    expect(cancelWords(entry({ job: 'library', kind: 'library_move' }))).toEqual({
+      title: 'Cancel the move?',
+      body: 'The files copied so far are removed and the library stays where it is.',
+      ok: 'Cancel move',
+    });
   });
 
   it('clears every finished, failed and cancelled row (item 222)', () => {

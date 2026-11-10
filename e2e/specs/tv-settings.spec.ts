@@ -57,12 +57,18 @@ async function seek(k: string): Promise<void> {
   await waitFocused(k);
 }
 
-/** Confirms the open dialog: Cancel has focus, Right reaches the action. */
-async function confirm(title: string | RegExp): Promise<void> {
+/** Confirms the open dialog: Cancel has focus, Right reaches the action.
+ *  `words` checks the body and the action button's label too. */
+async function confirm(title: string | RegExp, words?: { body: string; ok: string; danger?: boolean }): Promise<void> {
   await $(testId('tv-confirm')).waitForExist({ timeout: TRANSITION_TIMEOUT });
   const t = (await $(`${testId('tv-confirm')} h2`).getText()).trim();
   if (typeof title === 'string') expect(t).toBe(title);
   else expect(t).toMatch(title);
+  if (words) {
+    expect((await $(`${testId('tv-confirm')} p`).getText()).trim()).toBe(words.body);
+    expect((await $(testId('tv-confirm-ok')).getText()).trim()).toBe(words.ok);
+    if (words.danger) expect(await $(testId('tv-confirm-ok')).getAttribute('class')).toContain('dng');
+  }
   await waitFocused('dlg-cancel');
   await key('ArrowRight');
   await waitFocused('dlg-ok');
@@ -122,7 +128,12 @@ describe('tv-settings: Downloads and Settings', () => {
     expect((await list()).options).toEqual(['Cancel', 'Open Big Arcade Game']);
     await waitFocused('o0');
     await key('Enter');
-    await confirm('Cancel Big Arcade Game?');
+    // The ruled words (ruling 8): an active install's files are removed.
+    await confirm('Cancel Big Arcade Game?', {
+      body: 'The download stops and its files are removed. You can install it again later.',
+      ok: 'Cancel install',
+      danger: true,
+    });
     await waitSegment(1, 'completed');
     await waitText('tv-dl-line-1', 'Arcade · Cancelled');
     await waitToast('Cancelled Big Arcade Game');
