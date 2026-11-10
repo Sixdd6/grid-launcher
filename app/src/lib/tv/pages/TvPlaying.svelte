@@ -2,8 +2,9 @@
   // Playing (items 321–325; tvmode.js `playing`, `ACT.resume`, `ACT.stop`;
   // ruling 7): "NOW PLAYING", the title as a logo, "<Platform> · <emulator>
   // · <m:ss>" counting up, the note, Back to the game (focused) and Stop
-  // game (confirmed). While the game runs, Rust ignores the controller (the
-  // gate), so these answer the mouse and keyboard; the page closes by
+  // game (confirmed). While GRID's window has focus the controller reaches
+  // them, a game running or not (the gate; user decision 2026-11-10); while
+  // the game's window has focus GRID hears nothing. The page closes by
   // itself when the game exits, then the save upload notices follow.
   import { onDestroy } from 'svelte';
   import { api } from '../../api';

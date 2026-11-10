@@ -28,8 +28,8 @@ async function lines(sel: string): Promise<string[]> {
  * games (seed/tv-details-seed.mjs): SaveSyncRetention's buttons, its long
  * summary and Related row, the right stick, LB / RB, its four server saves
  * (delete, upload, restore), Uninstall's confirmation; then Playing for
- * SaveSyncLaunch (stopped from the keyboard while injected controller input
- * is ignored) and SaveSyncManual (whose stub exits by itself).
+ * SaveSyncLaunch (stopped with the controller, which reaches Playing while
+ * GRID's window is focused) and SaveSyncManual (whose stub exits by itself).
  */
 describe('tv-details (a): Details, Saves and Playing', () => {
   before(async () => {
@@ -192,7 +192,7 @@ describe('tv-details (a): Details, Saves and Playing', () => {
     await waitButtons(['Play', 'Uninstall', 'Backup to drive…']);
   });
 
-  it('Play pushes Playing; the controller is ignored while the game runs; Stop (keyboard) asks and goes back (items 316, 321–325)', async () => {
+  it('Play pushes Playing; the controller drives it while GRID is focused; Stop asks and goes back (items 316, 321–325; user decision 2026-11-10)', async () => {
     await key('Escape');
     await $(testId('tv-library')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await openLibraryDetails('SaveSyncLaunch');
@@ -205,18 +205,16 @@ describe('tv-details (a): Details, Saves and Playing', () => {
     await waitText('tv-playing-line', /^Super Nintendo Entertainment System · TestEmu · \d+:\d\d$/);
     await waitFocused('pl-resume');
     await waitText('tv-crumb', /Playing/);
-    // The game owns the controller: an injected B does nothing.
-    await press('east');
-    await browser.pause(600);
-    expect(await $(testId('tv-playing')).isExisting()).toBe(true);
-    await key('ArrowRight');
+    // GRID's window has focus (the game is a stub with no window): the
+    // controller reaches Playing while the game runs.
+    await press('dpad_right');
     await waitFocused('pl-stop');
-    await key('Enter');
+    await press('south');
     await $(testId('tv-confirm')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     expect(await text('tv-confirm')).toContain('Stop SaveSyncLaunch?');
     await waitFocused('dlg-cancel');
-    await key('ArrowRight');
-    await key('Enter');
+    await press('dpad_right');
+    await press('south');
     await waitGone('tv-playing', 'Stop game never went back');
     await waitText('tv-det-title', 'SaveSyncLaunch');
   });

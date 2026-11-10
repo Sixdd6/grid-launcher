@@ -6,8 +6,9 @@
 //!   and runs for the rest of the process. A gilrs that cannot start (no
 //!   `/dev/input` access, a container, CI) is logged once at `warn`; the
 //!   keyboard still works, and the e2e injector still does.
-//! - Input passes only while the [`Gate`] is open: TV mode on, GRID's window
-//!   focused, no game running. Closing it sends `released_all`.
+//! - Input passes only while the [`Gate`] is open: TV mode on and GRID's
+//!   window focused, a game running or not (the Playing page answers it).
+//!   Closing it sends `released_all`.
 //! - Connections are always reported, so the UI's controller list stays
 //!   right while the gate is closed.
 
@@ -380,13 +381,19 @@ mod tests {
                 down: true
             }]
         );
+        // A game starting with GRID still focused: Playing keeps listening.
         let (transition, events) = shared.update_gate(|g| g.games_running = true);
+        assert_eq!(transition, Transition::None);
+        assert_eq!(events, vec![]);
+        assert_eq!(shared.handle(input(0, south(false))).len(), 1);
+        // The game's window takes focus: closed, everything released.
+        let (transition, events) = shared.update_gate(|g| g.window_focused = false);
         assert_eq!(transition, Transition::Closed);
         assert_eq!(events, vec![PadEvent::ReleasedAll]);
         // Closed: dropped.
         assert_eq!(shared.handle(input(0, south(false))), vec![]);
-        // Reopened after the game: a fresh press goes out again.
-        shared.update_gate(|g| g.games_running = false);
+        // GRID focused again, the game still running: a fresh press goes out.
+        shared.update_gate(|g| g.window_focused = true);
         assert_eq!(shared.handle(input(0, south(true))).len(), 1);
     }
 

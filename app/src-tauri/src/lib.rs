@@ -647,9 +647,9 @@ pub fn run() {
                 let handle = app.handle().clone();
                 let gamepad = state.gamepad.clone();
                 launch.set_notify(Arc::new(move |snapshot| {
-                    // TV mode ignores the controller while a game runs. When
-                    // the last one ends, GRID (minimized by "Back to the
-                    // game") comes back to the front and listens again.
+                    // The gate tracks running games. When the last one ends,
+                    // GRID (minimized by "Back to the game") comes back to
+                    // the front, focused, so the controller reaches it again.
                     let running = !snapshot.sessions.is_empty();
                     let was_running = gamepad.games_running();
                     gamepad.set_games_running(running);
