@@ -44,8 +44,9 @@ const appEnv: Record<string, string> = {
   // fallback path (the poster and "Watch on YouTube").
   GRID_LAUNCHER_E2E_YOUTUBE_API: 'http://127.0.0.1:9/iframe_api',
   RUST_LOG: process.env.E2E_RUST_LOG ?? 'info',
-  // Only the stage groups that run a mock forge set this (e2e.sh's
-  // group_needs_forge). GRID_LAUNCHER_E2E_FORGE_BASE is what the app's `e2e`
+  // The stage groups that run a mock forge (e2e.sh's group_needs_forge) set
+  // this to it; every other group sets a dead loopback address, so no forge
+  // request reaches the real forge. GRID_LAUNCHER_E2E_FORGE_BASE is what the app's `e2e`
   // build redirects forge requests to (grid-core launch/forge.rs); the app's
   // spawned emulators inherit GRID_E2E_ARGV_FILE and record their argv there.
   ...(process.env.E2E_FORGE_URL

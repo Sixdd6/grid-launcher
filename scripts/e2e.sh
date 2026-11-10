@@ -627,6 +627,11 @@ mock_args_for_group() {
 # launcher's own self-update check (app_update.rs) asks GitHub for
 # `Sixdd6/grid-launcher`'s latest release through the same ForgeClient, so
 # the same redirect points it at the mock forge's release route.
+# Where the groups that run no mock forge point forge requests: a loopback
+# port nothing listens on, so a request fails at once and never leaves the
+# machine.
+DEAD_FORGE_URL="http://127.0.0.1:9"
+
 group_needs_forge() {
   [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" || "$1" == "tv-startup" || "$1" == "tv-layout" ]]
 }
@@ -854,6 +859,11 @@ EOF
         # installed stub emulators record their argv.
         export E2E_FORGE_URL="$forge_url"
         export GRID_E2E_ARGV_FILE="$data_dir/emulator-argv.log"
+      else
+        # A group without a mock forge still gets the redirect, to a dead
+        # loopback address (the discard port, which nothing serves), so no
+        # forge request of its can ever reach the real forge.
+        export E2E_FORGE_URL="$DEAD_FORGE_URL"
       fi
       # Only the `updates` group asserts the self-update banner, so only it
       # lifts the dev-build gate on the launcher's own release check

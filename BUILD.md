@@ -186,6 +186,10 @@ dead loopback port (`GRID_LAUNCHER_E2E_YOUTUBE_API`, set by `wdio.conf.ts` and r
 e2e builds only), so a trailer always takes the fallback path (its poster and "Watch on
 YouTube").
 
+No run reaches a real forge: the groups that install emulators run the mock forge, and
+every other group points forge requests at a dead loopback port
+(`GRID_LAUNCHER_E2E_FORGE_BASE`, read by e2e builds only).
+
 Stage groups are defined in `scripts/e2e.sh` (`STAGE_GROUPS`); their specs live in
 `e2e/specs/`, fixtures in `e2e/fixtures*/`, seeds in `e2e/seed/`, and the mock servers in
 `e2e/mock-romm/`.
