@@ -1459,7 +1459,6 @@ function padBrand(id) {
   return 'xbox';
 }
 var PADB = { 0: 'A', 1: 'B', 2: 'X', 3: 'Y', 4: 'LB', 5: 'RB', 6: 'LT', 7: 'RT', 8: 'VIEW', 9: 'MENU', 12: 'UP', 13: 'DOWN', 14: 'LEFT', 15: 'RIGHT', 16: 'GUIDE' };
-var held = {};
 function oskRepeats(b) {
   var top = S.layers[S.layers.length - 1]; if (!top || !top.osk) return false;
   if (b === 'X' || b === 'Y' || b === 'LB' || b === 'RB') return true;
@@ -1476,24 +1475,38 @@ function stickScroll(px) {
    page has focus, and a page may not be allowed to read controllers at all (an
    embedded frame without the gamepad permission). The loop never stops on
    either; the hint bar says which it is. */
+/* Several controllers at once: each has its own held-button state (so one never
+   cancels the other's held button, which made a held L / R fire every frame) and
+   its own button assignment. The prompts and the Settings row follow the
+   controller whose button was pressed last. */
+var heldBy = {};
+function usePad(p) {
+  if (p.id === S.padId) return;
+  S.padName = p.id.replace(/\(.*?\)/g, '').trim() || 'Controller'; S.padId = p.id; S.scheme = padBrand(p.id);
+  paintHints(); paintTop();
+  if (S.tab === 'settings' && S.setPane === 'tv' && !S.pages.length && !S.layers.length) repaint();
+}
 function pollPads() {
-  var pads = [], now = performance.now(), any = null;
+  var pads = [], now = performance.now(), seen = [];
   try { pads = navigator.getGamepads ? navigator.getGamepads() || [] : []; if (S.padState === 'blocked') { S.padState = ''; paintHints(); } }
   catch (e) { if (S.padState !== 'blocked') { S.padState = 'blocked'; paintHints(); } requestAnimationFrame(pollPads); return; }
-  for (var i = 0; i < pads.length; i++) { var p = pads[i]; if (!p) continue; any = p;
-    var MAP = PADB; if (assignNow() === 'nintendo') { MAP = {}; for (var mk in PADB) MAP[mk] = PADB[mk]; MAP[0] = 'B'; MAP[1] = 'A'; MAP[2] = 'Y'; MAP[3] = 'X'; }
+  for (var i = 0; i < pads.length; i++) {
+    var p = pads[i]; if (!p) continue; seen.push(p);
+    var MAP = PADB;
+    if ((CFG.assign[p.id] || guessAssign(p.id)) === 'nintendo') { MAP = {}; for (var mk in PADB) MAP[mk] = PADB[mk]; MAP[0] = 'B'; MAP[1] = 'A'; MAP[2] = 'Y'; MAP[3] = 'X'; }
     var st = {}; for (var k in MAP) if (p.buttons[k] && p.buttons[k].pressed) st[MAP[k]] = 1;
-    var ry = p.axes[3] || 0; if (Math.abs(ry) > .25) stickScroll(ry * 22);
     var ax = p.axes[0] || 0, ay = p.axes[1] || 0; if (ax < -.5) st.LEFT = 1; if (ax > .5) st.RIGHT = 1; if (ay < -.5) st.UP = 1; if (ay > .5) st.DOWN = 1;
+    var held = heldBy[p.index] || (heldBy[p.index] = {});
     for (var b in st) {
       var typing = oskRepeats(b);
-      if (!held[b]) { held[b] = now + (typing ? 500 : 400); press(b); }
+      if (!held[b]) { usePad(p); held[b] = now + (typing ? 500 : 400); press(b); }
       else if (now > held[b] && (typing || /UP|DOWN|LEFT|RIGHT/.test(b))) { held[b] = now + (typing ? 50 : 90); press(b); }
     }
     for (var h in held) if (!st[h]) delete held[h];
+    var ry = p.axes[3] || 0; if (Math.abs(ry) > .25) { usePad(p); stickScroll(ry * 22); }
   }
-  if (!any && S.padId) { S.padName = ''; S.padId = ''; paintHints(); }
-  if (any) { var name = any.id.replace(/\(.*?\)/g, '').trim() || 'Controller'; var brand = padBrand(any.id); if (any.id !== S.padId || brand !== S.scheme) { S.padName = name; S.padId = any.id; S.scheme = brand; paintHints(); paintTop(); if (S.tab === 'settings' && S.setPane === 'tv' && !S.pages.length && !S.layers.length) repaint(); } }
+  for (var hi in heldBy) if (!seen.some(function (q) { return String(q.index) === hi; })) delete heldBy[hi];
+  if (!seen.some(function (q) { return q.id === S.padId; })) { if (seen.length) usePad(seen[0]); else if (S.padId) { S.padName = ''; S.padId = ''; paintHints(); } }
   requestAnimationFrame(pollPads);
 }
 requestAnimationFrame(pollPads);
