@@ -82,6 +82,9 @@ Modules as declared in `src/lib.rs`:
   settings it holds, and `data_dir_override()`. `offline` is "Use without a server";
   `[backup]` holds the firmware default and the remembered drives (`RememberedDrive`,
   keyed by mount).
+- `fsbrowse` — one folder's listing for TV mode's folder browser (`list_folder`): dot-entries
+  hidden, folders first, then a case-insensitive sort by name; files only when the browser
+  picks a file. An unreadable entry is left out; only an unreadable folder fails.
 - `fatx` — clean-room FATX reader/writer for the `E:` partition of a raw xemu Xbox HDD
   image, so cloud sync can pull `E:/UDATA` and `E:/TDATA` out and put them back.
 - `firmware` — server firmware download and install: keyword-based target routing, the
@@ -434,6 +437,37 @@ session exists and `Shell.svelte` afterwards.
   calls (`launchGame`, `installGame`), and holds the per-entry wording hints
   (`expectQueued`). `lifetime.svelte.ts` registers it once, so each event shows one card
   whichever views are mounted.
+- TV mode — `lib/tv/` (SPEC "TV mode"; design `docs/design/system/components/TVMode/`).
+  `App.svelte` mounts `lib/tv/TvShell.svelte` or the desktop screens, from
+  `stores/uiMode.svelte.ts` (Rust's `get_ui_mode` / `set_ui_mode`; `lib/uiMode.ts` maps
+  views to tabs and Settings pages to TV panes), and sets `html[data-ui="tv"]`, which scopes
+  every rule in `lib/tv/tv.css`. TV mode reuses the shared stores and screen logic above
+  (`games/run.ts`, `DetailsStore`, `SystemsStore`, `BackupPlanStore`, `ChooseSystems`, the
+  notifier) and owns only layout, focus and input:
+  - `TvShell.svelte` (the phases loading / unreachable / connect / choose / shell, the start
+    tab, the welcome card, the theme override), `TvTopBar`, `TvHintBar`, `TvStage` +
+    `ScreenFrame` (one screen or page at a time), `TvToasts` + `notices.svelte.ts` (the
+    cards and the session's history; pure rules in `notices.ts`), `TvBackground`.
+  - `nav.svelte.ts` — the tab, the Settings pane, the page stack, overlay layers, select
+    mode, focus memory per screen and the kept scroll; `screen.svelte.ts` (`useScreen`: a
+    screen's hints and its X / Y / LB / RB / LT / RT / Start / View hooks).
+  - `focus/` — the focus engine: `engine.ts` (pure spatial moves over a snapshot),
+    `reveal.ts` (every scroll; nothing uses the browser's own scrolling), `grid.ts` and
+    `windows.ts` (windowed grids), `dom.ts` (measures), `actions.ts` (`use:tvf`).
+  - `input/` — `router.svelte.ts` feeds `press.ts` from the `gamepad` event, the keyboard
+    and the mouse; `buttons.ts` (keyboard map), `controllers.ts` (Xbox / Nintendo style per
+    pad), `prompts.ts` + `glyphs/` (the prompt sets, Kenney's CC0 art), `repeat.ts`,
+    `sticks.ts`.
+  - `overlays/` (list, confirm, on-screen keyboard with `osk.ts`, Menu with `menu.ts`),
+    `tabs/` (`server/`, `library/`, `downloads/`, `settings/` with the pure `panes/*.ts`),
+    `pages/` (Details and its tabs, Playing, the media viewer, Game settings, Link, the
+    folder browser, Search everything, Notifications, the System page and emulator form,
+    the Backup page and the drive pages over `TvRowsPage`; each with a pure `.ts`),
+    `startup/` (Connect, Choose your systems, the unreachable library, the setup card),
+    `ui/` (primitives: `TvButton`, `TvCover`, `TvGrid`, `TvRail`, `TvRows`, `TvTrack`,
+    `TvSelBar`…), `select.svelte.ts` (select mode), `size.ts` (the root font rule),
+    `games.ts`, `gameActions.ts`, `backupActions.ts`, `systemsTv.svelte.ts`.
+  Rust reads the controller (`gamepad/`, above); the webview's Gamepad API is not used.
 - `lib/icons.ts` — hand-authored 24×24 icon paths. The old app's `assets/svg/` files are
   deliberately not reused.
 
@@ -453,6 +487,11 @@ mock RomM server. Structure:
   throttling, an offline switch, a request-introspection endpoint).
   `e2e/mock-romm/mock-forge.mjs` — stands in for GitHub and a direct-download provider,
   so catalog scraping runs against genuine markup.
+- TV mode — a group whose name starts with `tv-` starts the app with `--tv`
+  (`E2E_APP_ARGS`; a spec's `// e2e-app-args:` line overrides it). `e2e/helpers/tv.ts`
+  drives a controller through the e2e-only `e2e_gamepad_inject` and holds the layout
+  checks (`assertNoClipping`, `assertMinText`, `assertNoDocumentScroll`, `assertBands`) that
+  the `tv-layout` group runs on every screen at 720p, 1080p and 4K.
 - Fake drives — the `backups` group sets `E2E_DRIVE_ROOTS` to `<data dir>/media`, which
   `wdio.conf.ts` passes to the app as `GRID_LAUNCHER_E2E_DRIVE_ROOTS`.
   `e2e/helpers/drives.ts` plugs a drive in with `mkdir` and unplugs it by renaming it to

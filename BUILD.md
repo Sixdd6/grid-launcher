@@ -23,6 +23,8 @@ The repository is a Cargo workspace with a Svelte frontend:
 
       libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libudev-dev
 
+  `libudev-dev` is for TV mode's controller reader (the `gilrs` crate).
+
 - For the end-to-end suite, additionally:
 
       xvfb gnome-keyring libsecret-tools dbus-x11 at-spi2-core sqlite3
@@ -89,6 +91,33 @@ tests.
 
 That runs `npm run dev` (Vite on :5173) and the Tauri shell against it. A dev build
 never checks for its own updates.
+
+### TV mode
+
+    cd app && npx tauri dev -- -- --tv      # a dev build, started in TV mode
+    grid-launcher --tv                        # an installed build
+
+`--tv` is the only command-line flag GRID reads; anything else is ignored. It starts
+GRID fullscreen in TV mode. The mode is never saved: without `--tv` GRID starts in desktop
+mode, and the desktop top bar's TV button or Menu › Switch to desktop mode switches at run
+time.
+
+GRID reads controllers natively (`app/src-tauri/src/gamepad/`, through `gilrs`), only
+while TV mode is on. On Linux that means read access to the controller's
+`/dev/input/event*` device. Desktop distributions grant it to the logged-in user through
+systemd-logind's `uaccess` tag, which udev puts on every joystick, so nothing is needed
+there. Where a controller is not seen (a minimal system, a session without logind), check
+with `ls -l /dev/input/by-id/*-event-joystick` and either add the user to the `input`
+group or add a udev rule such as
+
+    # /etc/udev/rules.d/70-grid-controllers.rules
+    SUBSYSTEM=="input", ENV{ID_INPUT_JOYSTICK}=="1", TAG+="uaccess"
+
+then `sudo udevadm control --reload && sudo udevadm trigger`. A controller GRID can't open
+is not an error: the hint bar reads "No controller · the keyboard works too", and the
+keyboard and mouse keep working. Steam's Steam Input can take a controller over while
+Steam runs; turn it off for GRID, or close Steam, if a pad doubles or disappears. Windows
+needs no permission.
 
 ## Gate
 
@@ -169,6 +198,20 @@ firmware, `backups-b` pulls the drive mid-backup and plugs it back in, and `back
 starts a fresh profile, uses it without a server and installs from a seeded pack.
 
     scripts/e2e.sh backups
+
+TV mode's groups are named `tv-*`; each starts the app with `--tv` (a spec opts out with
+a first line `// e2e-app-args:`) and drives a controller through the e2e-only
+`e2e_gamepad_inject` command, so no controller is needed. `tv-layout` is the layout sweep:
+every tab, page and overlay at 1280x720, 1920x1080 and 3840x2160 (`E2E_WINDOW` picks one
+size), with no focus ring cut by a scrolling area, no text under 0.85rem, no document
+scroll and the bands at their rem heights. `E2E_TV_SCREENS=1` also saves each screen under
+`ctr-out/tv-screens/<size>/`:
+
+    E2E_TV_SCREENS=1 scripts/ctr.sh e2e tv-layout
+
+The window geometry after TV mode (desktop → TV → quit → relaunch without `--tv` opens at
+the desktop size, not fullscreen) is a manual check: e2e builds leave the window-state
+plugin out, and Xvfb has no window manager.
 
 ### Performance probe
 

@@ -31,6 +31,10 @@ Emulators, Settings.
   renders when the server is unreachable.
 - RetroAchievements login, so a supported emulator starts already signed in.
 - Light and dark themes, following the OS by default.
+- Game backups to a USB drive or SSD, installable on any computer with GRID, with or
+  without a network.
+- TV mode: a second, fullscreen interface for the couch, driven entirely with a game
+  controller (see below).
 
 ## Install
 
@@ -73,6 +77,26 @@ RetroAchievements token if you used one.
 Application state lives in the platform config directory (`config.toml`, the
 `grid-launcher.db` registry of installed games, and a `covers/` cache).
 
+## TV mode
+
+TV mode is GRID's fullscreen interface for a TV, driven with a game controller. It
+reaches every feature of the desktop app: Server › Discover and your platforms, the
+Library and its Backup drives, Downloads, Settings, game details, saves, and the startup
+screens.
+
+- **Entering and leaving.** The TV button in the desktop top bar opens it, or start
+  GRID with `grid-launcher --tv`. Menu (Start) › Switch to desktop mode, also in
+  Settings › TV mode, leaves it. The choice isn't saved: GRID starts in desktop mode
+  unless it is started with `--tv`.
+- **Controllers.** Xbox, PlayStation, Nintendo and 8BitDo pads, several at once. Each
+  controller keeps its own button assignment (Xbox style or Nintendo style), and the
+  on-screen prompts follow the controller pressed last (Settings › TV mode › Button
+  prompts picks a set by hand). GRID ignores the controller while a game runs, so the
+  emulator gets it. A keyboard and mouse work too.
+- **Linux permissions.** GRID reads controllers from `/dev/input`; desktop distributions
+  give the logged-in user access already. If a controller isn't seen, see "TV mode" in
+  [BUILD.md](BUILD.md).
+
 ## Emulator setup
 
 - **Windows** — emulators can be added manually or installed from the catalog, which
@@ -108,3 +132,4 @@ This repository includes the following third-party software or assets:
 - **7-Zip** — `assets/tools/7z/7z.exe`, the Windows extraction fallback the app looks for beside its own binary. Copyright © 1999-2026 Igor Pavlov. Licensed under GNU LGPL. The unRAR code is licensed under a mixed license (GNU LGPL + unRAR restriction). See [assets/tools/7z/License.txt](assets/tools/7z/License.txt) for full license details. Source code: https://github.com/ip7z/7zip
 - **RetroArch assets** — PNG image files in [assets/retroarch-assets](assets/retroarch-assets) sourced from the libretro/retroarch-assets repository. Licensed under Creative Commons Attribution 4.0 International (CC BY 4.0). Source: https://github.com/libretro/retroarch-assets
 - **SVG Repo** — Icons by [SVG Repo](https://www.svgrepo.com/)
+- **Input Prompts** — the controller button glyphs in [app/src/lib/tv/glyphs](app/src/lib/tv/glyphs), from Input Prompts 1.5A by [Kenney](https://kenney.nl/assets/input-prompts). Licensed under Creative Commons Zero (CC0 1.0). See [app/src/lib/tv/glyphs/License.txt](app/src/lib/tv/glyphs/License.txt).

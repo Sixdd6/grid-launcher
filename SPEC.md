@@ -1119,6 +1119,78 @@ pack's share of the drive, and removing the game removes them.
 - A pack written by a newer GRID is read-only.
 - Logs and errors carry drive labels, paths and game names, never a server credential.
 
+# TV mode
+TV mode is GRID's second interface: fullscreen, for a TV, and driven entirely with a game
+controller. It reaches every feature of the desktop app. The design, with every word and
+state, is `docs/design/system/components/TVMode/README.md` (its **Decided** and
+**Consultant decisions** sections are binding); `docs/tv-mode/checklist.md` lists each
+testable statement.
+
+## Entering and leaving
+- The desktop top bar's TV button (a 28×28 icon button left of the light / dark toggle,
+  "Switch to TV mode") opens TV mode on the same view; starting GRID with `--tv` starts
+  in it. Menu › Switch to desktop mode, also in Settings › TV mode, leaves it, on the same
+  view. There is no other way in or out, and the mode is never saved: without `--tv` GRID
+  starts in desktop mode.
+- TV mode makes the window fullscreen through the window itself (never the HTML
+  Fullscreen API). Leaving restores the desktop window, and the window geometry GRID saves
+  is always the desktop one, so a desktop start never opens fullscreen.
+- Where GRID opens follows the same rule as the desktop (Where GRID opens, under Top Bar):
+  Server › Discover when connected, else the Library (on the first connected Backup drive
+  without a server). A "Welcome to TV mode" card shows each time TV mode opens.
+
+## Controllers
+- GRID reads controllers natively (a Rust reader, only while TV mode is on). Input is
+  ignored while a game runs and while GRID's window isn't focused, so the game gets the
+  controller; GRID listens again when the game closes. The Home / Guide button does
+  nothing.
+- **Button assignments** (Settings › TV mode): Xbox style (bottom selects, right goes
+  back) or Nintendo style (right selects, bottom goes back), per controller and kept per
+  controller. A controller starts on its own layout's style. With several controllers,
+  each uses its own, and the prompts follow the one pressed last.
+- **Button prompts** match the controller (Xbox, PlayStation, Nintendo, 8BitDo Pro sets,
+  Kenney's CC0 glyphs) or a set picked by hand. With no controller the hint bar reads
+  "No controller · the keyboard works too".
+- Buttons: D-pad / left stick move (held: repeat after 400 ms, then every 90 ms); A
+  selects; B goes back; X is the focused item's quick action; Y the screen's action; LB /
+  RB switch tabs (Details tabs on Details); LT sorts; RT is select mode; Start presses a
+  page's main button where it has one, else opens the Menu; View acts on the newest notice
+  that offers an action; the right stick scrolls what you read. A keyboard and mouse work
+  too (Enter / Space A, Esc / Backspace B, Q / E LB / RB, Z LT, R RT, M Menu, V View;
+  pointing focuses, a click is A).
+
+## The shell
+- **Size.** Every measure is in rem; the root font is 1/54 of the screen height, capped at
+  1/80 of its width, so the layout is the same at 720p, 1080p and 4K. No text is smaller
+  than 0.85rem.
+- **Three bands:** the top bar (4.6rem: wordmark with a TV tag, the four tabs between
+  their LB / RB prompts, or a breadcrumb on a pushed page, then the live download, the
+  connection and a clock), the stage, and the hint bar (3.6rem: the controller's name or
+  the offline notice, then what each button does now). The window itself never scrolls.
+- **Focus** is a 0.2rem ring; a focused cover grows to 107%. Focus is never lost, and
+  going back returns it to where it was. Movement is spatial, inside a rail, row or list
+  along its axis; Right from a rail is A. Scrolling follows fixed rules (a Discover shelf
+  brings its title to the top; a sideways row keeps the cover 1.2rem inside; everything
+  else 1.2rem inside its area), and nothing focused is ever cut by a scrolling area.
+- **Background art, theme, notifications** as on the desktop, with TV's sizes: Follow
+  system shows dark; the cards sit at the top right, at most three, never take focus, and
+  every card goes to Menu › Notifications (the whole session).
+
+## Screens
+- **Tabs:** Library, Server (Discover first, then the platforms), Downloads, Settings (the
+  desktop's panes plus TV mode). **Pages** pushed over a tab (B goes back): Details and its
+  tabs (Overview, Media, Saves, Achievements), Playing, System, the emulator form, Game
+  settings, Link to server game, the folder browser (every path in TV mode), Search
+  everything, Notifications, the Backup page and the drive pages. **Overlays:** the Menu,
+  lists, confirmations (Cancel focused; a destructive action always asks) and the
+  on-screen keyboard.
+- **Startup:** Connect (with View to paste and Use without a server), Choose your systems
+  (Start skips) with the setup card, and the unreachable-library dialog. The Menu isn't
+  available on them.
+- **Game backups** are the Game backups design with a controller's controls: select mode
+  on RT, the Backup page as a page whose main button Start presses, Backup drives rows in
+  the Library rail, and Settings › Backup drives with a page per drive.
+
 # Cloud Save Synchronization
 The application now includes cloud save and state synchronization for emulator-based games using the RomM saves/states API.
 
