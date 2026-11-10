@@ -141,6 +141,16 @@ STAGE_GROUPS=(
   # Discover, its rows and hero, platforms with their header and search,
   # X to install, Search everything, the offline panel and Menu › Discover.
   "tv-server:specs/tv-server.spec.ts"
+  # TV mode's Library tab (docs/tv-mode/plan.md P8), used without a server
+  # (seeded): three installed games on two platforms and a fake Backup drive
+  # (<data>/media, like `backups`) with a two-game pack. The rail and its
+  # folders, filtering at once, the header, sort, live search, Details,
+  # Install from drive and an unplugged drive.
+  "tv-library:specs/tv-library.spec.ts"
+  # Windowed TV grids (plan risk R8) on the 2500-game large-platform
+  # fixtures: a Server platform and a Library of 600 seeded installed games;
+  # focus moves through them smoothly and covers load as they scroll in.
+  "tv-large-platform:specs/tv-large-platform.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -550,7 +560,7 @@ mock_args_for_group() {
     # One "Arcade" platform of 2500 generated ROMs (`e2e_synthetic` in
     # roms.json; see mock-romm/server.mjs), with covers that take 40ms each
     # like a remote server's.
-    large-platform|large-platform-perf) printf -- '--fixtures-dir fixtures-large-platform --cover-delay-ms 40' ;;
+    large-platform|large-platform-perf|tv-large-platform) printf -- '--fixtures-dir fixtures-large-platform --cover-delay-ms 40' ;;
     *) printf '' ;;
   esac
 }
@@ -588,6 +598,8 @@ seed_script_for_group() {
     backups) printf '%s' "$E2E_DIR/seed/backups-seed.mjs" ;;
     tv-shell) printf '%s' "$E2E_DIR/seed/tv-shell-seed.mjs" ;;
     tv-server) printf '%s' "$E2E_DIR/seed/tv-server-seed.mjs" ;;
+    tv-library) printf '%s' "$E2E_DIR/seed/tv-library-seed.mjs" ;;
+    tv-large-platform) printf '%s' "$E2E_DIR/seed/tv-large-platform-seed.mjs" ;;
     *) printf '' ;;
   esac
 }
@@ -829,7 +841,7 @@ EOF
       # <data>/media (wdio.conf.ts turns this into
       # GRID_LAUNCHER_E2E_DRIVE_ROOTS, read by the e2e build only; the
       # specs plug and unplug drives there, e2e/helpers/drives.ts).
-      if [[ "$name" == "backups" ]]; then
+      if [[ "$name" == "backups" || "$name" == "tv-library" ]]; then
         mkdir -p "$data_dir/media"
         export E2E_DRIVE_ROOTS="$data_dir/media"
       fi
