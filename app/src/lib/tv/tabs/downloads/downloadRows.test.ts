@@ -52,6 +52,7 @@ describe('downloadRows', () => {
       'SNES · Copying from SAMSUNG T7 · 50%',
     );
     expect(statusLine(entry({ status: 'queued', drive_label: 'SAMSUNG T7' }))).toBe('SNES · Queued · from SAMSUNG T7');
+    expect(statusLine(entry({ status: 'completed', drive_label: 'SAMSUNG T7', downloaded_bytes: 10 }))).toBe('SNES · Installed from SAMSUNG T7');
     expect(statusLine(entry({ job: 'backup', kind: 'backup_game', status: 'queued', drive_name: 'Couch kit' }))).toBe('SNES · Waiting · to Couch kit');
     expect(isFailed(entry({ status: 'failed' }))).toBe(true);
     expect(isFailed(entry({ status: 'cancelled' }))).toBe(false);

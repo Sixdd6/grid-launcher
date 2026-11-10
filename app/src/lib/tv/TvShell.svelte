@@ -7,7 +7,6 @@
   import { tick, untrack } from 'svelte';
   import './tv.css';
   import { connectPrefill } from '../connectPrefill';
-  import { driveRailKey } from '../library/rail';
   import { librarySelection } from '../library/selection.svelte';
   import { drives } from '../stores/drives.svelte';
   import { libraryUnreachable } from '../stores/libraryUnreachable.svelte';
@@ -24,7 +23,7 @@
     nav,
     registerMenu,
     registerView,
-    rememberFocus,
+    focusMemory,
     resetNav,
     resetStartup,
     restoreFocus,
@@ -34,14 +33,13 @@
     showTab,
     stageChanged,
   } from './nav.svelte';
-  import { attachNotices, showNotice, viewNewest } from './notices.svelte';
+  import { attachNotices, showNotice, tvNotices, viewNewest } from './notices.svelte';
   import { WELCOME } from './notices';
   import TvLayer from './overlays/TvLayer.svelte';
   import { confirmBox, openKeyboard, openList, openMenu } from './overlays/overlays.svelte';
   import { notify } from '../notifications/notifier';
   import { openDetails, openSystem } from './gameActions';
-  import { lib, selectLibRail } from './tabs/library/library.svelte';
-  import { railRowKey } from './tabs/library/libraryRail';
+  import { selectDriveRow } from './tabs/library/library.svelte';
   import { selectRail as selectServerRail } from './tabs/server/server.svelte';
   import { resetConnectForm } from './startup/connectForm.svelte';
   import TvChooseSystems from './startup/TvChooseSystems.svelte';
@@ -57,7 +55,19 @@
   // e2e only (the build drops it otherwise): the overlays and a notice with
   // an action, reachable before the screens that open them exist (P7–P13).
   if (import.meta.env.VITE_E2E) {
-    (window as unknown as { __tvE2E?: unknown }).__tvE2E = { notify, openList, openKeyboard, confirmBox };
+    (window as unknown as { __tvE2E?: unknown }).__tvE2E = {
+      notify,
+      openList,
+      openKeyboard,
+      confirmBox,
+      // Every notice of the session, oldest first, as "title" or "title | sub":
+      // a card lasts ten seconds, so specs read this log instead (P13).
+      memory: () => focusMemory(),
+      notices: () =>
+        [...tvNotices.history]
+          .reverse()
+          .map((h) => (typeof h.sub === 'string' && h.sub !== '' ? `${h.title} | ${h.sub}` : h.title)),
+    };
   }
 
   let rootEl = $state<HTMLElement | null>(null);
@@ -110,10 +120,7 @@
   /** The Library on a Backup drive: its folder open, its row selected and
    *  focused (item 415; tvmode.js `showDrive`). */
   function selectDrive(key: string) {
-    const rail = driveRailKey(key);
-    selectLibRail(rail);
-    lib.folds.drives = true;
-    rememberFocus('tab:library', railRowKey(rail));
+    selectDriveRow(key);
   }
 
   /**

@@ -54,6 +54,8 @@ export function statusText(e: DownloadEntry): string {
     case 'cancelling':
       return 'Cancelling…';
     case 'completed':
+      // A copy off a Backup drive (item 425; tvmode.js tick: "Installed from <label>").
+      if (drive) return `Installed from ${drive}`;
       return e.downloaded_bytes > 0 ? `Completed · ${formatSize(e.downloaded_bytes)}` : 'Completed';
     case 'failed':
       return `Failed · ${e.error.trim() || 'Unknown error'}`;

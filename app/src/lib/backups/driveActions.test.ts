@@ -49,7 +49,7 @@ describe('driveActions', () => {
     const a = await import('./driveActions');
     await a.setUpDrive(drive({ pack: null }), '  Couch kit ', ['linux']);
     expect(api.setupDrive).toHaveBeenCalledWith('/media/kit', 'Couch kit', ['linux']);
-    expect(toasts).toEqual([['Couch kit is ready for backups', undefined]]);
+    expect(toasts).toEqual([['Couch kit is ready for backups', 'success']]);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
@@ -87,7 +87,7 @@ describe('driveActions', () => {
   it('removes GRID files with a card, opens the folder, forgets a drive', async () => {
     const a = await import('./driveActions');
     await a.removeGridFiles(drive());
-    expect(toasts).toEqual([['GRID files removed from KIT', undefined]]);
+    expect(toasts).toEqual([['GRID files removed from KIT', 'success']]);
     api.openDriveFolder.mockRejectedValueOnce(new Error('no file manager'));
     a.openDriveFolder(drive());
     await vi.waitFor(() => expect(toasts.at(-1)).toEqual(['no file manager', 'error']));

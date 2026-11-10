@@ -18,7 +18,8 @@ function errorText(err: unknown): string {
 export async function setUpDrive(drive: DriveInfo, name: string, oses: PackOs[]): Promise<void> {
   const trimmed = name.trim();
   await api.setupDrive(drive.mount, trimmed, oses);
-  pushToast(`${trimmed} is ready for backups`);
+  // The second line shows on TV mode's card only ("SAMSUNG T7 · exFAT").
+  pushToast(`${trimmed} is ready for backups`, 'success', undefined, { sub: `${drive.label} · ${drive.fs}` });
   await refresh();
 }
 
@@ -55,10 +56,11 @@ export function gridFilesSize(drive: DriveInfo): Promise<number> {
   return api.removeGridFilesSize(drive.key).catch(() => drive.pack?.gridpack_bytes ?? 0);
 }
 
-/** Removes the GRID files from the drive. */
-export async function removeGridFiles(drive: DriveInfo): Promise<void> {
+/** Removes the GRID files from the drive. `freed` (TV mode's card only):
+ *  the second line, "126.6 GB freed". */
+export async function removeGridFiles(drive: DriveInfo, freed?: string): Promise<void> {
   await api.removeGridFiles(drive.key);
-  pushToast(`GRID files removed from ${drive.label}`);
+  pushToast(`GRID files removed from ${drive.label}`, 'success', undefined, freed ? { sub: freed } : {});
   await refresh();
 }
 
