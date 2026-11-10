@@ -729,6 +729,8 @@ pub fn run() {
             commands::tv::read_clipboard_text,
             #[cfg(feature = "e2e")]
             commands::tv::e2e_gamepad_inject,
+            #[cfg(feature = "e2e")]
+            commands::tv::e2e_clipboard_write,
             commands::connect,
             commands::restore_session,
             commands::use_without_server,

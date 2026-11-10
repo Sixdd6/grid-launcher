@@ -177,6 +177,16 @@ STAGE_GROUPS=(
   # fixtures: a Server platform and a Library of 600 seeded installed games;
   # focus moves through them smoothly and covers load as they scroll in.
   "tv-large-platform:specs/tv-large-platform.spec.ts"
+  # TV mode's startup screens (docs/tv-mode/plan.md P12) on the
+  # first-run-setup fixtures and the mock forge, each spec on a profile of
+  # its own (seeded per spec): (a) a fresh --tv start: Connect through the
+  # on-screen keyboard, Start presses Connect (and names what is missing),
+  # View pastes, a rejected token comes back with the reason, Choose your
+  # systems and Start skips; (b) an unreachable library: B does nothing,
+  # Relocate through the folder browser; (c) Use without a server opens the
+  # Library on the first Backup drive; (d) Install N emulators with the
+  # setup card; (e) the unreachable library's Close sends the quit with no question.
+  "tv-startup:specs/tv-startup-a.spec.ts specs/tv-startup-b.spec.ts specs/tv-startup-c.spec.ts specs/tv-startup-d.spec.ts specs/tv-startup-e.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -547,7 +557,7 @@ mock_args_for_group() {
     # from e2e/fixtures so the shared set — and every assertion the other
     # groups and mock-romm/server.test.mjs make about it — stays untouched.
     emulator-catalog) printf -- '--fixtures-dir fixtures-emulator-catalog' ;;
-    first-run-setup|settings-screens) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
+    first-run-setup|settings-screens|tv-startup) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
     # The first-run-setup set plus a "Sony PlayStation 4", whose ShadPS4
     # installs with its Qt launcher companion from the mock forge.
     systems|tv-systems) printf -- '--fixtures-dir fixtures-systems' ;;
@@ -601,7 +611,7 @@ mock_args_for_group() {
 # `Sixdd6/grid-launcher`'s latest release through the same ForgeClient, so
 # the same redirect points it at the mock forge's release route.
 group_needs_forge() {
-  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" ]]
+  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" || "$1" == "tv-startup" ]]
 }
 
 # The `launch` group's data dir is pre-seeded (Ruling A, task-7-brief.md):
@@ -629,6 +639,7 @@ seed_script_for_group() {
     tv-details) printf '%s' "$E2E_DIR/seed/tv-details-seed.mjs" ;;
     tv-settings) printf '%s' "$E2E_DIR/seed/tv-settings-seed.mjs" ;;
     tv-large-platform) printf '%s' "$E2E_DIR/seed/tv-large-platform-seed.mjs" ;;
+    tv-startup) printf '%s' "$E2E_DIR/seed/tv-startup-seed.mjs" ;;
     *) printf '' ;;
   esac
 }
@@ -639,7 +650,7 @@ seed_script_for_group() {
 # the run's keyring, but each starts the app on the state its own seed
 # variant writes.
 group_seeds_per_spec() {
-  [[ "$1" == "library-move" || "$1" == "backups" ]]
+  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" ]]
 }
 
 # Runs every spec of one group against a freshly created data dir and mock.
@@ -785,11 +796,11 @@ EOF
     wdio_log="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.log"
     out_dir="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.d"
     say "running $stage (attempt $attempt)"
-    # backups-c and backups-d start from a fresh profile: the credential an
+    # backups-c, backups-d and tv-startup a, c and d start from a fresh profile: the credential an
     # earlier spec saved in this run's private keyring must go too, or the
     # app would restore that session. Same best-effort clear as the
     # python-import group.
-    if [[ "$spec" == */backups-[cd].spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
+    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
       secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
     fi
     if [[ -n "$seed_script" ]] && group_seeds_per_spec "$name"; then
@@ -842,7 +853,7 @@ EOF
       # Only the `first-run-setup` group sees the platform picker after
       # connecting (wdio.conf.ts turns this into
       # GRID_LAUNCHER_E2E_FIRST_RUN_SETUP, read by the e2e build only).
-      if [[ "$name" == "first-run-setup" || "$name" == "settings-screens" ]]; then
+      if [[ "$name" == "first-run-setup" || "$name" == "settings-screens" || "$name" == "tv-startup" ]]; then
         export E2E_FIRST_RUN_SETUP=1
       fi
       # Only the `library-move` group: the whole run is on one disk, where
@@ -870,7 +881,7 @@ EOF
       # <data>/media (wdio.conf.ts turns this into
       # GRID_LAUNCHER_E2E_DRIVE_ROOTS, read by the e2e build only; the
       # specs plug and unplug drives there, e2e/helpers/drives.ts).
-      if [[ "$name" == "backups" || "$name" == "tv-library" ]]; then
+      if [[ "$name" == "backups" || "$name" == "tv-library" || "$name" == "tv-startup" ]]; then
         mkdir -p "$data_dir/media"
         export E2E_DRIVE_ROOTS="$data_dir/media"
       fi

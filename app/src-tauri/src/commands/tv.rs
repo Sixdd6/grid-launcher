@@ -177,6 +177,15 @@ pub fn read_clipboard_text(app: AppHandle) -> String {
     app.clipboard().read_text().unwrap_or_default()
 }
 
+/// e2e only: puts text on the clipboard, so a spec can check View-to-paste
+/// on Connect (the specs seed a non-secret server address).
+#[cfg(feature = "e2e")]
+#[tauri::command]
+pub fn e2e_clipboard_write(app: AppHandle, text: String) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    app.clipboard().write_text(text).map_err(|e| e.to_string())
+}
+
 /// e2e only: feeds synthetic controller input through the same mapping and
 /// gate a real controller goes through (`gamepad::GamepadInput`'s wire format).
 #[cfg(feature = "e2e")]
