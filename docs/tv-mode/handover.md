@@ -106,3 +106,44 @@
   `tv: 'M5 8h14a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5V9.5A1.5 1.5 0 0 1 5 8zM8 3.5l4 4.5 4-4.5'`
 - Space stays A (`' ': 'A'` in tv/input/buttons.ts); while the OSK is open the printable-key branch
   runs first, so Space types a space and marks physical typing (Enter = Done).
+
+## After P6: overlays and notifications
+- **Overlays** (`lib/tv/overlays/overlays.svelte.ts`; each is a layer on nav's stack, drawn by
+  TvShell's `.layers` box through `TvLayer`, scrim to the hint bar):
+  - `openList({title, sub?, items})` — items `{label, sub?, checked?, danger?, onPick?, testId?}` or
+    `{group}` (heading, not focusable). Give every option `checked: true|false` in a choice list (the
+    check column shows only then); the checked one has focus on open. A closes, then runs `onPick`.
+  - `confirmBox({title, body, ok, danger?, onOk})` — Cancel focused; `onOk` runs after it closes.
+    `quitBox()` is Quit GRID's (calls `api.quitApp()`).
+  - `openKeyboard({title, value?, mask?, onInput?, onDone?, onCancel?})` — masked opens empty and
+    shows dots; `onInput` on every change (live search); `onDone(value)` after it closes; B →
+    `onCancel`. Pad shortcuts, typing repeat (layer `typingRepeat`) and physical typing (layer
+    `keydown`) are built in. Model: `overlays/osk.ts` (pure).
+  - `openMenu()` — Start's Menu (TvShell registers it with `registerMenu`). Discover only shows the
+    Server tab: TODO(P7) select the Discover rail row so `arrive` focuses its content (item 365).
+    Reconnect is `lib/tv/reconnect.ts` (no server → Connect; a failed retry says
+    "Can't reach <URL>", TODO(design)).
+  - Anything custom (P9's media viewer, P12's blocking unreachable dialog):
+    `openLayer({component, props, blocking?, hints?, binds?, cls?, keydown?, typingRepeat?, onClose?})`
+    from nav.svelte.ts → id. `binds` = buttons the layer answers itself (a bound direction too, e.g.
+    the viewer's LEFT/RIGHT/LB/RB); every other button but A/B/directions does nothing under a layer
+    (press.ts `layerButton`). `blocking` = B and a click on the scrim do nothing. `closeLayer()`
+    restores focus to the opener (by element, else by `data-k`), then runs `onClose`, then
+    `afterOverlays(fn)` callbacks (item 117: wrap a redraw that would move things under an overlay).
+    `topLayer()` reads the top one. Focus memory is per layer (`layer:<id>`), so the screen's is kept.
+- **Notices** (`lib/tv/notices.svelte.ts`, pure rules in `notices.ts`): `pushToast(text, level,
+  durationMs?, {sub?, action?: {label, run}})` reaches TV through `onToastPushed` (desktop ignores
+  the extras and is unchanged; TvShell hides the desktop `Toast` in TV mode). The notifier gives
+  queued / failed download cards and backup-queued cards `action: 'downloads'` → "Open Downloads"
+  (`Notice.action` in notifications/notices.ts; summaries keep a shared action). TV-only cards:
+  `showNotice({title, sub?, error?, action?, ms?, hold?, pinned?, segs?, step?})` → id;
+  `updateNotice(id, patch)`, `releaseNotice(id, ms?)` (unpins and starts the countdown),
+  `closeNotice(id)`. P12's setup card = `showNotice({hold: true, pinned: true, segs, step})`, then
+  `releaseNotice(id, 10_000)` when done. `sub` may mix text and `{glyph}` parts. History: whole
+  session from app start (ruling 16), `tvNotices.history`, `clearHistory()`; page
+  `pages/TvNotifications.svelte`. Welcome card: TvShell, after the first `showScreen` (ruling 15).
+- **TODO for later phases:** "Couldn't launch X: no emulator for P" with "Set up P" (tvmode.js) needs
+  the platform in the launch failure (P9). `pushPage(page, {fresh: true})` closes pages first.
+- **e2e.** `tv-shell-d.spec.ts` (overlays, keyboard, Menu, cards, Notifications). VITE_E2E builds
+  expose `window.__tvE2E = {notify, openList, openKeyboard, confirmBox}` (TvShell) until real
+  screens open them; later specs should drive the real screens instead.
