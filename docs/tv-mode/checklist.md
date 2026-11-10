@@ -20,7 +20,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 4. The window itself never scrolls: only the designated areas (rows, grids, rails, panes, lists, pages, Details tab bodies, list overlays) scroll (src: tvmode.css `html, body`; tvmode.js `SCROLLERS`). (P14: tv-layout assertNoDocumentScroll)
 - [x] 5. The screen is three bands: top bar 4.6rem, the stage filling the rest, hint bar 3.6rem at the bottom (src: README § The shell; tvmode.css `.top`, `.stage`, `.hints`). (P14: tv-layout assertBands)
 - [ ] 6. The top bar, hint bar and every tab screen use a 2.4rem side gutter (src: tvmode.css `.top`, `.hints`, `.split`, `.list`, `.page`).
-- [ ] 7. Scrollbars are hidden on every scrolling area (src: tvmode.css `scrollbar-width: none`).
+- [x] 7. Scrollbars are hidden on every scrolling area (src: tvmode.css `scrollbar-width: none`).
 - [ ] 8. Text sits only on `panel` or `overlay` surfaces, as on the desktop (src: README § The shell › Background art).
 - [ ] 9. The background shows the focused game's art, blurred, behind the panels, reaching 6rem past the screen edges so the blur has no hard border (src: README § The shell › Background art; tvmode.css `.tv-art`).
 - [ ] 10. A layer of the `bg` colour at the opacity set by Settings › Appearance › Background fade covers the art, and Background blur sets the blur (src: README § Background art; tvmode.css `.tv-art::after`; tvmode.js `srowAdj`).
@@ -38,7 +38,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [ ] 22. A focused button grows to 104% (a primary one also takes `primary-hover`), a focused keyboard key to 106% and a focused media tile to 105% (src: tvmode.css `.btn.f`, `.btn.pri.f`, `.key.f`, `.mtile.f`).
 - [ ] 23. Focus changes animate transform, shadow and background over 150 ms (src: tvmode.css `[data-f]`).
 - [ ] 24. Disabled controls show at 45% opacity and stay focusable, so A on them can say why (src: tvmode.css `[data-f][disabled]`; tvmode.js `press`).
-- [ ] 25. With reduced motion, focus has no transitions or growth, the notification countdown bar does not animate, and scrolls jump (src: tvmode.css `@media (prefers-reduced-motion)`; README § Scrolling).
+- [x] 25. With reduced motion, focus has no transitions or growth, the notification countdown bar does not animate, and scrolls jump (src: tvmode.css `@media (prefers-reduced-motion)`; README § Scrolling).
 - [x] 26. Rows, grids and Details tabs leave room around every cover for its 7% growth and ring (rows pad 1.4rem above and below; a grid's scroll area reaches 1.2rem past its header on both sides; a Details tab body has 1rem side padding pulled back by a negative margin), while covers still line up with the titles and headers beside them (src: README § Scrolling; tvmode.css `.track`, `.scroll`, `.tbody`). (P14: tv-layout assertNoClipping after every move)
 - [ ] 27. Grids lay out 10rem columns that fill the width (space-between), with 1.6rem row and 1.2rem column gaps and 1.4rem / 1.2rem / 2.4rem padding (top / sides / bottom) (src: tvmode.css `.grid`).
 - [ ] 28. Buttons are pills at least 3rem tall with 1.05rem semibold text, in default, primary (`primary` fill) and danger (`danger` text and border) styles (src: tvmode.css `.btn`).
@@ -153,7 +153,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 111. In grids, lists, panes and menus, the focused item stays 1.2rem inside the scrolling area; an item taller than the area lines up with its top (src: README § Scrolling; tvmode.js `reveal`).
 - [x] 112. Focusing an area's first item scrolls it to the very top and its last item to the very bottom, so a heading above or a note below ("No Backup drives connected") is never stranded (src: README § Scrolling; tvmode.js `reveal`).
 - [ ] 113. A redraw (an install starting, coming back from Details, switching tabs and back) keeps every scroll position of every rail, row, grid, list and pane on that screen (src: README § Scrolling; tvmode.js `renderStage`).
-- [ ] 114. Scrolls glide; with reduced motion, and when a screen first appears or redraws, they jump (src: README § Scrolling; tvmode.js `glide`, `render`).
+- [x] 114. Scrolls glide; with reduced motion, and when a screen first appears or redraws, they jump (src: README § Scrolling; tvmode.js `glide`, `render`).
 - [x] 115. After a change of data, focus stays on the same item; if it is gone, focus moves to the enabled item now in its place in the same panel (src: README § The shell › Focus; tvmode.js `repaint`).
 - [ ] 116. A change never moves the player: in Settings only the pane redraws, never the rail (src: README § The shell › Focus; tvmode.js `repaint`).
 - [ ] 117. A redraw caused by a finished install while an overlay is open waits until the overlay closes (src: tvmode.js tick, `closeLayer`).
@@ -223,12 +223,12 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 167. Recently added holds games newly added to the server, newest first, leaving out those already in New releases (src: tvmode.js `discoverHTML`).
 - [x] 168. Updates holds installed games with an update; Your library holds every installed game (src: tvmode.js `discoverHTML`).
 - [x] 169. An empty row shows "Nothing here yet." (src: tvmode.js `discoverHTML`).
-- [ ] 170. Row titles are 1.25rem semibold, with their extra text muted at 1rem (src: tvmode.css `.shelf h2`).
-- [ ] 171. Discover covers carry platform tags (src: tvmode.js `discoverHTML`).
+- [x] 170. Row titles are 1.25rem semibold, with their extra text muted at 1rem (src: tvmode.css `.shelf h2`).
+- [x] 171. Discover covers carry platform tags (src: tvmode.js `discoverHTML`).
 - [x] 172. A on a cover opens Details, X plays or installs it, Y opens Search everything (src: README § Discover).
-- [ ] 173. Select mode and Backup all aren't offered on Discover: RT does nothing and no Select hint shows (src: README § Discover; tvmode.js `TABS.server.rt`, `hints`).
+- [x] 173. Select mode and Backup all aren't offered on Discover: RT does nothing and no Select hint shows (src: README § Discover; tvmode.js `TABS.server.rt`, `hints`).
 - [x] 174. Up from Discover's top row and Down from its bottom row do nothing (never the rail); Left from a row's first cover goes to the rail (src: README § Discover; tvmode.js `move`).
-- [ ] 175. The Discover hints are Y "Search" (plus A and X for the cover) (src: tvmode.js `TABS.server.hints`).
+- [x] 175. The Discover hints are Y "Search" (plus A and X for the cover) (src: tvmode.js `TABS.server.hints`).
 
 ## 7. Library
 
@@ -277,13 +277,13 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 212. Each row shows the title with its kind badge (Update, Backup, Library), a status line "<Platform> · <status>", a progress bar while active, the network / disk sparkline and the speed (src: README § Downloads; tvmode.js `row`).
 - [x] 213. An active download's status reads "Downloading · <n>% · <speed> · <time> left"; a queued one "Queued" (src: tvmode.js `row`).
 - [x] 214. A failed row's status is in the `danger` colour ("Failed · <reason>"); a cancelled one reads "Cancelled" (src: tvmode.js `row`, `dlrow`).
-- [ ] 215. The sparkline draws network in `primary` and disk in `graph-disk` (src: tvmode.js `row`).
+- [x] 215. The sparkline draws network in `primary` and disk in `graph-disk` (src: tvmode.js `row`).
 - [x] 216. The rows form one vertical list per panel, and the A hint reads "Cancel" (active, queued), "Retry or dismiss" (failed) or "Dismiss" (finished) (src: tvmode.js `row`).
 - [x] 217. A opens the row's actions as a list titled with the row's title over "<Platform> · <kind>": Cancel (danger) while active or queued, Retry when failed or cancelled, Dismiss when finished, failed or cancelled, and "Open <title>" for a game (src: README § Downloads; tvmode.js `ACT.dlrow`).
 - [x] 218. Cancel stops the row ("Cancelled <title>") and the next queued row starts (src: tvmode.js `ACT.dlrow`).
 - [x] 219. Retry queues the row again ("<title> added to download queue") (src: tvmode.js `ACT.dlrow`).
 - [x] 220. Dismiss removes the row and focus moves to the row now in its place (src: tvmode.js `ACT.dlrow`).
-- [ ] 221. "Open <title>" opens the game's Details over Downloads (src: tvmode.js `ACT.dlrow`).
+- [x] 221. "Open <title>" opens the game's Details over Downloads (src: tvmode.js `ACT.dlrow`).
 - [x] 222. Y clears every finished, failed and cancelled row; the hint Y "Clear completed" shows only when there are any (src: README § Downloads; tvmode.js `TABS.downloads`).
 - [x] 223. Progress updates while Downloads shows keep focus and scroll (src: tvmode.js tick).
 - [x] 224. B on Downloads does nothing (src: README § Try it).
@@ -293,12 +293,12 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 225. The Settings rail lists the panes in this order: Appearance, Backup drives, Cloud saves, Connection, Library, RetroAchievements, Systems, TV mode, Updates (src: README § Tabs › Settings; README § Game backups › Settings › Backup drives; tvmode.js `PANES`).
 - [x] 226. Moving through the rail shows each pane at once; A or Right moves into the pane (src: README § Tabs › Library "The same holds for every rail"; tvmode.js `ONF.set`).
 - [x] 227. Each pane starts with its name as a heading (1.6rem) (src: tvmode.js `setPaint`).
-- [ ] 228. A switch row flips with A (hint "Switch") (src: README § Settings; tvmode.js `srowAct`).
+- [x] 228. A switch row flips with A (hint "Switch") (src: README § Settings; tvmode.js `srowAct`).
 - [x] 229. A choice row shows its current value and a chevron, and A (hint "Select") opens a list with a check on the current value (src: README § Settings; tvmode.js `srow`, `srowAct`).
 - [x] 230. A slider row shows its bar and value; Left / Right adjust it by its step while it is focused, ◀ ▶ arrows show only while it is focused, and the hint reads D-pad "Adjust" (src: README § Settings; tvmode.js `srowAdj`, `TABS.settings.hints`; tvmode.css `.adj-arrows`).
-- [ ] 231. A text row shows its value, "Not set" in italics when empty, or dots when masked, and A (hint "Edit") opens the on-screen keyboard (src: README § Settings; tvmode.js `srow`, `srowAct`).
-- [ ] 232. Information rows aren't focusable; action rows show a chevron, and a dangerous action's label is in `danger` (src: tvmode.js `srow`; tvmode.css `.srow.dng`).
-- [ ] 233. Every change applies at once and redraws only the pane, keeping focus on the row (src: README § The shell › Focus; tvmode.js `repaint`).
+- [x] 231. A text row shows its value, "Not set" in italics when empty, or dots when masked, and A (hint "Edit") opens the on-screen keyboard (src: README § Settings; tvmode.js `srow`, `srowAct`).
+- [x] 232. Information rows aren't focusable; action rows show a chevron, and a dangerous action's label is in `danger` (src: tvmode.js `srow`; tvmode.css `.srow.dng`).
+- [x] 233. Every change applies at once and redraws only the pane, keeping focus on the row (src: README § The shell › Focus; tvmode.js `repaint`).
 - [x] 234. Appearance › Open GRID on is a choice with the line "Here and in desktop mode" and the options "Automatic: Discover when connected, else Library", "Server › Discover" and "Library" (src: README § Decided Where GRID opens; tvmode.js `paneRows('appearance')`).
 - [x] 235. Appearance › Theme is a choice: Follow system, Dark, Light (src: tvmode.js `paneRows('appearance')`).
 - [x] 236. Appearance › Background art is a switch with "The focused game's art, blurred, behind everything" (src: tvmode.js `paneRows('appearance')`).
@@ -383,7 +383,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 312. Upload notifies "Uploading the latest save…", then "Save uploaded for <title>", and the upload appears at the top of the list as Latest (src: README § Details; tvmode.js `ACT.uploadSave`).
 - [x] 313. An empty list reads "No cloud saves for this game. Upload the latest one, or play and GRID uploads it when the game closes." ("states" for States) (src: README § Details; tvmode.js `detBody`).
 - [x] 314. Saves on an unlinked game reads only "Cloud saves need the link to a server game."; on a game never installed or played, "No cloud saves yet. They appear after you play." (src: tvmode.js `detBody`).
-- [ ] 315. Achievements shows a summary line ("<k> of <n> unlocked · <p> of <total> points · <h> hardcore") and a list of rows with the badge (locked ones grey and faded), name, "Unlocked <when>" (with " · Hardcore") or the description, and "<n> pts" (src: tvmode.js `detBody`; tvmode.css `.badge.locked`).
+- [x] 315. Achievements shows a summary line ("<k> of <n> unlocked · <p> of <total> points · <h> hardcore") and a list of rows with the badge (locked ones grey and faded), name, "Unlocked <when>" (with " · Hardcore") or the description, and "<n> pts" (src: tvmode.js `detBody`; tvmode.css `.badge.locked`).
 - [x] 316. Play notifies "Launching <title>…" (with "Restored the latest cloud save" when Restore before launch is on) and pushes Playing (src: tvmode.js `play`).
 - [ ] 317. Play on a Missing game notifies "Couldn't launch <title>: files not found"; on an unlinked one "Couldn't launch <title>: not linked to a server game" (src: tvmode.js `play`).
 - [x] 318. Play with no emulator notifies "Couldn't launch <title>: no emulator for <Platform>" with the action "Set up <Platform>", which opens that System page (src: tvmode.js `play`).
@@ -392,8 +392,8 @@ and "Conflicts" lists at the end are not part of the build.
 
 ### General
 
-- [ ] 319. A page is pushed over its tab, the top bar shows its breadcrumb, and B goes back to the screen under it with focus and scroll as they were (src: README § Pages; tvmode.js `push`, `pop`).
-- [ ] 320. A settings-style page is a centred panel up to 62rem wide with a title (1.9rem) and a muted line under it, and scrolls as one list (src: tvmode.css `.page`, `.page-in`).
+- [x] 319. A page is pushed over its tab, the top bar shows its breadcrumb, and B goes back to the screen under it with focus and scroll as they were (src: README § Pages; tvmode.js `push`, `pop`).
+- [x] 320. A settings-style page is a centred panel up to 62rem wide with a title (1.9rem) and a muted line under it, and scrolls as one list (src: tvmode.css `.page`, `.page-in`).
 
 ### Playing
 
@@ -462,8 +462,8 @@ and "Conflicts" lists at the end are not part of the build.
 
 ### General
 
-- [ ] 360. An overlay covers the stage and the top bar with a `scrim` and a 6px backdrop blur, but not the hint bar; notification cards stay above it (src: tvmode.css `.layer`; consultant decision after P6).
-- [ ] 361. Focus stays inside the top overlay until it closes (src: tvmode.js `scope`).
+- [x] 360. An overlay covers the stage and the top bar with a `scrim` and a 6px backdrop blur, but not the hint bar; notification cards stay above it (src: tvmode.css `.layer`; consultant decision after P6).
+- [x] 361. Focus stays inside the top overlay until it closes (src: tvmode.js `scope`).
 
 ### Menu
 
@@ -501,7 +501,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 384. The keyboard's hints are A "Type", X "Delete", Y "Space", LB "◀", RB "▶", Menu "Done", B "Cancel" (src: tvmode.js `openOSK`).
 - [x] 385. B cancels and leaves the value as it was; Done keeps the typed value (src: README § On-screen keyboard; tvmode.js `openOSK`).
 - [x] 386. Masked fields (tokens, passwords) show dots and open empty (src: README § On-screen keyboard; tvmode.js `srowAct`, `ACT.cfield`).
-- [ ] 387. A search updates its results with every key (src: README § On-screen keyboard).
+- [x] 387. A search updates its results with every key (src: README § On-screen keyboard).
 - [x] 388. Redrawing the keyboard after each key keeps focus on the same key (src: tvmode.js `openOSK`).
 
 ## 14. Startup
@@ -545,9 +545,9 @@ and "Conflicts" lists at the end are not part of the build.
 ### Where GRID opens
 
 - [x] 413. With Open GRID on set to Automatic, GRID opens on Server › Discover when it is connected to a RomM server (src: README § Decided Where GRID opens; tvmode.js `openStart`).
-- [ ] 414. With Automatic and the server unreachable, GRID opens on the Library (src: README § Decided Where GRID opens; tvmode.js `openStart`).
+- [x] 414. With Automatic and the server unreachable, GRID opens on the Library (src: README § Decided Where GRID opens; tvmode.js `openStart`).
 - [x] 415. With Automatic and no server, GRID opens on the Library with the first connected Backup drive selected (its folder open, its row focused) (src: README § Decided Where GRID opens; tvmode.js `ACT.noServer`, `showDrive`).
-- [ ] 416. Open GRID on set to Server › Discover or Library forces that place; forced Discover with no server opens the Server tab's not-connected panel (src: README § Decided Where GRID opens).
+- [x] 416. Open GRID on set to Server › Discover or Library forces that place; forced Discover with no server opens the Server tab's not-connected panel (src: README § Decided Where GRID opens).
 - [x] 417. Opening on Discover lands focus on Discover's first cover (src: README § Discover; tvmode.js `render`).
 
 ## 15. Game backups in TV mode
@@ -598,14 +598,14 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 447. Y with nothing picked notifies "Pick games first" / "A picks the focused game; X picks them all." (src: tvmode.js `selAct`).
 - [x] 448. Y offline notifies the error "Backing up needs a server." (src: tvmode.js `selAct`).
 - [x] 449. On a drive, Y opens the list "<n> games on <pack>" with Install <n> games and Remove <n> from drive… (danger) (src: README § Select mode; tvmode.js `selAct`).
-- [ ] 450. Install <n> games queues every picked game not installed and notifies "<n> games added to download queue" / "Copying from <label>" (src: tvmode.js `selAct`).
+- [x] 450. Install <n> games queues every picked game not installed and notifies "<n> games added to download queue" / "Copying from <label>" (src: tvmode.js `selAct`).
 - [x] 451. Remove <n> from drive… asks "Remove <n> games from <pack>?" / "Their files leave the drive. Games installed on this computer stay." with Remove from drive (danger), then notifies "<n> games removed from <pack>" (src: tvmode.js `selAct`). (desktop wording, intro rule)
 - [x] 452. Acting on the picked games, or the drive going away, ends select mode (src: tvmode.js `selAct`, `startBackup`, `unplugCouch`). Also ends on a rail row change (consultant).
 - [ ] 453. There is no range pick; Select all covers that case (src: README § Select mode).
 
 ### A whole platform
 
-- [ ] 454. A Server platform header has "Backup all <n>…" (hint "Backup"), counting all the platform's games, which opens the Backup page titled "Backup <Platform> · <n> games" (src: README § A whole platform; tvmode.js `srvPaint`, `ACT.backupPlat`).
+- [x] 454. A Server platform header has "Backup all <n>…" (hint "Backup"), counting all the platform's games, which opens the Backup page titled "Backup <Platform> · <n> games" (src: README § A whole platform; tvmode.js `srvPaint`, `ACT.backupPlat`).
 - [x] 455. On a Library platform row, X is "Backup all <n>…", counting installed games only (src: README § A whole platform; tvmode.js `libRailHTML`, `ACT.backupPlat`).
 - [x] 456. Offline, Backup all is disabled and says "Backing up needs a server." (src: tvmode.js `srvPaint`, `ACT.backupPlat`).
 
@@ -684,8 +684,8 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 515. Connect offers "Use without a server" after an "or", beside Connect, enabled once a library folder is set, with the note "Without a server, GRID needs only the library folder. Your Library and Backup drives work offline." (src: README § Use without a server; tvmode.js `connectPage`).
 - [x] 516. Use without a server notifies "Using GRID without a server" / "Your Library and Backup drives work offline" and opens per "Where GRID opens" (src: README § Use without a server; tvmode.js `ACT.noServer`).
 - [x] 517. Without a server the top bar reads "Offline · no server" with a grey dot, and the hint bar says the Library and Backup drives work without one (src: README § Use without a server).
-- [ ] 518. Without a server the Server tab shows one panel: "Not connected to a server", "Your Library and Backup drives work without one.", Connect to a server… (primary) and Open Library (src: README § Use without a server; tvmode.js `TABS.server.render`).
-- [ ] 519. Connect to a server… opens Connect (src: README § Use without a server; tvmode.js `ACT.toConnect`).
+- [x] 518. Without a server the Server tab shows one panel: "Not connected to a server", "Your Library and Backup drives work without one.", Connect to a server… (primary) and Open Library (src: README § Use without a server; tvmode.js `TABS.server.render`).
+- [x] 519. Connect to a server… opens Connect (src: README § Use without a server; tvmode.js `ACT.toConnect`).
 - [x] 520. Library, Backup drives, Downloads, Settings and play all work without a server; backing up is disabled with "Backing up needs a server." (src: GB card § Use without a server).
 
 ## 16. Desktop changes
@@ -693,9 +693,9 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 521. The desktop top bar gets a TV button that opens TV mode (src: README § Decided Entering and leaving).
 - [x] 522. Starting GRID with `--tv` opens straight into TV mode (src: README § Decided Entering and leaving).
 - [x] 523. Menu › Switch to desktop mode and Settings › TV mode › Switch to desktop mode leave TV mode for the desktop window, on the same view (src: README § Decided Entering and leaving; tvmode.js `toDesktop`).
-- [ ] 524. There is no other way into or out of TV mode (src: README § Decided Entering and leaving).
-- [ ] 525. The desktop opens on Server › Discover when connected to a RomM server and on the Library when not (unreachable, or without a server, on the first connected Backup drive), replacing today's "always Discover" (src: README § Decided Where GRID opens).
-- [ ] 526. Settings › Appearance › Open GRID on (Automatic, Server › Discover, Library) is one setting shared by the desktop and TV mode and governs both (src: README § Decided Where GRID opens; tvmode.js `paneRows('appearance')`).
+- [x] 524. There is no other way into or out of TV mode (src: README § Decided Entering and leaving).
+- [x] 525. The desktop opens on Server › Discover when connected to a RomM server and on the Library when not (unreachable, or without a server, on the first connected Backup drive), replacing today's "always Discover" (src: README § Decided Where GRID opens).
+- [x] 526. Settings › Appearance › Open GRID on (Automatic, Server › Discover, Library) is one setting shared by the desktop and TV mode and governs both (src: README § Decided Where GRID opens; tvmode.js `paneRows('appearance')`).
 - [x] 527. Card size, game labels and card display stay desktop-only settings and don't affect TV mode (src: README § Decided Implementation).
 - [x] 528. The TV mode work, the Game backups TV screens and these desktop changes ship together on `feat/tv-mode` (src: README § Decided Implementation). (P14: built and verified together on feat/tv-mode)
 
@@ -757,9 +757,9 @@ The Fable consultant ruled on every conflict above; the rulings are recorded in 
 
 ## Added after P9 (consultant)
 
-- [ ] 529. Install or Play refused for umu-run opens a confirm "Install umu-launcher?" / "<title> runs through Proton, which needs umu-run. umu-launcher downloads as a Downloads row; launch <title> again when it finishes." / "Install umu-launcher" (primary), Cancel focused; while a umu row is live the card "umu-launcher is installing (see Downloads). Launch the game again when it finishes." with Open Downloads. (src: README § Consultant decisions)
-- [ ] 530. Install refused for no library folder opens "Set a library folder" / "GRID installs games into a library folder, and none is set. Choose one, then press Install again." / "Choose a folder…" → folder browser "Library folder" at home, Y saves; success card "Library folder set" with the path; refusal = error card with the reason; Install is pressed again by the user. (src: README § Consultant decisions)
-- [ ] 531. Details › Saves (kind Saves) on a native game shows "Save locations" with the desktop's status line, rows (raw path over expanded path; PCGamingWiki rows first), A on a row confirms "Remove this save location?" (danger "Remove"), focus to the row in its place; "Add a save folder…" opens "Save folder for <title>", Y adds ("Save folder added"); Upload latest keeps "Add a save location to enable uploads." until a row exists. (src: README § Consultant decisions)
-- [ ] 532. Settings › TV mode › Button assignments with no controller: disabled, line "For the controller in use", value "Xbox style", A says "Connect a controller to choose its buttons. Each controller keeps its own choice."; re-enables when a pad connects. (src: README § Consultant decisions)
-- [ ] 533. Settings › RetroAchievements rows: Username, Token, Save, Password (masked, opens empty, sub "Write-only: used once to log in, never kept"), Log In (sub "Signs in with your password and saves the token it gets"), Clear. Save disabled until username + token ("Enter a username and a token first." / "Enter a token first." / "Enter a username first."); Log In disabled until username + password (same pattern with "password"); Log In runs raLogin, blanks the password, refreshes status. (src: README § Consultant decisions)
-- [ ] 534. Downloads: a live firmware row is disabled, A says "Installing firmware — this step cannot be cancelled" (library move: "Updating paths — this step cannot be cancelled"); an extracting install's A hint reads "Details" and its list offers only "Open <title>". (src: README § Consultant decisions)
+- [x] 529. Install or Play refused for umu-run opens a confirm "Install umu-launcher?" / "<title> runs through Proton, which needs umu-run. umu-launcher downloads as a Downloads row; launch <title> again when it finishes." / "Install umu-launcher" (primary), Cancel focused; while a umu row is live the card "umu-launcher is installing (see Downloads). Launch the game again when it finishes." with Open Downloads. (src: README § Consultant decisions)
+- [x] 530. Install refused for no library folder opens "Set a library folder" / "GRID installs games into a library folder, and none is set. Choose one, then press Install again." / "Choose a folder…" → folder browser "Library folder" at home, Y saves; success card "Library folder set" with the path; refusal = error card with the reason; Install is pressed again by the user. (src: README § Consultant decisions)
+- [x] 531. Details › Saves (kind Saves) on a native game shows "Save locations" with the desktop's status line, rows (raw path over expanded path; PCGamingWiki rows first), A on a row confirms "Remove this save location?" (danger "Remove"), focus to the row in its place; "Add a save folder…" opens "Save folder for <title>", Y adds ("Save folder added"); Upload latest keeps "Add a save location to enable uploads." until a row exists. (src: README § Consultant decisions)
+- [x] 532. Settings › TV mode › Button assignments with no controller: disabled, line "For the controller in use", value "Xbox style", A says "Connect a controller to choose its buttons. Each controller keeps its own choice."; re-enables when a pad connects. (src: README § Consultant decisions)
+- [x] 533. Settings › RetroAchievements rows: Username, Token, Save, Password (masked, opens empty, sub "Write-only: used once to log in, never kept"), Log In (sub "Signs in with your password and saves the token it gets"), Clear. Save disabled until username + token ("Enter a username and a token first." / "Enter a token first." / "Enter a username first."); Log In disabled until username + password (same pattern with "password"); Log In runs raLogin, blanks the password, refreshes status. (src: README § Consultant decisions)
+- [x] 534. Downloads: a live firmware row is disabled, A says "Installing firmware — this step cannot be cancelled" (library move: "Updating paths — this step cannot be cancelled"); an extracting install's A hint reads "Details" and its list offers only "Open <title>". (src: README § Consultant decisions)
