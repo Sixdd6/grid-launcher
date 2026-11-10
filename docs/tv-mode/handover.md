@@ -377,3 +377,17 @@
   `emulator-installed` event names no system); the why texts for the disabled Installing button, Check for updates
   while checking, a busy row, and Save with no name are mine (TODO(design)); "Show program folder" (the desktop's ⋯
   menu) isn't offered in TV.
+
+## Pending for the next phase (consultant, after P11)
+- Checklist 260 "Used for <system>": app/src-tauri/src/commands.rs `EmulatorInstalledEvent` gains `used_for: Vec<String>`
+  (platform labels) from the `PendingOutcome::Assigned` outcomes `apply_after_install` returns for this emulator;
+  app/src-tauri/src/lib.rs (set_emulator_installed_hook closure, ~l.578–607): move the `emulator-installed` emit into the
+  existing spawn_blocking after apply_after_install so the payload carries them, then emit `setup-defaults` as today.
+  api.ts type; notifications/notices.ts: `Notice.sub?`, `emulatorInstalledNotice(name, fresh, usedFor)` sets sub only when
+  fresh && usedFor non-empty ("Used for A", "Used for A and B", "A, B and C"); notifier.ts coalescer passes
+  `{ sub: card.sub, action }` to pushToast (summary cards have none). Desktop Toast ignores sub (card unchanged). Tests;
+  tv-systems e2e if it asserts the card.
+- Reasons: panes/systems.ts `REC_RUNNING` → "Still installing. Downloads shows the progress."; `CHECK_RUNNING` stays
+  "Already checking for updates."; pages/systemPage.ts `BUSY_WHY` → "Still in progress. Try again when it finishes.";
+  pages/emulatorForm.ts `NAME_NEEDED` stays "Give the emulator a name first."; remove the four TODO(design); tests.
+- No "Show program folder" on the TV System page (close the open item).

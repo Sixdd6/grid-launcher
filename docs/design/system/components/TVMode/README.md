@@ -147,6 +147,9 @@ prototype, SPEC.md and the Game backups card. The user can overturn any of them.
 - Button assignments with no controller is disabled, reads "For the controller in use · Xbox style", and A says "Connect a controller to choose its buttons. Each controller keeps its own choice."
 - RetroAchievements in TV mode also has the desktop's Log In: Password (masked, write-only) and Log In rows after Save; Save and Log In are disabled until their fields are filled and A names the missing field ("Enter a token first.").
 - A live firmware row is disabled and A says "Installing firmware — this step cannot be cancelled"; an extracting install's A hint reads "Details" and its list offers only "Open <title>".
+- The emulator-installed card's second line "Used for <system>" comes from the backend (`used_for` on the `emulator-installed` event: the platforms whose default the install applied), so it shows only when a system really switched to that emulator; several read "Used for A and B"; the desktop card stays "<Name> installed".
+- Disabled-control reasons in Settings › Systems and the System page: "Still installing. Downloads shows the progress." (the Installing N emulators… button), "Already checking for updates." (Check for updates), "Still in progress. Try again when it finishes." (a row whose action runs), "Give the emulator a name first." (Save with no name).
+- The TV System page has no Show program folder; the desktop ⋯ menu keeps it, and Emulator settings › Program shows the path.
 
 Open questions for the user (not blocking): the order and wording of RetroAchievements' Password and Log In rows (not in the prototype); a controller-only way out of TV mode from Connect; whether a controller press should reach Playing when GRID's own window is focused; whether the welcome card shows every time or only the first time.
 
