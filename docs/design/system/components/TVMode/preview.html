@@ -573,7 +573,7 @@ TABS.home = {
   y: function () { searchAll(); }
 };
 
-function railItem(key, label, n, on, nav) { return '<button class="ri' + (on ? ' sel' : '') + '" data-f data-k="r-' + key + '" data-onfocus="' + nav + '" data-key="' + key + '" data-al="Open">' + label + (n != null ? '<span class="n">' + n + '</span>' : '') + '</button>'; }
+function railItem(key, label, n, on, nav) { return '<button class="ri' + (on ? ' sel' : '') + '" data-f data-k="r-' + key + '" data-onfocus="' + nav + '" data-key="' + key + '" data-a="railOpen" data-al="Open">' + label + (n != null ? '<span class="n">' + n + '</span>' : '') + '</button>'; }
 function libList() {
   var L = G.filter(function (g) { return g.inst; }), r = S.libRail;
   if (r === 'recent') L = L.filter(function (g) { return g.played != null && g.played <= 30; });
@@ -1088,6 +1088,13 @@ var ACT = {
     openSheet({ title: d.t, sub: PLAT[d.p] + (d.kind ? ' · ' + d.kind : ''), items: items });
   },
   srow: srowAct,
+  /* A on a rail entry does what Right does: into the page beside it (the place you
+     last left there, else its first control). */
+  railOpen: function () {
+    var box = $('pane') || $('lib-grid') || $('srv-grid'); if (!box) return;
+    var L = focusables(box), el = box._last && box.contains(box._last) && box._last.offsetParent ? box._last : L[0];
+    if (el) setFocus(el);
+  },
   system: function (el) { push(systemPage(sysOf(el.dataset.id))); },
   installRec: function () { SYS.filter(function (s) { return !s.emu && s.status !== 'Installing…'; }).forEach(function (s) { installEmu(s); }); },
   installEmu: function (el) { installEmu(sysOf(el.dataset.id)); },
