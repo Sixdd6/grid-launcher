@@ -193,8 +193,7 @@ describe('tv-server: the Server tab', () => {
     await waitFocused('ch-emu');
     expect(await hints()).toContain('A Open in Systems');
     await key('Enter');
-    // TODO(P11): TvSystem replaces the stand-in page.
-    await $(testId('tv-system-stub')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the chip never opened the system page' });
+    await $(testId('tv-system-page')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the chip never opened the system page' });
     await waitText('tv-crumb', new RegExp(SNES));
     await key('Escape');
     await waitFocused('ch-emu');

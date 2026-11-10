@@ -19,6 +19,33 @@ async function waitConfig(check: (c: string) => boolean, timeoutMsg: string, tim
   await browser.waitUntil(() => check(config()), { timeout, timeoutMsg });
 }
 
+/** A settings row's words: its label, the line under it, its value, spaced. */
+async function rowText(id: string): Promise<string> {
+  return (await browser.execute((sel: string) => {
+    const r = document.querySelector(sel);
+    if (!r) return '';
+    return ['.t', '.s', '.val']
+      .map((c) => (r.querySelector(c)?.textContent ?? '').replace(/\s+/g, ' ').trim())
+      .filter((t) => t !== '')
+      .join(' ');
+  }, testId(id))) as string;
+}
+
+async function waitRow(id: string, want: string | RegExp): Promise<void> {
+  let last = '';
+  await browser
+    .waitUntil(
+      async () => {
+        last = await rowText(id);
+        return typeof want === 'string' ? last === want : want.test(last);
+      },
+      { timeout: TRANSITION_TIMEOUT, timeoutMsg: `${id} never read ${String(want)}` },
+    )
+    .catch((e) => {
+      throw new Error(`${(e as Error).message} (it reads "${last}")`);
+    });
+}
+
 /** The pane's system rows, top to bottom (their test keys). */
 async function rowOrder(): Promise<string[]> {
   return (await browser.execute(() =>
@@ -187,8 +214,8 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
     await waitText('tv-crumb', /Windows/);
     await browser.waitUntil(async () => (await pageRows()).includes('umu'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'no umu-run line' });
     expect(await pageRows()).toEqual(expect.arrayContaining(['proton', 'umu', 'first']));
-    expect(await text('tv-row-proton')).toContain('Runs Windows games on Linux');
-    expect(await text('tv-row-first')).toBe('First Windows game Downloads the Steam Linux Runtime (about 200 MB)');
+    expect(await rowText('tv-row-proton')).toContain('Runs Windows games on Linux');
+    expect(await rowText('tv-row-first')).toBe('First Windows game Downloads the Steam Linux Runtime (about 200 MB)');
     await waitFocused('s-proton');
     await key('Enter');
     await waitList('Default Proton version');
@@ -208,7 +235,7 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
     await waitText('tv-crumb', new RegExp(PS2));
     expect(await text('tv-system-page')).toContain('No emulator');
     expect(await pageRows()).toEqual(['install', 'choose']);
-    await waitText('tv-row-install', 'Install PCSX2 (recommended)');
+    await waitRow('tv-row-install', 'Install PCSX2 (recommended)');
     await waitFocused('s-install');
     await key('ArrowDown');
     await waitFocused('s-choose');
@@ -217,7 +244,7 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
     const items = (await list()).items;
     expect(items[0]).toBe('[Download]');
     expect(items[1]).toBe('PCSX2 (recommended)');
-    expect(items.slice(-2)).toEqual(['[ ]', 'None']);
+    expect(items.slice(-2)).toEqual(['[]', 'None']);
     // None is checked: the list opens on it.
     await waitFocused(`o${items.length - 1}`);
     await pickOption('PCSX2 (recommended)');
@@ -225,11 +252,11 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
     await waitConfig((c) => c.includes(`"${PS2}" = "${PCSX2}"`), 'PCSX2 never became PS2’s emulator');
     await waitToast(`${PCSX2} installed`);
     await browser.waitUntil(async () => (await pageRows()).includes('emu'), { timeout: INSTALL_WAIT, timeoutMsg: 'the page never showed the emulator' });
-    await waitText('tv-row-emu', `Emulator ${PCSX2}`);
+    await waitRow('tv-row-emu', `Emulator ${PCSX2}`);
     expect(await text('tv-system-page')).toContain(`${PCSX2} · Ready`);
     expect(await pageRows()).toEqual(expect.arrayContaining(['emu', 'ver', 'open', 'settings', 'remove']));
-    expect(await text('tv-row-open')).toBe(`Open ${PCSX2} Opens the emulator on its own to change its settings. Its window needs a mouse.`);
-    expect(await text('tv-row-settings')).toBe('Emulator settings Program, launch options, cloud save folders');
+    expect(await rowText('tv-row-open')).toBe(`Open ${PCSX2} Opens the emulator on its own to change its settings. Its window needs a mouse.`);
+    expect(await rowText('tv-row-settings')).toBe('Emulator settings Program, launch options, cloud save folders');
     // The emulator list now has it under Installed, checked.
     await seek('s-emu');
     await key('Enter');
@@ -256,7 +283,7 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
     await key('Enter');
     await $(testId('tv-system-page')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await browser.waitUntil(async () => (await pageRows()).includes('update'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'no Update to row' });
-    expect(await text('tv-row-update')).toMatch(/^Update to \S+/);
+    expect(await rowText('tv-row-update')).toMatch(/^Update to \S+/);
   });
 
   it('Remove asks, notifies and goes back (item 333)', async () => {
@@ -296,11 +323,11 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
     await $(testId('tv-emu-form')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     expect(await text('tv-emu-form')).toContain('Add an emulator manually');
     expect(await text('tv-emu-form')).toContain("For an emulator GRID doesn't install. It never becomes a system's default by itself.");
-    await waitText('tv-row-which', 'Which emulator is it? Something else');
-    await waitText('tv-row-name', 'Name Not set');
-    await waitText('tv-row-prog', "Program Browse for the emulator's program Not set");
-    await waitText('tv-row-args', 'Launch options %rom% is replaced by the game file %rom%');
-    await waitText('tv-row-strategy', 'Cloud saves (advanced) Save and state folders, files not to upload Save strategy: Automatic');
+    await waitRow('tv-row-which', 'Which emulator is it? Something else');
+    await waitRow('tv-row-name', 'Name Not set');
+    await waitRow('tv-row-prog', "Program Browse for the emulator's program Not set");
+    await waitRow('tv-row-args', 'Launch options %rom% is replaced by the game file %rom%');
+    await waitRow('tv-row-strategy', 'Cloud saves (advanced) Save and state folders, files not to upload Save strategy: Automatic');
     // "Which emulator is it?" lists the known emulators and Something else.
     await waitFocused('s-which');
     await key('Enter');
@@ -314,7 +341,7 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
     await typeKeys('Stub Emu');
     await key('Enter');
     await waitOskClosed();
-    await waitText('tv-row-name', 'Name Stub Emu');
+    await waitRow('tv-row-name', 'Name Stub Emu');
     // Program, through the folder browser in file mode.
     await seek('s-prog');
     await key('Enter');
@@ -326,18 +353,18 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
     expect(await hints()).toContain('A Choose');
     await key('Enter');
     await $(testId('tv-emu-form')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await waitText('tv-row-prog', `Program ${program} stub-emu`);
+    await waitRow('tv-row-prog', `Program ${program} stub-emu`);
     // What was typed survived the browser.
-    await waitText('tv-row-name', 'Name Stub Emu');
+    await waitRow('tv-row-name', 'Name Stub Emu');
     // The save strategy list.
     await seek('s-strategy');
     await key('Enter');
     await waitList('How does it store saves?');
     expect((await list()).items).toEqual(['Automatic', 'One file per game', 'A folder per game']);
     await pickOption('One file per game');
-    await waitText('tv-row-strategy', /Save strategy: One file per game$/);
+    await waitRow('tv-row-strategy', /Save strategy: One file per game$/);
     await seek('s-save');
-    await waitText('tv-row-save', 'Add emulator');
+    await waitRow('tv-row-save', 'Add emulator');
     await key('Enter');
     await waitToast("Added emulator 'Stub Emu'.");
     await $(testId('tv-settings')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Add emulator did not go back' });
@@ -381,17 +408,19 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
     await moveTo('r-1', 'ArrowDown', 6);
     await key('ArrowRight');
     await browser.waitUntil(async () => ((await focused()) ?? '').startsWith('sg'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the grid never took focus' });
+    await $(testId('tv-srv-emu')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the header never showed its emulator chip' });
+    // Up from the top row reaches the header (tv-server walks it with the
+    // D-pad); a click on the chip focuses it and presses A.
     await key('ArrowUp');
-    for (let i = 0; i < 6 && (await focused()) !== 'ch-emu'; i++) {
-      await key('ArrowLeft');
-      await browser.pause(80);
-    }
-    await waitFocused('ch-emu');
-    expect(await hints()).toContain('A Open in Systems');
-    await key('Enter');
+    await browser.waitUntil(async () => (await browser.execute(() => !!document.querySelector('[data-testid="tv-srv-header"] .f'))) as boolean, {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Up never reached the header',
+    });
+    expect(await $(testId('tv-srv-emu')).getAttribute('data-al')).toBe('Open in Systems');
+    await $(testId('tv-srv-emu')).click();
     await $(testId('tv-system-page')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the chip never opened the system page' });
     await browser.waitUntil(async () => (await pageRows()).includes('emu'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the page never showed PS2’s emulator' });
-    await waitText('tv-row-emu', `Emulator ${PCSX2}`);
+    await waitRow('tv-row-emu', `Emulator ${PCSX2}`);
     await key('Escape');
     await waitGone('tv-system-page');
   });

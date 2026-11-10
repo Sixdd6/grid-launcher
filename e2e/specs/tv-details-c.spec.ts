@@ -168,6 +168,8 @@ describe('tv-details (c): search rules, Search everything failure, Set up <Platf
   it('a native game’s Saves lists its save locations; one is added through the browser and removed, asked first (checklist 531)', async () => {
     await key('q');
     await waitTab('library');
+    // The Library remembers the cover left there (No Emu Game): B goes to the rail.
+    if ((await focused()) !== 'r-all') await key('Escape');
     await waitFocused('r-all');
     await openLibraryDetails('My Game');
     for (let i = 0; i < 4 && !(await $(testId('tv-saves-locs-heading')).isExisting()); i++) {
