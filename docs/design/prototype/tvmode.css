@@ -40,6 +40,13 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .gl { display: inline-flex; align-items: center; justify-content: center; min-width: 1.7rem; height: 1.7rem; padding: 0 .35rem; border-radius: 100px; background: var(--text-h); color: var(--bg); font-size: .85rem; font-weight: 700; line-height: 1; letter-spacing: 0; }
 .gl.round { width: 1.7rem; padding: 0; }
 .gl.sh { font-size: 1rem; }
+/* Kenney glyphs: white artwork used as a mask, filled with the text colour so it
+   reads in both themes. */
+.gli { display: inline-block; flex: 0 0 auto; width: 2.1rem; height: 2.1rem; vertical-align: middle; background: var(--text-h); -webkit-mask: var(--g) center / contain no-repeat; mask: var(--g) center / contain no-repeat; }
+.key .gli { width: 1.6rem; height: 1.6rem; background: currentColor; }
+.chip .gli, .toast .gli, .selbar .gli { width: 1.8rem; height: 1.8rem; }
+.viewer .gli { background: #fff; }
+.btn.pri .gli { background: var(--on-primary); }
 
 /* ---- Stage and hint bar */
 .stage { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }

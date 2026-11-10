@@ -1,0 +1,62 @@
+{
+ "xbox": {
+  "A": "xbox_button_a.svg",
+  "B": "xbox_button_b.svg",
+  "X": "xbox_button_x.svg",
+  "Y": "xbox_button_y.svg",
+  "LB": "xbox_lb.svg",
+  "RB": "xbox_rb.svg",
+  "LT": "xbox_lt.svg",
+  "RT": "xbox_rt.svg",
+  "VIEW": "xbox_button_view.svg",
+  "MENU": "xbox_button_menu.svg",
+  "RS": "xbox_stick_r_vertical.svg",
+  "LS": "xbox_ls.svg",
+  "DPAD": "xbox_dpad.svg"
+ },
+ "ps": {
+  "A": "playstation_button_cross.svg",
+  "B": "playstation_button_circle.svg",
+  "X": "playstation_button_square.svg",
+  "Y": "playstation_button_triangle.svg",
+  "LB": "playstation_trigger_l1.svg",
+  "RB": "playstation_trigger_r1.svg",
+  "LT": "playstation_trigger_l2.svg",
+  "RT": "playstation_trigger_r2.svg",
+  "VIEW": "playstation5_button_create.svg",
+  "MENU": "playstation5_button_options.svg",
+  "RS": "playstation_stick_r_vertical.svg",
+  "LS": "playstation_button_l3.svg",
+  "DPAD": "playstation_dpad.svg"
+ },
+ "nintendo": {
+  "A": "switch_button_a.svg",
+  "B": "switch_button_b.svg",
+  "X": "switch_button_x.svg",
+  "Y": "switch_button_y.svg",
+  "LB": "switch_button_l.svg",
+  "RB": "switch_button_r.svg",
+  "LT": "switch_button_zl.svg",
+  "RT": "switch_button_zr.svg",
+  "VIEW": "switch_button_minus.svg",
+  "MENU": "switch_button_plus.svg",
+  "RS": "switch_stick_r_vertical.svg",
+  "LS": "switch_stick_l_press.svg",
+  "DPAD": "switch_dpad.svg"
+ },
+ "8bitdo": {
+  "A": "switch_button_a.svg",
+  "B": "switch_button_b.svg",
+  "X": "switch_button_x.svg",
+  "Y": "switch_button_y.svg",
+  "LB": "switch_button_l.svg",
+  "RB": "switch_button_r.svg",
+  "LT": "playstation_trigger_l2_alternative.svg",
+  "RT": "playstation_trigger_r2_alternative.svg",
+  "VIEW": "switch_button_minus.svg",
+  "MENU": "switch_button_plus.svg",
+  "RS": "switch_stick_r_vertical.svg",
+  "LS": "switch_stick_l_press.svg",
+  "DPAD": "switch_dpad.svg"
+ }
+}

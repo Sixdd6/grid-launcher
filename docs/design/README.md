@@ -42,6 +42,8 @@ python3 -I docs/design/prototype/applayout.py docs/design/system/components
 - `themetoggle.js`, `themetoggle.css` — the light / dark toggle.
 - `tvmode.py`, `tvmode.js`, `tvmode.css` — the TV mode card (its own shell and focus
   engine): `python3 -I docs/design/prototype/tvmode.py docs/design/system/components`.
+- `glyphs/` — the controller button glyphs the TV mode card inlines (Kenney Input
+  Prompts, CC0; `map.json` assigns them, `License.txt` is the pack's license).
 - `icons.json` — icon paths: the app's (`app/src/lib/icons.ts`) plus proposed ones.
 
 To view a card locally, it needs the design system's `tokens.css`, which the

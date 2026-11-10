@@ -6,6 +6,13 @@ import gen  # noqa: E402  (writes the small previews too; reuse its icon helper)
 
 CSS = open(os.path.join(HERE, 'tvmode.css')).read()
 JS = open(os.path.join(HERE, 'tvmode.js')).read()
+# Button glyphs (Kenney Input Prompts, CC0): each prompt set's glyph per button,
+# inlined as data URIs so the card is self-contained.
+import base64, json
+GDIR = os.path.join(HERE, 'glyphs')
+GMAP = json.load(open(os.path.join(GDIR, 'map.json')))
+GLYPHS = {sc: {role: 'data:image/svg+xml;base64,' + base64.b64encode(open(os.path.join(GDIR, f), 'rb').read()).decode() for role, f in m.items()} for sc, m in GMAP.items()}
+GLYPH_JS = '<script>window.TV_GLYPHS = ' + json.dumps(GLYPHS) + ';</script>'
 HTML = f"""<!-- @dsCard group="Prototype" height=800 width=1280 subtitle="TV mode: the fullscreen, controller-first GRID. Arrows, Enter = A, Esc = B, X, Y, Q/E = LB/RB, Z = LT, M = Menu, V = View; a real controller works too" -->
 <!doctype html>
 <html lang="en">
@@ -24,6 +31,7 @@ HTML = f"""<!-- @dsCard group="Prototype" height=800 width=1280 subtitle="TV mod
   <div class="desk" id="desk" hidden></div>
 </div>
 {gen.ICON_JS}
+{GLYPH_JS}
 <script>
 {JS}
 </script>

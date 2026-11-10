@@ -92,7 +92,15 @@ var GL = {
 var NLIKE = { nintendo: 1, '8bitdo': 1 }, SWAP = { A: 'B', B: 'A', X: 'Y', Y: 'X' };
 function scheme() { return CFG.prompts === 'auto' ? S.scheme : CFG.prompts; }
 function glyphText(b) { var sc = scheme(), k = NLIKE[sc] && CFG.btnLayout === 'xbox' && SWAP[b] ? SWAP[b] : b; return GL[sc][k]; }
-function gl(b) { var t = glyphText(b); var round = t.length === 1; return '<span class="gl' + (round ? ' round' : '') + (scheme() === 'ps' && 'ABXY'.indexOf(b) >= 0 && b.length === 1 ? ' sh' : '') + '">' + t + '</span>'; }
+/* A prompt is the Kenney glyph for this controller and button, drawn as a mask in
+   the theme's text colour; the text form stays as its label, and as the fallback
+   for a button with no glyph (the Home / Guide button). */
+function gl(b) {
+  var sc = scheme(), k = NLIKE[sc] && CFG.btnLayout === 'xbox' && SWAP[b] ? SWAP[b] : b, src = window.TV_GLYPHS && TV_GLYPHS[sc] && TV_GLYPHS[sc][k];
+  if (src) return '<span class="gli" role="img" aria-label="' + esc(GL[sc][k]) + '" style="--g:url(&quot;' + src + '&quot;)"></span>';
+  return glText(b);
+}
+function glText(b) { var t = glyphText(b); var round = t.length === 1; return '<span class="gl' + (round ? ' round' : '') + (scheme() === 'ps' && 'ABXY'.indexOf(b) >= 0 && b.length === 1 ? ' sh' : '') + '">' + t + '</span>'; }
 
 /* ------------------------------------------------------------------ helpers */
 function ago(d) { return d === 0 ? 'today' : d === 1 ? 'yesterday' : d < 14 ? d + ' days ago' : Math.round(d / 7) + ' weeks ago'; }
