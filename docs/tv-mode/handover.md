@@ -29,3 +29,68 @@
 - `initialView(connected, offline, firstDrive, openOn)` in lib/shell.ts is the shared start rule.
 - Unverified (do in P5): window geometry after TV → quit → relaunch (window-state plugin has
   FULLSCREEN removed; `exit_app` leaves fullscreen first).
+
+## After P5: the TV shell, focus engine, input and primitives
+- **Mounting.** `stores/uiMode.svelte.ts` (`uiMode.mode|startedWithTv|loaded|tvStart|desktopStart`,
+  `initUiMode()`, `enterTv(view)`, `leaveTv(tab, pane)`) mirrors Rust's `get_ui_mode` / `set_ui_mode`.
+  App.svelte mounts `lib/tv/TvShell.svelte` **or** the desktop screens (nothing until `get_ui_mode`
+  answers) and sets `html[data-ui="tv"]`; every rule in `lib/tv/tv.css` is scoped to it. Desktop
+  `Shell` takes `initialView` / `initialSettingsPage` (Switch to desktop mode lands on the same
+  view) and has the `tv-mode-button` (look not designed yet: TODO(design) in Shell.svelte).
+  `uiMode.ts` maps views ↔ tabs and Settings pages ↔ TV panes (`TV_PANES`, `TV_PANE_LABELS`; TV
+  mode's own pane leaves to Appearance). TvShell owns the start tab (`uiMode.tvStart`, else the
+  shared `initialView` rule), the theme override (`setTvThemeActive`: Follow system → dark), the
+  clock, the input router and `registerNavigation` (toast actions switch tabs).
+- **Screens.** `nav.svelte.ts` holds the tab, `pane`, the page stack, `layers` (empty until P6),
+  `startup`, `selMode`, per-screen focus memory (`data-k`) and scroll (`data-scroll` keys).
+  `showTab(tab)`, `pushPage({title, component, props})` (breadcrumb uses `title`), `popPage()`,
+  `setPane(pane)`, `setStartup(on)`. TvStage mounts one screen at a time inside `ScreenFrame`; a
+  screen registers hooks with `useScreen({...})` (`screen.svelte.ts`):
+  `hints(focusedEl) → Hint[]` (after A and X), `x`, `y`, `lt`, `rt`, `lb`, `rb` (a page's LB / RB, e.g.
+  Details tabs, win over tab switching), `main() → {disabled, why?, press} | null` (Start presses it
+  or toasts `why`; the hint bar then drops "Menu"), `arrive()` (after the screen is shown and focus
+  restored: P7's Discover focus, item 104). `registerMenu(fn)` / `registerView(fn)` are the hooks P6
+  fills for Start and View. B rules are generic (`input/press.ts`): overlay (P6 `closeLayer` TODO),
+  page pop, select mode (P13 TODO), grid/pane → rail.
+- **Items.** `use:tvf={{a, x, adjust, focus}}` (`focus/actions.ts`) makes an element focusable;
+  never give a TV item its own onclick (a click focuses and presses A). Markup attributes:
+  `data-k` (stable key), `data-al` (A hint, default "Select"), `data-xl` (X hint), `data-why` +
+  `aria-disabled="true"` (A / click toasts why; use aria-disabled, not disabled), `data-autofocus`,
+  `data-adj` (Left/Right call `adjust`), `data-read` (Up/Down scroll the `data-read-area` first,
+  P9), `data-cover`, `data-rail-open` (Right = A on rail rows). Areas: `data-nav="h|v|grid"`,
+  `data-enter="sel|first"`, `data-edge` (Discover's rows area), `data-up|down|left|right="<data-k>"`
+  links, `data-rail` (B target; its `.sel[data-f]` row), `data-rail-target` (what A/Right on a rail
+  row enters), `data-track` (sideways row: 1.2rem edge), `data-shelves` + `data-shelf` (Discover:
+  shelf title to top), `data-scroll="<key>"` (scroll kept per screen), `data-read-area` (Details
+  tab body: right stick / PgUp/PgDn target). Focus is the `.f` class; the engine is pure
+  (`focus/engine.ts`, `reveal.ts`, `grid.ts`), `focus/dom.ts` measures. A redraw keeps focus by key,
+  else the enabled item in its place inside the nearest `[id]` box (give panels ids).
+  One deliberate extension of the prototype: a list's end carry-on treats a rail row as spanning
+  its whole rail, so Left from any Discover shelf reaches the rail.
+- **Primitives (`lib/tv/ui/`).** `TvButton {k, primary, danger, disabled, why, al, xl, autofocus,
+  glyph, testId, onA, onX}`, `TvCover {k, title, cover, installed, update, missing, platform, queue,
+  picked, label, width, art (BackgroundSubject → background follows focus), quick (X label), onA,
+  onX}`, `TvRail {label, scroll}` + `TvRailRow {k, selected, count, sub, fold (folder header open
+  state), xl, onSelect (on focus), onToggle, onX}`, `TvGrid {id, scroll}` (not windowed yet:
+  TODO(P7/P8) use `focus/grid.ts`), `TvTrack {scroll, up, down}`, `TvRows {rows: Row[]}` over
+  `rows.ts` (switch | choice | slider | text | action | info), `TvPage {title, sub, scroll}`,
+  `TvChip {glyph, warn, k+onA for focusable}`, `TvSwitch`, `TvSlider`, `TvIcon {name, px}` (rem-sized
+  icon), `glyphs/Glyph {button}` (prompt set from `controllers.promptSet`; `data-set` attribute).
+- **Input.** `input/router.svelte.ts` (`controllers.pads|current|name|assignment|promptSet`,
+  `setTypingRepeat(fn)` for P6's keyboard) feeds `handlePress` from the `gamepad` event (per-pad
+  `Repeater` + `Causes`, assignment per pad key), the keyboard (Q/E/Z/R/M/V…, held keys use the same
+  400/90 ms repeater, PgUp/PgDn scroll 70%) and the mouse (pointing focuses only after a real move;
+  click = focus + A; `data-btn` hints and `data-tab` tabs are clickable). TODO(P6): physical typing
+  into the OSK (item 74). Notices: P5 still renders the desktop `Toast` (px, bottom right) in TV mode;
+  P6 replaces it with TV cards.
+- **Interim (P12):** TvShell's startup screens are a placeholder box that offers Switch to desktop
+  mode. Settings › TV mode has only Controller and Switch to desktop mode (P10 adds the rest).
+- **e2e.** Group `tv-shell` (seed `e2e/seed/tv-shell-seed.mjs`: offline profile). `tv-*` groups get
+  `E2E_APP_ARGS=--tv`; a spec opts out with a first line `// e2e-app-args:` (wdio.conf.ts passes
+  `appArgs`). Helpers in `e2e/helpers/tv.ts` (`XBOX_PAD`, `NINTENDO_PAD`, `connectPad`, `press`,
+  `hold`/`release`, `axis`, `key`, `focused`, `waitFocused`, `hints`, `promptSet`, `waitTab`, `invoke`).
+- **Settings store.** uiSettings gained `setTvPrompts(choice)`, `setTvAssignment(key, style)` (for
+  P10's pane) and `setTvThemeActive(on)`. `BackgroundArt` takes `fadeMs` (TV: 360).
+- **Still unverified:** window geometry after TV → quit → relaunch. The container can't check it:
+  e2e builds don't register the window-state plugin (`#[cfg(not(feature = "e2e"))]` in lib.rs)
+  and Xvfb has no window manager. Check by hand on the P14 .rpm.
