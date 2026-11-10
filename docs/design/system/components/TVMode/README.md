@@ -9,6 +9,7 @@ The card is a working prototype. Click inside it first, then use the keyboard as
 | Controller | Keyboard in the preview | Does |
 | --- | --- | --- |
 | D-pad / left stick | Arrow keys | Move focus. Held, it repeats after 400 ms, then every 90 ms |
+| (held, on the on-screen keyboard) | (held) | A, X, Y, LB and RB repeat after 500 ms, 20 times a second |
 | A | Enter | Select |
 | B | Esc or Backspace | Back. From a grid or pane, B first goes to the rail; from a tab's top level, B goes Home |
 | X | X | The focused item's quick action: Play / Install on a cover, Change emulator on a system |
@@ -66,7 +67,7 @@ The Menu has a **Prototype only** section for states that need a trigger: first 
 - **Menu** (Menu button) — a panel from the right: clock, user and server, then Home, Downloads (with the active count), Notifications, Settings, Reconnect, Switch to desktop mode, Quit GRID.
 - **Lists** — every choice is a centred list with a check on the current value; group headings (Installed / Download) are not focusable.
 - **Confirmations** — a destructive action always asks first, in a dialog whose Cancel is focused. (The desktop's two-click confirm doesn't work with a controller: a double press of A would confirm by accident.)
-- **On-screen keyboard** — slides up from the bottom over the hint bar's area: the field with a caret, four rows of keys, then Shift, symbols, Space, Delete and Done. Shortcuts: X deletes, Y adds a space, LB / RB move the caret, LT is Shift, Menu is Done, B cancels. A physical keyboard types straight in, and Enter is then Done. Masked fields (tokens, passwords) show dots. Search updates the results as you type.
+- **On-screen keyboard** — slides up from the bottom over the hint bar's area: the field with a caret, four rows of keys, then Shift, symbols, Space, Delete and Done. Shortcuts: X deletes, Y adds a space, LB / RB move the caret, LT is Shift, Menu is Done, B cancels. Held typing buttons repeat like a keyboard key, after 500 ms and then 20 times a second: A on a letter, number, symbol, Space or Delete key, X (delete), Y (space) and LB / RB (caret), so a held X clears a search quickly. A held on Shift, symbols or Done doesn't repeat. A physical keyboard types straight in, and Enter is then Done. Masked fields (tokens, passwords) show dots. Search updates the results as you type.
 
 ## Startup screens
 

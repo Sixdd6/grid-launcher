@@ -1116,6 +1116,7 @@ function openOSK(o) {
 }
 function searchAll() {
   openOSK({ title: 'Search everything', kind: 'search', onDone: function (v) {
+    if (!v.trim()) return; /* Done with nothing typed just closes the keyboard. */
     var L = G.filter(function (g) { return g.t.toLowerCase().indexOf(v.toLowerCase()) >= 0; });
     push({ title: 'Search: ' + v, render: function () { return '<div class="list"><div class="list-in"><div class="panel"><h2>' + L.length + ' result' + (L.length === 1 ? '' : 's') + ' for “' + esc(v) + '”</h2><div class="grid" data-nav="grid">' + (L.map(function (g) { return cover(g, { k: 'sr', plat: true }); }).join('') || '<p class="note">Nothing matches. Try fewer letters.</p>') + '</div></div></div></div>'; } });
   } });
@@ -1416,7 +1417,10 @@ document.addEventListener('keydown', function (e) {
   if (top && top.osk && e.key === 'Enter' && top.osk.phys) { e.preventDefault(); top.type('DONE'); return; }
   if (top && top.osk && e.key === 'Backspace') { e.preventDefault(); top.type('BACK'); return; }
   var b = KEYMAP[e.key] || KEYMAP[e.key.toLowerCase()]; if (!b) return;
-  e.preventDefault(); press(b);
+  e.preventDefault();
+  /* A held keyboard key repeats only where a held controller button would. */
+  if (e.repeat && !oskRepeats(b) && !/UP|DOWN|LEFT|RIGHT/.test(b)) return;
+  press(b);
 });
 document.addEventListener('mousemove', function () { mouseMoved = true; });
 document.addEventListener('mouseover', function (e) { if (!mouseMoved) return; var f = e.target.closest('[data-f]'); if (f && scope().contains(f) && f !== cur) setFocus(f, true); });
@@ -1429,9 +1433,19 @@ document.addEventListener('click', function (e) {
 });
 
 /* Real controllers through the Gamepad API (standard mapping). Held directions
-   repeat after 400 ms, every 90 ms; the left stick works like the d-pad. */
+   repeat after 400 ms, every 90 ms; the left stick works like the d-pad. On the
+   on-screen keyboard, held typing buttons repeat like a keyboard key: after
+   500 ms, 20 times a second. That covers A on a letter, number, symbol, Space or
+   Delete key, X (delete), Y (space) and LB / RB (move the caret). A held on
+   Shift, the symbols key or Done does not repeat. */
 var PADB = { 0: 'A', 1: 'B', 2: 'X', 3: 'Y', 4: 'LB', 5: 'RB', 6: 'LT', 7: 'RT', 8: 'VIEW', 9: 'MENU', 12: 'UP', 13: 'DOWN', 14: 'LEFT', 15: 'RIGHT', 16: 'GUIDE' };
 var held = {};
+function oskRepeats(b) {
+  var top = S.layers[S.layers.length - 1]; if (!top || !top.osk) return false;
+  if (b === 'X' || b === 'Y' || b === 'LB' || b === 'RB') return true;
+  if (b !== 'A' || !cur || cur.dataset.key == null) return false;
+  return ['SHIFT', 'DONE', '@'].indexOf(cur.dataset.key) < 0;
+}
 /* The right stick scrolls what you're reading without moving focus: the Details
    tab, else the focused item's scrolling area. */
 function stickScroll(px) {
@@ -1444,7 +1458,11 @@ function pollPads() {
     var st = {}; for (var k in PADB) if (p.buttons[k] && p.buttons[k].pressed) st[PADB[k]] = 1;
     var ry = p.axes[3] || 0; if (Math.abs(ry) > .25) stickScroll(ry * 22);
     var ax = p.axes[0] || 0, ay = p.axes[1] || 0; if (ax < -.5) st.LEFT = 1; if (ax > .5) st.RIGHT = 1; if (ay < -.5) st.UP = 1; if (ay > .5) st.DOWN = 1;
-    for (var b in st) { if (!held[b]) { held[b] = now + 400; press(b); } else if (/UP|DOWN|LEFT|RIGHT/.test(b) && now > held[b]) { held[b] = now + 90; press(b); } }
+    for (var b in st) {
+      var typing = oskRepeats(b);
+      if (!held[b]) { held[b] = now + (typing ? 500 : 400); press(b); }
+      else if (now > held[b] && (typing || /UP|DOWN|LEFT|RIGHT/.test(b))) { held[b] = now + (typing ? 50 : 90); press(b); }
+    }
     for (var h in held) if (!st[h]) delete held[h];
   }
   if (any) { var name = any.id.replace(/\(.*?\)/g, '').trim() || 'Controller'; var ps = /054c|playstation|dualsense|dualshock/i.test(any.id); if (name !== S.padName || (ps ? 'ps' : 'xbox') !== S.scheme) { S.padName = name; S.scheme = ps ? 'ps' : 'xbox'; paintHints(); paintTop(); } }
