@@ -25,6 +25,7 @@ import {
   type ResolvedTheme,
   type ThemeChoice,
 } from '../theme';
+import { tvTheme } from '../tv/theme';
 
 const state = $state<{
   theme: ThemeChoice;
@@ -150,9 +151,13 @@ function readStoredTheme(): ResolvedTheme | null {
   }
 }
 
+// TV mode shows "Follow system" as dark (ruling 22); TvShell turns this on
+// while it is mounted.
+let tvThemeActive = false;
+
 /** The single writer of `<html data-theme>`. */
 function applyTheme(choice: ThemeChoice): void {
-  const attribute = themeAttribute(choice);
+  const attribute = tvThemeActive ? tvTheme(choice) : themeAttribute(choice);
   if (attribute === null) delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = attribute;
 }
@@ -326,4 +331,25 @@ export async function setCardLabels(mode: CardLabels): Promise<void> {
  */
 export async function setBackgroundEnabled(enabled: boolean): Promise<void> {
   await commitBackgroundFade(fadeForToggle(enabled, rememberedFade));
+}
+
+/** TvShell mounted (true) or unmounted (false): re-applies the theme with
+ *  TV mode's rule for "Follow system", or the desktop's. */
+export function setTvThemeActive(on: boolean): void {
+  tvThemeActive = on;
+  applyTheme(state.theme);
+}
+
+/** Settings › TV mode › Button prompts: applies at once (the prompts
+ *  redraw), then persists. */
+export async function setTvPrompts(choice: TvPrompts): Promise<void> {
+  state.tvPrompts = choice;
+  await api.setUiSettings(payload());
+}
+
+/** Settings › TV mode › Button assignments, for one controller model (its
+ *  key): applies at once, then persists. */
+export async function setTvAssignment(key: string, style: TvAssignment): Promise<void> {
+  state.tvAssignments = { ...state.tvAssignments, [key]: style };
+  await api.setUiSettings(payload());
 }

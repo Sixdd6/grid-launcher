@@ -16,6 +16,10 @@
   // visible; the outgoing slot's image is left in place until the fade has
   // had time to finish, so both images sit on screen together while the
   // opacity transitions — see `backgroundSlots.ts` for the sequencing.
+  // TV mode fades the art over 360 ms (TVMode tvmode.css `.tv-art`); the
+  // desktop keeps CROSS_FADE_MS.
+  let { fadeMs = CROSS_FADE_MS }: { fadeMs?: number } = $props();
+
   let slots = $state(initialSlotState);
 
   // Which of the subject's images is showing. Reset whenever the subject
@@ -108,7 +112,7 @@
       clearTimer = setTimeout(() => {
         clearTimer = null;
         slots = clearIfBottom(slots, toClear);
-      }, CROSS_FADE_MS);
+      }, fadeMs);
     }
 
     const key = variantKey(blur, url, size);
@@ -146,7 +150,7 @@
   data-testid="background-art"
   class="art"
   aria-hidden="true"
-  style={`--art-opacity: ${opacity}; --art-w: ${fill.width / fill.dpr}px; --art-h: ${fill.height / fill.dpr}px`}
+  style={`--art-opacity: ${opacity}; --art-w: ${fill.width / fill.dpr}px; --art-h: ${fill.height / fill.dpr}px${fadeMs === CROSS_FADE_MS ? '' : `; --art-fade: ${fadeMs}ms`}`}
 >
   <div class="layer" class:visible={slots.top === 'a'} style={slots.a ? `background-image: url("${slots.a}")` : ''}></div>
   <div class="layer" class:visible={slots.top === 'b'} style={slots.b ? `background-image: url("${slots.b}")` : ''}></div>
@@ -181,7 +185,7 @@
        instead of re-blurring ~2.4 Mpx per layer per frame for the whole
        fade. */
     opacity: 0;
-    transition: opacity var(--m-base) ease;
+    transition: opacity var(--art-fade, var(--m-base)) ease;
     /* No standing `will-change`: WebKit promotes a layer for the length of
        its opacity transition on its own, and a layer kept promoted was
        re-composited (scaled up from 960px and blended) on every scrolled
