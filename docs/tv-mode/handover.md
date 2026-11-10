@@ -422,3 +422,17 @@
   backend's message on the reason line. The unreachable dialog's two buttons wrap onto two lines in its 40rem box
   (as on the prototype, same CSS), so Down, not Right, reaches Close. The setup card unpins when its countdown
   starts (as on the prototype), so later cards can push it out before the 10 s end.
+
+## Pending for P14 (consultant, after P12)
+
+Code changes from the consultant's Phase 12 rulings (README § Consultant decisions, last four bullets):
+- `startup/choose.ts`: replace the TODO(design) with `noEmulatorWhy(label)` → "No emulator GRID installs plays
+  <System>. If you have one, add it in Settings › Systems after setup." (`NO_EMULATOR` stays the row's value);
+  `TvChooseSystems.svelte` puts it on the disabled row's `data-why`; no X on that row; test in `choose.test.ts`.
+- `startup/connectPage.ts` + `TvConnect.svelte`: while a connect runs, Connect reads "Connecting…", Connect and
+  Use without a server are disabled, `why` "Still connecting. Wait for it to finish." (A and Start).
+- `TvConnect.svelte` `paste()`: empty clipboard on a field → notice "Nothing to paste: the clipboard has no
+  text."; not on a field → "Focus a field to paste into it." (plain notices). Cover in `tv-startup-a` if cheap.
+- `notices.svelte.ts` `releaseNotice` keeps `pinned` (update its comment, `notices.svelte.test.ts`, `notices.ts`
+  header, `TvSetupCard.svelte` comment); the setup card stays pinned through its 10 s countdown. The "after P12"
+  note above about unpinning is superseded.

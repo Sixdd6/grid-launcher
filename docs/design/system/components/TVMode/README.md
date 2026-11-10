@@ -153,6 +153,16 @@ prototype, SPEC.md and the Game backups card. The user can overturn any of them.
 
 Open questions for the user (not blocking): the order and wording of RetroAchievements' Password and Log In rows (not in the prototype); a controller-only way out of TV mode from Connect; whether a controller press should reach Playing when GRID's own window is focused; whether the welcome card shows every time or only the first time.
 
+- On Choose your systems a system nothing installable plays is a dimmed, unticked row reading "No emulator
+  available", with no X; A says "No emulator GRID installs plays <System>. If you have one, add it in Settings ›
+  Systems after setup."
+- While a connect runs, Connect reads "Connecting…" and both Connect buttons are disabled; A or Start then says
+  "Still connecting. Wait for it to finish."
+- View on Connect always answers: "Pasted from the clipboard", "Nothing to paste: the clipboard has no text." or
+  "Focus a field to paste into it." (plain notices, not errors).
+- The setup card stays pinned through its 10 s countdown, so later cards go under it and never push it out; it
+  leaves only when it closes itself.
+
 ## Notes
 
 - **Opening an emulator** on its own from TV mode works, but the emulator's own window needs a mouse or its own controller support.
