@@ -17,6 +17,7 @@ The card is a working prototype. Click inside it first, then use the keyboard as
 | LT | Z | Sort (Library); Shift on the keyboard |
 | Menu (Start) | M | The Menu panel |
 | View (Back/Select) | V | Act on the newest notice that offers an action ("Open Downloads") |
+| Right stick | Page Up / Page Down | Scroll what you're reading (a Details tab, a list) without moving focus |
 
 A real controller also works in the preview, through the browser's Gamepad API. The prompts change to ✕ ○ □ △ when it is a PlayStation controller. Mouse hover and click work as well.
 
@@ -50,7 +51,7 @@ The Menu has a **Prototype only** section for states that need a trigger: first 
 
 ## Pages (pushed over a tab; B goes back)
 
-- **Details** — the cover and the last-played / emulator line on the left. On the right: title, header line, chips, then one row of buttons (Play / Install / Cancel install, Update, Game settings, Uninstall; Locate… and Remove from library for a missing game; Link to server game and Remove from library for an unlinked one), then the tabs, switched with LB / RB: **Overview** (summary, Related row, facts panel), **Media** (Screenshots and Videos rows; A opens the fullscreen viewer, LB / RB step through), **Saves** (Saves | States switch, Upload latest, a list where A opens Restore / Delete, each confirmed) and **Achievements** (when the server lists any).
+- **Details** — the cover and the last-played / emulator line on the left. On the right: title, header line, chips, then one row of buttons (Play / Install / Cancel install, Update, Game settings, Uninstall; Locate… and Remove from library for a missing game; Link to server game and Remove from library for an unlinked one), then the tabs, switched with LB / RB (switching focuses the new tab's first item, at the top of the tab; a tab with nothing to focus puts focus on the first button): **Overview** (summary, Related row, facts panel: Down from the buttons focuses the summary, and Down / Up read through a long one before moving on; Up from Related always returns to the summary; Up into the buttons scrolls the tab back to its top; the right stick scrolls the summary, Related row and facts panel together, as one page, from anywhere in Details, without moving focus), **Media** (Screenshots and Videos rows; A opens the fullscreen viewer, LB / RB step through), **Saves** (Saves | States switch, Upload latest, a list where A opens Restore / Delete, each confirmed) and **Achievements** (when the server lists any).
 - **Playing** — after Play, "Now playing" with the session time, Back to the game, and Stop game (confirmed). While a game runs, the game owns the controller and GRID ignores it. GRID listens again when the game closes, then shows the save upload notices.
 - **System** (from Settings › Systems or a Server chip) — Emulator (a list with Installed and Download groups; picking a Download one installs it), version, Update to …, RetroArch core, firmware Install, Open the emulator, Emulator settings, Remove, setup tips. **Windows** has the Proton version, the umu-run line and Reinstall.
 - **Add an emulator manually / Emulator settings** — the desktop's settings sheet as rows: which emulator, name, program (folder browser), launch options, cloud-save strategy.

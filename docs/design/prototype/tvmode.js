@@ -33,6 +33,8 @@ var G = [
   [19, 'Static Bloom', 'hsl(315 45% 38%)', 'WIN', { inst: 1, native: 1, played: 20, rel: 38 }],
   [20, 'Wren Hollow', 'hsl(120 30% 30%)', 'LINUX', { native: 1, rel: 25, added: 7 }]
 ].map(function (r) { var g = { id: r[0], t: r[1], c: r[2], p: r[3] }; for (var k in r[4]) g[k] = r[4][k]; return g; });
+/* A long summary, so the prototype shows how a description longer than the tab reads. */
+G[0].sum = SUM + '\nThe coast changes with every storm season. Towns flood and rise again on stilts, ferries reroute, and the lighthouse keepers trade rumours about the routes that still hold. Your hovercycle can be rebuilt between runs from salvage you carry home, trading top speed for grip or cargo space.\nA story mode follows the courier Mara Quell across three seasons, with choices that decide which towns survive the last storm. Time trials, a daily coastline and ghost races against friends keep the circuits fresh after the credits.\nAccessibility options include a steering assist, a slower storm clock, colour-blind palettes for hazard markers and full controller remapping.';
 var byId = function (id) { return G.filter(function (g) { return g.id === +id; })[0]; };
 
 var SYS = [
@@ -61,8 +63,8 @@ var S = { tab: 'home', pages: [], layers: [], offline: false, libRail: 'all', sr
 
 /* ------------------------------------------------------------------ glyphs */
 var GL = {
-  xbox: { A: 'A', B: 'B', X: 'X', Y: 'Y', LB: 'LB', RB: 'RB', LT: 'LT', RT: 'RT', VIEW: '⧉', MENU: '≡', GUIDE: '⌂', LS: 'L3', DPAD: '✚' },
-  ps: { A: '✕', B: '○', X: '□', Y: '△', LB: 'L1', RB: 'R1', LT: 'L2', RT: 'R2', VIEW: '⧉', MENU: '≡', GUIDE: '⌂', LS: 'L3', DPAD: '✚' }
+  xbox: { A: 'A', B: 'B', X: 'X', Y: 'Y', LB: 'LB', RB: 'RB', LT: 'LT', RT: 'RT', VIEW: '⧉', MENU: '≡', GUIDE: '⌂', LS: 'L3', RS: 'RS', DPAD: '✚' },
+  ps: { A: '✕', B: '○', X: '□', Y: '△', LB: 'L1', RB: 'R1', LT: 'L2', RT: 'R2', VIEW: '⧉', MENU: '≡', GUIDE: '⌂', LS: 'L3', RS: 'RS', DPAD: '✚' }
 };
 function scheme() { return CFG.prompts === 'auto' ? S.scheme : CFG.prompts; }
 function gl(b) { var t = GL[scheme()][b]; var round = t.length === 1; return '<span class="gl' + (round ? ' round' : '') + (scheme() === 'ps' && 'ABXY'.indexOf(b) >= 0 && b.length === 1 ? ' sh' : '') + '">' + t + '</span>'; }
@@ -115,8 +117,11 @@ function scope() { return S.layers.length ? S.layers[S.layers.length - 1].el : $
 function focusables(root) { return Array.prototype.filter.call((root || scope()).querySelectorAll('[data-f]'), function (e) { return e.offsetParent !== null || e.getClientRects().length; }); }
 function setFocus(el, noScroll) {
   if (!el) return;
+  var prev = cur;
   if (cur && cur !== el) cur.classList.remove('f');
   cur = el; el.classList.add('f');
+  /* Up from a Details tab into the buttons: the tab scrolls back to its top. */
+  var tbd = $('tbody'); if (tbd && prev && tbd.contains(prev) && el.closest('.det-r .btns')) tbd.scrollTo({ top: 0, behavior: glide() ? 'smooth' : 'auto' });
   var c = el.closest('[data-nav]'); if (c) c._last = el;
   if (!noScroll) reveal(el);
   var top = S.layers.length ? S.layers[S.layers.length - 1] : (S.pages.length ? S.pages[S.pages.length - 1] : TABS[S.tab]);
@@ -181,6 +186,9 @@ function restoreFocus(obj) {
 function rc(e) { return e.getBoundingClientRect(); }
 function move(dir) {
   var all = focusables(); if (!cur || all.indexOf(cur) < 0) { restoreFocus(); return; }
+  /* An explicit link wins over geometry: data-up / data-down on the item or a container names the data-k to go to. */
+  var link = cur.closest('[data-' + dir + ']'), to = link && scope().querySelector('[data-k="' + link.getAttribute('data-' + dir) + '"]');
+  if (to && to !== cur) { setFocus(to); return; }
   var a = rc(cur), ax = a.left + a.width / 2, ay = a.top + a.height / 2;
   var cont = cur.closest('[data-nav]'), axis = cont && cont.dataset.nav;
   var along = (axis === 'h' && (dir === 'left' || dir === 'right')) || (axis === 'v' && (dir === 'up' || dir === 'down'));
@@ -483,16 +491,25 @@ function details(g) {
         '<div class="tbody" id="tbody">' + detBody(g) + '</div></div></div>';
     },
     after: function () { hero(g); },
-    hints: function (el) { return el && el.classList.contains('prose') ? [['DPAD', 'Scroll']] : []; },
+    hints: function (el) { return el && el.classList.contains('prose') ? [['DPAD', 'Read']] : [['RS', 'Scroll']]; },
     lb: function () { detTabStep(g, -1); }, rb: function () { detTabStep(g, 1); }
   };
 }
-function detTabStep(g, d) { var tabs = ['Overview', 'Media', 'Saves'].concat(g.ach ? ['Achievements'] : []); S.detTab = tabs[(tabs.indexOf(S.detTab) + d + tabs.length) % tabs.length]; renderStage(); }
+function detTabStep(g, d) { var tabs = ['Overview', 'Media', 'Saves'].concat(g.ach ? ['Achievements'] : []); detShowTab(tabs[(tabs.indexOf(S.detTab) + d + tabs.length) % tabs.length]); }
+/* Switching a Details tab (LB / RB, or a click) focuses the tab's first item, at
+   the top of the tab; a tab with nothing to focus leaves focus where it was. */
+function detShowTab(t) {
+  S.detTab = t; renderStage();
+  var tb = $('tbody'); if (!tb) return; tb.scrollTop = 0;
+  /* Nothing to focus in the tab (Saves on an unlinked game): the first button. */
+  var first = focusables(tb)[0] || focusables(document.querySelector('.det-r .btns'))[0];
+  if (first) { INSTANT = true; setFocus(first); INSTANT = false; }
+}
 function detBody(g) {
   if (S.detTab === 'Overview') {
     var rel = G.filter(function (x) { return x.p === g.p && x.id !== g.id; }).slice(0, 6);
-    return '<div class="ov"><div><div class="prose" data-f data-k="prose" data-al="Read" tabindex="-1">' + SUM.split('\n').map(function (p) { return '<p>' + esc(p) + '</p>'; }).join('') + '</div>' +
-      (rel.length ? '<div class="sub-h">Related<span>' + rel.length + '</span></div><div class="track" data-nav="h">' + rel.map(function (x) { return cover(x, { k: 'rel' }); }).join('') + '</div>' : '') + '</div>' +
+    return '<div class="ov"><div><div class="prose" data-f data-k="prose" data-al="Read" tabindex="-1">' + (g.sum || SUM).split('\n').map(function (p) { return '<p>' + esc(p) + '</p>'; }).join('') + '</div>' +
+      (rel.length ? '<div class="sub-h">Related<span>' + rel.length + '</span></div><div class="track" data-nav="h" data-up="prose">' + rel.map(function (x) { return cover(x, { k: 'rel' }); }).join('') + '</div>' : '') + '</div>' +
       '<dl class="facts"><div><dt>Developer</dt><dd>Lighthouse Works</dd></div><div><dt>Release</dt><dd>' + relDate(g.rel) + '</dd></div><div><dt>Genres</dt><dd>Racing, Adventure</dd></div><div><dt>Players</dt><dd>1–2</dd></div><div><dt>Size</dt><dd>1.2 GB</dd></div></dl></div>';
   }
   if (S.detTab === 'Media') {
@@ -940,7 +957,16 @@ function press(b) {
   if (top && top.el.classList.contains('viewer')) { if (b === 'B') return closeLayer(); if ((b === 'LB' || b === 'LEFT') && top.lb) return top.lb(); if ((b === 'RB' || b === 'RIGHT') && top.rb) return top.rb(); return; }
   if (b === 'UP' || b === 'DOWN' || b === 'LEFT' || b === 'RIGHT') {
     if (cur && cur.dataset.adj && (b === 'LEFT' || b === 'RIGHT') && !top) { srowAdj(cur, b === 'LEFT' ? -1 : 1); return; }
-    if (cur && cur.classList.contains('prose') && (b === 'UP' || b === 'DOWN')) { var tb = $('tbody'); if (tb) { var before = tb.scrollTop; tb.scrollBy({ top: b === 'DOWN' ? 120 : -120 }); if (tb.scrollTop !== before || b === 'DOWN' && tb.scrollTop + tb.clientHeight < tb.scrollHeight - 2) return; } }
+    /* The focused description reads like a page: Down / Up scroll it while more of
+       it is out of view that way, then move on (Related below, the buttons above). */
+    if (cur && cur.classList.contains('prose') && (b === 'UP' || b === 'DOWN')) {
+      var tb = $('tbody');
+      if (tb) {
+        var pr = cur.getBoundingClientRect(), vr = tb.getBoundingClientRect(), rem = remPx(), step = 6 * rem, how = glide() ? 'smooth' : 'auto';
+        if (b === 'DOWN' && pr.bottom > vr.bottom + 1) { tb.scrollBy({ top: Math.min(step, pr.bottom - vr.bottom + 1.2 * rem), behavior: how }); return; }
+        if (b === 'UP' && pr.top < vr.top - 1) { tb.scrollBy({ top: -Math.min(step, vr.top - pr.top + 1.2 * rem), behavior: how }); return; }
+      }
+    }
     return move(b.toLowerCase());
   }
   if (b === 'A') {
@@ -982,6 +1008,7 @@ function press(b) {
 
 var KEYMAP = { ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', Enter: 'A', ' ': 'A', Escape: 'B', Backspace: 'B', x: 'X', y: 'Y', q: 'LB', e: 'RB', z: 'LT', m: 'MENU', v: 'VIEW', g: 'GUIDE' };
 document.addEventListener('keydown', function (e) {
+  if (e.key === 'PageDown' || e.key === 'PageUp') { e.preventDefault(); var v = $('tbody') || (cur && vScroller(cur)); if (v) v.scrollBy({ top: (e.key === 'PageDown' ? 1 : -1) * v.clientHeight * .7, behavior: glide() ? 'smooth' : 'auto' }); return; }
   var top = S.layers[S.layers.length - 1];
   if (top && top.osk && e.key.length === 1 && !e.ctrlKey && !e.metaKey) { e.preventDefault(); top.osk.phys = true; top.type(e.key); return; }
   if (top && top.osk && e.key === 'Enter' && top.osk.phys) { e.preventDefault(); top.type('DONE'); return; }
@@ -994,7 +1021,7 @@ document.addEventListener('mouseover', function (e) { if (!mouseMoved) return; v
 document.addEventListener('click', function (e) {
   var h = e.target.closest('[data-btn]'); if (h) return press(h.dataset.btn);
   var t = e.target.closest('[data-tab]'); if (t && !S.pages.length && t.classList.contains('tab')) { S.tab = t.dataset.tab; return render(); }
-  var dt = e.target.closest('[data-dtab]'); if (dt) { S.detTab = dt.dataset.dtab; renderStage(); return restoreFocus(); }
+  var dt = e.target.closest('[data-dtab]'); if (dt) return detShowTab(dt.dataset.dtab);
   if (S.desk) return press('A');
   var f = e.target.closest('[data-f]'); if (f && scope().contains(f)) { setFocus(f, true); press('A'); }
 });
@@ -1003,10 +1030,17 @@ document.addEventListener('click', function (e) {
    repeat after 400 ms, every 90 ms; the left stick works like the d-pad. */
 var PADB = { 0: 'A', 1: 'B', 2: 'X', 3: 'Y', 4: 'LB', 5: 'RB', 6: 'LT', 7: 'RT', 8: 'VIEW', 9: 'MENU', 12: 'UP', 13: 'DOWN', 14: 'LEFT', 15: 'RIGHT', 16: 'GUIDE' };
 var held = {};
+/* The right stick scrolls what you're reading without moving focus: the Details
+   tab, else the focused item's scrolling area. */
+function stickScroll(px) {
+  if (S.layers.length) return;
+  var v = $('tbody') || (cur && vScroller(cur)); if (v) v.scrollBy({ top: px });
+}
 function pollPads() {
   var pads = navigator.getGamepads ? navigator.getGamepads() : [], now = performance.now(), any = null;
   for (var i = 0; i < pads.length; i++) { var p = pads[i]; if (!p) continue; any = p;
     var st = {}; for (var k in PADB) if (p.buttons[k] && p.buttons[k].pressed) st[PADB[k]] = 1;
+    var ry = p.axes[3] || 0; if (Math.abs(ry) > .25) stickScroll(ry * 22);
     var ax = p.axes[0] || 0, ay = p.axes[1] || 0; if (ax < -.5) st.LEFT = 1; if (ax > .5) st.RIGHT = 1; if (ay < -.5) st.UP = 1; if (ay > .5) st.DOWN = 1;
     for (var b in st) { if (!held[b]) { held[b] = now + 400; press(b); } else if (/UP|DOWN|LEFT|RIGHT/.test(b) && now > held[b]) { held[b] = now + 90; press(b); } }
     for (var h in held) if (!st[h]) delete held[h];
