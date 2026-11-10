@@ -82,7 +82,7 @@ The box always fits between the top bar and the hint bar, so the screen itself n
 
 TV mode carries the whole Game backups design (the Game backups card, built on `feat/game-backups`): the same drives, words, rules, states and notifications. Only the controls change for a controller. Everything not listed here matches that card.
 
-- **Library › Backup drives:** one row per connected, set-up drive, with its game count. Its grid is the drive's games with platform tags (search and sort as usual); the header reads "Couch kit", "8 games · 13.3 GB · on SAMSUNG T7", with the emulators and firmware chips. X on a cover is Play when the game is installed, else **Install from drive**, which copies it from the drive with no network ("Copying from SAMSUNG T7" in Downloads) and brings the system's emulator and firmware from the drive when the system has none.
+- **Library › Backup drives:** one row per connected, set-up drive, with its game count. Its grid is the drive's games with platform tags (search and sort as usual); the header reads "Couch kit", "8 games · 13.3 GB · on SAMSUNG T7", with the emulators and firmware chips. X on a cover is Play when the game is installed, else **Install from drive**, which copies it from the drive with no network ("Copying from SAMSUNG T7" in Downloads). When the game's system has no emulator, it also brings one from the drive, but only an emulator that plays that platform (the app's `platform-emulators.json` and emulator profiles decide); with none on the drive, the notice says the drive has no emulator for that system.
 - **Details from a drive:** "From Couch kit" leads the header line; the buttons are Install from drive (or Play) and **Remove from drive…** (confirmed); the left column says where the copy is.
 - **Details › Backup to drive…** sits after Uninstall; the left column adds "On Couch kit" when a connected drive already has the game. Offline it is disabled, and A on it says "Backing up needs a server."
 - **Select mode (RT)** on the Library and Server grids, the desktop's Select / Done. A picks a cover instead of opening Details (a filled check top left, a primary ring, slightly smaller), X selects all or clears, Y acts, RT or B leaves. A bar pinned under the grid reads "3 selected · 4.2 GB" with those buttons. Y is **Backup to drive…**; on a drive it opens a list with Install N games and Remove N from drive…. The desktop's Shift-click range has no controller equivalent: Select all covers it.
@@ -95,12 +95,12 @@ TV mode carries the whole Game backups design (the Game backups card, built on `
 
 ## Decided
 
+- **Entering and leaving:** a TV button in the desktop top bar opens TV mode, and so does starting GRID with `--tv`. Menu › Switch to desktop mode (also in Settings › TV mode) leaves. No other way in or out (2026-11-10).
 - **RT is select mode** on the Library and Server grids (2026-11-10).
 - **Start presses a page's main button** where a page has one: Skip for now on Choose your systems, Backup N games on the Backup page, Set up for GRID; while the button is disabled, Start says why (2026-11-10). Elsewhere Start opens the Menu.
 
 ## Proposed defaults (to confirm)
 
-- **Entering and leaving:** a TV button in the desktop top bar, F11, and a `--tv` start option; Settings › TV mode › Open GRID in (the mode it was closed in / TV mode / desktop mode). Menu › Switch to desktop mode leaves.
 - **Desktop-only settings:** card size, game labels and card display stay desktop-only; TV mode has one cover size.
 - **Opening an emulator** on its own from TV mode works, but the emulator's own window needs a mouse or its own controller support.
 

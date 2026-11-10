@@ -47,6 +47,12 @@ var SYS = [
   { id: 'WIN', name: 'Windows', emu: 'GE-Proton9-20', status: 'Ready', proton: 1 }
 ];
 var EMUS = { SAT: [['Ymir', 'Download', 1], ['Mednafen', 'Download'], ['RetroArch · Beetle Saturn', 'Download']], GC: [['Dolphin', 'Installed', 1]], N64: [['RetroArch', 'Installed'], ['Rosalie\'s Mupen GUI', 'Download', 1]], PS: [['DuckStation', 'Installed', 1], ['RetroArch · Beetle PSX', 'Installed']], PS2: [['PCSX2', 'Installed', 1]], SNES: [['RetroArch', 'Installed', 1], ['bsnes', 'Download']], WIN: [['GE-Proton9-20', 'Installed'], ['Proton 9.0 (Steam)', 'Installed'], ['System Wine', 'Installed'], ['GE-Proton (latest)', 'Download', 1]] };
+/* Each system's emulators come only from its own list, recommended first: the
+   prototype's stand-in for the app's platform-emulators.json and emulator
+   profiles. A RetroArch entry ("RetroArch · Beetle Saturn") counts as RetroArch. */
+function recFor(id) { var L = EMUS[id] || []; return ((L.filter(function (e) { return e[2]; })[0] || L[0]) || [null])[0]; }
+function playsOn(emu, id) { return (EMUS[id] || []).some(function (e) { return e[0].split(' · ')[0] === emu; }); }
+function driveEmuFor(dv, id) { return dv.emus.filter(function (e) { return playsOn(e, id); })[0] || null; }
 var sysOf = function (p) { return SYS.filter(function (s) { return s.id === p; })[0]; };
 
 var DL = [
@@ -67,7 +73,7 @@ var driveOf = function (id) { return DRIVES.filter(function (d) { return d.id ==
 var readyDrives = function () { return DRIVES.filter(function (d) { return d.connected && d.status === 'ready'; }); };
 var onDrive = function (g) { return readyDrives().filter(function (d) { return d.games.indexOf(g.id) >= 0; })[0]; };
 var CFG = { theme: 'dark', art: true, fade: 45, blur: 40, hw: true, restore: true, upload: true, skipNewer: true, delay: 10, retain: 10,
-  raUser: 'sam_plays', raToken: '', tvStart: 'last', prompts: 'auto', bkFirmware: true, url: 'https://romm.home.lan', user: 'sam', lib: '/home/sam/Games/GRID', exitBtn: 'menu' };
+  raUser: 'sam_plays', raToken: '', prompts: 'auto', bkFirmware: true, url: 'https://romm.home.lan', user: 'sam', lib: '/home/sam/Games/GRID', exitBtn: 'menu' };
 
 var S = { tab: 'home', pages: [], layers: [], offline: false, libRail: 'all', srvRail: 'PS', libQ: '', srvQ: '', libSort: 'Recently played', detTab: 'Overview', saveKind: 'Saves', notes: [], scheme: 'xbox', padName: '' };
 
@@ -479,10 +485,9 @@ function paneRows(id) {
     { type: 'action', label: 'Save', sub: 'Sets the login in every emulator that supports it', fn: function () { toast('RetroAchievements login saved', { s: 'Sent to 3 emulators and your server account' }); } },
     { type: 'action', label: 'Clear', danger: 1, fn: function () { CFG.raToken = ''; setPaint(); toast('RetroAchievements login cleared'); } }];
   if (id === 'tv') return [
-    { type: 'choice', key: 'tvStart', label: 'Open GRID in', opts: [['last', 'The mode it was closed in'], ['tv', 'TV mode'], ['desktop', 'Desktop mode']] },
     { type: 'choice', key: 'prompts', label: 'Button prompts', opts: [['auto', 'Match my controller'], ['xbox', 'A B X Y'], ['ps', '✕ ○ □ △']] },
     { type: 'info', label: 'Controller', value: S.padName || 'None found · the keyboard works too' },
-    { type: 'action', label: 'Switch to desktop mode', sub: 'Also from the Menu, or F11 / the TV button on the desktop', fn: toDesktop },
+    { type: 'action', label: 'Switch to desktop mode', sub: 'Also in the Menu. To come back: the TV button in the desktop top bar, or start GRID with --tv', fn: toDesktop },
     { type: 'action', label: 'Quit GRID', fn: quitBox }];
   if (id === 'updates') return [
     { type: 'info', label: 'Version', value: 'GRID 0.9.12' }, { type: 'info', label: 'Last checked', value: 'Today at 09:14' },
@@ -650,7 +655,7 @@ function systemPage(s) {
         if (s.fw === 'installed') rows.push({ type: 'info', label: s.name + ' firmware', value: 'Installed' });
         rows.push({ type: 'action', label: 'Open ' + s.emu, sub: 'Opens the emulator on its own to change its settings. Switches to desktop mode while it runs.', fn: function () { toast('Opening ' + s.emu + '…'); } });
         rows.push({ type: 'action', label: 'Emulator settings', sub: 'Program, launch options, cloud save folders', fn: function () { push(emuForm(s.emu)); } });
-        rows.push({ type: 'action', label: 'Remove ' + s.emu, danger: 1, fn: function () { confirmBox({ title: 'Remove ' + s.emu + '?', body: 'Games and saves stay. ' + s.name + ' games can\'t start until another emulator is picked.', ok: 'Remove', danger: 1, fn: function () { toast(s.emu + ' removed'); s.emu = null; s.status = 'No emulator'; s.rec = s.rec || 'DuckStation'; pop(); } }); } });
+        rows.push({ type: 'action', label: 'Remove ' + s.emu, danger: 1, fn: function () { confirmBox({ title: 'Remove ' + s.emu + '?', body: 'Games and saves stay. ' + s.name + ' games can\'t start until another emulator is picked.', ok: 'Remove', danger: 1, fn: function () { toast(s.emu + ' removed'); s.emu = null; s.status = 'No emulator'; s.rec = recFor(s.id); pop(); } }); } });
         rows.push({ type: 'info', label: 'Setup tips', value: 'Map your controller once in ' + s.emu + '; GRID keeps it.' });
       }
       this._rows = rows;
@@ -787,7 +792,7 @@ function confirmBox(o) {
   openLayer({ html: '<div class="dialog" role="alertdialog"><h2>' + esc(o.title) + '</h2><p>' + esc(o.body) + '</p><div class="btns" data-nav="h"><button class="btn" data-f data-autofocus data-cl="1">Cancel</button><button class="btn ' + (o.danger ? 'dng' : 'pri') + '" data-f data-ok="1">' + esc(o.ok) + '</button></div></div>', ok: o.fn });
 }
 function quitBox() { confirmBox({ title: 'Quit GRID?', body: 'Downloads in progress pause and resume the next time GRID starts.', ok: 'Quit', fn: function () { $('desk').hidden = false; $('desk').innerHTML = '<div class="box"><h1>GRID has quit</h1><p class="muted">Prototype: press A to start it again.</p></div>'; S.desk = true; } }); }
-function toDesktop() { S.desk = true; $('desk').hidden = false; $('desk').innerHTML = '<div class="box"><h1>Desktop mode</h1><p class="muted">The desktop window opens here, at its last size, on the same view. Its top bar gains a TV button (and F11) to come back.</p><p class="muted">Prototype: press A or click to return to TV mode.</p></div>'; }
+function toDesktop() { S.desk = true; $('desk').hidden = false; $('desk').innerHTML = '<div class="box"><h1>Desktop mode</h1><p class="muted">The desktop window opens here, on the same view. Its top bar has a TV button that opens TV mode again; starting GRID with <code>--tv</code> opens straight into TV mode.</p><p class="muted">Prototype: press A or click to return to TV mode.</p></div>'; }
 
 /* On-screen keyboard. X deletes, Y adds a space, LB / RB move the caret, LT is
    Shift, Menu is Done, B cancels. A physical keyboard types straight in. */
@@ -1176,8 +1181,11 @@ function backupRowDone(a) {
 }
 function installFromDrive(g, dv, quiet) {
   var s = sysOf(g.p), active = DL.some(function (d) { return d.st === 'active'; });
-  DL.push({ id: 'i' + Date.now() + '-' + g.id, gid: g.id, t: g.t, p: g.p, st: active ? 'queued' : 'active', pct: 0, kind: '', from: dv.label });
-  if (!quiet) toast(g.t + ' added to download queue', { s: 'Copying from ' + dv.label + (!g.native && s && !s.emu ? ' · ' + s.rec + ' from ' + dv.name + ' installs with it' : ''), act: ['Open Downloads', function () { S.pages = []; S.tab = 'downloads'; render(); }] });
+  /* The drive brings the system's emulator only when the system has none and the
+     drive has one that plays this platform. */
+  var emu = !g.native && s && !s.emu ? driveEmuFor(dv, g.p) : null;
+  DL.push({ id: 'i' + Date.now() + '-' + g.id, gid: g.id, t: g.t, p: g.p, st: active ? 'queued' : 'active', pct: 0, kind: '', from: dv.label, driveEmu: emu });
+  if (!quiet) toast(g.t + ' added to download queue', { s: 'Copying from ' + dv.label + (emu ? ' · ' + emu + ' from ' + dv.name + ' installs with it' : !g.native && s && !s.emu ? ' · ' + dv.name + ' has no emulator for ' + s.name : ''), act: ['Open Downloads', function () { S.pages = []; S.tab = 'downloads'; render(); }] });
   repaint();
 }
 /* Open the Library on a drive: the drive's rail row is focused, so the grid shows
@@ -1302,7 +1310,7 @@ setInterval(function () {
   var a = DL.filter(function (d) { return d.st === 'active'; })[0]; if (!a) return;
   a.pct = Math.min(100, a.pct + 3 + Math.floor(Math.random() * 4));
   if (a.pct >= 100 && a.kind === 'Backup') { backupRowDone(a); advanceQueue(); }
-  else if (a.pct >= 100) { a.st = 'done'; a.line = a.kind === 'Update' ? 'Updated' : a.kind === 'Library' ? 'Moved' : a.from ? 'Installed from ' + a.from : 'Installed · 1.2 GB'; var g = byId(a.gid); if (g) { g.inst = 1; var sy = sysOf(g.p); if (a.from && sy && !sy.emu) { sy.emu = sy.rec; sy.status = 'Ready'; } } toast(a.kind === 'Library' ? 'Library moved' : a.t + (a.kind === 'Update' ? ' updated' : ' installed')); advanceQueue(); }
+  else if (a.pct >= 100) { a.st = 'done'; a.line = a.kind === 'Update' ? 'Updated' : a.kind === 'Library' ? 'Moved' : a.from ? 'Installed from ' + a.from : 'Installed · 1.2 GB'; var g = byId(a.gid); if (g) { g.inst = 1; var sy = sysOf(g.p); if (a.driveEmu && sy && !sy.emu && playsOn(a.driveEmu, g.p)) { sy.emu = a.driveEmu; sy.status = sy.fw === 'needed' ? 'Firmware needed' : 'Ready'; toast(a.driveEmu + ' from ' + a.from + ' is now the ' + sy.name + ' emulator'); } } toast(a.kind === 'Library' ? 'Library moved' : a.t + (a.kind === 'Update' ? ' updated' : ' installed')); advanceQueue(); }
   /* A finished install changes the game everywhere it shows (the progress tag goes,
      the installed dot comes, the next queued game starts), so the screen redraws,
      keeping focus and scroll; under an open overlay it redraws when that closes.
