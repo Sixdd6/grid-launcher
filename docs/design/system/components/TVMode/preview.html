@@ -711,12 +711,19 @@ TABS.server = {
   render: function () {
     if (S.offline) return '<div class="list"><div class="list-in"><div class="panel empty"><h2>Can\'t reach your server</h2>' + esc(CFG.url) + ' isn\'t answering. Your installed games still play from the Library.<div class="btns" style="margin-top:1.4rem"><button class="btn pri" data-f data-a="retry">Try again</button><button class="btn" data-f data-a="gotab" data-tab="library">Open Library</button></div></div></div></div>';
     var plats = Object.keys(PLAT);
-    return '<div class="split"><nav class="rail" data-nav="v"><h3>PLATFORMS</h3>' + plats.map(function (p) { return railItem(p, PLAT[p], G.filter(function (g) { return g.p === p; }).length * 12, S.srvRail === p, 'srv'); }).join('') + '</nav><div class="main"><div class="vh" id="srv-h"></div><div class="scroll"><div class="grid" id="srv-grid" data-nav="grid" data-enter="first"></div></div></div></div>';
+    return '<div class="split"><nav class="rail" data-nav="v"><h3>PLATFORMS</h3>' + plats.map(function (p) { return railItem(p, PLAT[p], G.filter(function (g) { return g.p === p; }).length, S.srvRail === p, 'srv'); }).join('') + '</nav><div class="main"><div class="vh" id="srv-h"></div><div class="scroll"><div class="grid" id="srv-grid" data-nav="grid" data-enter="first"></div></div></div></div>';
   },
   after: function () { if (!S.offline) srvPaint(); },
   hints: function () { return S.offline ? [] : [['Y', 'Search']]; },
   y: function () { if (S.offline) return; openOSK({ title: 'Search ' + PLAT[S.srvRail], value: S.srvQ, kind: 'search', onInput: function (v) { S.srvQ = v; srvPaint(); }, onDone: function (v) { S.srvQ = v; srvPaint(); } }); }
 };
+/* The header counts the platform's games and how many are installed; while a search
+   narrows the grid it says how many of them match. Always the numbers the grid shows. */
+function srvCount(p, shown) {
+  var all = G.filter(function (g) { return g.p === p; }), inst = all.filter(function (g) { return g.inst; }).length;
+  var games = all.length + ' game' + (all.length === 1 ? '' : 's');
+  return (S.srvQ ? shown.length + ' of ' + games + ' match' : games) + ' · ' + inst + ' installed';
+}
 function srvPaint() {
   var p = S.srvRail, L = G.filter(function (g) { return g.p === p && (!S.srvQ || g.t.toLowerCase().indexOf(S.srvQ.toLowerCase()) >= 0); }), s = sysOf(p), nat = p === 'WIN' || p === 'LINUX';
   var chips = '';
@@ -725,7 +732,7 @@ function srvPaint() {
     chips = '<button class="chip' + (s.emu ? '' : ' warn') + '" data-f data-k="ch-emu" data-a="system" data-id="' + p + '" data-al="Open in Systems">' + (s.emu ? 'Emulator: <b>' + s.emu + '</b>' : 'No default emulator') + '</button>' +
       (s.fw === 'none' ? '<span class="chip">' + fw + '</span>' : '<button class="chip" data-f data-k="ch-fw" data-a="system" data-id="' + p + '" data-al="Open in Systems">' + fw + '</button>');
   }
-  $('srv-h').innerHTML = '<h1>' + PLAT[p] + '</h1><span class="cnt">' + L.length * 12 + ' games · ' + L.filter(function (g) { return g.inst; }).length + ' installed</span>' + chips + (S.srvQ ? '<span class="chip">Search: <b>' + esc(S.srvQ) + '</b></span>' : '') + '<span class="sp"></span><span class="chip">' + gl('Y') + ' Search</span>';
+  $('srv-h').innerHTML = '<h1>' + PLAT[p] + '</h1><span class="cnt">' + srvCount(p, L) + '</span>' + chips + (S.srvQ ? '<span class="chip">Search: <b>' + esc(S.srvQ) + '</b></span>' : '') + '<span class="sp"></span><span class="chip">' + gl('Y') + ' Search</span>';
   $('srv-grid').innerHTML = L.length ? L.map(function (g) { return cover(g, { k: 'sg' }); }).join('') : '<div class="empty"><h2>No games match “' + esc(S.srvQ) + '”</h2></div>';
 }
 
@@ -1042,7 +1049,7 @@ function choosePage() {
     title: 'Choose your systems', render: function () {
       var n = Object.keys(pick).filter(function (k) { return pick[k].on; }).length;
       return '<div class="start"><div class="start-box wide"><h1>Choose your systems</h1><p class="sub">Tick the systems you want to play. GRID installs the recommended emulator for each. ' + gl('X') + ' changes the emulator; ' + gl('MENU') + ' skips this step. You can change this later in Settings › Systems.</p><div class="start-body" data-nav="v">' +
-        SYS.map(function (s) { var p = pick[s.id]; return '<div class="srow" data-f data-k="ch-' + s.id + '" data-a="chTick" data-id="' + s.id + '" data-al="' + (p.on ? 'Untick' : 'Tick') + '" data-xl="Change emulator" data-xa="chEmu"><span class="sw' + (p.on ? ' on' : '') + '"></span><div class="lab"><div class="t">' + s.name + '</div><div class="s">' + (s.id === 'WIN' ? 'Proton for Windows games' : (G.filter(function (g) { return g.p === s.id; }).length * 12) + ' games') + '</div></div><div class="val">' + esc(p.emu) + '</div></div>'; }).join('') +
+        SYS.map(function (s) { var p = pick[s.id]; return '<div class="srow" data-f data-k="ch-' + s.id + '" data-a="chTick" data-id="' + s.id + '" data-al="' + (p.on ? 'Untick' : 'Tick') + '" data-xl="Change emulator" data-xa="chEmu"><span class="sw' + (p.on ? ' on' : '') + '"></span><div class="lab"><div class="t">' + s.name + '</div><div class="s">' + (s.id === 'WIN' ? 'Proton for Windows games' : (function (n) { return n + ' game' + (n === 1 ? '' : 's'); })(G.filter(function (g) { return g.p === s.id; }).length)) + '</div></div><div class="val">' + esc(p.emu) + '</div></div>'; }).join('') +
         '</div><div class="btns start-foot" data-nav="h"><button class="btn pri" data-f data-k="ch-go" data-a="chGo"' + (n ? '' : ' disabled') + '>' + (n ? 'Install ' + n + ' emulator' + (n === 1 ? '' : 's') : 'Install emulators') + '</button><button class="btn" data-f data-k="ch-skip" data-a="chSkip">' + gl('MENU') + 'Skip for now</button></div></div></div>';
     },
     pick: pick,
