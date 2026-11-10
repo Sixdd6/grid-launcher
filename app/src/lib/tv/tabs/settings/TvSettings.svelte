@@ -26,7 +26,7 @@
   } from '../../../stores/uiSettings.svelte';
   import { leaveTv } from '../../../stores/uiMode.svelte';
   import { LibraryChange } from '../../../settings/libraryChange.svelte';
-  import { clearRaCredentials, fetchRaStatus, saveRaToken } from '../../../settings/raActions';
+  import { clearRaCredentials, fetchRaStatus, raLogin, saveRaToken } from '../../../settings/raActions';
   import { SKIPPED_TOAST_MS, skippedRemovalText } from '../../../uninstallSkips';
   import { TV_PANES, TV_PANE_LABELS, type TvPane } from '../../../uiMode';
   import { openFolderBrowser } from '../../gameActions';
@@ -58,7 +58,7 @@
     moveStartedNotice,
     refusalNotice,
   } from './panes/library';
-  import { RA_SAVED, raCanSave, raRows } from './panes/ra';
+  import { RA_SAVED, raCanLogin, raCanSave, raRows } from './panes/ra';
   import { tvRows } from './panes/tv';
   import { releaseName, UPDATE_DISMISSED, updatesRows } from './panes/updates';
 
@@ -205,17 +205,22 @@
     });
   }
 
-  // ---- RetroAchievements: typed values stay here until Save. The token is
-  // a plain (non-reactive) local, never shown, logged or put in a row.
+  // ---- RetroAchievements: typed values stay here until Save or Log In. The
+  // token and the password are plain (non-reactive) locals, never shown,
+  // logged or put in a row.
   let raStatus = $state<RaStatus | null>(null);
   let raUser = $state<string | null>(null);
   let raToken = '';
   let raTokenTyped = $state(false);
+  let raPassword = '';
+  let raPasswordTyped = $state(false);
   let raBusy = false;
   function forgetRaTyping() {
     raUser = null;
     raToken = '';
     raTokenTyped = false;
+    raPassword = '';
+    raPasswordTyped = false;
   }
   $effect(() => {
     if (nav.pane !== 'retroachievements') {
@@ -239,6 +244,29 @@
       const line = await saveRaToken(raUsername, token);
       pushToast(RA_SAVED, 'success', undefined, { sub: line });
       raUser = null;
+      raStatus = await fetchRaStatus();
+    } catch (err) {
+      fail(err);
+    } finally {
+      raBusy = false;
+    }
+  }
+
+  /** Log In: the password is traded for a token (the desktop's second form).
+   *  The password is blanked before the call returns; the cards are raLogin's. */
+  async function raLoginNow() {
+    if (raBusy || !raCanLogin(raUsername, raPassword)) return;
+    raBusy = true;
+    const password = raPassword;
+    raPassword = '';
+    raPasswordTyped = false;
+    try {
+      const result = await raLogin(raUsername, password);
+      if (result.kind === 'ok') {
+        raToken = '';
+        raTokenTyped = false;
+        raUser = null;
+      }
       raStatus = await fetchRaStatus();
     } catch (err) {
       fail(err);
@@ -350,7 +378,14 @@
         return libraryRows({ path: settingsState.libPath, move: libraryMove.status }, changeLibrary);
       case 'retroachievements':
         return raRows(
-          { username: raUsername, tokenTyped: raTokenTyped, tokenPresent: raStatus?.token_present ?? false, canSave: raCanSave(raUsername, raTokenTyped ? 'x' : '') },
+          {
+            username: raUsername,
+            tokenTyped: raTokenTyped,
+            tokenPresent: raStatus?.token_present ?? false,
+            canSave: raCanSave(raUsername, raTokenTyped ? 'x' : ''),
+            passwordTyped: raPasswordTyped,
+            canLogin: raCanLogin(raUsername, raPasswordTyped ? 'x' : ''),
+          },
           {
             editUsername: () => void openKeyboard({ title: 'Username', value: raUsername, onDone: (v) => (raUser = v) }),
             editToken: () =>
@@ -363,6 +398,16 @@
                 },
               }),
             save: () => void raSave(),
+            editPassword: () =>
+              void openKeyboard({
+                title: 'Password',
+                mask: true,
+                onDone: (v) => {
+                  raPassword = v;
+                  raPasswordTyped = v !== '';
+                },
+              }),
+            login: () => void raLoginNow(),
             clear: () => void raClear(),
           },
         );

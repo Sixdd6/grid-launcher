@@ -126,7 +126,7 @@ export function rowActions(e: DownloadEntry, movePhase: MovePhase | null): RowAc
 /**
  * The A hint (item 216): "Cancel" while active or queued, "Retry or dismiss"
  * when failed, "Dismiss" when finished or cancelled (tvmode.js `row`). A row
- * that can't be stopped right now says "Select" while it still opens its
+ * that can't be stopped right now says "Details" while it still opens its
  * game, and is disabled (null) with nothing to offer.
  */
 export function rowA(e: DownloadEntry, movePhase: MovePhase | null): string | null {
@@ -135,12 +135,20 @@ export function rowA(e: DownloadEntry, movePhase: MovePhase | null): string | nu
   if (e.status === 'failed' && acts.includes('retry')) return acts.includes('dismiss') ? 'Retry or dismiss' : 'Retry';
   if (acts.includes('dismiss')) return 'Dismiss';
   if (acts.includes('retry')) return 'Retry';
+  // Only "Open <title>" is left (an extracting install): "Details"
+  // (consultant decision; checklist 534).
+  if (acts.length === 1 && acts[0] === 'open') return 'Details';
   return acts.length ? 'Select' : null;
 }
 
-/** Why a row with no actions can't be pressed (shown as a notice on A). */
+export const FIRMWARE_WHY = 'Installing firmware — this step cannot be cancelled';
+export const MOVE_WHY = 'Updating paths — this step cannot be cancelled';
+
+/** Why a row with no actions can't be pressed (shown as a notice on A;
+ *  checklist 534): by kind. */
 export function rowWhy(e: DownloadEntry): string {
-  if (e.kind === 'library_move') return 'Updating paths — this step cannot be cancelled';
+  if (e.kind === 'firmware' || e.job === 'firmware') return FIRMWARE_WHY;
+  if (e.kind === 'library_move') return MOVE_WHY;
   return CANCEL_EXTRACTING;
 }
 

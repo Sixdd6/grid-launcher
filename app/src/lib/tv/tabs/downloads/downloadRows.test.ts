@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { entry } from '../../fixtures.test-util';
+import { CANCEL_EXTRACTING } from '../../pages/details';
 import {
   cancelWords,
   completedIds,
@@ -9,6 +10,7 @@ import {
   listSub,
   progress,
   rowA,
+  rowWhy,
   rowActions,
   speedText,
   statusLine,
@@ -90,10 +92,14 @@ describe('downloadRows', () => {
     // An extracting install can't be stopped: it still opens its game.
     const extracting = entry({ title: 'Kite Season', status: 'installing' });
     expect(kinds(extracting)).toEqual(['Open Kite Season']);
-    expect(rowA(extracting, null)).toBe('Select');
+    expect(rowA(extracting, null)).toBe('Details');
     // An emulator row opens no game; a live firmware row offers nothing.
     expect(kinds(entry({ job: 'emulator', kind: 'emulator', rom_id: 0, status: 'downloading' }))).toEqual(['Cancel']);
-    expect(rowA(entry({ job: 'firmware', kind: 'firmware', rom_id: 0, status: 'downloading' }), null)).toBeNull();
+    const firmware = entry({ job: 'firmware', kind: 'firmware', rom_id: 0, status: 'downloading' });
+    expect(rowA(firmware, null)).toBeNull();
+    expect(rowWhy(firmware)).toBe('Installing firmware — this step cannot be cancelled');
+    expect(rowWhy(entry({ job: 'library', kind: 'library_move', rom_id: 0, status: 'downloading' }))).toBe('Updating paths — this step cannot be cancelled');
+    expect(rowWhy(extracting)).toBe(CANCEL_EXTRACTING);
     // The library move's own commands: Retry and Cancel while its copy waits.
     const move = entry({ job: 'library', kind: 'library_move', rom_id: 0, status: 'failed' });
     expect(kinds(move)).toEqual(['Dismiss']);

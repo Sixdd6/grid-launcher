@@ -17,8 +17,8 @@ import {
   moveStartedNotice,
   refusalNotice,
 } from './library';
-import { raRows, SAVE_NEEDS } from './ra';
-import { assignLine, NO_CONTROLLER, tvRows } from './tv';
+import { LOGIN_NEEDS, LOGIN_NEEDS_PASSWORD, LOGIN_NEEDS_USER, loginWhy, raRows, SAVE_NEEDS, SAVE_NEEDS_TOKEN, SAVE_NEEDS_USER, saveWhy } from './ra';
+import { ASSIGN_NEEDS_PAD, assignLine, NO_CONTROLLER, tvRows } from './tv';
 import { lastCheckedText, updatesRows, versionText } from './updates';
 
 const summary = (rows: Row[]) =>
@@ -209,23 +209,50 @@ describe('Library pane (items 245–249)', () => {
 });
 
 describe('RetroAchievements pane (items 250–251)', () => {
-  const acts = { editUsername: vi.fn(), editToken: vi.fn(), save: vi.fn(), clear: vi.fn() };
+  const acts = { editUsername: vi.fn(), editToken: vi.fn(), save: vi.fn(), editPassword: vi.fn(), login: vi.fn(), clear: vi.fn() };
+  const base = { username: 'sam', tokenTyped: false, tokenPresent: false, canSave: false, passwordTyped: false, canLogin: false };
 
-  it('has Username, a write-only Token, Save and Clear', () => {
-    const rows = raRows({ username: 'sam', tokenTyped: false, tokenPresent: false, canSave: false }, acts);
+  it('has Username, a write-only Token, Save, Password, Log In and Clear (533)', () => {
+    const rows = raRows(base, acts);
     expect(summary(rows)).toEqual([
       ['text', 'Username', '', 'sam'],
       ['text', 'Token', 'Write-only: GRID never shows it again', ''],
       ['action', 'Save', 'Sets the login in every emulator that supports it', ''],
+      ['text', 'Password', 'Write-only: used once to log in, never kept', ''],
+      ['action', 'Log In', 'Signs in with your password and saves the token it gets', ''],
       ['action', 'Clear', '', ''],
     ]);
     expect(byKey(rows, 'ra-token')).toMatchObject({ mask: true });
-    expect(byKey(rows, 'ra-save')).toMatchObject({ disabled: true, why: SAVE_NEEDS });
+    expect(byKey(rows, 'ra-password')).toMatchObject({ mask: true });
+    expect(byKey(rows, 'ra-save')).toMatchObject({ disabled: true, why: SAVE_NEEDS_TOKEN });
+    expect(byKey(rows, 'ra-login')).toMatchObject({ disabled: true, why: LOGIN_NEEDS_PASSWORD });
     expect(byKey(rows, 'ra-clear').danger).toBe(true);
   });
 
+  it('names the missing field on Save and Log In (533)', () => {
+    expect(saveWhy('', false)).toBe(SAVE_NEEDS);
+    expect(SAVE_NEEDS).toBe('Enter a username and a token first.');
+    expect(saveWhy('sam', false)).toBe('Enter a token first.');
+    expect(saveWhy('', true)).toBe('Enter a username first.');
+    expect(SAVE_NEEDS_USER).toBe('Enter a username first.');
+    expect(saveWhy('sam', true)).toBeNull();
+    expect(loginWhy('', false)).toBe(LOGIN_NEEDS);
+    expect(LOGIN_NEEDS).toBe('Enter a username and a password first.');
+    expect(loginWhy('sam', false)).toBe('Enter a password first.');
+    expect(loginWhy(' ', true)).toBe(LOGIN_NEEDS_USER);
+    expect(loginWhy('sam', true)).toBeNull();
+    const rows = raRows({ ...base, username: '', passwordTyped: true, canLogin: false }, acts);
+    expect(byKey(rows, 'ra-login')).toMatchObject({ disabled: true, why: 'Enter a username first.' });
+  });
+
+  it('shows a typed password only as a stand-in and enables Log In', () => {
+    const rows = raRows({ ...base, passwordTyped: true, canLogin: true }, acts);
+    expect(byKey<Row & { value: string }>(rows, 'ra-password').value).toBe('•');
+    expect(byKey(rows, 'ra-login').disabled).toBeUndefined();
+  });
+
   it('shows a saved or typed token only as a stand-in, never its value', () => {
-    const rows = raRows({ username: 'sam', tokenTyped: true, tokenPresent: false, canSave: true }, acts);
+    const rows = raRows({ ...base, tokenTyped: true, canSave: true }, acts);
     const token = byKey<Row & { value: string }>(rows, 'ra-token');
     expect(token.value).toBe('•');
     expect(byKey(rows, 'ra-save').disabled).toBeUndefined();
@@ -270,6 +297,16 @@ describe('TV mode pane (items 261–267)', () => {
     const rows = tvRows({ prompts: 'match', padName: null, assignment: 'xbox' }, acts);
     expect(byKey<Row & { value: string }>(rows, 'tv-controller').value).toBe(NO_CONTROLLER);
     expect(NO_CONTROLLER).toBe('None found · the keyboard works too');
+  });
+
+  it('disables Button assignments with no controller: "For the controller in use · Xbox style" (532)', () => {
+    const rows = tvRows({ prompts: 'match', padName: null, assignment: 'nintendo' }, acts);
+    const assign = byKey<ChoiceRow>(rows, 'assign');
+    expect(assign).toMatchObject({ disabled: true, why: ASSIGN_NEEDS_PAD, sub: 'For the controller in use', value: 'xbox' });
+    expect(ASSIGN_NEEDS_PAD).toBe('Connect a controller to choose its buttons. Each controller keeps its own choice.');
+    const withPad = byKey<ChoiceRow>(tvRows({ prompts: 'match', padName: 'Pro Controller', assignment: 'nintendo' }, acts), 'assign');
+    expect(withPad.disabled).toBeUndefined();
+    expect(withPad.value).toBe('nintendo');
   });
 });
 

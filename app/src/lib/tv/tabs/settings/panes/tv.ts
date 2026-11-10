@@ -42,8 +42,9 @@ export const ASSIGN_SUBS: Record<TvAssignment, string> = {
 };
 
 export const NO_CONTROLLER = 'None found · the keyboard works too';
-/** TODO(design): what Button assignments does with no controller connected. */
-export const ASSIGN_NEEDS_PAD = 'Connect a controller to choose its buttons.';
+/** A on Button assignments with no controller connected (consultant decision;
+ *  checklist 532): the row is disabled and reads "Xbox style". */
+export const ASSIGN_NEEDS_PAD = 'Connect a controller to choose its buttons. Each controller keeps its own choice.';
 
 /** "For <controller>", or "For the controller in use" with none (item 262). */
 export function assignLine(padName: string | null): string {
@@ -69,7 +70,7 @@ export function tvRows(s: TvPaneState, a: TvPaneActions): Row[] {
         ...(s.padName === null ? { disabled: true, why: ASSIGN_NEEDS_PAD } : {}),
       },
       ASSIGN_OPTIONS,
-      s.assignment,
+      s.padName === null ? 'xbox' : s.assignment,
       (v) => a.setAssignment(v as TvAssignment),
       a.open,
     ),
