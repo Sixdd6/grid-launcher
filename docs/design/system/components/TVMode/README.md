@@ -105,6 +105,38 @@ TV mode carries the whole Game backups design (the Game backups card, built on `
 - **RT is select mode** on the Library and Server grids (2026-11-10).
 - **Start presses a page's main button** where a page has one: Skip for now on Choose your systems, Backup N games on the Backup page, Set up for GRID; while the button is disabled, Start says why (2026-11-10). Elsewhere Start opens the Menu.
 
+## Consultant decisions (2026-11-10)
+
+Settled by the Fable consultant while the user was away, from the design, the
+prototype, SPEC.md and the Game backups card. The user can overturn any of them.
+
+- The root font is 1/54 of the screen height, capped at 1/80 of its width so squarer screens still fit the layout.
+- No text is smaller than 0.85rem: the TV tag, cover tags, kind badges, Latest, facts labels, the hero platform line and rail / group headings are raised to it.
+- A sideways row keeps the focused cover one row padding inside its edges: 1.2rem, since every row sits inside a panel.
+- The 8BitDo set shows − and + for View and Menu (read as "Minus" and "Plus").
+- The Home / Guide button does nothing in TV mode.
+- The Menu isn't available on the startup screens. On Connect, Start presses Connect (and says what's missing while it's disabled); on Choose your systems it skips.
+- While a game runs, GRID ignores the controller, so Playing's Back to the game and Stop game answer the mouse and keyboard; the page closes by itself when the game exits.
+- Cancel in Downloads asks first, for every kind of row (install, backup, library move).
+- RetroAchievements › Clear acts at once, as on the desktop; turning a computer off on a pack asks first, because it deletes that computer's emulator builds from the drive.
+- A Details tab with nothing to focus puts focus on the first button.
+- The Backup page lists each game inline up to 6 games and behind "Show each game (n)" above that, as the Game backups card says.
+- The Backup page carries the Game backups card's space-set-aside line, the disabled Firmware reason, the Wine prefix note and the FAT32 over-4 GB note, with the desktop's wording.
+- Installing from a drive uses the Game backups card's notices: the game's card ("Copying from <label>"), its own card for the emulator ("<emulator> from <pack> added to download queue", then "<emulator> installed · Used for <system>") and for firmware ("<System> firmware installed from <pack>").
+- Set up for GRID starts with this computer's OS ticked.
+- The "Welcome to TV mode" card shows each time TV mode opens, once the main screen is up.
+- Menu › Notifications keeps the whole session's notices; there is no visible cap.
+- Search everything shows its results on Done; Y on the results page reopens the keyboard and from then on the results follow every key.
+- Close without changing anything on the Unreachable library dialog quits GRID at once, with no second question.
+- Open <emulator> opens the emulator's window over TV mode without switching to desktop mode; its window needs a mouse.
+- The on-screen keyboard stops at the hint bar, which keeps showing the keyboard's hints.
+- A running backup shows in the top bar like any download: its title, bar and percent.
+- Theme is the one shared setting; in TV mode "Follow system" shows dark, and Dark or Light apply as chosen in both modes.
+- The desktop's Settings › Appearance shows "Open GRID on" too, first in the pane, as the same shared setting (`[ui] open_on` = automatic | discover | library).
+- With no controller connected the hint bar reads "No controller · the keyboard works too".
+
+Open questions for the user (not blocking): a controller-only way out of TV mode from Connect; whether a controller press should reach Playing when GRID's own window is focused; whether the welcome card shows every time or only the first time.
+
 ## Notes
 
 - **Opening an emulator** on its own from TV mode works, but the emulator's own window needs a mouse or its own controller support.
