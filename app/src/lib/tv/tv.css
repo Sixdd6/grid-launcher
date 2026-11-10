@@ -24,6 +24,8 @@ html[data-ui='tv'] .tv [data-scroll],
 html[data-ui='tv'] .tv [data-track] { scrollbar-width: none; }
 html[data-ui='tv'] .tv [data-scroll]::-webkit-scrollbar,
 html[data-ui='tv'] .tv [data-track]::-webkit-scrollbar { display: none; }
+html[data-ui='tv'] .tv :is(.rail, .rows, .scroll, .list, .page, .split .pane) { scrollbar-width: none; }
+html[data-ui='tv'] .tv :is(.rail, .rows, .scroll, .list, .page, .split .pane)::-webkit-scrollbar { display: none; }
 
 /* ---- Focus: one ring everywhere, larger than the desktop's, and a lift for covers. */
 html[data-ui='tv'] .tv [data-f] { outline: none; transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease; }

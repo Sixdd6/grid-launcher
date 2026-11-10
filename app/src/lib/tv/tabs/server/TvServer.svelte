@@ -117,7 +117,7 @@
 </script>
 
 {#if mode === 'none'}
-  <div class="list" data-testid="tv-server-none">
+  <div class="list" data-scroll="list" data-testid="tv-server-none">
     <div class="list-in">
       <div class="panel empty" id="srv-panel">
         <h2>Not connected to a server</h2>
@@ -130,7 +130,7 @@
     </div>
   </div>
 {:else if mode === 'offline'}
-  <div class="list" data-testid="tv-server-offline">
+  <div class="list" data-scroll="list" data-testid="tv-server-offline">
     <div class="list-in">
       <div class="panel empty" id="srv-panel">
         <h2>Can't reach your server</h2>

@@ -37,3 +37,11 @@ export function rightStickScroll(y: number, dtMs: number, remPx: number): number
   if (!rightStickActive(y)) return 0;
   return -y * RIGHT_REM_PER_FRAME * remPx * (dtMs / FRAME_MS);
 }
+
+/**
+ * Page Up / Page Down (items 71, 114, 25): 70 % of the reading area's height,
+ * gliding unless the system asks for reduced motion, which jumps.
+ */
+export function pageScroll(down: boolean, viewHeight: number, reduced: boolean): ScrollToOptions {
+  return { top: (down ? 1 : -1) * viewHeight * 0.7, behavior: reduced ? 'auto' : 'smooth' };
+}

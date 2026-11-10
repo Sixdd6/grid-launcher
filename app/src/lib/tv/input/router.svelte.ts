@@ -7,14 +7,14 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { api, GAMEPAD_EVENT, type PadEvent, type PadInfo } from '../../api';
 import { uiSettings } from '../../stores/uiSettings.svelte';
 import type { PromptSet } from '../glyphs/glyphs';
-import { focusables, remPx, vScroller } from '../focus/dom';
+import { focusables, reducedMotion, remPx, vScroller } from '../focus/dom';
 import { focused, handlePress, nav, scope, setFocus, showTab, topLayer } from '../nav.svelte';
 import type { TvTab } from './press';
 import { buttonForKey, isDirection, type TvButton } from './buttons';
 import { assignmentFor, logicalButton, padBrand, padDisplayName } from './controllers';
 import { promptSet } from './prompts';
 import { Causes, Repeater, type RepeatKind } from './repeat';
-import { leftStickDirections, rightStickActive, rightStickScroll } from './sticks';
+import { leftStickDirections, pageScroll, rightStickActive, rightStickScroll } from './sticks';
 
 const state = $state<{ pads: PadInfo[]; currentId: number | null }>({ pads: [], currentId: null });
 
@@ -207,7 +207,7 @@ function onKeyDown(e: KeyboardEvent): void {
   if (e.key === 'PageDown' || e.key === 'PageUp') {
     e.preventDefault();
     const v = readingArea();
-    v?.scrollBy({ top: (e.key === 'PageDown' ? 1 : -1) * v.clientHeight * 0.7, behavior: 'smooth' });
+    v?.scrollBy(pageScroll(e.key === 'PageDown', v.clientHeight, reducedMotion()));
     return;
   }
   // While the on-screen keyboard is open, a printable key types straight in

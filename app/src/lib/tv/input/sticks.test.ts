@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { leftStickDirections, rightStickActive, rightStickScroll } from './sticks';
+import { leftStickDirections, pageScroll, rightStickActive, rightStickScroll } from './sticks';
 
 describe('left stick (item 35)', () => {
   it('moves past half its travel; Y is positive up', () => {
@@ -27,5 +27,13 @@ describe('right stick (item 36)', () => {
     // Twice the time, twice the distance; twice the root font, twice too.
     expect(rightStickScroll(-1, 2000 / 60, 20)).toBeCloseTo(44);
     expect(rightStickScroll(-1, 1000 / 60, 40)).toBeCloseTo(44);
+  });
+});
+
+describe('Page Up / Page Down (items 114, 25)', () => {
+  it('scrolls 70% of the view, gliding, or jumping under reduced motion', () => {
+    expect(pageScroll(true, 1000, false)).toEqual({ top: 700, behavior: 'smooth' });
+    expect(pageScroll(false, 1000, false)).toEqual({ top: -700, behavior: 'smooth' });
+    expect(pageScroll(true, 1000, true)).toEqual({ top: 700, behavior: 'auto' });
   });
 });
