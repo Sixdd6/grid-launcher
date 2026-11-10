@@ -147,3 +147,13 @@
 - **e2e.** `tv-shell-d.spec.ts` (overlays, keyboard, Menu, cards, Notifications). VITE_E2E builds
   expose `window.__tvE2E = {notify, openList, openKeyboard, confirmBox}` (TvShell) until real
   screens open them; later specs should drive the real screens instead.
+
+## Pending for the next phase (consultant, after P6)
+- app/src/lib/tv/reconnect.ts: drop the TODO(design); keep the failure card as is ("Can't reach
+  <URL>", error, second line `session.lastError` verbatim when set, none when null, no action),
+  pushed only when the retry leaves the shell not connected (a 401 opens Connect, no card); make
+  Reconnect a no-op while `session.busy`.
+- app/src/lib/tv/overlays/menu.ts (+ test, TvMenu.svelte passes session state): when
+  `session.offline && !session.connected` the reconnect row reads "Connect to a server…" (same key,
+  same handler, which opens Connect) and `menuHead` reads "Offline · no server".
+- tv.css `.layer` stays inset 0 0 3.6rem (scrim covers the top bar); checklist 360 reworded.

@@ -136,6 +136,9 @@ prototype, SPEC.md and the Game backups card. The user can overturn any of them.
 - With no controller connected the hint bar reads "No controller · the keyboard works too".
 - The desktop top bar's TV button is a 28×28 icon button just left of the light / dark toggle (after the update badge): a new outline `tv` icon (a screen with a V antenna, drawn at 18 like the toggle), labelled and tooltipped "Switch to TV mode", with the toggle's hover and focus states and no animation.
 - A physical keyboard's Space is A in TV mode, with Enter; while the on-screen keyboard is open Space types a space like any printable key (and Enter is then Done).
+- Menu › Reconnect that fails shows an error card "Can't reach <URL>" with the backend's reason as its second line (what the desktop chip shows as a tooltip) and no action; a rejected credential opens Connect with no card; Reconnect does nothing while a probe is already running.
+- Used without a server, the Menu's Reconnect row reads "Connect to a server…" and opens Connect, as the desktop's one-item menu does; the Menu head then reads "Offline · no server" like the top bar.
+- Overlays dim and blur everything above the hint bar, the top bar included (the Menu's head repeats the clock and connection for that reason), and notification cards stay above the scrim.
 
 Open questions for the user (not blocking): a controller-only way out of TV mode from Connect; whether a controller press should reach Playing when GRID's own window is focused; whether the welcome card shows every time or only the first time.
 
