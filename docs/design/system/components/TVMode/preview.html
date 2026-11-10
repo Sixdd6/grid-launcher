@@ -293,7 +293,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .toast.err .tbar { background: var(--danger); }
 .toast .segs { display: flex; gap: .25rem; margin-top: .6rem; }
 .toast .segs i { flex: 1; height: .3rem; border-radius: .15rem; background: var(--field); overflow: hidden; }
+.toast .segs i { position: relative; }
 .toast .segs i b { display: block; width: 0; height: 100%; background: var(--primary); }
+/* A notch at the half: download on the left, install on the right. */
+.toast .segs i::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--surface-2); opacity: .7; }
 .toast .segs i.done b { width: 100% !important; }
 .toast .segs i.fail b { width: 100% !important; background: var(--danger); }
 @keyframes tbar { from { width: 100%; } to { width: 0; } }
@@ -1106,7 +1109,11 @@ var ACT = {
   connectGo: function () { var F = S.pages[S.pages.length - 1].F; CFG.url = F.url; CFG.lib = F.lib; toast('Connected to ' + F.url); S.pages = []; push(choosePage()); },
   chTick: function (el) { var P = S.pages[S.pages.length - 1]; P.pick[el.dataset.id].on = !P.pick[el.dataset.id].on; renderStage(); },
   chEmu: function (el) { var P = S.pages[S.pages.length - 1], id = el.dataset.id; openSheet({ title: 'Emulator for ' + sysOf(id).name, items: emuItems(id, P.pick[id].emu, function (e) { P.pick[id].emu = e; P.pick[id].on = true; renderStage(); }) }); },
-  chGo: function () { var P = S.pages[S.pages.length - 1], n = Object.keys(P.pick).filter(function (k) { return P.pick[k].on; }).length; S.startup = false; S.pages = []; S.tab = 'home'; render(); setupCard(n); },
+  chGo: function () {
+    var P = S.pages[S.pages.length - 1], names = [];
+    Object.keys(P.pick).forEach(function (k) { var e = P.pick[k].emu; if (P.pick[k].on && e && names.indexOf(e) < 0) names.push(e); });
+    S.startup = false; S.pages = []; S.tab = 'home'; render(); setupCard(names);
+  },
   chSkip: function () { S.startup = false; S.pages = []; S.tab = 'home'; render(); }
 };
 function emuItems(id, curE, fn) {
@@ -1120,24 +1127,30 @@ function installEmu(s, name) {
   name = name || s.rec; s.status = 'Installing…'; repaint(); toast('Installing ' + name + '…');
   setTimeout(function () { s.emu = name; s.ver = '0.4.1'; s.status = 'Ready'; toast(name + ' installed', { s: 'Used for ' + s.name }); repaint(); }, 2200);
 }
-/* The first-run setup card: one segment per install, filled as each install runs
-   (the prototype installs them one after another). It holds still, with no
-   countdown, until every install is done; then it counts down 10 seconds. */
-function setupCard(n) {
-  var segs = ''; for (var i = 0; i < n; i++) segs += '<i><b></b></i>';
+/* The first-run setup card: one segment per install (each emulator once). A
+   segment's first half fills while that install downloads and its second half
+   while it installs; a line under the bar names the current step. The prototype
+   runs the installs one after another. The card holds still, with no countdown,
+   until every install is done; then it counts down 10 seconds. */
+function setupCard(names) {
+  var n = names.length, segs = ''; for (var i = 0; i < n; i++) segs += '<i><b></b></i>';
   var el = toast('Setting up ' + n + ' install' + (n === 1 ? '' : 's') + ' · 0 done', { segs: segs, hold: true, pinned: true });
-  var dur = [], k; for (k = 0; k < n; k++) dur.push(1800 + Math.random() * 1600);
+  el.querySelector('.segs').insertAdjacentHTML('afterend', '<div class="ts" id="setup-step"></div>');
+  var plan = names.map(function () { return { dl: 1200 + Math.random() * 1200, inst: 700 + Math.random() * 700 }; });
   var idx = 0, t0 = performance.now();
   var t = setInterval(function () {
-    var bars = el.querySelectorAll('.segs b'), now = performance.now();
+    var bars = el.querySelectorAll('.segs b'), step = el.querySelector('#setup-step'), now = performance.now();
     if (idx < n) {
-      var p = Math.min(1, (now - t0) / dur[idx]);
-      bars[idx].style.width = (p * 100) + '%'; bars[idx].parentNode.className = 'run';
-      if (p >= 1) { bars[idx].parentNode.className = 'done'; idx++; t0 = now; el.querySelector('.tt').textContent = idx >= n ? n + ' install' + (n === 1 ? '' : 's') + ' done' : 'Setting up ' + n + ' installs · ' + idx + ' done'; }
+      var e = now - t0, P = plan[idx], pct, word;
+      if (e < P.dl) { pct = e / P.dl * 50; word = 'downloading ' + Math.round(e / P.dl * 100) + '%'; }
+      else { pct = 50 + Math.min(1, (e - P.dl) / P.inst) * 50; word = 'installing…'; }
+      bars[idx].style.width = pct + '%'; bars[idx].parentNode.className = 'run';
+      step.textContent = names[idx] + ' · ' + word;
+      if (pct >= 100) { bars[idx].parentNode.className = 'done'; idx++; t0 = now; el.querySelector('.tt').textContent = idx >= n ? n + ' install' + (n === 1 ? '' : 's') + ' done' : 'Setting up ' + n + ' installs · ' + idx + ' done'; }
     }
     if (idx >= n) {
       clearInterval(t);
-      el.querySelector('.tt').insertAdjacentHTML('afterend', '<div class="ts">' + n + ' system' + (n === 1 ? ' is' : 's are') + ' ready to play.</div>');
+      step.textContent = n + ' system' + (n === 1 ? ' is' : 's are') + ' ready to play.';
       el._pinned = false; el.release(10000);
     }
   }, 50);

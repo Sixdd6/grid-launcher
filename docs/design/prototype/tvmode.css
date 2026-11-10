@@ -288,7 +288,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .toast.err .tbar { background: var(--danger); }
 .toast .segs { display: flex; gap: .25rem; margin-top: .6rem; }
 .toast .segs i { flex: 1; height: .3rem; border-radius: .15rem; background: var(--field); overflow: hidden; }
+.toast .segs i { position: relative; }
 .toast .segs i b { display: block; width: 0; height: 100%; background: var(--primary); }
+/* A notch at the half: download on the left, install on the right. */
+.toast .segs i::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--surface-2); opacity: .7; }
 .toast .segs i.done b { width: 100% !important; }
 .toast .segs i.fail b { width: 100% !important; background: var(--danger); }
 @keyframes tbar { from { width: 100%; } to { width: 0; } }
