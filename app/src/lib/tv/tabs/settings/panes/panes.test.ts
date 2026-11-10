@@ -222,14 +222,14 @@ describe('RetroAchievements pane (items 250–251)', () => {
   const acts = { editUsername: vi.fn(), editToken: vi.fn(), save: vi.fn(), editPassword: vi.fn(), login: vi.fn(), clear: vi.fn() };
   const base = { username: 'sam', tokenTyped: false, tokenPresent: false, canSave: false, passwordTyped: false, canLogin: false };
 
-  it('has Username, a write-only Token, Save, Password, Log In and Clear (533)', () => {
+  it('has Username, Password, Log In, a write-only Token, Save and Clear (533; order by the user 2026-11-10)', () => {
     const rows = raRows(base, acts);
     expect(summary(rows)).toEqual([
       ['text', 'Username', '', 'sam'],
-      ['text', 'Token', 'Write-only: GRID never shows it again', ''],
-      ['action', 'Save', 'Sets the login in every emulator that supports it', ''],
       ['text', 'Password', 'Write-only: used once to log in, never kept', ''],
       ['action', 'Log In', 'Signs in with your password and saves the token it gets', ''],
+      ['text', 'Token', 'Write-only: GRID never shows it again', ''],
+      ['action', 'Save', 'Sets the login in every emulator that supports it', ''],
       ['action', 'Clear', '', ''],
     ]);
     expect(byKey(rows, 'ra-token')).toMatchObject({ mask: true });

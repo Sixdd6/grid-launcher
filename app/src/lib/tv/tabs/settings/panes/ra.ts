@@ -2,9 +2,10 @@
 // tvmode.js `paneRows('ra')`; ruling 9). The username and the token are
 // typed on the on-screen keyboard and held only by the pane until Save; the
 // token row is write-only: it opens empty and shows dots once a token is
-// typed or saved, never the token. The desktop's Log In follows Save
-// (consultant decision; checklist 533): a write-only Password row and Log In,
-// which trades the password for a token. Clear acts at once, as on the desktop.
+// typed or saved, never the token. The desktop's Log In comes first
+// (checklist 533; order by the user, 2026-11-10): Username, a write-only
+// Password row and Log In, which trades the password for a token; then
+// Token and Save. Clear acts at once, as on the desktop.
 import { canLogin, canSubmit } from '../../../../emulators/retroachievements';
 import type { Row } from '../../../rows';
 
@@ -71,25 +72,10 @@ export function raCanSave(username: string, token: string): boolean {
 const DOTS = '•';
 
 export function raRows(s: RaState, a: RaActions): Row[] {
+  // Username, Password, Log In first, then the token way in (user decision
+  // 2026-11-10), then Clear.
   return [
     { type: 'text', key: 'ra-user', label: 'Username', value: s.username, edit: a.editUsername },
-    {
-      type: 'text',
-      key: 'ra-token',
-      label: 'Token',
-      sub: 'Write-only: GRID never shows it again',
-      mask: true,
-      value: s.tokenTyped || s.tokenPresent ? DOTS : '',
-      edit: a.editToken,
-    },
-    {
-      type: 'action',
-      key: 'ra-save',
-      label: 'Save',
-      sub: 'Sets the login in every emulator that supports it',
-      ...(s.canSave ? {} : { disabled: true, why: saveWhy(s.username, s.tokenTyped) ?? SAVE_NEEDS }),
-      run: a.save,
-    },
     {
       type: 'text',
       key: 'ra-password',
@@ -106,6 +92,23 @@ export function raRows(s: RaState, a: RaActions): Row[] {
       sub: 'Signs in with your password and saves the token it gets',
       ...(s.canLogin ? {} : { disabled: true, why: loginWhy(s.username, s.passwordTyped) ?? LOGIN_NEEDS }),
       run: a.login,
+    },
+    {
+      type: 'text',
+      key: 'ra-token',
+      label: 'Token',
+      sub: 'Write-only: GRID never shows it again',
+      mask: true,
+      value: s.tokenTyped || s.tokenPresent ? DOTS : '',
+      edit: a.editToken,
+    },
+    {
+      type: 'action',
+      key: 'ra-save',
+      label: 'Save',
+      sub: 'Sets the login in every emulator that supports it',
+      ...(s.canSave ? {} : { disabled: true, why: saveWhy(s.username, s.tokenTyped) ?? SAVE_NEEDS }),
+      run: a.save,
     },
     { type: 'action', key: 'ra-clear', label: 'Clear', danger: true, run: a.clear },
   ];
