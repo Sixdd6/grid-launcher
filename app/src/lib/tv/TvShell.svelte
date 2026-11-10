@@ -27,6 +27,7 @@
     resetNav,
     resetStartup,
     restoreFocus,
+    revealFocus,
     setPane,
     setStartup,
     showScreen,
@@ -229,13 +230,22 @@
     return () => el.removeEventListener('mousedown', keep);
   });
 
+  // A new window size (TV mode going fullscreen after it is drawn, a
+  // resized window) changes 1rem: the scroll rules run again for the
+  // focused item, once the layout has settled.
+  let resizeFrame = 0;
+  function onResize() {
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => revealFocus());
+  }
+
   function onKeydown(e: KeyboardEvent) {
     // Tab would walk the browser's focus through the page and scroll it.
     if (e.key === 'Tab') e.preventDefault();
   }
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onresize={onResize} />
 
 <div class="tv" data-tv-root data-testid="tv-shell" bind:this={rootEl}>
   <TvBackground />

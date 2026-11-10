@@ -257,6 +257,13 @@ function onMouseMove(e: MouseEvent): void {
   onMouseOver(e);
 }
 
+// A new window size (TV mode going fullscreen, a resize) moves the page
+// under a resting pointer: the item that lands there must not take focus.
+// The pointer has to move again first.
+function onResize(): void {
+  mouseMoved = false;
+}
+
 function onMouseOver(e: MouseEvent): void {
   if (!mouseMoved) return;
   const f = (e.target as Element | null)?.closest<HTMLElement>('[data-f]');
@@ -303,6 +310,7 @@ export function startRouter(): () => void {
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', onBlur);
+  window.addEventListener('resize', onResize);
   document.addEventListener('mousemove', onMouseMove);
   document.addEventListener('mouseover', onMouseOver);
   document.addEventListener('click', onClick);
@@ -312,6 +320,7 @@ export function startRouter(): () => void {
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
     window.removeEventListener('blur', onBlur);
+    window.removeEventListener('resize', onResize);
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseover', onMouseOver);
     document.removeEventListener('click', onClick);

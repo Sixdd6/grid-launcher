@@ -195,6 +195,14 @@ STAGE_GROUPS=(
   # drive's emulator, Details from a drive, Remove from drive…; (d) Change…
   # refuses the last computer, Remove GRID files asks twice, Forget.
   "tv-backups:specs/tv-backups-a.spec.ts specs/tv-backups-b.spec.ts specs/tv-backups-c.spec.ts specs/tv-backups-d.spec.ts specs/tv-backups-e.spec.ts"
+  # TV mode's layout sweep (docs/tv-mode/plan.md P14) on the `backups`
+  # fixtures, the mock forge and a fake drive, seeded by backups-seed.mjs
+  # `tv-layout` (backups-d's profile). A fresh --tv start: Connect, Choose
+  # your systems, then every tab, page and overlay, each at 1280x720,
+  # 1920x1080 and 3840x2160 (E2E_WINDOW picks one size): no clipped focus
+  # ring, no text under 0.85rem, no document scroll, the bands' rem heights.
+  # E2E_TV_SCREENS=1 saves each screen under ctr-out/tv-screens/<size>/.
+  "tv-layout:specs/tv-layout.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -601,7 +609,7 @@ mock_args_for_group() {
     # `e2e_throttle` for the removal mid-backup), PS2 firmware, and an
     # Emulators platform whose `ps2` folder has PCSX2 builds for Linux and
     # Windows, so a backup never needs a forge.
-    backups|tv-backups) printf -- '--fixtures-dir fixtures-backups' ;;
+    backups|tv-backups|tv-layout) printf -- '--fixtures-dir fixtures-backups' ;;
     # One "Arcade" platform of 2500 generated ROMs (`e2e_synthetic` in
     # roms.json; see mock-romm/server.mjs), with covers that take 40ms each
     # like a remote server's.
@@ -619,7 +627,7 @@ mock_args_for_group() {
 # `Sixdd6/grid-launcher`'s latest release through the same ForgeClient, so
 # the same redirect points it at the mock forge's release route.
 group_needs_forge() {
-  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" || "$1" == "tv-startup" ]]
+  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" || "$1" == "tv-startup" || "$1" == "tv-layout" ]]
 }
 
 # The `launch` group's data dir is pre-seeded (Ruling A, task-7-brief.md):
@@ -640,7 +648,7 @@ seed_script_for_group() {
     updates) printf '%s' "$E2E_DIR/seed/updates-seed.mjs" ;;
     layout-migration) printf '%s' "$E2E_DIR/seed/layout-migration-seed.mjs" ;;
     library-move) printf '%s' "$E2E_DIR/seed/library-move-seed.mjs" ;;
-    backups|tv-backups) printf '%s' "$E2E_DIR/seed/backups-seed.mjs" ;;
+    backups|tv-backups|tv-layout) printf '%s' "$E2E_DIR/seed/backups-seed.mjs" ;;
     tv-shell) printf '%s' "$E2E_DIR/seed/tv-shell-seed.mjs" ;;
     tv-server) printf '%s' "$E2E_DIR/seed/tv-server-seed.mjs" ;;
     tv-library) printf '%s' "$E2E_DIR/seed/tv-library-seed.mjs" ;;
@@ -658,7 +666,7 @@ seed_script_for_group() {
 # the run's keyring, but each starts the app on the state its own seed
 # variant writes.
 group_seeds_per_spec() {
-  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" ]]
+  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" ]]
 }
 
 # Runs every spec of one group against a freshly created data dir and mock.
@@ -804,11 +812,11 @@ EOF
     wdio_log="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.log"
     out_dir="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.d"
     say "running $stage (attempt $attempt)"
-    # backups-c, backups-d, tv-startup a, c and d and tv-backups c and e start from a fresh profile: the credential an
+    # backups-c, backups-d, tv-startup a, c and d, tv-backups c and e and tv-layout start from a fresh profile: the credential an
     # earlier spec saved in this run's private keyring must go too, or the
     # app would restore that session. Same best-effort clear as the
     # python-import group.
-    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
+    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
       secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
     fi
     if [[ -n "$seed_script" ]] && group_seeds_per_spec "$name"; then
@@ -861,7 +869,7 @@ EOF
       # Only the `first-run-setup` group sees the platform picker after
       # connecting (wdio.conf.ts turns this into
       # GRID_LAUNCHER_E2E_FIRST_RUN_SETUP, read by the e2e build only).
-      if [[ "$name" == "first-run-setup" || "$name" == "settings-screens" || "$name" == "tv-startup" ]]; then
+      if [[ "$name" == "first-run-setup" || "$name" == "settings-screens" || "$name" == "tv-startup" || "$name" == "tv-layout" ]]; then
         export E2E_FIRST_RUN_SETUP=1
       fi
       # Only the `library-move` group: the whole run is on one disk, where
@@ -889,7 +897,7 @@ EOF
       # <data>/media (wdio.conf.ts turns this into
       # GRID_LAUNCHER_E2E_DRIVE_ROOTS, read by the e2e build only; the
       # specs plug and unplug drives there, e2e/helpers/drives.ts).
-      if [[ "$name" == "backups" || "$name" == "tv-library" || "$name" == "tv-startup" || "$name" == "tv-backups" ]]; then
+      if [[ "$name" == "backups" || "$name" == "tv-library" || "$name" == "tv-startup" || "$name" == "tv-backups" || "$name" == "tv-layout" ]]; then
         mkdir -p "$data_dir/media"
         export E2E_DRIVE_ROOTS="$data_dir/media"
       fi

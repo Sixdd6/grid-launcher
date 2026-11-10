@@ -103,10 +103,13 @@ export const GLYPH_LABELS: Record<PromptSet, Record<GlyphButton, string>> = {
   },
 };
 
-// The bundled URL of every SVG in this folder, keyed by file name.
+// The bundled URL of every SVG in this folder, keyed by file name. Emitted
+// as files, never inlined as `data:` URLs: the app's CSP (`img-src`, which
+// covers CSS masks) allows no `data:` images, and an inlined glyph's mask
+// never painted.
 const URLS: Record<string, string> = Object.fromEntries(
   Object.entries(
-    import.meta.glob('./*.svg', { eager: true, query: '?url', import: 'default' }) as Record<string, string>,
+    import.meta.glob('./*.svg', { eager: true, query: '?no-inline', import: 'default' }) as Record<string, string>,
   ).map(([path, url]) => [path.replace(/^\.\//, ''), url]),
 );
 

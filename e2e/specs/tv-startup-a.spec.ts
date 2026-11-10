@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { APP_START_TIMEOUT, dataDir, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT, WRONG_TOKEN } from '../helpers/env.js';
-import { connectPad, focused, hints, invoke, key, press, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
+import { assertLayoutAtSizes, connectPad, focused, hints, invoke, key, press, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, moveTo, pageErrors, testId, text, typeKeys, waitOskClosed, waitText } from '../helpers/tvDetails.js';
 
 const MASK = '••••••••••••';
@@ -220,6 +220,9 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     await waitFocused('ch-dc');
     expect(await hints()).toEqual(['A Tick', 'X Change emulator', 'MENU Skip for now']);
     await expectBoxFits();
+    // The layout sweep's checks at 720p, 1080p and 4K (P14; items 3, 4, 5).
+    await assertLayoutAtSizes();
+    await waitFocused('ch-dc');
   });
 
   it('A ticks; X changes the emulator from its own list, which ticks the system (items 402, 403)', async () => {
@@ -241,8 +244,10 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     await waitText('tv-choose-install', 'Install 2 emulators');
     // A system nothing installable plays can't be ticked.
     await moveTo('ch-zeebo', 'ArrowDown');
+    expect(await text('tv-ch-val-zeebo')).toBe('No emulator available');
+    expect(await hints()).not.toContain('X Change emulator');
     await key('Enter');
-    await waitToast('No emulator available');
+    await waitToast('No emulator GRID installs plays Zeebo. If you have one, add it in Settings › Systems after setup.');
   });
 
   it('Down from the last system reaches the buttons, which remember the one left (item 405)', async () => {

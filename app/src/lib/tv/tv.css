@@ -79,6 +79,8 @@ html[data-ui='tv'] .tv .cv[data-f].f { outline: none; }
 html[data-ui='tv'] .tv .cv-art { position: relative; width: 100%; aspect-ratio: 3 / 4; border-radius: .7rem; background: var(--field); overflow: hidden; display: flex; align-items: flex-end; box-shadow: var(--shadow-card); transition: transform 150ms ease, box-shadow 150ms ease; }
 html[data-ui='tv'] .tv .cv-art .cv-img { position: absolute; inset: 0; width: 100%; height: 100%; }
 html[data-ui='tv'] .tv .cv-art .cv-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* A cover with no art shows its title (the shared Image placeholder, .8rem on the desktop): the cover label's .9rem, never under 0.85rem (ruling 2). */
+html[data-ui='tv'] .tv .cv-art .cv-img .placeholder { font-size: .9rem; }
 html[data-ui='tv'] .tv .cv.f .cv-art { transform: scale(1.07); box-shadow: var(--shadow-lift), 0 0 0 .22rem var(--bg), 0 0 0 .42rem var(--focus); }
 html[data-ui='tv'] .tv .cv-l { font-size: .9rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 .1rem; }
 html[data-ui='tv'] .tv .cv.f .cv-l { color: var(--text-h); font-weight: 600; }

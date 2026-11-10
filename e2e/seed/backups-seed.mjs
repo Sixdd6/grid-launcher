@@ -300,6 +300,11 @@ offline = true
   case 'tv-backups-e':
     seedD();
     break;
+  // The `tv-layout` group (P14): backups-d's profile, connected through TV
+  // mode's own Connect (no credential is stored).
+  case 'tv-layout':
+    seedD();
+    break;
   default:
     console.error(`backups-seed.mjs: unknown spec ${spec}`);
     process.exit(1);

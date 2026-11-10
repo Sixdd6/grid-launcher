@@ -351,6 +351,17 @@ function byKey(root: Element, k: string): HTMLElement | null {
   return focusables(root).find((e) => e.getAttribute('data-k') === k) ?? materialize(root, k);
 }
 
+/** The window changed size (a fullscreen switch, a resized window): every
+ *  measure is in rem, so the scroll offsets in pixels are stale. The scroll
+ *  rules run again for the focused item, at once (no glide). */
+export function revealFocus(): void {
+  const el = cur;
+  if (!el || !el.isConnected) return;
+  const w = windowOf(el);
+  if (w) w.handle.focusAt(w.index);
+  reveal(el, false);
+}
+
 /** Re-reads the focused item's labels for the hint bar. */
 export function refreshFocus(): void {
   const el = cur;
