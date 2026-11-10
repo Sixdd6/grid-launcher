@@ -562,6 +562,7 @@ function setFocus(el, noScroll) {
   var top = S.layers.length ? S.layers[S.layers.length - 1] : (S.pages.length ? S.pages[S.pages.length - 1] : TABS[S.tab]);
   if (el.dataset.k) top._k = el.dataset.k;
   if (el.dataset.hero) hero(byId(el.dataset.hero));
+  if (el.closest('#disc')) TABS.server._dk = el.dataset.k;
   if (el.dataset.onfocus && ONF[el.dataset.onfocus]) ONF[el.dataset.onfocus](el);
   paintHints();
 }
@@ -1708,18 +1709,29 @@ function renderStage() {
   var scr = S.pages.length ? S.pages[S.pages.length - 1] : TABS[S.tab];
   /* Keep each screen's scroll: a redraw, or coming back to it, puts every rail,
      row and list where it was. */
+  var same = shownScr === scr;
   if (shownScr) shownScr._scroll = saveScroll();
   $('stage').innerHTML = scr.render();
   if (scr.after) scr.after();
   loadScroll(scr._scroll);
   shownScr = scr;
   paintTop();
-  if (cur && !document.body.contains(cur)) { var k = cur.dataset.k, el = k && scope().querySelector('[data-k="' + k + '"]'); if (el) { INSTANT = true; setFocus(el); INSTANT = false; } }
+  /* Only a redraw of the same screen re-finds the focused control by its key:
+     another screen can reuse a key (Library's and Server's PlayStation rows are
+     both r-PS), and focusing a rail row selects it. */
+  if (same && cur && !document.body.contains(cur)) { var k = cur.dataset.k, el = k && scope().querySelector('[data-k="' + k + '"]'); if (el) { INSTANT = true; setFocus(el); INSTANT = false; } }
 }
 function render() {
   var scr = S.pages.length ? S.pages[S.pages.length - 1] : TABS[S.tab];
   renderStage();
   INSTANT = true; if (!S.layers.length) restoreFocus(scr); INSTANT = false;
+  /* Arriving on Server while Discover is selected focuses Discover's content (the
+     cover last focused there, else the first), not the rail: Down then moves
+     through its rows instead of onto the platforms. */
+  if (S.tab === 'server' && S.srvRail === 'discover' && !S.pages.length && !S.layers.length && cur && cur.closest('.rail')) {
+    var dk = TABS.server._dk, dc = (dk && document.querySelector('#disc [data-k="' + dk + '"]')) || document.querySelector('#disc .cv');
+    if (dc) { INSTANT = true; setFocus(dc); INSTANT = false; }
+  }
   if (S.tab === 'server' && S.srvRail === 'discover' && !S.pages.length && cur && !cur.dataset.hero) { var fc = document.querySelector('#disc .cv'); if (fc) hero(byId(fc.dataset.id)); }
   paintHints();
 }
