@@ -18,6 +18,7 @@ import { gridMove } from './focus/grid';
 import { materialize, windowOf, windowsIn } from './focus/windows';
 import type { Direction, TvButton } from './input/buttons';
 import { press, stepTab, type Command, type PressContext, type TvTab } from './input/press';
+import { select, selAct, selAll, selEnd, selPick, selToggle } from './select.svelte';
 
 export type ScreenHooks = {
   /** The screen's own hints, after A and X (Y Search, LT Sort, …). */
@@ -89,7 +90,6 @@ const state = $state<{
   pages: Page[];
   layers: Layer[];
   startup: boolean;
-  selMode: boolean;
   focus: FocusInfo;
   /** Bumped when a screen registers or drops hooks. */
   hooksVersion: number;
@@ -99,7 +99,6 @@ const state = $state<{
   pages: [],
   layers: [],
   startup: false,
-  selMode: false,
   focus: { key: null, a: 'Select', x: null, disabled: false, present: false },
   hooksVersion: 0,
 });
@@ -120,6 +119,8 @@ const layerPrev = new Map<number, { el: HTMLElement | null; key: string | null; 
  *  focused for a moment, it would restore the screen's focus, and focusing
  *  a rail row selects it). */
 let closing = false;
+/** Set while `showScreen` waits for the new screen to be drawn. */
+let showing = 0;
 /** Work that waits for the last overlay to close (item 117). */
 let afterLayers: (() => void)[] = [];
 
@@ -150,7 +151,7 @@ export const nav = {
     return state.startup;
   },
   get selMode(): boolean {
-    return state.selMode;
+    return select.on;
   },
   get focus(): FocusInfo {
     return state.focus;
@@ -194,7 +195,7 @@ export function resetNav(tab: TvTab, pane: TvPane | null): void {
   state.layers = [];
   layerPrev.clear();
   afterLayers = [];
-  state.selMode = false;
+  selEnd();
   memory.clear();
   cur = null;
   curPlace = null;
@@ -211,7 +212,7 @@ export async function resetStartup(page: Omit<Page, 'id'>): Promise<void> {
   state.layers = [];
   layerPrev.clear();
   afterLayers = [];
-  state.selMode = false;
+  selEnd();
   memory.clear();
   if (cur) cur.classList.remove('f');
   cur = null;
@@ -418,6 +419,18 @@ export function restoreFocus(): void {
     refreshFocus();
     return;
   }
+  // The item focus was on has gone (a game removed from the drive while its
+  // Details was open): with no autofocus, land on the rail's selected row,
+  // never its first one, since focusing a rail row selects it (item 82).
+  const found = k !== null && els[i].getAttribute('data-k') === k;
+  if (k !== null && !found && !els[i].hasAttribute('data-autofocus')) {
+    const rail = root?.querySelector('[data-rail]');
+    const sel = rail ? railSelected(rail) : null;
+    if (sel && els.includes(sel)) {
+      setFocus(sel, { instant: true });
+      return;
+    }
+  }
   setFocus(els[i], { instant: true });
 }
 
@@ -477,12 +490,22 @@ function saveScreen(): void {
 /** After the screen changed: its scroll positions come back, then focus,
  *  with no glide (items 79, 113–114). */
 export async function showScreen(): Promise<void> {
+  // The stage's observer leaves focus to this until the new screen is drawn:
+  // removing the ring below is a mutation, and its callback can run before
+  // Svelte draws the new screen, when it would restore the new screen's
+  // focus among the old screen's items (and focusing a rail row selects it:
+  // Settings' first pane, Server's Discover).
+  showing++;
   if (cur) cur.classList.remove('f');
   cur = null;
   // Another screen can reuse a key (Library's and Settings' "r-library"
   // rows): only a redraw of the same screen re-finds focus by key.
   curPlace = null;
-  await tick();
+  try {
+    await tick();
+  } finally {
+    showing--;
+  }
   // Windowed grids measure first, so a saved scroll deep in a long list
   // isn't cut short, then render what the restored scroll shows.
   for (const w of windowsIn(stage)) w.sync();
@@ -512,6 +535,8 @@ export function rememberFocus(screen: string, k: string): void {
  *  and `arrive` run), as tvmode.js `render` does. */
 export async function showTab(tab: TvTab, opts: { again?: boolean } = {}): Promise<void> {
   if (state.tab === tab && state.pages.length === 0 && !opts.again) return;
+  // Select mode belongs to the grid it was turned on for (item 452).
+  if (state.tab !== tab) selEnd();
   saveScreen();
   state.pages = [];
   state.tab = tab;
@@ -557,7 +582,7 @@ export async function popPage(): Promise<void> {
  * that arrived late), the screen's focus is restored.
  */
 export function stageChanged(): void {
-  if (closing) return;
+  if (closing || showing > 0) return;
   const root = scope();
   if (!root) return;
   if (cur && cur.isConnected && root.contains(cur)) {
@@ -605,7 +630,7 @@ function context(): PressContext {
     layer: layer ? { blocking: layer.blocking, binds: Object.keys(layer.binds) as TvButton[] } : null,
     pages: state.pages.length,
     startup: state.startup,
-    selMode: state.selMode,
+    selMode: select.on,
     focus: cur
       ? {
           adjust: cur.hasAttribute('data-adj'),
@@ -692,8 +717,27 @@ function run(cmd: Command): void {
     case 'layerButton':
       topLayer()?.binds[cmd.button]?.();
       return;
-    // TODO(P13): selToggle / selPick / selAll / selAct — select mode.
+    case 'selToggle':
+      selToggle();
+      return;
+    case 'selPick': {
+      const id = cur?.getAttribute('data-sel');
+      if (id) selPick(id);
+      else handlersOf(cur)?.a?.();
+      return;
+    }
+    case 'selAll':
+      selAll();
+      return;
+    case 'selAct':
+      selAct();
+      return;
     default:
       return;
   }
+}
+
+/** e2e diagnostics: each screen's remembered focus key. */
+export function focusMemory(): Record<string, string | null> {
+  return Object.fromEntries([...memory.entries()].map(([k, v]) => [k, v.k]));
 }
