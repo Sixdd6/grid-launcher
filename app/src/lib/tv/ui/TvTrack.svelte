@@ -9,10 +9,11 @@
     scroll,
     up = undefined,
     down = undefined,
+    enter = undefined,
     children,
-  }: { scroll: string; up?: string; down?: string; children: Snippet } = $props();
+  }: { scroll: string; up?: string; down?: string; enter?: 'first' | 'sel'; children: Snippet } = $props();
 </script>
 
-<div class="track" data-nav="h" data-track data-scroll={scroll} data-up={up} data-down={down}>
+<div class="track" data-nav="h" data-track data-scroll={scroll} data-up={up} data-down={down} data-enter={enter}>
   {@render children()}
 </div>

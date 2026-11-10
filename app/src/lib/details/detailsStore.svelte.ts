@@ -81,8 +81,10 @@ export class DetailsStore {
   // display overlay: the subject is the caller's data and is never mutated.
   detail = $state<RomDetail | null>(null);
   launchDefaults = $state<LaunchDefaults | null>(null);
+  /** The platform's server games (TV's Related row shows their covers). */
+  serverGames = $state.raw<GameSummary[]>([]);
   /** The platform's server titles, to filter Related against. */
-  serverTitles = $state<string[]>([]);
+  serverTitles = $derived(this.serverGames.map((g) => g.name));
   /** The primary button's reason it cannot install; `''` when none. */
   installBlocked = $state('');
   contentAvailability = $state<ContentAvailability | null>(null);
@@ -288,7 +290,7 @@ export class DetailsStore {
     api
       .listGames(platformId)
       .then((games) => {
-        if (!cancelled) this.serverTitles = games.map((g) => g.name);
+        if (!cancelled) this.serverGames = games;
       })
       .catch(() => {});
     return () => {

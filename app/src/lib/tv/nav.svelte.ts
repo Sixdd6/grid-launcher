@@ -13,7 +13,7 @@ import type { TvPane } from '../uiMode';
 import type { Hint } from './hints';
 import { handlersOf } from './focus/actions';
 import { restore, inPlace } from './focus/engine';
-import { entryOf, focusables, isDisabled, loadScroll, moveIn, readScroll, rememberLast, reveal, saveScroll } from './focus/dom';
+import { entryOf, focusables, isDisabled, loadScroll, moveIn, readScroll, reducedMotion, rememberLast, reveal, saveScroll } from './focus/dom';
 import { gridMove } from './focus/grid';
 import { materialize, windowOf, windowsIn } from './focus/windows';
 import type { Direction, TvButton } from './input/buttons';
@@ -356,8 +356,15 @@ export function refreshFocus(): void {
  */
 export function setFocus(el: HTMLElement | null, opts: { scroll?: boolean; instant?: boolean } = {}): void {
   if (!el) return;
+  const prev = cur;
   if (cur && cur !== el) cur.classList.remove('f');
   cur = el;
+  // Up from a Details tab into the buttons: the tab scrolls back to its
+  // top (item 299; tvmode.js `setFocus`). `data-read-reset` marks the row.
+  if (prev && prev !== el && el.closest('[data-read-reset]')) {
+    const area = prev.closest<HTMLElement>('[data-read-area]');
+    if (area && area.isConnected) area.scrollTo({ top: 0, behavior: opts.instant || instant || reducedMotion() ? 'auto' : 'smooth' });
+  }
   el.classList.add('f');
   rememberLast(el);
   // A windowed grid keeps the focused cover's row rendered (risk R8).
@@ -505,6 +512,12 @@ export async function pushPage(page: Omit<Page, 'id'>, opts: { fresh?: boolean }
  *  the search, ruling 17). */
 export function setPageTitle(id: number, title: string): void {
   state.pages = state.pages.map((p) => (p.id === id ? { ...p, title } : p));
+}
+
+/** Replaces a page's props (Details after Link to server game follows the
+ *  row's new server game). The page redraws when it is next shown. */
+export function setPageProps(id: number, props: Record<string, unknown>): void {
+  state.pages = state.pages.map((p) => (p.id === id ? { ...p, props: { ...p.props, ...props } } : p));
 }
 
 /** B on a page: back one page, focus and scroll as they were (items 93, 319). */
