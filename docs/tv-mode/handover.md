@@ -536,3 +536,43 @@ From the consultant's Phase 13 rulings (README § Consultant decisions, last six
 6. `docs/tv-mode/checklist.md`: tick 434, 451, 492, 504, 458, 475 "(desktop wording, intro rule)"; mark 452 "also
    ends on a rail row change (consultant)"; correct "After P13" here: 425 is asserted in tv-backups-c, and the
    select-mode search note is superseded.
+
+## After P14: hardening, the layout sweep, docs, the test build
+- **Done from both "Pending for P14" sections** (60316bc): `startup/choose.ts` `noEmulatorWhy(label)` on the
+  disabled row's `data-why` (no X there); `connectPage.ts` `connectButtons(state, connecting)` ("Connecting…", both
+  buttons disabled with "Still connecting. Wait for it to finish.") and `pasteRefusal(field, text)` ("Nothing to
+  paste: the clipboard has no text." / "Focus a field to paste into it."); `releaseNotice` keeps `pinned` (the setup
+  card stays on top through its countdown; tv-startup-d asserts it). Select mode keeps picks a search hides:
+  `SelectGrid.all()` is the rail row's whole list, `selKeep` takes it, `selBar(sel, shown, whole, drive)` counts and
+  sizes every pick, X counts the shown covers, Y (and the Library's drive list) acts on every pick. `firmwareText`
+  shows only the backend's reasons (blank and off otherwise). tv-backups-b asserts the running backup in the top bar;
+  `tv-backups-e` (seed `tv-backups-e` = `seedD`) asserts 438. The "After P13" notes are corrected above.
+- **tv-layout** (fcc4074): `e2e/specs/tv-layout.spec.ts`, group `tv-layout` (fixtures-backups, mock forge, fake
+  drives, seed `tv-layout` = `seedD`, `--tv`, keyring cleared first). Connect (pasted address and token), then every
+  tab, page and overlay; each screen at 1280x720, 1920x1080 and 3840x2160 (`E2E_WINDOW` picks one) with
+  `helpers/tv.ts` `assertNoDocumentScroll`, `assertBands`, `assertMinText(0.85)` and `assertNoClipping` (now the
+  prototype's 0.42rem inflation for every item) after every move. Failures are collected and reported together.
+  `E2E_TV_SCREENS=1` saves `ctr-out/tv-screens/<size>/<screen>.png`. Choose your systems isn't offered on that
+  profile, so tv-startup-a runs `assertLayoutAtSizes()` there. Not walked: Playing, the media viewer (no media in the
+  fixtures), Link to server game, the unreachable dialog.
+- **Fixes it found:** cover placeholder text (the shared `Image`, .8rem) → .9rem in TV, on every grid and row, at all
+  sizes; a Discover cover cut at 720p after the window changed size (scroll offsets are pixels, sizes are rem):
+  `nav.revealFocus()` runs on `resize` (TvShell); a window that grows under a resting pointer no longer hands it
+  focus (router: a real move is a change of screen position, a move within 500 ms of a resize only records where
+  the pointer is, and an over event counts only right behind a real move; tv-startup-a caught it when the window
+  shrank back over Xvfb's centred pointer); the button glyphs never painted anywhere: Vite inlined the SVGs as `data:` URLs, which the
+  CSP's `img-src` blocks for CSS masks too — now `?no-inline` files. No band, document-scroll or other clipping
+  failure at any size.
+- **Still manual:** window geometry (desktop 1280×800 → TV → quit → relaunch without `--tv` opens at 1280×800, not
+  fullscreen): e2e builds leave the window-state plugin out and Xvfb has no window manager. Real controllers (Xbox,
+  PlayStation, 8BitDo / Nintendo, two at once), GNOME Wayland, KDE Wayland and X11 fullscreen.
+- **Checklist:** 435 of 534 ticked — each one cited by a passing TV unit test or e2e spec title (`items N`), plus 3, 4,
+  5, 26 (tv-layout) and 528. Not ticked: item 1 (tv-layout navigates mostly by click, so it isn't proof of
+  "controller alone") and the 98 items no test title cites; the 1–534 audit is the auditor's.
+- **Results:** gate PASS (after 74edc27). Full `scripts/ctr.sh e2e`: every group passed but tv-startup (a's layout
+  check, fixed in 74edc27); after the fix tv-startup, tv-shell and tv-layout pass, and tv-server, tv-library (one
+  retry: the drive cover's queue tag is brief), tv-details, tv-settings, tv-systems, tv-large-platform and tv-backups
+  (a–e) passed on the earlier router change.
+- **Test build:** `scripts/ctr.sh packages 0.9.0-dev.tv` → `ctr-out/grid-launcher-0.9.0+dev.tv-1.x86_64.rpm` (and the
+  .deb); unpacked in `ctr-out/rpm-tv/`, binary `ctr-out/rpm-tv/usr/bin/grid-launcher`. "dev" in the version keeps
+  the app's own update check off.
