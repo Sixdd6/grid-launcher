@@ -155,6 +155,11 @@ pub struct UiSettings {
     /// the first time TV mode opens, then only from Menu › Controls.
     #[serde(default)]
     pub tv_welcomed: bool,
+    /// The video players' own volume, 0–100 (the media viewer's YouTube
+    /// player and server videos, desktop and TV mode alike). Separate from
+    /// the system volume; every player opens at it and a change stores it.
+    #[serde(default = "default_video_volume")]
+    pub video_volume: u8,
     /// TV mode's button assignments, per controller: the controller's key
     /// (its gilrs UUID as hex; two pads of one model share a key) →
     /// `"xbox"` or `"nintendo"`. A controller with no entry starts on the
@@ -200,6 +205,10 @@ fn default_tv_prompts() -> String {
     "match".to_string()
 }
 
+fn default_video_volume() -> u8 {
+    50
+}
+
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
@@ -214,6 +223,7 @@ impl Default for UiSettings {
             open_on: default_open_on(),
             tv_prompts: default_tv_prompts(),
             tv_welcomed: false,
+            video_volume: default_video_volume(),
             tv_assignments: BTreeMap::new(),
         }
     }
@@ -1511,6 +1521,7 @@ mod tests {
                 open_on: "library".to_string(),
                 tv_prompts: "8bitdo".to_string(),
                 tv_welcomed: true,
+                video_volume: 80,
                 tv_assignments: assignments.clone(),
                 ..Default::default()
             },
@@ -1526,6 +1537,7 @@ mod tests {
         assert_eq!(loaded.ui.open_on, "library");
         assert_eq!(loaded.ui.tv_prompts, "8bitdo");
         assert!(loaded.ui.tv_welcomed);
+        assert_eq!(loaded.ui.video_volume, 80);
         assert_eq!(loaded.ui.tv_assignments, assignments);
     }
 
@@ -1537,6 +1549,7 @@ mod tests {
         assert_eq!(loaded.ui.open_on, "automatic");
         assert_eq!(loaded.ui.tv_prompts, "match");
         assert!(!loaded.ui.tv_welcomed);
+        assert_eq!(loaded.ui.video_volume, 50);
         assert!(loaded.ui.tv_assignments.is_empty());
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");

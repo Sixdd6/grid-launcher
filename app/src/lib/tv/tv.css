@@ -312,6 +312,17 @@ html[data-ui='tv'] .tv .viewer .shot .play { position: absolute; inset: 0; displ
 html[data-ui='tv'] .tv .viewer .verr { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 2rem; text-align: center; }
 html[data-ui='tv'] .tv .viewer .cap { font-size: 1.1rem; display: flex; gap: 1.5rem; align-items: center; }
 html[data-ui='tv'] .tv .viewer .muted { color: rgba(255, 255, 255, .7); }
+html[data-ui='tv'] .tv .viewer .col { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; min-width: 0; }
+html[data-ui='tv'] .tv .viewer .watch { display: inline-flex; align-items: center; gap: .55rem; font: inherit; font-size: 1.1rem; font-weight: 600; color: #fff; background: rgba(255, 255, 255, .12); border: 0; border-radius: 100px; padding: .45rem 1.1rem; cursor: pointer; }
+/* A video plays left of the notification column (26rem at the right, the
+   cards' own column), so no card, hint or readout ever covers it (YouTube's
+   rules); at least 480×270. The readout sits in that column, beside it. */
+html[data-ui='tv'] .tv .viewer.vid { flex-direction: row; justify-content: flex-start; align-items: stretch; gap: 2.4rem; padding: 0 2.4rem; }
+html[data-ui='tv'] .tv .viewer.vid .col { flex: 1 1 auto; }
+html[data-ui='tv'] .tv .viewer.vid .shot.player { height: auto; width: min(100%, calc((100vh - 3.6rem - 10rem) * 16 / 9)); max-width: none; aspect-ratio: 16 / 9; min-width: 480px; min-height: 270px; flex: 0 0 auto; }
+html[data-ui='tv'] .tv .viewer .shot.player > iframe { width: 100%; height: 100%; display: block; border: 0; }
+html[data-ui='tv'] .tv .viewer .side { flex: 0 0 26rem; display: flex; align-items: center; justify-content: center; }
+html[data-ui='tv'] .tv .viewer .vol { font-size: 1.2rem; font-weight: 600; background: rgba(255, 255, 255, .12); border-radius: 100px; padding: .55rem 1.3rem; }
 
 /* ---- Playing (items 321–323). */
 html[data-ui='tv'] .tv .playing { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }

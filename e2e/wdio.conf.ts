@@ -38,6 +38,11 @@ const appEnv: Record<string, string> = {
   // GTK prefers the session's real Wayland compositor over Xvfb's DISPLAY.
   GDK_BACKEND: 'x11',
   E2E_MOCK_URL: mockUrl,
+  // The YouTube relay page loads YouTube's player script from here instead
+  // (app youtube_relay.rs `player_api`, e2e feature only): a loopback port
+  // nothing serves, so no run reaches YouTube and a trailer always takes the
+  // fallback path (the poster and "Watch on YouTube").
+  GRID_LAUNCHER_E2E_YOUTUBE_API: 'http://127.0.0.1:9/iframe_api',
   RUST_LOG: process.env.E2E_RUST_LOG ?? 'info',
   // Only the stage groups that run a mock forge set this (e2e.sh's
   // group_needs_forge). GRID_LAUNCHER_E2E_FORGE_BASE is what the app's `e2e`

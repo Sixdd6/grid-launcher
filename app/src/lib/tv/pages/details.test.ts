@@ -7,6 +7,11 @@ import {
   achSummary,
   seekTarget,
   viewerHints,
+  viewerAction,
+  viewerRepeats,
+  viewerShow,
+  VIEWER_BUTTONS,
+  type ViewerShow,
   releaseFact,
   unlockedWhen,
   ADD_SAVE_FOLDER,
@@ -366,13 +371,44 @@ describe('a system with no emulator (ruling A, items 273, 288)', () => {
   });
 });
 
-describe('the media viewer on a server video (ruling E6)', () => {
+describe('the media viewer controls (user decision 2026-11-10)', () => {
   const labels = (h: { button: string; label: string }[]) => h.map((x) => `${x.button} ${x.label}`);
-  it('A pauses or plays, LT and RT seek 10 s; a screenshot or trailer keeps LB / RB / B', () => {
-    expect(labels(viewerHints('video', false))).toEqual(['A Pause', 'LT Back 10 s', 'RT Forward 10 s', 'LB Previous', 'RB Next', 'B Close']);
+  it('a video: A pauses or plays, LB / RB seek 10 s, LT / RT set the volume', () => {
+    expect(labels(viewerHints('video', false))).toEqual([
+      'A Pause',
+      'LB Back 10 s',
+      'RB Forward 10 s',
+      'LT Volume −',
+      'RT Volume +',
+      'B Close',
+    ]);
     expect(labels(viewerHints('video', true))[0]).toBe('A Play');
     expect(labels(viewerHints('screenshot', false))).toEqual(['LB Previous', 'RB Next', 'B Close']);
-    expect(labels(viewerHints('youtube', false))).toEqual(['LB Previous', 'RB Next', 'B Close']);
+    expect(labels(viewerHints('poster', false))).toEqual(['A Watch on YouTube', 'LB Previous', 'RB Next', 'B Close']);
+  });
+
+  it('a server video and a YouTube player are videos; a fallen-back trailer is its poster', () => {
+    expect(viewerShow('video', false)).toBe('video');
+    expect(viewerShow('youtube', true)).toBe('video');
+    expect(viewerShow('youtube', false)).toBe('poster');
+    expect(viewerShow('screenshot', false)).toBe('screenshot');
+    expect(viewerShow(null, false)).toBeNull();
+  });
+
+  it('maps every button while a video shows', () => {
+    const map = (show: ViewerShow, youtube: boolean) => VIEWER_BUTTONS.map((b) => `${b}:${viewerAction(b, show, youtube)}`);
+    expect(map('video', true)).toEqual(['LB:back', 'RB:forward', 'LEFT:prev', 'RIGHT:next', 'LT:volDown', 'RT:volUp', 'X:watch']);
+    expect(map('video', false)).toEqual(['LB:back', 'RB:forward', 'LEFT:prev', 'RIGHT:next', 'LT:volDown', 'RT:volUp', 'X:null']);
+    expect(map('screenshot', false)).toEqual(['LB:prev', 'RB:next', 'LEFT:prev', 'RIGHT:next', 'LT:null', 'RT:null', 'X:null']);
+    expect(map('poster', true)).toEqual(['LB:prev', 'RB:next', 'LEFT:prev', 'RIGHT:next', 'LT:null', 'RT:null', 'X:watch']);
+  });
+
+  it('held LT / RT repeat only while a video shows', () => {
+    expect(viewerRepeats('LT', 'video')).toBe(true);
+    expect(viewerRepeats('RT', 'video')).toBe(true);
+    expect(viewerRepeats('LB', 'video')).toBe(false);
+    expect(viewerRepeats('LT', 'screenshot')).toBe(false);
+    expect(viewerRepeats('RT', 'poster')).toBe(false);
   });
 
   it('a seek stays inside the video', () => {

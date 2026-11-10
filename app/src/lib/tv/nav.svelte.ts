@@ -72,6 +72,9 @@ export type Layer = {
   keydown?: (e: KeyboardEvent) => boolean;
   /** Held typing buttons repeat (the keyboard, items 42–43). */
   typingRepeat?: (b: TvButton, focused: HTMLElement | null) => boolean;
+  /** Held buttons it binds that repeat like a direction (the media
+   *  viewer's LT / RT volume, user decision 2026-11-10). */
+  dirRepeat?: (b: TvButton) => boolean;
   /** Extra class on the scrim: `side` (the Menu), `kb` (the keyboard). */
   cls: string;
   component: Component<any>;

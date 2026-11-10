@@ -62,6 +62,9 @@ export type UiSettings = {
   /** TV mode's welcome card has been shown (`ui.tv_welcomed`): it shows the
    *  first time TV mode opens, then from Menu › Controls. */
   tv_welcomed: boolean;
+  /** The video players' own volume, 0–100, shared by desktop and TV mode
+   *  (`ui.video_volume`, default 50). Not the system volume. */
+  video_volume: number;
 };
 /** Where GRID opens: `automatic` (Server › Discover when connected, else the
  *  Library), or forced to `discover` or `library`. */
@@ -1173,6 +1176,10 @@ export const api = {
    *  Rust side before it reaches a URL; rejects with "not a YouTube video
    *  id" for anything but an 11-character id. */
   openYoutubeVideo: (videoId: string) => invoke<void>('open_youtube_video', { videoId }),
+  /** The loopback relay page that plays a trailer in an iframe (media
+   *  server, `youtube_embed_url`): the id is validated in Rust and the
+   *  player opens at `volume` (0–100). */
+  youtubeEmbedUrl: (videoId: string, volume: number) => invoke<string>('youtube_embed_url', { videoId, volume }),
   installGame: (romId: number) => invoke<void>('install_game', { romId }),
   cancelInstall: (entryId: number) => invoke<void>('cancel_install', { entryId }),
   retryInstall: (entryId: number) => invoke<void>('retry_install', { entryId }),

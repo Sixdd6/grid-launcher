@@ -31,12 +31,20 @@
 //! credential in the token-secrecy sense — but it is never logged, and
 //! neither is any media URL or path.
 //!
+//! One more thing is served: the YouTube relay page,
+//! `/<nonce>/yt.html?v=<id>&vol=<n>` (`youtube_relay.rs`), behind the same
+//! nonce. It is built from a validated id and a number only, carries its own
+//! strict CSP with a per-response script nonce, and no file is read for it.
+//! The page asks the browser to send YouTube only `http://127.0.0.1:<port>/`
+//! as the referrer, never the path, so the nonce does not leave the machine.
+//!
 //! Availability is part of that exposure, because the port is discoverable by
 //! any local process (`ss -ltn`) and the head is read BEFORE the nonce is
 //! checked. So a connection cannot pin resources: [`Limits`] bounds the head
 //! read, every socket write, and the number of connections in flight, and the
 //! accept loop sheds rather than queues once the cap is reached.
 
+use crate::youtube_relay;
 use grid_core::images::video::VIDEO_EXTENSIONS;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -197,6 +205,20 @@ impl MediaServer {
         ))
     }
 
+    /// `http://127.0.0.1:<port>/<nonce>/yt.html?v=<id>&vol=<volume>`: the
+    /// relay page that plays `id` in an iframe, or `None` when `id` is not a
+    /// YouTube video id. `volume` is clamped to 100.
+    pub fn relay_url(&self, id: &str, volume: u8) -> Option<String> {
+        let id = youtube_relay::video_id(id)?;
+        Some(format!(
+            "http://127.0.0.1:{}/{}/{}?v={id}&vol={}",
+            self.port,
+            self.nonce,
+            youtube_relay::RELAY_NAME,
+            volume.min(100)
+        ))
+    }
+
     #[cfg(test)]
     fn port(&self) -> u16 {
         self.port
@@ -233,6 +255,11 @@ impl MediaServer {
             "HEAD" => false,
             _ => return self.reply(&mut stream, &not_found()).await,
         };
+        if let Some((id, volume)) = self.relay_target(target) {
+            return self
+                .serve_relay(&mut stream, &id, volume, body_wanted)
+                .await;
+        }
         let path = match self.resolve(target) {
             Some(path) => path,
             None => return self.reply(&mut stream, &not_found()).await,
@@ -315,6 +342,43 @@ impl MediaServer {
             return None;
         }
         Some(self.dir.join(name))
+    }
+
+    /// `/<nonce>/yt.html?<query>` → the relay's video id and volume, or
+    /// `None` (then the target is tried as a file, and 404s there).
+    fn relay_target(&self, target: &str) -> Option<(String, u8)> {
+        let rest = target.strip_prefix('/')?;
+        let (nonce, rest) = rest.split_once('/')?;
+        let (name, query) = rest.split_once('?')?;
+        if name != youtube_relay::RELAY_NAME || !eq_constant_time(nonce, &self.nonce) {
+            return None;
+        }
+        youtube_relay::parse_relay_query(query)
+    }
+
+    /// The relay page, with its own CSP. A fresh script nonce per response;
+    /// neither it nor the path nonce is logged.
+    async fn serve_relay(
+        &self,
+        stream: &mut TcpStream,
+        id: &str,
+        volume: u8,
+        body_wanted: bool,
+    ) -> std::io::Result<()> {
+        let Ok(script_nonce) = random_nonce() else {
+            return self.reply(stream, &not_found()).await;
+        };
+        let api = youtube_relay::player_api();
+        let Some(page) = youtube_relay::relay_page(id, volume, &script_nonce, &api) else {
+            return self.reply(stream, &not_found()).await;
+        };
+        self.reply(stream, &relay_head(page.len(), &script_nonce, &api))
+            .await?;
+        if body_wanted {
+            self.write_all(stream, page.as_bytes()).await?;
+            self.timed(stream.flush()).await?;
+        }
+        Ok(())
     }
 
     /// One response head, written under the write deadline. A client that
@@ -539,6 +603,22 @@ fn parse_range(header: Option<&str>, len: u64) -> RangeSpec {
     RangeSpec::Slice(start, end.min(len - 1))
 }
 
+/// The relay page's response head: its CSP, a referrer policy that sends
+/// YouTube the origin only, no sniffing, no caching.
+fn relay_head(len: usize, script_nonce: &str, api: &str) -> String {
+    format!(
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: text/html; charset=utf-8\r\n\
+         Content-Length: {len}\r\n\
+         Content-Security-Policy: {}\r\n\
+         Referrer-Policy: strict-origin-when-cross-origin\r\n\
+         X-Content-Type-Options: nosniff\r\n\
+         Cache-Control: no-store\r\n\
+         Connection: close\r\n\r\n",
+        youtube_relay::relay_csp(script_nonce, api)
+    )
+}
+
 /// The 404 every rejection shares: empty body, no reason. A wrong nonce must
 /// not be distinguishable from a missing file.
 fn not_found() -> String {
@@ -609,6 +689,73 @@ mod tests {
 
     fn ranged(path: &str, range: &str) -> String {
         format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: {range}\r\n\r\n")
+    }
+
+    #[tokio::test]
+    async fn the_relay_page_is_served_behind_the_nonce_with_its_own_csp() {
+        let (_dir, server, _bytes) = server().await;
+        let url = server.relay_url("dQw4w9WgXcQ", 70).unwrap();
+        let prefix = format!("http://127.0.0.1:{}", server.port());
+        assert!(url.starts_with(&prefix), "{url}");
+        assert!(url.ends_with("/yt.html?v=dQw4w9WgXcQ&vol=70"), "{url}");
+        let (head, body) = request(server.port(), &get(&url[prefix.len()..])).await;
+        assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
+        assert!(
+            head.contains("Content-Type: text/html; charset=utf-8\r\n"),
+            "{head}"
+        );
+        assert!(
+            head.contains("Content-Security-Policy: default-src 'none'; script-src 'nonce-"),
+            "{head}"
+        );
+        assert!(
+            head.contains("Referrer-Policy: strict-origin-when-cross-origin\r\n"),
+            "{head}"
+        );
+        assert!(
+            head.contains("X-Content-Type-Options: nosniff\r\n"),
+            "{head}"
+        );
+        let body = String::from_utf8(body).unwrap();
+        assert!(body.contains("var VIDEO = 'dQw4w9WgXcQ';"));
+        assert!(body.contains("var VOLUME = 70;"));
+        // The header's script nonce is the page's.
+        let nonce = head
+            .split("'nonce-")
+            .nth(1)
+            .and_then(|rest| rest.split('\'').next())
+            .unwrap();
+        assert!(body.contains(&format!("<script nonce=\"{nonce}\">")));
+        // A fresh one per response.
+        let (again, _) = request(server.port(), &get(&url[prefix.len()..])).await;
+        assert!(!again.contains(&format!("'nonce-{nonce}'")));
+    }
+
+    #[tokio::test]
+    async fn the_relay_page_needs_the_nonce_and_a_valid_id() {
+        let (_dir, server, _bytes) = server().await;
+        let good = server.test_path("yt.html?v=dQw4w9WgXcQ");
+        let (head, _) = request(server.port(), &get(&good)).await;
+        assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
+        let wrong_nonce = format!("/{}/yt.html?v=dQw4w9WgXcQ", "0".repeat(64));
+        for path in [
+            wrong_nonce,
+            server.test_path("yt.html?v=dQw4w9WgX%27"),
+            server.test_path("yt.html?v=dQw4w9WgXcQ&x=1"),
+            server.test_path("yt.html"),
+            server.test_path("other.html?v=dQw4w9WgXcQ"),
+        ] {
+            let (head, body) = request(server.port(), &get(&path)).await;
+            assert!(
+                head.starts_with("HTTP/1.1 404 Not Found\r\n"),
+                "{path}: {head}"
+            );
+            assert!(body.is_empty());
+        }
+        assert_eq!(server.relay_url("../evil/xx", 50), None);
+        let post = format!("POST {good} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        let (head, _) = request(server.port(), &post).await;
+        assert!(head.starts_with("HTTP/1.1 404 Not Found\r\n"), "{head}");
     }
 
     #[tokio::test]

@@ -256,21 +256,67 @@ export function viewerCaption(items: readonly MediaItem[], index: number, title:
   return `Screenshot ${shots.indexOf(item) + 1} of ${shots.length} · ${title}`;
 }
 
-/** The viewer's hints (item 305). A server video adds A (Pause while it
- *  plays, Play while paused) and LT / RT to seek 10 s (ruling E6). */
-export function viewerHints(kind: MediaItem['kind'] | null, paused: boolean): Hint[] {
+/** What the viewer shows, for its controls: a screenshot, a video that
+ *  plays (a server video, or the YouTube player until it falls back), or a
+ *  trailer's poster (the YouTube fallback). */
+export type ViewerShow = 'screenshot' | 'video' | 'poster' | null;
+
+export function viewerShow(kind: MediaItem['kind'] | null, embedShowing: boolean): ViewerShow {
+  if (kind === null) return null;
+  if (kind === 'screenshot') return 'screenshot';
+  if (kind === 'youtube') return embedShowing ? 'video' : 'poster';
+  return 'video';
+}
+
+/** What a viewer button does (user decision 2026-11-10, replacing ruling
+ *  E6): while a video shows, LB / RB seek 10 s, LT / RT step its volume and
+ *  Left / Right page; otherwise LB / RB and Left / Right page. X opens a
+ *  trailer on YouTube, playing or not. */
+export type ViewerAct = 'prev' | 'next' | 'back' | 'forward' | 'volDown' | 'volUp' | 'watch' | null;
+
+export const VIEWER_BUTTONS = ['LB', 'RB', 'LEFT', 'RIGHT', 'LT', 'RT', 'X'] as const;
+export type ViewerButton = (typeof VIEWER_BUTTONS)[number];
+
+export function viewerAction(b: ViewerButton, show: ViewerShow, youtube: boolean): ViewerAct {
+  if (b === 'LEFT') return 'prev';
+  if (b === 'RIGHT') return 'next';
+  if (b === 'X') return youtube ? 'watch' : null;
+  if (show === 'video') {
+    if (b === 'LB') return 'back';
+    if (b === 'RB') return 'forward';
+    if (b === 'LT') return 'volDown';
+    return 'volUp';
+  }
+  if (b === 'LB') return 'prev';
+  if (b === 'RB') return 'next';
+  return null;
+}
+
+/** Held LT / RT repeat like a direction while a video shows. */
+export function viewerRepeats(b: string, show: ViewerShow): boolean {
+  return show === 'video' && (b === 'LT' || b === 'RT');
+}
+
+/** The viewer's hints (item 305). A video: A Pause / Play, LB / RB seek,
+ *  LT / RT volume (user decision 2026-11-10); a trailer's poster: A Watch on
+ *  YouTube. */
+export function viewerHints(show: ViewerShow, paused: boolean): Hint[] {
+  if (show === 'video') {
+    return [
+      { button: 'A', label: paused ? 'Play' : 'Pause' },
+      { button: 'LB', label: 'Back 10 s' },
+      { button: 'RB', label: 'Forward 10 s' },
+      { button: 'LT', label: 'Volume −' },
+      { button: 'RT', label: 'Volume +' },
+      { button: 'B', label: 'Close' },
+    ];
+  }
   const base: Hint[] = [
     { button: 'LB', label: 'Previous' },
     { button: 'RB', label: 'Next' },
     { button: 'B', label: 'Close' },
   ];
-  if (kind !== 'video') return base;
-  return [
-    { button: 'A', label: paused ? 'Play' : 'Pause' },
-    { button: 'LT', label: 'Back 10 s' },
-    { button: 'RT', label: 'Forward 10 s' },
-    ...base,
-  ];
+  return show === 'poster' ? [{ button: 'A', label: 'Watch on YouTube' }, ...base] : base;
 }
 
 /** Where a 10 s seek lands: inside the video. */

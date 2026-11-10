@@ -16,6 +16,7 @@ mod python_import;
 mod relink_service;
 pub(crate) mod test_env;
 mod update_service;
+mod youtube_relay;
 
 use commands::AppState;
 use grid_core::autoconfig::RaCredentials;
@@ -751,6 +752,7 @@ pub fn run() {
             commands::video_url,
             commands::ensure_background_variant,
             commands::open_youtube_video,
+            commands::youtube_embed_url,
             commands::install_game,
             commands::cancel_install,
             commands::retry_install,

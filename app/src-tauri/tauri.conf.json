@@ -34,6 +34,7 @@
         "img-src": "'self' asset: http://asset.localhost https://img.youtube.com",
         "media-src": "'self' http://127.0.0.1:*",
         "connect-src": "ipc: http://ipc.localhost",
+        "frame-src": "http://127.0.0.1:*",
         "style-src": "'unsafe-inline' 'self'"
       }
     }

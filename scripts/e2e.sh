@@ -154,8 +154,9 @@ STAGE_GROUPS=(
   # stick, Saves, Uninstall's confirmation, Playing and the gate; (b) --tv:
   # Link to server game, Locate… through the folder browser, Game settings;
   # (c) --tv: the platform search rule, Search everything's failure and the
-  # launch card's "Set up <Platform>".
-  "tv-details:specs/tv-details-a.spec.ts specs/tv-details-b.spec.ts specs/tv-details-c.spec.ts"
+  # launch card's "Set up <Platform>"; (d) --tv: the media viewer's videos
+  # (a trailer's offline fallback, a server video's seek and volume).
+  "tv-details:specs/tv-details-a.spec.ts specs/tv-details-b.spec.ts specs/tv-details-c.spec.ts specs/tv-details-d.spec.ts"
   # TV mode's Downloads tab and Settings panes (docs/tv-mode/plan.md P10) on
   # the default fixtures with the `downloads` group's throttled content, so a
   # download stays in flight long enough to cancel. The spec connects on the

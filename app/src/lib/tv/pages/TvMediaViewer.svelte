@@ -1,27 +1,39 @@
 <script lang="ts">
   // The media viewer's face (items 303–305; tvmode.css `.viewer`): black,
-  // fullscreen down to the hint bar, the picture at 70% of the screen
-  // height, and "(LB) Screenshot <i> of <n> · <title> (RB)" ("Trailer ·
-  // <title>" for a video) under it. A trailer can't play inside GRID (the
-  // desktop's reason: YouTube refuses embeds from the app), so A on it opens
-  // it in the browser; a server video plays in place, A pausing and playing
-  // it and LT / RT seeking 10 s (ruling E6; the controls stay for a mouse).
-  import { api } from '../../api';
+  // fullscreen down to the hint bar. A screenshot sits at 70% of the screen
+  // height with "(LB) Screenshot <i> of <n> · <title> (RB)" under it.
+  //
+  // A video — a server video, or a trailer in the YouTube player (the
+  // loopback relay, youtube_relay.rs) — plays in place (user decision
+  // 2026-11-10): A plays and pauses, LB / RB seek 10 s, LT / RT step its own
+  // volume, Left / Right page. It sits in the left of the screen, clear of
+  // the notification column on the right, so nothing ever covers it
+  // (YouTube's rules); the "Volume N%" readout shows in that column, beside
+  // it. "(X) Watch on YouTube" stays under a trailer's player. When the
+  // player can't play the trailer (an error, or no ready signal in 10 s) the
+  // poster comes back and A opens the trailer in the browser.
+  import { untrack } from 'svelte';
   import Image from '../../Image.svelte';
   import { trailerPoster, videoLoadMessage } from '../../details/media';
-  import { pushToast } from '../../stores/toasts.svelte';
+  import { fromElementVolume, toElementVolume, volumeLabel } from '../../details/videoVolume';
+  import YoutubeEmbed from '../../details/YoutubeEmbed.svelte';
+  import { initialEmbed } from '../../details/youtubeRelay';
+  import { api } from '../../api';
+  import { setVideoVolume, uiSettings } from '../../stores/uiSettings.svelte';
   import { tvf } from '../focus/actions';
   import Glyph from '../glyphs/Glyph.svelte';
   import TvIcon from '../ui/TvIcon.svelte';
   import { viewerCaption } from './details';
-  import { toggleVideo, type ViewerModel } from './mediaViewer.svelte';
+  import { pausedOf, showOf, toggleVideo, type ViewerModel } from './mediaViewer.svelte';
 
   let { model }: { model: ViewerModel } = $props();
 
   let item = $derived(model.items[model.index] ?? null);
   let caption = $derived(viewerCaption(model.items, model.index, model.title));
+  let show = $derived(showOf(model));
   let ratio = $state<Record<string, number>>({});
   let thumbFailed = $state(false);
+  let srEl = $state<HTMLButtonElement | null>(null);
 
   // A server video's playable URL (the desktop's `video_url`).
   let videoSrc = $state<string | null>(null);
@@ -46,6 +58,20 @@
     };
   });
 
+  // Each item starts its own player: a trailer after one that fell back
+  // gets its own try.
+  let itemKey = $derived(item === null ? '' : item.kind === 'youtube' ? `yt:${item.videoId}` : `${item.kind}:${item.url}`);
+  $effect(() => {
+    void itemKey;
+    model.embed = initialEmbed();
+  });
+
+  // A server video opens at the stored level.
+  $effect(() => {
+    const v = model.video;
+    if (v) v.volume = toElementVolume(untrack(() => uiSettings.videoVolume));
+  });
+
   /** A screenshot that fails leaves the sequence, as in the desktop viewer. */
   function failed(url: string) {
     model.onFail(url);
@@ -56,48 +82,98 @@
   }
 
   function activate() {
-    // A server video: A pauses and plays it (ruling E6).
-    if (item?.kind === 'video') toggleVideo(model);
-    else if (item?.kind === 'youtube') api.openYoutubeVideo(item.videoId).catch((e: unknown) => pushToast(e instanceof Error ? e.message : String(e), 'error'));
+    if (item?.kind === 'video' || item?.kind === 'youtube') toggleVideo(model);
   }
+
+  let aLabel = $derived(show === 'video' ? (pausedOf(model) ? 'Play' : 'Pause') : show === 'poster' ? 'Watch on YouTube' : 'Select');
 </script>
 
-<div class="viewer" data-testid="tv-viewer">
+<div class="viewer" class:vid={show === 'video'} data-testid="tv-viewer" data-show={show}>
   {#if item}
-    {#if item.kind === 'screenshot'}
-      <div class="shot" style={`aspect-ratio:${ratio[item.url] ?? 16 / 9}`} data-testid="tv-viewer-shot">
-        <Image
-          url={item.url}
-          alt={item.caption}
-          placeholder="Screenshot"
-          onmeasure={(w, h) => (ratio = { ...ratio, [item.url]: w / h })}
-          onerror={() => failed(item.url)}
-        />
-      </div>
-    {:else if item.kind === 'youtube'}
-      {@const poster = trailerPoster(item.videoId, model.cover, thumbFailed)}
-      <div class="shot" style="aspect-ratio:16/9" data-testid="tv-viewer-trailer">
-        {#if poster.kind === 'youtube'}
-          <img src={poster.url} alt="" referrerpolicy="no-referrer" draggable="false" onerror={() => (thumbFailed = true)} />
+    <div class="col">
+      {#if item.kind === 'screenshot'}
+        <div class="shot" style={`aspect-ratio:${ratio[item.url] ?? 16 / 9}`} data-testid="tv-viewer-shot">
+          <Image
+            url={item.url}
+            alt={item.caption}
+            placeholder="Screenshot"
+            onmeasure={(w, h) => (ratio = { ...ratio, [item.url]: w / h })}
+            onerror={() => failed(item.url)}
+          />
+        </div>
+      {:else if item.kind === 'youtube'}
+        {#if show === 'video'}
+          <div
+            class="shot player"
+            data-testid="tv-viewer-trailer"
+            data-phase={model.embed?.phase}
+            data-linked={model.embed?.linked ? 'true' : 'false'}
+          >
+            {#key item.videoId}
+              <YoutubeEmbed
+                bind:this={model.yt}
+                bind:embed={model.embed}
+                videoId={item.videoId}
+                volume={uiSettings.videoVolume}
+                onVolume={(v) => setVideoVolume(v)}
+                onFocusLost={() => srEl?.focus()}
+                testid="tv-viewer-embed"
+              />
+            {/key}
+          </div>
         {:else}
-          <Image url={poster.url} alt="" placeholder="Trailer" />
+          {@const poster = trailerPoster(item.videoId, model.cover, thumbFailed)}
+          <div
+            class="shot"
+            style="aspect-ratio:16/9"
+            data-testid="tv-viewer-trailer"
+            data-phase={model.embed?.phase}
+            data-reason={model.embed?.reason}
+            data-linked={model.embed?.linked ? 'true' : 'false'}
+          >
+            {#if poster.kind === 'youtube'}
+              <img src={poster.url} alt="" referrerpolicy="no-referrer" draggable="false" onerror={() => (thumbFailed = true)} />
+            {:else}
+              <Image url={poster.url} alt="" placeholder="Trailer" />
+            {/if}
+            <span class="play"><TvIcon name="play" px={64} /></span>
+          </div>
+          <div class="muted" data-testid="tv-viewer-trailer-note">This trailer can't play in GRID.</div>
         {/if}
-        <span class="play"><TvIcon name="play" px={64} /></span>
+        <!-- Always under the player or the poster, never over it. -->
+        <button class="watch" data-btn="X" data-testid="tv-viewer-watch" tabindex="-1"><Glyph button="X" />Watch on YouTube</button>
+      {:else}
+        <div class="shot player" data-testid="tv-viewer-video">
+          {#if videoSrc}
+            <!-- svelte-ignore a11y_media_has_caption -->
+            <video
+              src={videoSrc}
+              autoplay
+              controls
+              tabindex="-1"
+              bind:this={model.video}
+              onplay={() => (model.paused = false)}
+              onpause={() => (model.paused = true)}
+              onvolumechange={(e) => setVideoVolume(fromElementVolume((e.currentTarget as HTMLVideoElement).volume))}
+              data-testid="tv-viewer-videoel"
+            ></video>
+          {:else if videoError}
+            <span class="verr">{videoError}</span>
+          {/if}
+        </div>
+      {/if}
+      <div class="cap">
+        {#if show === 'video'}<Glyph button="DPAD" />{:else}<Glyph button="LB" />{/if}<span data-testid="tv-viewer-caption">{caption}</span>{#if show !== 'video'}<Glyph button="RB" />{/if}
       </div>
-      <div class="muted">Trailers open in your browser.</div>
-    {:else}
-      <div class="shot" style="aspect-ratio:16/9" data-testid="tv-viewer-video">
-        {#if videoSrc}
-          <!-- svelte-ignore a11y_media_has_caption -->
-          <video src={videoSrc} autoplay controls bind:this={model.video} bind:paused={model.paused} data-testid="tv-viewer-videoel"></video>
-        {:else if videoError}
-          <span class="verr">{videoError}</span>
-        {/if}
+    </div>
+    {#if show === 'video'}
+      <!-- The notification column: the volume readout sits here, beside
+           the player, and the notification cards stack above it. -->
+      <div class="side" aria-live="polite">
+        {#if model.readout}<span class="vol" data-testid="tv-viewer-volume">{volumeLabel(uiSettings.videoVolume)}</span>{/if}
       </div>
     {/if}
-    <div class="cap"><Glyph button="LB" /><span data-testid="tv-viewer-caption">{caption}</span><Glyph button="RB" /></div>
   {/if}
-  <!-- The one focusable item, so focus stays inside the viewer; A on a
-       trailer opens it in the browser. -->
-  <button class="sr" data-k="viewer" data-al={item?.kind === 'youtube' ? 'Watch on YouTube' : item?.kind === 'video' ? (model.paused ? 'Play' : 'Pause') : 'Select'} use:tvf={{ a: activate }}>media</button>
+  <!-- The one focusable item, so focus stays inside the viewer. -->
+  <button class="sr" data-k="viewer" data-al={aLabel} bind:this={srEl} use:tvf={{ a: activate }}>media</button>
 </div>

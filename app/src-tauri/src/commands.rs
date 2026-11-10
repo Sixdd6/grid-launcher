@@ -481,37 +481,44 @@ pub async fn video_url(state: State<'_, AppState>, url: String) -> Result<String
         .ok_or_else(|| "the video is not in the cache directory".to_string())
 }
 
-/// The exact-length check a YouTube video id must pass before it is
-/// interpolated into a URL handed to the OS browser: exactly 11
-/// `[A-Za-z0-9_-]` characters, YouTube's fixed id format. Anything else — a
-/// path, an id with a query string tacked on, a full URL — must not build a
-/// URL at all. Surrounding whitespace is trimmed before the check (and the
-/// built URL uses the trimmed id), so a padded id is still accepted, but
-/// never as the untrimmed original.
+/// The YouTube watch page for a video id, or `None` when the id is not
+/// exactly 11 `[A-Za-z0-9_-]` characters (`youtube_relay::video_id`, which
+/// trims surrounding whitespace first). A path, an id with a query string
+/// tacked on or a full URL never builds a URL handed to the OS browser.
 pub fn youtube_watch_url(id: &str) -> Option<String> {
-    let trimmed = id.trim();
-    let valid = trimmed.len() == 11
-        && trimmed
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
-    if valid {
-        Some(format!("https://www.youtube.com/watch?v={trimmed}"))
-    } else {
-        None
-    }
+    crate::youtube_relay::video_id(id).map(|id| format!("https://www.youtube.com/watch?v={id}"))
 }
 
-/// Opens a trailer's YouTube watch page in the system browser. An embedded
-/// `<iframe>` cannot play the video on Linux: the page origin is
-/// `tauri://localhost`, a "local scheme" under the W3C referrer policy, so
-/// no `Referer` header is ever sent and YouTube answers error 153 ("Video
-/// unavailable") for every embed (tauri-apps/tauri#14422) — no markup fix
-/// works around it. `video_id` is validated here before it reaches a URL
-/// handed to the OS opener.
+/// Opens a trailer's YouTube watch page in the system browser: the media
+/// viewer's "Watch on YouTube", always shown under the embedded player and
+/// the only way to watch when the embed fails. `video_id` is validated here
+/// before it reaches a URL handed to the OS opener.
 #[tauri::command]
 pub fn open_youtube_video(app: tauri::AppHandle, video_id: String) -> Result<(), String> {
     let url = youtube_watch_url(&video_id).ok_or("not a YouTube video id")?;
     app.opener().open_url(url, None::<&str>).map_err(err)
+}
+
+/// The loopback relay page that plays a trailer inside GRID
+/// (`youtube_relay.rs`): `http://127.0.0.1:<port>/<nonce>/yt.html?v=<id>&vol=<n>`.
+/// An iframe straight to YouTube from the app page gets error 153 on Linux
+/// and macOS (no `Referer` from `tauri://localhost`, tauri-apps/tauri#14422);
+/// the relay's http origin is accepted. The id is validated here and again
+/// by the server; `volume` (the stored `ui.video_volume`) is clamped to 100.
+/// The URL carries the media server's nonce, so it is never logged.
+#[tauri::command]
+pub fn youtube_embed_url(
+    state: State<'_, AppState>,
+    video_id: String,
+    volume: u8,
+) -> Result<String, String> {
+    let server = state
+        .media_server
+        .get()
+        .ok_or_else(|| "the media server did not start".to_string())?;
+    server
+        .relay_url(&video_id, volume)
+        .ok_or_else(|| "not a YouTube video id".to_string())
 }
 
 /// The local path of the shell background's pre-scaled variant of `url`,
@@ -675,6 +682,9 @@ const MAX_BACKGROUND_FADE: u8 = 100;
 /// drift apart.
 const MAX_BACKGROUND_BLUR: u8 = grid_core::images::background::BACKGROUND_BLUR_MAX;
 
+/// The loudest the video players go (`ui.video_volume`, a percentage).
+const MAX_VIDEO_VOLUME: u8 = 100;
+
 /// What actually gets written to `config.toml` for a set of appearance
 /// settings: an unrecognized theme falls back to `"system"` (rather than
 /// being rejected, which would make a stale frontend unable to save
@@ -697,6 +707,7 @@ pub fn normalize_ui_settings(settings: UiSettings) -> UiSettings {
         open_on: normalize_open_on(&settings.open_on),
         tv_prompts: normalize_tv_prompts(&settings.tv_prompts),
         tv_welcomed: settings.tv_welcomed,
+        video_volume: settings.video_volume.min(MAX_VIDEO_VOLUME),
         tv_assignments: settings
             .tv_assignments
             .into_iter()
@@ -3549,9 +3560,28 @@ mod ui_settings_tests {
                 open_on: "automatic".to_string(),
                 tv_prompts: "match".to_string(),
                 tv_welcomed: false,
+                video_volume: 50,
                 tv_assignments: BTreeMap::new(),
             }
         );
+    }
+
+    /// The video volume is a percentage: a hand-edited or stale value past
+    /// 100 is stored as 100.
+    #[test]
+    fn the_video_volume_is_clamped_to_zero_to_a_hundred() {
+        let volume = |value: u8| {
+            normalize_ui_settings(UiSettings {
+                video_volume: value,
+                ..Default::default()
+            })
+            .video_volume
+        };
+        assert_eq!(volume(0), 0);
+        assert_eq!(volume(50), 50);
+        assert_eq!(volume(100), 100);
+        assert_eq!(volume(101), 100);
+        assert_eq!(volume(255), 100);
     }
 
     #[test]

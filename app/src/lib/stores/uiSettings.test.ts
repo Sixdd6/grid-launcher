@@ -344,6 +344,7 @@ describe('background blur', () => {
       tv_prompts: 'match',
       tv_assignments: {},
       tv_welcomed: false,
+      video_volume: 50,
     });
   });
 
@@ -503,6 +504,32 @@ describe('Open GRID on and the TV keys', () => {
     expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ tv_welcomed: true, tv_assignments: { aa: 'xbox' } }));
     await store.setTvWelcomed();
     expect(setUiSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the video volume back, clamped, with 50 for an old config (user decision 2026-11-10)', async () => {
+    expect((await loadStore({})).store.uiSettings.videoVolume).toBe(50);
+    expect((await loadStore({ video_volume: 80 })).store.uiSettings.videoVolume).toBe(80);
+    expect((await loadStore({ video_volume: 400 })).store.uiSettings.videoVolume).toBe(100);
+  });
+
+  it('applies a volume change at once and writes it once, 500 ms after the last change', async () => {
+    const { store, setUiSettings } = await loadStore({});
+    vi.useFakeTimers();
+    try {
+      store.setVideoVolume(60);
+      store.setVideoVolume(70);
+      expect(store.uiSettings.videoVolume).toBe(70);
+      vi.advanceTimersByTime(499);
+      expect(setUiSettings).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(setUiSettings).toHaveBeenCalledTimes(1);
+      expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ video_volume: 70 }));
+      store.setVideoVolume(70);
+      vi.advanceTimersByTime(1000);
+      expect(setUiSettings).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reads tv_welcomed back', async () => {

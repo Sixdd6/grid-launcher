@@ -2,6 +2,11 @@
   import { api } from '../api';
   import Icon from '../Icon.svelte';
   import Image from '../Image.svelte';
+  import { untrack } from 'svelte';
+  import { setVideoVolume, uiSettings } from '../stores/uiSettings.svelte';
+  import { fromElementVolume, toElementVolume } from './videoVolume';
+  import YoutubeEmbed from './YoutubeEmbed.svelte';
+  import { initialEmbed, type EmbedState } from './youtubeRelay';
   import {
     fitMedia,
     nextIndex,
@@ -51,14 +56,27 @@
     void currentKey;
     natural = null;
   });
-  /** The trailer poster's frame: 16:9, at most 1280 wide, never enlarged.
-   *  Room is left under it for the "open in your browser" note. */
+  /** The trailer's frame: 16:9, at most 1280 wide, never enlarged. Room
+   *  is left under it for "Watch on YouTube" and the fallback's note. */
   const TRAILER_FRAME = { width: 1280, height: 720 };
-  const TRAILER_NOTE_PX = 48;
+  const TRAILER_NOTE_PX = 104;
+  /** The notification cards' column at the right (Toast.svelte: 340px wide,
+   *  24px from the edge), which a trailer keeps clear of: nothing may
+   *  overlap YouTube's player. Less the viewer's own 16px padding, plus a
+   *  16px gap. */
+  const TOAST_COLUMN_PX = 340 + 24 - 16 + 16;
   let mediaSize = $derived.by(() => {
     if (current === null) return { width: 0, height: 0 };
     if (current.kind === 'youtube') {
-      return fitMedia(TRAILER_FRAME.width, TRAILER_FRAME.height, stageWidth, stageHeight - TRAILER_NOTE_PX, 1);
+      // The arrows sit beside the player, never over it.
+      const arrows = items.length > 1 ? ARROW_ROOM_PX : 0;
+      return fitMedia(
+        TRAILER_FRAME.width,
+        TRAILER_FRAME.height,
+        Math.max(0, stageWidth - TOAST_COLUMN_PX - arrows),
+        stageHeight - TRAILER_NOTE_PX,
+        1,
+      );
     }
     if (current.kind === 'video') {
       const size = natural ?? TRAILER_FRAME;
@@ -95,10 +113,28 @@
    *  the rejection carried no reason. `null` means no failure. */
   let videoLoadError = $state<string | null>(null);
 
-  // A trailer never plays in-app (Task 5): the button opens the system
-  // browser through a validated Tauri command, and any failure to launch
-  // it (no browser configured, the opener plugin erroring) surfaces here.
+  // A trailer plays in the YouTube player through the loopback relay
+  // (youtube_relay.rs); "Watch on YouTube" under it opens the system browser
+  // through a validated Tauri command, and any failure to launch it (no
+  // browser configured, the opener plugin erroring) surfaces here.
   let youtubeError = $state<string | null>(null);
+  /** The YouTube player's state; `fallback` brings the poster back. */
+  let embed = $state<EmbedState>(initialEmbed());
+  // Each trailer gets its own try, after one that fell back too. Keyed on
+  // the id, not the item: `items` is rebuilt on every recompute.
+  let trailerId = $derived(current !== null && current.kind === 'youtube' ? current.videoId : null);
+  $effect(() => {
+    void trailerId;
+    embed = initialEmbed();
+  });
+
+  // A hosted video opens at the stored volume; its own controls store a
+  // change (`ui.video_volume`, shared with TV mode).
+  let videoEl = $state<HTMLVideoElement | null>(null);
+  $effect(() => {
+    const v = videoEl;
+    if (v) v.volume = toElementVolume(untrack(() => uiSettings.videoVolume));
+  });
 
   // Which YouTube thumbnails have failed, keyed by video id — same shape as
   // `MediaTab.svelte`'s guard, kept local because this popup and the tab
@@ -194,7 +230,13 @@
       <Icon name="close" size={20} />
     </button>
 
-    <div class="stage" bind:clientWidth={stageWidth} bind:clientHeight={stageHeight}>
+    <div
+      class="stage"
+      class:reserve={current.kind === 'youtube'}
+      style:--toast-column={`${TOAST_COLUMN_PX}px`}
+      bind:clientWidth={stageWidth}
+      bind:clientHeight={stageHeight}
+    >
       {#if items.length > 1}
         <!-- As wide as the media plus an arrow each side, and no wider than
              the stage: the arrows hug the media, and on wide media stop at
@@ -244,13 +286,13 @@
           />
         </div>
       {:else if current.kind === 'youtube'}
-        <!-- No embed: an iframe to youtube-nocookie.com never plays on
-             Linux. The page origin is `tauri://localhost`, a "local scheme"
-             under the W3C referrer policy, so no `Referer` header is ever
-             sent and YouTube answers error 153 ("Video unavailable") for
-             every embed (tauri-apps/tauri#14422) — no markup fix works
-             around it. The poster opens the trailer in the system browser
-             instead. -->
+        <!-- The trailer plays in YouTube's player, framed by GRID's loopback
+             relay page: an iframe straight from the app page never plays on
+             Linux (no Referer from `tauri://localhost`, error 153,
+             tauri-apps/tauri#14422). Nothing overlaps the player (YouTube's
+             rules): the arrows sit beside it, the notification column is
+             kept clear, and "Watch on YouTube" is under it. An error, or no
+             ready signal within 10 s, brings the poster back. -->
         {@const poster = trailerPoster(
           current.videoId,
           coverUrl,
@@ -259,10 +301,25 @@
         <div class="youtube-wrap">
           <div
             class="frame youtube-frame"
+            data-testid="media-viewer-trailer"
+            data-phase={embed.phase}
+            data-reason={embed.reason}
+            data-linked={embed.linked ? 'true' : 'false'}
             style:width={mediaSize.width > 0 ? `${mediaSize.width}px` : null}
             style:height={mediaSize.height > 0 ? `${mediaSize.height}px` : null}
           >
-            {#if poster.kind === 'youtube'}
+            {#if embed.phase !== 'fallback'}
+              {#key current.videoId}
+                <YoutubeEmbed
+                  bind:embed
+                  videoId={current.videoId}
+                  volume={uiSettings.videoVolume}
+                  onVolume={(v) => setVideoVolume(v)}
+                  onFocusLost={() => viewerEl?.focus()}
+                  testid="media-viewer-embed"
+                />
+              {/key}
+            {:else if poster.kind === 'youtube'}
               <!-- Plain <img>, deliberately NOT `Image.svelte`: that
                    component fetches through `ensure_image` -> RommClient,
                    which would attach the RomM token to a foreign host.
@@ -286,22 +343,24 @@
             {:else}
               <Image url={poster.url} alt="" placeholder="Trailer" />
             {/if}
-            <button
-              class="watch-btn"
-              data-testid="media-viewer-youtube-open"
-              onclick={() => {
-                youtubeError = null;
-                api
-                  .openYoutubeVideo(current.videoId)
-                  .catch((e) => (youtubeError = e instanceof Error ? e.message : String(e)));
-              }}
-            >
-              Watch on YouTube
-            </button>
           </div>
-          <p class="youtube-note" data-testid="media-viewer-youtube-note">
-            Trailers open in your browser.
-          </p>
+          <button
+            class="watch-btn"
+            data-testid="media-viewer-youtube-open"
+            onclick={() => {
+              youtubeError = null;
+              api
+                .openYoutubeVideo(current.videoId)
+                .catch((e) => (youtubeError = e instanceof Error ? e.message : String(e)));
+            }}
+          >
+            Watch on YouTube
+          </button>
+          {#if embed.phase === 'fallback'}
+            <p class="youtube-note" data-testid="media-viewer-youtube-note">
+              This trailer can't play in GRID.
+            </p>
+          {/if}
           {#if youtubeError}
             <p class="youtube-error" data-testid="media-viewer-youtube-error">{youtubeError}</p>
           {/if}
@@ -316,6 +375,9 @@
             style:height={mediaSize.height > 0 ? `${mediaSize.height}px` : null}
             src={videoSrc}
             controls
+            bind:this={videoEl}
+            onvolumechange={(e) =>
+              setVideoVolume(fromElementVolume((e.currentTarget as HTMLVideoElement).volume))}
             onloadedmetadata={(e) => {
               const v = e.currentTarget as HTMLVideoElement;
               if (v.videoWidth > 0 && v.videoHeight > 0) natural = { width: v.videoWidth, height: v.videoHeight };
@@ -447,11 +509,19 @@
     display: block;
   }
 
+  /* The stage keeps the notification column clear while a trailer shows. */
+  .stage.reserve {
+    padding-right: var(--toast-column);
+    box-sizing: border-box;
+  }
+
+  .youtube-frame {
+    min-width: 480px;
+    min-height: 270px;
+  }
+
   .watch-btn {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    margin-top: 12px;
     font: inherit;
     font-weight: 600;
     padding: 12px 24px;

@@ -18,13 +18,10 @@ export type MediaGalleryInput = {
 };
 
 /**
- * An 11-character YouTube id and nothing else. Nothing here builds a watch
- * URL: an `<iframe>` to `youtube-nocookie.com` cannot play on Linux (the
- * page origin is `tauri://localhost`, a "local scheme" under the W3C
- * referrer policy, so no `Referer` is sent and YouTube answers error 153
- * "Video unavailable" for every embed — tauri-apps/tauri#14422), so the
- * trailer opens in the system browser through `open_youtube_video`, which
- * validates the id again on the Rust side and builds the only URL. This
+ * An 11-character YouTube id and nothing else. Nothing here builds a URL:
+ * the trailer plays through GRID's loopback relay page (`youtube_embed_url`)
+ * and "Watch on YouTube" opens the browser through `open_youtube_video`;
+ * both validate the id again on the Rust side and build the only URLs. This
  * guard decides whether a trailer tile exists at all and gates the
  * thumbnail URL below.
  */

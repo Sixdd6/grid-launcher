@@ -167,12 +167,32 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     );
     await $(testId('media-viewer-next')).click();
     await expect($(testId('media-viewer-caption'))).toHaveText('Super Mario World — trailer');
-    // No embed: trailers open in the system browser (Task 5). Do NOT click
-    // this button here — it would launch a real browser on the host.
+    // The trailer plays in YouTube's player through GRID's loopback relay
+    // page (youtube_relay.rs). e2e runs point the relay's player script at a
+    // dead loopback port (wdio.conf.ts GRID_LAUNCHER_E2E_YOUTUBE_API), so it
+    // can't load: the relay reports it and the viewer falls back to the
+    // poster and "Watch on YouTube" well before its 10 s ready timeout. `data-linked` proves messages passed both ways in the real
+    // webview: the relay loads the player only after the app's hello, and
+    // the app accepts only the relay's origin and window.
+    const trailer = $(testId('media-viewer-trailer'));
+    await browser.waitUntil(async () => (await trailer.getAttribute('data-phase')) === 'fallback', {
+      timeout: 8_000,
+      timeoutMsg: 'the trailer never fell back to its poster before the ready timeout',
+    });
+    expect(await trailer.getAttribute('data-reason')).toBe('error');
+    expect(await trailer.getAttribute('data-linked')).toBe('true');
+    await expect($(testId('media-viewer-embed'))).not.toExist();
+    // Do NOT click this button here — it would launch a real browser on
+    // the host. It sits under the poster, never over it.
     await expect($(testId('media-viewer-youtube-open'))).toBeExisting();
-    await expect($(testId('media-viewer-youtube-note'))).toHaveText(
-      'Trailers open in your browser.',
-    );
+    const below = (await browser.execute(() => {
+      const frame = document.querySelector('[data-testid="media-viewer-trailer"]')!.getBoundingClientRect();
+      const btn = document.querySelector('[data-testid="media-viewer-youtube-open"]')!.getBoundingClientRect();
+      return btn.top >= frame.bottom;
+    })) as boolean;
+    expect(below).toBe(true);
+    await expect($(testId('media-viewer-youtube-note'))).toHaveText("This trailer can't play in GRID.");
+    // Focus stayed on the viewer, so the arrows and Esc below still work.
 
     // The gallery's fourth and last item: rom 101's hosted video
     // (fixture path_video). `MediaViewer.svelte` resolves it through

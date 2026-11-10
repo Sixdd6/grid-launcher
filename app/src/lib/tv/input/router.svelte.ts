@@ -52,12 +52,15 @@ export const controllers = {
 const KEYBOARD = -1;
 
 /**
- * Which held buttons repeat: directions, and the on-screen keyboard's
- * typing buttons while it is the top overlay (A on a typing key, X, Y, LB
- * and RB; items 42–43). Asked at the press and at every repeat.
+ * Which held buttons repeat: directions, the on-screen keyboard's typing
+ * buttons while it is the top overlay (A on a typing key, X, Y, LB and RB;
+ * items 42–43), and the media viewer's LT / RT volume while a video shows
+ * (timed like a direction). Asked at the press and at every repeat.
  */
 function repeatKind(b: TvButton): RepeatKind {
-  if (topLayer()?.typingRepeat?.(b, focused())) return 'typing';
+  const layer = topLayer();
+  if (layer?.typingRepeat?.(b, focused())) return 'typing';
+  if (layer?.dirRepeat?.(b)) return 'dir';
   return isDirection(b) ? 'dir' : null;
 }
 

@@ -26,6 +26,7 @@ import {
   type ThemeChoice,
 } from '../theme';
 import { tvTheme } from '../tv/theme';
+import { clampVolume, debounced, VOLUME_DEFAULT, VOLUME_SAVE_MS } from '../details/videoVolume';
 
 const state = $state<{
   theme: ThemeChoice;
@@ -41,6 +42,7 @@ const state = $state<{
   tvPrompts: TvPrompts;
   tvAssignments: Record<string, TvAssignment>;
   tvWelcomed: boolean;
+  videoVolume: number;
   /** The stored settings have been read (or the read failed and the
    *  defaults stand). The shell waits for it: Open GRID on decides the view
    *  it opens on. */
@@ -59,6 +61,7 @@ const state = $state<{
   tvPrompts: 'match',
   tvAssignments: {},
   tvWelcomed: false,
+  videoVolume: VOLUME_DEFAULT,
   loaded: false,
 });
 
@@ -84,6 +87,7 @@ function payload(): UiSettings {
     tv_prompts: state.tvPrompts,
     tv_assignments: { ...state.tvAssignments },
     tv_welcomed: state.tvWelcomed,
+    video_volume: state.videoVolume,
   };
 }
 
@@ -126,6 +130,10 @@ export const uiSettings = {
   },
   get tvWelcomed(): boolean {
     return state.tvWelcomed;
+  },
+  /** The video players' own volume, 0–100. */
+  get videoVolume(): number {
+    return state.videoVolume;
   },
   get loaded(): boolean {
     return state.loaded;
@@ -211,6 +219,7 @@ export async function initUiSettings(): Promise<() => void> {
     state.tvPrompts = normalizeTvPrompts(stored.tv_prompts ?? '');
     state.tvAssignments = normalizeTvAssignments(stored.tv_assignments);
     state.tvWelcomed = stored.tv_welcomed === true;
+    state.videoVolume = clampVolume(stored.video_volume ?? VOLUME_DEFAULT);
   } catch {
     // Defaults/mirror already in `state`.
   }
@@ -366,4 +375,26 @@ export async function setTvWelcomed(): Promise<void> {
 export async function setTvAssignment(key: string, style: TvAssignment): Promise<void> {
   state.tvAssignments = { ...state.tvAssignments, [key]: style };
   await api.setUiSettings(payload());
+}
+
+// One write per settled change: LT / RT held down, or a volume slider
+// dragged, sends a level every few frames.
+const saveVolume = debounced(() => {
+  void (async () => {
+    try {
+      await api.setUiSettings(payload());
+    } catch {
+      // The level still applies for this session.
+    }
+  })();
+}, VOLUME_SAVE_MS);
+
+/** A video player's volume changed (LT / RT in TV mode, the player's own
+ *  controls on the desktop): applies at once, then persists about 500 ms
+ *  after the last change. */
+export function setVideoVolume(value: number): void {
+  const v = clampVolume(value);
+  if (v === state.videoVolume) return;
+  state.videoVolume = v;
+  saveVolume();
 }
