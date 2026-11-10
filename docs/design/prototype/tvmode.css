@@ -54,7 +54,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .cv-art { position: relative; width: 100%; aspect-ratio: 3 / 4; border-radius: .7rem; background: var(--c); overflow: hidden; display: flex; align-items: flex-end; padding: .9rem; color: #fff; font-weight: 700; font-size: 1.1rem; line-height: 1.15; box-shadow: var(--shadow-card); transition: transform 150ms ease, box-shadow 150ms ease; }
 .cv-art::before { content: ''; position: absolute; right: -18%; top: 12%; width: 70%; aspect-ratio: 1; border-radius: 50%; background: rgba(255,255,255,.12); }
 .cv-art::after { content: ''; position: absolute; left: 10%; top: 8%; width: 34%; height: .4rem; border-radius: .2rem; background: rgba(255,255,255,.35); }
-.cv-art span { position: relative; text-shadow: 0 1px 2px rgba(0,0,0,.4); padding-bottom: 2.4rem; }
+.cv-art .ttl { position: relative; text-shadow: 0 1px 2px rgba(0,0,0,.4); padding-bottom: 2rem; }
 .cv.f .cv-art { transform: scale(1.07); box-shadow: var(--shadow-lift), 0 0 0 .22rem var(--bg), 0 0 0 .42rem var(--focus); }
 .cv-l { font-size: .9rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 .1rem; }
 .cv.f .cv-l { color: var(--text-h); font-weight: 600; }
@@ -67,18 +67,21 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 
 /* ---- Home */
 .home { position: absolute; inset: 0; display: flex; flex-direction: column; }
-.hero { flex: 0 0 auto; min-height: 15.5rem; display: flex; align-items: flex-end; padding: 1.6rem 2.4rem 1rem; }
-.hero-box { max-width: 46rem; padding: 1.4rem 1.8rem; border-radius: .9rem; background: var(--panel); border: 1px solid var(--line); }
+/* A fixed height, so the rows area never changes size as focus moves. */
+.hero { flex: 0 0 15rem; height: 15rem; display: flex; align-items: flex-end; padding: 1.2rem 2.4rem .6rem; overflow: hidden; }
+.hero-box { width: 46rem; max-width: 100%; padding: 1.4rem 1.8rem; border-radius: .9rem; background: var(--panel); border: 1px solid var(--line); }
 .hero .plat { font-size: .8rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
-.logo { margin: .2rem 0 .4rem; font-size: 2.6rem; line-height: 1.05; font-weight: 800; letter-spacing: -.01em; color: var(--text-h); }
-.hero .meta { color: var(--text-muted); font-size: 1rem; }
-.hero .sum { margin: .6rem 0 0; font-size: 1rem; color: var(--text); max-width: 40rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 0 2rem; scrollbar-width: none; }
+.logo { margin: .2rem 0 .4rem; font-size: 2.6rem; line-height: 1.1; font-weight: 800; letter-spacing: -.01em; color: var(--text-h); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero .meta { color: var(--text-muted); font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero .sum { margin: .6rem 0 0; font-size: 1rem; line-height: 1.4; height: 2.8em; color: var(--text); max-width: 40rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0; scrollbar-width: none; }
 .rows::-webkit-scrollbar, .track::-webkit-scrollbar, .scroll::-webkit-scrollbar { display: none; }
-.shelf { margin-top: 1.1rem; }
-.shelf h2 { margin: 0 2.4rem .6rem; font-size: 1.25rem; font-weight: 600; color: var(--text-h); }
+.shelf { padding-top: .6rem; }
+.shelf h2 { margin: 0 2.4rem; line-height: 1.6rem; font-size: 1.25rem; font-weight: 600; color: var(--text-h); }
 .shelf h2 span { color: var(--text-muted); font-weight: 400; font-size: 1rem; margin-left: .5rem; }
-.track { display: flex; gap: 1.3rem; overflow-x: auto; padding: .7rem 2.4rem 1rem; scroll-padding: 0 2.4rem; scrollbar-width: none; }
+/* 1.4rem above and below: room for a focused cover's 7% growth and its ring,
+   which the row's own edge would otherwise cut. */
+.track { display: flex; gap: 1.3rem; overflow-x: auto; overflow-y: hidden; padding: 1.4rem 2.4rem 1.4rem; scrollbar-width: none; }
 .track .cv { --cw: 10rem; }
 .track .cv-l { display: none; }
 .shelf .empty { margin: 0 2.4rem; }
@@ -99,8 +102,11 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .chip { display: inline-flex; align-items: center; gap: .4rem; padding: .35rem .9rem; border-radius: 100px; border: 1px solid var(--line-strong); font-size: .9rem; color: var(--text-muted); }
 .chip b { color: var(--text-h); font-weight: 600; }
 .chip.warn { border-color: var(--warning-text); color: var(--warning-text); }
-.scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, 10rem); justify-content: space-between; gap: 1.6rem 1.2rem; padding: 1.4rem .6rem 2.4rem; }
+/* The grid's scroll area reaches 1.2rem past the header on both sides, so covers
+   still line up with the header while a grown, ringed cover in the first or last
+   column has room. */
+.scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none; margin: 0 -1.2rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, 10rem); justify-content: space-between; gap: 1.6rem 1.2rem; padding: 1.4rem 1.2rem 2.4rem; }
 .grid .cv { --cw: 10rem; }
 .empty { color: var(--text-muted); font-size: 1.1rem; padding: 2rem .6rem; max-width: 40rem; }
 .empty h2 { color: var(--text-h); margin: 0 0 .4rem; font-size: 1.4rem; }
@@ -129,7 +135,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .ttab { padding: .7rem 0; font-weight: 600; color: var(--text-muted); font-size: 1.05rem; border-bottom: .2rem solid transparent; margin-bottom: -1px; }
 .ttab.on { color: var(--text-h); border-color: var(--primary); }
 .ttabs .gl { opacity: .8; }
-.tbody { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1.2rem .3rem 2rem; scrollbar-width: none; }
+/* 1rem of side padding (pulled back with a negative margin) so focus rings and
+   grown covers at the edges are never cut by the tab's scrolling area. */
+.tbody { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1.2rem 1rem 2rem; margin: 0 -1rem; scrollbar-width: none; }
+.tbody .track { margin: 0 -1.2rem; padding-left: 1.2rem; padding-right: 1.2rem; }
 .ov { display: grid; grid-template-columns: 1fr 17rem; gap: 2rem; }
 .prose { font-size: 1.1rem; line-height: 1.65; max-width: 44rem; border-radius: .6rem; padding: .4rem .6rem; margin: -.4rem -.6rem; }
 .prose p { margin: 0 0 .8rem; }
@@ -138,7 +147,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .facts dd { margin: .1rem 0 0; color: var(--text-h); }
 .sub-h { margin: 1.4rem 0 .4rem; font-size: 1.1rem; color: var(--text-h); font-weight: 600; }
 .sub-h span { color: var(--text-muted); font-weight: 400; margin-left: .4rem; }
-.mtrack { display: flex; gap: 1rem; overflow-x: auto; padding: .6rem .4rem 1rem; scrollbar-width: none; }
+.mtrack { display: flex; gap: 1rem; overflow-x: auto; overflow-y: hidden; padding: 1rem 1.2rem 1.2rem; margin: 0 -1.2rem; scrollbar-width: none; }
 .mtile { flex: 0 0 auto; height: 8rem; border-radius: .6rem; background: var(--c); position: relative; overflow: hidden; }
 .mtile::after { content: ''; position: absolute; left: 12%; bottom: 18%; width: 30%; height: 30%; border-radius: 50%; background: rgba(255,255,255,.14); }
 .mtile .play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; z-index: 1; }

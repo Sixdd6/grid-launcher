@@ -29,6 +29,13 @@ The Menu has a **Prototype only** section for states that need a trigger: first 
 - **Hint bar** (3.6rem, bottom): what each button does right now, in the controller's own glyphs, for the focused item. The left side shows the controller's name, or the offline notice. Each hint can also be clicked.
 - **Focus:** one 0.2rem `focus` ring at a 0.2rem offset. A focused cover grows to 107% with `shadow-lift` and a ring. A focused row takes the `selected` fill. Focus is never lost: every screen opens with something focused, and going back returns focus to where it was. A change never moves the player: in Settings only the pane redraws (never the rail), and when the focused control goes away (Install recommended once nothing is missing) focus moves to the control now in its place in the same panel. While Install recommended runs, the button reads "Installing N emulators…" and can't be pressed again.
 - **Movement:** spatial. Rails, rows and lists keep you inside them along their axis (no wrapping off the end). Moving into a rail, row, pane or button group goes back to the item you last left there, or to its first item. Down from a list's last item carries on to the buttons under it (never sideways into another panel).
+- **Scrolling** follows fixed rules, never the browser's "just enough":
+  - On Home, moving into a shelf brings its title to the top of the rows area, so a shelf is always seen whole with its title; the first shelf sits at the very top. The hero has a fixed height, so the rows area never changes size.
+  - A row that scrolls sideways keeps the focused cover a full row margin (2.4rem) inside its edges.
+  - Everywhere else (grids, lists, panes, menus), the focused item stays 1.2rem inside the scrolling area, room for its ring and lift; an item taller than the area lines up with its top.
+  - Rows, grids and Details tabs leave room around every cover for its 7% growth and ring, so nothing focused is ever cut, and covers still line up with the titles and headers beside them.
+  - A redraw (an install starting, coming back from Details, switching tabs and back) keeps every scroll position.
+  - Scrolls glide; with reduced motion, and when a screen first appears, they jump.
 - **Background art:** the focused game's art, blurred, behind panels. The fade and blur from Settings › Appearance apply. Text sits only on `panel` or `overlay`, as on the desktop.
 - **Theme:** dark by default, because TV mode is for a dark room. Settings › Appearance › Theme still applies.
 - **Notifications:** the same events and wording as the desktop, as cards at the top right under the top bar (the bottom is the hint bar). At most three. They never take focus. A card with an action shows the View prompt. Every card also goes to Menu › Notifications.

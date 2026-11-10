@@ -59,7 +59,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .cv-art { position: relative; width: 100%; aspect-ratio: 3 / 4; border-radius: .7rem; background: var(--c); overflow: hidden; display: flex; align-items: flex-end; padding: .9rem; color: #fff; font-weight: 700; font-size: 1.1rem; line-height: 1.15; box-shadow: var(--shadow-card); transition: transform 150ms ease, box-shadow 150ms ease; }
 .cv-art::before { content: ''; position: absolute; right: -18%; top: 12%; width: 70%; aspect-ratio: 1; border-radius: 50%; background: rgba(255,255,255,.12); }
 .cv-art::after { content: ''; position: absolute; left: 10%; top: 8%; width: 34%; height: .4rem; border-radius: .2rem; background: rgba(255,255,255,.35); }
-.cv-art span { position: relative; text-shadow: 0 1px 2px rgba(0,0,0,.4); padding-bottom: 2.4rem; }
+.cv-art .ttl { position: relative; text-shadow: 0 1px 2px rgba(0,0,0,.4); padding-bottom: 2rem; }
 .cv.f .cv-art { transform: scale(1.07); box-shadow: var(--shadow-lift), 0 0 0 .22rem var(--bg), 0 0 0 .42rem var(--focus); }
 .cv-l { font-size: .9rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 .1rem; }
 .cv.f .cv-l { color: var(--text-h); font-weight: 600; }
@@ -72,18 +72,21 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 
 /* ---- Home */
 .home { position: absolute; inset: 0; display: flex; flex-direction: column; }
-.hero { flex: 0 0 auto; min-height: 15.5rem; display: flex; align-items: flex-end; padding: 1.6rem 2.4rem 1rem; }
-.hero-box { max-width: 46rem; padding: 1.4rem 1.8rem; border-radius: .9rem; background: var(--panel); border: 1px solid var(--line); }
+/* A fixed height, so the rows area never changes size as focus moves. */
+.hero { flex: 0 0 15rem; height: 15rem; display: flex; align-items: flex-end; padding: 1.2rem 2.4rem .6rem; overflow: hidden; }
+.hero-box { width: 46rem; max-width: 100%; padding: 1.4rem 1.8rem; border-radius: .9rem; background: var(--panel); border: 1px solid var(--line); }
 .hero .plat { font-size: .8rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
-.logo { margin: .2rem 0 .4rem; font-size: 2.6rem; line-height: 1.05; font-weight: 800; letter-spacing: -.01em; color: var(--text-h); }
-.hero .meta { color: var(--text-muted); font-size: 1rem; }
-.hero .sum { margin: .6rem 0 0; font-size: 1rem; color: var(--text); max-width: 40rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 0 2rem; scrollbar-width: none; }
+.logo { margin: .2rem 0 .4rem; font-size: 2.6rem; line-height: 1.1; font-weight: 800; letter-spacing: -.01em; color: var(--text-h); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero .meta { color: var(--text-muted); font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero .sum { margin: .6rem 0 0; font-size: 1rem; line-height: 1.4; height: 2.8em; color: var(--text); max-width: 40rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0; scrollbar-width: none; }
 .rows::-webkit-scrollbar, .track::-webkit-scrollbar, .scroll::-webkit-scrollbar { display: none; }
-.shelf { margin-top: 1.1rem; }
-.shelf h2 { margin: 0 2.4rem .6rem; font-size: 1.25rem; font-weight: 600; color: var(--text-h); }
+.shelf { padding-top: .6rem; }
+.shelf h2 { margin: 0 2.4rem; line-height: 1.6rem; font-size: 1.25rem; font-weight: 600; color: var(--text-h); }
 .shelf h2 span { color: var(--text-muted); font-weight: 400; font-size: 1rem; margin-left: .5rem; }
-.track { display: flex; gap: 1.3rem; overflow-x: auto; padding: .7rem 2.4rem 1rem; scroll-padding: 0 2.4rem; scrollbar-width: none; }
+/* 1.4rem above and below: room for a focused cover's 7% growth and its ring,
+   which the row's own edge would otherwise cut. */
+.track { display: flex; gap: 1.3rem; overflow-x: auto; overflow-y: hidden; padding: 1.4rem 2.4rem 1.4rem; scrollbar-width: none; }
 .track .cv { --cw: 10rem; }
 .track .cv-l { display: none; }
 .shelf .empty { margin: 0 2.4rem; }
@@ -104,8 +107,11 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .chip { display: inline-flex; align-items: center; gap: .4rem; padding: .35rem .9rem; border-radius: 100px; border: 1px solid var(--line-strong); font-size: .9rem; color: var(--text-muted); }
 .chip b { color: var(--text-h); font-weight: 600; }
 .chip.warn { border-color: var(--warning-text); color: var(--warning-text); }
-.scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, 10rem); justify-content: space-between; gap: 1.6rem 1.2rem; padding: 1.4rem .6rem 2.4rem; }
+/* The grid's scroll area reaches 1.2rem past the header on both sides, so covers
+   still line up with the header while a grown, ringed cover in the first or last
+   column has room. */
+.scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none; margin: 0 -1.2rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, 10rem); justify-content: space-between; gap: 1.6rem 1.2rem; padding: 1.4rem 1.2rem 2.4rem; }
 .grid .cv { --cw: 10rem; }
 .empty { color: var(--text-muted); font-size: 1.1rem; padding: 2rem .6rem; max-width: 40rem; }
 .empty h2 { color: var(--text-h); margin: 0 0 .4rem; font-size: 1.4rem; }
@@ -134,7 +140,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .ttab { padding: .7rem 0; font-weight: 600; color: var(--text-muted); font-size: 1.05rem; border-bottom: .2rem solid transparent; margin-bottom: -1px; }
 .ttab.on { color: var(--text-h); border-color: var(--primary); }
 .ttabs .gl { opacity: .8; }
-.tbody { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1.2rem .3rem 2rem; scrollbar-width: none; }
+/* 1rem of side padding (pulled back with a negative margin) so focus rings and
+   grown covers at the edges are never cut by the tab's scrolling area. */
+.tbody { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1.2rem 1rem 2rem; margin: 0 -1rem; scrollbar-width: none; }
+.tbody .track { margin: 0 -1.2rem; padding-left: 1.2rem; padding-right: 1.2rem; }
 .ov { display: grid; grid-template-columns: 1fr 17rem; gap: 2rem; }
 .prose { font-size: 1.1rem; line-height: 1.65; max-width: 44rem; border-radius: .6rem; padding: .4rem .6rem; margin: -.4rem -.6rem; }
 .prose p { margin: 0 0 .8rem; }
@@ -143,7 +152,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .facts dd { margin: .1rem 0 0; color: var(--text-h); }
 .sub-h { margin: 1.4rem 0 .4rem; font-size: 1.1rem; color: var(--text-h); font-weight: 600; }
 .sub-h span { color: var(--text-muted); font-weight: 400; margin-left: .4rem; }
-.mtrack { display: flex; gap: 1rem; overflow-x: auto; padding: .6rem .4rem 1rem; scrollbar-width: none; }
+.mtrack { display: flex; gap: 1rem; overflow-x: auto; overflow-y: hidden; padding: 1rem 1.2rem 1.2rem; margin: 0 -1.2rem; scrollbar-width: none; }
 .mtile { flex: 0 0 auto; height: 8rem; border-radius: .6rem; background: var(--c); position: relative; overflow: hidden; }
 .mtile::after { content: ''; position: absolute; left: 12%; bottom: 18%; width: 30%; height: 30%; border-radius: 50%; background: rgba(255,255,255,.14); }
 .mtile .play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; z-index: 1; }
@@ -408,7 +417,7 @@ function cover(g, o) {
   if (o.plat) b += '<span class="tag plat">' + g.p + '</span>';
   var d = dlOf(g); if (d) b += '<span class="tag q">' + (d.st === 'active' ? d.pct + '%' : 'Queued') + '</span>';
   return '<button class="cv" data-f data-k="' + (o.k || 'g') + g.id + '" data-a="details" data-id="' + g.id + '" data-x="quick" data-hero="' + g.id + '" style="--c:' + g.c + '">' +
-    '<span class="cv-art">' + b + '<span>' + esc(g.t) + '</span></span><span class="cv-l">' + esc(g.t) + '</span></button>';
+    '<span class="cv-art">' + b + '<span class="ttl">' + esc(g.t) + '</span></span><span class="cv-l">' + esc(g.t) + '</span></button>';
 }
 function quickLabel(g) { if (!g) return null; if (dlOf(g)) return null; if (g.missing || g.unlinked) return null; return g.inst ? 'Play' : (S.offline ? null : 'Install'); }
 
@@ -446,13 +455,58 @@ function setFocus(el, noScroll) {
   if (cur && cur !== el) cur.classList.remove('f');
   cur = el; el.classList.add('f');
   var c = el.closest('[data-nav]'); if (c) c._last = el;
-  if (!noScroll) el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  if (!noScroll) reveal(el);
   var top = S.layers.length ? S.layers[S.layers.length - 1] : (S.pages.length ? S.pages[S.pages.length - 1] : TABS[S.tab]);
   if (el.dataset.k) top._k = el.dataset.k;
   if (el.dataset.hero) hero(byId(el.dataset.hero));
   if (el.dataset.onfocus && ONF[el.dataset.onfocus]) ONF[el.dataset.onfocus](el);
   paintHints();
 }
+/* Scrolling. Every move scrolls by a rule, never by the browser's "nearest":
+   - A row that scrolls sideways (Home shelves, Related, Media) keeps the focused
+     item a full row-padding (2.4rem) inside its edges, so a grown, ringed cover is
+     never cut at the left or right.
+   - On Home, a shelf snaps its title to the top of the rows area whenever focus
+     moves into it, so a row is always seen whole with its title, and the first
+     shelf sits at the very top.
+   - Anywhere else (grids, lists, panes, sheets), the focused item stays 1.2rem
+     inside the scrolling area, which clears its focus ring and lift; an item taller
+     than the area lines up with its top.
+   Redraws keep each screen's scroll positions (see renderStage). */
+var INSTANT = false;
+function remPx() { return parseFloat(getComputedStyle(document.documentElement).fontSize); }
+function glide() { return !INSTANT && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); }
+function vScroller(el) {
+  for (var v = el.parentElement; v && v !== document.body; v = v.parentElement) {
+    var oy = getComputedStyle(v).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && v.scrollHeight > v.clientHeight + 1 && !v.classList.contains('track') && !v.classList.contains('mtrack')) return v;
+  }
+  return null;
+}
+function reveal(el) {
+  var rem = remPx(), how = glide() ? 'smooth' : 'auto';
+  var ht = el.closest('.track, .mtrack');
+  if (ht) {
+    var tr = ht.getBoundingClientRect(), r = el.getBoundingClientRect(), edge = parseFloat(getComputedStyle(ht).paddingLeft) || 2.4 * rem, x = ht.scrollLeft;
+    if (r.left - tr.left < edge) x += (r.left - tr.left) - edge;
+    else if (tr.right - r.right < edge) x += (r.right - tr.right) + edge;
+    x = Math.max(0, Math.min(x, ht.scrollWidth - ht.clientWidth));
+    if (Math.abs(x - ht.scrollLeft) > 1) ht.scrollTo({ left: x, behavior: how });
+  }
+  var v = vScroller(el); if (!v) return;
+  var vr = v.getBoundingClientRect(), y = v.scrollTop, shelf = v.classList.contains('rows') && el.closest('.shelf');
+  if (shelf) y = shelf.previousElementSibling ? y + (shelf.getBoundingClientRect().top - vr.top) : 0;
+  else {
+    var b = el.getBoundingClientRect(), pad = 1.2 * rem, top = b.top - pad, bot = b.bottom + pad;
+    if (top < vr.top) y += top - vr.top; else if (bot > vr.bottom) y += Math.min(bot - vr.bottom, top - vr.top);
+  }
+  y = Math.max(0, Math.min(y, v.scrollHeight - v.clientHeight));
+  if (Math.abs(y - v.scrollTop) > 1) v.scrollTo({ top: y, behavior: how });
+}
+var SCROLLERS = '.rows, .track, .mtrack, .scroll, .tbody, .list, .pane, .page, .rail, .start-body';
+function saveScroll() { return Array.prototype.map.call($('stage').querySelectorAll(SCROLLERS), function (e) { return [e.scrollLeft, e.scrollTop]; }); }
+function loadScroll(saved) { if (!saved) return; var L = $('stage').querySelectorAll(SCROLLERS); if (L.length !== saved.length) return; for (var i = 0; i < L.length; i++) { L[i].scrollLeft = saved[i][0]; L[i].scrollTop = saved[i][1]; } }
+
 function restoreFocus(obj) {
   var root = scope(), el = null;
   if (obj && obj._k) el = root.querySelector('[data-k="' + obj._k + '"]');
@@ -775,7 +829,7 @@ function detBody(g) {
   if (S.detTab === 'Overview') {
     var rel = G.filter(function (x) { return x.p === g.p && x.id !== g.id; }).slice(0, 6);
     return '<div class="ov"><div><div class="prose" data-f data-k="prose" data-al="Read" tabindex="-1">' + SUM.split('\n').map(function (p) { return '<p>' + esc(p) + '</p>'; }).join('') + '</div>' +
-      (rel.length ? '<div class="sub-h">Related<span>' + rel.length + '</span></div><div class="track" data-nav="h" style="padding-left:.4rem;padding-right:.4rem">' + rel.map(function (x) { return cover(x, { k: 'rel' }); }).join('') + '</div>' : '') + '</div>' +
+      (rel.length ? '<div class="sub-h">Related<span>' + rel.length + '</span></div><div class="track" data-nav="h">' + rel.map(function (x) { return cover(x, { k: 'rel' }); }).join('') + '</div>' : '') + '</div>' +
       '<dl class="facts"><div><dt>Developer</dt><dd>Lighthouse Works</dd></div><div><dt>Release</dt><dd>' + relDate(g.rel) + '</dd></div><div><dt>Genres</dt><dd>Racing, Adventure</dd></div><div><dt>Players</dt><dd>1–2</dd></div><div><dt>Size</dt><dd>1.2 GB</dd></div></dl></div>';
   }
   if (S.detTab === 'Media') {
@@ -1169,31 +1223,33 @@ function viewer(i) {
 }
 
 /* ------------------------------------------------------------------ render */
+var shownScr = null;
 function renderStage() {
   var scr = S.pages.length ? S.pages[S.pages.length - 1] : TABS[S.tab];
+  /* Keep each screen's scroll: a redraw, or coming back to it, puts every rail,
+     row and list where it was. */
+  if (shownScr) shownScr._scroll = saveScroll();
   $('stage').innerHTML = scr.render();
   if (scr.after) scr.after();
+  loadScroll(scr._scroll);
+  shownScr = scr;
   paintTop();
-  if (cur && !document.body.contains(cur)) { var k = cur.dataset.k, el = k && scope().querySelector('[data-k="' + k + '"]'); if (el) setFocus(el, true); }
+  if (cur && !document.body.contains(cur)) { var k = cur.dataset.k, el = k && scope().querySelector('[data-k="' + k + '"]'); if (el) { INSTANT = true; setFocus(el); INSTANT = false; } }
 }
 function render() {
   var scr = S.pages.length ? S.pages[S.pages.length - 1] : TABS[S.tab];
   renderStage();
-  if (!S.layers.length) restoreFocus(scr);
+  INSTANT = true; if (!S.layers.length) restoreFocus(scr); INSTANT = false;
   if (S.tab === 'home' && !S.pages.length && cur && !cur.dataset.hero) hero(byId(1));
   paintHints();
 }
-/* Redraw after a change without moving the player. In Settings only the pane is
-   redrawn, never the rail. Focus stays on the same control; if that control is
-   gone (Install recommended once nothing is missing), it moves to the control now
-   at the same place in the same panel, never back to the rail or the top. */
 function repaint() {
   if (S.layers.length) { if ($('pane') && S.tab === 'settings' && !S.pages.length) setPaint(); else renderStage(); paintHints(); return; }
   var k = cur && document.body.contains(cur) && cur.dataset.k, box = cur && cur.closest('[id]'), bid = box && box.id, idx = box ? focusables(box).indexOf(cur) : -1;
   if ($('pane') && S.tab === 'settings' && !S.pages.length) setPaint(); else renderStage();
   var el = k && scope().querySelector('[data-k="' + k + '"]');
   if (!el && bid && $(bid)) { var L = focusables($(bid)).filter(function (e) { return !e.disabled; }); el = L[Math.max(0, Math.min(idx, L.length - 1))]; }
-  if (el) setFocus(el, true); else restoreFocus();
+  INSTANT = true; if (el) setFocus(el); else restoreFocus(); INSTANT = false;
   paintHints();
 }
 function advanceQueue() { if (!DL.some(function (d) { return d.st === 'active'; })) { var q = DL.filter(function (d) { return d.st === 'queued'; })[0]; if (q) q.st = 'active'; } }

@@ -80,7 +80,7 @@ function cover(g, o) {
   if (o.plat) b += '<span class="tag plat">' + g.p + '</span>';
   var d = dlOf(g); if (d) b += '<span class="tag q">' + (d.st === 'active' ? d.pct + '%' : 'Queued') + '</span>';
   return '<button class="cv" data-f data-k="' + (o.k || 'g') + g.id + '" data-a="details" data-id="' + g.id + '" data-x="quick" data-hero="' + g.id + '" style="--c:' + g.c + '">' +
-    '<span class="cv-art">' + b + '<span>' + esc(g.t) + '</span></span><span class="cv-l">' + esc(g.t) + '</span></button>';
+    '<span class="cv-art">' + b + '<span class="ttl">' + esc(g.t) + '</span></span><span class="cv-l">' + esc(g.t) + '</span></button>';
 }
 function quickLabel(g) { if (!g) return null; if (dlOf(g)) return null; if (g.missing || g.unlinked) return null; return g.inst ? 'Play' : (S.offline ? null : 'Install'); }
 
@@ -118,13 +118,58 @@ function setFocus(el, noScroll) {
   if (cur && cur !== el) cur.classList.remove('f');
   cur = el; el.classList.add('f');
   var c = el.closest('[data-nav]'); if (c) c._last = el;
-  if (!noScroll) el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  if (!noScroll) reveal(el);
   var top = S.layers.length ? S.layers[S.layers.length - 1] : (S.pages.length ? S.pages[S.pages.length - 1] : TABS[S.tab]);
   if (el.dataset.k) top._k = el.dataset.k;
   if (el.dataset.hero) hero(byId(el.dataset.hero));
   if (el.dataset.onfocus && ONF[el.dataset.onfocus]) ONF[el.dataset.onfocus](el);
   paintHints();
 }
+/* Scrolling. Every move scrolls by a rule, never by the browser's "nearest":
+   - A row that scrolls sideways (Home shelves, Related, Media) keeps the focused
+     item a full row-padding (2.4rem) inside its edges, so a grown, ringed cover is
+     never cut at the left or right.
+   - On Home, a shelf snaps its title to the top of the rows area whenever focus
+     moves into it, so a row is always seen whole with its title, and the first
+     shelf sits at the very top.
+   - Anywhere else (grids, lists, panes, sheets), the focused item stays 1.2rem
+     inside the scrolling area, which clears its focus ring and lift; an item taller
+     than the area lines up with its top.
+   Redraws keep each screen's scroll positions (see renderStage). */
+var INSTANT = false;
+function remPx() { return parseFloat(getComputedStyle(document.documentElement).fontSize); }
+function glide() { return !INSTANT && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); }
+function vScroller(el) {
+  for (var v = el.parentElement; v && v !== document.body; v = v.parentElement) {
+    var oy = getComputedStyle(v).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && v.scrollHeight > v.clientHeight + 1 && !v.classList.contains('track') && !v.classList.contains('mtrack')) return v;
+  }
+  return null;
+}
+function reveal(el) {
+  var rem = remPx(), how = glide() ? 'smooth' : 'auto';
+  var ht = el.closest('.track, .mtrack');
+  if (ht) {
+    var tr = ht.getBoundingClientRect(), r = el.getBoundingClientRect(), edge = parseFloat(getComputedStyle(ht).paddingLeft) || 2.4 * rem, x = ht.scrollLeft;
+    if (r.left - tr.left < edge) x += (r.left - tr.left) - edge;
+    else if (tr.right - r.right < edge) x += (r.right - tr.right) + edge;
+    x = Math.max(0, Math.min(x, ht.scrollWidth - ht.clientWidth));
+    if (Math.abs(x - ht.scrollLeft) > 1) ht.scrollTo({ left: x, behavior: how });
+  }
+  var v = vScroller(el); if (!v) return;
+  var vr = v.getBoundingClientRect(), y = v.scrollTop, shelf = v.classList.contains('rows') && el.closest('.shelf');
+  if (shelf) y = shelf.previousElementSibling ? y + (shelf.getBoundingClientRect().top - vr.top) : 0;
+  else {
+    var b = el.getBoundingClientRect(), pad = 1.2 * rem, top = b.top - pad, bot = b.bottom + pad;
+    if (top < vr.top) y += top - vr.top; else if (bot > vr.bottom) y += Math.min(bot - vr.bottom, top - vr.top);
+  }
+  y = Math.max(0, Math.min(y, v.scrollHeight - v.clientHeight));
+  if (Math.abs(y - v.scrollTop) > 1) v.scrollTo({ top: y, behavior: how });
+}
+var SCROLLERS = '.rows, .track, .mtrack, .scroll, .tbody, .list, .pane, .page, .rail, .start-body';
+function saveScroll() { return Array.prototype.map.call($('stage').querySelectorAll(SCROLLERS), function (e) { return [e.scrollLeft, e.scrollTop]; }); }
+function loadScroll(saved) { if (!saved) return; var L = $('stage').querySelectorAll(SCROLLERS); if (L.length !== saved.length) return; for (var i = 0; i < L.length; i++) { L[i].scrollLeft = saved[i][0]; L[i].scrollTop = saved[i][1]; } }
+
 function restoreFocus(obj) {
   var root = scope(), el = null;
   if (obj && obj._k) el = root.querySelector('[data-k="' + obj._k + '"]');
@@ -447,7 +492,7 @@ function detBody(g) {
   if (S.detTab === 'Overview') {
     var rel = G.filter(function (x) { return x.p === g.p && x.id !== g.id; }).slice(0, 6);
     return '<div class="ov"><div><div class="prose" data-f data-k="prose" data-al="Read" tabindex="-1">' + SUM.split('\n').map(function (p) { return '<p>' + esc(p) + '</p>'; }).join('') + '</div>' +
-      (rel.length ? '<div class="sub-h">Related<span>' + rel.length + '</span></div><div class="track" data-nav="h" style="padding-left:.4rem;padding-right:.4rem">' + rel.map(function (x) { return cover(x, { k: 'rel' }); }).join('') + '</div>' : '') + '</div>' +
+      (rel.length ? '<div class="sub-h">Related<span>' + rel.length + '</span></div><div class="track" data-nav="h">' + rel.map(function (x) { return cover(x, { k: 'rel' }); }).join('') + '</div>' : '') + '</div>' +
       '<dl class="facts"><div><dt>Developer</dt><dd>Lighthouse Works</dd></div><div><dt>Release</dt><dd>' + relDate(g.rel) + '</dd></div><div><dt>Genres</dt><dd>Racing, Adventure</dd></div><div><dt>Players</dt><dd>1–2</dd></div><div><dt>Size</dt><dd>1.2 GB</dd></div></dl></div>';
   }
   if (S.detTab === 'Media') {
@@ -841,31 +886,33 @@ function viewer(i) {
 }
 
 /* ------------------------------------------------------------------ render */
+var shownScr = null;
 function renderStage() {
   var scr = S.pages.length ? S.pages[S.pages.length - 1] : TABS[S.tab];
+  /* Keep each screen's scroll: a redraw, or coming back to it, puts every rail,
+     row and list where it was. */
+  if (shownScr) shownScr._scroll = saveScroll();
   $('stage').innerHTML = scr.render();
   if (scr.after) scr.after();
+  loadScroll(scr._scroll);
+  shownScr = scr;
   paintTop();
-  if (cur && !document.body.contains(cur)) { var k = cur.dataset.k, el = k && scope().querySelector('[data-k="' + k + '"]'); if (el) setFocus(el, true); }
+  if (cur && !document.body.contains(cur)) { var k = cur.dataset.k, el = k && scope().querySelector('[data-k="' + k + '"]'); if (el) { INSTANT = true; setFocus(el); INSTANT = false; } }
 }
 function render() {
   var scr = S.pages.length ? S.pages[S.pages.length - 1] : TABS[S.tab];
   renderStage();
-  if (!S.layers.length) restoreFocus(scr);
+  INSTANT = true; if (!S.layers.length) restoreFocus(scr); INSTANT = false;
   if (S.tab === 'home' && !S.pages.length && cur && !cur.dataset.hero) hero(byId(1));
   paintHints();
 }
-/* Redraw after a change without moving the player. In Settings only the pane is
-   redrawn, never the rail. Focus stays on the same control; if that control is
-   gone (Install recommended once nothing is missing), it moves to the control now
-   at the same place in the same panel, never back to the rail or the top. */
 function repaint() {
   if (S.layers.length) { if ($('pane') && S.tab === 'settings' && !S.pages.length) setPaint(); else renderStage(); paintHints(); return; }
   var k = cur && document.body.contains(cur) && cur.dataset.k, box = cur && cur.closest('[id]'), bid = box && box.id, idx = box ? focusables(box).indexOf(cur) : -1;
   if ($('pane') && S.tab === 'settings' && !S.pages.length) setPaint(); else renderStage();
   var el = k && scope().querySelector('[data-k="' + k + '"]');
   if (!el && bid && $(bid)) { var L = focusables($(bid)).filter(function (e) { return !e.disabled; }); el = L[Math.max(0, Math.min(idx, L.length - 1))]; }
-  if (el) setFocus(el, true); else restoreFocus();
+  INSTANT = true; if (el) setFocus(el); else restoreFocus(); INSTANT = false;
   paintHints();
 }
 function advanceQueue() { if (!DL.some(function (d) { return d.st === 'active'; })) { var q = DL.filter(function (d) { return d.st === 'queued'; })[0]; if (q) q.st = 'active'; } }
