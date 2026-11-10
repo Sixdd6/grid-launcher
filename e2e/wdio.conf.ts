@@ -23,6 +23,11 @@ const appBinaryPath = required('E2E_APP_BINARY');
 const dataDir = required('E2E_DATA_DIR');
 const mockUrl = required('E2E_MOCK_URL');
 
+// e2e.sh sets E2E_APP_ARGS (space-separated): `--tv` for the TV mode groups,
+// so the app starts straight into TV mode. The embedded driver spawns the app
+// with `wdio:tauriServiceOptions.appArgs`.
+const appArgs = (process.env.E2E_APP_ARGS ?? '').split(' ').filter((a) => a !== '');
+
 const appEnv: Record<string, string> = {
   // All app state (config.toml, grid-launcher.db, covers/) goes to the
   // stage's temp directory — never ~/.config/grid-launcher.
@@ -122,10 +127,11 @@ export const config: WebdriverIO.Config = {
       'wdio:enforceWebDriverClassic': true,
       'tauri:options': {
         application: appBinaryPath,
-        args: [],
+        args: appArgs,
       },
       'wdio:tauriServiceOptions': {
         appBinaryPath,
+        appArgs,
         driverProvider: 'embedded',
         env: appEnv,
         captureBackendLogs: true,

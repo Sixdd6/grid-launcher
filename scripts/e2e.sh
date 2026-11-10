@@ -126,6 +126,14 @@ STAGE_GROUPS=(
   # are copied from this computer, one out of date, and one is restored
   # from the drive. Seeded per spec.
   "backups:specs/backups-a.spec.ts specs/backups-b.spec.ts specs/backups-c.spec.ts specs/backups-d.spec.ts"
+  # TV mode's shell (docs/tv-mode/plan.md P5), on a profile used without a
+  # server (seeded). A group whose name starts with `tv-` starts the app with
+  # --tv (E2E_APP_ARGS, read by wdio.conf.ts); a spec opts out with an
+  # `// e2e-app-args:` line. (a) --tv: bands, sizing, tabs, input, prompts and
+  # assignments with injected controllers; (b) a desktop start: the TV button,
+  # Switch to desktop mode on the same view; (c) a restart without --tv opens
+  # the desktop.
+  "tv-shell:specs/tv-shell-a.spec.ts specs/tv-shell-b.spec.ts specs/tv-shell-c.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -571,6 +579,7 @@ seed_script_for_group() {
     layout-migration) printf '%s' "$E2E_DIR/seed/layout-migration-seed.mjs" ;;
     library-move) printf '%s' "$E2E_DIR/seed/library-move-seed.mjs" ;;
     backups) printf '%s' "$E2E_DIR/seed/backups-seed.mjs" ;;
+    tv-shell) printf '%s' "$E2E_DIR/seed/tv-shell-seed.mjs" ;;
     *) printf '' ;;
   esac
 }
@@ -752,6 +761,14 @@ EOF
       export E2E_MOCK_URL="$mock_url"
       export E2E_STAGE="$stage"
       export E2E_WDIO_LOG_DIR="$out_dir"
+      # TV mode groups (`tv-*`) start the app with --tv; wdio.conf.ts passes
+      # E2E_APP_ARGS (space-separated) to the app. A spec overrides it with
+      # an `// e2e-app-args: <args>` line, empty for a desktop start.
+      export E2E_APP_ARGS=""
+      if [[ "$name" == tv-* ]]; then E2E_APP_ARGS="--tv"; fi
+      if grep -q '^// e2e-app-args:' "$spec"; then
+        E2E_APP_ARGS="$(sed -n 's|^// e2e-app-args:[[:space:]]*\(.*\)$|\1|p' "$spec" | head -n1)"
+      fi
       if [[ -n "$forge_url" ]]; then
         # wdio.conf.ts forwards both into the app process: the first is what
         # launch/forge.rs's e2e redirect reads, the second is where the
