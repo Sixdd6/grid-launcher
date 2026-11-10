@@ -110,7 +110,12 @@ let instant = false;
 let nextPageId = 1;
 let nextLayerId = 1;
 /** Where each open layer was opened from (tvmode.js `o.prev`). */
-const layerPrev = new Map<number, { el: HTMLElement | null; key: string | null }>();
+const layerPrev = new Map<number, { el: HTMLElement | null; key: string | null; boxId: string | null; index: number }>();
+/** Set while an overlay closes: the stage's observer leaves focus to
+ *  `closeLayer`, which puts it back on the opener (else, with nothing
+ *  focused for a moment, it would restore the screen's focus, and focusing
+ *  a rail row selects it). */
+let closing = false;
 /** Work that waits for the last overlay to close (item 117). */
 let afterLayers: (() => void)[] = [];
 
@@ -219,7 +224,7 @@ export function topLayer(): Layer | null {
  */
 export async function openLayer(spec: LayerSpec): Promise<number> {
   const id = nextLayerId++;
-  layerPrev.set(id, { el: cur, key: cur?.getAttribute('data-k') ?? null });
+  layerPrev.set(id, { el: cur, key: cur?.getAttribute('data-k') ?? null, boxId: curPlace?.boxId ?? null, index: curPlace?.index ?? -1 });
   state.layers = [
     ...state.layers,
     { blocking: false, hints: null, binds: {}, cls: '', props: {}, ...spec, id },
@@ -238,17 +243,32 @@ export async function openLayer(spec: LayerSpec): Promise<number> {
 export async function closeLayer(): Promise<void> {
   const layer = state.layers[state.layers.length - 1];
   if (!layer) return;
-  const prev = layerPrev.get(layer.id) ?? { el: null, key: null };
+  const prev = layerPrev.get(layer.id) ?? { el: null, key: null, boxId: null, index: -1 };
   layerPrev.delete(layer.id);
   memory.delete(`layer:${layer.id}`);
+  closing = true;
   state.layers = state.layers.slice(0, -1);
   if (cur) cur.classList.remove('f');
   cur = null;
-  await tick();
+  try {
+    await tick();
+  } finally {
+    closing = false;
+  }
   const root = scope();
   let el: HTMLElement | null = null;
   if (prev.el && prev.el.isConnected && root?.contains(prev.el)) el = prev.el;
   else if (prev.key && root) el = focusables(root).find((e) => e.getAttribute('data-k') === prev.key) ?? null;
+  // The opener went while the overlay was up (a live search narrowed the
+  // grid): the item now in its place in the same panel (item 115), else,
+  // with the panel empty, the rail's selected row (as B would go), so
+  // restoring focus never lands on another rail row and selects it.
+  const box = !el && prev.boxId ? document.getElementById(prev.boxId) : null;
+  if (box && root?.contains(box)) {
+    const enabled = focusables(box).filter((e) => !isDisabled(e));
+    const i = inPlace(enabled.map((_, n) => n), prev.index);
+    el = i === null ? (root.querySelector<HTMLElement>('[data-rail] .sel[data-f]') ?? null) : enabled[i];
+  }
   if (el) setFocus(el, { scroll: false });
   else restoreFocus();
   layer.onClose?.();
@@ -415,9 +435,20 @@ export async function showScreen(): Promise<void> {
   refreshFocus();
 }
 
-/** LB / RB at a tab's top level, a top-bar tab click, a notice's action. */
-export async function showTab(tab: TvTab): Promise<void> {
-  if (state.tab === tab && state.pages.length === 0) return;
+/**
+ * Sets the item a screen focuses when it next appears (tvmode.js
+ * `TABS.server._k = 'r-discover'`: Menu › Discover lands on the Discover
+ * rail row, which Server's `arrive` then carries into Discover's content).
+ */
+export function rememberFocus(screen: string, k: string): void {
+  mem(screen).k = k;
+}
+
+/** LB / RB at a tab's top level, a top-bar tab click, a notice's action.
+ *  With `again`, a tab already on show appears afresh (its focus restored
+ *  and `arrive` run), as tvmode.js `render` does. */
+export async function showTab(tab: TvTab, opts: { again?: boolean } = {}): Promise<void> {
+  if (state.tab === tab && state.pages.length === 0 && !opts.again) return;
   saveScreen();
   state.pages = [];
   state.tab = tab;
@@ -433,6 +464,12 @@ export async function pushPage(page: Omit<Page, 'id'>, opts: { fresh?: boolean }
   state.pages = [...(opts.fresh ? [] : state.pages), { ...page, id }];
   await showScreen();
   return id;
+}
+
+/** Renames a page in the breadcrumb (Search everything's results follow
+ *  the search, ruling 17). */
+export function setPageTitle(id: number, title: string): void {
+  state.pages = state.pages.map((p) => (p.id === id ? { ...p, title } : p));
 }
 
 /** B on a page: back one page, focus and scroll as they were (items 93, 319). */
@@ -451,6 +488,7 @@ export async function popPage(): Promise<void> {
  * that arrived late), the screen's focus is restored.
  */
 export function stageChanged(): void {
+  if (closing) return;
   const root = scope();
   if (!root) return;
   if (cur && cur.isConnected && root.contains(cur)) {

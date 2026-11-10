@@ -2,7 +2,7 @@
 // wraps each screen in a context naming it, and the screen calls
 // `useScreen(hooks)` from its script. The hooks object is read lazily, so a
 // screen may answer from its own reactive state.
-import { getContext, setContext } from 'svelte';
+import { getContext, setContext, untrack } from 'svelte';
 import { registerScreen, type ScreenHooks } from './nav.svelte';
 
 const KEY = Symbol('tv-screen');
@@ -15,5 +15,10 @@ export function provideScreen(key: () => string): void {
 export function useScreen(hooks: ScreenHooks): void {
   const key = getContext<(() => string) | undefined>(KEY);
   if (!key) return;
-  $effect(() => registerScreen(key(), hooks));
+  // Untracked: registering bumps a counter it also reads, which would make
+  // this effect depend on itself and loop.
+  $effect(() => {
+    const k = key();
+    return untrack(() => registerScreen(k, hooks));
+  });
 }
