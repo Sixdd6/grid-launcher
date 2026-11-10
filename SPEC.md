@@ -779,7 +779,9 @@ are none), then the remembered drives that are not connected.
   inline). Adding a computer queues that OS's build of every emulator already on the
   drive, which needs a server. Removing one deletes those builds; games and firmware
   stay, and it works offline. Under it: a usage bar split into Other files, GRID and Free,
-  then Games, Emulators, Firmware, Last backup and the folder path, then **Show in
+  (GRID is what the `gridpack` folder takes on the drive, art and files a backup is still
+  writing included; the bar's total leaves out space the file system keeps for root, such as
+  ext4's 5%), then Games, Emulators, Firmware, Last backup and the folder path, then **Show in
   Library**, **Open folder**, **Rename…** (inline) and **Remove GRID files…**. Remove asks
   again ("Delete the gridpack folder from <label>?"), says how much it frees, deletes only
   `gridpack/`, and leaves the games installed on this computer.

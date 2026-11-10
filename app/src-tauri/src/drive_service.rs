@@ -124,6 +124,10 @@ pub struct DrivesSnapshot {
 pub struct ScannedDrive {
     pub drive: DetectedDrive,
     pub pack: Result<PackState, String>,
+    /// What the `gridpack` folder takes on the drive, files still being
+    /// written and art included (see [`pack::gridpack_disk_bytes`]); `None`
+    /// when not measured, and the index's own total stands in.
+    pub gridpack_disk_bytes: Option<u64>,
 }
 
 impl ScannedDrive {
@@ -225,7 +229,13 @@ pub fn drive_info(scanned: &ScannedDrive) -> DriveInfo {
         read_only: drive.read_only,
         status: classify(drive.read_only, &scanned.pack),
         problem,
-        pack: scanned.ready_pack().map(pack_summary),
+        pack: scanned.ready_pack().map(|pack| {
+            let mut summary = pack_summary(pack);
+            if let Some(bytes) = scanned.gridpack_disk_bytes {
+                summary.gridpack_bytes = bytes;
+            }
+            summary
+        }),
     }
 }
 
@@ -306,11 +316,16 @@ pub struct PendingDriveFirmware {
 
 type CachedPack = (SystemTime, u64, PackState);
 
+/// How long a measured `gridpack` folder size is reused before the folder is
+/// walked again. A running backup's growth shows within this.
+const DISK_BYTES_TTL: Duration = Duration::from_secs(6);
+
 pub struct DriveService {
     latest: Mutex<Vec<ScannedDrive>>,
     snapshot: Mutex<Option<DrivesSnapshot>>,
     remembered: Mutex<Option<Vec<RememberedDrive>>>,
     pack_cache: Mutex<HashMap<PathBuf, CachedPack>>,
+    disk_bytes_cache: Mutex<HashMap<PathBuf, (std::time::Instant, u64)>>,
     pending_firmware: Mutex<Vec<PendingDriveFirmware>>,
     /// One tick at a time: the poll loop and a command's rescan.
     tick_lock: tokio::sync::Mutex<()>,
@@ -323,6 +338,7 @@ impl DriveService {
             snapshot: Mutex::new(None),
             remembered: Mutex::new(None),
             pack_cache: Mutex::new(HashMap::new()),
+            disk_bytes_cache: Mutex::new(HashMap::new()),
             pending_firmware: Mutex::new(Vec::new()),
             tick_lock: tokio::sync::Mutex::new(()),
         })
@@ -390,12 +406,35 @@ impl DriveService {
         Ok(state)
     }
 
+    /// The `gridpack` folder's size on the drive, walked at most once per
+    /// [`DISK_BYTES_TTL`].
+    fn disk_bytes_cached(&self, mount: &Path) -> u64 {
+        let now = std::time::Instant::now();
+        if let Some((when, bytes)) = self.disk_bytes_cache.lock().unwrap().get(mount) {
+            if now.duration_since(*when) < DISK_BYTES_TTL {
+                return *bytes;
+            }
+        }
+        let bytes = pack::gridpack_disk_bytes(mount);
+        self.disk_bytes_cache
+            .lock()
+            .unwrap()
+            .insert(mount.to_path_buf(), (now, bytes));
+        bytes
+    }
+
     fn scan_blocking(&self) -> Vec<ScannedDrive> {
         drives::scan()
             .into_iter()
             .map(|drive| {
                 let pack = self.read_cached(&drive.mount);
-                ScannedDrive { drive, pack }
+                let gridpack_disk_bytes = matches!(pack, Ok(PackState::Ready(_)))
+                    .then(|| self.disk_bytes_cached(&drive.mount));
+                ScannedDrive {
+                    drive,
+                    pack,
+                    gridpack_disk_bytes,
+                }
             })
             .collect()
     }
@@ -670,18 +709,29 @@ mod tests {
         });
         let info = drive_info(&ScannedDrive {
             drive: detected("/run/media/u/T7", false),
-            pack: Ok(PackState::Ready(kit)),
+            pack: Ok(PackState::Ready(kit.clone())),
+            gridpack_disk_bytes: None,
         });
         assert_eq!(info.key, "/run/media/u/T7");
         assert_eq!(info.status, DriveStatus::Ready);
         let summary = info.pack.expect("a summary");
         assert_eq!(summary.name, "Couch kit");
         assert_eq!(summary.gridpack_bytes, 7);
+
+        // A measured folder (art, files still being written) wins over the
+        // index's own total.
+        let measured = drive_info(&ScannedDrive {
+            drive: detected("/run/media/u/T7", false),
+            pack: Ok(PackState::Ready(kit)),
+            gridpack_disk_bytes: Some(4096),
+        });
+        assert_eq!(measured.pack.expect("a summary").gridpack_bytes, 4096);
         assert_eq!(summary.emulators[0].os, Some(PackOs::Windows));
 
         let broken = drive_info(&ScannedDrive {
             drive: detected("/run/media/u/T7", false),
             pack: Ok(PackState::Unreadable("no format number".into())),
+            gridpack_disk_bytes: None,
         });
         assert_eq!(broken.status, DriveStatus::Unreadable);
         assert_eq!(broken.problem, "no format number");
@@ -750,6 +800,7 @@ mod tests {
         let scanned = vec![ScannedDrive {
             drive: detected("/run/media/u/T7", false),
             pack: Ok(PackState::Absent),
+            gridpack_disk_bytes: None,
         }];
         let snapshot = snapshot_of(
             &scanned,

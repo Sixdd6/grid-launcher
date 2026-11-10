@@ -99,8 +99,9 @@ pub fn disk_space(path: &Path) -> Option<(u64, u64)> {
     (ok != 0).then_some((total, available))
 }
 
-/// The total bytes and the bytes free to this user on the volume that holds
-/// `path`, which must exist. `None` when they cannot be read.
+/// The total bytes this user can use and the bytes free to this user on the
+/// volume that holds `path`, which must exist. Blocks kept for root are left
+/// out of both. `None` when they cannot be read.
 #[cfg(unix)]
 // The statvfs field types differ between targets (u32 on some 32-bit
 // ones), so the casts are needed there even where they are no-ops here.
@@ -114,11 +115,22 @@ pub fn disk_space(path: &Path) -> Option<(u64, u64)> {
     let rc = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
     (rc == 0).then(|| {
         let block = stat.f_frsize as u64;
+        let blocks = stat.f_blocks as u64;
+        let free = stat.f_bfree as u64;
+        let avail = stat.f_bavail as u64;
         (
-            (stat.f_blocks as u64).saturating_mul(block),
-            (stat.f_bavail as u64).saturating_mul(block),
+            usable_blocks(blocks, free, avail).saturating_mul(block),
+            avail.saturating_mul(block),
         )
     })
+}
+
+/// The blocks this user can ever use: all of them less the ones the file
+/// system keeps for root (ext4 keeps 5% by default). Those are never free
+/// to GRID, so counting them would show them as other files in a usage bar.
+#[cfg(unix)]
+fn usable_blocks(blocks: u64, free: u64, avail: u64) -> u64 {
+    blocks.saturating_sub(free.saturating_sub(avail))
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -205,6 +217,16 @@ mod tests {
             canonicalize(&dir).unwrap(),
             std::fs::canonicalize(&dir).unwrap()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn usable_blocks_leaves_out_the_root_reserve() {
+        // 1000 blocks, 300 free of which 250 are free to this user: 50 are
+        // kept for root.
+        assert_eq!(usable_blocks(1000, 300, 250), 950);
+        assert_eq!(usable_blocks(1000, 300, 300), 1000);
+        assert_eq!(usable_blocks(10, 300, 0), 0);
     }
 
     #[test]

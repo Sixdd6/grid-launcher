@@ -9,6 +9,7 @@
 //! relative path is validated before use, and the file is size-capped.
 
 use std::collections::{BTreeMap, HashMap};
+use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -487,6 +488,42 @@ pub fn pack_dir(mount: &Path) -> PathBuf {
 /// `<mount>/gridpack/gridpack.json`.
 pub fn index_path(mount: &Path) -> PathBuf {
     pack_dir(mount).join(PACK_FILE)
+}
+
+/// The space everything under `<mount>/gridpack` takes on the drive: the
+/// indexed files, art, saves and the files a running backup is still
+/// writing (`*.gridtmp`). [`Pack::pack_bytes`] counts only finished, indexed
+/// files, so a drive's usage bar drawn from it shows the rest as other files.
+/// Links are not followed. On unix it counts allocated blocks, which is what
+/// the drive's free space is measured in; elsewhere, file lengths.
+pub fn gridpack_disk_bytes(mount: &Path) -> u64 {
+    fn walk(dir: &Path, total: &mut u64) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Ok(meta) = fs::symlink_metadata(entry.path()) else {
+                continue;
+            };
+            if meta.is_dir() {
+                walk(&entry.path(), total);
+            } else if meta.is_file() {
+                *total = total.saturating_add(on_disk(&meta));
+            }
+        }
+    }
+    #[cfg(unix)]
+    fn on_disk(meta: &fs::Metadata) -> u64 {
+        use std::os::unix::fs::MetadataExt;
+        meta.blocks().saturating_mul(512)
+    }
+    #[cfg(not(unix))]
+    fn on_disk(meta: &fs::Metadata) -> u64 {
+        meta.len()
+    }
+    let mut total = 0;
+    walk(&pack_dir(mount), &mut total);
+    total
 }
 
 fn is_link(path: &Path) -> bool {
@@ -1179,6 +1216,22 @@ pub fn edit_pack<R>(mount: &Path, edit: impl FnOnce(&mut Pack) -> R) -> Result<R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gridpack_disk_bytes_counts_every_file_under_gridpack_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mount = tmp.path();
+        let games = pack_dir(mount).join("games").join("snes");
+        fs::create_dir_all(&games).unwrap();
+        fs::write(games.join("a.sfc"), vec![1u8; 10_000]).unwrap();
+        fs::write(games.join("b.sfc.gridtmp"), vec![1u8; 5_000]).unwrap();
+        fs::write(pack_dir(mount).join(PACK_FILE), b"{}").unwrap();
+        fs::write(mount.join("outside.bin"), vec![1u8; 50_000]).unwrap();
+        let counted = gridpack_disk_bytes(mount);
+        assert!(counted >= 15_002, "counted {counted}");
+        assert!(counted < 50_000, "counted {counted}");
+        assert_eq!(gridpack_disk_bytes(&mount.join("missing")), 0);
+    }
 
     /// The spec's draft, with the fields the schema requires filled in, plus an
     /// unknown top-level key.
