@@ -106,14 +106,18 @@
   /** All games, Recent and Updates mix platforms: their covers carry tags (item 186). */
   let mixed = $derived(selected.key === 'all' || selected.key === 'recent' || selected.key === 'updates');
 
-  let games = $derived.by((): TvGame[] => {
+  /** The selected row's covers under a search (`''`: the row's whole list). */
+  function gridFor(query: string): TvGame[] {
     if (driveKey !== null) {
       const list = driveGamesFor === driveKey && driveGames ? driveGames : [];
-      return driveGrid(list, lib.query, lib.sort, rowFor).map((g) => gameFromDrive(driveKey!, g, rowFor(g), updateIds));
+      return driveGrid(list, query, lib.sort, rowFor).map((g) => gameFromDrive(driveKey!, g, rowFor(g), updateIds));
     }
     const rows = visibleLibraryGames(installed.list).filter((r) => matchesRail(r, selected.key, updateIds, nowSeconds));
-    return libraryGrid(rows, lib.query, lib.sort).map((r) => gameFromRow(r, updateIds));
-  });
+    return libraryGrid(rows, query, lib.sort).map((r) => gameFromRow(r, updateIds));
+  }
+  let games = $derived(gridFor(lib.query));
+  /** The row's whole list, for select mode: picks a search hides are kept. */
+  let allGames = $derived(lib.query.trim() === '' ? games : gridFor(''));
   let driveLoading = $derived(driveKey !== null && drive !== null && (driveGamesFor !== driveKey || driveGames === null));
   let empty = $derived.by((): EmptyState | null => {
     if (games.length > 0 || driveLoading) return null;
@@ -133,16 +137,17 @@
   }
 
   // ---- Select mode (items 439–453).
-  let selGames = $derived<SelGame[]>(
-    games.map((g) => ({ id: g.id, size: g.drive ? g.drive.game.size : (g.row?.filesize_bytes ?? 0) })),
-  );
-  // A search that narrows the grid drops the picks it hides.
+  const selGame = (g: TvGame): SelGame => ({ id: g.id, size: g.drive ? g.drive.game.size : (g.row?.filesize_bytes ?? 0) });
+  let selGames = $derived<SelGame[]>(games.map(selGame));
+  let selAllGames = $derived<SelGame[]>(allGames.map(selGame));
+  // A pick the row no longer lists goes; a search that hides one keeps it
+  // (the bar counts and sizes it, Y acts on it).
   $effect(() => {
-    if (select.on) selKeep(selGames.map((g) => g.id));
+    if (select.on) selKeep(selAllGames.map((g) => g.id));
   });
 
   function pickedGames(ids: readonly string[]): TvGame[] {
-    return games.filter((g) => ids.includes(g.id));
+    return allGames.filter((g) => ids.includes(g.id));
   }
 
   /** Y on a drive: "<n> games on <pack>" with Install and Remove (items 449–451). */
@@ -195,6 +200,7 @@
   $effect(() =>
     registerSelectGrid({
       games: () => selGames,
+      all: () => selAllGames,
       drive: () => driveKey !== null,
       connected: () => session.connected,
       act: (ids) => (driveKey !== null ? driveAct(ids) : backupAct(ids)),
@@ -301,6 +307,6 @@
         </div>
       {/if}
     </TvGrid>
-    <TvSelBar games={selGames} drive={driveKey !== null} />
+    <TvSelBar games={selGames} all={selAllGames} drive={driveKey !== null} />
   </div>
 </div>

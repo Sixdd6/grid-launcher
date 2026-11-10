@@ -6,9 +6,12 @@
 // games, RT or B leaves. There is no range pick: Select all covers it.
 //
 // The picks are the covers' `TvGame.id`s, over the desktop's pure selection
-// rules (`backups/selection.ts`). The grid on show registers what it lists
-// and what Y does with `useSelect`; nothing here reads a store but the
-// toasts, so the rules are tested without a screen.
+// rules (`backups/selection.ts`). The grid on show registers what it shows,
+// the rail row's whole list and what Y does with `registerSelectGrid`;
+// nothing here reads a store but the toasts, so the rules are tested without
+// a screen. Picks a search hides are kept, as on the desktop and in the
+// prototype: the bar counts and sizes every pick, X counts the covers shown,
+// Y acts on every pick (consultant, after P13).
 import { allPicked, EMPTY_SELECTION, keepOnly, selectAll, toggle, type Selection } from '../backups/selection';
 import { sizeText } from '../backups/dialog';
 import { pushToast } from '../stores/toasts.svelte';
@@ -20,8 +23,10 @@ export type SelGame = { id: string; size: number };
 
 /** What the grid on show lists, and what Y does with the picked games. */
 export type SelectGrid = {
-  /** The games the grid shows, in its order. */
+  /** The games the grid shows, in its order (a search may narrow it). */
   games: () => readonly SelGame[];
+  /** The rail row's whole list, before a search: the picks it may hold. */
+  all: () => readonly SelGame[];
   /** The grid is a Backup drive's: Y is "Install or remove". */
   drive: () => boolean;
   /** A server answers (Backup to drive… needs one). */
@@ -80,10 +85,10 @@ export function selAll(visible: readonly string[] = (grid?.games() ?? []).map((g
   state.sel = selectAll(state.sel, visible);
 }
 
-/** Drops picks the grid no longer shows (a search narrowed it, a game left
- *  the drive), so the bar never counts a game that isn't on screen. */
-export function selKeep(visible: readonly string[]): void {
-  const next = keepOnly(state.sel, visible);
+/** Drops picks the rail row no longer lists (a game left the drive or the
+ *  server). Pass the row's whole list: a search that hides a pick keeps it. */
+export function selKeep(present: readonly string[]): void {
+  const next = keepOnly(state.sel, present);
   if (next !== state.sel) state.sel = next;
 }
 
@@ -121,10 +126,12 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 /** The bar under the grid (item 445). */
 export type SelBar = { summary: string; x: string; y: string; rt: string };
 
-export function selBar(sel: readonly string[], games: readonly SelGame[], drive: boolean): SelBar {
-  const ids = games.map((g) => g.id);
+/** `shown`: the covers on show (X's count); `whole`: the rail row's whole
+ *  list, which sizes every pick, hidden by a search or not. */
+export function selBar(sel: readonly string[], shown: readonly SelGame[], whole: readonly SelGame[], drive: boolean): SelBar {
+  const ids = shown.map((g) => g.id);
   const all = allPicked({ ids: sel, anchor: null }, ids);
-  const bytes = games.filter((g) => sel.includes(g.id)).reduce((s, g) => s + Math.max(0, g.size || 0), 0);
+  const bytes = whole.filter((g) => sel.includes(g.id)).reduce((s, g) => s + Math.max(0, g.size || 0), 0);
   return {
     summary: `${sel.length} selected · ${sizeText(bytes)}`,
     x: all ? `All ${ids.length} selected · Clear` : `Select all ${ids.length}`,

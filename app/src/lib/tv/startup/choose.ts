@@ -22,9 +22,12 @@ export const SKIP_LABEL = 'Skip for now';
 export const CHANGE_EMULATOR = 'Change emulator';
 export const WINDOWS_LABEL = 'Windows';
 export const WINDOWS_SUB = 'Proton for Windows games';
-/** An unavailable system's value, and what A on it says. TODO(design): the
- *  prototype has no unavailable system; this is the desktop's note. */
+/** An unavailable system's value (consultant, after P12). */
 export const NO_EMULATOR = 'No emulator available';
+/** What A on an unavailable system says (consultant, after P12). */
+export function noEmulatorWhy(label: string): string {
+  return `No emulator GRID installs plays ${label}. If you have one, add it in Settings › Systems after setup.`;
+}
 export const NO_PROTON = 'No Proton version available';
 export const LOADING = 'Loading your systems…';
 export const NO_SYSTEMS = 'Your server has no systems that need an emulator.';

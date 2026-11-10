@@ -21,10 +21,10 @@
   import { useScreen } from '../screen.svelte';
   import TvButton from '../ui/TvButton.svelte';
   import {
+    connectButtons,
     connectedText,
     connectFields,
     connectReady,
-    connectWhy,
     CONNECT_SUB,
     CONNECT_TITLE,
     isSecret,
@@ -36,6 +36,8 @@
     offlineReady,
     parentOf,
     PASTED,
+    PASTE_NEEDS_FIELD,
+    pasteRefusal,
     SIGN_IN_LABELS,
     type FieldKey,
   } from './connectPage';
@@ -44,9 +46,9 @@
   let fields = $derived(connectFields(f));
   let ready = $derived(connectReady(f));
   let canOffline = $derived(offlineReady(f));
-  let why = $derived(connectWhy(f.how));
   let reason = $derived(f.reason ?? session.error);
   let connecting = $state(false);
+  let btns = $derived(connectButtons(f, connecting));
 
   function edit(key: FieldKey) {
     if (key === 'how') {
@@ -85,15 +87,20 @@
 
   /** View: the clipboard's text into the focused field (item 396). */
   async function paste() {
-    const key = focused()?.getAttribute('data-field') as FieldKey | null;
-    if (!key || key === 'how') return;
+    const key = (focused()?.getAttribute('data-field') ?? null) as FieldKey | null;
     let text = '';
-    try {
-      text = (await api.readClipboardText()).trim();
-    } catch {
+    if (key !== null && key !== 'how') {
+      try {
+        text = (await api.readClipboardText()).trim();
+      } catch {
+        text = '';
+      }
+    }
+    const refusal = pasteRefusal(key, text);
+    if (refusal !== null || key === null) {
+      pushToast(refusal ?? PASTE_NEEDS_FIELD);
       return;
     }
-    if (text === '') return;
     if (isSecret(key)) setSecret(text);
     else if (key === 'url') f.url = text;
     else if (key === 'user') f.user = text;
@@ -142,7 +149,7 @@
 
   useScreen({
     hints: () => [{ button: 'VIEW', label: 'Paste' }],
-    main: () => ({ disabled: !ready, why, press: () => void connectNow() }),
+    main: () => ({ disabled: btns.go.disabled, why: btns.go.why, press: () => void connectNow() }),
     view: () => void paste(),
   });
 </script>
@@ -167,11 +174,11 @@
       {/each}
     </div>
     <div class="btns start-foot" data-nav="h" id="cf-btns">
-      <TvButton k="cf-go" primary disabled={!ready} {why} testId="tv-connect-go" onA={() => void connectNow()}>
-        {connecting ? 'Connecting…' : 'Connect'}
+      <TvButton k="cf-go" primary disabled={btns.go.disabled} why={btns.go.why} testId="tv-connect-go" onA={() => void connectNow()}>
+        {btns.go.label}
       </TvButton>
       <span class="or">or</span>
-      <TvButton k="cf-none" disabled={!canOffline} testId="tv-connect-offline" onA={() => void offlineNow()}>Use without a server</TvButton>
+      <TvButton k="cf-none" disabled={btns.offline.disabled} why={btns.offline.why} testId="tv-connect-offline" onA={() => void offlineNow()}>{btns.offline.label}</TvButton>
     </div>
     <p class="note" style="margin:.8rem 0 0">{NO_SERVER_NOTE}</p>
   </div>

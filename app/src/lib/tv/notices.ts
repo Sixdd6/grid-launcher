@@ -6,7 +6,7 @@
 // shows. At most three show: a fourth drops the oldest card that isn't
 // pinned. A card closes on its own after 10 s, or 15 s for an error, unless
 // it is held (the setup card holds still until its installs are done, then
-// counts down). Every card also goes to the session's history (Menu ›
+// counts down, still pinned, so it leaves only when it closes itself). Every card also goes to the session's history (Menu ›
 // Notifications), which keeps the whole session (ruling 16).
 import type { GlyphButton } from './glyphs/glyphs';
 

@@ -4,7 +4,7 @@
   // dropped, that follows setup's installs (the Downloads rows). One segment
   // per install; the step line names what runs. Once nothing is still
   // installing it says how many systems are ready and closes after 10 s,
-  // which also ends the run. Draws nothing itself: TvToasts draws the card.
+  // still pinned through the countdown, which also ends the run. Draws nothing itself: TvToasts draws the card.
   import { onDestroy, untrack } from 'svelte';
   import { downloads } from '../../stores/downloads.svelte';
   import { dismissSetupRun, setupRun } from '../../stores/setupRun.svelte';

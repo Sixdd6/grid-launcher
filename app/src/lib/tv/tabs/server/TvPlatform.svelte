@@ -63,13 +63,17 @@
   }
 
   // ---- Select mode (items 439–453): Y backs the picked games up.
+  // X counts the covers shown; a search that hides a pick keeps it (the
+  // bar counts and sizes the platform's whole list).
   let selGames = $derived<SelGame[]>(shown.map((g) => ({ id: String(g.id), size: g.fs_size_bytes })));
+  let selAllGames = $derived<SelGame[]>(all.map((g) => ({ id: String(g.id), size: g.fs_size_bytes })));
   $effect(() => {
-    if (select.on) selKeep(selGames.map((g) => g.id));
+    if (select.on) selKeep(selAllGames.map((g) => g.id));
   });
   $effect(() =>
     registerSelectGrid({
       games: () => selGames,
+      all: () => selAllGames,
       drive: () => false,
       connected: () => session.connected,
       act: (ids) => {
@@ -109,4 +113,4 @@
     <div class="empty" data-testid="tv-srv-nomatch"><h2>{noMatch(srv.query)}</h2></div>
   {/if}
 </TvGrid>
-<TvSelBar games={selGames} />
+<TvSelBar games={selGames} all={selAllGames} />

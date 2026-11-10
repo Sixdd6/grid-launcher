@@ -93,7 +93,11 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     expect(await $(testId('tv-layer')).isExisting()).toBe(false);
   });
 
-  it('View pastes the clipboard into the focused field (item 396)', async () => {
+  it('View pastes the clipboard into the focused field (item 396), and says so when there is nothing to paste', async () => {
+    await invoke('e2e_clipboard_write', { text: '' });
+    await press('select');
+    await waitToast('Nothing to paste: the clipboard has no text.');
+    expect(await text('tv-cf-url-value')).toBe('https://…');
     await invoke('e2e_clipboard_write', { text: mockUrl() });
     await press('select');
     await waitText('tv-cf-url-value', mockUrl());

@@ -38,7 +38,7 @@ describe('tvNotices', () => {
     expect(n.viewNewest()).toBe(false);
   });
 
-  it('a held card counts down once released, and history clears', async () => {
+  it('a held card counts down once released, still pinned, and history clears', async () => {
     const n = await import('./notices.svelte');
     n.attachNotices(true);
     const id = n.showNotice({ title: 'Setting up 2 installs · 0 done', hold: true, pinned: true });
@@ -46,7 +46,13 @@ describe('tvNotices', () => {
     expect(n.tvNotices.cards).toHaveLength(1);
     n.updateNotice(id, { title: '2 installs done' });
     n.releaseNotice(id, 10_000);
-    expect(n.tvNotices.cards[0]).toMatchObject({ title: '2 installs done', pinned: false, countdown: 10_000 });
+    expect(n.tvNotices.cards[0]).toMatchObject({ title: '2 installs done', pinned: true, countdown: 10_000 });
+    // Later cards go under it and never push it out during the countdown.
+    for (const t of ['a', 'b', 'c', 'd']) n.showNotice({ title: t });
+    expect(n.tvNotices.cards[0]).toMatchObject({ id, pinned: true });
+    expect(n.tvNotices.cards).toHaveLength(3);
+    vi.advanceTimersByTime(10_000);
+    expect(n.tvNotices.cards.some((c) => c.id === id)).toBe(false);
     vi.advanceTimersByTime(10_000);
     expect(n.tvNotices.cards).toHaveLength(0);
     n.clearHistory();

@@ -19,7 +19,7 @@
  *   one PlayStation 2 game, PCSX2 for Linux (a zip of the mock forge's
  *   AppImage stub, a shell script the header check never refuses) and a
  *   PS2 BIOS.
- * - `tv-backups-a` … `-d` (TV mode, P13): see the cases at the end.
+ * - `tv-backups-a` … `-e` (TV mode, P13, P14): see the cases at the end.
  * - `backups-d`: a fresh profile again, spec a's PCSX2 setup, and three
  *   games installed in the library, each one copied from this computer by
  *   the backup: Cinder Peaks (rom 901, an extracted zip), Tux Trail (rom
@@ -294,6 +294,11 @@ offline = true
     writeRegistry(path.join(dataDir, 'grid-launcher.db'));
     break;
   case 'tv-backups-d':
+    break;
+  // e: backups-d's profile (Cinder Peaks installed here, TESTDRIVE set up),
+  // so a backup from this computer can be queued behind an install.
+  case 'tv-backups-e':
+    seedD();
     break;
   default:
     console.error(`backups-seed.mjs: unknown spec ${spec}`);

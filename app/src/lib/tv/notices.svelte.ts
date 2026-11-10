@@ -74,11 +74,13 @@ export function updateNotice(id: number, patch: { title?: string; sub?: NoticeLi
   state.cards = state.cards.map((c) => (c.id === id ? { ...c, ...patch } : c));
 }
 
-/** Starts a held card's countdown (`ms`, default its life) and unpins it. */
+/** Starts a held card's countdown (`ms`, default its life). A pinned card
+ *  stays pinned through it, so later cards go under it and never push it
+ *  out; it leaves only when the countdown ends (consultant, after P12). */
 export function releaseNotice(id: number, ms?: number): void {
   const c = state.cards.find((x) => x.id === id);
   if (!c) return;
-  const next: Card = { ...c, pinned: false, countdown: ms ?? lifeOf({ error: c.error }) };
+  const next: Card = { ...c, countdown: ms ?? lifeOf({ error: c.error }) };
   state.cards = state.cards.map((x) => (x.id === id ? next : x));
   arm(next);
 }

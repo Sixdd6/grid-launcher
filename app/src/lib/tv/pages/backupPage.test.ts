@@ -252,7 +252,12 @@ describe('Also copy and the notes (items 473–478)', () => {
 
   it('counts the firmware, or says why it is off (474; ruling 12)', () => {
     expect(firmwareText(plan({ firmware: [{ platform_name: 'PlayStation', files: 3, bytes: 1, already: false }, { platform_name: 'PlayStation 2', files: 2, bytes: 1, already: false }] }))).toEqual({ text: '2 systems · 5 files', disabled: false });
-    expect(firmwareText(plan({ firmware_reason: 'The server has no firmware for these systems' }))).toEqual({ text: 'The server has no firmware for these systems', disabled: true });
+    // The backend's two reasons, verbatim and disabled (consultant, after P13).
+    expect(firmwareText(plan({ firmware_reason: 'Your server has no firmware for these systems' }))).toEqual({ text: 'Your server has no firmware for these systems', disabled: true });
+    expect(firmwareText(plan({ firmware_reason: 'Couch kit already has the firmware for these systems' }))).toEqual({ text: 'Couch kit already has the firmware for these systems', disabled: true });
+    // No reason and nothing to write: blank and off, no TV-only words.
+    expect(firmwareText(plan({}))).toEqual({ text: '', disabled: true });
+    expect(firmwareText(plan({ firmware: [{ platform_name: 'PlayStation', files: 3, bytes: 1, already: true }] }))).toEqual({ text: '', disabled: true });
     const rows = backupPageRows(model(plan({ firmware_reason: 'Already on Couch kit' })), acts());
     expect(find(rows, 'bk-fw')).toMatchObject({ disabled: true, why: 'Already on Couch kit', toggle: false });
   });

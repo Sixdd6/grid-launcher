@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PlatformSetup, SetupOption } from '../../api';
 import { relocatedNotice, unreachableBody, UNREACHABLE_TITLE } from './unreachable';
-import { CHOOSE_INTRO, chooseRow, emulatorItems, emulatorListTitle, NO_EMULATOR, unmarked } from './choose';
+import { CHOOSE_INTRO, chooseRow, emulatorItems, emulatorListTitle, NO_EMULATOR, noEmulatorWhy, unmarked } from './choose';
 
 const opt = (source_id: string, name: string, installed = false): SetupOption => ({
   source_id, name, kind: 'standalone', installed, server: null, needs_core: false,
@@ -29,6 +29,13 @@ describe('Choose your systems rows (items 400–403)', () => {
 
   it("can't tick a system nothing installable plays", () => {
     expect(chooseRow(zeebo, {})).toMatchObject({ disabled: true, value: NO_EMULATOR });
+    expect(NO_EMULATOR).toBe('No emulator available');
+  });
+
+  it("says why an unavailable system can't be ticked (consultant, after P12)", () => {
+    expect(noEmulatorWhy('Zeebo')).toBe(
+      'No emulator GRID installs plays Zeebo. If you have one, add it in Settings › Systems after setup.',
+    );
   });
 
   it('lists the emulators in Installed and Download groups, then None, the current one checked', () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  connectButtons,
   connectedText,
   connectFields,
   connectReady,
@@ -10,6 +11,7 @@ import {
   NO_SERVER_NOTE,
   offlineReady,
   parentOf,
+  pasteRefusal,
   type ConnectState,
 } from './connectPage';
 
@@ -66,6 +68,25 @@ describe('Connect enablement (item 397) and Use without a server (item 515)', ()
   it('says what is missing while disabled', () => {
     expect(connectWhy('token')).toBe('Fill in the server, the API token and the library folder first.');
     expect(connectWhy('password')).toBe('Fill in the server, the username and password and the library folder first.');
+  });
+
+  it('disables both buttons while a connect runs, Connect reading "Connecting…" (consultant, after P12)', () => {
+    const why = 'Still connecting. Wait for it to finish.';
+    expect(connectButtons(filled, true)).toEqual({
+      go: { label: 'Connecting…', disabled: true, why },
+      offline: { label: 'Use without a server', disabled: true, why },
+    });
+    expect(connectButtons(filled, false).go).toEqual({ label: 'Connect', disabled: false, why: connectWhy('token') });
+    expect(connectButtons(filled, false).offline).toEqual({ label: 'Use without a server', disabled: false });
+    expect(connectButtons(blank, false).go.disabled).toBe(true);
+    expect(connectButtons(blank, false).offline.disabled).toBe(true);
+  });
+
+  it('says why View pasted nothing (consultant, after P12)', () => {
+    expect(pasteRefusal(null, 'x')).toBe('Focus a field to paste into it.');
+    expect(pasteRefusal('how', 'x')).toBe('Focus a field to paste into it.');
+    expect(pasteRefusal('url', '  ')).toBe('Nothing to paste: the clipboard has no text.');
+    expect(pasteRefusal('token', 'abc')).toBeNull();
   });
 
   it('needs only the library folder without a server', () => {

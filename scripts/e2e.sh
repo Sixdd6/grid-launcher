@@ -194,7 +194,7 @@ STAGE_GROUPS=(
   # mid-backup; (c) used without a server: Install from drive with the
   # drive's emulator, Details from a drive, Remove from drive…; (d) Change…
   # refuses the last computer, Remove GRID files asks twice, Forget.
-  "tv-backups:specs/tv-backups-a.spec.ts specs/tv-backups-b.spec.ts specs/tv-backups-c.spec.ts specs/tv-backups-d.spec.ts"
+  "tv-backups:specs/tv-backups-a.spec.ts specs/tv-backups-b.spec.ts specs/tv-backups-c.spec.ts specs/tv-backups-d.spec.ts specs/tv-backups-e.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -804,11 +804,11 @@ EOF
     wdio_log="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.log"
     out_dir="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.d"
     say "running $stage (attempt $attempt)"
-    # backups-c, backups-d and tv-startup a, c and d start from a fresh profile: the credential an
+    # backups-c, backups-d, tv-startup a, c and d and tv-backups c and e start from a fresh profile: the credential an
     # earlier spec saved in this run's private keyring must go too, or the
     # app would restore that session. Same best-effort clear as the
     # python-import group.
-    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-c.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
+    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
       secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
     fi
     if [[ -n "$seed_script" ]] && group_seeds_per_spec "$name"; then

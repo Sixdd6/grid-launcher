@@ -27,7 +27,7 @@
     emulatorListTitle,
     loadFailed,
     LOADING,
-    NO_EMULATOR,
+    noEmulatorWhy,
     NO_PROTON,
     NO_SYSTEMS,
     protonItems,
@@ -123,7 +123,7 @@
             data-k={r.view.key}
             data-al={r.view.on ? 'Untick' : 'Tick'}
             data-xl={r.view.disabled ? undefined : CHANGE_EMULATOR}
-            data-why={r.view.disabled ? NO_EMULATOR : undefined}
+            data-why={r.view.disabled ? noEmulatorWhy(r.view.label) : undefined}
             aria-disabled={r.view.disabled ? 'true' : undefined}
             data-testid={`tv-ch-row-${r.setup.slug || r.setup.label}`}
             use:tvf={{ a: () => cs.tick(r.setup), x: r.view.disabled ? undefined : () => changeEmulator(r.setup) }}

@@ -55,6 +55,9 @@ describe('tv-backups-b: the drive is removed mid-backup', () => {
       .catch(async () => {
         throw new Error(`"Big Arcade Game" never started downloading: ${JSON.stringify(await entries())}`);
       });
+    // The running backup shows in the top bar like any download: title, bar, percent (ruling 21).
+    await waitText('tv-topbar-download', /^Big Arcade Game\b.*\d+%$/);
+    expect(await text('tv-topbar-download')).toMatch(/^Big Arcade Game\b.*\d+%$/);
     unplug(DRIVE);
 
     // The drive leaves the rail, which falls back to All games.

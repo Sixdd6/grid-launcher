@@ -576,7 +576,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [ ] 431. Its buttons are Install from drive (or Play when installed, or Cancel while installing) and Remove from drive… (src: README § Details from a drive; tvmode.js `details`).
 - [ ] 432. The left column says where the copy is: "Installed on this computer." when installed, "From <pack> · <size>" and "Installing copies it from the drive, no network needed." (src: README § Details from a drive; tvmode.js `details`).
 - [ ] 433. A copy of an installed game adds the GB card's lines ("A copy of an installed game · v1.1", "(the server had newer files)", and the Wine prefix lines for Windows games) (src: GB card § Library › Backup drives).
-- [ ] 434. Remove from drive… asks "Remove <title> from <pack>?" / "Its files leave the drive. The copy installed on this computer stays." ("You can back it up again later." when not installed) with Remove from drive (danger), notifies "<title> removed from <pack>" and goes back (src: README § Details from a drive; tvmode.js `ACT.removeFromDrive`).
+- [x] 434. Remove from drive… asks "Remove <title> from <pack>?" / "Its files leave the drive. The copy installed on this computer stays." ("You can back it up again later." when not installed) with Remove from drive (danger), notifies "<title> removed from <pack>" and goes back (src: README § Details from a drive; tvmode.js `ACT.removeFromDrive`). (desktop wording, intro rule)
 
 ### Details › Backup to drive…
 
@@ -599,8 +599,8 @@ and "Conflicts" lists at the end are not part of the build.
 - [ ] 448. Y offline notifies the error "Backing up needs a server." (src: tvmode.js `selAct`).
 - [ ] 449. On a drive, Y opens the list "<n> games on <pack>" with Install <n> games and Remove <n> from drive… (danger) (src: README § Select mode; tvmode.js `selAct`).
 - [ ] 450. Install <n> games queues every picked game not installed and notifies "<n> games added to download queue" / "Copying from <label>" (src: tvmode.js `selAct`).
-- [ ] 451. Remove <n> from drive… asks "Remove <n> games from <pack>?" / "Their files leave the drive. Games installed on this computer stay." with Remove from drive (danger), then notifies "<n> games removed from <pack>" (src: tvmode.js `selAct`).
-- [ ] 452. Acting on the picked games, or the drive going away, ends select mode (src: tvmode.js `selAct`, `startBackup`, `unplugCouch`).
+- [x] 451. Remove <n> from drive… asks "Remove <n> games from <pack>?" / "Their files leave the drive. Games installed on this computer stay." with Remove from drive (danger), then notifies "<n> games removed from <pack>" (src: tvmode.js `selAct`). (desktop wording, intro rule)
+- [ ] 452. Acting on the picked games, or the drive going away, ends select mode (src: tvmode.js `selAct`, `startBackup`, `unplugCouch`). Also ends on a rail row change (consultant).
 - [ ] 453. There is no range pick; Select all covers that case (src: README § Select mode).
 
 ### A whole platform
@@ -612,7 +612,7 @@ and "Conflicts" lists at the end are not part of the build.
 ### The Backup page
 
 - [ ] 457. The Backup page is the desktop's backup dialog as a pushed page that scrolls like every list, titled "Backup <n> games", "Backup <title>" or "Backup <Platform> · <n> games" (src: README § The Backup page; tvmode.js `openBackup`).
-- [ ] 458. The lede reads "GRID copies games installed on this computer and downloads the rest from <host>, then writes each one, with its art and details, to the drive's gridpack folder.", or "GRID downloads each game from <host>, then writes …" when nothing is copied (src: README § The Backup page; GB card § The backup dialog; tvmode.js `openBackup`).
+- [x] 458. The lede reads "GRID copies games installed on this computer and downloads the rest from <host>, then writes each one, with its art and details, to the drive's gridpack folder.", or "GRID downloads each game from <host>, then writes …" when nothing is copied (src: README § The Backup page; GB card § The backup dialog; tvmode.js `openBackup`). (desktop wording, intro rule)
 - [ ] 459. The page opens on its first row with the title in view (src: README § The Backup page).
 - [ ] 460. Drive lists one radio row per connected, set-up drive: "<pack> · <label> · <file system>", "<n> GB left after this backup", and a bar where this backup's share is hatched (src: README § The Backup page; tvmode.js `openBackup`; tvmode.css `.ubar i`).
 - [ ] 461. A drive's space left counts what queued backups to it still hold: "<n> GB available" with "<n> GB set aside for queued backups" under the bar, which shows that share in a muted disk colour (src: GB card § The backup dialog).
@@ -629,7 +629,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [ ] 472. The per-game reasons are the GB card's: "Its files weren't found on this computer", "Installed outside the library folder", "Its install contains links", a name that can't go on a Windows pack, "It was installed from another server", "It's running right now; close it to copy it" (src: GB card § The backup dialog).
 - [ ] 473. Also copy has Emulators, always on with a fixed check: "<emulators> for Linux and Windows · <size>" (or "for Linux" / "for Windows" per the pack), or "Already on the drive" (src: README § The Backup page; tvmode.js `openBackup`).
 - [ ] 474. Also copy has the Firmware switch ("<n> systems · <n> files"), starting from Settings › Backup drives › Every backup also copies › Firmware, disabled with the reason when the drive already has the firmware or the server has none (src: README § The Backup page; GB card § The backup dialog).
-- [ ] 475. When the pack is for Linux and the selection has Windows games, Also copy adds "Make Windows games work offline" (off by default): "Adds the Steam Linux Runtime (about 0.3 GB) so the first launch needs no network" (src: README § The Backup page; tvmode.js `openBackup`).
+- [x] 475. When the pack is for Linux and the selection has Windows games, Also copy adds "Make Windows games work offline" (off by default): "Adds the Steam Linux Runtime (about 0.3 GB) so the first launch needs no network" (src: README § The Backup page; tvmode.js `openBackup`). (desktop wording, intro rule)
 - [ ] 476. When a Windows game is in the backup, the page says "Windows games are copied without their Wine prefix. The save folders GRID knows about are copied from it." (src: GB card § The backup dialog).
 - [ ] 477. Games already on the chosen drive are listed in the note "<n> games are already on <pack> and will be skipped: <titles>" ("1 game is") (src: README § The Backup page; tvmode.js `openBackup`).
 - [ ] 478. On a FAT32 drive, games that download and have a file over 4 GB are listed as not possible (src: GB card § The backup dialog).
@@ -652,7 +652,7 @@ and "Conflicts" lists at the end are not part of the build.
 
 - [ ] 490. When a drive is removed mid-backup, the row being written fails: "Failed — <label> was removed" (src: README § A drive removed mid-backup; tvmode.js `unplugCouch`).
 - [ ] 491. The drive's remaining queue becomes one Completed row "<n> more items" reading "Cancelled — <label> was removed · backup again to finish" (src: README § A drive removed mid-backup; tvmode.js `unplugCouch`).
-- [ ] 492. One error card says how many items were written: "<label> was removed during the backup" / "<n> items were written. Backup again to finish." (src: README § A drive removed mid-backup; tvmode.js `unplugCouch`).
+- [x] 492. One error card says how many items were written: "<label> was removed during the backup" / "<n> items were written. Backup again to finish." (src: README § A drive removed mid-backup; tvmode.js `unplugCouch`). (desktop wording, intro rule)
 - [ ] 493. The drive leaves the Library rail; if it was selected, the rail falls back to All games (src: README § A drive removed mid-backup; tvmode.js `unplugCouch`).
 - [ ] 494. A drive appears in the rail within a few seconds of being plugged in, and leaves when removed, with focus kept per the redraw rules (src: GB card intro; tvmode.js `unplugCouch`).
 
@@ -667,7 +667,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [ ] 501. The space bar is split into other files, GRID and free, with "Other files <n> GB · GRID <n> GB · <n> GB free" (src: README § Settings › Backup drives; tvmode.js `drivePage`).
 - [ ] 502. Change… pushes "Computers this pack is for" ("Emulators go on the drive built for each one. At least one stays ticked.") with Linux and Windows switches (src: README § Settings › Backup drives; tvmode.js `osPage`).
 - [ ] 503. Turning off the last ticked computer is refused with the error "At least one computer stays ticked" (src: README § Settings › Backup drives; tvmode.js `osPage`).
-- [ ] 504. Adding a computer notifies "<OS> builds of <n> emulators added to the backup queue for <pack>"; removing one notifies "<OS> builds removed from <pack>" / "Games and firmware stay" (src: GB card § Settings › Backup drives; tvmode.js `osPage`).
+- [x] 504. Adding a computer notifies "<OS> builds of <n> emulators added to the backup queue for <pack>"; removing one notifies "<OS> builds removed from <pack>" / "Games and firmware stay" (src: GB card § Settings › Backup drives; tvmode.js `osPage`). (desktop wording, intro rule)
 - [ ] 505. Show in Library shows the Library on that drive (its folder open, its row selected) (src: tvmode.js `showDrive`).
 - [ ] 506. Open folder ("Opens the file manager in desktop mode") switches to desktop mode to open the folder (src: README § Settings › Backup drives; tvmode.js `drivePage`).
 - [ ] 507. Rename… opens the keyboard "Pack name"; a non-empty name renames the pack and notifies "Renamed to <name>" (src: README § Settings › Backup drives; tvmode.js `drivePage`).

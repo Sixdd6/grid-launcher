@@ -32,6 +32,12 @@ function grid(over: Partial<SelectGrid> = {}): SelectGrid & { acted: string[][] 
       { id: 'b', size: 2_147_483_648 },
       { id: 'c', size: 536_870_912 },
     ],
+    all: () => [
+      { id: 'a', size: 1_073_741_824 },
+      { id: 'b', size: 2_147_483_648 },
+      { id: 'c', size: 536_870_912 },
+      { id: 'd', size: 1_073_741_824 },
+    ],
     drive: () => false,
     connected: () => true,
     act: (ids) => acted.push(ids),
@@ -81,11 +87,31 @@ describe('select mode', () => {
     expect(select.ids).toEqual([]);
   });
 
-  it('drops picks the grid no longer shows', () => {
+  it('drops picks the rail row no longer lists (a game left the drive)', () => {
     selToggle();
     selAll(['a', 'b', 'c']);
     selKeep(['a', 'c']);
     expect(select.ids).toEqual(['a', 'c']);
+  });
+
+  it('keeps picks a search hides; the summary counts them; Select all N counts the shown covers (consultant, after P13)', () => {
+    const g = grid({ games: () => [{ id: 'a', size: 1_073_741_824 }] });
+    const drop = registerSelectGrid(g);
+    selToggle();
+    selPick('a');
+    selPick('d');
+    // The search shows only "a"; the grids keep against the whole list.
+    selKeep(g.all().map((x) => x.id));
+    expect(select.ids).toEqual(['a', 'd']);
+    const bar = selBar(select.ids, g.games(), g.all(), false);
+    expect(bar.summary).toBe('2 selected · 2 GB');
+    expect(bar.x).toBe('All 1 selected · Clear');
+    // X's hint reads against the shown covers too.
+    expect(currentSelHints(null, 'Select')?.[1]).toEqual({ button: 'X', label: 'Clear all' });
+    // Y acts on every pick, the hidden one too.
+    selAct(g);
+    expect(g.acted).toEqual([['a', 'd']]);
+    drop();
   });
 
   it('decides what Y does (items 443, 447–449)', () => {
@@ -133,9 +159,10 @@ describe('select mode', () => {
 
   it('words the bar under the grid (item 445)', () => {
     const games = grid().games();
-    expect(selBar(['a'], games, false)).toEqual({ summary: '1 selected · 1 GB', x: 'Select all 3', y: 'Backup to drive…', rt: 'Done' });
-    expect(selBar(['a', 'b', 'c'], games, true).x).toBe('All 3 selected · Clear');
-    expect(selBar(['a', 'b', 'c'], games, true).y).toBe('Install or remove');
+    const all = grid().all();
+    expect(selBar(['a'], games, all, false)).toEqual({ summary: '1 selected · 1 GB', x: 'Select all 3', y: 'Backup to drive…', rt: 'Done' });
+    expect(selBar(['a', 'b', 'c'], games, all, true).x).toBe('All 3 selected · Clear');
+    expect(selBar(['a', 'b', 'c'], games, all, true).y).toBe('Install or remove');
   });
 
   it('gives select mode its own hints (item 446)', () => {

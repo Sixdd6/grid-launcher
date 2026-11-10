@@ -7,9 +7,11 @@
   import Glyph from '../glyphs/Glyph.svelte';
   import { select, selBar, type SelGame } from '../select.svelte';
 
-  let { games, drive = false }: { games: readonly SelGame[]; drive?: boolean } = $props();
+  // `games`: the covers on show; `all`: the rail row's whole list (a search
+  // may hide picks, which the summary still counts and sizes).
+  let { games, all, drive = false }: { games: readonly SelGame[]; all: readonly SelGame[]; drive?: boolean } = $props();
 
-  let bar = $derived(selBar(select.ids, games, drive));
+  let bar = $derived(selBar(select.ids, games, all, drive));
 </script>
 
 {#if select.on}

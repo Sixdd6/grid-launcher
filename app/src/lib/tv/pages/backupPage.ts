@@ -113,12 +113,13 @@ export function driveRadio(d: DriveInfo, plan: BackupPlan | null, chosen: boolea
 }
 
 /** The firmware switch's line (item 474): "<n> systems · <n> files", or the
- *  reason it is off (ruling 12, the desktop's words). */
+ *  backend's reason it is off (ruling 12, the desktop's words; no TV-only
+ *  words, consultant after P13). With no reason and no set to write it is
+ *  blank and off, like `dialog.ts` `firmwareLine`. */
 export function firmwareText(plan: BackupPlan): { text: string; disabled: boolean } {
   if (plan.firmware_reason.trim() !== '') return { text: plan.firmware_reason.trim(), disabled: true };
-  if (plan.firmware.length === 0) return { text: 'None needed', disabled: true };
   const sets = plan.firmware.filter((f) => !f.already);
-  if (sets.length === 0) return { text: 'Already on the drive', disabled: true };
+  if (sets.length === 0) return { text: '', disabled: true };
   const files = sets.reduce((n, f) => n + f.files, 0);
   return { text: `${plural(sets.length, 'system')} · ${plural(files, 'file')}`, disabled: false };
 }

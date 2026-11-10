@@ -445,7 +445,7 @@ Code changes from the consultant's Phase 12 rulings (README § Consultant decisi
   `sub`; the Systems / System page / emulator form reasons take the ruled words and their TODO(design) markers are
   gone; the TV System page never had Show program folder (closed). Also: a game queued from a drive gets the sub
   "Copying from <label>" (item 426), and a finished drive copy's Downloads line reads "Installed from <label>"
-  (`downloadRows.ts`, item 425).
+  (`downloadRows.ts`, item 425; asserted end to end in `tv-backups-c`).
 - **Select mode** (`lib/tv/select.svelte.ts`, over the desktop's now generic `backups/selection.ts`): `select.on`,
   `select.ids` (the covers' `TvGame.id`s), `selToggle / selPick / selAll / selKeep / selEnd / selAct`, pure
   `selActOutcome`, `selBar`, `selHints`. The grid on show registers `registerSelectGrid({games, drive, connected,
@@ -505,8 +505,8 @@ Code changes from the consultant's Phase 12 rulings (README § Consultant decisi
     are there (no words in the sources); a still-planning drive's main button reads "Checking the drive…" with the
     why "GRID is still checking the drive."
 - **For P14:** the "Pending for P14" section above is untouched. `tv-layout` should walk the Backup page (long:
-  per-game rows, notes), the drive pages and select mode's bar. `selKeep` drops picks a search hides (the desktop's
-  `keepOnly`); the prototype kept them.
+  per-game rows, notes), the drive pages and select mode's bar. (Superseded by the consultant: picks a search hides
+  are kept; `selKeep` now takes the rail row's whole list. Built in P14.)
 - **Results:** gate PASS; e2e `tv-backups` (a–d), `tv-shell`, `backups`, `tv-library`, `tv-details`, `tv-settings`,
   `tv-server`, `tv-startup`, `tv-systems` pass (there is no `tv-downloads` group: Downloads is in `tv-settings`).
   `tv-library` changed: its first test now walks up from the first drive to All games, because GRID used without

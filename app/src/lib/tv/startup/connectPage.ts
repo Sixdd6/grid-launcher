@@ -11,6 +11,12 @@ export const CONNECT_SUB = 'Everything here works with a controller. A keyboard 
 export const NO_SERVER_NOTE = 'Without a server, GRID needs only the library folder. Your Library and Backup drives work offline.';
 export const SIGN_IN_LABELS: Record<SignIn, string> = { token: 'API token', password: 'Username and password' };
 export const PASTED = 'Pasted from the clipboard';
+/** View with an empty clipboard on a field, and View off a field (consultant, after P12). */
+export const NOTHING_TO_PASTE = 'Nothing to paste: the clipboard has no text.';
+export const PASTE_NEEDS_FIELD = 'Focus a field to paste into it.';
+/** Connect's label and both buttons' reason while a connect runs (consultant, after P12). */
+export const CONNECTING = 'Connecting…';
+export const CONNECTING_WHY = 'Still connecting. Wait for it to finish.';
 export const NO_SERVER_TITLE = 'Using GRID without a server';
 export const NO_SERVER_SUB = 'Your Library and Backup drives work offline';
 export const LIBRARY_BROWSER_TITLE = 'Library folder';
@@ -77,6 +83,32 @@ export function connectReady(s: ConnectState): boolean {
 /** What A (or Start) on a disabled Connect says (item 397; ruling 6). */
 export function connectWhy(how: SignIn): string {
   return `Fill in the server, the ${how === 'token' ? 'API token' : 'username and password'} and the library folder first.`;
+}
+
+export type ConnectButton = { label: string; disabled: boolean; why?: string };
+
+/** Connect and Use without a server (items 397, 515; consultant, after P12):
+ *  while a connect runs, Connect reads "Connecting…" and both are disabled
+ *  with the same reason; otherwise each is enabled once its fields are. */
+export function connectButtons(s: ConnectState, connecting: boolean): { go: ConnectButton; offline: ConnectButton } {
+  if (connecting) {
+    return {
+      go: { label: CONNECTING, disabled: true, why: CONNECTING_WHY },
+      offline: { label: 'Use without a server', disabled: true, why: CONNECTING_WHY },
+    };
+  }
+  return {
+    go: { label: 'Connect', disabled: !connectReady(s), why: connectWhy(s.how) },
+    offline: { label: 'Use without a server', disabled: !offlineReady(s) },
+  };
+}
+
+/** What View says when there's nothing to paste: off a text field, or an
+ *  empty clipboard (consultant, after P12). Null when it can paste. */
+export function pasteRefusal(field: FieldKey | null, text: string): string | null {
+  if (field === null || field === 'how') return PASTE_NEEDS_FIELD;
+  if (text.trim() === '') return NOTHING_TO_PASTE;
+  return null;
 }
 
 /** Use without a server needs only the library folder (item 515). */

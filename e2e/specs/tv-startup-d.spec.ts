@@ -6,9 +6,9 @@ import { captureErrors, moveTo, pageErrors, testId, typeKeys, waitOskClosed, wai
 /** Two installs from the mock forge, each held back a moment. */
 const SETUP_TIMEOUT = 60_000;
 
-type Card = { title: string; segs: string[]; step: string; countdown: boolean };
+type Card = { title: string; segs: string[]; step: string; countdown: boolean; pinned: boolean };
 
-/** The setup card (pinned until its countdown starts), or null. */
+/** The setup card (pinned until it closes itself), or null. */
 async function setupCard(): Promise<Card | null> {
   return (await browser.execute(() => {
     const c = Array.from(document.querySelectorAll('[data-testid="tv-toast"]')).find((t) => t.querySelector('.segs'));
@@ -19,6 +19,7 @@ async function setupCard(): Promise<Card | null> {
       segs: Array.from(c.querySelectorAll('.segs i')).map((i) => i.className),
       step: lines[lines.length - 1] ?? '',
       countdown: !!c.querySelector('.tbar'),
+      pinned: c.hasAttribute('data-pinned'),
     };
   })) as Card | null;
 }
@@ -99,6 +100,8 @@ describe('tv-startup (d): Install N emulators and the setup card', () => {
     const done = (await setupCard())!;
     expect(done.segs.every((c) => c === 'done')).toBe(true);
     expect(done.countdown).toBe(true);
+    // Still pinned through its countdown (consultant, after P12).
+    expect(done.pinned).toBe(true);
     await browser.waitUntil(async () => /^\d+ systems? (is|are) ready to play\.$/.test((await setupCard())?.step ?? ''), {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: `the ready line never showed (${JSON.stringify(await setupCard())})`,
