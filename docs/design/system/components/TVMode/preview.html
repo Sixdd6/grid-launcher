@@ -911,11 +911,13 @@ function choosePage() {
   return {
     title: 'Choose your systems', render: function () {
       var n = Object.keys(pick).filter(function (k) { return pick[k].on; }).length;
-      return '<div class="start"><div class="start-box wide"><h1>Choose your systems</h1><p class="sub">Tick the systems you want to play. GRID installs the recommended emulator for each. ' + gl('X') + ' changes the emulator.</p><div data-nav="v">' +
+      return '<div class="start"><div class="start-box wide"><h1>Choose your systems</h1><p class="sub">Tick the systems you want to play. GRID installs the recommended emulator for each. ' + gl('X') + ' changes the emulator; ' + gl('MENU') + ' skips this step.</p><div data-nav="v">' +
         SYS.map(function (s) { var p = pick[s.id]; return '<div class="srow" data-f data-k="ch-' + s.id + '" data-a="chTick" data-id="' + s.id + '" data-al="' + (p.on ? 'Untick' : 'Tick') + '" data-xl="Change emulator" data-xa="chEmu"><span class="sw' + (p.on ? ' on' : '') + '"></span><div class="lab"><div class="t">' + s.name + '</div><div class="s">' + (s.id === 'WIN' ? 'Proton for Windows games' : (G.filter(function (g) { return g.p === s.id; }).length * 12) + ' games') + '</div></div><div class="val">' + esc(p.emu) + '</div></div>'; }).join('') +
-        '</div><div class="btns" style="margin-top:1.2rem" data-nav="h"><button class="btn pri" data-f data-k="ch-go" data-a="chGo"' + (n ? '' : ' disabled') + '>' + (n ? 'Install ' + n + ' emulator' + (n === 1 ? '' : 's') : 'Install emulators') + '</button><button class="btn" data-f data-k="ch-skip" data-a="chSkip">Skip for now</button></div><p class="note" style="margin-top:1rem">Change this later in Settings › Systems.</p></div></div>';
+        '</div><div class="btns" style="margin-top:1.2rem" data-nav="h"><button class="btn pri" data-f data-k="ch-go" data-a="chGo"' + (n ? '' : ' disabled') + '>' + (n ? 'Install ' + n + ' emulator' + (n === 1 ? '' : 's') : 'Install emulators') + '</button><button class="btn" data-f data-k="ch-skip" data-a="chSkip">' + gl('MENU') + 'Skip for now</button></div><p class="note" style="margin-top:1rem">Change this later in Settings › Systems.</p></div></div>';
     },
-    pick: pick
+    pick: pick,
+    hints: function () { return [['MENU', 'Skip for now']]; },
+    menu: function () { ACT.chSkip(); }
   };
 }
 
@@ -1189,6 +1191,7 @@ function press(b) {
     if (S.pages.length || S.startup) return;
     var i = TAB_ORDER.indexOf(S.tab); S.tab = TAB_ORDER[(i + (b === 'LB' ? -1 : 1) + TAB_ORDER.length) % TAB_ORDER.length]; render(); return;
   }
+  if (b === 'MENU' && scr.menu) return scr.menu();
   if (b === 'MENU' || b === 'GUIDE') { if (!S.startup) guideMenu(); return; }
   if (b === 'VIEW') { var n = newestAction(); if (n) { n.remove(); n._act[1](); } else if (S.startup && scr.F) toast('Pasted from the clipboard'); return; }
 }

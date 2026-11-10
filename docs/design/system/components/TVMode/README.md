@@ -63,7 +63,7 @@ The Menu has a **Prototype only** section for states that need a trigger: first 
 ## Startup screens
 
 - **Connect** — Server, Sign in with (API token / Username and password), the token or password, Library folder (folder browser), Connect. View pastes from the clipboard. A rejected token returns here with the reason, as on the desktop.
-- **Choose your systems** — the desktop rows as switches; A ticks, X changes the emulator, then Install N emulators or Skip for now. The setup card follows the installs at the top right with one segment per install.
+- **Choose your systems** — the desktop rows as switches; A ticks, X changes the emulator, then Install N emulators or Skip for now. Down from the last system reaches the buttons; Menu (Start) skips from anywhere on the page, so a long list never has to be scrolled to skip. The setup card follows the installs at the top right with one segment per install.
 - **Unreachable library** — the blocking dialog with Relocate the library… (folder browser) and Close without changing anything; B does nothing.
 
 ## Proposed defaults (to confirm)
