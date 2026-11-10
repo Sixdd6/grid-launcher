@@ -135,13 +135,13 @@ describe('tv-shell (a): --tv', () => {
     await waitFocused('r-tv');
     await expect($(`${testId('tv-pane')} .pane-h h1`)).toHaveText('TV mode');
     await key('ArrowRight');
-    await waitFocused('s-tv-desktop');
+    await waitFocused('s-prompts');
     expect(await hints()).toEqual(['A Select', 'MENU Menu']);
     await key('Escape');
     await waitFocused('r-tv');
     // A hint is a button: clicking A presses A (item 134).
     await $(testId('tv-hint-A')).click();
-    await waitFocused('s-tv-desktop');
+    await waitFocused('s-prompts');
     await press('east');
     await waitFocused('r-tv');
   });
@@ -169,13 +169,13 @@ describe('tv-shell (a): --tv', () => {
   it('a Nintendo pad gets Nintendo style: right selects, bottom goes back (items 50, 54)', async () => {
     await waitFocused('r-tv');
     await press('east', NINTENDO_PAD);
-    await waitFocused('s-tv-desktop');
+    await waitFocused('s-prompts');
     await waitPromptSet('nintendo');
     await press('south', NINTENDO_PAD);
     await waitFocused('r-tv');
     // The Xbox pad keeps its own: bottom selects.
     await press('south', XBOX_PAD);
-    await waitFocused('s-tv-desktop');
+    await waitFocused('s-prompts');
     await press('east', XBOX_PAD);
     await waitFocused('r-tv');
   });

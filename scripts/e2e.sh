@@ -156,6 +156,14 @@ STAGE_GROUPS=(
   # (c) --tv: the platform search rule, Search everything's failure and the
   # launch card's "Set up <Platform>".
   "tv-details:specs/tv-details-a.spec.ts specs/tv-details-b.spec.ts specs/tv-details-c.spec.ts"
+  # TV mode's Downloads tab and Settings panes (docs/tv-mode/plan.md P10) on
+  # the default fixtures with the `downloads` group's throttled content, so a
+  # download stays in flight long enough to cancel. The spec connects on the
+  # desktop and enters TV mode: Downloads' Cancel (asked first), Retry,
+  # Dismiss and Y Clear completed with focus kept; the Settings rail, a
+  # slider, Theme, Button prompts and assignments per injected controller,
+  # Change library folder › Start fresh › Leave, and Disconnect.
+  "tv-settings:specs/tv-settings.spec.ts"
   # Windowed TV grids (plan risk R8) on the 2500-game large-platform
   # fixtures: a Server platform and a Library of 600 seeded installed games;
   # focus moves through them smoothly and covers load as they scroll in.
@@ -524,7 +532,7 @@ dump_failure() {
 # plain, unthrottled server so its installs stay fast.
 mock_args_for_group() {
   case "$1" in
-    downloads) printf -- '--throttle-ms 100' ;;
+    downloads|tv-settings) printf -- '--throttle-ms 100' ;;
     # A fixture set of its own, with the "Sony PlayStation 2" platform the
     # catalog spec needs (PCSX2's platform_keywords match it). Kept separate
     # from e2e/fixtures so the shared set — and every assertion the other
@@ -610,6 +618,7 @@ seed_script_for_group() {
     tv-server) printf '%s' "$E2E_DIR/seed/tv-server-seed.mjs" ;;
     tv-library) printf '%s' "$E2E_DIR/seed/tv-library-seed.mjs" ;;
     tv-details) printf '%s' "$E2E_DIR/seed/tv-details-seed.mjs" ;;
+    tv-settings) printf '%s' "$E2E_DIR/seed/tv-settings-seed.mjs" ;;
     tv-large-platform) printf '%s' "$E2E_DIR/seed/tv-large-platform-seed.mjs" ;;
     *) printf '' ;;
   esac

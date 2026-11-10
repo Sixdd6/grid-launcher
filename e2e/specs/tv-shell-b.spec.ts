@@ -42,6 +42,10 @@ describe('tv-shell (b): entering and leaving TV mode', () => {
     await key('e');
     await waitTab('settings');
     await $(testId('tv-set-rail-tv')).click();
+    await waitFocused('s-prompts');
+    // Button prompts, Button assignments, then Switch to desktop mode.
+    await key('ArrowDown');
+    await key('ArrowDown');
     await waitFocused('s-tv-desktop');
     await key('Enter');
     await waitDesktop('settings');

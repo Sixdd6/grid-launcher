@@ -1,0 +1,358 @@
+// e2e-app-args:
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { APP_START_TIMEOUT, configPath, dataDir, FIXTURE_TOKEN, INSTALL_TIMEOUT, mockUrl, THROTTLED_DOWNLOAD_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { axis, connectPad, focused, hints, invoke, key, NINTENDO_PAD, promptSet, waitFocused, waitPromptSet, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
+import { captureErrors, moveTo, pageErrors, testId, text, waitGone, waitText } from '../helpers/tvDetails.js';
+
+const SNES = 'Super Nintendo Entertainment System';
+const oldRoot = () => path.join(dataDir(), 'library');
+const newRoot = () => path.join(dataDir(), 'library-new');
+
+/** The open list's title and its options' texts, whitespace collapsed. */
+async function list(): Promise<{ title: string; options: string[] }> {
+  return (await browser.execute(() => {
+    const sheet = document.querySelector('[data-testid="tv-list"]');
+    const clean = (s: string | null | undefined) => (s ?? '').replace(/\s+/g, ' ').trim();
+    return {
+      title: clean(sheet?.querySelector('h2')?.textContent),
+      options: Array.from(sheet?.querySelectorAll('.opt') ?? []).map((o) => {
+        const all = o.textContent ?? '';
+        const sub = o.querySelector('.s')?.textContent ?? '';
+        return clean(sub ? `${all.slice(0, all.length - sub.length)} ${sub}` : all);
+      }),
+    };
+  })) as { title: string; options: string[] };
+}
+
+async function waitList(title: string | RegExp): Promise<void> {
+  await browser.waitUntil(async () => {
+    const t = (await list()).title;
+    return typeof title === 'string' ? t === title : title.test(t);
+  }, { timeout: TRANSITION_TIMEOUT, timeoutMsg: `no list titled ${String(title)} (${JSON.stringify(await list())})` });
+}
+
+/** The row's segment, from its panel. */
+async function segmentOf(id: number): Promise<string | null> {
+  return (await browser.execute(
+    (s: string) => document.querySelector(s)?.closest('[data-testid^="tv-dl-seg-"]')?.getAttribute('data-testid')?.replace('tv-dl-seg-', '') ?? null,
+    testId(`tv-dl-row-${id}`),
+  )) as string | null;
+}
+
+async function waitSegment(id: number, seg: string, timeout = TRANSITION_TIMEOUT): Promise<void> {
+  await browser.waitUntil(async () => (await segmentOf(id)) === seg, { timeout, timeoutMsg: `row ${id} never reached ${seg} (in ${await segmentOf(id)})` });
+}
+
+/** Moves focus along a list to `k`, down first, then up. */
+async function seek(k: string): Promise<void> {
+  for (const dir of ['ArrowDown', 'ArrowUp']) {
+    for (let i = 0; i < 12 && (await focused()) !== k; i++) {
+      const was = await focused();
+      await key(dir);
+      await browser.pause(80);
+      if ((await focused()) === was) break;
+    }
+  }
+  await waitFocused(k);
+}
+
+/** Confirms the open dialog: Cancel has focus, Right reaches the action. */
+async function confirm(title: string | RegExp): Promise<void> {
+  await $(testId('tv-confirm')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+  const t = (await $(`${testId('tv-confirm')} h2`).getText()).trim();
+  if (typeof title === 'string') expect(t).toBe(title);
+  else expect(t).toMatch(title);
+  await waitFocused('dlg-cancel');
+  await key('ArrowRight');
+  await waitFocused('dlg-ok');
+  await key('Enter');
+  await waitGone('tv-confirm');
+}
+
+/**
+ * Stage `tv-settings` (docs/tv-mode/plan.md P10): connects on the desktop
+ * (seed: a library folder and an empty `library-new` beside it), enters TV
+ * mode and works through Downloads on throttled installs (rom 301 is the
+ * big one; 201 and 101 are small), then Settings: the rail, a slider, Theme,
+ * Button prompts and assignments with injected controllers, Change library
+ * folder › Start fresh › Leave, and Disconnect.
+ */
+describe('tv-settings: Downloads and Settings', () => {
+  before(async () => {
+    await $(testId('connect-server-url')).waitForExist({ timeout: APP_START_TIMEOUT, timeoutMsg: 'the connect form never appeared' });
+    await $(testId('connect-server-url')).setValue(mockUrl());
+    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
+    await $(testId('connect-submit')).click();
+    await $(testId('tv-mode-button')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the desktop shell never loaded' });
+    await captureErrors();
+    await $(testId('tv-mode-button')).click();
+    await $(testId('tv-shell')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'TV mode never opened' });
+    await waitTab('server');
+    await connectPad(XBOX_PAD);
+    await key('e');
+    await waitTab('downloads');
+  });
+
+  it('Downloads shows Active, Queued and Completed with counts and empty lines (items 209–210)', async () => {
+    for (const [seg, word] of [['active', 'active'], ['queued', 'queued'], ['completed', 'completed']]) {
+      await waitText(`tv-dl-count-${seg}`, '0');
+      await waitText(`tv-dl-empty-${seg}`, `Nothing ${word}.`);
+    }
+    expect(await hints()).not.toContain('Y Clear completed');
+  });
+
+  it('rows arrive in their panels with their lines, and A reads Cancel (items 212–213, 216)', async () => {
+    await invoke('install_game', { romId: 301 });
+    await invoke('install_game', { romId: 201 });
+    await invoke('install_game', { romId: 101 });
+    await waitSegment(1, 'active');
+    await waitText('tv-dl-line-1', /^Arcade · Downloading/);
+    await waitSegment(2, 'queued');
+    await waitText('tv-dl-line-2', 'Arcade · Queued');
+    await waitText('tv-dl-count-queued', '2');
+    await seek('dl-1');
+    expect(await hints()).toContain('A Cancel');
+    expect(await $(`${testId('tv-dl-row-1')} .spark svg`).isExisting()).toBe(true);
+  });
+
+  it('Cancel asks first, then stops the row; focus stays on it and the queue moves on (items 217–218, 223, ruling 8)', async () => {
+    await key('Enter');
+    await waitList('Big Arcade Game');
+    expect((await list()).options).toEqual(['Cancel', 'Open Big Arcade Game']);
+    await waitFocused('o0');
+    await key('Enter');
+    await confirm('Cancel Big Arcade Game?');
+    await waitSegment(1, 'completed');
+    await waitText('tv-dl-line-1', 'Arcade · Cancelled');
+    await waitToast('Cancelled Big Arcade Game');
+    expect(await focused()).toBe('dl-1');
+    // The small installs run and finish.
+    await waitSegment(2, 'completed', INSTALL_TIMEOUT);
+    await waitSegment(3, 'completed', INSTALL_TIMEOUT);
+    expect(await focused()).toBe('dl-1');
+    expect(await hints()).toContain('Y Clear completed');
+  });
+
+  it('Dismiss removes a row and focus moves to the row in its place (item 220)', async () => {
+    await seek('dl-2');
+    expect(await hints()).toContain('A Dismiss');
+    await key('Enter');
+    await waitList('Pac-Man');
+    expect((await list()).options).toEqual(['Dismiss', 'Open Pac-Man']);
+    await key('Enter');
+    await waitGone('tv-dl-row-2');
+    await browser.waitUntil(async () => /^dl-[13]$/.test((await focused()) ?? ''), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'focus did not move to the row in its place' });
+  });
+
+  it('Retry queues a cancelled row again (item 219)', async () => {
+    await seek('dl-1');
+    await key('Enter');
+    await waitList('Big Arcade Game');
+    expect((await list()).options).toEqual(['Retry', 'Dismiss', 'Open Big Arcade Game']);
+    await key('Enter');
+    // The retry runs on a new row; the old one makes way.
+    await waitGone('tv-dl-row-1');
+    await waitSegment(4, 'active');
+  });
+
+  it('Y clears the completed rows, keeping focus on the active one (item 222)', async () => {
+    await seek('dl-4');
+    await key('y');
+    await waitText('tv-dl-empty-completed', 'Nothing completed.');
+    await waitGone('tv-dl-row-3');
+    expect(await focused()).toBe('dl-4');
+    expect(await hints()).not.toContain('Y Clear completed');
+    // Stop it again (asked first), and clear it too.
+    await key('Enter');
+    await waitList('Big Arcade Game');
+    await key('Enter');
+    await confirm('Cancel Big Arcade Game?');
+    await waitSegment(4, 'completed', THROTTLED_DOWNLOAD_TIMEOUT);
+    await key('y');
+    await waitText('tv-dl-empty-completed', 'Nothing completed.');
+  });
+
+  it('B on Downloads does nothing (item 224)', async () => {
+    await key('Escape');
+    await browser.pause(200);
+    await waitTab('downloads');
+  });
+
+  it('the Settings rail shows each pane at once as focus moves (items 225–227)', async () => {
+    await key('e');
+    await waitTab('settings');
+    await waitFocused('r-appearance');
+    const panes: [string, string][] = [
+      ['backup-drives', 'Backup drives'],
+      ['cloud-saves', 'Cloud saves'],
+      ['connection', 'Connection'],
+      ['library', 'Library'],
+      ['retroachievements', 'RetroAchievements'],
+      ['systems', 'Systems'],
+      ['tv', 'TV mode'],
+      ['updates', 'Updates'],
+    ];
+    for (const [k, title] of panes) {
+      await key('ArrowDown');
+      await waitFocused(`r-${k}`);
+      await waitText('tv-pane-title', title);
+    }
+    await waitText('tv-row-version', /^Version\s*GRID /);
+    await moveTo('r-appearance', 'ArrowUp', 10);
+    await waitText('tv-pane-title', 'Appearance');
+    await waitText('tv-row-cards', /Desktop grids only/);
+  });
+
+  it('a slider adjusts with Left / Right while focused, with the D-pad hint (item 230)', async () => {
+    await key('ArrowRight');
+    await waitFocused('s-open-on');
+    await moveTo('s-fade', 'ArrowDown');
+    expect(await hints()).toContain('DPAD Adjust');
+    await waitText('tv-row-fade', /50%/);
+    expect(await $(`${testId('tv-row-fade')} .adj-arrows`).isDisplayed()).toBe(true);
+    await key('ArrowRight');
+    await waitText('tv-row-fade', /55%/);
+    expect(await focused()).toBe('s-fade');
+    await key('ArrowLeft');
+    await waitText('tv-row-fade', /50%/);
+    await browser.waitUntil(() => /background_fade = 50\b/.test(readFileSync(configPath(), 'utf-8')), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the fade never reached config.toml',
+    });
+  });
+
+  it('Theme applies at once; Follow system shows dark here (items 13, 229, 235, ruling 22)', async () => {
+    await moveTo('s-theme', 'ArrowUp');
+    await waitText('tv-row-theme', /Follow system shows dark here/);
+    expect(await browser.execute(() => document.documentElement.dataset.theme)).toBe('dark');
+    await key('Enter');
+    await waitList('Theme');
+    expect((await list()).options).toEqual(['Follow system', 'Dark', 'Light']);
+    await waitFocused('o0');
+    await moveTo('o2', 'ArrowDown');
+    await key('Enter');
+    await waitFocused('s-theme');
+    await browser.waitUntil(async () => (await browser.execute(() => document.documentElement.dataset.theme)) === 'light', {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Light never applied',
+    });
+    await waitText('tv-row-theme', /Light/);
+    await key('Enter');
+    await waitFocused('o2');
+    await moveTo('o0', 'ArrowUp');
+    await key('Enter');
+    await browser.waitUntil(async () => (await browser.execute(() => document.documentElement.dataset.theme)) === 'dark', {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Follow system did not show dark',
+    });
+  });
+
+  it('Button prompts redraws the hints at once (items 70, 261)', async () => {
+    await key('Escape');
+    await waitFocused('r-appearance');
+    await moveTo('r-tv', 'ArrowDown');
+    await key('ArrowRight');
+    await waitFocused('s-prompts');
+    await waitPromptSet('xbox');
+    await key('Enter');
+    await waitList('Button prompts');
+    expect((await list()).options).toEqual(['Match my controller', 'Xbox', 'PlayStation', 'Nintendo', '8BitDo (Pro series)']);
+    await moveTo('o2', 'ArrowDown');
+    await key('Enter');
+    await waitPromptSet('ps');
+    await waitText('tv-row-prompts', /PlayStation/);
+    await key('Enter');
+    await moveTo('o0', 'ArrowUp');
+    await key('Enter');
+    await waitPromptSet('xbox');
+  });
+
+  it('Button assignments is kept per controller and the row follows the controller in use (items 48, 53, 262–265)', async () => {
+    await moveTo('s-assign', 'ArrowDown');
+    await waitText('tv-row-assign', /For Xbox Wireless Controller.*Xbox style/);
+    await waitText('tv-row-tv-controller', /Xbox Wireless Controller/);
+    await key('Enter');
+    await waitList('Button assignments');
+    expect((await list()).options).toEqual(['Xbox style Bottom selects, right goes back', 'Nintendo style Right selects, bottom goes back']);
+    expect(await $(`${testId('tv-list')} .sub`).getText()).toBe('Xbox Wireless Controller');
+    await moveTo('o1', 'ArrowDown');
+    await key('Enter');
+    await waitText('tv-row-assign', /Nintendo style/);
+    await browser.waitUntil(() => new RegExp(`"?${XBOX_PAD.key}"? = "nintendo"`).test(readFileSync(configPath(), 'utf-8')), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: "the Xbox pad's assignment never reached config.toml",
+    });
+    // Another controller takes over: the row renames and shows its own style.
+    await connectPad(NINTENDO_PAD);
+    await axis('right_stick_y', 0.9, NINTENDO_PAD);
+    await axis('right_stick_y', 0, NINTENDO_PAD);
+    await waitText('tv-row-assign', /For Pro Controller.*Nintendo style/);
+    await waitText('tv-row-tv-controller', /Pro Controller/);
+    await waitPromptSet('nintendo');
+    expect(readFileSync(configPath(), 'utf-8')).not.toContain(NINTENDO_PAD.key);
+    expect(await promptSet()).toBe('nintendo');
+  });
+
+  it('Change library folder refuses the current one, then Start fresh › Leave switches (items 245–249)', async () => {
+    await key('Escape');
+    await waitFocused('r-tv');
+    await moveTo('r-library', 'ArrowUp');
+    await waitText('tv-row-lib-path', new RegExp(oldRoot().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    await key('ArrowRight');
+    await waitFocused('s-lib-change');
+    // The current library: refused.
+    await key('Enter');
+    await waitText('tv-crumb', /Choose the new library folder/);
+    await moveTo('fs-library', 'ArrowDown');
+    await key('Enter');
+    await waitText('tv-fs-path', /\/library$/);
+    await key('y');
+    await waitToast("Can't use that folder");
+    // Another folder: the move list, Start fresh, Leave them on disk.
+    await waitFocused('s-lib-change');
+    await key('Enter');
+    await waitText('tv-crumb', /Choose the new library folder/);
+    await moveTo('fs-library-new', 'ArrowDown');
+    await key('Enter');
+    await waitText('tv-fs-path', /\/library-new$/);
+    await key('y');
+    await waitList(`Move to ${newRoot()}?`);
+    expect((await list()).options).toEqual(['Move existing files Runs in Downloads', 'Start fresh Leave or delete the old files']);
+    await moveTo('o1', 'ArrowDown');
+    await key('Enter');
+    await waitList('Delete the old game files, or leave them on disk?');
+    expect((await list()).options[0]).toBe('Leave them on disk');
+    expect((await list()).options[1]).toMatch(/^Delete them \(.+\)$/);
+    await waitFocused('o0');
+    await key('Enter');
+    await waitToast(`Library is now ${newRoot()}`);
+    await waitText('tv-row-lib-path', new RegExp(`${newRoot().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+    await browser.waitUntil(() => readFileSync(configPath(), 'utf-8').includes(`library_path = ${JSON.stringify(newRoot())}`), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the new library folder never reached config.toml',
+    });
+    // Leave: the old game's files stay on disk.
+    expect(existsSync(path.join(oldRoot(), 'games', SNES))).toBe(true);
+  });
+
+  it('Disconnect asks first, then returns to Connect (items 243–244)', async () => {
+    await key('Escape');
+    await moveTo('r-connection', 'ArrowUp');
+    await waitText('tv-row-credential', /Stored in the system keyring · verified/);
+    await key('ArrowRight');
+    await waitFocused('s-reconnect');
+    await key('ArrowDown');
+    await waitFocused('s-disconnect');
+    await key('Enter');
+    await confirm(/^Disconnect from .+\?$/);
+    await browser.waitUntil(async () => /Connect to your RomM server/.test(await text('tv-stage')), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Disconnect did not return to Connect',
+    });
+  });
+
+  it('raised no page errors', async () => {
+    expect(await pageErrors()).toEqual([]);
+  });
+});
