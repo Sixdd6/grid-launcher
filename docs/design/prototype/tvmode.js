@@ -1400,7 +1400,10 @@ function press(b) {
     if (S.pages.length) return pop();
     if (S.selMode) return selToggle();
     var rail = document.querySelector('.rail');
+    /* B from a grid or pane goes to the rail; on the rail itself B does nothing
+       (LB / RB switch tabs). A tab without a rail (Downloads) goes Home. */
     if (rail && cur && !rail.contains(cur)) { var sel = rail.querySelector('.ri.sel') || rail.querySelector('[data-f]'); return setFocus(sel); }
+    if (rail) return;
     if (S.tab !== 'home') { S.tab = 'home'; render(); }
     return;
   }
