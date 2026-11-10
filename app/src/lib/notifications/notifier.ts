@@ -16,7 +16,7 @@ import {
 import { BackupBatches, osChangeHint } from '../backups/notices';
 import { toLaunchFailure } from '../launchError';
 import { markCurrent } from '../stores/emulatorUpdates.svelte';
-import { onSnapshot } from '../stores/downloads.svelte';
+import { downloads, hasSnapshot, onSnapshot } from '../stores/downloads.svelte';
 import { onSessionsSnapshot } from '../stores/sessions.svelte';
 import { setupRun } from '../stores/setupRun.svelte';
 import { navigation } from '../stores/navigation.svelte';
@@ -143,7 +143,11 @@ export async function installGame(romId: number, title: string): Promise<void> {
 }
 
 export function initNotifications(): () => void {
-  let book: StatusBook | null = null;
+  // Started after the store's first snapshot (a shell that comes up later
+  // than the store, as TV mode's offline start does), the book begins from
+  // what is on screen now, so the next snapshot's arrivals are announced
+  // instead of being taken for the baseline.
+  let book: StatusBook | null = hasSnapshot() ? new Map(downloads.entries.map((e) => [e.id, e.status])) : null;
   const offDownloads = onSnapshot((entries, first) => {
     for (const n of backups.observe(entries, first, Date.now())) notify(n);
     pumpBackups();

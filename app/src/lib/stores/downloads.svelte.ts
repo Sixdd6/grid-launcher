@@ -50,6 +50,11 @@ export function onSnapshot(listener: SnapshotListener): () => void {
 
 let first = true;
 
+/** Whether a snapshot has arrived yet (a listener added later starts from it). */
+export function hasSnapshot(): boolean {
+  return !first;
+}
+
 function apply(snapshot: DownloadsSnapshot): void {
   state.entries = snapshot.entries;
   observe(sampler, snapshot.entries);

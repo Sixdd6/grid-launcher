@@ -33,6 +33,7 @@ type Handler = (e: { payload: unknown }) => void;
 
 describe('initNotifications', () => {
   let downloadsListener: ((entries: DownloadEntry[], first: boolean) => void) | null;
+  let current: DownloadEntry[] | null = null;
   let sessionsListener: ((before: GameSession[], snap: SessionsSnapshot) => void) | null;
   let handlers: Record<string, Handler>;
   let setupActive: boolean;
@@ -42,6 +43,7 @@ describe('initNotifications', () => {
     vi.resetModules();
     vi.useFakeTimers();
     downloadsListener = null;
+    current = null;
     sessionsListener = null;
     handlers = {};
     setupActive = false;
@@ -53,6 +55,12 @@ describe('initNotifications', () => {
       },
     }));
     vi.doMock('../stores/downloads.svelte', () => ({
+      hasSnapshot: () => current !== null,
+      downloads: {
+        get entries() {
+          return current ?? [];
+        },
+      },
       onSnapshot: (fn: typeof downloadsListener) => {
         downloadsListener = fn;
         return () => (downloadsListener = null);
@@ -98,6 +106,15 @@ describe('initNotifications', () => {
     const texts = () => toasts.list.map((t) => t.text);
     return { notifier, stop, texts };
   }
+
+  it('started after the store had its first snapshot, announces the next arrivals (TV mode offline start)', async () => {
+    current = [entry({ id: 9, status: 'completed', title: 'Old' })];
+    const { stop, texts } = await start();
+    downloadsListener!([entry({ id: 1 }), entry({ id: 9, status: 'completed', title: 'Old' })], false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(texts()).toEqual(['Zelda added to download queue']);
+    stop();
+  });
 
   it('shows queue and install cards once, after a baseline', async () => {
     const { stop, texts } = await start();
