@@ -11,6 +11,15 @@ import { CountdownTimer } from '../countdown';
 
 export type ToastLevel = 'success' | 'error';
 
+/** What a card offers beside its text. The desktop's cards show neither;
+ *  TV mode's cards show the second line, and View runs the action (TV mode
+ *  plan P6, checklist items 144, 148). */
+export type ToastAction = { label: string; run: () => void };
+export type ToastExtra = { sub?: string; action?: ToastAction };
+
+/** A pushed card, as a subscriber (TV mode's card stack) sees it. */
+export type PushedToast = { text: string; level: ToastLevel; durationMs: number } & ToastExtra;
+
 export type Toast = {
   id: number;
   text: string;
@@ -56,6 +65,20 @@ const timers = new Map<number, CountdownTimer>();
 
 let nextId = 0;
 
+const subscribers = new Set<(t: PushedToast) => void>();
+
+/**
+ * Calls `fn` with every card pushed from now on (blank ones excepted), so
+ * TV mode can show the same events in its own stack with its own limit.
+ * Answers the function that unsubscribes. The desktop stack is unchanged.
+ */
+export function onToastPushed(fn: (t: PushedToast) => void): () => void {
+  subscribers.add(fn);
+  return () => {
+    subscribers.delete(fn);
+  };
+}
+
 export const toasts = {
   get list() {
     return state.list;
@@ -71,9 +94,11 @@ export function pushToast(
   text: string,
   level: ToastLevel = 'success',
   durationMs: number = TOAST_DURATION_MS,
+  extra: ToastExtra = {},
 ): number | null {
   const trimmed = text.trim();
   if (trimmed === '') return null;
+  for (const fn of subscribers) fn({ text: trimmed, level, durationMs, ...extra });
   nextId += 1;
   const id = nextId;
   const next = appendToast(state.list, { id, text: trimmed, level, durationMs, paused: false });

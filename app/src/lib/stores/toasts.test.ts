@@ -149,3 +149,17 @@ describe('pushToast duration', () => {
     expect(toasts.list).toEqual([]);
   });
 });
+
+describe('onToastPushed (TV mode sees the same cards)', () => {
+  it('hands every non-blank card, with its extras, to subscribers until they unsubscribe', async () => {
+    const { onToastPushed, pushToast } = await import('./toasts.svelte');
+    const seen: unknown[] = [];
+    const off = onToastPushed((t) => seen.push(t));
+    const run = () => {};
+    pushToast('  Zelda added to download queue ', 'success', 10_000, { action: { label: 'Open Downloads', run } });
+    pushToast('   ');
+    off();
+    pushToast('after');
+    expect(seen).toEqual([{ text: 'Zelda added to download queue', level: 'success', durationMs: 10_000, action: { label: 'Open Downloads', run } }]);
+  });
+});

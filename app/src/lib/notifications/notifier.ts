@@ -19,7 +19,8 @@ import { markCurrent } from '../stores/emulatorUpdates.svelte';
 import { onSnapshot } from '../stores/downloads.svelte';
 import { onSessionsSnapshot } from '../stores/sessions.svelte';
 import { setupRun } from '../stores/setupRun.svelte';
-import { pushToast } from '../stores/toasts.svelte';
+import { navigation } from '../stores/navigation.svelte';
+import { pushToast, TOAST_DURATION_MS, type ToastAction } from '../stores/toasts.svelte';
 import {
   Coalescer,
   diffSnapshot,
@@ -31,10 +32,19 @@ import {
   queueRefusedNotice,
   type Hint,
   type Notice,
+  type NoticeAction,
   type StatusBook,
 } from './notices';
 
-const coalescer = new Coalescer((text, level) => pushToast(text, level));
+/** What a card's action does. Only TV mode's cards show it (View runs it). */
+function toastAction(action: NoticeAction | undefined): ToastAction | undefined {
+  if (action === 'downloads') return { label: 'Open Downloads', run: () => navigation.go('downloads') };
+  return undefined;
+}
+
+const coalescer = new Coalescer((text, level, card) =>
+  pushToast(text, level, TOAST_DURATION_MS, { action: toastAction(card.action) }),
+);
 
 /** Shows `notice`, merged with any of its group arriving at the same time. */
 export function notify(notice: Notice): void {

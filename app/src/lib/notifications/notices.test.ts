@@ -242,6 +242,7 @@ describe('single notices', () => {
       group: 'drive-queued',
       text: 'DuckStation from Couch kit added to download queue',
       level: 'success',
+      action: 'downloads',
     });
     // The emulator line and the firmware card in one window: two cards, each
     // as worded, never "2 items installed from a backup drive".
@@ -301,6 +302,54 @@ describe('coalesce', () => {
     expect(summaryText('backup-queued', 2)).toBe('2 backups added to the backup queue');
     expect(summaryText('backup-done', 2)).toBe('2 backups finished');
     expect(summaryText('backup-failed', 2)).toBe('2 backups stopped — see Downloads');
+  });
+});
+
+describe('actions (TV mode: View runs them, items 144, 148)', () => {
+  function cards(snapshots: DownloadEntry[][]): Notice[] {
+    let book: StatusBook | null = null;
+    const out: Notice[] = [];
+    for (const snap of snapshots) {
+      const { book: next, transitions } = diffSnapshot(book, snap);
+      book = next;
+      for (const t of transitions) out.push(...noticesFor(t, { setupActive: false }));
+    }
+    return out;
+  }
+
+  it('a queued game, update, emulator or failed install opens Downloads', () => {
+    const [queued, failed] = cards([[], [entry({})], [entry({ status: 'failed', error: '503' })]]);
+    expect(queued).toMatchObject({ text: 'Chrono Trigger added to download queue', action: 'downloads' });
+    expect(failed).toMatchObject({ text: "Couldn't install Chrono Trigger: 503", action: 'downloads' });
+    const [emu] = cards([[], [entry({ job: 'emulator', kind: 'emulator', title: 'PCSX2', source_id: 'pcsx2' })]]);
+    expect(emu).toMatchObject({ text: 'Installing PCSX2…', action: 'downloads' });
+  });
+
+  it('a finished install, a launch or a refused queue offers nothing', () => {
+    const [, done] = cards([[], [entry({})], [entry({ status: 'completed' })]]);
+    expect(done.action).toBeUndefined();
+    expect(launchingNotice('Zelda').action).toBeUndefined();
+    expect(queueRefusedNotice('Zelda', 'offline').action).toBeUndefined();
+  });
+
+  it('a summary keeps the action its cards share', () => {
+    const q = (t: string): Notice => ({ group: 'game-queued', text: t, level: 'success', action: 'downloads' });
+    expect(coalesce([q('A'), q('B')])[0]).toEqual({ group: 'game-queued', text: '2 games added to download queue', level: 'success', action: 'downloads' });
+    const failed = coalesce([
+      { group: 'game-failed', text: "Couldn't install C", level: 'error', action: 'downloads' },
+      queueRefusedNotice('D', 'offline'),
+    ]);
+    expect(failed[0].action).toBeUndefined();
+  });
+
+  it('the Coalescer hands the card with its action to the show callback', () => {
+    vi.useFakeTimers();
+    const shown: Notice[] = [];
+    const c = new Coalescer((_t, _l, card) => shown.push(card));
+    c.add({ group: 'game-queued', text: 'A added to download queue', level: 'success', action: 'downloads' });
+    c.flush();
+    expect(shown).toEqual([{ group: 'game-queued', text: 'A added to download queue', level: 'success', action: 'downloads' }]);
+    vi.useRealTimers();
   });
 });
 

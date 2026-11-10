@@ -39,7 +39,14 @@ export type NoticeGroup =
   | 'backup-done'
   | 'backup-failed';
 
-export type Notice = { group: NoticeGroup; text: string; level: ToastLevel };
+/**
+ * A card may offer a place to go: `downloads` is "Open Downloads". The
+ * desktop's cards show no action; TV mode's View runs it (checklist items
+ * 144, 148–149).
+ */
+export type NoticeAction = 'downloads';
+
+export type Notice = { group: NoticeGroup; text: string; level: ToastLevel; action?: NoticeAction };
 
 const TERMINAL: ReadonlySet<DownloadStatus> = new Set(['completed', 'failed', 'cancelled']);
 
@@ -140,11 +147,11 @@ function queuedNotice(entry: DownloadEntry, ctx: NoticeContext): Notice | null {
   if (entry.job === 'game') {
     switch (gameShape(entry)) {
       case 'update':
-        return { group: 'update-queued', text: `Update for ${t} added to download queue`, level: 'success' };
+        return { group: 'update-queued', text: `Update for ${t} added to download queue`, level: 'success', action: 'downloads' };
       case 'content':
-        return { group: 'content-queued', text: `Extra content for ${t} added to download queue`, level: 'success' };
+        return { group: 'content-queued', text: `Extra content for ${t} added to download queue`, level: 'success', action: 'downloads' };
       default:
-        return { group: 'game-queued', text: `${t} added to download queue`, level: 'success' };
+        return { group: 'game-queued', text: `${t} added to download queue`, level: 'success', action: 'downloads' };
     }
   }
   // An emulator or Proton an install from a drive brings is announced by
@@ -152,8 +159,8 @@ function queuedNotice(entry: DownloadEntry, ctx: NoticeContext): Notice | null {
   // queue"), so its queue row stays quiet.
   if (isTool(entry) && !ctx.setupActive && entry.drive_label.trim() === '') {
     return ctx.hint?.update
-      ? { group: 'tool-updating', text: `Updating ${t}…`, level: 'success' }
-      : { group: 'tool-queued', text: `Installing ${t}…`, level: 'success' };
+      ? { group: 'tool-updating', text: `Updating ${t}…`, level: 'success', action: 'downloads' }
+      : { group: 'tool-queued', text: `Installing ${t}…`, level: 'success', action: 'downloads' };
   }
   return null;
 }
@@ -170,7 +177,7 @@ function outcomeNotice(entry: DownloadEntry, ctx: NoticeContext): Notice | null 
         return { group: 'game-installed', text: `${t} installed`, level: 'success' };
       case 'failed': {
         const what = shape === 'update' ? `Couldn't update ${t}` : shape === 'content' ? `Couldn't install extra content for ${t}` : `Couldn't install ${t}`;
-        return { group: 'game-failed', text: withReason(what, entry.error), level: 'error' };
+        return { group: 'game-failed', text: withReason(what, entry.error), level: 'error', action: 'downloads' };
       }
       case 'cancelled':
         return {
@@ -190,7 +197,7 @@ function outcomeNotice(entry: DownloadEntry, ctx: NoticeContext): Notice | null 
       if (entry.kind !== 'compat_tool') return null;
       return { group: 'tool-installed', text: ctx.hint?.done ?? `${t} installed`, level: 'success' };
     case 'failed':
-      return { group: 'tool-failed', text: withReason(`Couldn't install ${t}`, entry.error), level: 'error' };
+      return { group: 'tool-failed', text: withReason(`Couldn't install ${t}`, entry.error), level: 'error', action: 'downloads' };
     case 'cancelled':
       return { group: 'cancelled', text: `Cancelled ${t}`, level: 'success' };
     default:
@@ -233,7 +240,7 @@ export function removedFromLibraryNotice(title: string): Notice {
  * same moment is not summed with it as "2 items installed".
  */
 export function driveQueuedNotice(message: string): Notice {
-  return { group: 'drive-queued', text: message, level: 'success' };
+  return { group: 'drive-queued', text: message, level: 'success', action: 'downloads' };
 }
 
 /** A `backup-notice` event's card ("PlayStation firmware installed from Couch kit"); the backend words it. */
@@ -337,7 +344,7 @@ export class Coalescer {
   private firstAt = 0;
 
   constructor(
-    private readonly show: (text: string, level: ToastLevel) => void,
+    private readonly show: (text: string, level: ToastLevel, card: Notice) => void,
     private readonly now: () => number = () => Date.now(),
     private readonly timers: Timers = realTimers,
     private readonly windowMs: number = COALESCE_WINDOW_MS,
@@ -360,7 +367,7 @@ export class Coalescer {
     this.timer = null;
     const held = this.held;
     this.held = [];
-    for (const card of coalesce(held)) this.show(card.text, card.level);
+    for (const card of coalesce(held)) this.show(card.text, card.level, card);
   }
 
   /** Drops what is held without showing it. */
@@ -379,7 +386,13 @@ export function coalesce(held: readonly Notice[]): Notice[] {
     list.push(n);
     groups.set(n.group, list);
   }
-  return [...groups.entries()].map(([group, list]) =>
-    list.length === 1 ? list[0] : { group, text: summaryText(group, list.length), level: list[0].level },
-  );
+  return [...groups.entries()].map(([group, list]) => {
+    if (list.length === 1) return list[0];
+    const card: Notice = { group, text: summaryText(group, list.length), level: list[0].level };
+    // The summary keeps the action its cards share ("2 games added to
+    // download queue" still opens Downloads).
+    const action = list[0].action;
+    if (action && list.every((n) => n.action === action)) card.action = action;
+    return card;
+  });
 }

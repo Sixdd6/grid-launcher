@@ -264,7 +264,7 @@ export class BackupBatches {
     } else {
       what = joinParts(phraseParts(c)) || plural(batch.rows.size, 'item');
     }
-    return { group: 'backup-queued', text: `${what} added to the backup queue for ${batch.name}`, level: 'success' };
+    return { group: 'backup-queued', text: `${what} added to the backup queue for ${batch.name}`, level: 'success', action: 'downloads' };
   }
 
   private endCard(batch: Batch, hint: OsChangeHint | undefined): Notice | null {
