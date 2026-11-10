@@ -167,7 +167,7 @@
         ask(stopConfirm(title), true, () => void d.stop().then(sayError));
         return;
       case 'install':
-        void d.install().then((outcome) => outcome && promptFor(outcome));
+        void d.install().then((outcome) => outcome && promptFor(outcome, title));
         return;
       case 'install-drive':
         void d.installFromDrive();

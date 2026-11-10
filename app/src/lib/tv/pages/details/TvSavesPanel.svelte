@@ -5,18 +5,30 @@
   // the server, each confirmed; a deleted record leaves the list and focus
   // moves to the record now in its place (`#saves-list`, item 311); an
   // upload reloads the list, so it shows at the top as LATEST (item 312).
-  // The records and actions are the shared CloudStore's.
-  import type { CloudPanelInfo, CloudRecord, SaveType } from '../../../api';
+  // A native game's Saves then lists its save locations (checklist 531):
+  // the desktop's status line, each row's raw path over its expanded one
+  // (PCGamingWiki rows first); A on a row asks to remove it and focus moves
+  // to the row in its place (`#saves-locs`); "Add a save folder…" opens the
+  // folder browser, where Y adds the folder shown. The records, locations
+  // and actions are the shared CloudStore's.
+  import { api, type CloudPanelInfo, type CloudRecord, type SaveType } from '../../../api';
   import { CloudStore } from '../../../details/cloudStore.svelte';
   import type { DetailsStore } from '../../../details/detailsStore.svelte';
   import { restoreAllConfirmText } from '../../../details/cloud';
+  import { nativePathsEmptyLabel, nativePathsStatusLine } from '../../../details/nativePaths';
+  import { openFolderBrowser } from '../../gameActions';
   import { pushToast } from '../../../stores/toasts.svelte';
   import { tvf } from '../../focus/actions';
   import { confirmBox, openList } from '../../overlays/overlays.svelte';
   import TvButton from '../../ui/TvButton.svelte';
   import TvIcon from '../../ui/TvIcon.svelte';
   import {
+    ADD_SAVE_FOLDER,
     deleteConfirm,
+    removeLocationConfirm,
+    SAVE_FOLDER_ADDED,
+    SAVE_LOCATIONS_HEADING,
+    saveFolderBrowserTitle,
     deletedNotice,
     restoreConfirm,
     restoredNotice,
@@ -40,6 +52,7 @@
     : null;
 
   $effect(() => {
+    void det.locations;
     store?.load();
   });
 
@@ -109,6 +122,40 @@
     });
   }
 
+  /** A on a save location: asks, then removes it (a PCGamingWiki row is
+   *  hidden, a manual one deleted: the backend's rule). */
+  function removeLocation(raw: string) {
+    if (!store) return;
+    void confirmBox({
+      ...removeLocationConfirm(raw),
+      danger: true,
+      onOk: async () => {
+        await store.removeSavePath(raw);
+        if (store.manualPathError) pushToast(store.manualPathError, 'error');
+      },
+    });
+  }
+
+  /** "Add a save folder…": the folder browser, opened in the game's own
+   *  folder (else home); Y adds the folder shown. The browser's page
+   *  remounts Details, so the new panel reloads (`det.locations`). */
+  function addLocation() {
+    const game = d.cloudGame;
+    openFolderBrowser({
+      title: saveFolderBrowserTitle(title),
+      start: game.native_game_dir.trim(),
+      onPick: (path) => {
+        api.nativeAddManualSavePath(game, path.trim()).then(
+          () => {
+            pushToast(SAVE_FOLDER_ADDED, 'success');
+            det.locations += 1;
+          },
+          (err: unknown) => pushToast(err instanceof Error ? err.message : String(err), 'error'),
+        );
+      },
+    });
+  }
+
   function rowActions(r: CloudRecord) {
     void openList({
       title: saveListTitle(kind, r),
@@ -154,3 +201,34 @@
     </div>
   {/if}
 {/if}
+{#if store && store.nativeSave && !store.recordsBlocked}
+  {@const paths = store.nativePaths}
+  <h3 class="locs-h" data-testid="tv-saves-locs-heading">{SAVE_LOCATIONS_HEADING}</h3>
+  <p class="note" data-testid="tv-saves-locs-status">{nativePathsStatusLine(store.nativePhase, store.nativePathCount)}</p>
+  {#if store.nativePhase === 'loading'}
+    <p class="note" data-testid="tv-saves-locs-fetching">{nativePathsEmptyLabel(store.nativePhase)}</p>
+  {/if}
+  <div data-nav="v" id="saves-locs" data-testid="tv-saves-locs">
+    {#if store.nativePhase === 'loaded' && paths}
+      {#each [...paths.pcgw, ...paths.manual] as p (p.raw)}
+        <div class="lrow" data-k={`sl${p.raw}`} data-al="Remove" data-raw={p.raw} data-testid="tv-saves-loc" use:tvf={{ a: () => removeLocation(p.raw) }}>
+          <div class="grow">
+            <div class="t">{p.raw}</div>
+            <div class="s">{p.expanded}</div>
+          </div>
+        </div>
+      {/each}
+    {/if}
+    <div class="btns">
+      <TvButton k="sl-add" testId="tv-saves-loc-add" onA={addLocation}>{ADD_SAVE_FOLDER}</TvButton>
+    </div>
+  </div>
+{/if}
+
+<style>
+  .locs-h {
+    margin: 1.6rem 0 0.4rem;
+    color: var(--text-h);
+    font-size: 1.2rem;
+  }
+</style>

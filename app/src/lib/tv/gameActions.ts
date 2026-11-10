@@ -19,7 +19,8 @@ import type { TvGame, TvQuick } from './games';
 import TvDetails from './pages/TvDetails.svelte';
 import TvFolderBrowser from './pages/TvFolderBrowser.svelte';
 import TvPlaying from './pages/TvPlaying.svelte';
-import TvSystemStub from './pages/TvSystemStub.svelte';
+import TvSystemPage from './pages/TvSystemPage.svelte';
+import { LIBRARY_FOLDER_BROWSER_TITLE, LIBRARY_FOLDER_SET, libraryFolderConfirm, umuConfirm } from './pages/details';
 
 /** The Details subject for a cover's game. */
 export function subjectOf(game: TvGame): DetailsSubject {
@@ -73,18 +74,18 @@ export async function playGame(game: PlayingGame): Promise<void> {
     void pushPage({ title: 'Playing', component: TvPlaying, props: { game } });
     return;
   }
-  promptFor(outcome);
+  promptFor(outcome, game.title);
 }
 
 /** Install from the server. A missing library folder offers to set one. */
 export async function installGame(romId: number, title: string): Promise<void> {
-  promptFor(await installServerGame(romId, title));
+  promptFor(await installServerGame(romId, title), title);
 }
 
 /** The TV prompt a refusal asks for, if any (the desktop's umu-launcher
- *  offer beside Play, and its library-folder banner). */
-export function promptFor(outcome: RunOutcome): void {
-  if (outcome.kind === 'needs-umu') offerUmu(outcome.reason);
+ *  offer beside Play, and its library-folder banner), for the game `title`. */
+export function promptFor(outcome: RunOutcome, title: string): void {
+  if (outcome.kind === 'needs-umu') offerUmu(title);
   else if (outcome.kind === 'needs-library-folder') promptLibraryFolder();
 }
 
@@ -92,20 +93,19 @@ export function promptFor(outcome: RunOutcome): void {
 export const UMU_INSTALLING = 'umu-launcher is installing (see Downloads). Launch the game again when it finishes.';
 
 /**
- * A Proton launch found no umu-run: offer the umu-launcher install, the one
- * Settings › Systems › Windows queues (UmuInstallOffer.svelte). While it is
- * already installing, say so instead.
+ * A Proton launch (or install) found no umu-run: offer the umu-launcher
+ * install, the one Settings › Systems › Windows queues (checklist 529:
+ * "Install umu-launcher?", Cancel focused). While it is already installing,
+ * say so instead, with Open Downloads.
  */
-export function offerUmu(reason: string): void {
+export function offerUmu(title: string): void {
   const toDownloads = { label: 'Open Downloads', run: () => navigation.go('downloads') };
   if (umuInstallBusy(downloads.entries)) {
     pushToast(UMU_INSTALLING, 'success', TOAST_DURATION_MS, { action: toDownloads });
     return;
   }
   void confirmBox({
-    title: 'Install umu-launcher?',
-    body: reason,
-    ok: 'Install umu-launcher',
+    ...umuConfirm(title),
     onOk: () => {
       api.installUmuLauncher().then(
         () => pushToast(UMU_INSTALLING, 'success', TOAST_DURATION_MS, { action: toDownloads }),
@@ -115,25 +115,25 @@ export function offerUmu(reason: string): void {
   });
 }
 
-/** The desktop banner's words (Server.svelte). */
-export const LIBRARY_FOLDER_LINE = 'Set a library folder to install games.';
-
 /**
- * No library folder is set: offer to pick one in the folder browser and
- * save it, as the desktop's banner does (Browse…, Save). The install is
- * pressed again afterwards, as on the desktop.
+ * No library folder is set (checklist 530): offer to pick one in the folder
+ * browser ("Library folder", at home; Y saves). A saved folder shows
+ * "Library folder set" with its path; a refusal is an error card with the
+ * reason. The install is pressed again afterwards, as on the desktop.
  */
 export function promptLibraryFolder(): void {
   void confirmBox({
-    title: 'Set a library folder',
-    body: LIBRARY_FOLDER_LINE,
-    ok: 'Choose a folder…',
+    ...libraryFolderConfirm(),
     onOk: () =>
       openFolderBrowser({
-        title: 'Library folder',
+        title: LIBRARY_FOLDER_BROWSER_TITLE,
         start: '',
         onPick: (path) => {
-          api.setLibraryPath(path.trim()).catch((err: unknown) => pushToast(err instanceof Error ? err.message : String(err), 'error'));
+          const folder = path.trim();
+          api.setLibraryPath(folder).then(
+            () => pushToast(LIBRARY_FOLDER_SET, 'success', TOAST_DURATION_MS, { sub: folder }),
+            (err: unknown) => pushToast(err instanceof Error ? err.message : String(err), 'error'),
+          );
         },
       }),
   });
@@ -156,9 +156,9 @@ export async function runQuick(game: TvGame, kind: TvQuick): Promise<void> {
 
 /**
  * A Server header chip, or a launch card's "Set up <Platform>": the
- * system's page (items 200, 318). TODO(P11): TvSystem replaces the stub
- * page.
+ * system's page (items 200, 318, 326). `system` is the platform's label or
+ * its server name; the page finds the row by either.
  */
-export function openSystem(platform: string): void {
-  void pushPage({ title: platform, component: TvSystemStub, props: { platform } });
+export function openSystem(system: string): void {
+  void pushPage({ title: system, component: TvSystemPage, props: { system } });
 }

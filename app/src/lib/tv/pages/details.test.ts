@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest';
 import type { MediaItem } from '../../details/media';
 import { readStep } from '../focus/reveal';
 import {
+  ADD_SAVE_FOLDER,
   BACKUP_NEEDS_SERVER,
+  LIBRARY_FOLDER_BROWSER_TITLE,
+  LIBRARY_FOLDER_SET,
+  libraryFolderConfirm,
+  removeLocationConfirm,
+  SAVE_FOLDER_ADDED,
+  SAVE_LOCATIONS_HEADING,
+  saveFolderBrowserTitle,
+  umuConfirm,
   cancelConfirm,
   deleteConfirm,
   detButtons,
@@ -242,5 +251,30 @@ describe('Playing, Link, Game settings', () => {
     expect(launchFileSub('sidecar', 'a.exe', 'a.exe')).toBe('Set by game.json');
     expect(launchFileSub('sidecar', 'b.exe', 'a.exe')).toBe('Your choice');
     expect(launchFileSub('user', 'a.exe', 'a.exe')).toBe('Your choice');
+  });
+});
+
+describe('refusal prompts and save locations (checklist 529–531)', () => {
+  it('the umu-launcher and library-folder confirms', () => {
+    expect(umuConfirm('Static Bloom')).toEqual({
+      title: 'Install umu-launcher?',
+      body: 'Static Bloom runs through Proton, which needs umu-run. umu-launcher downloads as a Downloads row; launch Static Bloom again when it finishes.',
+      ok: 'Install umu-launcher',
+    });
+    expect(libraryFolderConfirm()).toEqual({
+      title: 'Set a library folder',
+      body: 'GRID installs games into a library folder, and none is set. Choose one, then press Install again.',
+      ok: 'Choose a folder…',
+    });
+    expect(LIBRARY_FOLDER_BROWSER_TITLE).toBe('Library folder');
+    expect(LIBRARY_FOLDER_SET).toBe('Library folder set');
+  });
+
+  it('the save location words', () => {
+    expect(SAVE_LOCATIONS_HEADING).toBe('Save locations');
+    expect(ADD_SAVE_FOLDER).toBe('Add a save folder…');
+    expect(SAVE_FOLDER_ADDED).toBe('Save folder added');
+    expect(saveFolderBrowserTitle('My Game')).toBe('Save folder for My Game');
+    expect(removeLocationConfirm('<home>/saves')).toEqual({ title: 'Remove this save location?', body: '<home>/saves', ok: 'Remove' });
   });
 });

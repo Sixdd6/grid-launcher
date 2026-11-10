@@ -430,3 +430,43 @@ export function launchFileSub(launchSource: string, selected: string, saved: str
 
 export const GAME_SETTINGS_SAVED = 'Game settings saved';
 export const LAUNCH_INFO_RELOADED = 'Launch info reloaded';
+
+// ---- The refusal prompts (README § Consultant decisions; checklist 529–530)
+
+/** Install or Play refused for want of umu-run: the confirm's words. */
+export function umuConfirm(title: string): ConfirmWords {
+  return {
+    title: 'Install umu-launcher?',
+    body: `${title} runs through Proton, which needs umu-run. umu-launcher downloads as a Downloads row; launch ${title} again when it finishes.`,
+    ok: 'Install umu-launcher',
+  };
+}
+
+/** Install refused for want of a library folder: the confirm's words. */
+export function libraryFolderConfirm(): ConfirmWords {
+  return {
+    title: 'Set a library folder',
+    body: 'GRID installs games into a library folder, and none is set. Choose one, then press Install again.',
+    ok: 'Choose a folder…',
+  };
+}
+
+export const LIBRARY_FOLDER_BROWSER_TITLE = 'Library folder';
+/** The card once the folder is saved; the path is its second line. */
+export const LIBRARY_FOLDER_SET = 'Library folder set';
+
+// ---- Details › Saves › Save locations on a native game (checklist 531)
+
+export const SAVE_LOCATIONS_HEADING = 'Save locations';
+export const ADD_SAVE_FOLDER = 'Add a save folder…';
+export const SAVE_FOLDER_ADDED = 'Save folder added';
+
+/** The folder browser's title for a new save folder. */
+export function saveFolderBrowserTitle(title: string): string {
+  return `Save folder for ${title}`;
+}
+
+/** A on a save location: asks first, naming the row's path. */
+export function removeLocationConfirm(raw: string): ConfirmWords {
+  return { title: 'Remove this save location?', body: raw, ok: 'Remove' };
+}

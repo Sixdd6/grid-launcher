@@ -5,4 +5,6 @@
 import type { SaveType } from '../../api';
 import type { DetailsTab } from '../../details/tabs';
 
-export const det = $state<{ tab: DetailsTab; saveKind: SaveType }>({ tab: 'overview', saveKind: 'save' });
+// `locations` is bumped when a save folder is added from the folder browser:
+// popping the browser remounts Details, so the new Saves panel reloads.
+export const det = $state<{ tab: DetailsTab; saveKind: SaveType; locations: number }>({ tab: 'overview', saveKind: 'save', locations: 0 });
