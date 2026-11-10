@@ -192,3 +192,16 @@
   `assertNoClipping()` (focused item + ring / cover growth inside every clipping ancestor, waits for
   glides), `toastTitles()`, `waitToast(text|re)`. The spec captures page errors from the start and
   its last test asserts there were none: worth copying into later TV specs.
+
+## Pending for the next phase (consultant, after P7): Search everything states
+- app/src/lib/tv/tabs/server/server.svelte.ts `loadAllGames()`: resolve `{ games: LabelledGame[]; partial: boolean }`;
+  a failed or partial load is dropped from the cache so the next load re-asks.
+- app/src/lib/tv/pages/searchResults.ts (+ tests): `searchingHeading(q)` → `Searching for “<q>”…`;
+  `LOAD_FAILED_TITLE = "Can't reach your server"`; `loadFailedLine(url)` → `<url> isn't answering, so nothing could be searched.`;
+  `PARTIAL_NOTE = "Some systems didn't answer, so their games aren't in these results."`; `RETRY = 'Try again'`.
+- app/src/lib/tv/pages/TvSearchAll.svelte: state `'loading' | 'failed' | { games; partial }`; loading = heading
+  `tv-search-heading` over an empty grid (no spinner, no partial results); failed = `.empty` block
+  (`data-testid="tv-search-failed"`, h2 + line + primary TvButton k="sr-retry" testId="tv-search-retry", focused);
+  partial = `.note.warn` `data-testid="tv-search-partial"` + the same Try again above the grid; retry re-runs the load
+  with the loading heading; remove the `.catch(() => (all = []))` that produced "0 results". `setQuery` keeps the
+  early return on blank (results page: emptied field = nothing typed), comment cites the ruling. Inline only, never cards.
