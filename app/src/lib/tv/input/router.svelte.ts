@@ -245,27 +245,39 @@ function onBlur(): void {
 // Only a real move counts (item 75): WebKit sends a synthetic mousemove at
 // the unchanged position after a scroll, which must not make the item that
 // scrolled under a resting pointer take focus.
+// The same goes for a page that moves under a resting pointer (a resize,
+// TV mode going fullscreen, a redraw): only an over event close behind a
+// real move counts.
+const OVER_AFTER_MOVE_MS = 120;
 let mouseMoved = false;
+let lastMoveAt = 0;
 let lastPointer: { x: number; y: number } | null = null;
 
 function onMouseMove(e: MouseEvent): void {
-  const moved = lastPointer === null || lastPointer.x !== e.clientX || lastPointer.y !== e.clientY;
-  lastPointer = { x: e.clientX, y: e.clientY };
+  // Screen coordinates: a window that moves under a resting pointer changes
+  // the client position, not this one. A window that grows under a resting
+  // pointer (going fullscreen) gets a move as the pointer enters it: just
+  // after a resize, a move only records where the pointer is.
+  const settling = performance.now() - lastResizeAt < SETTLE_AFTER_RESIZE_MS;
+  const moved = !settling && (lastPointer === null || lastPointer.x !== e.screenX || lastPointer.y !== e.screenY);
+  lastPointer = { x: e.screenX, y: e.screenY };
   if (!moved) return;
   mouseMoved = true;
+  lastMoveAt = performance.now();
   // The over event may come before the move that arms it.
   onMouseOver(e);
 }
 
-// A new window size (TV mode going fullscreen, a resize) moves the page
-// under a resting pointer: the item that lands there must not take focus.
-// The pointer has to move again first.
+// A new window size: the pointer has to move again before it focuses.
+const SETTLE_AFTER_RESIZE_MS = 500;
+let lastResizeAt = -Infinity;
 function onResize(): void {
   mouseMoved = false;
+  lastResizeAt = performance.now();
 }
 
 function onMouseOver(e: MouseEvent): void {
-  if (!mouseMoved) return;
+  if (!mouseMoved || performance.now() - lastMoveAt > OVER_AFTER_MOVE_MS) return;
   const f = (e.target as Element | null)?.closest<HTMLElement>('[data-f]');
   const root = scope();
   if (f && root?.contains(f) && f !== focused() && focusables(root).includes(f)) setFocus(f, { scroll: false });
