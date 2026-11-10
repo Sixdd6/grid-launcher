@@ -193,6 +193,12 @@ impl RommClient {
         Ok(resp)
     }
 
+    /// The server's base URL, as this client requests it: never with
+    /// userinfo ([`strip_userinfo`] ran in [`Self::new`]), no trailing slash.
+    pub fn server_url(&self) -> &str {
+        &self.base
+    }
+
     pub async fn connect(&self) -> Result<UserInfo, RommError> {
         self.get_json("/api/users/me", &[]).await
     }
@@ -371,6 +377,54 @@ pub struct GameSummary {
     /// `""` when the server has none on its own host.
     #[serde(default)]
     pub logo_url: String,
+    /// The ROM's size on the server's disk (`fs_size_bytes`), all its files
+    /// together; `0` when the payload has none. The Server select bar sums
+    /// it ("3 selected · 4.2 GB").
+    #[serde(default)]
+    pub fs_size_bytes: i64,
+    /// The largest single file of the game (see
+    /// [`largest_file_from_payload`]); `None` when the payload carries no
+    /// `files` list, which `/api/roms` sends only with `with_files=true`
+    /// ([`RommClient::games_with_files`]). The backup dialog warns with it
+    /// about files too big for FAT32; an unknown size is never read as the
+    /// whole game's.
+    #[serde(default)]
+    pub largest_file_bytes: Option<i64>,
+}
+
+/// An integer field of a payload, lenient: absent, null or a non-number is
+/// `None`; a float is truncated.
+fn lenient_i64(value: Option<&serde_json::Value>) -> Option<i64> {
+    let value = value?;
+    value.as_i64().or_else(|| value.as_f64().map(|f| f as i64))
+}
+
+/// The largest `file_size_bytes` among a `SimpleRomSchema` entry's
+/// top-level game files (`is_top_level` true, `category` null or `"game"`):
+/// the files an install downloads. When no file qualifies (the server
+/// lists only nested or categorized files) the largest of every file is
+/// taken instead, so the FAT32 check errs on the safe side. A missing or
+/// malformed `files` list is `None` (unknown, not zero); an entry without a
+/// size counts as `0`.
+fn largest_file_from_payload(payload: &serde_json::Value) -> Option<i64> {
+    let files = payload.get("files")?.as_array()?;
+    let size = |file: &serde_json::Value| lenient_i64(file.get("file_size_bytes")).unwrap_or(0);
+    let is_game = |file: &serde_json::Value| {
+        let top_level = file
+            .get("is_top_level")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let category = file.get("category").and_then(|v| v.as_str()).unwrap_or("");
+        top_level && (category.is_empty() || category.eq_ignore_ascii_case("game"))
+    };
+    files
+        .iter()
+        .filter(|file| is_game(file))
+        .map(size)
+        .max()
+        .or_else(|| files.iter().map(size).max())
+        .map(|largest| largest.max(0))
+        .or(Some(0))
 }
 
 /// `metadatum.first_release_date` of a list payload, in seconds. Lenient: a
@@ -495,6 +549,8 @@ impl RawGameSummary {
             created_at: self.created_at.unwrap_or_default(),
             first_release_date: release_date_from_payload(&extra),
             logo_url: logo_url_from_payload(&extra, &resolver),
+            fs_size_bytes: lenient_i64(extra.get("fs_size_bytes")).unwrap_or(0).max(0),
+            largest_file_bytes: largest_file_from_payload(&extra),
         }
     }
 }
@@ -534,7 +590,23 @@ impl RommClient {
     /// platform grew meanwhile), it carries on one page at a time until a
     /// short page.
     pub async fn games(&self, platform_id: i64) -> Result<Vec<GameSummary>, RommError> {
-        let first = self.games_page(platform_id, 0, true).await?;
+        self.games_listing(platform_id, false).await
+    }
+
+    /// [`Self::games`] with each game's file entries (`with_files=true`), so
+    /// [`GameSummary::largest_file_bytes`] is known. Only backup planning
+    /// asks for it: the file lists make every page heavier, and the Server
+    /// grid does not read them.
+    pub async fn games_with_files(&self, platform_id: i64) -> Result<Vec<GameSummary>, RommError> {
+        self.games_listing(platform_id, true).await
+    }
+
+    async fn games_listing(
+        &self,
+        platform_id: i64,
+        with_files: bool,
+    ) -> Result<Vec<GameSummary>, RommError> {
+        let first = self.games_page(platform_id, 0, true, with_files).await?;
         let mut last_len = first.items.len();
         let mut out = self.summaries(first.items);
         let mut offset = PAGE_SIZE;
@@ -544,7 +616,7 @@ impl RommClient {
         if let Some(total) = first.total.filter(|&t| t > PAGE_SIZE) {
             let pages: Vec<Paged<RawGameSummary>> =
                 futures_util::stream::iter((PAGE_SIZE..total).step_by(PAGE_SIZE))
-                    .map(|off| self.games_page(platform_id, off, false))
+                    .map(|off| self.games_page(platform_id, off, false, with_files))
                     .buffered(PAGE_CONCURRENCY)
                     .try_collect()
                     .await?;
@@ -555,7 +627,9 @@ impl RommClient {
             }
         }
         while last_len == PAGE_SIZE {
-            let page = self.games_page(platform_id, offset, false).await?;
+            let page = self
+                .games_page(platform_id, offset, false, with_files)
+                .await?;
             last_len = page.items.len();
             out.extend(self.summaries(page.items));
             offset += PAGE_SIZE;
@@ -567,26 +641,28 @@ impl RommClient {
     /// does not read: the char index and filter values (as the Python client
     /// did) and the rom id index — all three default to `true` server-side,
     /// and the id index is the full ordered id list of the platform, rebuilt
-    /// on every page. `with_total` only where the caller needs the count.
+    /// on every page. `with_total` only where the caller needs the count;
+    /// `with_files` (sent only when true) only for backup planning.
     async fn games_page(
         &self,
         platform_id: i64,
         offset: usize,
         with_total: bool,
+        with_files: bool,
     ) -> Result<Paged<RawGameSummary>, RommError> {
-        self.get_json(
-            "/api/roms",
-            &[
-                ("platform_ids", platform_id.to_string()),
-                ("limit", PAGE_SIZE.to_string()),
-                ("offset", offset.to_string()),
-                ("with_char_index", "false".to_string()),
-                ("with_filter_values", "false".to_string()),
-                ("with_rom_id_index", "false".to_string()),
-                ("with_total", with_total.to_string()),
-            ],
-        )
-        .await
+        let mut query = vec![
+            ("platform_ids", platform_id.to_string()),
+            ("limit", PAGE_SIZE.to_string()),
+            ("offset", offset.to_string()),
+            ("with_char_index", "false".to_string()),
+            ("with_filter_values", "false".to_string()),
+            ("with_rom_id_index", "false".to_string()),
+            ("with_total", with_total.to_string()),
+        ];
+        if with_files {
+            query.push(("with_files", "true".to_string()));
+        }
+        self.get_json("/api/roms", &query).await
     }
 
     /// One `/api/roms` page ordered by `order_by` (`created_at`,
@@ -709,6 +785,16 @@ pub struct RomFile {
     /// game file. The server sends `null` for no category.
     #[serde(default, deserialize_with = "null_to_empty")]
     pub category: String,
+    /// The file's MD5 as the server states it, lowercase hex; `""` when the
+    /// server sends none (absent or `null`). For an archive (zip, 7z, ...)
+    /// RomM hashes the decompressed contents, not the archive's bytes, so
+    /// this must never be used to verify a downloaded file.
+    #[serde(default, deserialize_with = "null_to_empty")]
+    pub md5_hash: String,
+    /// The file's SHA-1 as the server states it; `""` when absent or `null`.
+    /// A content hash, like [`Self::md5_hash`].
+    #[serde(default, deserialize_with = "null_to_empty")]
+    pub sha1_hash: String,
 }
 
 /// Deserializes a nullable string field as an empty string when absent or
@@ -806,6 +892,29 @@ pub struct RomDetail {
     /// Details Achievements tab shows only when this is above zero: many
     /// RA-linked ROMs (`ra_id` set) have an empty list.
     pub achievement_count: usize,
+    /// The game's clear logo, already resolved and host-filtered
+    /// (`ss_metadata.logo_path`, else `ss_metadata.logo_url`); `""` when none.
+    pub logo_url: String,
+}
+
+impl RomDetail {
+    /// The largest top-level game file, by the same rule as
+    /// [`largest_file_from_payload`]: `is_top_level` with no category (or
+    /// `"game"`), else the largest file of any kind; `0` with no files.
+    pub fn largest_game_file_bytes(&self) -> i64 {
+        let is_game = |file: &&RomFile| {
+            file.is_top_level
+                && (file.category.is_empty() || file.category.eq_ignore_ascii_case("game"))
+        };
+        self.files
+            .iter()
+            .filter(is_game)
+            .map(|file| file.file_size_bytes)
+            .max()
+            .or_else(|| self.files.iter().map(|file| file.file_size_bytes).max())
+            .unwrap_or(0)
+            .max(0)
+    }
 }
 
 /// Wire shape of `RomMetadataSchema` fields we use. Every field defaulted so
@@ -952,6 +1061,7 @@ impl RawRomDetail {
         let extra = serde_json::Value::Object(self.extra);
         let screenshot_urls = crate::images::urls::screenshot_urls_from_payload(&extra, &resolver);
         let fanart_urls = crate::images::urls::fanart_urls_from_payload(&extra, &resolver);
+        let logo_url = logo_url_from_payload(&extra, &resolver);
         RomDetail {
             id: self.id,
             name,
@@ -992,6 +1102,7 @@ impl RawRomDetail {
                 .merged_ra_metadata
                 .map(|m| m.achievements.len())
                 .unwrap_or(0),
+            logo_url,
         }
     }
 }
@@ -1111,6 +1222,75 @@ mod summary_tests {
         assert_eq!(summary.created_at, "");
     }
 
+    /// `fs_size_bytes` and the largest top-level game file come from the
+    /// list payload (`SimpleRomSchema.files`): updates, DLC, nested files and
+    /// manuals do not count when a game file is listed.
+    #[test]
+    fn a_summary_carries_its_size_and_largest_game_file() {
+        let summary = parse(serde_json::json!({
+            "id": 106,
+            "name": "Wario World",
+            "platform_id": 9,
+            "fs_size_bytes": 6_500_000_000_i64,
+            "files": [
+                { "id": 1, "file_name": "disc.iso", "file_size_bytes": 1_459_978_240_i64,
+                  "is_top_level": true, "category": null, "md5_hash": null },
+                { "id": 2, "file_name": "big.iso", "file_size_bytes": 4_700_000_000_i64,
+                  "is_top_level": true, "category": "game" },
+                { "id": 3, "file_name": "update.wua", "file_size_bytes": 9_000_000_000_i64,
+                  "is_top_level": true, "category": "update" },
+                { "id": 4, "file_name": "sub/nested.bin", "file_size_bytes": 8_000_000_000_i64,
+                  "is_top_level": false, "category": null },
+                { "id": 5, "file_name": "manual.pdf", "file_size_bytes": 7_000_000_000_i64,
+                  "is_top_level": true, "category": "manual" }
+            ]
+        }));
+        assert_eq!(summary.fs_size_bytes, 6_500_000_000);
+        assert_eq!(summary.largest_file_bytes, Some(4_700_000_000));
+    }
+
+    /// No top-level game file listed: the largest file of any kind is used,
+    /// so a FAT32 check never under-counts.
+    #[test]
+    fn with_no_top_level_game_file_the_largest_file_counts() {
+        let summary = parse(serde_json::json!({
+            "id": 107,
+            "name": "Folder Game",
+            "platform_id": 9,
+            "files": [
+                { "id": 1, "file_name": "a/game.bin", "file_size_bytes": 300, "is_top_level": false },
+                { "id": 2, "file_name": "a/game.cue", "file_size_bytes": 2 }
+            ]
+        }));
+        assert_eq!(summary.largest_file_bytes, Some(300));
+    }
+
+    /// Lenient: no `fs_size_bytes` is `0`; a missing or malformed `files` is
+    /// an unknown largest file (`None`, never the whole game's size); an
+    /// entry with no size counts as `0`. None of it fails the page.
+    #[test]
+    fn missing_or_malformed_sizes_are_zero_or_unknown() {
+        let bare = parse(serde_json::json!({
+            "id": 108, "name": "Old", "platform_id": 1
+        }));
+        assert_eq!((bare.fs_size_bytes, bare.largest_file_bytes), (0, None));
+        let odd = parse(serde_json::json!({
+            "id": 109, "name": "Odd", "platform_id": 1,
+            "fs_size_bytes": null,
+            "files": "not a list"
+        }));
+        assert_eq!((odd.fs_size_bytes, odd.largest_file_bytes), (0, None));
+        let sizeless = parse(serde_json::json!({
+            "id": 110, "name": "Sizeless", "platform_id": 1,
+            "fs_size_bytes": 12.0,
+            "files": [ { "id": 1, "file_name": "x.bin", "is_top_level": true }, 5 ]
+        }));
+        assert_eq!(
+            (sizeless.fs_size_bytes, sizeless.largest_file_bytes),
+            (12, Some(0))
+        );
+    }
+
     #[test]
     fn a_summary_carries_its_genres_and_platform_label() {
         let summary = parse(serde_json::json!({
@@ -1204,6 +1384,63 @@ mod detail_fanart_tests {
         }))
         .expect("detail decodes");
         assert_eq!(raw.into_detail("https://romm.example").achievement_count, 2);
+    }
+
+    #[test]
+    fn a_detail_carries_its_logo_and_file_hashes() {
+        let raw: RawRomDetail = serde_json::from_value(serde_json::json!({
+            "id": 7,
+            "platform_id": 1,
+            "ss_metadata": { "logo_path": "/assets/romm/resources/logo.png" },
+            "files": [{
+                "id": 70,
+                "file_name": "game.sfc",
+                "md5_hash": "0123456789abcdef0123456789abcdef",
+                "sha1_hash": "0123456789abcdef0123456789abcdef01234567"
+            }]
+        }))
+        .expect("detail decodes");
+        let detail = raw.into_detail("https://romm.example");
+        assert_eq!(
+            detail.logo_url,
+            "https://romm.example/assets/romm/resources/logo.png"
+        );
+        assert_eq!(detail.files[0].md5_hash, "0123456789abcdef0123456789abcdef");
+        assert_eq!(
+            detail.files[0].sha1_hash,
+            "0123456789abcdef0123456789abcdef01234567"
+        );
+    }
+
+    #[test]
+    fn missing_or_null_logo_and_hashes_decode_to_empty() {
+        let raw: RawRomDetail = serde_json::from_value(serde_json::json!({
+            "id": 8,
+            "platform_id": 1,
+            "ss_metadata": null,
+            "files": [
+                { "id": 80, "file_name": "a.sfc" },
+                { "id": 81, "file_name": "b.sfc", "md5_hash": null, "sha1_hash": null }
+            ]
+        }))
+        .expect("detail decodes");
+        let detail = raw.into_detail("https://romm.example");
+        assert_eq!(detail.logo_url, "");
+        for file in &detail.files {
+            assert_eq!(file.md5_hash, "");
+            assert_eq!(file.sha1_hash, "");
+        }
+    }
+
+    #[test]
+    fn a_logo_on_another_host_is_dropped() {
+        let raw: RawRomDetail = serde_json::from_value(serde_json::json!({
+            "id": 9,
+            "platform_id": 1,
+            "ss_metadata": { "logo_url": "https://elsewhere.example/logo.png" }
+        }))
+        .expect("detail decodes");
+        assert_eq!(raw.into_detail("https://romm.example").logo_url, "");
     }
 }
 

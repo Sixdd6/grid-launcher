@@ -656,3 +656,170 @@ async fn a_rejected_connect_does_not_fire_the_hook() {
     assert_eq!(err.to_string(), "the server rejected the credentials");
     assert!(calls.lock().unwrap().is_empty());
 }
+
+/// Offline mode (`Config.offline`): restore answers `Offline` without a
+/// probe. The mock matches every request and expects zero calls, so any
+/// request fails the test.
+#[tokio::test]
+async fn restore_while_offline_makes_no_request() {
+    let server = MockServer::start().await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let (mgr, store) = stored_session(&dir, &server.uri(), token());
+    mgr.use_offline().unwrap();
+    // The keyring is left alone.
+    assert!(SecretStore::load(&*store).unwrap().is_some());
+
+    let fresh = SessionManager::new(
+        dir.path().join("config.toml"),
+        dir.path().join("covers"),
+        store.clone(),
+    );
+    let outcome = fresh.restore().await.unwrap();
+    assert_eq!(
+        serde_json::to_value(&outcome).unwrap(),
+        serde_json::json!({
+            "kind": "offline",
+            "server_url": server.uri(),
+            "username": "six",
+        })
+    );
+    assert!(fresh.client().is_none());
+    // Image filtering still knows the configured server.
+    assert_eq!(fresh.server_url(), server.uri());
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn restore_while_offline_without_a_server_is_offline() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    let cfg = grid_core::config::Config {
+        offline: true,
+        ..Default::default()
+    };
+    cfg.save(&config_path).unwrap();
+    let mgr = SessionManager::new(
+        config_path,
+        dir.path().join("covers"),
+        Arc::new(MemoryStore::default()),
+    );
+    match mgr.restore().await.unwrap() {
+        RestoreOutcome::Offline {
+            server_url,
+            username,
+        } => {
+            assert!(server_url.is_empty());
+            assert!(username.is_empty());
+        }
+        other => panic!("expected Offline, got {other:?}"),
+    }
+    assert!(mgr.server_url().is_empty());
+}
+
+#[tokio::test]
+async fn use_offline_drops_the_live_client() {
+    let server = MockServer::start().await;
+    mount_users_me(&server).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (mgr, _store) = stored_session(&dir, &server.uri(), token());
+    assert!(matches!(
+        mgr.restore().await.unwrap(),
+        RestoreOutcome::Connected { .. }
+    ));
+    mgr.use_offline().unwrap();
+    assert!(mgr.client().is_none());
+    let cfg = grid_core::config::Config::load(&dir.path().join("config.toml")).unwrap();
+    assert!(cfg.offline);
+}
+
+#[tokio::test]
+async fn retry_while_offline_without_a_credential_is_no_stored_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    let cfg = grid_core::config::Config {
+        server_url: "https://romm.example".into(),
+        offline: true,
+        ..Default::default()
+    };
+    cfg.save(&config_path).unwrap();
+    let mgr = SessionManager::new(
+        config_path,
+        dir.path().join("covers"),
+        Arc::new(MemoryStore::default()),
+    );
+    assert!(matches!(
+        mgr.retry().await,
+        Err(grid_core::session::SessionError::NoStoredSession)
+    ));
+}
+
+#[tokio::test]
+async fn connect_clears_offline() {
+    let server = MockServer::start().await;
+    mount_users_me(&server).await;
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    let cfg = grid_core::config::Config {
+        offline: true,
+        ..Default::default()
+    };
+    cfg.save(&config_path).unwrap();
+    let store = Arc::new(MemoryStore::default());
+    let mgr = SessionManager::new(config_path.clone(), dir.path().join("covers"), store);
+    mgr.connect(
+        server.uri(),
+        "six".into(),
+        SecretString::from("FAKE-TEST-TOKEN-not-real"),
+        true,
+    )
+    .await
+    .unwrap();
+    let cfg = grid_core::config::Config::load(&config_path).unwrap();
+    assert!(!cfg.offline);
+    assert!(matches!(
+        mgr.restore().await.unwrap(),
+        RestoreOutcome::Connected { .. }
+    ));
+}
+
+#[tokio::test]
+async fn retry_that_connects_clears_offline() {
+    let server = MockServer::start().await;
+    mount_users_me(&server).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (mgr, store) = stored_session(&dir, &server.uri(), token());
+    mgr.use_offline().unwrap();
+    assert!(matches!(
+        mgr.retry().await.unwrap(),
+        RestoreOutcome::Connected { .. }
+    ));
+    let config_path = dir.path().join("config.toml");
+    let cfg = grid_core::config::Config::load(&config_path).unwrap();
+    assert!(!cfg.offline);
+    // The next start probes the server again instead of answering Offline.
+    let fresh = SessionManager::new(config_path, dir.path().join("covers"), store);
+    assert!(matches!(
+        fresh.restore().await.unwrap(),
+        RestoreOutcome::Connected { .. }
+    ));
+}
+
+#[tokio::test]
+async fn retry_that_fails_keeps_offline() {
+    let server = MockServer::start().await;
+    mount_status(&server, "/api/users/me", 503).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (mgr, _store) = stored_session(&dir, &server.uri(), token());
+    mgr.use_offline().unwrap();
+    assert!(matches!(
+        mgr.retry().await.unwrap(),
+        RestoreOutcome::Unreachable { .. }
+    ));
+    let cfg = grid_core::config::Config::load(&dir.path().join("config.toml")).unwrap();
+    assert!(cfg.offline);
+}

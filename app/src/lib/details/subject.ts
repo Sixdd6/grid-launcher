@@ -1,9 +1,24 @@
 // The Details overlay's single input contract (task-9-brief.md). It can be
-// opened from either the Server grid (a `GameSummary` fetched live from the
-// RomM server) or the Library grid (an `InstalledGame` registry row already
-// on disk) — `DetailsSubject` normalizes both into one shape so Details.svelte
-// itself never has to branch on which grid opened it.
-import type { GameSummary, InstalledGame, RomDetail } from '../api';
+// opened from the Server grid (a `GameSummary` fetched live from the RomM
+// server), the Library grid (an `InstalledGame` registry row already on
+// disk) or a backup drive's grid (a `DriveGame` from the drive's pack) —
+// `DetailsSubject` normalizes all three into one shape.
+import type { DriveGame, DriveInfo, GameSummary, InstalledGame, RomDetail } from '../api';
+import { driveAssetUrl } from '../backups/driveArt';
+import { serverKey } from '../backups/drives';
+import { isWindowsPlatform } from './actions';
+
+/** The drive a drive subject was opened from (GameBackups README, "Details from a drive"). */
+export type SubjectDrive = {
+  /** The drive key: its mount path, or its drive letter on Windows. */
+  key: string;
+  /** The pack name: "From Couch kit". */
+  name: string;
+  /** The volume label. */
+  label: string;
+  /** The server the game was backed up from (`DriveGame.server`). */
+  server: string;
+};
 
 export type DetailsSubject = {
   romId: number | null;
@@ -22,7 +37,18 @@ export type DetailsSubject = {
   description: string;
   rating: string;
   genres: string;
-  source: 'server' | 'installed';
+  source: 'server' | 'installed' | 'drive';
+  /** Set only for `source: 'drive'`. */
+  drive?: SubjectDrive;
+  /** The release date and companies a drive's pack carries, for the header
+   *  line before (or without) a server detail. */
+  releaseDate?: string;
+  companies?: string;
+  /** A drive game backed up from a computer's install, not the server's
+   *  files: the copy's version, and whether the server had newer files then. */
+  installedCopy?: { version: string; outdated: boolean };
+  /** A drive game whose saves were copied out of its Wine prefix. */
+  savesCopied?: boolean;
 };
 
 export function fromSummary(game: GameSummary, platformName: string, platformSlug: string): DetailsSubject {
@@ -74,6 +100,100 @@ export function fromInstalled(row: InstalledGame): DetailsSubject {
 }
 
 /**
+ * A game on a backup drive. Its art is the drive's own copy, loaded through
+ * `drive_asset` (`backups/driveArt.ts`), so it shows with no network.
+ */
+export function fromDriveGame(game: DriveGame, drive: Pick<DriveInfo, 'key' | 'label' | 'mount' | 'pack'>): DetailsSubject {
+  const asset = (rel: string) => driveAssetUrl(drive.key, rel);
+  const cover = asset(game.cover);
+  const urls = (rels: readonly string[]) => rels.flatMap((rel) => asset(rel) ?? []);
+  return {
+    romId: game.rom_id,
+    name: game.name,
+    platformName: game.platform_name,
+    platformSlug: game.platform,
+    coverSmall: cover,
+    coverLarge: cover,
+    screenshotUrls: urls(game.screenshots),
+    fanartUrls: urls([game.fanart]),
+    description: game.summary,
+    rating: game.rating,
+    genres: game.genres.join(', '),
+    source: 'drive',
+    drive: {
+      key: drive.key,
+      name: drive.pack?.name ?? (drive.label.trim() || drive.mount),
+      label: drive.label.trim() || drive.mount,
+      server: game.server,
+    },
+    releaseDate: releaseSeconds(game.release_date),
+    companies: game.companies.join(', '),
+    ...(game.installed_copy
+      ? { installedCopy: { version: game.installed_version.trim(), outdated: game.outdated } }
+      : {}),
+    ...(game.saves_copied ? { savesCopied: true } : {}),
+  };
+}
+
+/**
+ * A pack's release date ("1993-11-11") as the epoch-seconds string the
+ * header reads from a server detail (`releaseYear`), mirroring grid-core's
+ * `release_date_seconds`. Seconds pass through; anything else is `''`.
+ */
+export function releaseSeconds(raw: string): string {
+  const t = raw.trim();
+  if (/^\d+$/.test(t)) return t;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (m === null) return '';
+  return String(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 1000);
+}
+
+/** "From Couch kit", the drive part of the header line; `''` for any other subject. */
+export function fromDriveText(subject: DetailsSubject): string {
+  return subject.drive ? `From ${subject.drive.name}` : '';
+}
+
+/** The line for a drive game whose saves were copied out of its Wine prefix. */
+export const SAVES_INCLUDED = 'Saves from its Wine prefix are included';
+
+/**
+ * Details from a drive: for a copy of an installed game, "A copy of an
+ * installed game · v1.1 (the server had newer files)", and for a Windows
+ * one the Wine-prefix line, which says whether its saves came along. A
+ * downloaded game with saves gets the saves line alone. Empty for any
+ * other subject.
+ */
+export function driveCopyLines(subject: DetailsSubject): string[] {
+  if (subject.drive === undefined) return [];
+  const copy = subject.installedCopy;
+  if (copy === undefined) return subject.savesCopied === true ? [SAVES_INCLUDED] : [];
+  const version = copy.version === '' ? '' : ` · ${copy.version}`;
+  const lines = [`A copy of an installed game${version}${copy.outdated ? ' (the server had newer files)' : ''}`];
+  if (subject.savesCopied === true) {
+    lines.push(SAVES_INCLUDED);
+  } else if (isWindowsPlatform(subject.platformSlug, subject.platformName)) {
+    lines.push('Its Wine prefix wasn’t copied, so saves kept there aren’t on the drive');
+  }
+  return lines;
+}
+
+/**
+ * Whether the server's detail for `subject.romId` describes this game. A
+ * drive game's rom id belongs to the server it was backed up from: from any
+ * other server the same id is a different game, so its detail must not be
+ * merged over the drive's.
+ */
+export function detailApplies(subject: DetailsSubject, serverUrl: string): boolean {
+  if (subject.drive === undefined) return true;
+  return serverUrl.trim() !== '' && serverKey(subject.drive.server) === serverKey(serverUrl);
+}
+
+/** The version-label source order (`details/version.ts`): a drive game reads like a server one. */
+export function versionSource(subject: DetailsSubject): 'server' | 'installed' {
+  return subject.source === 'installed' ? 'installed' : 'server';
+}
+
+/**
  * Shim for the code Details.svelte still shares with the rest of the app in
  * `GameSummary` terms (`isInstalled`, `syntheticCloudGame`). `platform_id: 0`
  * is a harmless placeholder — both call sites take the platform name
@@ -88,6 +208,14 @@ export function summaryOf(subject: DetailsSubject): GameSummary {
     path_cover_large: subject.coverLarge,
     screenshot_urls: subject.screenshotUrls,
     fanart_urls: subject.fanartUrls,
+    // Server-grid fields neither call site reads: their "unknown" values.
+    platform_display_name: '',
+    genres: [],
+    created_at: '',
+    first_release_date: null,
+    logo_url: '',
+    fs_size_bytes: 0,
+    largest_file_bytes: 0,
   };
 }
 

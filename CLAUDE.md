@@ -38,7 +38,7 @@ order. All must pass before work counts as done. On Windows, run them in Git Bas
 
     scripts/check_secret_hygiene.sh
     cargo fmt --check
-    cd app && npm ci && npx svelte-check && npm run build
+    cd app && npm ci && npm run check && npm run build
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy -p app --all-targets --features e2e -- -D warnings
     cargo test --workspace

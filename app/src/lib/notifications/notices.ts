@@ -7,7 +7,7 @@
 // snapshots (every event carries the whole list), so each transition is seen
 // exactly once whichever view started it.
 
-import type { DownloadEntry, DownloadStatus, GameSession } from '../api';
+import type { BackupNotice, DownloadEntry, DownloadStatus, GameSession } from '../api';
 import type { ToastLevel } from '../stores/toasts.svelte';
 
 /**
@@ -30,7 +30,14 @@ export type NoticeGroup =
   | 'tool-failed'
   | 'launch'
   | 'launch-failed'
-  | 'removed';
+  | 'removed'
+  | 'drive-queued'
+  | 'drive-installed'
+  | 'drive-failed'
+  // One card per backup batch (backups/notices.ts).
+  | 'backup-queued'
+  | 'backup-done'
+  | 'backup-failed';
 
 export type Notice = { group: NoticeGroup; text: string; level: ToastLevel };
 
@@ -95,6 +102,8 @@ function withReason(text: string, error: string): string {
  */
 export function noticesFor(t: Transition, ctx: NoticeContext): Notice[] {
   const { entry } = t;
+  // A backup row's cards are its batch's (backups/notices.ts), never its own.
+  if (entry.job === 'backup') return [];
   const out: Notice[] = [];
   const arrived = t.from === null || TERMINAL.has(t.from);
   if (arrived) {
@@ -138,7 +147,10 @@ function queuedNotice(entry: DownloadEntry, ctx: NoticeContext): Notice | null {
         return { group: 'game-queued', text: `${t} added to download queue`, level: 'success' };
     }
   }
-  if (isTool(entry) && !ctx.setupActive) {
+  // An emulator or Proton an install from a drive brings is announced by
+  // that command's own notice ("DuckStation from Couch kit added to download
+  // queue"), so its queue row stays quiet.
+  if (isTool(entry) && !ctx.setupActive && entry.drive_label.trim() === '') {
     return ctx.hint?.update
       ? { group: 'tool-updating', text: `Updating ${t}…`, level: 'success' }
       : { group: 'tool-queued', text: `Installing ${t}…`, level: 'success' };
@@ -215,6 +227,23 @@ export function removedFromLibraryNotice(title: string): Notice {
 }
 
 /**
+ * A line `install_from_drive` answers with: something it queued from the
+ * drive beside the game ("DuckStation from Couch kit added to download
+ * queue"). Its own group, so a firmware "installed from" card arriving in the
+ * same moment is not summed with it as "2 items installed".
+ */
+export function driveQueuedNotice(message: string): Notice {
+  return { group: 'drive-queued', text: message, level: 'success' };
+}
+
+/** A `backup-notice` event's card ("PlayStation firmware installed from Couch kit"); the backend words it. */
+export function backupNoticeCard(notice: BackupNotice): Notice {
+  return notice.error
+    ? { group: 'drive-failed', text: notice.message, level: 'error' }
+    : { group: 'drive-installed', text: notice.message, level: 'success' };
+}
+
+/**
  * The early-exit warning a `sessions-changed` snapshot carries, prefixed
  * with the game it was about when exactly one session went away with it.
  */
@@ -269,6 +298,18 @@ export function summaryText(group: NoticeGroup, n: number): string {
       return `${plural(n, 'launch', 'launches')} failed`;
     case 'removed':
       return `${games} removed`;
+    case 'drive-queued':
+      return `${plural(n, 'item', 'items')} from a backup drive added to download queue`;
+    case 'drive-installed':
+      return `${plural(n, 'item', 'items')} installed from a backup drive`;
+    case 'drive-failed':
+      return `${plural(n, 'item', 'items')} from a backup drive could not be installed`;
+    case 'backup-queued':
+      return `${plural(n, 'backup', 'backups')} added to the backup queue`;
+    case 'backup-done':
+      return `${plural(n, 'backup', 'backups')} finished`;
+    case 'backup-failed':
+      return `${plural(n, 'backup', 'backups')} stopped — see Downloads`;
   }
 }
 

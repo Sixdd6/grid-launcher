@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import type { InstalledGame } from './api';
+  import { api, type DriveGame, type InstalledGame } from './api';
   import UmuInstallOffer from './UmuInstallOffer.svelte';
   import { isUmuMissing } from './launchError';
   import { launchGame } from './notifications/notifier';
@@ -8,13 +8,44 @@
   import { updates } from './stores/updates.svelte';
   import { installedKey, visibleLibraryGames } from './library';
   import { isMissing } from './library/missing';
-  import { emptyText, entryForKey, matchesRail, railEntries, type RailKey } from './library/rail';
+  import { driveKeyOf, emptyText, entryForKey, matchesRail, railEntries, type RailKey } from './library/rail';
+  import {
+    DRIVE_SORTS,
+    driveChips,
+    driveCountLine,
+    driveEmptyText,
+    driveGameKey,
+    driveGrid,
+    driveSortLabel,
+    installSelectionLabel,
+    normalizeDriveSort,
+    type DriveSort,
+  } from './library/drive';
+  import { drives } from './stores/drives.svelte';
+  import { session } from './stores/session.svelte';
+  import { driveAssetUrl } from './backups/driveArt';
+  import { installAllFromDrive, installFromDrive, removeFromDrive } from './backups/install';
+  import SelectionBar from './backups/SelectionBar.svelte';
+  import { openBackup } from './backups/dialogState.svelte';
+  import { backupRequest, sizeText } from './backups/dialog';
+  import { backupAction } from './details/actions';
+  import {
+    allPicked,
+    EMPTY_SELECTION,
+    isPicked,
+    keepOnly,
+    leavesSelectMode,
+    pick,
+    selectAll,
+    totalBytes,
+    type Selection,
+  } from './backups/selection';
   import { librarySelection, selectRail } from './library/selection.svelte';
   import { LIBRARY_SORTS, normalizeSort, sortGames, sortLabel, titleContains, type LibrarySort } from './library/sort';
   import { cloudPlatformSet } from './cards/badges';
   import { CARD_SIZES, cardSizeLabel, type CardSize } from './cards/size';
   import { setCardSize, uiSettings } from './stores/uiSettings.svelte';
-  import { fromInstalled, type DetailsSubject } from './details/subject';
+  import { fromDriveGame, fromInstalled, type DetailsSubject } from './details/subject';
   import type { CloudMode } from './details/cloud';
   import GameCard from './GameCard.svelte';
   import { coverPair } from './cards/cover';
@@ -60,14 +91,218 @@
   });
 
   let updateRomIds = $derived(new Set(updates.rows.map((r) => r.rom_id)));
-  let entries = $derived(railEntries(installed.list, updateRomIds, nowSeconds));
+  let entries = $derived(railEntries(installed.list, updateRomIds, nowSeconds, drives.withPack));
   let selected = $derived(entryForKey(entries, librarySelection.key));
+
+  let rows = $derived(
+    sortGames(
+      visibleLibraryGames(installed.list).filter(
+        (row) =>
+          matchesRail(row, selected.key, updateRomIds, nowSeconds) && titleContains(row.title, search),
+      ),
+      sort,
+    ),
+  );
+
+  // Library › Backup drives (GameBackups README): a drive row shows the
+  // drive's own games. Unplugging the drive drops its row, and `entryForKey`
+  // falls back to All games.
+  let driveKey = $derived(driveKeyOf(selected.key));
+  let drive = $derived(driveKey === null ? null : drives.byKey(driveKey));
+  let driveGames = $state.raw<DriveGame[]>([]);
+  /** The drive key `driveGames` belongs to; `null` while the first answer for this drive is pending. */
+  let driveGamesFor = $state<string | null>(null);
+  let driveError = $state<string | null>(null);
+  let driveSort = $state<DriveSort>('title');
+  let driveRows = $derived(driveKey !== null && driveGamesFor === driveKey ? driveGrid(driveGames, search, driveSort) : []);
+  let driveLoading = $derived(driveKey !== null && driveGamesFor !== driveKey && driveError === null);
+  let chips = $derived(drive === null ? null : driveChips(drive));
+
+  // The drive's games, again whenever its pack changes (a backup or a
+  // removal moves `updated` and the count) or the registry does (a finished
+  // install flips a card from Install to Play).
+  $effect(() => {
+    const key = driveKey;
+    void drive?.pack?.updated;
+    void drive?.pack?.game_count;
+    void installed.list;
+    if (key === null) return;
+    let cancelled = false;
+    driveError = null;
+    api
+      .driveGames(key)
+      .then((games) => {
+        if (cancelled) return;
+        driveGames = games;
+        driveGamesFor = key;
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        driveError = err instanceof Error ? err.message : String(err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  /** The cards on screen, whichever grid: the empty state and the focus clamp read it. */
+  let gridCount = $derived(driveKey === null ? rows.length : driveRows.length);
+
+  // Select mode (GameBackups README): on installed games it backs them up;
+  // on a drive it installs or removes them. Changing the rail leaves it.
+  let selecting = $state(false);
+  let selection = $state.raw<Selection>(EMPTY_SELECTION);
+  let confirmRemove = $state(false);
+  let removeError = $state<string | null>(null);
+  let visibleIds = $derived(
+    driveKey !== null ? driveRows.map((g) => g.rom_id) : rows.flatMap((r) => (r.rom_id === null ? [] : [r.rom_id])),
+  );
+  let pickedBytes = $derived.by(() => {
+    const sizes = new Map<number, number>(
+      driveKey !== null
+        ? driveGames.map((g) => [g.rom_id, g.size])
+        : installed.list.flatMap((r) => (r.rom_id === null ? [] : [[r.rom_id, r.filesize_bytes] as [number, number]])),
+    );
+    return totalBytes(selection, (id) => sizes.get(id) ?? 0);
+  });
+  let backup = $derived(backupAction(session.connected));
+
+  function leaveSelectMode() {
+    selecting = false;
+    selection = EMPTY_SELECTION;
+    confirmRemove = false;
+    removeError = null;
+  }
+
+  function toggleSelectMode() {
+    if (selecting) leaveSelectMode();
+    else selecting = true;
+  }
+
+  function onRailSelect(key: RailKey) {
+    if (key !== librarySelection.key) leaveSelectMode();
+    selectRail(key);
+  }
+
+  // A refresh can drop a game: the selection never counts one off screen.
+  $effect(() => {
+    const ids = driveKey !== null ? driveGames.map((g) => g.rom_id) : installed.list.flatMap((r) => (r.rom_id === null ? [] : [r.rom_id]));
+    const next = keepOnly(untrack(() => selection), ids);
+    if (next !== untrack(() => selection)) selection = next;
+  });
+
+  // A change to the picks takes back a pending "Remove N from drive".
+  $effect(() => {
+    void selection;
+    confirmRemove = false;
+  });
+
+  /** Picked games that are not installed yet: what "Install N games" copies. */
+  let toInstall = $derived(driveGames.filter((g) => !g.installed && selection.ids.includes(g.rom_id)).length);
+
+  function pickedDriveGames(): DriveGame[] {
+    return driveGames.filter((g) => selection.ids.includes(g.rom_id));
+  }
+
+  /** The select bar's "Install N games": copies each picked game that is not installed yet. */
+  async function installSelection() {
+    if (driveKey === null) return;
+    const key = driveKey;
+    const todo = pickedDriveGames().filter((g) => !g.installed);
+    leaveSelectMode();
+    await installAllFromDrive(key, todo);
+  }
+
+  /** "Remove from drive…", then "Remove N from <pack>". */
+  async function removeSelection() {
+    if (driveKey === null || drive === null) return;
+    if (!confirmRemove) {
+      confirmRemove = true;
+      return;
+    }
+    removeError = null;
+    try {
+      await removeFromDrive(driveKey, drive.pack?.name ?? drive.label, pickedDriveGames());
+      leaveSelectMode();
+    } catch (err) {
+      confirmRemove = false;
+      removeError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  /** "Backup to drive…" on the select bar of installed games. */
+  function backUpSelection() {
+    if (selection.ids.length === 0 || backup.disabled) return;
+    openBackup({
+      request: backupRequest({ kind: 'games', count: selection.ids.length }, selection.ids),
+      onQueued: leaveSelectMode,
+    });
+  }
+
+  // "Backup all N…" on a Library platform row: the installed games of
+  // that platform the server knows (a row with no server id can't be
+  // downloaded again).
+  let platformBackupIds = $derived(
+    selected.key.startsWith('platform:')
+      ? visibleLibraryGames(installed.list).flatMap((r) =>
+          matchesRail(r, selected.key, updateRomIds, nowSeconds) && r.rom_id !== null ? [r.rom_id] : [],
+        )
+      : [],
+  );
+
+  function backUpPlatform() {
+    if (platformBackupIds.length === 0 || backup.disabled) return;
+    openBackup({
+      request: backupRequest(
+        { kind: 'platform', platform: selected.label, count: platformBackupIds.length },
+        platformBackupIds,
+      ),
+    });
+  }
+
+  function driveCover(game: DriveGame) {
+    const url = driveKey === null ? null : driveAssetUrl(driveKey, game.cover);
+    return coverPair(null, url);
+  }
+
+  async function drivePrimary(game: DriveGame) {
+    if (game.installed) {
+      launchError = null;
+      try {
+        await launchGame(game.rom_id, game.name);
+      } catch (err) {
+        const missing = isUmuMissing(err);
+        launchError = missing ? (err instanceof Error ? err.message : String(err)) : null;
+        umuOfferFor = missing ? launchError : null;
+      }
+      return;
+    }
+    if (driveKey !== null) await installFromDrive(driveKey, game);
+  }
+
+  function openDriveDetails(game: DriveGame, mode: CloudMode = 'overview') {
+    if (drive === null) return;
+    detailsCloudMode = mode;
+    // No `noteViewed`: the drive's art is not on the server the background
+    // layer builds from.
+    subject = fromDriveGame(game, drive);
+  }
+
+  // Details from a drive closes when that drive goes away: its Install and
+  // Remove act on a drive that is no longer there.
+  $effect(() => {
+    const current = subject;
+    if (current?.drive !== undefined && drives.byKey(current.drive.key) === null) closeDetails();
+  });
 
   /** The rail key without its `platform:` prefix — the dash slug the
    *  §11 `library-rail-platform-<slug>` id already carries, so the count
    *  id beside it never grows a colon. */
   const slugOf = (key: RailKey): string =>
     key.startsWith('platform:') ? key.slice('platform:'.length) : key;
+
+  let firstPlatform = $derived(entries.findIndex((e) => e.key.startsWith('platform:')));
+  let firstDrive = $derived(entries.findIndex((e) => e.key.startsWith('drive:')));
 
   let railRows = $derived(
     entries.map(
@@ -79,20 +314,12 @@
         label: entry.label,
         count: entry.count,
         selected: entry.key === selected.key,
-        // The three fixed entries come first; everything after them is a
-        // platform, so the heading sits on the first of those.
-        heading: i === 3 ? 'PLATFORMS' : undefined,
+        // The three fixed entries come first, then the platforms, then the
+        // backup drives; each group's heading sits on its first row.
+        heading: i === firstPlatform ? 'PLATFORMS' : i === firstDrive ? 'BACKUP DRIVES' : undefined,
+        icon: entry.key.startsWith('drive:') ? 'drive' : undefined,
+        title: entry.title,
       }),
-    ),
-  );
-
-  let rows = $derived(
-    sortGames(
-      visibleLibraryGames(installed.list).filter(
-        (row) =>
-          matchesRail(row, selected.key, updateRomIds, nowSeconds) && titleContains(row.title, search),
-      ),
-      sort,
     ),
   );
 
@@ -129,7 +356,7 @@
 
   // A filter change can leave the focus index past the end of the new list.
   $effect(() => {
-    if (focusIndex > rows.length - 1) focusIndex = Math.max(0, rows.length - 1);
+    if (focusIndex > gridCount - 1) focusIndex = Math.max(0, gridCount - 1);
   });
 
   function openDetails(row: InstalledGame, mode: CloudMode = 'overview') {
@@ -201,6 +428,7 @@
     // the art to whatever sits at the current index. Only the SELECTION is a
     // reason to change the background, so the row is read untracked.
     const selected = untrack(() => {
+      if (driveKey !== null) return null; // a drive's art is not the background's
       const row = rows[index];
       return row === undefined ? null : subjectFromInstalled(row);
     });
@@ -227,6 +455,7 @@
   // three builds at a time, with a hovered card jumping to the front — so
   // speculative art never crowds out the covers the grid is still fetching.
   const warmer = createVisibleWarmer((index) => {
+    if (driveKey !== null) return null;
     const row = rows[index];
     return row === undefined ? null : subjectFromInstalled(row);
   });
@@ -237,6 +466,7 @@
     // been observed. `warmBackground` de-duplicates by URL, so re-observing
     // a card already warmed costs no request.
     void rows;
+    void driveRows;
     const el = grid?.element();
     if (!el) return;
     warmer.observe(el);
@@ -288,7 +518,7 @@
   /** Arrow-key grid movement. */
   function moveSelection(action: NavDirection) {
     if (subject) return; // grid navigation is suspended while the overlay is open
-    focusIndex = grid ? grid.neighbor(focusIndex, action) : moveFocus(focusIndex, action, 1, rows.length);
+    focusIndex = grid ? grid.neighbor(focusIndex, action) : moveFocus(focusIndex, action, 1, gridCount);
     // The windowed grid may not have the card rendered; it scrolls to its row.
     grid?.scrollToIndex(focusIndex);
   }
@@ -297,6 +527,11 @@
     if (!active) return;
     // One read of the document, shared by both branches below.
     const ctx = chordContext(document);
+    if (leavesSelectMode(e.key, selecting, chordBlocked(ctx) || subject !== null)) {
+      e.preventDefault();
+      leaveSelectMode();
+      return;
+    }
     if (shouldFocusSearch(e, ctx)) {
       e.preventDefault();
       focusSearch();
@@ -328,7 +563,9 @@
   }
 
   function onSortChange(e: Event) {
-    sort = normalizeSort((e.currentTarget as HTMLSelectElement).value);
+    const value = (e.currentTarget as HTMLSelectElement).value;
+    if (driveKey !== null) driveSort = normalizeDriveSort(value);
+    else sort = normalizeSort(value);
   }
 
   function onSizeChange(e: Event) {
@@ -346,7 +583,7 @@
     entries={railRows}
     testId="library-rail"
     ariaLabel="Library filters"
-    onSelect={selectRail}
+    onSelect={onRailSelect}
   />
 
   <div class="body">
@@ -354,7 +591,32 @@
       {#snippet title()}
         <header data-testid="library-header" class="title-row">
           <h2 data-testid="library-title">{selected.label}</h2>
-          <p data-testid="library-count" class="counts">{gameCountLine(rows.length)}</p>
+          {#if drive !== null}
+            <p data-testid="library-count" class="counts">{driveCountLine(drive)}</p>
+            {#if chips !== null}
+              <!-- GameBackups README: chips for the drive's emulators and firmware. -->
+              <div class="chips" data-testid="library-drive-chips">
+                <span class="chip" data-testid="library-drive-emulators">{chips.emulators}</span>
+                <span class="chip" data-testid="library-drive-firmware">{chips.firmware}</span>
+              </div>
+            {/if}
+          {:else}
+            <p data-testid="library-count" class="counts">{gameCountLine(rows.length)}</p>
+            {#if platformBackupIds.length > 0}
+              <!-- GameBackups README: "Backup all N…" on a Library platform row, installed games only. -->
+              <div class="chips">
+                <button
+                  data-testid="library-backup-platform"
+                  class="chip link backup-all"
+                  disabled={backup.disabled}
+                  title={backup.reason || undefined}
+                  onclick={backUpPlatform}
+                >
+                  Backup all {platformBackupIds.length}…
+                </button>
+              </div>
+            {/if}
+          {/if}
         </header>
       {/snippet}
       {#snippet toolbar()}
@@ -364,18 +626,26 @@
             class="search"
             type="search"
             placeholder={librarySearchPlaceholder(folded, selected.key, selected.label)}
-            aria-label="Search installed games"
+            aria-label={drive !== null ? 'Search games on this drive' : 'Search installed games'}
             bind:this={searchEl}
             bind:value={search}
             onkeydown={onSearchKey}
           />
           <label class="control">
             <span>Sort</span>
-            <select data-testid="library-sort" value={sort} onchange={onSortChange}>
-              {#each LIBRARY_SORTS as option (option)}
-                <option value={option}>{sortLabel(option)}</option>
-              {/each}
-            </select>
+            {#if driveKey !== null}
+              <select data-testid="library-sort" value={driveSort} onchange={onSortChange}>
+                {#each DRIVE_SORTS as option (option)}
+                  <option value={option}>{driveSortLabel(option)}</option>
+                {/each}
+              </select>
+            {:else}
+              <select data-testid="library-sort" value={sort} onchange={onSortChange}>
+                {#each LIBRARY_SORTS as option (option)}
+                  <option value={option}>{sortLabel(option)}</option>
+                {/each}
+              </select>
+            {/if}
           </label>
           <label class="control">
             <span>Size</span>
@@ -385,6 +655,15 @@
               {/each}
             </select>
           </label>
+          <button
+            data-testid="library-select"
+            class="select-btn"
+            class:active={selecting}
+            aria-pressed={selecting}
+            onclick={toggleSelectMode}
+          >
+            {selecting ? 'Done' : 'Select'}
+          </button>
         </div>
       {/snippet}
     </FoldingHeader>
@@ -395,7 +674,58 @@
       {#if launchError === umuOfferFor}<UmuInstallOffer />{/if}
     {/if}
 
-    {#if rows.length === 0}
+    {#if driveKey !== null}
+      {#if driveError !== null}
+        <p data-testid="library-drive-error" class="error panel" role="alert">{driveError}</p>
+      {:else if driveLoading}
+        <!-- The drive's index is being read; "nothing on this drive" would be a guess. -->
+      {:else if driveRows.length === 0}
+        <p data-testid="library-empty" class="empty panel">{driveEmptyText(search)}</p>
+      {:else}
+        <CardGrid
+          bind:this={grid}
+          gridId="library-grid"
+          labels={uiSettings.cardLabels}
+          display={uiSettings.cardDisplay}
+          cover={driveCover}
+          size={uiSettings.cardSizeLibrary}
+          items={driveRows}
+          key={driveGameKey}
+          {selecting}
+        >
+          {#snippet card(game, i, rect)}
+            <GameCard
+              testId={`library-drive-card-${game.rom_id}`}
+              index={i}
+              badgeId={`drive-${game.rom_id}`}
+              title={game.name}
+              platform={game.platform_name}
+              cover={driveCover(game)}
+              installed={game.installed}
+              updateLabel={null}
+              {cloudPlatforms}
+              labels={uiSettings.cardLabels}
+              {rect}
+              focused={i === focusIndex && inputMode.directional}
+              {selecting}
+              selected={isPicked(selection, game.rom_id)}
+              onSelect={(shift) => {
+                focusIndex = i;
+                selection = pick(selection, game.rom_id, shift, visibleIds);
+              }}
+              onOpen={() => {
+                focusIndex = i;
+                openDriveDetails(game);
+              }}
+              onPrimary={() => drivePrimary(game)}
+              onCloud={() => openDriveDetails(game, 'save')}
+              onHoverStart={() => {}}
+              onHoverEnd={hover.end}
+            />
+          {/snippet}
+        </CardGrid>
+      {/if}
+    {:else if rows.length === 0}
       <p data-testid="library-empty" class="empty panel">
         {search.trim() === '' ? emptyText(selected) : `No games match “${search.trim()}”`}
       </p>
@@ -409,6 +739,7 @@
         size={uiSettings.cardSizeLibrary}
         items={rows}
         key={installedKey}
+        {selecting}
       >
         {#snippet card(row, i, rect)}
           <GameCard
@@ -425,6 +756,14 @@
             labels={uiSettings.cardLabels}
             {rect}
             focused={i === focusIndex && inputMode.directional}
+            {selecting}
+            selected={row.rom_id !== null && isPicked(selection, row.rom_id)}
+            onSelect={(shift) => {
+              // A game the server does not know can't be backed up.
+              if (row.rom_id === null) return;
+              focusIndex = i;
+              selection = pick(selection, row.rom_id, shift, visibleIds);
+            }}
             onOpen={() => {
               // A click moves the selection, so keyboard navigation resumes
               // from the clicked card and the focus dwell that re-arms when
@@ -442,6 +781,55 @@
       </CardGrid>
     {/if}
     </div>
+    {#if selecting}
+      <SelectionBar
+        testId="library-selection"
+        count={selection.ids.length}
+        size={sizeText(pickedBytes)}
+        visibleCount={visibleIds.length}
+        allSelected={allPicked(selection, visibleIds)}
+        onSelectAll={() => (selection = selectAll(selection, visibleIds))}
+        onClear={() => (selection = EMPTY_SELECTION)}
+      >
+        {#snippet actions()}
+          {#if driveKey !== null}
+            {#if removeError}
+              <span class="bar-error" role="alert">{removeError}</span>
+            {/if}
+            <button
+              data-testid="library-selection-install"
+              class="g-btn"
+              disabled={toInstall === 0}
+              onclick={installSelection}
+            >
+              {installSelectionLabel(toInstall)}
+            </button>
+            <!-- Two clicks (GameBackups prototype `bkSelBar`): the second names what goes. -->
+            <button
+              data-testid="library-selection-remove"
+              class="g-btn"
+              class:secondary={!confirmRemove}
+              class:destructive={!confirmRemove}
+              class:danger={confirmRemove}
+              disabled={selection.ids.length === 0}
+              onclick={removeSelection}
+            >
+              {confirmRemove ? `Remove ${selection.ids.length} from drive` : 'Remove from drive…'}
+            </button>
+          {:else}
+            <button
+              data-testid="library-selection-backup"
+              class="g-btn"
+              disabled={selection.ids.length === 0 || backup.disabled}
+              title={backup.reason || undefined}
+              onclick={backUpSelection}
+            >
+              Backup to drive…
+            </button>
+          {/if}
+        {/snippet}
+      </SelectionBar>
+    {/if}
   </div>
 </section>
 
@@ -541,6 +929,93 @@
     gap: 6px;
     font-size: 11px;
     color: var(--text-muted);
+  }
+
+  /* The header's chips, as on a Server platform header. */
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    font: inherit;
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    color: var(--text-muted);
+  }
+
+  .chip.link {
+    cursor: pointer;
+  }
+
+  .chip.link:hover:not(:disabled) {
+    color: var(--text-h);
+    border-color: var(--primary);
+  }
+
+  .chip.link:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .backup-all {
+    white-space: nowrap;
+  }
+
+  /* Select / Done, as on Server: the size select's height, filled while on. */
+  .select-btn {
+    font: inherit;
+    font-size: 12px;
+    height: var(--control-h);
+    box-sizing: border-box;
+    padding: 0 12px;
+    border-radius: var(--r-control);
+    border: 1px solid var(--line-strong);
+    background: var(--field);
+    color: var(--text-h);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .select-btn:hover {
+    border-color: var(--primary);
+  }
+
+  .select-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--on-primary);
+  }
+
+  /* Remove from drive: the secondary shape with a danger label, then the
+     danger fill on the confirming click (as Settings › Backup drives). */
+  .g-btn.secondary.destructive {
+    color: var(--danger);
+  }
+
+  .g-btn.danger {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: var(--on-danger);
+  }
+
+  .g-btn.danger:hover:not(:disabled) {
+    background: var(--danger);
+    border-color: var(--danger);
+    filter: brightness(1.08);
+  }
+
+  .bar-error {
+    font-size: 12px;
+    color: var(--danger);
   }
 
   .control select {

@@ -22,7 +22,7 @@ describe('descriptionParagraphs', () => {
 });
 
 function file(id: number, bytes: number, category = ''): RomFile {
-  return { id, file_name: `f${id}`, file_size_bytes: bytes, is_top_level: id === 1, last_modified: '', category };
+  return { id, file_name: `f${id}`, file_size_bytes: bytes, is_top_level: id === 1, last_modified: '', category, md5_hash: '', sha1_hash: '' };
 }
 
 describe('sizeFact', () => {

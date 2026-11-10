@@ -24,17 +24,20 @@ export function percent(done: number, total: number): number {
 
 export function entryDetail(e: DownloadEntry): string {
   if (e.kind === 'library_move') return moveDetail(e);
+  if (e.job === 'backup') return backupDetail(e);
+  // An install from a backup drive reads the drive, not the network.
+  const fetching = copiesFromDrive(e) ? `Copying from ${e.drive_label}` : 'Downloading';
   switch (e.status) {
     case 'queued':
       return 'Queued';
     case 'downloading':
       if (e.total_bytes > 0) {
         return (
-          `Downloading ${percent(e.downloaded_bytes, e.total_bytes)}% • ` +
+          `${fetching} ${percent(e.downloaded_bytes, e.total_bytes)}% • ` +
           `${formatSize(e.downloaded_bytes)} / ${formatSize(e.total_bytes)} • ${formatSize(e.speed_bps)}/s`
         );
       }
-      return `Downloading • ${formatSize(e.downloaded_bytes)} • ${formatSize(e.speed_bps)}/s`;
+      return `${fetching} • ${formatSize(e.downloaded_bytes)} • ${formatSize(e.speed_bps)}/s`;
     case 'installing':
       if (e.install_total_bytes > 0) {
         return (
@@ -49,6 +52,63 @@ export function entryDetail(e: DownloadEntry): string {
       return `Completed • ${e.downloaded_bytes > 0 ? formatSize(e.downloaded_bytes) : 'Unknown size'}`;
     case 'failed':
       return `Failed • ${e.error.trim() || 'Unknown error'}`;
+    case 'cancelled':
+      return 'Cancelled';
+    default:
+      return 'Unknown';
+  }
+}
+
+/** A row that installs from a backup drive (a game, or the emulator or
+ *  Proton it brings): `drive_label` names the drive it copies from. */
+export function copiesFromDrive(e: DownloadEntry): boolean {
+  return e.job !== 'backup' && e.drive_label.trim() !== '';
+}
+
+/** The pack name a backup row writes to, else the volume label. */
+function packName(e: DownloadEntry): string {
+  return e.drive_name.trim() || e.drive_label.trim() || 'the drive';
+}
+
+/** The volume label a backup row writes to, else the pack name. */
+function volumeLabel(e: DownloadEntry): string {
+  return e.drive_label.trim() || e.drive_name.trim() || 'the drive';
+}
+
+/**
+ * A backup row's line (GameBackups design, "Backups run in Downloads"):
+ * `downloading` fetches from the server into staging, `installing` writes
+ * to the drive. A game copied from this computer (`backup_game_local`)
+ * only gets its details and art from the server while `downloading`, then
+ * copies its install to the drive. The summary row stands for the waiting
+ * rows of a removed drive; its title is already "13 more items" (or the one
+ * item's title).
+ */
+function backupDetail(e: DownloadEntry): string {
+  if (e.kind === 'backup_cancelled') {
+    const reason = e.error.trim();
+    return `Cancelled${reason === '' ? '' : ` — ${reason}`} · backup again to finish`;
+  }
+  const local = e.kind === 'backup_game_local';
+  const writing = local ? `Copying from this computer to ${volumeLabel(e)}` : `Writing to ${volumeLabel(e)}`;
+  switch (e.status) {
+    case 'queued':
+      return `Waiting · to ${packName(e)}`;
+    case 'downloading':
+      if (local) return 'Getting details from server';
+      return e.total_bytes > 0
+        ? `Downloading from server ${percent(e.downloaded_bytes, e.total_bytes)}%`
+        : 'Downloading from server';
+    case 'installing':
+      return e.install_total_bytes > 0
+        ? `${writing} ${percent(e.install_processed_bytes, e.install_total_bytes)}%`
+        : writing;
+    case 'cancelling':
+      return 'Cancelling...';
+    case 'completed':
+      return `${local ? 'Copied from this computer · ' : ''}Written to ${packName(e)}`;
+    case 'failed':
+      return `Failed — ${e.error.trim() || 'Unknown error'}`;
     case 'cancelled':
       return 'Cancelled';
     default:
@@ -130,9 +190,21 @@ export function kindLabel(kind: DownloadKind): string {
       return 'Firmware';
     case 'library_move':
       return 'Library move';
+    case 'backup_game':
+    case 'backup_game_local':
+    case 'backup_emulator':
+    case 'backup_firmware':
+    case 'backup_cancelled':
+      return 'Backup';
     default:
       return '';
   }
+}
+
+function isBackupKind(kind: DownloadKind): boolean {
+  return (
+    kind === 'backup_game' || kind === 'backup_game_local' || kind === 'backup_emulator' || kind === 'backup_firmware'
+  );
 }
 
 export type DownloadAction =
@@ -174,6 +246,11 @@ export function actionFor(
   if (kind === 'firmware') {
     return LIVE_STATUSES.includes(status) ? 'none' : 'dismiss';
   }
+  // The removed drive's summary row is never retried: backup again.
+  if (kind === 'backup_cancelled') return 'dismiss';
+  // A backup row's write to the drive can be stopped (its writer checks a
+  // flag per chunk and removes its temporary file), unlike an extraction.
+  if (isBackupKind(kind) && status === 'installing') return 'cancel';
   switch (status) {
     case 'queued':
     case 'downloading':
@@ -220,6 +297,7 @@ export function currentTransfer(entries: DownloadEntry[]): DownloadEntry | null 
 export function footerLine(entries: DownloadEntry[]): string | null {
   const current = currentTransfer(entries);
   if (current === null) return null;
+  if (current.job === 'backup') return backupFooterLine(current);
 
   const dash = '—';
   let pct = dash;
@@ -245,7 +323,41 @@ export function footerLine(entries: DownloadEntry[]): string | null {
   // A library move reads and writes local disks: the phase word, never a
   // network rate.
   if (current.kind === 'library_move') speed = 'Moving';
+  // An install from a drive names the drive instead of a network rate.
+  if (copiesFromDrive(current) && current.status === 'downloading') speed = `Copying from ${current.drive_label}`;
   return `${current.title} · ${pct} · ${speed}`;
+}
+
+/**
+ * "Backing up Velvet Static to Couch kit · 45% · downloading". A game
+ * copied from this computer reads "getting details", then "copying from
+ * this computer".
+ */
+function backupFooterLine(e: DownloadEntry): string {
+  const local = e.kind === 'backup_game_local';
+  let pct = '—';
+  let phase: string;
+  switch (e.status) {
+    case 'downloading':
+      if (local) {
+        phase = 'getting details';
+        break;
+      }
+      if (e.total_bytes > 0) pct = `${percent(e.downloaded_bytes, e.total_bytes)}%`;
+      phase = 'downloading';
+      break;
+    case 'installing':
+      if (e.install_total_bytes > 0) pct = `${percent(e.install_processed_bytes, e.install_total_bytes)}%`;
+      phase = local ? 'copying from this computer' : 'writing';
+      break;
+    case 'cancelling':
+      phase = 'cancelling';
+      break;
+    default:
+      phase = 'waiting';
+      break;
+  }
+  return `Backing up ${e.title} to ${packName(e)} · ${pct} · ${phase}`;
 }
 
 /**
@@ -283,7 +395,7 @@ export function graphCaption(e: DownloadEntry): string {
       return eta === '' ? rate : `${rate} · ${eta}`;
     }
     case 'installing':
-      return 'Writing to disk';
+      return e.job === 'backup' ? 'Writing to drive' : 'Writing to disk';
     default:
       return '';
   }

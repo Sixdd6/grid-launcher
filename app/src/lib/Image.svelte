@@ -1,6 +1,6 @@
 <script lang="ts">
   import { fileSrc } from './fileSrc';
-  import { api } from './api';
+  import { loadImagePath } from './backups/driveArt';
   import { imagePaths, startImageLoad, watchNear, type LoadSlot } from './imageLoad';
 
   let {
@@ -77,7 +77,8 @@
     }
     // Far until the watch above says otherwise: an image that mounts off
     // screen must not go ahead of the ones on it.
-    const load = startImageLoad(url, (u) => api.ensureImage(u));
+    // A drive's art loads through `drive_asset` (`backups/driveArt.ts`).
+    const load = startImageLoad(url, loadImagePath);
     slot = load.slot;
     load.path
       .then((path) => {

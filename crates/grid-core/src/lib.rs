@@ -2,6 +2,7 @@
 //! UI-agnostic — this crate must never depend on Tauri.
 
 pub mod autoconfig;
+pub mod backup;
 pub mod cloud;
 pub mod config;
 pub mod fatx;

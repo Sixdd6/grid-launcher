@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   canConnect,
+  connectionActions,
   CREDENTIAL_STORED,
   credentialStatusLabel,
   OPEN_CONFIG_FOLDER_LABEL,
   reconnectEnabled,
   serverLine,
+  statusLabel,
 } from './connection';
 
 describe('credentialStatusLabel', () => {
@@ -15,6 +17,30 @@ describe('credentialStatusLabel', () => {
     // only that the session is not verified, and the Status line and error
     // banner carry the reason. A 401 never lands here — it opens Connect.
     expect(credentialStatusLabel(false)).toBe(`${CREDENTIAL_STORED} · not verified`);
+  });
+
+  it('says the credential is unused in offline mode', () => {
+    expect(credentialStatusLabel(false, true)).toBe('Not used offline');
+    expect(credentialStatusLabel(true, false)).toBe(`${CREDENTIAL_STORED} · session verified`);
+  });
+});
+
+describe('statusLabel', () => {
+  it('reads like the top bar chip', () => {
+    expect(statusLabel(true, false)).toBe('Connected');
+    expect(statusLabel(false, false)).toBe('Not connected');
+    expect(statusLabel(false, true)).toBe('Offline · no server');
+  });
+});
+
+describe('connectionActions', () => {
+  it('offers only Connect to a server in offline mode', () => {
+    expect(connectionActions(false, true)).toEqual(['connect']);
+  });
+
+  it('keeps edit, reconnect and disconnect otherwise', () => {
+    expect(connectionActions(true, false)).toEqual(['edit', 'reconnect', 'disconnect']);
+    expect(connectionActions(false, false)).toEqual(['edit', 'reconnect', 'disconnect']);
   });
 });
 

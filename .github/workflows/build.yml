@@ -46,7 +46,7 @@ jobs:
       - name: Format
         run: cargo fmt --check
       - name: Frontend install and build
-        run: cd app && npm ci && npx svelte-check && npm run build
+        run: cd app && npm ci && npm run check && npm run build
       - name: Clippy
         run: |
           cargo clippy --workspace --all-targets -- -D warnings

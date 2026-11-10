@@ -4,18 +4,22 @@
   // functions the server menu calls. Nothing here can render a secret —
   // the store never holds one.
   import { api } from '../api';
-  import { connect, disconnect, retry, session } from '../stores/session.svelte';
+  import { connect, connectToServer, disconnect, retry, session } from '../stores/session.svelte';
   import {
     canConnect,
+    connectionActions,
     credentialStatusLabel,
     OPEN_CONFIG_FOLDER_LABEL,
     reconnectEnabled,
     serverLine,
+    statusLabel,
   } from './connection';
 
   let { active = true }: { active?: boolean } = $props();
 
   let configFolderError = $state<string | null>(null);
+  let actions = $derived(connectionActions(session.connected, session.offline));
+  let offlineMode = $derived(session.offline && !session.connected);
 
   // The reference's Settings › Server Connection panel (grid-launcher.py:
   // 1601-1623): Server URL + API Token, then Connect. Collapsed by default —
@@ -84,18 +88,25 @@
   </div>
   <div>
     <dt>Credential</dt>
-    <dd data-testid="settings-connection-credential">{credentialStatusLabel(session.connected)}</dd>
+    <dd data-testid="settings-connection-credential">{credentialStatusLabel(session.connected, session.offline)}</dd>
   </div>
   <div>
     <dt>Status</dt>
     <dd data-testid="settings-connection-status">
-      <span class="dot" class:online={session.connected} aria-hidden="true"></span>
-      {session.connected ? 'Connected' : 'Not connected'}
+      <span class="dot" class:online={session.connected} class:offline={offlineMode} aria-hidden="true"></span>
+      {statusLabel(session.connected, session.offline)}
     </dd>
   </div>
 </dl>
 
-{#if editing}
+{#if offlineMode}
+  <p data-testid="settings-connection-offline-note" class="note">
+    GRID is running without a server. Your Library and backup drives work without one. Connect to browse the server and
+    backup games.
+  </p>
+{/if}
+
+{#if editing && actions.includes('edit')}
   <form
     id="settings-connection-edit-form"
     data-testid="settings-connection-edit-form"
@@ -154,6 +165,18 @@
 {/if}
 
 <div class="g-actions">
+  {#if actions.includes('connect')}
+    <button
+      class="g-btn"
+      data-testid="settings-connection-connect"
+      onclick={() => {
+        connectToServer();
+      }}
+    >
+      Connect to a server…
+    </button>
+  {/if}
+  {#if actions.includes('edit')}
   <button
     data-testid="settings-connection-edit"
     class="g-btn secondary"
@@ -162,6 +185,8 @@
   >
     {editing ? 'Close editor' : 'Edit connection'}
   </button>
+  {/if}
+  {#if actions.includes('reconnect')}
   <button
     class="g-btn"
     data-testid="settings-connection-reconnect"
@@ -172,6 +197,8 @@
   >
     {session.busy ? 'Reconnecting…' : 'Reconnect'}
   </button>
+  {/if}
+  {#if actions.includes('disconnect')}
   <button
     data-testid="settings-connection-disconnect"
     class="g-btn secondary"
@@ -181,6 +208,7 @@
   >
     Disconnect
   </button>
+  {/if}
   <button
     data-testid="settings-open-config-folder"
     class="g-btn secondary"
@@ -208,5 +236,16 @@
 
   .dot.online {
     background: var(--success);
+  }
+
+  /* Offline mode is chosen, not a fault: grey, as in the top bar. */
+  .dot.offline {
+    background: var(--text-muted);
+  }
+
+  .note {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
   }
 </style>

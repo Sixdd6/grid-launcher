@@ -169,3 +169,20 @@ export function isWindowsHost(platform: string): boolean {
 export function launchSourceNote(launchSource: string, selected: string, shown: string): string {
   return launchSource === 'sidecar' && selected === shown ? 'Set by game.json' : '';
 }
+
+/** Why "Backup to drive…" is disabled offline (GameBackups README). */
+export const BACKUP_NEEDS_SERVER = 'Connect to a server to backup games';
+
+/**
+ * Details' "Backup to drive…": a backup downloads each game from the
+ * server, so it is disabled, with the reason, while no server is connected.
+ */
+export function backupAction(connected: boolean): { disabled: boolean; reason: string } {
+  return connected ? { disabled: false, reason: '' } : { disabled: true, reason: BACKUP_NEEDS_SERVER };
+}
+
+/** The line under it when connected drives hold the game: "On Couch kit", or `''`. */
+export function onDrivesLine(packNames: readonly string[]): string {
+  const names = packNames.filter((n, i) => n.trim() !== '' && packNames.indexOf(n) === i);
+  return names.length === 0 ? '' : `On ${names.join(', ')}`;
+}

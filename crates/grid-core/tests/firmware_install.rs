@@ -646,3 +646,166 @@ async fn a_gamecube_ipl_lands_only_in_the_region_folders_its_header_names() {
         );
     }
 }
+
+/// Every file under `root`, as (path relative to `root`, bytes), sorted.
+fn tree(root: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+    fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, Vec<u8>)>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, root, out);
+            } else {
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                out.push((rel, fs::read(&path).unwrap()));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out.sort();
+    out
+}
+
+#[tokio::test]
+async fn a_pack_source_routes_its_files_to_the_same_targets_as_the_server() {
+    use grid_core::backup::pack::{PackFirmware, PackFirmwareFile};
+    use grid_core::firmware::{install_platform_firmware_from, PackFirmwareSource};
+
+    let bios = b"PS1BIOS".to_vec();
+    let naomi = zip_bytes(&[("epr-21576.ic27", b"NAOMI")]);
+    let ntsc = zip_bytes(&[("IPL.bin", b"NTSC IPL")]);
+    let files: [(&str, &[u8]); 3] = [
+        ("scph5501.bin", &bios),
+        ("naomi.zip", &naomi),
+        ("gc-ntsc.zip", &ntsc),
+    ];
+
+    // The server serves the three files.
+    let server = MockServer::start().await;
+    let records: Vec<serde_json::Value> = files
+        .iter()
+        .enumerate()
+        .map(|(i, (name, data))| {
+            serde_json::json!({"id": i + 10, "file_name": name, "file_size_bytes": data.len()})
+        })
+        .collect();
+    Mock::given(method("GET"))
+        .and(path("/api/firmware"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(records))
+        .mount(&server)
+        .await;
+    for (i, (name, data)) in files.iter().enumerate() {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/firmware/{}/content/{name}", i + 10)))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(data.to_vec()))
+            .mount(&server)
+            .await;
+    }
+
+    // The drive holds the same three files under gridpack/firmware/ps/.
+    let drive = tempfile::tempdir().unwrap();
+    let fw_dir = drive.path().join("gridpack").join("firmware").join("ps");
+    fs::create_dir_all(&fw_dir).unwrap();
+    let mut pack_files = Vec::new();
+    for (name, data) in &files {
+        fs::write(fw_dir.join(name), data).unwrap();
+        pack_files.push(PackFirmwareFile {
+            name: name.to_string(),
+            path: format!("firmware/ps/{name}"),
+            size: data.len() as u64,
+            md5: String::new(),
+        });
+    }
+    let source = PackFirmwareSource {
+        mount: drive.path().to_path_buf(),
+        entry: PackFirmware {
+            platform: "ps".into(),
+            platform_name: "PlayStation".into(),
+            files: pack_files,
+            extra: Default::default(),
+        },
+    };
+
+    let targets_in = |root: &std::path::Path| {
+        vec![
+            plain(&root.join("bios")),
+            routed(&root.join("naomi"), &["naomi.zip"]),
+            routed(&root.join("GC").join("USA"), &["ntsc"]),
+        ]
+    };
+    let from_server = tempfile::tempdir().unwrap();
+    let from_drive = tempfile::tempdir().unwrap();
+    let server_warnings = install_platform_firmware(
+        &client(&server),
+        19,
+        &targets_in(from_server.path()),
+        FirmwareOptions::default(),
+    )
+    .await;
+    let drive_warnings = install_platform_firmware_from(
+        &source,
+        &targets_in(from_drive.path()),
+        FirmwareOptions::default(),
+        None,
+    )
+    .await;
+
+    assert_eq!(server_warnings, Vec::<String>::new());
+    assert_eq!(drive_warnings, Vec::<String>::new());
+    let placed = tree(from_drive.path());
+    assert!(!placed.is_empty());
+    assert_eq!(placed, tree(from_server.path()));
+}
+
+#[tokio::test]
+async fn a_pack_source_never_reads_outside_gridpack() {
+    use grid_core::backup::pack::{PackFirmware, PackFirmwareFile};
+    use grid_core::firmware::{install_platform_firmware_from, PackFirmwareSource};
+
+    let drive = tempfile::tempdir().unwrap();
+    fs::create_dir_all(drive.path().join("gridpack")).unwrap();
+    fs::write(drive.path().join("secret.bin"), b"NOT FIRMWARE").unwrap();
+    let entry = |path: &str| PackFirmware {
+        platform: "ps".into(),
+        platform_name: "PlayStation".into(),
+        files: vec![PackFirmwareFile {
+            name: "scph5501.bin".into(),
+            path: path.into(),
+            size: 12,
+            md5: String::new(),
+        }],
+        extra: Default::default(),
+    };
+    let absolute = drive
+        .path()
+        .join("secret.bin")
+        .to_string_lossy()
+        .into_owned();
+    for path in [
+        "../secret.bin",
+        "firmware/../../secret.bin",
+        absolute.as_str(),
+    ] {
+        let source = PackFirmwareSource {
+            mount: drive.path().to_path_buf(),
+            entry: entry(path),
+        };
+        let out = tempfile::tempdir().unwrap();
+        let warnings = install_platform_firmware_from(
+            &source,
+            &[plain(out.path())],
+            FirmwareOptions::default(),
+            None,
+        )
+        .await;
+        assert_eq!(warnings.len(), 1, "{path}: {warnings:?}");
+        assert!(!out.path().join("scph5501.bin").exists(), "{path}");
+    }
+}

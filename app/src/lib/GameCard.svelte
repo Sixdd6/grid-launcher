@@ -26,6 +26,9 @@
     rect,
     showPlatform = true,
     focused,
+    selecting = false,
+    selected = false,
+    onSelect = () => {},
     onOpen,
     onPrimary,
     onCloud,
@@ -59,6 +62,13 @@
      *  same thing over its cover. */
     showPlatform?: boolean;
     focused: boolean;
+    /** Select mode (GameBackups README): a click picks the card instead of
+     *  opening Details, the hover bar is hidden and a check shows top left. */
+    selecting?: boolean;
+    /** Picked in select mode: a filled check, a primary ring, a slight shrink. */
+    selected?: boolean;
+    /** A click in select mode; `shift` picks a range (`backups/selection.ts`). */
+    onSelect?: (shift: boolean) => void;
     onOpen: () => void;
     onPrimary: () => void;
     onCloud: () => void;
@@ -87,6 +97,16 @@
       handler();
     };
   }
+
+  function onClick(e: MouseEvent) {
+    if (selecting) onSelect(e.shiftKey);
+    else onOpen();
+  }
+
+  /** Shift-click picks a range: keep the browser from selecting text too. */
+  function onMouseDown(e: MouseEvent) {
+    if (selecting && e.shiftKey) e.preventDefault();
+  }
 </script>
 
 <!-- A card is the size of its artwork (look-and-feel plan 2026-10-30): no
@@ -98,10 +118,15 @@
   class="card"
   class:hover-labels={labels === 'hover'}
   class:focused
-  onclick={onOpen}
+  class:selecting
+  class:selected={selecting && selected}
+  onclick={onClick}
+  onmousedown={onMouseDown}
   onmouseenter={onHoverStart}
   onmouseleave={onHoverEnd}
-  role="presentation"
+  role={selecting ? 'option' : 'presentation'}
+  aria-selected={selecting ? selected : undefined}
+  aria-label={selecting ? title : undefined}
   style="--x: {rect.x}px; --y: {rect.y}px; --w: {rect.w}px; --cover-h: {rect.h}px; --card-h: {rect.h + labelRowPx(labels)}px; --label-h: {LABEL_HEIGHT_PX}px; --label-gap: {LABEL_GAP_PX}px; --bar-h: {ACTION_BAR_HEIGHT_PX}px"
 >
     <div class="cover">
@@ -137,6 +162,12 @@
         <span data-testid={`card-cloud-badge-${badgeId}`} class="cloud-badge corner" role="img" aria-label="Cloud saves enabled" title="Cloud saves enabled"><Icon name="cloud" size={14} /></span>
       {/if}
 
+      {#if selecting}
+        <span data-testid={`card-check-${badgeId}`} class="check" aria-hidden="true">
+          {#if selected}<Icon name="check" size={14} />{/if}
+        </span>
+      {/if}
+
       <!-- The shade never takes a click: a click on the cover above the bar
            falls through to `onOpen` (see `ACTION_BAR_HEIGHT_PX`). -->
       <div class="shade" aria-hidden="true"></div>
@@ -145,6 +176,7 @@
            reveals it, so a keyboard user reaches Play/Install, Cloud sync
            and Details. The card ROOT is not focusable — the views drive
            selection with the `focused` class instead. -->
+      {#if !selecting}
       <div class="bar">
         <button data-testid={`card-primary-${badgeId}`} class="primary" onclick={act(onPrimary)} tabindex="0">
           {cardPrimaryLabel(installed, missing)}
@@ -170,6 +202,7 @@
           <Icon name="more" size={15} />
         </button>
       </div>
+      {/if}
     </div>
 
   <span class="label" title={title}>{title}</span>
@@ -253,6 +286,48 @@
   .card.focused .cover {
     outline: 2px solid var(--focus);
     outline-offset: 2px;
+  }
+
+  /* Select mode (GameBackups README): no hover shade or bar, a check top
+     left (the tags move below it), and a picked cover shrinks slightly
+     inside a primary ring. */
+  .selecting .shade {
+    display: none;
+  }
+
+  .selecting .tag-stack {
+    top: 36px;
+  }
+
+  .selected .cover,
+  .selected:hover .cover,
+  .selected.focused .cover {
+    transform: scale(0.96);
+    box-shadow:
+      0 0 0 3px var(--primary),
+      var(--shadow-card);
+  }
+
+  .check {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 3;
+    width: 22px;
+    height: 22px;
+    box-sizing: border-box;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    background: rgba(0, 0, 0, 0.35);
+    color: var(--on-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+
+  .selected .check {
+    background: var(--primary);
+    border-color: var(--primary);
   }
 
   .shade {

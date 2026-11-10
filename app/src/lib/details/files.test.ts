@@ -8,6 +8,8 @@ function file(overrides: Partial<RomFile> & { id: number; file_name: string }): 
     is_top_level: true,
     category: '',
     last_modified: '',
+    md5_hash: '',
+    sha1_hash: '',
     ...overrides,
   };
 }

@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DownloadEntry, GameSession } from '../api';
 import {
+  backupNoticeCard,
   coalesce,
   Coalescer,
   COALESCE_MAX_MS,
   COALESCE_WINDOW_MS,
   diffSnapshot,
+  driveQueuedNotice,
   earlyExitNotice,
   emulatorInstalledNotice,
   launchFailedNotice,
@@ -34,6 +36,10 @@ function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
     install_total_bytes: 0,
     error: '',
     detail: '',
+    drive_id: '',
+    drive_name: '',
+    drive_label: '',
+    batch: 0,
     ...overrides,
   };
 }
@@ -202,6 +208,50 @@ describe('single notices', () => {
     );
   });
 
+  it('gives backup rows no per-row card: their batch speaks for them', () => {
+    const row = (status: DownloadEntry['status']) =>
+      entry({ job: 'backup', kind: 'backup_game', status, drive_name: 'Couch kit', drive_label: 'SAMSUNG T7', batch: 2 });
+    expect(texts([[], [row('queued')], [row('completed')]])).toEqual([]);
+    expect(texts([[], [row('queued')], [row('failed')]])).toEqual([]);
+  });
+
+  it('keeps an install from a drive announced as a game, but not the emulator it brings', () => {
+    const fromDrive = { drive_id: '/run/media/sam/T7', drive_name: 'Couch kit', drive_label: 'SAMSUNG T7' };
+    expect(texts([[], [entry({ ...fromDrive, title: 'Velvet Static' })]])).toEqual(['Velvet Static added to download queue']);
+    expect(
+      texts([[], [entry({ ...fromDrive, job: 'emulator', kind: 'emulator', title: 'DuckStation', source_id: 'duckstation' })]]),
+    ).toEqual([]);
+  });
+
+  it('shows a backup-notice as the backend worded it, failures as errors', () => {
+    expect(backupNoticeCard({ message: 'PlayStation firmware installed from Couch kit', error: false })).toEqual({
+      group: 'drive-installed',
+      text: 'PlayStation firmware installed from Couch kit',
+      level: 'success',
+    });
+    expect(backupNoticeCard({ message: 'Some PlayStation firmware from Couch kit could not be installed', error: true })).toEqual({
+      group: 'drive-failed',
+      text: 'Some PlayStation firmware from Couch kit could not be installed',
+      level: 'error',
+    });
+  });
+
+  it('keeps what an install from a drive queued apart from what a drive installed', () => {
+    const queued = driveQueuedNotice('DuckStation from Couch kit added to download queue');
+    expect(queued).toEqual({
+      group: 'drive-queued',
+      text: 'DuckStation from Couch kit added to download queue',
+      level: 'success',
+    });
+    // The emulator line and the firmware card in one window: two cards, each
+    // as worded, never "2 items installed from a backup drive".
+    const firmware = backupNoticeCard({ message: 'PlayStation firmware installed from Couch kit', error: false });
+    expect(coalesce([queued, firmware]).map((n) => n.text)).toEqual([
+      'DuckStation from Couch kit added to download queue',
+      'PlayStation firmware installed from Couch kit',
+    ]);
+  });
+
   it('names the game an early exit was about when exactly one session went', () => {
     const s = (id: number, title: string): GameSession => ({
       id,
@@ -245,6 +295,12 @@ describe('coalesce', () => {
     expect(summaryText('cancelled', 3)).toBe('Cancelled 3 downloads');
     expect(summaryText('game-installed', 4)).toBe('4 games installed');
     expect(summaryText('update-queued', 2)).toBe('2 updates added to download queue');
+    expect(summaryText('drive-queued', 2)).toBe('2 items from a backup drive added to download queue');
+    expect(summaryText('drive-installed', 2)).toBe('2 items installed from a backup drive');
+    expect(summaryText('drive-failed', 1)).toBe('1 item from a backup drive could not be installed');
+    expect(summaryText('backup-queued', 2)).toBe('2 backups added to the backup queue');
+    expect(summaryText('backup-done', 2)).toBe('2 backups finished');
+    expect(summaryText('backup-failed', 2)).toBe('2 backups stopped — see Downloads');
   });
 });
 

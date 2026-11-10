@@ -10,6 +10,7 @@ describe('settings rail', () => {
   it('lists the pages alphabetically by label', () => {
     expect([...SETTINGS_PAGES]).toEqual([
       'appearance',
+      'backup-drives',
       'cloud-saves',
       'connection',
       'library',
@@ -34,6 +35,7 @@ describe('settings rail', () => {
     expect(settingsPageLabel('systems')).toBe('Systems');
     expect(settingsPageLabel('updates')).toBe('Updates');
     expect(settingsPageLabel('appearance')).toBe('Appearance');
+    expect(settingsPageLabel('backup-drives')).toBe('Backup drives');
   });
 });
 
@@ -42,6 +44,7 @@ describe('settingsRailEntries', () => {
     const entries = settingsRailEntries('updates');
     expect(entries.map((e) => e.testId)).toEqual([
       'settings-nav-appearance',
+      'settings-nav-backup-drives',
       'settings-nav-cloud-saves',
       'settings-nav-connection',
       'settings-nav-library',
@@ -49,7 +52,7 @@ describe('settingsRailEntries', () => {
       'settings-nav-systems',
       'settings-nav-updates',
     ]);
-    expect(entries.map((e) => e.selected)).toEqual([false, false, false, false, false, false, true]);
+    expect(entries.map((e) => e.selected)).toEqual([false, false, false, false, false, false, false, true]);
     expect(entries[0].heading).toBe('SETTINGS');
     expect(entries.slice(1).every((e) => e.heading === undefined)).toBe(true);
   });

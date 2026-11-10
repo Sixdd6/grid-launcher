@@ -1,0 +1,262 @@
+{
+  "901": {
+    "id": 901,
+    "name": "Cinder Peaks",
+    "fs_name_no_ext": "Cinder Peaks",
+    "platform_id": 1,
+    "platform_display_name": "PlayStation 2",
+    "platform_slug": "ps2",
+    "fs_name": "Cinder Peaks.zip",
+    "summary": "A single-zip game (backups-a).",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 9011,
+        "file_name": "Cinder Peaks.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  },
+  "902": {
+    "id": 902,
+    "name": "Moss and Marrow",
+    "fs_name_no_ext": "Moss and Marrow",
+    "platform_id": 1,
+    "platform_display_name": "PlayStation 2",
+    "platform_slug": "ps2",
+    "fs_name": "Moss and Marrow",
+    "summary": "A multi-file game (backups-a).",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 9021,
+        "file_name": "disc1.bin",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      },
+      {
+        "id": 9022,
+        "file_name": "disc2.bin",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      },
+      {
+        "id": 9023,
+        "file_name": "game.m3u",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  },
+  "903": {
+    "id": 903,
+    "name": "Big Arcade Game",
+    "fs_name_no_ext": "Big Arcade Game",
+    "platform_id": 1,
+    "platform_display_name": "PlayStation 2",
+    "platform_slug": "ps2",
+    "fs_name": "Big Arcade Game.zip",
+    "summary": "A slow 2 MB download: the drive is removed during it (backups-b).",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 9031,
+        "file_name": "Big Arcade Game.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true,
+        "e2e_throttle": 100
+      }
+    ],
+    "metadatum": null
+  },
+  "904": {
+    "id": 904,
+    "name": "Velvet Static",
+    "fs_name_no_ext": "Velvet Static",
+    "platform_id": 1,
+    "platform_display_name": "PlayStation 2",
+    "platform_slug": "ps2",
+    "fs_name": "Velvet Static.zip",
+    "summary": "Waits behind 903 (backups-b).",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 9041,
+        "file_name": "Velvet Static.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true,
+        "e2e_throttle": 100
+      }
+    ],
+    "metadatum": null
+  },
+  "905": {
+    "id": 905,
+    "name": "Harbor Lights",
+    "fs_name_no_ext": "Harbor Lights",
+    "platform_id": 1,
+    "platform_display_name": "PlayStation 2",
+    "platform_slug": "ps2",
+    "fs_name": "Harbor Lights.zip",
+    "summary": "Waits behind 903 (backups-b).",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 9051,
+        "file_name": "Harbor Lights.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true,
+        "e2e_throttle": 100
+      }
+    ],
+    "metadatum": null
+  },
+  "906": {
+    "id": 906,
+    "name": "Quiet Orbit",
+    "fs_name_no_ext": "Quiet Orbit",
+    "platform_id": 1,
+    "platform_display_name": "PlayStation 2",
+    "platform_slug": "ps2",
+    "fs_name": "Quiet Orbit.zip",
+    "summary": "Waits behind 903 (backups-b).",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 9061,
+        "file_name": "Quiet Orbit.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true,
+        "e2e_throttle": 100
+      }
+    ],
+    "metadatum": null
+  },
+  "951": {
+    "id": 951,
+    "name": "ps2",
+    "fs_name_no_ext": "ps2",
+    "platform_id": 2,
+    "platform_display_name": "Emulators",
+    "platform_slug": "emulators",
+    "fs_name": "ps2",
+    "summary": "The server's ps2 emulator folder: PCSX2 builds for Linux and Windows (docs/server-emulator-packages.md).",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 9511,
+        "file_name": "PCSX2 (v2.0.2) (arch-linux-x64).zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      },
+      {
+        "id": 9512,
+        "file_name": "PCSX2 (v2.0.2) (arch-windows-x64).zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  },
+  "961": {
+    "id": 961,
+    "name": "Tux Trail",
+    "fs_name_no_ext": "tuxtrail",
+    "platform_id": 3,
+    "platform_display_name": "Linux",
+    "platform_slug": "linux",
+    "fs_name": "tuxtrail.zip",
+    "summary": "A Linux game with a game.json sidecar (backups-d: copied from this computer).",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 9611,
+        "file_name": "tuxtrail.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      },
+      {
+        "id": 9612,
+        "file_name": "game.json",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  }
+}

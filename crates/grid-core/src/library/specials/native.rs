@@ -866,6 +866,8 @@ mod tests {
             is_top_level,
             last_modified: String::new(),
             category: String::new(),
+            md5_hash: String::new(),
+            sha1_hash: String::new(),
         }
     }
 
@@ -1713,6 +1715,7 @@ mod tests {
             is_identified: false,
             related: Vec::new(),
             achievement_count: 0,
+            logo_url: "".to_string(),
         }
     }
 

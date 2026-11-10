@@ -21,6 +21,10 @@ function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
     install_total_bytes: 0,
     error: '',
     detail: '',
+    drive_id: '',
+    drive_name: '',
+    drive_label: '',
+    batch: 0,
     ...overrides,
   };
 }
@@ -132,6 +136,35 @@ describe('initNotifications', () => {
     downloadsListener!([entry({ id: 5, job: 'emulator', kind: 'emulator', title: 'PCSX2', source_id: 'PCSX2/pcsx2' })], false);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(texts()).toEqual(['Updating PCSX2…']);
+    stop();
+  });
+
+  it('shows one queued card per backup batch once it settles, and one done card', async () => {
+    const { stop, texts } = await start();
+    const row = (id: number, status: DownloadEntry['status'], title = `G${id}`) =>
+      entry({ id, job: 'backup', kind: 'backup_game', title, status, drive_name: 'Couch kit', drive_label: 'SAMSUNG T7', batch: 4 });
+    downloadsListener!([], true);
+    // The queue admits a batch one row per snapshot.
+    downloadsListener!([row(1, 'downloading')], false);
+    downloadsListener!([row(2, 'queued'), row(1, 'downloading')], false);
+    downloadsListener!([row(3, 'queued'), row(2, 'queued'), row(1, 'downloading')], false);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(texts()).toEqual(['3 games added to the backup queue for Couch kit']);
+    downloadsListener!([row(3, 'completed'), row(2, 'completed'), row(1, 'completed')], false);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(texts()).toEqual(['3 games added to the backup queue for Couch kit', '3 games backed up to Couch kit']);
+    stop();
+  });
+
+  it('words an OS-change batch through expectOsChangeBatch', async () => {
+    const { notifier, stop, texts } = await start();
+    const emu = (id: number, title: string, status: DownloadEntry['status']) =>
+      entry({ id, job: 'backup', kind: 'backup_emulator', title, platform: 'Emulator', status, drive_name: 'Couch kit', drive_label: 'SAMSUNG T7', batch: 8 });
+    downloadsListener!([], true);
+    downloadsListener!([emu(2, 'PCSX2 for Windows', 'queued'), emu(1, 'DuckStation for Windows', 'downloading')], false);
+    notifier.expectOsChangeBatch({ batch: 8, queued: 2, removed: 0 }, ['windows']);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(texts()).toEqual(['Windows builds of 2 emulators added to the backup queue for Couch kit']);
     stop();
   });
 

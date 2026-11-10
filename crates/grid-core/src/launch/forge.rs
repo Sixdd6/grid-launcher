@@ -22,8 +22,8 @@ use regex::RegexBuilder;
 use serde_json::Value;
 
 use super::source::{
-    allow_prerelease, resolve_source, select_asset, select_release, str_field, SourceError,
-    SourceMap, HOST_PLATFORM,
+    allow_prerelease, resolve_source_for_host, select_asset, select_release, str_field,
+    SourceError, SourceMap, HOST_PLATFORM,
 };
 use crate::library::download::{FileTarget, ResponseProvider};
 use crate::library::LibraryError;
@@ -93,15 +93,38 @@ impl ForgeClient {
         raw: &Value,
         profile_name: &str,
     ) -> Result<ResolvedDownload, SourceError> {
-        let source = resolve_source(raw)?;
+        self.resolve_for_host(raw, profile_name, HOST_PLATFORM)
+            .await
+    }
+
+    /// [`resolve`](Self::resolve) as `host` (a `sys.platform`-shaped slug:
+    /// `linux`, `win32`) sees `raw`: the `platform_overrides` entry for
+    /// `host` is merged in ([`resolve_source_for_host`]) and the `direct`
+    /// platforms gate checks `host`. A backup uses it to fetch the build for
+    /// an OS other than the one GRID runs on.
+    ///
+    /// Asset ranking still reads this computer's processor (AVX2), as an
+    /// install does.
+    pub async fn resolve_for_host(
+        &self,
+        raw: &Value,
+        profile_name: &str,
+        host: &str,
+    ) -> Result<ResolvedDownload, SourceError> {
+        let source = resolve_source_for_host(raw, host)?;
         let provider = str_field(&source, "provider");
 
-        // `resolve_source` above already rejected a non-object `raw`, so
-        // this object is always present once we get here.
-        let raw_obj = raw.as_object().expect("resolve_source accepted `raw`");
+        // `resolve_source_for_host` above already rejected a non-object
+        // `raw`, so this object is always present once we get here.
+        let raw_obj = raw
+            .as_object()
+            .expect("resolve_source_for_host accepted `raw`");
 
         match provider.as_str() {
-            "direct" => self.resolve_direct(&source, raw_obj, profile_name).await,
+            "direct" => {
+                self.resolve_direct(&source, raw_obj, profile_name, host)
+                    .await
+            }
             "github" => {
                 let owner = str_field(&source, "owner");
                 let repo = str_field(&source, "repo");
@@ -121,6 +144,37 @@ impl ForgeClient {
                 "Unsupported source provider '{other}'. Supported providers: github, gitea, direct."
             ))),
         }
+    }
+
+    /// Every `supplemental_downloads` entry of `raw` (a profile's RAW
+    /// source) resolved for `host`, paired with its 1-based index in that
+    /// array. The index is taken BEFORE unusable entries are skipped, so the
+    /// file names of the supplementals after a skipped one do not shift (the
+    /// install's own rule). A non-object entry, or one that resolves to no
+    /// download URL, is skipped; an entry that fails to resolve fails the
+    /// whole call. A backup sizes and fetches RetroArch's cores for another
+    /// OS through it.
+    pub async fn resolve_supplementals_for_host(
+        &self,
+        raw: &Value,
+        profile_name: &str,
+        host: &str,
+    ) -> Result<Vec<(usize, ResolvedDownload)>, SourceError> {
+        let Some(Value::Array(specs)) = raw.get("supplemental_downloads") else {
+            return Ok(Vec::new());
+        };
+        let mut resolved = Vec::new();
+        for (index, spec) in specs.iter().enumerate() {
+            if !spec.is_object() {
+                continue;
+            }
+            let supplemental = self.resolve_for_host(spec, profile_name, host).await?;
+            if supplemental.download_url.trim().is_empty() {
+                continue;
+            }
+            resolved.push((index + 1, supplemental));
+        }
+        Ok(resolved)
     }
 
     /// GET `url` (after the E2E rewrite, see [`effective_url`]) with the
@@ -261,8 +315,9 @@ impl ForgeClient {
         source: &SourceMap,
         raw: &SourceMap,
         profile_name: &str,
+        host: &str,
     ) -> Result<ResolvedDownload, SourceError> {
-        if let Some(message) = direct_platforms_gate_message(raw, profile_name) {
+        if let Some(message) = direct_platforms_gate_message(raw, profile_name, host) {
             return Err(SourceError(message));
         }
 
@@ -375,11 +430,15 @@ impl ResponseProvider for ForgeProvider<'_> {
 // --- direct-provider helpers -------------------------------------------------
 
 /// The `direct` platforms gate (`workers.py:177-184`): when the RAW
-/// source's `platforms` array is present and non-empty, [`HOST_PLATFORM`]
-/// must start with at least one of its entries. Returns the (trimmed)
+/// source's `platforms` array is present and non-empty, `host` (normally
+/// [`HOST_PLATFORM`]) must start with at least one of its entries. Returns the (trimmed)
 /// error message when the gate fails, `None` when it passes or does not
 /// apply.
-fn direct_platforms_gate_message(raw: &SourceMap, profile_name: &str) -> Option<String> {
+fn direct_platforms_gate_message(
+    raw: &SourceMap,
+    profile_name: &str,
+    host: &str,
+) -> Option<String> {
     let Some(Value::Array(platforms)) = raw.get("platforms") else {
         return None;
     };
@@ -388,7 +447,7 @@ fn direct_platforms_gate_message(raw: &SourceMap, profile_name: &str) -> Option<
     }
     let allowed = platforms.iter().any(|entry| {
         let entry = json_value_as_display_string(entry);
-        HOST_PLATFORM.starts_with(entry.as_str())
+        host.starts_with(entry.as_str())
     });
     if allowed {
         return None;
@@ -1742,6 +1801,118 @@ mod tests {
         assert_eq!(
             str_field(asset, "name"),
             "Dolphin_Emulator-2609-anylinux-x86_64.AppImage"
+        );
+    }
+
+    // --- resolve_for_host: another OS's build --------------------------------
+
+    /// The catalog's RetroArch source with every buildbot URL (and its
+    /// escaped form inside the regexes) pointed at `base`, so the real
+    /// `platform_overrides` shape is resolved against a mock server.
+    fn retroarch_source_at(base: &str) -> Value {
+        fn rewrite(value: &mut Value, base: &str) {
+            match value {
+                Value::String(text) => {
+                    *text = text
+                        .replace(r"https://buildbot\.libretro\.com", &regex::escape(base))
+                        .replace("https://buildbot.libretro.com", base);
+                }
+                Value::Array(items) => items.iter_mut().for_each(|v| rewrite(v, base)),
+                Value::Object(map) => map.values_mut().for_each(|v| rewrite(v, base)),
+                _ => {}
+            }
+        }
+        let profile = crate::launch::profiles::load_profiles()
+            .iter()
+            .find(|p| p.name == "RetroArch (Multi-System)")
+            .expect("the catalog ships a RetroArch profile");
+        let mut raw = profile.source.clone().unwrap();
+        rewrite(&mut raw, base);
+        raw
+    }
+
+    async fn mount_buildbot_page(server: &MockServer, os: &str) {
+        let body = format!(
+            r#"<a href="RetroArch.7z">RetroArch.7z</a> <a href="RetroArch_cores.7z">cores</a> <a href="/nightly/{os}/x86_64/other.zip">x</a>"#
+        );
+        Mock::given(method("GET"))
+            .and(path(format!("/nightly/{os}/x86_64/")))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn resolve_for_host_picks_each_oss_platform_override() {
+        let server = MockServer::start().await;
+        mount_buildbot_page(&server, "windows").await;
+        mount_buildbot_page(&server, "linux").await;
+        let base = server.uri();
+        let raw = retroarch_source_at(&base);
+        let client = ForgeClient::new().unwrap();
+
+        let windows = client
+            .resolve_for_host(&raw, "RetroArch", "win32")
+            .await
+            .unwrap();
+        assert_eq!(
+            windows.download_url,
+            format!("{base}/nightly/windows/x86_64/RetroArch.7z")
+        );
+        assert_eq!(windows.asset_name, "RetroArch.7z");
+
+        let linux = client
+            .resolve_for_host(&raw, "RetroArch", "linux")
+            .await
+            .unwrap();
+        assert_eq!(
+            linux.download_url,
+            format!("{base}/nightly/linux/x86_64/RetroArch.7z")
+        );
+    }
+
+    #[tokio::test]
+    async fn supplementals_resolve_for_the_host_asked_for() {
+        let server = MockServer::start().await;
+        mount_buildbot_page(&server, "windows").await;
+        let base = server.uri();
+        let raw = retroarch_source_at(&base);
+        let client = ForgeClient::new().unwrap();
+
+        let cores = client
+            .resolve_supplementals_for_host(&raw, "RetroArch", "win32")
+            .await
+            .unwrap();
+        assert_eq!(cores.len(), 1);
+        assert_eq!(cores[0].0, 1);
+        assert_eq!(
+            cores[0].1.download_url,
+            format!("{base}/nightly/windows/x86_64/RetroArch_cores.7z")
+        );
+        // A source without supplementals has nothing to resolve.
+        let none = client
+            .resolve_supplementals_for_host(&json!({"provider": "github"}), "X", "win32")
+            .await
+            .unwrap();
+        assert!(none.is_empty());
+    }
+
+    #[tokio::test]
+    async fn direct_platforms_gate_checks_the_host_asked_for() {
+        let raw = json!({
+            "provider": "direct", "owner": "o", "repo": "r",
+            "page_url": "https://example.com/downloads",
+            "platforms": ["win32"],
+            "name": "WinOnly"
+        });
+        let client = ForgeClient::new().unwrap();
+        let err = client
+            .resolve_for_host(&raw, "WinOnly", "linux")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.0,
+            "WinOnly has no auto-install source available for this platform."
         );
     }
 }

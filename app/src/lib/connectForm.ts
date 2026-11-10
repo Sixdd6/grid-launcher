@@ -30,3 +30,13 @@ export function canConnect(f: ConnectFields): boolean {
   if (f.libraryPath !== null && f.libraryPath.trim() === '') return false;
   return true;
 }
+
+/**
+ * "Use without a server" needs only the library folder: enabled once the
+ * stored folder is known (`libraryKnown`) and, when the form asks for one,
+ * the field is filled. The server fields play no part.
+ */
+export function canUseOffline(libraryKnown: boolean, libraryPath: string | null): boolean {
+  if (!libraryKnown) return false;
+  return libraryPath === null || libraryPath.trim() !== '';
+}

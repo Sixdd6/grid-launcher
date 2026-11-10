@@ -14,7 +14,9 @@
   import UmuInstallOffer from './UmuInstallOffer.svelte';
   import { isUmuMissing } from './launchError';
   import { installGame, launchGame } from './notifications/notifier';
+  import { needsLibraryFolder } from './library/installRefusal';
   import GameCard from './GameCard.svelte';
+  import Icon from './Icon.svelte';
   import { coverPair } from './cards/cover';
   import CardGrid from './CardGrid.svelte';
   import FoldingHeader from './FoldingHeader.svelte';
@@ -27,7 +29,7 @@
   import { isInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
   import { updates } from './stores/updates.svelte';
   import { hostOf } from './shell';
-  import { session, retry } from './stores/session.svelte';
+  import { session, retry, connectToServer } from './stores/session.svelte';
   import { HOVER_DELAY_MS, PREFETCH_DELAY_MS, subjectFromSummary } from './background';
   import { createHoverViewed } from './lastViewedHover';
   import { dropPendingWarms } from './backgroundPrefetch';
@@ -50,6 +52,20 @@
   import { savedDefaultFor } from './emulators/defaults';
   import { chordBlocked, chordContext, shouldFocusSearch } from './views/searchKeys';
   import { pickFolder } from './pickers';
+  import SelectionBar from './backups/SelectionBar.svelte';
+  import { openBackup } from './backups/dialogState.svelte';
+  import { backupRequest, sizeText } from './backups/dialog';
+  import {
+    allPicked,
+    EMPTY_SELECTION,
+    isPicked,
+    keepOnly,
+    leavesSelectMode,
+    pick,
+    selectAll,
+    totalBytes,
+    type Selection,
+  } from './backups/selection';
 
   let {
     active,
@@ -107,6 +123,15 @@
   let activePlatformRow = $derived(platforms.find((p) => p.id === activePlatform) ?? null);
   let activePlatformName = $derived(activePlatformRow ? platformLabel(activePlatformRow) : '');
   let visible = $derived(filterServerGames(games, search));
+  // Select mode (GameBackups README): Select in the toolbar turns it on, a
+  // click on a cover picks it, and the selection bar backs the picks up.
+  // Leaving the platform, or Discover, leaves it.
+  let selecting = $state(false);
+  let selection = $state.raw<Selection>(EMPTY_SELECTION);
+  let visibleIds = $derived(visible.map((g) => g.id));
+  let sizeById = $derived(new Map(games.map((g) => [g.id, g.fs_size_bytes])));
+  let pickedBytes = $derived(totalBytes(selection, (id) => sizeById.get(id) ?? 0));
+
   let installedCount = $derived(
     games.filter((game) => isInstalled(game, activePlatformName)).length,
   );
@@ -261,9 +286,49 @@
   function showDiscover() {
     discover = true;
     search = '';
+    leaveSelectMode();
+  }
+
+  function leaveSelectMode() {
+    selecting = false;
+    selection = EMPTY_SELECTION;
+  }
+
+  function toggleSelectMode() {
+    if (selecting) leaveSelectMode();
+    else selecting = true;
+  }
+
+  // A reload can drop a game: the selection never counts one off screen.
+  $effect(() => {
+    const ids = games.map((g) => g.id);
+    const next = keepOnly(untrack(() => selection), ids);
+    if (next !== untrack(() => selection)) selection = next;
+  });
+
+  /** "Backup to drive…" on the selection bar. */
+  function backUpSelection() {
+    if (selection.ids.length === 0 || activePlatform === null) return;
+    openBackup({
+      request: backupRequest({ kind: 'games', count: selection.ids.length }, selection.ids, [activePlatform]),
+      onQueued: leaveSelectMode,
+    });
+  }
+
+  /** "Backup all N…" in the platform header: every game of the platform. */
+  function backUpPlatform() {
+    if (activePlatform === null || games.length === 0) return;
+    openBackup({
+      request: backupRequest(
+        { kind: 'platform', platform: activePlatformName, count: games.length },
+        games.map((g) => g.id),
+        [activePlatform],
+      ),
+    });
   }
 
   async function selectPlatform(id: number) {
+    if (id !== activePlatform) leaveSelectMode();
     discover = false;
     activePlatform = id;
     search = '';
@@ -311,7 +376,7 @@
       const missing = isUmuMissing(err);
       actionError = missing ? message : null;
       umuOfferFor = missing ? message : null;
-      if (message.includes('library folder')) showLibraryBanner = true;
+      if (needsLibraryFolder(message)) showLibraryBanner = true;
     }
   }
 
@@ -458,6 +523,11 @@
       if (discoverView?.handleKey(e)) noteDirectional('keyboard');
       return;
     }
+    if (leavesSelectMode(e.key, selecting, chordBlocked(ctx) || detailsGame !== null)) {
+      e.preventDefault();
+      leaveSelectMode();
+      return;
+    }
     if (shouldFocusSearch(e, ctx)) {
       e.preventDefault();
       focusSearch();
@@ -541,7 +611,18 @@
     </div>
   {/if}
 
-  {#if !session.connected}
+  {#if session.offline && !session.connected}
+    <!-- Offline mode (GameBackups README): one panel in place of the rail
+         and grid, with the way back to a server. -->
+    <div data-testid="server-offline-mode" class="offline-mode panel">
+      <div class="offline-mode-in">
+        <span class="offline-icon"><Icon name="cloud" size={24} /></span>
+        <h2>Not connected to a server</h2>
+        <p class="note">Your Library and backup drives work without one. Connect to browse the server and backup games.</p>
+        <button data-testid="server-connect" class="g-btn" onclick={() => connectToServer()}>Connect to a server…</button>
+      </div>
+    </div>
+  {:else if !session.connected}
     <div data-testid="server-offline" class="offline panel">
       Not connected to {hostOf(session.serverUrl)}
       <button data-testid="server-retry" onclick={() => retry()}>Retry</button>
@@ -581,8 +662,9 @@
                   {platformCountsLine(activePlatformRow?.rom_count ?? 0, installedCount)}
                 </p>
               {/if}
-              {#if chipsShown}
+              {#if chipsShown || (!gamesLoading && games.length > 0)}
                 <div class="chips">
+                  {#if chipsShown}
                   {#if firmwareLinks}
                     <button
                       data-testid="server-firmware-chip"
@@ -598,6 +680,13 @@
                   <button data-testid="server-emulator-chip" class="chip link" onclick={() => onOpenSystems(activePlatformName)}>
                     {emulatorChipLabel(defaultEmulator)}
                   </button>
+                  {/if}
+                  {#if !gamesLoading && games.length > 0}
+                    <!-- GameBackups README: "Backup all 11…" on the right of the header. -->
+                    <button data-testid="server-backup-platform" class="chip link backup-all" onclick={backUpPlatform}>
+                      Backup all {games.length}…
+                    </button>
+                  {/if}
                 </div>
               {/if}
             </header>
@@ -622,6 +711,15 @@
                   {/each}
                 </select>
               </label>
+              <button
+                data-testid="server-select"
+                class="select-btn"
+                class:active={selecting}
+                aria-pressed={selecting}
+                onclick={toggleSelectMode}
+              >
+                {selecting ? 'Done' : 'Select'}
+              </button>
             </div>
           {/snippet}
         </FoldingHeader>
@@ -652,6 +750,7 @@
             size={uiSettings.cardSizeServer}
             items={visible}
             key={(game) => game.id}
+            {selecting}
           >
             {#snippet card(game, i, rect)}
               <GameCard
@@ -668,6 +767,12 @@
                 {rect}
                 showPlatform={false}
                 focused={i === focusIndex && inputMode.directional}
+                {selecting}
+                selected={isPicked(selection, game.id)}
+                onSelect={(shift) => {
+                  focusIndex = i;
+                  selection = pick(selection, game.id, shift, visibleIds);
+                }}
                 onOpen={() => {
                   // A click moves the selection, so keyboard navigation
                   // resumes from the clicked card and the focus dwell that
@@ -685,6 +790,28 @@
           </CardGrid>
         {/if}
         </div>
+        {#if selecting}
+          <SelectionBar
+            testId="server-selection"
+            count={selection.ids.length}
+            size={sizeText(pickedBytes)}
+            visibleCount={visibleIds.length}
+            allSelected={allPicked(selection, visibleIds)}
+            onSelectAll={() => (selection = selectAll(selection, visibleIds))}
+            onClear={() => (selection = EMPTY_SELECTION)}
+          >
+            {#snippet actions()}
+              <button
+                data-testid="server-selection-backup"
+                class="g-btn"
+                disabled={selection.ids.length === 0}
+                onclick={backUpSelection}
+              >
+                Backup to drive…
+              </button>
+            {/snippet}
+          </SelectionBar>
+        {/if}
       </div>
       {/if}
     </div>
@@ -811,6 +938,37 @@
   .chip button:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+
+  /* "Backup all N…" sits at the right end of the header row, after the
+     chips (which take the free space when shown). */
+  .backup-all {
+    white-space: nowrap;
+  }
+
+  /* Select / Done: the size select's height, filled while select mode is on. */
+  .select-btn {
+    font: inherit;
+    font-size: 12px;
+    height: var(--control-h);
+    box-sizing: border-box;
+    padding: 0 12px;
+    border-radius: var(--r-control);
+    border: 1px solid var(--line-strong);
+    background: var(--field);
+    color: var(--text-h);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .select-btn:hover {
+    border-color: var(--primary);
+  }
+
+  .select-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--on-primary);
   }
 
   .toolbar {
@@ -940,6 +1098,47 @@
     padding: 40px 24px;
     color: var(--text);
     font-size: 14px;
+  }
+
+  /* GameBackups prototype `.bk-off`: the panel fills the view, its content
+     centred in one 420px column. */
+  .offline-mode {
+    flex: 1 1 auto;
+    display: grid;
+    place-items: center;
+    padding: 40px;
+  }
+
+  .offline-mode-in {
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    text-align: center;
+  }
+
+  .offline-mode-in h2 {
+    margin: 0;
+    font-size: 18px;
+    color: var(--text-h);
+  }
+
+  .offline-mode-in .note {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .offline-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border-radius: var(--r-control);
+    background: var(--field);
+    color: var(--text-h);
   }
 
   .offline button {

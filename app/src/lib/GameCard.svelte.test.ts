@@ -58,3 +58,54 @@ describe('GameCard missing badge (9c)', () => {
     }
   });
 });
+
+describe('GameCard select mode (GameBackups)', () => {
+  function selectCard(selected: boolean) {
+    return render(GameCard, {
+      props: {
+        testId: 'game-card-7',
+        index: 0,
+        badgeId: 7,
+        title: 'Mario',
+        platform: 'SNES',
+        cover: { small: null, large: null },
+        installed: false,
+        updateLabel: null,
+        cloudPlatforms: new Set<string>(),
+        labels: 'always' as const,
+        rect: { x: 0, y: 0, w: 160, h: 213 },
+        focused: false,
+        selecting: true,
+        selected,
+        onSelect: () => {},
+        onOpen: () => {},
+        onPrimary: () => {},
+        onCloud: () => {},
+        onHoverStart: () => {},
+        onHoverEnd: () => {},
+      },
+    }).body;
+  }
+
+  it('marks a picked card selected, with a filled check and no hover bar', () => {
+    const body = selectCard(true);
+    expect(body).toMatch(/class="card[^"]*\bselecting\b[^"]*\bselected\b/);
+    expect(body).toContain('aria-selected="true"');
+    expect(body).toContain('data-testid="card-check-7"');
+    expect(body).toContain('<svg');
+    expect(body).not.toContain('card-primary-7');
+  });
+
+  it('shows an empty check on an unpicked card', () => {
+    const body = selectCard(false);
+    expect(body).toContain('aria-selected="false"');
+    expect(body).not.toMatch(/class="card[^"]*\bselected\b/);
+    expect(body).toContain('data-testid="card-check-7"');
+  });
+
+  it('keeps the hover bar and no check outside select mode', () => {
+    const body = card(false);
+    expect(body).not.toContain('card-check-7');
+    expect(body).toContain('card-primary-7');
+  });
+});

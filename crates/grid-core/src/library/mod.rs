@@ -7,8 +7,12 @@
 //! ("InstallService", "Data flow for one install") and
 //! `docs/porting/03-library-install.md` for the behavior this mirrors.
 
+pub mod backup_job;
 pub mod content;
 pub mod download;
+pub mod drive_copy;
+pub mod drive_install;
+pub mod drive_restore;
 pub mod emulator_package;
 pub mod emulator_removal;
 pub mod extract;
@@ -25,6 +29,7 @@ pub mod relink;
 pub mod relocate;
 pub mod root_access;
 pub mod server_emulator;
+pub mod space;
 pub mod specials;
 pub mod update_detection;
 pub mod user_data_links;
@@ -33,7 +38,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -75,7 +80,9 @@ use paths::{
 use platforms::{
     is_native_platform, is_ps3_platform, is_ps4_platform, is_ps5_platform, is_xbox360_platform,
 };
-use queue::{Admission, CancelAction, DownloadStatus, DownloadsSnapshot, JobKey, QueueState};
+use queue::{
+    Admission, CancelAction, DownloadStatus, DownloadsSnapshot, EntryMeta, JobKey, QueueState,
+};
 use registry::{identity_key, installed_match, InstalledGame, Registry};
 use relocate::LibraryGate;
 use specials::ps3::Ps3Roots;
@@ -103,6 +110,9 @@ pub enum LibraryError {
     /// The library gate is closed (a library move runs): the reason.
     #[error("{0}")]
     LibraryBusy(String),
+    /// A backup drive went away mid-job: "<label> was removed".
+    #[error("{0}")]
+    DriveRemoved(String),
 }
 
 // --- constants --------------------------------------------------------------
@@ -195,6 +205,18 @@ pub const NOT_A_NATIVE_GAME: &str =
 pub const NATIVE_UPDATE_REQUIRED: &str = "Native games update through the merge path.";
 /// Locate… refuses a row an install is writing right now.
 const LOCATE_WHILE_INSTALLING: &str = "This game is installing. Wait for it to finish.";
+/// Uninstall, update and Locate… refuse a game a backup is copying from
+/// this computer.
+pub const BACKING_UP_LOCAL: &str = "This game is being backed up. Wait for it to finish.";
+/// Why a game that is running is not copied from this computer: its files
+/// may change while they are read.
+pub const RUNNING_NOW: &str = "It's running right now; close it to copy it";
+/// Whether a game (by rom id) is running right now. Installed by the app
+/// layer, which owns the launch sessions.
+pub type RunningCheck = Arc<dyn Fn(i64) -> bool + Send + Sync>;
+/// How long a plan-time scan of an installed game stays fresh
+/// ([`InstallService::local_states`]).
+const LOCAL_SCAN_TTL: Duration = Duration::from_secs(60);
 
 /// One installed game as the Library lists it (9c): the registry row,
 /// flattened, plus `missing` — its files are not on disk. Computed by the
@@ -212,12 +234,24 @@ pub struct InstalledRow {
 fn row_is_busy(snapshot: &DownloadsSnapshot, row: &InstalledGame) -> bool {
     let title = identity_key(&row.title);
     let platform = identity_key(&row.platform);
+    row.rom_id
+        .is_some_and(|rom_id| local_backup_live(snapshot, rom_id))
+        || snapshot.entries.iter().any(|entry| {
+            entry.status.is_live()
+                && entry.job == "game"
+                && (row.rom_id == Some(entry.rom_id)
+                    || (identity_key(&entry.title) == title
+                        && identity_key(&entry.platform) == platform))
+        })
+}
+
+/// True while a live backup row copies `rom_id` from this computer's
+/// install (queued, reading the server, or archiving).
+fn local_backup_live(snapshot: &DownloadsSnapshot, rom_id: i64) -> bool {
     snapshot.entries.iter().any(|entry| {
         entry.status.is_live()
-            && entry.job == "game"
-            && (row.rom_id == Some(entry.rom_id)
-                || (identity_key(&entry.title) == title
-                    && identity_key(&entry.platform) == platform))
+            && entry.kind == backup_job::LOCAL_GAME_KIND
+            && entry.rom_id == rom_id
     })
 }
 
@@ -301,9 +335,102 @@ struct InstallJob {
     /// game: where that sidecar was downloaded to, so finalize can read the
     /// metadata back off disk.
     game_json_target: Option<PathBuf>,
-    /// The client the download runs on, carried on the job so a queued
-    /// install can start after its caller has gone away.
-    client: Arc<RommClient>,
+    /// Where the bytes come from, carried on the job so a queued install can
+    /// start after its caller has gone away.
+    source: GameSource,
+    /// `Some` only for an installed copy restored from a backup drive
+    /// ([`drive_restore::plan_restore`]): the job then has no targets, and
+    /// its download and finalize steps are the restore's own.
+    restore: Option<drive_restore::RestorePlan>,
+    /// The space this job holds in the library folder ([`space`]), set at
+    /// admission and released with the job.
+    space: Option<Arc<space::JobSpace>>,
+}
+
+/// Where an install's bytes come from. The plan and the finalize route are
+/// the same for both; only the download step differs.
+#[derive(Clone)]
+pub enum GameSource {
+    /// Download from the RomM server.
+    Server(Arc<RommClient>),
+    /// Copy from a backup drive's `gridpack/` folder.
+    Drive(DriveSource),
+}
+
+/// A backup drive an install copies its files from.
+#[derive(Clone, Debug)]
+pub struct DriveSource {
+    /// The drive key: the mount path, or the drive letter on Windows.
+    pub drive_id: String,
+    /// The drive's volume label, for "<label> was removed".
+    pub label: String,
+    /// The drive's mount root (the folder that holds `gridpack/`).
+    pub mount: PathBuf,
+    /// The absolute path on the drive of each backed-up file, keyed by its
+    /// server file id (`PackFile::server_file_id`, resolved with
+    /// `backup::pack::resolve`).
+    pub files: BTreeMap<i64, PathBuf>,
+    /// The server the backup came from (`PackSource::server`, without
+    /// userinfo): recorded as the row's `source_server`.
+    pub server: String,
+    /// Whether the row keeps the pack's `rom_id`. `false` when a live session
+    /// is connected to another server, whose ids mean other games; the
+    /// relink pass can then match the row instead.
+    pub keep_rom_id: bool,
+    /// A Windows game's saves on the drive (`PackGame::saves`), put back
+    /// when the install finalizes ([`drive_restore`]).
+    pub saves: Option<DriveSaves>,
+}
+
+/// A Windows game's saves on a backup drive, as an install reads them.
+#[derive(Clone, Debug, Default)]
+pub struct DriveSaves {
+    /// The save folders, Windows-token paths (`PackSaves::folders`).
+    pub folders: Vec<String>,
+    /// The saves archive's parts (resolved, absolute); empty when only the
+    /// folders were recorded.
+    pub parts: Vec<crate::backup::archive::PartSource>,
+    /// The parts named a path the drive can't use: the saves are skipped
+    /// with a warning.
+    pub unusable: bool,
+}
+
+impl DriveSource {
+    /// The copy list for a planned job: each target's source on the drive,
+    /// its destination and its expected size. `file_ids` is one id per
+    /// target, in target order (true of every base and native-update job).
+    /// `Err` names the first file the drive has no copy of.
+    fn copy_files(
+        &self,
+        file_ids: &[i64],
+        targets: &[FileTarget],
+    ) -> Result<Vec<drive_copy::CopyFile>, LibraryError> {
+        if file_ids.len() != targets.len() {
+            return Err(LibraryError::Extract(format!(
+                "this install cannot be copied from {}",
+                self.label
+            )));
+        }
+        file_ids
+            .iter()
+            .zip(targets)
+            .map(|(id, target)| {
+                let src = self.files.get(id).ok_or_else(|| {
+                    let name = target
+                        .dest
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    LibraryError::Extract(format!(
+                        "The backup on {} has no copy of {name}",
+                        self.label
+                    ))
+                })?;
+                let size = u64::try_from(target.expected_size).unwrap_or(0);
+                Ok((src.clone(), target.dest.clone(), size))
+            })
+            .collect()
+    }
 }
 
 /// Everything one admitted emulator acquisition needs. Unlike an
@@ -351,7 +478,30 @@ struct EmulatorJob {
     /// Set for a build from the RomM server's Emulators platform: the one
     /// file to download from it instead of resolving a forge release.
     romm: Option<RommBuild>,
+    /// Set for an emulator installed from a backup drive: the files to copy
+    /// off the drive instead of downloading anything.
+    local: Option<drive_install::LocalBuild>,
+    /// The space this job holds in the library folder ([`space`]), set at
+    /// admission and released with the job.
+    space: Option<Arc<space::JobSpace>>,
 }
+
+impl EmulatorJob {
+    /// Whether this job installs a build from the RomM server's Emulators
+    /// platform, downloaded now or copied from a backup of one.
+    fn server_build(&self) -> bool {
+        self.romm.is_some() || self.source_id.starts_with(SERVER_SOURCE_PREFIX)
+    }
+
+    /// The drive this job copies from, for an install from a backup drive.
+    fn drive_id(&self) -> Option<&str> {
+        self.local.as_ref().map(|local| local.drive_id.as_str())
+    }
+}
+
+/// The `source_id` prefix of an emulator installed from the RomM server's
+/// Emulators platform ([`server_emulator_source_id`]).
+const SERVER_SOURCE_PREFIX: &str = "romm:";
 
 /// A build from the RomM server's Emulators platform
 /// (`docs/server-emulator-packages.md`): one file of a platform folder.
@@ -404,6 +554,10 @@ enum JobTarget {
     /// The managed umu-launcher: [`umu::install_dir`], the
     /// `Config.umu_launcher` record, and a checksum check before extraction.
     UmuLauncher,
+    /// The Steam Linux Runtime from a backup drive, placed where umu-run
+    /// looks for it ([`crate::backup::steam_runtime::place_runtime`]).
+    /// `EmulatorJob::library` is umu's data folder.
+    SteamRuntime,
 }
 
 /// What the download task resolved an [`EmulatorJob`] down to.
@@ -427,6 +581,20 @@ struct ResolvedPaths {
 enum JobPayload {
     Game(InstallJob),
     Emulator(EmulatorJob),
+    /// One backup row (`backup_job`): download to staging, then write to
+    /// the drive.
+    Backup(Box<backup_job::BackupJob>),
+}
+
+impl JobPayload {
+    /// The space the job holds ([`space`]).
+    fn space(&self) -> Option<&Arc<space::JobSpace>> {
+        match self {
+            JobPayload::Game(job) => job.space.as_ref(),
+            JobPayload::Emulator(job) => job.space.as_ref(),
+            JobPayload::Backup(job) => job.space.as_ref(),
+        }
+    }
 }
 
 /// Whether a download from `provider` needs the GitHub API headers. Read
@@ -499,29 +667,47 @@ fn is_nested_game_file(file: &RomFile) -> bool {
         && (!file.is_top_level || file.file_name.contains('/') || file.file_name.contains('\\'))
 }
 
-/// Computes the download plan for `detail` under `library`. Pure apart from
-/// cloning the client handle: no I/O, no queue access.
+/// Which of a game's server files an install downloads, before any
+/// destination is chosen. Shared by [`plan_install`] and the backup planner,
+/// so a backup holds exactly the files an install from it needs.
+pub(crate) enum DownloadSet<'a> {
+    /// One candidate: a single archive.
+    Single(&'a RomFile),
+    /// More than one candidate: a multi-file game. `launch` is the first
+    /// `.m3u` if there is one, else the first candidate.
+    Multi {
+        files: Vec<&'a RomFile>,
+        launch: &'a RomFile,
+    },
+    /// A native (Windows or Linux) game: its archive, and its `game.json`
+    /// sidecar when the server lists one.
+    Native {
+        archive: &'a RomFile,
+        sidecar: Option<&'a RomFile>,
+    },
+}
+
+/// Picks the files [`plan_install`] downloads for `detail`. Pure.
 ///
-/// One candidate ⇒ a single archive at `<platform dir>/<archive name>`.
-/// More than one ⇒ a multi-file game: every candidate lands in
-/// `<platform dir>/<safe title>/`, and the launch entry is the first `.m3u`
-/// if there is one, else the first candidate.
+/// A native game's archive is picked by [`specials::native::select_archive`],
+/// not by the generic candidate filter: a native game's server payload
+/// routinely lists artwork and soundtracks before the archive, and
+/// `game.json` is a metadata sidecar rather than something to launch.
 ///
 /// A PlayStation 5 `.pkg` or folder game is rejected here
 /// ([`KYTY_UNSUPPORTED_GAME`]; see [`ps5_unsupported_download`]).
-fn plan_install(
-    detail: &RomDetail,
-    library: &Path,
-    client: Arc<RommClient>,
-) -> Result<InstallJob, LibraryError> {
-    let platform_root = platform_dir(library, &detail.platform_name);
-
+pub(crate) fn download_set(detail: &RomDetail) -> Result<DownloadSet<'_>, LibraryError> {
     // A native (Windows or Linux) game never becomes a multi-file install: the
     // server lists its archive next to a `game.json` sidecar and any number
-    // of extras, and exactly one of those is the game. Everything lands in
-    // one per-game directory instead of the platform root.
+    // of extras, and exactly one of those is the game.
     if is_native_platform(&detail.platform_slug, &detail.platform_name) {
-        return plan_native_install(detail, &platform_root, client);
+        let Some(archive) = specials::native::select_archive(&detail.files) else {
+            return Err(LibraryError::Extract(
+                NO_NATIVE_DOWNLOADABLE_FILE.to_string(),
+            ));
+        };
+        let sidecar = specials::native::has_game_json(&detail.files);
+        return Ok(DownloadSet::Native { archive, sidecar });
     }
 
     let candidates: Vec<&RomFile> = detail
@@ -536,7 +722,43 @@ fn plan_install(
 
     match candidates.as_slice() {
         [] => Err(LibraryError::Extract(NO_DOWNLOADABLE_FILE.to_string())),
-        [only] => {
+        [only] => Ok(DownloadSet::Single(only)),
+        many => {
+            let launch = many
+                .iter()
+                .copied()
+                .find(|file| file.file_name.to_lowercase().ends_with(".m3u"))
+                .unwrap_or(many[0]);
+            Ok(DownloadSet::Multi {
+                files: many.to_vec(),
+                launch,
+            })
+        }
+    }
+}
+
+/// Computes the download plan for `detail` under `library`. Pure apart from
+/// moving `source` onto the job: no I/O, no queue access.
+///
+/// One candidate ⇒ a single archive at `<platform dir>/<archive name>`.
+/// More than one ⇒ a multi-file game: every candidate lands in
+/// `<platform dir>/<safe title>/`. A native game lands in its own per-game
+/// directory ([`plan_native_install`]). [`download_set`] picks the files.
+///
+/// The plan is the same whatever `source` is. For a
+/// [`GameSource::Drive`], every planned file must have a copy on the drive.
+fn plan_install(
+    detail: &RomDetail,
+    library: &Path,
+    source: GameSource,
+) -> Result<InstallJob, LibraryError> {
+    let platform_root = platform_dir(library, &detail.platform_name);
+
+    let job = match download_set(detail)? {
+        DownloadSet::Native { archive, sidecar } => {
+            plan_native_install(detail, &platform_root, archive, sidecar, source)
+        }
+        DownloadSet::Single(only) => {
             // Named from the FILE, not `detail.fs_name`: for a game stored in
             // a per-game folder on the server, `fs_name` is the folder name
             // with no extension. The file's name is what the record stores
@@ -553,7 +775,8 @@ fn plan_install(
             } else {
                 detail.filesize_bytes
             };
-            Ok(InstallJob {
+            InstallJob {
+                space: None,
                 rom_id: detail.id,
                 mode: InstallMode::Base,
                 content_kind: None,
@@ -565,17 +788,13 @@ fn plan_install(
                 launch_entry: only.file_name.clone(),
                 native_game_dir: None,
                 game_json_target: None,
-                client,
-            })
+                source,
+                restore: None,
+            }
         }
-        many => {
+        DownloadSet::Multi { files, launch } => {
             let game_dir = platform_root.join(sanitize_component(&detail.name, "game"));
-            let launch = many
-                .iter()
-                .copied()
-                .find(|file| file.file_name.to_lowercase().ends_with(".m3u"))
-                .unwrap_or(many[0]);
-            let targets = many
+            let targets = files
                 .iter()
                 .map(|file| {
                     content_target(
@@ -586,11 +805,12 @@ fn plan_install(
                     )
                 })
                 .collect();
-            Ok(InstallJob {
+            InstallJob {
+                space: None,
                 rom_id: detail.id,
                 mode: InstallMode::Base,
                 content_kind: None,
-                file_ids: many.iter().map(|file| file.id).collect(),
+                file_ids: files.iter().map(|file| file.id).collect(),
                 detail: detail.clone(),
                 targets,
                 primary_archive: game_dir.join(&launch.file_name),
@@ -598,32 +818,31 @@ fn plan_install(
                 launch_entry: launch.file_name.clone(),
                 native_game_dir: None,
                 game_json_target: None,
-                client,
-            })
+                source,
+                restore: None,
+            }
         }
+    };
+    if let GameSource::Drive(drive) = &job.source {
+        drive.copy_files(&job.file_ids, &job.targets)?;
     }
+    Ok(job)
 }
 
-/// [`plan_install`]'s native (Windows) branch.
+/// [`plan_install`]'s native (Windows) branch, for the `archive` and
+/// `sidecar` [`download_set`] picked.
 ///
-/// The archive is picked by [`specials::native::select_archive`], not by the
-/// generic candidate filter: a native game's server payload routinely lists
-/// artwork and soundtracks before the archive, and `game.json` is a metadata
-/// sidecar rather than something to launch. Everything is downloaded into
-/// `<platform dir>/<safe title>/` — the game's own home directory, which
-/// later holds the extracted `game/` tree and (on non-Windows hosts) the
-/// Wine prefix. Ports `_download_game_archive`'s native branch
-/// (`install_mixin.py:977-1020`).
+/// Everything is downloaded into `<platform dir>/<safe title>/` — the game's
+/// own home directory, which later holds the extracted `game/` tree and (on
+/// non-Windows hosts) the Wine prefix. Ports `_download_game_archive`'s
+/// native branch (`install_mixin.py:977-1020`).
 fn plan_native_install(
     detail: &RomDetail,
     platform_root: &Path,
-    client: Arc<RommClient>,
-) -> Result<InstallJob, LibraryError> {
-    let Some(archive) = specials::native::select_archive(&detail.files) else {
-        return Err(LibraryError::Extract(
-            NO_NATIVE_DOWNLOADABLE_FILE.to_string(),
-        ));
-    };
+    archive: &RomFile,
+    sidecar: Option<&RomFile>,
+    source: GameSource,
+) -> InstallJob {
     let game_dir = platform_root.join(sanitize_component(&detail.name, "game"));
     let dest = game_dir.join(&archive.file_name);
     let size = if archive.file_size_bytes > 0 {
@@ -637,7 +856,7 @@ fn plan_native_install(
     // The sidecar is fetched as its own request with its own `file_ids`:
     // asking for the content endpoint without one makes the server bundle
     // every listed file into a single zip.
-    let game_json_target = specials::native::has_game_json(&detail.files).map(|sidecar| {
+    let game_json_target = sidecar.map(|sidecar| {
         let sidecar_dest = game_dir.join(METADATA_FILE_NAME);
         file_ids.push(sidecar.id);
         targets.push(content_target(
@@ -649,7 +868,8 @@ fn plan_native_install(
         sidecar_dest
     });
 
-    Ok(InstallJob {
+    InstallJob {
+        space: None,
         rom_id: detail.id,
         mode: InstallMode::Base,
         content_kind: None,
@@ -661,8 +881,9 @@ fn plan_native_install(
         launch_entry: archive.file_name.clone(),
         native_game_dir: Some(game_dir),
         game_json_target,
-        client,
-    })
+        source,
+        restore: None,
+    }
 }
 
 /// Which finalize path a `Base`/`Update` job takes once the multi-file case
@@ -681,6 +902,81 @@ enum BaseRoute {
     Extract,
     /// Nothing to extract: the downloaded file is the install.
     Downloaded,
+}
+
+/// Whether `job` extracts its download next to it: a single-file game
+/// whose route is not [`BaseRoute::Downloaded`], and every add-on mode (an
+/// update or DLC archive is unpacked over the install).
+fn job_extracts(job: &InstallJob) -> bool {
+    if job.multi_file_game_dir.is_some() || job.restore.is_some() {
+        return false;
+    }
+    match job.mode {
+        InstallMode::Base | InstallMode::Update => {
+            base_finalize_route(
+                &job.detail.platform_slug,
+                &job.detail.platform_name,
+                &job.primary_archive,
+            ) != BaseRoute::Downloaded
+        }
+        InstallMode::Ps4Content | InstallMode::Xbox360Content | InstallMode::NativeUpdate => true,
+    }
+}
+
+/// What a game job adds to the library folder at its peak: the server's
+/// file sizes (unknown when any is missing), plus as much again when it is
+/// extracted. A restore needs its tree's size.
+fn install_estimate(job: &InstallJob) -> space::Estimate {
+    if let Some(plan) = &job.restore {
+        return space::Estimate {
+            download: Some(plan.installed.tree_bytes),
+            existing: 0,
+            extracts: false,
+        };
+    }
+    let download = job.targets.iter().try_fold(0u64, |sum, target| {
+        u64::try_from(target.expected_size)
+            .ok()
+            .filter(|size| *size > 0)
+            .map(|size| sum.saturating_add(size))
+    });
+    // A destination that is already there is skipped when complete, or
+    // truncated and replaced: either way it needs no new space.
+    let existing = job
+        .targets
+        .iter()
+        .filter_map(|target| fs::metadata(&target.dest).ok())
+        .filter(fs::Metadata::is_file)
+        .fold(0u64, |sum, meta| sum.saturating_add(meta.len()));
+    space::Estimate {
+        download: if job.targets.is_empty() {
+            None
+        } else {
+            download
+        },
+        existing,
+        extracts: job_extracts(job),
+    }
+}
+
+/// What an emulator job adds: a release copied off a drive has known
+/// sizes; a download's size is known only once its response arrives.
+/// Either is extracted.
+fn emulator_estimate(job: &EmulatorJob) -> space::Estimate {
+    let download = job.local.as_ref().and_then(|local| {
+        std::iter::once(&local.primary)
+            .chain(&local.supplementals)
+            .try_fold(0u64, |sum, path| {
+                fs::metadata(path)
+                    .ok()
+                    .map(|meta| sum.saturating_add(meta.len()))
+            })
+    });
+    space::Estimate {
+        download,
+        existing: 0,
+        extracts: true,
+    }
 }
 
 /// [`BaseRoute`] for `platform` and the downloaded `archive`. Pure, so the
@@ -763,6 +1059,7 @@ fn content_job(
     ));
 
     let mut job = InstallJob {
+        space: None,
         rom_id: detail.id,
         mode,
         content_kind: Some(kind),
@@ -776,7 +1073,8 @@ fn content_job(
         launch_entry: detail.fs_name.clone(),
         native_game_dir: None,
         game_json_target: None,
-        client,
+        source: GameSource::Server(client),
+        restore: None,
     };
     job.targets.push(FileTarget {
         url_path: format!(
@@ -853,6 +1151,14 @@ pub struct EmulatorInstalled {
 /// imports Tauri.
 pub type EmulatorInstalledHook = Arc<dyn Fn(EmulatorInstalled) + Send + Sync>;
 
+/// One cached plan-time scan ([`InstallService::local_states`]).
+struct LocalScan {
+    at: Instant,
+    root: PathBuf,
+    for_windows: bool,
+    state: crate::backup::plan::LocalState,
+}
+
 /// Owns the install queue and drives one download task and one finalize task
 /// at a time. Every method takes `&self`; the async entry points take
 /// `&Arc<Self>` because they spawn tasks that outlive the call.
@@ -917,6 +1223,45 @@ pub struct InstallService {
     /// The forge source a managed umu-launcher install resolves
     /// ([`umu::default_source`]; [`Self::set_umu_source`] in tests).
     umu_source: RwLock<Value>,
+    /// Where a backup fetches the Steam Linux Runtime from
+    /// ([`crate::backup::steam_runtime::DEFAULT_BASE`];
+    /// [`Self::set_steam_runtime_base`] in tests).
+    steam_runtime_base: RwLock<String>,
+    /// The last backup batch id handed out ([`Self::start_backup`]).
+    next_batch: AtomicU64,
+    /// Drives [`Self::abort_drive`] marked removed, with the reason their
+    /// rows fail with. Cleared by [`Self::drive_connected`] and by a new
+    /// backup to the drive.
+    removed_drives: Mutex<HashMap<String, String>>,
+    /// Emulator release sizes, per name and OS, as a download or
+    /// [`Self::resolve_emulator_sizes`] found them. Kept for the process, so
+    /// the Backup dialog does not query a forge again.
+    resolved_sizes: Mutex<HashMap<(String, crate::backup::pack::PackOs), u64>>,
+    /// Every backup row admitted this session, by entry id: what `retry`
+    /// rebuilds the row from.
+    backup_rows: Mutex<HashMap<u64, (backup_job::DriveTarget, backup_job::BackupItem)>>,
+    /// Test hook run before each file (and archive part) a backup writes
+    /// to its drive.
+    backup_write_hook: RwLock<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// Plan-time tree scans of installed games, by rom id
+    /// ([`Self::local_states`]); fresh for [`LOCAL_SCAN_TTL`].
+    local_scans: Mutex<HashMap<i64, LocalScan>>,
+    /// Every install-from-drive row admitted this session, by entry id: what
+    /// `retry` rebuilds the row from.
+    drive_rows: Mutex<HashMap<u64, drive_install::DriveRow>>,
+    /// Test hook run after each chunk an install copies off a drive.
+    drive_copy_hook: RwLock<Option<drive_install::DriveCopyHook>>,
+    /// Whether a game is running ([`Self::set_running_check`]). `None`
+    /// (grid-core tests that do not opt in): nothing counts as running.
+    running_check: RwLock<Option<RunningCheck>>,
+    /// The space promised to queued and running jobs ([`space`]).
+    space: space::SpaceLedger,
+    /// How a volume's free space and filesystem are read
+    /// ([`Self::set_space_probe`] in tests).
+    space_probe: RwLock<space::SpaceProbe>,
+    /// Each admitted job's [`space::JobSpace`], by entry id, for the
+    /// progress callbacks. Weak: the job's payload owns it.
+    job_spaces: Mutex<HashMap<u64, std::sync::Weak<space::JobSpace>>>,
 }
 
 impl InstallService {
@@ -964,6 +1309,19 @@ impl InstallService {
             emulator_installed_hook: RwLock::new(None),
             library_gate: RwLock::new(LibraryGate::default()),
             umu_source: RwLock::new(umu::default_source()),
+            steam_runtime_base: RwLock::new(crate::backup::steam_runtime::DEFAULT_BASE.to_string()),
+            next_batch: AtomicU64::new(0),
+            removed_drives: Mutex::new(HashMap::new()),
+            resolved_sizes: Mutex::new(HashMap::new()),
+            backup_rows: Mutex::new(HashMap::new()),
+            backup_write_hook: RwLock::new(None),
+            local_scans: Mutex::new(HashMap::new()),
+            drive_rows: Mutex::new(HashMap::new()),
+            drive_copy_hook: RwLock::new(None),
+            running_check: RwLock::new(None),
+            space: space::SpaceLedger::new(),
+            space_probe: RwLock::new(space::SpaceProbe::system()),
+            job_spaces: Mutex::new(HashMap::new()),
         })
     }
 
@@ -1199,7 +1557,14 @@ impl InstallService {
             .registry
             .find(None, title, platform)?
             .ok_or_else(|| LibraryError::Registry(NOT_INSTALLED.to_string()))?;
-        if row_is_busy(&self.snapshot(), &row) {
+        let snapshot = self.snapshot();
+        if row
+            .rom_id
+            .is_some_and(|rom_id| local_backup_live(&snapshot, rom_id))
+        {
+            return Err(LibraryError::Extract(BACKING_UP_LOCAL.to_string()));
+        }
+        if row_is_busy(&snapshot, &row) {
             return Err(LibraryError::Extract(LOCATE_WHILE_INSTALLING.to_string()));
         }
         let home = crate::platform::home_dir();
@@ -1256,7 +1621,7 @@ impl InstallService {
                 return Ok(());
             }
         }
-        let job = plan_install(&detail, &library, client)?;
+        let job = plan_install(&detail, &library, GameSource::Server(client))?;
         let key = JobKey::Rom(job.rom_id);
         let title = job.detail.name.clone();
         let platform = job.detail.platform_name.clone();
@@ -1317,6 +1682,7 @@ impl InstallService {
         rom_id: i64,
     ) -> Result<(), LibraryError> {
         self.check_library_gate()?;
+        self.refuse_while_backing_up(rom_id)?;
         let row = self.current_row(rom_id)?;
         let extracted_dir = row.extracted_dir.trim();
         if !row.is_native() || extracted_dir.is_empty() || !Path::new(extracted_dir).is_dir() {
@@ -1366,6 +1732,7 @@ impl InstallService {
         let title = format!("{} (update)", detail.name);
         let platform = detail.platform_name.clone();
         let job = InstallJob {
+            space: None,
             rom_id,
             mode: InstallMode::NativeUpdate,
             content_kind: None,
@@ -1377,7 +1744,8 @@ impl InstallService {
             native_game_dir: Some(native_game_dir),
             game_json_target,
             detail: detail.clone(),
-            client,
+            source: GameSource::Server(client),
+            restore: None,
         };
         self.admit(
             JobKey::NativeUpdate(rom_id),
@@ -1540,13 +1908,14 @@ impl InstallService {
         rom_id: i64,
     ) -> Result<(), LibraryError> {
         self.check_library_gate()?;
+        self.refuse_while_backing_up(rom_id)?;
         let library = self.library_root()?;
         let row = self.current_row(rom_id)?;
         if row.is_native() {
             return Err(LibraryError::Extract(NATIVE_UPDATE_REQUIRED.to_string()));
         }
         let detail = client.rom_detail(rom_id).await?;
-        let mut job = plan_install(&detail, &library, client)?;
+        let mut job = plan_install(&detail, &library, GameSource::Server(client))?;
         job.mode = InstallMode::Update;
         let key = JobKey::Rom(job.rom_id);
         let title = job.detail.name.clone();
@@ -1653,6 +2022,7 @@ impl InstallService {
             .unwrap()
             .insert(source_id.clone(), request.clone());
         let job = EmulatorJob {
+            space: None,
             source_id: source_id.clone(),
             profile_name: profile.name.clone(),
             profile_args: profile.args.clone(),
@@ -1663,6 +2033,7 @@ impl InstallService {
             resolved: None,
             target: JobTarget::Emulator,
             entry_name: entry_name.clone(),
+            local: None,
             romm: Some(RommBuild {
                 client,
                 rom_id: request.rom_id,
@@ -1697,6 +2068,7 @@ impl InstallService {
             .unwrap_or_else(|| "latest".to_string());
 
         let job = EmulatorJob {
+            space: None,
             source_id: source_id.clone(),
             profile_name: profile.name.clone(),
             profile_args: profile.args.clone(),
@@ -1708,6 +2080,7 @@ impl InstallService {
             target: JobTarget::Emulator,
             entry_name: profile.name.clone(),
             romm: None,
+            local: None,
         };
         let title = job.profile_name.clone();
         self.admit(
@@ -1800,6 +2173,7 @@ impl InstallService {
             .unwrap_or_else(|| "latest".to_string());
 
         let job = EmulatorJob {
+            space: None,
             source_id: source_id.clone(),
             profile_name: profile.name.clone(),
             profile_args: profile.args.clone(),
@@ -1811,6 +2185,7 @@ impl InstallService {
             target: JobTarget::CompatTool,
             entry_name: profile.name.clone(),
             romm: None,
+            local: None,
         };
         let title = job.profile_name.clone();
         self.admit(
@@ -1859,6 +2234,7 @@ impl InstallService {
             return Err(LibraryError::Extract(UMU_LINUX_ONLY.to_string()));
         }
         let job = EmulatorJob {
+            space: None,
             source_id: umu::UMU_SOURCE_ID.to_string(),
             profile_name: umu::UMU_TITLE.to_string(),
             profile_args: String::new(),
@@ -1870,6 +2246,7 @@ impl InstallService {
             target: JobTarget::UmuLauncher,
             entry_name: umu::UMU_TITLE.to_string(),
             romm: None,
+            local: None,
         };
         self.admit(
             JobKey::Emulator(umu::UMU_SOURCE_ID.to_string()),
@@ -1887,13 +2264,20 @@ impl InstallService {
         *self.umu_source.write().unwrap() = source;
     }
 
+    /// Replaces the host a backup fetches the Steam Linux Runtime from
+    /// (default [`crate::backup::steam_runtime::DEFAULT_BASE`]). A test seam.
+    pub fn set_steam_runtime_base(&self, base: &str) {
+        *self.steam_runtime_base.write().unwrap() = base.to_string();
+    }
+
     /// Cancels `entry_id`: an active download gets its flag flipped and ends
     /// as `Cancelled` once the task observes it; a queued entry is dropped
-    /// immediately. Anything else is ignored.
+    /// immediately. A backup row writing to its drive gets its flag flipped
+    /// too ([`CancelAction::ActiveWrite`]). Anything else is ignored.
     pub fn cancel(&self, entry_id: u64) {
         let action = self.queue.lock().unwrap().request_cancel(entry_id);
         match action {
-            CancelAction::ActiveDownload => {
+            CancelAction::ActiveDownload | CancelAction::ActiveWrite => {
                 if let Some(flag) = self.cancel_flags.lock().unwrap().get(&entry_id) {
                     flag.store(true, Ordering::Relaxed);
                 }
@@ -1915,6 +2299,578 @@ impl InstallService {
         if let Some(id) = id {
             self.cancel(id);
         }
+    }
+
+    // --- space ----------------------------------------------------------------
+
+    /// The ledger of space promised to queued and running jobs. Every clone
+    /// is the same ledger (the library move reads it).
+    pub fn space_ledger(&self) -> space::SpaceLedger {
+        self.space.clone()
+    }
+
+    /// Replaces how volumes are read (tests fake a small or full disk).
+    pub fn set_space_probe(&self, probe: space::SpaceProbe) {
+        *self.space_probe.write().unwrap() = probe;
+    }
+
+    fn space_probe(&self) -> space::SpaceProbe {
+        self.space_probe.read().unwrap().clone()
+    }
+
+    /// What queued and running jobs still hold on the filesystem of `path`.
+    pub fn reserved_at(&self, path: &Path) -> u64 {
+        (self.space_probe().key)(path).map_or(0, |key| self.space.outstanding(&key))
+    }
+
+    /// What queued and running jobs hold on the drive at `mount`, less
+    /// what the backup rows for `drive_key` whose items are in `exclude`
+    /// hold: a plan that would write those items again must not count them
+    /// twice (a start skips them).
+    pub fn drive_reserved(
+        &self,
+        mount: &Path,
+        drive_key: &str,
+        exclude: &[queue::BackupItemKey],
+    ) -> u64 {
+        let total = self.reserved_at(mount);
+        let rows = self.backup_rows.lock().unwrap();
+        let spaces = self.job_spaces.lock().unwrap();
+        let excluded = rows
+            .iter()
+            .filter(|(_, (drive, item))| drive.key == drive_key && exclude.contains(&item.key()))
+            .filter_map(|(id, _)| spaces.get(id).and_then(std::sync::Weak::upgrade))
+            .fold(0u64, |sum, space| {
+                sum.saturating_add(space.drive_outstanding())
+            });
+        total.saturating_sub(excluded)
+    }
+
+    /// Checks and reserves an install's estimated peak in the library
+    /// folder at `at`. Refused with "There isn't enough free space in the
+    /// library folder for <Game> (needs X, Y available)". A volume that
+    /// cannot be read is reserved without a check.
+    fn reserve_install(
+        &self,
+        title: &str,
+        at: &Path,
+        estimate: space::Estimate,
+    ) -> Result<Arc<space::JobSpace>, LibraryError> {
+        let probe = self.space_probe();
+        let reservation = match (probe.key)(at) {
+            None => None,
+            Some(key) => {
+                let bytes = estimate.peak();
+                match (probe.free)(at) {
+                    None => Some(self.space.reserve(key, bytes)),
+                    Some(free) => {
+                        let request = space::Request { key, bytes, free };
+                        match self.space.try_reserve(std::slice::from_ref(&request)) {
+                            Ok(mut held) => held.pop(),
+                            Err((_, shortfall)) => {
+                                return Err(LibraryError::Extract(
+                                    space::library_shortfall_message(title, shortfall),
+                                ))
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        Ok(Arc::new(space::JobSpace::install(
+            reservation,
+            estimate,
+            at.to_path_buf(),
+            title,
+            probe,
+        )))
+    }
+
+    /// Gives a game or emulator job its reservation, unless it has one.
+    /// A backup row is reserved by [`Self::start_backup_on`] instead.
+    fn attach_space(&self, payload: &mut JobPayload) -> Result<(), LibraryError> {
+        match payload {
+            JobPayload::Game(job) if job.space.is_none() => {
+                let at = match &job.restore {
+                    Some(plan) => plan.dest.clone(),
+                    None => job.primary_archive.clone(),
+                };
+                let estimate = install_estimate(job);
+                job.space = Some(self.reserve_install(&job.detail.name, &at, estimate)?);
+            }
+            JobPayload::Emulator(job) if job.space.is_none() => {
+                let estimate = emulator_estimate(job);
+                job.space = Some(self.reserve_install(&job.entry_name, &job.library, estimate)?);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn job_space(&self, id: u64) -> Option<Arc<space::JobSpace>> {
+        self.job_spaces
+            .lock()
+            .unwrap()
+            .get(&id)
+            .and_then(std::sync::Weak::upgrade)
+    }
+
+    /// The archive is down: before extracting, read its real uncompressed
+    /// size where that is cheap (a zip's central directory) and resize the
+    /// job's reservation to it. When that no longer fits the download is
+    /// removed and the job fails with the library-folder message.
+    fn check_extract_space(&self, job: &InstallJob) -> Result<(), LibraryError> {
+        let Some(space) = &job.space else {
+            return Ok(());
+        };
+        if !job_extracts(job) {
+            return Ok(());
+        }
+        let Some(extracted) = extract::zip_uncompressed_total(&job.primary_archive) else {
+            return Ok(());
+        };
+        space.resize_for_extract(extracted).map_err(|message| {
+            let _ = fs::remove_file(&job.primary_archive);
+            LibraryError::Extract(message)
+        })
+    }
+
+    // --- backups ------------------------------------------------------------
+
+    /// Queues a backup to `drive`: one row per item, games first, then
+    /// emulators, then firmware ([`crate::backup::plan::plan`] builds
+    /// `items`). Every row shares one new batch id. Each row downloads into
+    /// `<library>/.grid-staging/backup-<entry id>/` and is then written to the
+    /// drive. An item already queued for the same drive is skipped.
+    ///
+    /// `Err` only before anything is queued: no library folder (staging lives
+    /// there), or a library move running. Starting a backup to a drive
+    /// clears an earlier removal mark for it: the caller resolved `drive`
+    /// from the current scan.
+    pub fn start_backup(
+        self: &Arc<Self>,
+        client: Arc<RommClient>,
+        drive: backup_job::DriveTarget,
+        items: crate::backup::plan::BackupItems,
+    ) -> Result<crate::backup::plan::BackupQueued, LibraryError> {
+        let free = (self.space_probe().free)(&drive.mount);
+        self.start_backup_on(client, drive, items, free)
+    }
+
+    /// [`Self::start_backup`] with the drive's free space as the caller's
+    /// drive scan read it (`None` when unknown: nothing is checked on the
+    /// drive).
+    ///
+    /// The rows' space is checked against the [`space`] ledger and reserved
+    /// in one step, so two quick starts can never both pass: the bytes to
+    /// write on the drive, and the staging space in the library folder.
+    /// When the batch does not fit nothing is queued: "<label> doesn't have
+    /// enough free space (needs X, Y available)". A row already queued for
+    /// the drive is skipped before the check.
+    pub fn start_backup_on(
+        self: &Arc<Self>,
+        client: Arc<RommClient>,
+        drive: backup_job::DriveTarget,
+        items: crate::backup::plan::BackupItems,
+        drive_free: Option<u64>,
+    ) -> Result<crate::backup::plan::BackupQueued, LibraryError> {
+        self.check_library_gate()?;
+        let library = self.library_root()?;
+        self.drive_connected(&drive.key);
+        let rows: Vec<backup_job::BackupItem> = items
+            .games
+            .into_iter()
+            .map(backup_job::BackupItem::Game)
+            .chain(
+                items
+                    .emulators
+                    .into_iter()
+                    .map(backup_job::BackupItem::Emulator),
+            )
+            .chain(
+                items
+                    .firmware
+                    .into_iter()
+                    .map(backup_job::BackupItem::Firmware),
+            )
+            .collect();
+        let rows: Vec<backup_job::BackupItem> = {
+            let queue = self.queue.lock().unwrap();
+            rows.into_iter()
+                .filter(|item| {
+                    !queue.has_pending(&JobKey::Backup {
+                        drive: drive.key.clone(),
+                        item: item.key(),
+                    })
+                })
+                .collect()
+        };
+        let spaces = self.reserve_backup(&drive, &library, &rows, drive_free)?;
+        let batch = self.next_batch.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut queued = crate::backup::plan::BackupQueued {
+            batch,
+            ..Default::default()
+        };
+        for (item, space) in rows.into_iter().zip(spaces) {
+            let admitted = self.admit_backup_item(
+                client.clone(),
+                drive.clone(),
+                item.clone(),
+                &library,
+                batch,
+                Some(space),
+            )?;
+            if admitted {
+                match item {
+                    backup_job::BackupItem::Game(_) => queued.games += 1,
+                    backup_job::BackupItem::Emulator(_) => queued.emulators += 1,
+                    backup_job::BackupItem::Firmware(_) => queued.firmware += 1,
+                }
+            }
+        }
+        Ok(queued)
+    }
+
+    /// Checks and reserves, in one step, the space `rows` need: each row's
+    /// bytes on the drive (against `drive_free`) and its staging in the
+    /// library folder. One [`space::JobSpace`] per row, in order.
+    fn reserve_backup(
+        &self,
+        drive: &backup_job::DriveTarget,
+        library: &Path,
+        rows: &[backup_job::BackupItem],
+        drive_free: Option<u64>,
+    ) -> Result<Vec<Arc<space::JobSpace>>, LibraryError> {
+        let probe = self.space_probe();
+        let drive_key = (probe.key)(&drive.mount);
+        let staging_key = (probe.key)(library);
+        let staging_free = (probe.free)(library).unwrap_or(u64::MAX);
+        let drive_free = drive_free.unwrap_or(u64::MAX);
+        let mut requests: Vec<space::Request> = Vec::new();
+        let mut on_drive_flags: Vec<bool> = Vec::new();
+        let mut slots: Vec<(Option<usize>, Option<usize>)> = Vec::new();
+        for item in rows {
+            let mut push = |key: &Option<space::FsKey>, bytes: u64, free: u64, on_drive: bool| {
+                key.clone().map(|key| {
+                    requests.push(space::Request { key, bytes, free });
+                    on_drive_flags.push(on_drive);
+                    requests.len() - 1
+                })
+            };
+            let on_drive = push(&drive_key, item.bytes(), drive_free, true);
+            let staged = push(&staging_key, item.staging_bytes(), staging_free, false);
+            slots.push((on_drive, staged));
+        }
+        let held = self
+            .space
+            .try_reserve(&requests)
+            .map_err(|(index, shortfall)| {
+                LibraryError::Extract(if on_drive_flags[index] {
+                    space::drive_shortfall_message(&drive.label, shortfall)
+                } else {
+                    space::library_shortfall_message("this backup", shortfall)
+                })
+            })?;
+        let mut held: Vec<Option<space::Reservation>> = held.into_iter().map(Some).collect();
+        let mut take = |index: Option<usize>| index.and_then(|index| held[index].take());
+        Ok(rows
+            .iter()
+            .zip(slots)
+            .map(|(item, (on_drive, staged))| {
+                let staging = take(staged);
+                let on_drive = take(on_drive);
+                Arc::new(space::JobSpace::backup(
+                    staging,
+                    on_drive,
+                    &item.row().0,
+                    probe.clone(),
+                ))
+            })
+            .collect())
+    }
+
+    /// Admits one backup row and remembers it for `retry`. `false` for a
+    /// duplicate.
+    fn admit_backup_item(
+        self: &Arc<Self>,
+        client: Arc<RommClient>,
+        drive: backup_job::DriveTarget,
+        item: backup_job::BackupItem,
+        library: &Path,
+        batch: u64,
+        space: Option<Arc<space::JobSpace>>,
+    ) -> Result<bool, LibraryError> {
+        let (title, platform, kind) = item.row();
+        let key = JobKey::Backup {
+            drive: drive.key.clone(),
+            item: item.key(),
+        };
+        let meta = EntryMeta {
+            drive_id: drive.key.clone(),
+            drive_name: drive.name.clone(),
+            drive_label: drive.label.clone(),
+            batch,
+        };
+        let mut job =
+            backup_job::BackupJob::new(drive.clone(), item.clone(), client, library.to_path_buf());
+        job.space = space;
+        let admitted = self.admit_meta(
+            key,
+            &title,
+            &platform,
+            kind,
+            JobPayload::Backup(Box::new(job)),
+            meta,
+        )?;
+        if let Some(id) = admitted {
+            self.backup_rows.lock().unwrap().insert(id, (drive, item));
+        }
+        Ok(admitted.is_some())
+    }
+
+    /// The drive `drive_id` is gone (the drive watcher saw it disappear, or a
+    /// write found it missing):
+    /// 1. it is marked removed, so every row for it fails with `reason`
+    ///    ("SAMSUNG T7 was removed") instead of "cancelled";
+    /// 2. the rows downloading or writing for it have their cancel flags
+    ///    flipped;
+    /// 3. every waiting row for it, backup and install-from-drive alike,
+    ///    folds into one `backup_cancelled` row.
+    ///
+    /// The mark stays until [`Self::drive_connected`].
+    pub fn abort_drive(&self, drive_id: &str, reason: &str) -> backup_job::AbortReport {
+        if drive_id.is_empty() {
+            return backup_job::AbortReport::default();
+        }
+        self.removed_drives
+            .lock()
+            .unwrap()
+            .insert(drive_id.to_string(), reason.to_string());
+        let (report, removed) = {
+            let mut queue = self.queue.lock().unwrap();
+            let snapshot = queue.snapshot();
+            let mine = || snapshot.entries.iter().filter(|e| e.drive_id == drive_id);
+            let active: Vec<u64> = mine()
+                .filter(|e| e.status.is_live() && e.status != DownloadStatus::Queued)
+                .map(|e| e.id)
+                .collect();
+            let written = mine()
+                .filter(|e| e.status == DownloadStatus::Completed)
+                .count();
+            {
+                let flags = self.cancel_flags.lock().unwrap();
+                for id in &active {
+                    if let Some(flag) = flags.get(id) {
+                        flag.store(true, Ordering::Relaxed);
+                    }
+                }
+            }
+            let removed = queue.cancel_drive_queue(drive_id, reason);
+            {
+                let mut pending = self.pending_jobs.lock().unwrap();
+                for id in &removed {
+                    pending.remove(id);
+                }
+            }
+            let report = backup_job::AbortReport {
+                failed: active.len() as u32,
+                cancelled: removed.len() as u32,
+                written: written as u32,
+            };
+            (report, removed)
+        };
+        {
+            let mut rows = self.backup_rows.lock().unwrap();
+            for id in &removed {
+                rows.remove(id);
+            }
+        }
+        {
+            let mut rows = self.drive_rows.lock().unwrap();
+            for id in &removed {
+                rows.remove(id);
+            }
+        }
+        self.notify_now();
+        report
+    }
+
+    /// The drive `drive_id` is connected again: rows queued for it from now
+    /// on run normally.
+    pub fn drive_connected(&self, drive_id: &str) {
+        self.removed_drives.lock().unwrap().remove(drive_id);
+    }
+
+    /// The reason `drive_id`'s rows fail with, while it is marked removed.
+    fn removed_reason(&self, drive_id: &str) -> Option<String> {
+        self.removed_drives.lock().unwrap().get(drive_id).cloned()
+    }
+
+    /// Installs the check that tells whether a game is running. A running
+    /// game is not copied from this computer ([`RUNNING_NOW`]): the plan
+    /// lists it as downloading, and a queued copy fails.
+    pub fn set_running_check(&self, check: Option<RunningCheck>) {
+        *self.running_check.write().unwrap() = check;
+    }
+
+    /// Whether `rom_id` is running right now, per [`Self::set_running_check`].
+    pub(crate) fn game_running(&self, rom_id: i64) -> bool {
+        let check = self.running_check.read().unwrap().clone();
+        check.is_some_and(|check| check(rom_id))
+    }
+
+    /// Installs a hook run before each file a backup writes to its drive.
+    /// Tests use it to hold a write open; production never sets one.
+    #[doc(hidden)]
+    pub fn set_backup_write_hook(&self, hook: Option<Arc<dyn Fn() + Send + Sync>>) {
+        *self.backup_write_hook.write().unwrap() = hook;
+    }
+
+    /// Records the size of the emulator `name`'s release for `os`.
+    fn record_emulator_size(&self, name: &str, os: crate::backup::pack::PackOs, size: u64) {
+        if size > 0 {
+            self.resolved_sizes
+                .lock()
+                .unwrap()
+                .insert((name.to_string(), os), size);
+        }
+    }
+
+    /// Every emulator release size known this session, per name and OS: the
+    /// `sizes` input of [`crate::backup::plan::plan`].
+    pub fn emulator_sizes(&self) -> HashMap<(String, crate::backup::pack::PackOs), u64> {
+        self.resolved_sizes.lock().unwrap().clone()
+    }
+
+    /// Looks up the sizes of the emulator rows `items` that are not known
+    /// yet, best effort: a forge release (with its supplementals) for a
+    /// catalog emulator, the server file for a server build (needs
+    /// `client`), the program folder for a manual emulator (its archive is
+    /// at most that). A lookup that fails leaves the size unknown. Results
+    /// are cached for the process ([`Self::emulator_sizes`]).
+    pub async fn resolve_emulator_sizes(
+        &self,
+        client: Option<Arc<RommClient>>,
+        items: &[crate::backup::plan::EmulatorItem],
+    ) {
+        use crate::backup::plan::EmulatorSource;
+        for item in items {
+            let name = &item.pick.name;
+            if self
+                .resolved_sizes
+                .lock()
+                .unwrap()
+                .contains_key(&(name.clone(), item.os))
+            {
+                continue;
+            }
+            let size = match &item.pick.source {
+                EmulatorSource::Catalog { .. } => {
+                    let Ok(forge) = self.forge() else { continue };
+                    match backup_job::resolve_catalog(self, &forge, name, item.os).await {
+                        Ok((primary, supplementals)) => {
+                            let all = std::iter::once(&primary).chain(supplementals.iter());
+                            if all.clone().any(|download| download.size <= 0) {
+                                continue;
+                            }
+                            all.map(|download| download.size as u64).sum()
+                        }
+                        Err(_) => {
+                            // The error can name a forge URL: not logged.
+                            tracing::debug!(emulator = %name, "emulator size unknown");
+                            continue;
+                        }
+                    }
+                }
+                EmulatorSource::Server { source_id } => {
+                    let Some(client) = &client else { continue };
+                    match backup_job::server_build(self, client, source_id, item.os).await {
+                        Ok((_, size)) if size > 0 => size as u64,
+                        _ => continue,
+                    }
+                }
+                EmulatorSource::Local { program, .. } => {
+                    let Some(folder) = program.parent().map(Path::to_path_buf) else {
+                        continue;
+                    };
+                    let sized = tokio::task::spawn_blocking(move || folder_bytes(&folder)).await;
+                    match sized {
+                        Ok(size) if size > 0 => size,
+                        _ => continue,
+                    }
+                }
+            };
+            self.record_emulator_size(name, item.os, size);
+        }
+    }
+
+    /// The emulator each system of `games` takes in a backup
+    /// ([`crate::backup::plan::choose_emulator`]), keyed by platform slug,
+    /// and the compat tool Windows games take
+    /// ([`crate::backup::plan::choose_compat_tool`]). Reads the config.
+    pub fn backup_emulator_choices(
+        &self,
+        games: &[crate::backup::plan::PlanGame],
+    ) -> (
+        Vec<(String, crate::backup::plan::EmulatorChoice)>,
+        Option<crate::backup::plan::EmulatorPick>,
+    ) {
+        let config = Config::load(&self.config_path).unwrap_or_default();
+        let mut choices: Vec<(String, crate::backup::plan::EmulatorChoice)> = Vec::new();
+        for game in games {
+            if choices.iter().any(|(slug, _)| *slug == game.platform_slug) {
+                continue;
+            }
+            let choice = crate::backup::plan::choose_emulator(
+                &config,
+                &self.profiles,
+                &game.platform_label,
+                &game.platform_slug,
+                &game.platform_name,
+            );
+            choices.push((game.platform_slug.clone(), choice));
+        }
+        let compat = crate::backup::plan::choose_compat_tool(&config, &self.profiles);
+        (choices, compat)
+    }
+
+    /// Retries a failed or cancelled backup row: the item it wrote, to the
+    /// same drive, which must be connected (its index still readable at the
+    /// mount path the row used, and not marked removed). The new row gets a
+    /// batch of its own.
+    async fn retry_backup(
+        self: &Arc<Self>,
+        client: Option<Arc<RommClient>>,
+        entry_id: u64,
+        drive_key: &str,
+        item: queue::BackupItemKey,
+    ) -> Result<(), LibraryError> {
+        let client = client.ok_or_else(|| LibraryError::Registry("not connected".to_string()))?;
+        // Every backup row this session admitted is remembered (the queue
+        // itself does not outlive the process).
+        let remembered = self.backup_rows.lock().unwrap().get(&entry_id).cloned();
+        let Some((mut drive, item)) = remembered.filter(|(_, known)| known.key() == item) else {
+            return Err(LibraryError::Extract(
+                "This backup can't be retried; backup again".to_string(),
+            ));
+        };
+        let not_connected = || LibraryError::Extract(format!("Connect {} to retry", drive.label));
+        if drive.key != drive_key || self.removed_reason(drive_key).is_some() {
+            return Err(not_connected());
+        }
+        match crate::backup::pack::read_pack(&drive.mount) {
+            Ok(crate::backup::pack::PackState::Ready(pack)) => drive.name = pack.name,
+            _ => return Err(not_connected()),
+        }
+        let library = self.library_root()?;
+        let free = (self.space_probe().free)(&drive.mount);
+        let space = self
+            .reserve_backup(&drive, &library, std::slice::from_ref(&item), free)?
+            .pop();
+        self.dismiss(entry_id);
+        let batch = self.next_batch.fetch_add(1, Ordering::Relaxed) + 1;
+        self.admit_backup_item(client, drive, item, &library, batch, space)?;
+        Ok(())
     }
 
     /// Creates a drawer row for a transfer this service does NOT drive (the
@@ -1948,6 +2904,101 @@ impl InstallService {
             .unwrap()
             .check()
             .map_err(|busy| LibraryError::LibraryBusy(busy.reason))
+    }
+
+    /// True while a backup copies `rom_id` from this computer's install:
+    /// a live `backup_game_local` row for it (queued, reading the server
+    /// or archiving). Uninstall, update and Locate… refuse the game then.
+    pub fn local_backup_busy(&self, rom_id: i64) -> bool {
+        local_backup_live(&self.snapshot(), rom_id)
+    }
+
+    /// `Err(`[`BACKING_UP_LOCAL`]`)` while [`Self::local_backup_busy`].
+    fn refuse_while_backing_up(&self, rom_id: i64) -> Result<(), LibraryError> {
+        if self.local_backup_busy(rom_id) {
+            return Err(LibraryError::Extract(BACKING_UP_LOCAL.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Whether each of `rom_ids` can be copied from this computer's install
+    /// ([`crate::backup::local::assess`]), for the Backup dialog's plan:
+    /// - one registry pass ([`Self::installed_rows`], so Missing is fresh);
+    /// - the row for each rom id judged by [`crate::backup::local::locate`]
+    ///   against `live_server` (no userinfo needed);
+    /// - an eligible tree scanned, or its scan reused when the same tree
+    ///   was scanned for the same `for_windows` within the last minute (the
+    ///   dialog plans every ready drive).
+    ///
+    /// A game running right now ([`Self::set_running_check`]) is
+    /// [`LocalState::Ineligible`] with [`RUNNING_NOW`], unscanned.
+    ///
+    /// `outdated` is always `None`: the caller fills it from the update set.
+    /// A rom id with no row is [`LocalState::NotInstalled`].
+    pub fn local_states(
+        &self,
+        rom_ids: &[i64],
+        live_server: &str,
+        for_windows: bool,
+    ) -> Result<HashMap<i64, crate::backup::plan::LocalState>, LibraryError> {
+        use crate::backup::local::{self, Located};
+        use crate::backup::plan::LocalState;
+        let library = self.library_root()?;
+        let rows = self.installed_rows()?;
+        let home = crate::platform::home_dir();
+        let home = home.as_deref();
+        let now = Instant::now();
+        let mut states = HashMap::new();
+        for &rom_id in rom_ids {
+            let row = rows.iter().find(|row| row.game.rom_id == Some(rom_id));
+            let located = local::locate(
+                rom_id,
+                row.map(|row| &row.game),
+                row.is_some_and(|row| row.missing),
+                &library,
+                home,
+                live_server,
+            );
+            let state = match located {
+                Located::NotInstalled => LocalState::NotInstalled,
+                Located::Ineligible(reason) => LocalState::Ineligible { reason },
+                Located::Eligible(_) if self.game_running(rom_id) => LocalState::Ineligible {
+                    reason: RUNNING_NOW.to_string(),
+                },
+                Located::Eligible(source) => {
+                    let cached = self
+                        .local_scans
+                        .lock()
+                        .unwrap()
+                        .get(&rom_id)
+                        .filter(|scan| {
+                            scan.root == source.root
+                                && scan.for_windows == for_windows
+                                && now.saturating_duration_since(scan.at) < LOCAL_SCAN_TTL
+                        })
+                        .map(|scan| scan.state.clone());
+                    match cached {
+                        Some(state) => state,
+                        None => {
+                            let state =
+                                local::scanned_state(&local::scan_tree(&source, for_windows));
+                            self.local_scans.lock().unwrap().insert(
+                                rom_id,
+                                LocalScan {
+                                    at: now,
+                                    root: source.root.clone(),
+                                    for_windows,
+                                    state: state.clone(),
+                                },
+                            );
+                            state
+                        }
+                    }
+                }
+            };
+            states.insert(rom_id, state);
+        }
+        Ok(states)
     }
 
     /// Creates the library move's Downloads row
@@ -2029,6 +3080,14 @@ impl InstallService {
         entry_id: u64,
     ) -> Result<(), LibraryError> {
         let retryable = self.queue.lock().unwrap().retryable(entry_id);
+        // An install from a backup drive retries from the drive, never from
+        // the server.
+        if retryable.is_some() {
+            let row = self.drive_rows.lock().unwrap().get(&entry_id).cloned();
+            if let Some(row) = row {
+                return self.retry_drive_row(entry_id, row);
+            }
+        }
         match retryable {
             Some(JobKey::Rom(rom_id)) => {
                 let client =
@@ -2084,6 +3143,11 @@ impl InstallService {
             Some(JobKey::External(_)) => Ok(()),
             // A library move is resumed or restarted by its own service.
             Some(JobKey::LibraryMove) => Ok(()),
+            Some(JobKey::Backup { drive, item }) => {
+                self.retry_backup(client, entry_id, &drive, item).await
+            }
+            // A summary row is never retryable.
+            Some(JobKey::BackupSummary(_)) => Ok(()),
             None => Ok(()),
         }
     }
@@ -2100,6 +3164,8 @@ impl InstallService {
         }
         self.pending_jobs.lock().unwrap().remove(&entry_id);
         self.cancel_flags.lock().unwrap().remove(&entry_id);
+        self.backup_rows.lock().unwrap().remove(&entry_id);
+        self.drive_rows.lock().unwrap().remove(&entry_id);
         self.notify_now();
     }
 
@@ -2120,6 +3186,7 @@ impl InstallService {
     /// disk, with its reason, so the user is told what stayed.
     pub fn uninstall(&self, rom_id: i64) -> Result<UninstallReport, LibraryError> {
         self.check_library_gate()?;
+        self.refuse_while_backing_up(rom_id)?;
         let library = self.library_root()?;
         // `find` falls back to the (title, platform) identity when no row
         // carries the rom id, but never for this call: title and platform
@@ -2155,6 +3222,9 @@ impl InstallService {
         }
 
         self.registry.remove(&record.title, &record.platform)?;
+        if let Some(rom_id) = record.rom_id {
+            self.local_scans.lock().unwrap().remove(&rom_id);
+        }
         Ok(UninstallReport {
             skipped: plan.skipped,
         })
@@ -2390,6 +3460,33 @@ impl InstallService {
         kind: &'static str,
         payload: JobPayload,
     ) -> Result<(), LibraryError> {
+        self.admit_meta(key, title, platform, kind, payload, EntryMeta::default())
+            .map(|_| ())
+    }
+
+    /// [`Self::admit`], with the drive and batch the row belongs to.
+    /// Returns the new entry's id, or `None` for a duplicate.
+    fn admit_meta(
+        self: &Arc<Self>,
+        key: JobKey,
+        title: &str,
+        platform: &str,
+        kind: &'static str,
+        payload: JobPayload,
+        meta: EntryMeta,
+    ) -> Result<Option<u64>, LibraryError> {
+        let mut payload = payload;
+        {
+            // A duplicate is ignored before its space is checked: the live
+            // job already holds it.
+            let queue = self.queue.lock().unwrap();
+            self.check_library_gate()?;
+            if queue.has_pending(&key) {
+                return Ok(None);
+            }
+        }
+        self.attach_space(&mut payload)?;
+        let space = payload.space().map(Arc::downgrade);
         let (admitted, start) = {
             let mut queue = self.queue.lock().unwrap();
             // Under the queue lock: a library move closes the gate first and
@@ -2400,31 +3497,36 @@ impl InstallService {
                 JobPayload::Emulator(job) => job.romm.as_ref().map(|build| build.rom_id),
                 _ => None,
             };
-            let admission = queue.admit(key, title, platform, kind);
+            let admission = queue.admit_with(key, title, platform, kind, meta);
             if let (Some(rom_id), Admission::Start(id) | Admission::Queued(id)) =
                 (server_rom, &admission)
             {
                 queue.set_rom_id(*id, rom_id);
             }
             match admission {
-                Admission::Start(id) => (true, Some((id, payload))),
+                Admission::Start(id) => (Some(id), Some((id, payload))),
                 Admission::Queued(id) => {
                     self.pending_jobs.lock().unwrap().insert(id, payload);
-                    (true, None)
+                    (Some(id), None)
                 }
-                Admission::Duplicate => (false, None),
+                Admission::Duplicate => (None, None),
             }
         };
         // Nothing below runs under the queue lock: `spawn_download` takes it
         // again, and the listener must never see it held.
-        if !admitted {
-            return Ok(());
+        let Some(admitted) = admitted else {
+            return Ok(None);
+        };
+        if let Some(space) = space {
+            let mut spaces = self.job_spaces.lock().unwrap();
+            spaces.retain(|_, held| held.strong_count() > 0);
+            spaces.insert(admitted, space);
         }
         if let Some((id, payload)) = start {
             self.spawn_download(id, payload);
         }
         self.notify_now();
-        Ok(())
+        Ok(Some(admitted))
     }
 
     /// Starts the download task for `id`, registering its cancellation flag
@@ -2450,23 +3552,70 @@ impl InstallService {
             // through `on_download_progress` — comes back as a `JoinError`
             // instead of leaving the download slot taken forever.
             let reporter = service.clone();
+            let owner = service.clone();
             let worker = tokio::spawn(async move {
                 let mut payload = payload;
+                let stop = cancel.clone();
                 let mut on_progress = move |downloaded, total, speed| {
-                    reporter.on_download_progress(id, downloaded, total, speed);
+                    if reporter.on_download_progress(id, downloaded, total, speed) {
+                        stop.store(true, Ordering::Relaxed);
+                    }
                 };
                 let result = match &mut payload {
-                    JobPayload::Game(job) => {
-                        download_targets(
-                            &RommProvider(&job.client),
-                            &job.targets,
-                            &cancel,
-                            &mut on_progress,
+                    JobPayload::Game(job) => match &job.source {
+                        GameSource::Server(client) => {
+                            download_targets(
+                                &RommProvider(client),
+                                &job.targets,
+                                &cancel,
+                                &mut on_progress,
+                            )
+                            .await
+                        }
+                        GameSource::Drive(drive) => match &job.restore {
+                            Some(plan) => {
+                                drive_restore::restore_from_drive(
+                                    drive,
+                                    &job.detail.name,
+                                    plan,
+                                    cancel.clone(),
+                                    owner.drive_copy_hook(),
+                                    on_progress,
+                                )
+                                .await
+                            }
+                            None => {
+                                copy_from_drive(
+                                    drive,
+                                    job,
+                                    cancel.clone(),
+                                    owner.drive_copy_hook(),
+                                    on_progress,
+                                )
+                                .await
+                            }
+                        },
+                    },
+                    JobPayload::Emulator(job) if job.local.is_some() => {
+                        drive_install::copy_local_emulator(
+                            job,
+                            cancel.clone(),
+                            owner.drive_copy_hook(),
+                            on_progress,
                         )
                         .await
                     }
                     JobPayload::Emulator(job) => {
                         download_emulator(job, &cancel, &mut on_progress).await
+                    }
+                    JobPayload::Backup(job) => {
+                        job.staging = backup_job::staging_dir(&job.library, id);
+                        match owner.removed_reason(&job.drive.key) {
+                            Some(reason) => Err(LibraryError::DriveRemoved(reason)),
+                            None => {
+                                backup_job::download(&owner, job, &cancel, &mut on_progress).await
+                            }
+                        }
                     }
                 };
                 (payload, result)
@@ -2520,8 +3669,45 @@ impl InstallService {
                     && result.is_ok()
                     && self.already_installed(&job.detail).await
             }
-            JobPayload::Emulator(_) => false,
+            // A backup never short-circuits: its write phase decides whether
+            // the item is already on the drive.
+            JobPayload::Emulator(_) | JobPayload::Backup(_) => false,
         };
+        // A row whose drive was removed fails with the removal, whether its
+        // download was cancelled by `abort_drive` or finished just before.
+        let drive = match &payload {
+            JobPayload::Backup(job) => Some(job.drive.key.as_str()),
+            JobPayload::Game(InstallJob {
+                source: GameSource::Drive(drive),
+                ..
+            }) => Some(drive.drive_id.as_str()),
+            JobPayload::Emulator(job) => job.drive_id(),
+            _ => None,
+        };
+        let result = match (drive.and_then(|key| self.removed_reason(key)), result) {
+            (Some(reason), Ok(()) | Err(LibraryError::Cancelled)) => {
+                Err(LibraryError::DriveRemoved(reason))
+            }
+            (_, result) => result,
+        };
+        // A download stopped because the job no longer fits fails with why.
+        let result = match (result, payload.space().and_then(|space| space.shortfall())) {
+            (Err(LibraryError::Cancelled), Some(message)) => Err(LibraryError::Extract(message)),
+            (result, _) => result,
+        };
+        if let (JobPayload::Backup(job), Err(_)) = (&payload, &result) {
+            backup_job::remove_staging(&job.staging);
+        }
+        // A restore that will not be finalized leaves no temporary tree.
+        if let JobPayload::Game(InstallJob {
+            restore: Some(plan),
+            ..
+        }) = &payload
+        {
+            if skip_finalize || result.is_err() {
+                drive_restore::remove_path(&plan.tmp);
+            }
+        }
         // A cancel that lands after the last chunk arrived is too late: the
         // download succeeded, so `Cancelling` gives way to `Installing` here
         // and the entry finishes. Extraction is not cancellable (doc 03 §1).
@@ -2564,11 +3750,28 @@ impl InstallService {
     /// Starts the finalize task for `id`. Called exactly once by the task
     /// that owns the finalize slot.
     fn spawn_finalize(self: &Arc<Self>, id: u64, payload: JobPayload) {
+        // Only a backup's write is cancellable ([`CancelAction::ActiveWrite`]):
+        // it gets a fresh flag, registered before the task exists. A cancel
+        // that landed between the download ending and this point left
+        // `Cancelling` behind; honour it.
+        let cancel = Arc::new(AtomicBool::new(false));
+        if matches!(payload, JobPayload::Backup(_)) {
+            self.cancel_flags.lock().unwrap().insert(id, cancel.clone());
+            let cancelling = matches!(
+                self.queue.lock().unwrap().entry(id).map(|e| e.status),
+                Some(DownloadStatus::Cancelling)
+            );
+            if cancelling {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        }
         let service = self.clone();
         tokio::spawn(async move {
             let worker = service.clone();
             let (result, warning) =
-                match tokio::task::spawn_blocking(move || worker.finalize(id, &payload)).await {
+                match tokio::task::spawn_blocking(move || worker.finalize(id, &payload, &cancel))
+                    .await
+                {
                     Ok(outcome) => outcome,
                     Err(e) => (
                         Err(LibraryError::Extract(format!(
@@ -2577,6 +3780,7 @@ impl InstallService {
                         String::new(),
                     ),
                 };
+            service.cancel_flags.lock().unwrap().remove(&id);
             service
                 .queue
                 .lock()
@@ -2635,13 +3839,90 @@ impl InstallService {
         self: &Arc<Self>,
         id: u64,
         payload: &JobPayload,
+        cancel: &AtomicBool,
     ) -> (Result<(), LibraryError>, String) {
         let mut warning = String::new();
         let result = match payload {
-            JobPayload::Game(job) => self.finalize_inner(id, job, &mut warning),
+            JobPayload::Game(job) => self
+                .check_extract_space(job)
+                .and_then(|()| self.finalize_inner(id, job, &mut warning)),
             JobPayload::Emulator(job) => self.finalize_emulator(id, job, &mut warning),
+            JobPayload::Backup(job) => self.finalize_backup(id, job, cancel, &mut warning),
         };
         (result, warning)
+    }
+
+    /// The write phase of a backup row ([`backup_job::write`]). Staging is
+    /// deleted whatever happens. A drive found removed here aborts the
+    /// drive's whole queue ([`Self::abort_drive`]), exactly as the drive
+    /// watcher would; a write cancelled because the drive was removed fails
+    /// with the removal.
+    fn finalize_backup(
+        self: &Arc<Self>,
+        id: u64,
+        job: &backup_job::BackupJob,
+        cancel: &AtomicBool,
+        warning: &mut String,
+    ) -> Result<(), LibraryError> {
+        let mut warnings = job.warnings.clone();
+        let hook = self.backup_write_hook.read().unwrap().clone();
+        let before_file = || {
+            if let Some(hook) = &hook {
+                hook();
+            }
+        };
+        // A game copied from this computer reads the library while it
+        // writes: a gate ticket held for the whole write keeps a library
+        // move from starting under it. So does one whose saves are copied
+        // out of its Wine prefix.
+        let reads_library = job.copies_saves()
+            || matches!(&job.item, backup_job::BackupItem::Game(game) if game.local);
+        let running = match &job.item {
+            backup_job::BackupItem::Game(game) if game.local => self.game_running(game.rom_id),
+            _ => false,
+        };
+        // A downloaded game that is running here is still backed up, but
+        // its saves stay in the prefix: they may be mid-write.
+        let copy_saves = match &job.item {
+            backup_job::BackupItem::Game(game) => !self.game_running(game.rom_id),
+            _ => false,
+        };
+        let gate = self.library_gate.read().unwrap().clone();
+        let result = match self.removed_reason(&job.drive.key) {
+            Some(reason) => Err(LibraryError::DriveRemoved(reason)),
+            // Launched while it waited for the write slot.
+            None if running => Err(LibraryError::Extract(RUNNING_NOW.to_string())),
+            None => match reads_library.then(|| gate.enter()).transpose() {
+                Err(busy) => Err(LibraryError::LibraryBusy(busy.reason)),
+                Ok(_ticket) => backup_job::write(
+                    job,
+                    cancel,
+                    &mut |done, total| self.on_install_progress(id, done, total),
+                    &before_file,
+                    copy_saves,
+                    &mut warnings,
+                ),
+            },
+        };
+        backup_job::remove_staging(&job.staging);
+        if let Some(space) = &job.space {
+            space.release_staging();
+        }
+        for line in &warnings {
+            append_warning(warning, line);
+        }
+        match result {
+            Err(LibraryError::DriveRemoved(message)) => {
+                let reason = self.removed_reason(&job.drive.key).unwrap_or(message);
+                self.abort_drive(&job.drive.key, &reason);
+                Err(LibraryError::DriveRemoved(reason))
+            }
+            Err(LibraryError::Cancelled) => match self.removed_reason(&job.drive.key) {
+                Some(reason) => Err(LibraryError::DriveRemoved(reason)),
+                None => Err(LibraryError::Cancelled),
+            },
+            other => other,
+        }
     }
 
     /// Routes a game job to its mode's finalize. `Base` and `Update` lay a
@@ -2667,9 +3948,18 @@ impl InstallService {
         job: &InstallJob,
         warning: &mut String,
     ) -> Result<(), LibraryError> {
+        if let Some(plan) = &job.restore {
+            return self.finalize_restore(job, plan, warning);
+        }
         let detail = &job.detail;
         let platform = detail.platform_name.as_str();
         let mut record = new_record(detail, &job.launch_entry);
+        if let GameSource::Drive(drive) = &job.source {
+            record.source_server = drive.server.clone();
+            if !drive.keep_rom_id {
+                record.rom_id = None;
+            }
+        }
         let archive = job.primary_archive.as_path();
         let archive_to_delete: Option<&Path>;
 
@@ -2719,6 +4009,12 @@ impl InstallService {
         }
 
         self.registry.upsert(&record)?;
+
+        // A Windows game installed from a drive: its saves, before the
+        // finalized hook looks its save folders up.
+        if job.mode == InstallMode::Base {
+            self.restore_drive_saves(job, &record, warning);
+        }
 
         // Bound to a `let` first so the read lock is released before the
         // hook runs — an `if let` scrutinee would keep the temporary guard
@@ -2783,7 +4079,13 @@ impl InstallService {
     /// is simply dropped by the queue. This runs while the base entry still
     /// owns the finalize slot, so both content jobs are queued rather than
     /// started, and the FIFO gives base -> update -> DLC.
+    ///
+    /// Only for a server install: the content comes from the server, and a
+    /// game installed from a backup drive has no server to ask.
     fn queue_xbox360_content(self: &Arc<Self>, job: &InstallJob) {
+        let GameSource::Server(client) = &job.source else {
+            return;
+        };
         let Ok(library) = self.library_root() else {
             return;
         };
@@ -2798,7 +4100,7 @@ impl InstallService {
                 kind,
                 InstallMode::Xbox360Content,
                 file_ids,
-                job.client.clone(),
+                client.clone(),
             );
             if let Err(e) = self.admit(
                 key,
@@ -3268,6 +4570,16 @@ impl InstallService {
         };
         let install_dir = paths.install_dir.as_path();
         let archive = paths.archive.as_path();
+        if job.target == JobTarget::SteamRuntime {
+            let mut progress = |processed, total| self.on_install_progress(id, processed, total);
+            let placed =
+                crate::backup::steam_runtime::place_runtime(archive, &job.library, &mut progress);
+            let _ = fs::remove_dir_all(install_dir);
+            if !placed? {
+                append_warning(warning, "A Steam Linux Runtime was already in place");
+            }
+            return Ok(());
+        }
         if job.target == JobTarget::UmuLauncher {
             check_umu_digest(archive, &paths.resolved)?;
         }
@@ -3363,17 +4675,25 @@ impl InstallService {
         // permissions (on Windows, say): its emulator's own executable names
         // get their executable bit back before the pick, which only counts an
         // extensionless file that has one.
-        if job.romm.is_some() {
+        if job.server_build() {
             if let Some(profile) = self.profiles.iter().find(|p| p.name == job.profile_name) {
                 mark_profile_executables(install_dir, profile);
             }
         }
-        let selected = if !should_extract("", EMULATOR_PLATFORM, archive)
+        let manual = job.local.as_ref().and_then(|local| local.manual.as_ref());
+        let selected = if let Some(manual) = manual {
+            // An archived manual emulator names its own program.
+            Some(drive_install::manual_program(
+                install_dir,
+                &manual.program,
+                &job.entry_name,
+            )?)
+        } else if !should_extract("", EMULATOR_PLATFORM, archive)
             && is_appimage(archive)
             && archive.is_file()
         {
             Some(archive.to_path_buf())
-        } else if job.romm.is_some() {
+        } else if job.server_build() {
             // Only this host's binaries: a build may carry a stray `.exe`.
             emu_install::select_package_executable(
                 &job.profile_name,
@@ -3388,14 +4708,16 @@ impl InstallService {
         // only fail at launch with the kernel's "Exec format error": refuse
         // it here, and say why.
         let Some(exe) = selected else {
-            let other_machine = job.romm.as_ref().and_then(|_| {
+            let other_machine = if job.server_build() {
                 emu_install::package_executable_for_another_machine(
                     &job.profile_name,
                     install_dir,
                     archive,
                     cfg!(windows),
                 )
-            });
+            } else {
+                None
+            };
             return Err(LibraryError::Extract(match other_machine {
                 Some((path, target)) => wrong_machine_message(job, &path, &target),
                 None => NO_EMULATOR_EXECUTABLE.to_string(),
@@ -3422,7 +4744,13 @@ impl InstallService {
         let job_profile = catalog::find_profile(&self.profiles, &job.source_id).or_else(|| {
             self.profiles
                 .iter()
-                .find(|p| job.romm.is_some() && p.name == job.profile_name)
+                .find(|p| job.server_build() && p.name == job.profile_name)
+        });
+        // An archived manual emulator is matched the way a hand-added one is.
+        let job_profile = job_profile.or_else(|| {
+            manual.and_then(|_| {
+                profile_for_entry(&job.entry_name, &path_string(&exe), &self.profiles)
+            })
         });
         if let Some(profile) = job_profile {
             if !profile.user_data.is_empty() {
@@ -3474,7 +4802,7 @@ impl InstallService {
                 name: job.entry_name.clone(),
                 fresh,
                 compat_tool: false,
-                server_source: job.romm.as_ref().map(|_| job.source_id.clone()),
+                server_source: job.server_build().then(|| job.source_id.clone()),
             });
         }
         Ok(())
@@ -3666,6 +4994,20 @@ impl InstallService {
         // tag is recorded beside it, as the version actually on disk.
         entry.source_release_tag = job.configured_tag.clone();
         entry.source_installed_tag = resolved.release_tag.clone();
+        // An archived manual emulator from a backup drive is a manual entry
+        // again: it has no update source.
+        if job
+            .local
+            .as_ref()
+            .is_some_and(|local| local.manual.is_some())
+        {
+            entry.source_id.clear();
+            entry.source_provider.clear();
+            entry.source_owner.clear();
+            entry.source_repo.clear();
+            entry.source_release_tag.clear();
+            entry.source_installed_tag.clear();
+        }
         let fresh = match position {
             Some(index) => {
                 config.emulators[index] = entry;
@@ -3735,15 +5077,24 @@ impl InstallService {
         Ok(())
     }
 
-    fn on_download_progress(&self, id: u64, downloaded: u64, total: u64, speed: f64) {
+    /// Records download progress. `true` when the job no longer fits in the
+    /// library folder ([`space::JobSpace::on_download`]) and must stop.
+    fn on_download_progress(&self, id: u64, downloaded: u64, total: u64, speed: f64) -> bool {
+        let stop = self
+            .job_space(id)
+            .is_some_and(|space| space.on_download(downloaded, total));
         self.queue
             .lock()
             .unwrap()
             .set_progress(id, downloaded, total, speed);
         self.notify_throttled(DOWNLOAD_NOTIFY_INTERVAL);
+        stop
     }
 
     fn on_install_progress(&self, id: u64, processed: u64, total: u64) {
+        if let Some(space) = self.job_space(id) {
+            space.on_finalize(processed);
+        }
         self.queue
             .lock()
             .unwrap()
@@ -3835,6 +5186,7 @@ async fn download_emulator(
             emu_install::compat_tool_install_dir(&job.library, &file_stem_of(&dir_name))
         }
         JobTarget::UmuLauncher => umu::install_dir(&job.library),
+        JobTarget::SteamRuntime => crate::backup::steam_runtime::download_dir(&job.library),
         JobTarget::Emulator => emu_install::emulator_install_dir(&job.library, &job.entry_name),
     };
 
@@ -3940,6 +5292,20 @@ async fn download_server_build(
         expected_size: 0,
     }];
     download_targets(&RommProvider(&build.client), &targets, cancel, on_progress).await
+}
+
+/// The download step of an install from a backup drive: copies the job's
+/// targets off the drive on the blocking pool ([`drive_copy::copy_targets`]).
+async fn copy_from_drive(
+    drive: &DriveSource,
+    job: &InstallJob,
+    cancel: Arc<AtomicBool>,
+    hook: Option<drive_install::DriveCopyHook>,
+    on_progress: impl FnMut(u64, u64, f64) + Send + 'static,
+) -> Result<(), LibraryError> {
+    let files = drive.copy_files(&job.file_ids, &job.targets)?;
+    drive_install::copy_off_drive(&drive.mount, &drive.label, files, cancel, hook, on_progress)
+        .await
 }
 
 /// The install error for a build whose program cannot run on this computer.
@@ -4754,6 +6120,28 @@ fn apply_sidecar_launch_to(
 const MAX_SIDECAR_BYTES: usize = 1024 * 1024;
 
 /// Appends `line` to `warning`, keeping any warning already there.
+/// The bytes of every regular file under `folder`; links are not followed.
+fn folder_bytes(folder: &Path) -> u64 {
+    let mut total: u64 = 0;
+    let mut stack = vec![folder.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.path().symlink_metadata() else {
+                continue;
+            };
+            if meta.is_dir() {
+                stack.push(entry.path());
+            } else if meta.is_file() {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    total
+}
+
 fn append_warning(warning: &mut String, line: &str) {
     if !warning.is_empty() {
         warning.push('\n');
@@ -5025,6 +6413,8 @@ mod tests {
             is_top_level: top_level,
             last_modified: String::new(),
             category: String::new(),
+            md5_hash: String::new(),
+            sha1_hash: String::new(),
         }
     }
 
@@ -5060,6 +6450,7 @@ mod tests {
             is_identified: false,
             related: Vec::new(),
             achievement_count: 0,
+            logo_url: String::new(),
         }
     }
 
@@ -5086,7 +6477,8 @@ mod tests {
             rom_file(2, "nested/rom.bin", true),
             rom_file(3, "inner.bin", false),
         ]);
-        let Err(err) = plan_install(&detail, Path::new("/library"), client()) else {
+        let Err(err) = plan_install(&detail, Path::new("/library"), GameSource::Server(client()))
+        else {
             panic!("expected an error");
         };
         assert!(
@@ -5109,7 +6501,8 @@ mod tests {
         )]);
         detail.fs_name = "The Legend of Zelda - Breath of the Wild (igdb-7346)".to_string();
         detail.platform_name = "Wii U".to_string();
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
 
         assert_eq!(
             job.primary_archive,
@@ -5123,7 +6516,8 @@ mod tests {
     #[test]
     fn plan_single_file_targets_the_platform_dir_archive() {
         let detail = detail(vec![rom_file(11, "chrono.zip", true)]);
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
 
         assert_eq!(job.rom_id, 42);
         assert!(job.multi_file_game_dir.is_none());
@@ -5146,7 +6540,8 @@ mod tests {
     fn plan_single_file_falls_back_to_the_game_size() {
         let mut detail = detail(vec![rom_file(11, "chrono.zip", true)]);
         detail.files[0].file_size_bytes = 0;
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
         assert_eq!(job.targets[0].expected_size, 999);
     }
 
@@ -5157,7 +6552,8 @@ mod tests {
             rom_file(22, "Game.M3U", true),
             rom_file(23, "game.json", true),
         ]);
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
 
         let game_dir = PathBuf::from("/library/games/SNES/Chrono Trigger");
         assert_eq!(job.multi_file_game_dir, Some(game_dir.clone()));
@@ -5175,7 +6571,8 @@ mod tests {
             rom_file(21, "disc1.bin", true),
             rom_file(22, "disc2.bin", true),
         ]);
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
         assert_eq!(job.launch_entry, "disc1.bin");
     }
 
@@ -5194,7 +6591,7 @@ mod tests {
             let Err(err) = plan_install(
                 &ps5_detail(vec![rom_file(1, name, true)]),
                 Path::new("/library"),
-                client(),
+                GameSource::Server(client()),
             ) else {
                 panic!("a PS5 {name} must be rejected");
             };
@@ -5213,7 +6610,7 @@ mod tests {
                 rom_file(2, "libSceFios2.prx", true),
             ]),
             Path::new("/library"),
-            client(),
+            GameSource::Server(client()),
         ) else {
             panic!("a bare PS5 folder must be rejected");
         };
@@ -5230,7 +6627,7 @@ mod tests {
                 rom_file(2, "game.json", true),
             ]),
             Path::new("/library"),
-            client(),
+            GameSource::Server(client()),
         )
         .unwrap();
         assert_eq!(
@@ -5260,7 +6657,7 @@ mod tests {
                     rom_file(2, nested, false),
                 ]),
                 Path::new("/library"),
-                client(),
+                GameSource::Server(client()),
             ) else {
                 panic!("a PS5 folder game ({nested}) must be rejected");
             };
@@ -5277,7 +6674,7 @@ mod tests {
                     rom_file(2, "extras/readme.txt", false),
                 ]),
                 Path::new("/library"),
-                client(),
+                GameSource::Server(client()),
             )
             .unwrap_or_else(|e| panic!("{name} must be accepted: {e}"));
             assert_eq!(job.file_ids, vec![1]);
@@ -5291,7 +6688,7 @@ mod tests {
         let job = plan_install(
             &ps5_detail(vec![rom_file(1, "eboot.bin", true)]),
             Path::new("/library"),
-            client(),
+            GameSource::Server(client()),
         )
         .unwrap();
         assert_eq!(
@@ -5309,7 +6706,7 @@ mod tests {
         let job = plan_install(
             &ps5_detail(vec![rom_file(1, "Astro Bot.zip", true)]),
             Path::new("/library"),
-            client(),
+            GameSource::Server(client()),
         )
         .unwrap();
         assert_eq!(
@@ -5322,13 +6719,13 @@ mod tests {
     fn plan_rejection_applies_to_ps5_only() {
         let mut ps4 = detail(vec![rom_file(1, "game.pkg", true)]);
         ps4.platform_name = "PlayStation 4".to_string();
-        assert!(plan_install(&ps4, Path::new("/library"), client()).is_ok());
+        assert!(plan_install(&ps4, Path::new("/library"), GameSource::Server(client())).is_ok());
 
         let snes = detail(vec![
             rom_file(1, "disc1.bin", true),
             rom_file(2, "disc2.bin", true),
         ]);
-        assert!(plan_install(&snes, Path::new("/library"), client()).is_ok());
+        assert!(plan_install(&snes, Path::new("/library"), GameSource::Server(client())).is_ok());
 
         // A multi-file game on another PlayStation platform still installs.
         let mut ps4_multi = detail(vec![
@@ -5336,7 +6733,12 @@ mod tests {
             rom_file(2, "sce_sys.dat", true),
         ]);
         ps4_multi.platform_name = "PlayStation 4".to_string();
-        assert!(plan_install(&ps4_multi, Path::new("/library"), client()).is_ok());
+        assert!(plan_install(
+            &ps4_multi,
+            Path::new("/library"),
+            GameSource::Server(client())
+        )
+        .is_ok());
     }
 
     // --- install modes -------------------------------------------------------
@@ -5365,7 +6767,8 @@ mod tests {
             rom_file(1, "artwork.png", true),
             rom_file(2, "mygame.zip", true),
         ]);
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
 
         let game_dir = PathBuf::from("/library/games/Windows/My Game");
         assert_eq!(job.mode, InstallMode::Base);
@@ -5388,7 +6791,8 @@ mod tests {
             rom_file(1, "mygame.zip", true),
             rom_file(2, "game.json", true),
         ]);
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
 
         let game_dir = PathBuf::from("/library/games/Windows/My Game");
         assert_eq!(job.game_json_target, Some(game_dir.join("game.json")));
@@ -5414,7 +6818,8 @@ mod tests {
         detail.name = "Tamriel Rebuilt".to_string();
         detail.platform_name = "PC Fangames & Ports".to_string();
         detail.platform_slug = "win".to_string();
-        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+        let job =
+            plan_install(&detail, Path::new("/library"), GameSource::Server(client())).unwrap();
 
         let game_dir = PathBuf::from("/library/games/PC Fangames & Ports/Tamriel Rebuilt");
         assert_eq!(job.native_game_dir, Some(game_dir.clone()));
@@ -5437,13 +6842,261 @@ mod tests {
     #[test]
     fn plan_native_rejects_a_payload_of_nothing_but_a_sidecar() {
         let detail = native_detail(vec![rom_file(1, "game.json", true)]);
-        let Err(err) = plan_install(&detail, Path::new("/library"), client()) else {
+        let Err(err) = plan_install(&detail, Path::new("/library"), GameSource::Server(client()))
+        else {
             panic!("expected an error");
         };
         assert_eq!(
             err.to_string(),
             "No downloadable file was found for this game"
         );
+    }
+
+    // --- plan_install: from a backup ----------------------------------------
+
+    use crate::backup::pack::{pack_game_detail, resolve, PackGame};
+
+    /// The gridpack entry a backup of `detail` writes when it holds `files`.
+    fn pack_entry(detail: &RomDetail, files: &[RomFile]) -> PackGame {
+        let files: Vec<serde_json::Value> = files
+            .iter()
+            .map(|file| {
+                serde_json::json!({
+                    "path": format!("games/{}/{}", detail.platform_slug, file.id),
+                    "size": file.file_size_bytes,
+                    "server_file_id": file.id,
+                    "name": file.file_name,
+                    "category": file.category,
+                    "top_level": file.is_top_level,
+                })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "platform": detail.platform_slug,
+            "platform_name": detail.platform_name,
+            "source": {
+                "server": "http://romm.local",
+                "rom_id": detail.id,
+                "fs_name": detail.fs_name,
+            },
+            "name": detail.name,
+            "size": detail.filesize_bytes,
+            "files": files,
+            "added": "2026-11-09T00:00:00Z",
+        }))
+        .unwrap()
+    }
+
+    /// The files [`download_set`] picks for `detail`, owned.
+    fn planned_files(detail: &RomDetail) -> Vec<RomFile> {
+        match download_set(detail).unwrap() {
+            DownloadSet::Single(file) => vec![file.clone()],
+            DownloadSet::Multi { files, .. } => files.into_iter().cloned().collect(),
+            DownloadSet::Native { archive, sidecar } => {
+                std::iter::once(archive).chain(sidecar).cloned().collect()
+            }
+        }
+    }
+
+    /// `detail` → gridpack entry → `pack_game_detail` → `plan_install` gives
+    /// the server install's plan, whether the pack holds every server file
+    /// or only the ones the install downloads.
+    fn assert_round_trip(detail: &RomDetail) {
+        let library = Path::new("/library");
+        let server = plan_install(detail, library, GameSource::Server(client())).unwrap();
+        let targets = |job: &InstallJob| {
+            job.targets
+                .iter()
+                .map(|t| {
+                    (
+                        t.url_path.clone(),
+                        t.query.clone(),
+                        t.dest.clone(),
+                        t.expected_size,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let route = |job: &InstallJob| {
+            base_finalize_route(
+                &job.detail.platform_slug,
+                &job.detail.platform_name,
+                &job.primary_archive,
+            )
+        };
+        for files in [detail.files.clone(), planned_files(detail)] {
+            let restored = pack_game_detail(&pack_entry(detail, &files));
+            let job = plan_install(&restored, library, GameSource::Server(client())).unwrap();
+            assert_eq!(targets(&job), targets(&server));
+            assert_eq!(job.file_ids, server.file_ids);
+            assert_eq!(job.primary_archive, server.primary_archive);
+            assert_eq!(job.multi_file_game_dir, server.multi_file_game_dir);
+            assert_eq!(job.native_game_dir, server.native_game_dir);
+            assert_eq!(job.game_json_target, server.game_json_target);
+            assert_eq!(job.launch_entry, server.launch_entry);
+            assert_eq!(route(&job), route(&server));
+        }
+    }
+
+    #[test]
+    fn a_backed_up_single_file_game_plans_like_the_server_install() {
+        assert_round_trip(&detail(vec![
+            rom_file(11, "chrono.zip", true),
+            rom_file(12, "game.json", true),
+        ]));
+        // No size on the file entry: the game's own size is the total.
+        let mut no_size = detail(vec![rom_file(11, "chrono.zip", true)]);
+        no_size.files[0].file_size_bytes = 0;
+        assert_round_trip(&no_size);
+    }
+
+    #[test]
+    fn a_backed_up_multi_file_game_plans_like_the_server_install() {
+        let mut detail = detail(vec![
+            rom_file(1, "Disc 1.cue", true),
+            rom_file(2, "Disc 1.bin", true),
+            rom_file(3, "Game.m3u", true),
+            rom_file(4, "inner.bin", false),
+        ]);
+        detail.platform_name = "PlayStation".to_string();
+        detail.platform_slug = "psx".to_string();
+        assert_round_trip(&detail);
+    }
+
+    #[test]
+    fn a_backed_up_native_game_plans_like_the_server_install() {
+        assert_round_trip(&native_detail(vec![
+            rom_file(1, "artwork.png", true),
+            rom_file(2, "mygame.zip", true),
+            rom_file(3, "game.json", true),
+        ]));
+        let mut fangame = detail(vec![
+            rom_file(1, "TamrielRebuilt.zip", true),
+            rom_file(2, "readme.txt", true),
+        ]);
+        fangame.platform_name = "PC Fangames & Ports".to_string();
+        fangame.platform_slug = "win".to_string();
+        assert_round_trip(&fangame);
+    }
+
+    /// The drive source for `game` on a drive mounted at `mount`.
+    fn drive_source(mount: &Path, game: &PackGame) -> DriveSource {
+        DriveSource {
+            drive_id: mount.display().to_string(),
+            label: "SAMSUNG T7".to_string(),
+            mount: mount.to_path_buf(),
+            files: game
+                .files
+                .iter()
+                .map(|file| (file.server_file_id, resolve(mount, &file.path).unwrap()))
+                .collect(),
+            server: game.source.server.clone(),
+            keep_rom_id: true,
+            saves: None,
+        }
+    }
+
+    #[test]
+    fn a_drive_install_copies_each_target_from_its_backed_up_file() {
+        let detail = native_detail(vec![
+            rom_file(1, "mygame.zip", true),
+            rom_file(2, "game.json", true),
+        ]);
+        let mount = Path::new("/media/T7");
+        let game = pack_entry(&detail, &detail.files);
+        let drive = drive_source(mount, &game);
+        let job = plan_install(
+            &pack_game_detail(&game),
+            Path::new("/library"),
+            GameSource::Drive(drive.clone()),
+        )
+        .unwrap();
+
+        let game_dir = PathBuf::from("/library/games/Windows/My Game");
+        assert_eq!(
+            drive.copy_files(&job.file_ids, &job.targets).unwrap(),
+            vec![
+                (
+                    mount.join("gridpack/games/snes/1"),
+                    game_dir.join("mygame.zip"),
+                    10
+                ),
+                (
+                    mount.join("gridpack/games/snes/2"),
+                    game_dir.join("game.json"),
+                    10
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_drive_install_refuses_a_backup_missing_a_planned_file() {
+        let detail = detail(vec![
+            rom_file(1, "Disc 1.cue", true),
+            rom_file(2, "Disc 1.bin", true),
+        ]);
+        let game = pack_entry(&detail, &detail.files);
+        let mut drive = drive_source(Path::new("/media/T7"), &game);
+        drive.files.remove(&2);
+        let Err(err) = plan_install(
+            &pack_game_detail(&game),
+            Path::new("/library"),
+            GameSource::Drive(drive),
+        ) else {
+            panic!("expected an error");
+        };
+        assert_eq!(
+            err.to_string(),
+            "The backup on SAMSUNG T7 has no copy of Disc 1.bin"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_drive_install_copies_the_files_into_the_library() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mount = tmp.path().join("T7");
+        let library = tmp.path().join("library");
+        let detail = detail(vec![
+            rom_file(1, "Disc 1.cue", true),
+            rom_file(2, "Disc 1.bin", true),
+        ]);
+        let game = pack_entry(&detail, &detail.files);
+        for file in &game.files {
+            let path = resolve(&mount, &file.path).unwrap();
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            // Each name is 10 bytes, the size the entry records.
+            fs::write(&path, file.name.as_bytes()).unwrap();
+        }
+        let drive = drive_source(&mount, &game);
+        let job = plan_install(
+            &pack_game_detail(&game),
+            &library,
+            GameSource::Drive(drive.clone()),
+        )
+        .unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        copy_from_drive(
+            &drive,
+            &job,
+            Arc::new(AtomicBool::new(false)),
+            None,
+            move |copied, total, _| sink.lock().unwrap().push((copied, total)),
+        )
+        .await
+        .unwrap();
+
+        let game_dir = library.join("games").join("SNES").join("Chrono Trigger");
+        assert_eq!(
+            fs::read(game_dir.join("Disc 1.cue")).unwrap(),
+            b"Disc 1.cue"
+        );
+        assert_eq!(
+            fs::read(game_dir.join("Disc 1.bin")).unwrap(),
+            b"Disc 1.bin"
+        );
+        assert_eq!(*seen.lock().unwrap().last().unwrap(), (20, 20));
     }
 
     // --- ps3_roots_from_config -----------------------------------------------

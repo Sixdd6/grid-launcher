@@ -3,6 +3,7 @@ mod cloud_service;
 mod commands;
 mod config_write;
 mod covers_dir;
+mod drive_service;
 mod firmware_service;
 mod images;
 mod library_move_service;
@@ -255,6 +256,11 @@ pub fn run() {
     let install = registry
         .clone()
         .map(|registry| InstallService::new(registry, config_path.clone()));
+    // A library move's space check leaves room for what queued installs and
+    // backups still hold.
+    if let Ok(install) = &install {
+        library_move.set_space_ledger(install.space_ledger());
+    }
     // The data-root repair moved these entries' user data to the directory
     // the emulator really reads. One full autoconfig pass per entry writes
     // the keys a sync manages into the config files found there.
@@ -317,6 +323,21 @@ pub fn run() {
         launch.set_library_gate(library_move.gate().clone());
         launch
     });
+    // A game running right now is not copied from this computer by a
+    // backup: its files may change while they are read. Weak, so the
+    // install service never keeps the launch service alive.
+    if let (Ok(install), Ok(launch)) = (&install, &launch) {
+        let launch = Arc::downgrade(launch);
+        install.set_running_check(Some(Arc::new(move |rom_id| {
+            launch.upgrade().is_some_and(|launch| {
+                launch
+                    .snapshot()
+                    .sessions
+                    .iter()
+                    .any(|session| session.rom_id == rom_id)
+            })
+        })));
+    }
     let builder = tauri::Builder::default().manage(AppState {
         session,
         install,
@@ -332,6 +353,7 @@ pub fn run() {
         media_server: std::sync::OnceLock::new(),
         python_import,
         layout_migration,
+        drives: drive_service::DriveService::new(),
     });
     // Embedded WebDriver automation server, gated behind the `e2e` cargo
     // feature so it never ships in a release build (see
@@ -497,6 +519,7 @@ pub fn run() {
                 let session = state.session.clone();
                 let install_for_emulator = install.clone();
                 let handle = app.handle().clone();
+                let drives_for_emulator = state.drives.clone();
                 install.set_emulator_installed_hook(Arc::new(move |installed| {
                     // The completion toast, worded per `fresh` by the
                     // frontend: this is the only signal an install/update
@@ -514,6 +537,8 @@ pub fn run() {
                     let setup_handle = handle.clone();
                     let setup_name = installed.name.clone();
                     let setup_source = installed.server_source.clone();
+                    let setup_drives = drives_for_emulator.clone();
+                    let setup_firmware = firmware.clone();
                     tauri::async_runtime::spawn_blocking(move || {
                         let outcomes = commands::setup::apply_after_install(
                             &Config::default_path(),
@@ -524,6 +549,14 @@ pub fn run() {
                             let _ =
                                 setup_handle.emit(commands::setup::SETUP_DEFAULTS_EVENT, outcomes);
                         }
+                        // Firmware a drive install waited on: now that the
+                        // defaults are applied, every platform whose
+                        // emulator resolves gets the drive's firmware.
+                        drive_service::install_waiting_firmware(
+                            &setup_drives,
+                            &setup_firmware,
+                            &setup_handle,
+                        );
                     });
                     // A REINSTALL over an existing entry keeps whatever
                     // firmware is already there; a managed compat tool has
@@ -597,6 +630,11 @@ pub fn run() {
                     launch_for_loop.spawn_poll_loop();
                 });
             }
+            // Backup drives: the 2 s scan. Spawned through Tauri's runtime
+            // for the same reason as the launch poll loop above.
+            state
+                .drives
+                .spawn_poll_loop(app.handle().clone(), state.install.as_ref().ok().cloned());
             // 9b: a library move stopped in Copy or Cleanup (a crash or a
             // close) resumes in the background. The frontend reads
             // `resumed` from `library_move_status` and says "Resuming the
@@ -615,6 +653,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::connect,
             commands::restore_session,
+            commands::use_without_server,
             commands::retry_connect,
             commands::disconnect,
             commands::list_platforms,
@@ -726,6 +765,22 @@ pub fn run() {
             commands::relink::link_installed_row,
             commands::relink::remove_from_library,
             commands::relink::locate_installed_row,
+            commands::backups::list_drives,
+            commands::backups::setup_drive,
+            commands::backups::rename_drive,
+            commands::backups::set_drive_os,
+            commands::backups::remove_grid_files_size,
+            commands::backups::remove_grid_files,
+            commands::backups::forget_drive,
+            commands::backups::open_drive_folder,
+            commands::backups::drive_games,
+            commands::backups::drive_asset,
+            commands::backups::plan_backup,
+            commands::backups::start_backup,
+            commands::backups::install_from_drive,
+            commands::backups::remove_from_drive,
+            commands::backups::get_backup_settings,
+            commands::backups::set_backup_include_firmware,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

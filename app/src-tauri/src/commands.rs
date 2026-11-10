@@ -1,3 +1,4 @@
+pub mod backups;
 pub mod cloud;
 pub mod discover;
 pub mod library_move;
@@ -13,6 +14,7 @@ use crate::images::ImageService;
 use grid_core::autoconfig::paths::expand_user;
 use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
 use grid_core::config::{Config, ConfigError, EmulatorEntry, UiSettings};
+use grid_core::images::cache::ImageLookup;
 use grid_core::images::urls::{filter_to_server_host, resolve_image_url, server_resolver};
 use grid_core::import_python::ImportReport;
 use grid_core::launch::catalog::{
@@ -97,6 +99,9 @@ pub struct AppState {
     /// The library move job (9b), its gate and the unreachable-library
     /// state. See `library_move_service.rs`.
     pub library_move: Arc<crate::library_move_service::LibraryMoveService>,
+    /// Backup drives: the 2 s scan, the remembered list and the firmware a
+    /// drive install waits on. See `drive_service.rs`.
+    pub drives: Arc<crate::drive_service::DriveService>,
 }
 
 /// Refuses a command that touches the library while a library move runs
@@ -153,10 +158,34 @@ pub async fn restore_session(
     app: tauri::AppHandle,
 ) -> Result<RestoreOutcome, String> {
     let outcome = state.session.restore().await.map_err(err)?;
-    if matches!(outcome, RestoreOutcome::Connected { .. }) {
-        crate::relink_service::spawn_connected_jobs(&state, app);
+    match &outcome {
+        RestoreOutcome::Connected { .. } => {
+            crate::relink_service::spawn_connected_jobs(&state, app);
+        }
+        // "Use without a server": no probe ran and no client exists, so no
+        // server job starts. Drives, the library and play keep working.
+        RestoreOutcome::Offline { .. } => tracing::info!("starting without a server"),
+        _ => {}
     }
     Ok(outcome)
+}
+
+/// "Use without a server": remembers the choice (`Config.offline`), drops
+/// any live client and clears what described the server. The keyring
+/// credential stays, so Connect or Retry can use it later; a successful
+/// connect clears the choice.
+#[tauri::command]
+pub async fn use_without_server(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let session = state.session.clone();
+    tokio::task::spawn_blocking(move || session.use_offline())
+        .await
+        .map_err(|e| format!("use_without_server did not finish: {e}"))?
+        .map_err(err)?;
+    state.updates.clear(&app);
+    Ok(())
 }
 
 /// Event emitted the first time a live session gets a 401 (Q6). Payload:
@@ -383,10 +412,16 @@ pub async fn sync_ra_username_to_romm(
 #[tauri::command]
 pub async fn ensure_image(state: State<'_, AppState>, url: String) -> Result<String, String> {
     let base = state.session.server_url();
-    let resolved = filter_to_server_host(&resolve_image_url(&url, &base), &base);
-    if resolved.is_empty() {
-        return Err("the image is not hosted on the connected server".to_string());
-    }
+    // The cache is checked before the host filter: a hit makes no request,
+    // so it may serve any host (rows installed from a drive keep their
+    // backup server's URLs). A miss is filtered and fetched as before.
+    let resolved = match state.session.cache().lookup(&url, &base) {
+        ImageLookup::Hit(path) => return Ok(path.to_string_lossy().into_owned()),
+        ImageLookup::Fetch(resolved) => resolved,
+        ImageLookup::Refused => {
+            return Err("the image is not hosted on the connected server".to_string())
+        }
+    };
     let client = state.session.client();
     let path = state
         .session

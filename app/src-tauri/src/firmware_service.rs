@@ -54,15 +54,17 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex, RwLock};
 
+use grid_core::backup::pack::PackFirmware;
 use grid_core::config::{Config, EmulatorEntry};
-use grid_core::firmware::manifest::MANIFEST_FILE;
+use grid_core::firmware::manifest::{firmware_installed, FirmwareManifest, MANIFEST_FILE};
 use grid_core::firmware::routing::{
-    config_dir_of, emulator_dir_of, install_for_game, platform_ids_for_profile, targets_for_entry,
-    GameFirmwareContext,
+    config_dir_of, emulator_dir_of, firmware_plan, install_for_game, install_for_game_from,
+    platform_ids_for_profile, targets_for_entry, GameFirmwareContext,
 };
 use grid_core::firmware::rpcs3::{ps3_platform_id, rpcs3_installed_firmware, rpcs3_pup_path};
 use grid_core::firmware::{
     install_platform_firmware, install_platform_firmware_recorded, FirmwareOptions,
+    PackFirmwareSource,
 };
 use grid_core::launch::profiles::{load_profiles, profile_for_entry};
 use grid_core::library::registry::InstalledGame;
@@ -556,6 +558,119 @@ impl FirmwareService {
             row.complete(first_warning(&warnings));
         });
     }
+
+    /// Installs a platform's firmware from a backup drive's pack into the
+    /// platform's default emulator, in the background: the drive-install
+    /// counterpart of [`Self::spawn_for_platform`], through
+    /// [`PackFirmwareSource`] instead of the server, so it works offline.
+    ///
+    /// Does nothing, silently, when the platform has no default emulator,
+    /// when every file the pack has for it is already installed (the
+    /// installed-firmware manifest), during a library move, or while another
+    /// pass for that emulator directory runs. When it finishes it raises
+    /// the toast "<platform> firmware installed from <pack>", or the failure
+    /// one when a file could not be put in place.
+    pub fn spawn_from_pack(
+        self: &Arc<Self>,
+        app: AppHandle,
+        platform: String,
+        mount: PathBuf,
+        pack_name: String,
+        entry: PackFirmware,
+    ) {
+        if entry.files.is_empty() {
+            return;
+        }
+        let config_path = Config::default_path();
+        let Ok(config) = Config::load(&config_path) else {
+            return;
+        };
+        let profiles = load_profiles();
+        let config_dir = config_dir_of(&config_path);
+        let source = PackFirmwareSource { mount, entry };
+        let ctx = GameFirmwareContext {
+            platform: &platform,
+            platform_id: 0,
+            emulator: None,
+            config: &config,
+            profiles,
+            config_dir: &config_dir,
+        };
+        let Some(plan) = firmware_plan(&ctx) else {
+            return;
+        };
+        let records = pack_firmware_records(&source.entry);
+        let manifest = FirmwareManifest::load(&config_dir.join(MANIFEST_FILE));
+        if firmware_installed(&records, &plan.targets(), &manifest) {
+            return;
+        }
+        let dir = emulator_dir_of(plan.entry);
+        let Some(ticket) = self.enter_library() else {
+            return;
+        };
+        let claim = Some(drive_pass_id(&platform));
+        if !self.try_begin(&dir, claim) {
+            return;
+        }
+        let guard = FirmwareGuard::new(self.clone(), dir, claim);
+        tauri::async_runtime::spawn(async move {
+            let _guard = guard;
+            let _ticket = ticket;
+            let ctx = GameFirmwareContext {
+                platform: &platform,
+                platform_id: 0,
+                emulator: None,
+                config: &config,
+                profiles,
+                config_dir: &config_dir,
+            };
+            let warnings = install_for_game_from(&source, &ctx).await;
+            let system = source.entry.platform_name.clone();
+            let notice = if warnings.trim().is_empty() {
+                crate::drive_service::BackupNotice {
+                    message: format!("{system} firmware installed from {pack_name}"),
+                    error: false,
+                }
+            } else {
+                // Local paths and file names only: a pack holds no URL.
+                tracing::warn!("firmware for {platform} from {pack_name}: {warnings}");
+                crate::drive_service::BackupNotice {
+                    message: format!(
+                        "Some {system} firmware from {pack_name} could not be installed"
+                    ),
+                    error: true,
+                }
+            };
+            let _ = app.emit(crate::drive_service::BACKUP_NOTICE_EVENT, notice);
+        });
+    }
+}
+
+/// The firmware records a pack entry lists, as [`PackFirmwareSource`]
+/// numbers them, for the installed check.
+fn pack_firmware_records(entry: &PackFirmware) -> Vec<grid_core::romm::FirmwareRecord> {
+    entry
+        .files
+        .iter()
+        .enumerate()
+        .map(|(index, file)| grid_core::romm::FirmwareRecord {
+            id: index as i64,
+            file_name: file.name.clone(),
+            file_size_bytes: file.size,
+            md5_hash: file.md5.clone(),
+            missing_from_fs: false,
+        })
+        .collect()
+}
+
+/// The in-flight claim of a drive firmware pass for `platform`: a negative
+/// id (server platform ids are positive), stable for the process, so two
+/// platforms sharing one emulator directory do not block each other.
+fn drive_pass_id(platform: &str) -> i64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    platform.trim().to_lowercase().hash(&mut hasher);
+    -((hasher.finish() & 0x3fff_ffff_ffff_ffff) as i64) - 1
 }
 
 /// A drawer row completes on a blank error and fails on anything else, so

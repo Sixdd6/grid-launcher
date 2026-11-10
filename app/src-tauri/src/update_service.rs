@@ -48,6 +48,9 @@ pub struct UpdateService {
     available: Mutex<HashMap<i64, UpdateInfo>>,
     generation: AtomicU64,
     gate: PassGate,
+    /// A pass has committed its result since the set was last cleared, so
+    /// `available` reflects the server rather than an empty start.
+    completed_pass: AtomicBool,
 }
 
 /// Collapses overlapping refresh triggers into at most one pass in flight
@@ -110,18 +113,49 @@ impl UpdateService {
             available: Mutex::new(HashMap::new()),
             generation: AtomicU64::new(0),
             gate: PassGate::default(),
+            completed_pass: AtomicBool::new(false),
         })
     }
 
     /// `_details_update_button_text_for_game` (grid-launcher.py:3300-3325).
     pub fn button_label_for(installed_rom_file_name: &str, server_rom_file_name: &str) -> String {
-        if !has_newer_server_rom_version(installed_rom_file_name, server_rom_file_name) {
-            return "Update".to_string();
+        let tag = server_version_label(installed_rom_file_name, server_rom_file_name);
+        if tag.is_empty() {
+            "Update".to_string()
+        } else {
+            format!("Update to {tag}")
         }
-        match rom_file_name_version(server_rom_file_name) {
-            Some(tag) => format!("Update to {}", format_version_tag(&tag)),
-            None => "Update".to_string(),
-        }
+    }
+
+    /// The update known for one rom, if the last pass found one.
+    pub fn info(&self, rom_id: i64) -> Option<UpdateInfo> {
+        self.available.lock().unwrap().get(&rom_id).cloned()
+    }
+
+    /// Whether a pass has committed its result since the set was last
+    /// cleared. Until then an absent entry means "not checked yet", not
+    /// "up to date".
+    pub fn has_completed_pass(&self) -> bool {
+        self.completed_pass.load(Ordering::SeqCst)
+    }
+
+    /// Test seam: commits `available` (rom id to the server's ROM file
+    /// name) as if a pass had just finished.
+    #[cfg(test)]
+    pub(crate) fn commit_for_test(&self, available: HashMap<i64, String>) {
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let next = available
+            .into_iter()
+            .map(|(rom_id, server_rom_file_name)| {
+                (
+                    rom_id,
+                    UpdateInfo {
+                        server_rom_file_name,
+                    },
+                )
+            })
+            .collect();
+        self.store_if_current(generation, next, &[]);
     }
 
     /// The rows the frontend renders, in ascending rom id order.
@@ -142,6 +176,7 @@ impl UpdateService {
     fn take_all(&self) -> bool {
         self.generation.fetch_add(1, Ordering::SeqCst);
         let mut available = self.available.lock().unwrap();
+        self.completed_pass.store(false, Ordering::SeqCst);
         !std::mem::take(&mut *available).is_empty()
     }
 
@@ -170,6 +205,7 @@ impl UpdateService {
             return None;
         }
         *available = next;
+        self.completed_pass.store(true, Ordering::SeqCst);
         Some(rows_of(&available, installed))
     }
 
@@ -328,6 +364,26 @@ impl Drop for PassGuard {
             service.gate.in_flight.store(false, Ordering::SeqCst);
         }
     }
+}
+
+/// The installed copy's version tag, formatted ("v1.1"), or "" when its file
+/// name carries none.
+pub fn local_version_label(installed_rom_file_name: &str) -> String {
+    rom_file_name_version(installed_rom_file_name)
+        .map(|tag| format_version_tag(&tag))
+        .unwrap_or_default()
+}
+
+/// The server's version tag, formatted ("v1.2"), under the same rule as
+/// [`UpdateService::button_label_for`]: only when it is newer than the
+/// installed copy's tag, otherwise "".
+pub fn server_version_label(installed_rom_file_name: &str, server_rom_file_name: &str) -> String {
+    if !has_newer_server_rom_version(installed_rom_file_name, server_rom_file_name) {
+        return String::new();
+    }
+    rom_file_name_version(server_rom_file_name)
+        .map(|tag| format_version_tag(&tag))
+        .unwrap_or_default()
 }
 
 /// [`UpdateService::rows`]'s body, over an already-locked map: the commit
@@ -551,6 +607,54 @@ mod tests {
             !service.gate.should_start(),
             "the pass still holds the slot"
         );
+    }
+
+    #[test]
+    fn info_returns_the_entry_for_one_rom() {
+        let service = UpdateService::new();
+        assert!(service.info(2).is_none());
+        *service.available.lock().unwrap() = one(2, "b (v2.0).zip");
+        assert_eq!(
+            service.info(2).unwrap().server_rom_file_name,
+            "b (v2.0).zip"
+        );
+        assert!(service.info(3).is_none());
+    }
+
+    #[test]
+    fn a_completed_pass_is_reported_until_the_set_is_cleared() {
+        let service = UpdateService::new();
+        assert!(!service.has_completed_pass(), "no pass yet");
+        let generation = service.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        service.store_if_current(generation, HashMap::new(), &[]);
+        assert!(service.has_completed_pass(), "an empty result still counts");
+        service.take_all();
+        assert!(!service.has_completed_pass(), "a clear resets it");
+    }
+
+    #[test]
+    fn a_stale_pass_does_not_count_as_completed() {
+        let service = UpdateService::new();
+        let generation = service.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        service.generation.fetch_add(1, Ordering::SeqCst);
+        service.store_if_current(generation, HashMap::new(), &[]);
+        assert!(!service.has_completed_pass());
+    }
+
+    #[test]
+    fn local_version_label_formats_the_tag_or_is_empty() {
+        assert_eq!(local_version_label("g (v1.1).zip"), "v1.1");
+        assert_eq!(local_version_label("g (v00009).zip"), "v00009");
+        assert_eq!(local_version_label("g.zip"), "");
+    }
+
+    #[test]
+    fn server_version_label_follows_the_button_rule() {
+        assert_eq!(server_version_label("g (v1.1).zip", "g (v1.2).zip"), "v1.2");
+        assert_eq!(server_version_label("g (v1.2).zip", "g (v1.1).zip"), "");
+        assert_eq!(server_version_label("g.zip", "g (v1.2).zip"), "");
+        assert_eq!(server_version_label("g (v1.1).zip", "g.zip"), "");
+        assert_eq!(server_version_label("g (v01234).zip", "g (v1.0.0).zip"), "");
     }
 
     /// `clear` emits only on the transition, so `take_all` reports the set as

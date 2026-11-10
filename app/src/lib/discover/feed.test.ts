@@ -29,6 +29,8 @@ function game(over: Partial<GameSummary> = {}): GameSummary {
     created_at: '',
     first_release_date: null,
     logo_url: '',
+    fs_size_bytes: 0,
+    largest_file_bytes: 0,
     ...over,
   };
 }
@@ -38,6 +40,7 @@ function entry(over: Partial<DownloadEntry>): DownloadEntry {
     id: 1, job: 'game', kind: 'base', rom_id: 7, source_id: '', title: '', platform: '',
     status: 'downloading', downloaded_bytes: 0, total_bytes: 0, speed_bps: 0,
     install_processed_bytes: 0, install_total_bytes: 0, error: '', detail: '',
+    drive_id: '', drive_name: '', drive_label: '', batch: 0,
     ...over,
   };
 }

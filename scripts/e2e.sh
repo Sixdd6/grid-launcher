@@ -110,6 +110,16 @@ STAGE_GROUPS=(
   # menu near the bottom edge, two-click Remove, Install recommended (N) and
   # a manual add that sets no default.
   "systems:specs/systems.spec.ts"
+  # Game backups (docs/superpowers/plans/2026-11-09-game-backups.md, Task
+  # 21) on fake drives: every child folder of <data>/media is a mounted
+  # drive (GRID_LAUNCHER_E2E_DRIVE_ROOTS, e2e feature only). (a) set up a
+  # drive and back up two games with their emulator and firmware, (b) pull
+  # the drive mid-backup, then plug it back in, (c) a fresh profile used
+  # without a server installs from a seeded pack, (d) three installed games
+  # (docs/superpowers/plans/2026-11-09-game-backups-local-copies.md §6.4)
+  # are copied from this computer, one out of date, and one is restored
+  # from the drive. Seeded per spec.
+  "backups:specs/backups-a.spec.ts specs/backups-b.spec.ts specs/backups-c.spec.ts specs/backups-d.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -511,6 +521,11 @@ mock_args_for_group() {
     # ABSENT from rom-details.json so the mock answers 404 and the check
     # treats it as "no update".
     updates) printf -- '--fixtures-dir fixtures-updates' ;;
+    # PlayStation 2 games (one multi-file, four whose files carry their own
+    # `e2e_throttle` for the removal mid-backup), PS2 firmware, and an
+    # Emulators platform whose `ps2` folder has PCSX2 builds for Linux and
+    # Windows, so a backup never needs a forge.
+    backups) printf -- '--fixtures-dir fixtures-backups' ;;
     # One "Arcade" platform of 2500 generated ROMs (`e2e_synthetic` in
     # roms.json; see mock-romm/server.mjs), with covers that take 40ms each
     # like a remote server's.
@@ -549,6 +564,7 @@ seed_script_for_group() {
     updates) printf '%s' "$E2E_DIR/seed/updates-seed.mjs" ;;
     layout-migration) printf '%s' "$E2E_DIR/seed/layout-migration-seed.mjs" ;;
     library-move) printf '%s' "$E2E_DIR/seed/library-move-seed.mjs" ;;
+    backups) printf '%s' "$E2E_DIR/seed/backups-seed.mjs" ;;
     *) printf '' ;;
   esac
 }
@@ -559,7 +575,7 @@ seed_script_for_group() {
 # the run's keyring, but each starts the app on the state its own seed
 # variant writes.
 group_seeds_per_spec() {
-  [[ "$1" == "library-move" ]]
+  [[ "$1" == "library-move" || "$1" == "backups" ]]
 }
 
 # Runs every spec of one group against a freshly created data dir and mock.
@@ -705,6 +721,13 @@ EOF
     wdio_log="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.log"
     out_dir="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.d"
     say "running $stage (attempt $attempt)"
+    # backups-c and backups-d start from a fresh profile: the credential an
+    # earlier spec saved in this run's private keyring must go too, or the
+    # app would restore that session. Same best-effort clear as the
+    # python-import group.
+    if [[ "$spec" == */backups-[cd].spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
+      secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
+    fi
     if [[ -n "$seed_script" ]] && group_seeds_per_spec "$name"; then
       # Appended to the mock log, which the failure dump already shows.
       if ! node "$seed_script" "$data_dir" "$(basename "$spec" .spec.ts)" >>"$attempt_mock_log" 2>&1; then
@@ -771,6 +794,14 @@ EOF
       # before falling back to the library VFS, so without this the
       # `ps3-install` group would route a PS3 install into a real RPCS3
       # install's dev_hdd0 on any machine that has one.
+      # Only the `backups` group: its fake drives are the child folders of
+      # <data>/media (wdio.conf.ts turns this into
+      # GRID_LAUNCHER_E2E_DRIVE_ROOTS, read by the e2e build only; the
+      # specs plug and unplug drives there, e2e/helpers/drives.ts).
+      if [[ "$name" == "backups" ]]; then
+        mkdir -p "$data_dir/media"
+        export E2E_DRIVE_ROOTS="$data_dir/media"
+      fi
       if [[ -d "$data_dir/stubs/bin" ]]; then
         export E2E_STUB_BIN="$data_dir/stubs/bin"
       fi

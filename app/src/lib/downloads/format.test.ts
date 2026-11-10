@@ -19,6 +19,10 @@ function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
     install_total_bytes: 0,
     error: '',
     detail: '',
+    drive_id: '',
+    drive_name: '',
+    drive_label: '',
+    batch: 0,
     ...overrides,
   };
 }
@@ -289,6 +293,11 @@ describe('kindLabel', () => {
       'compat_tool',
       'firmware',
       'library_move',
+      'backup_game',
+      'backup_game_local',
+      'backup_emulator',
+      'backup_firmware',
+      'backup_cancelled',
     ];
     for (const kind of kinds) {
       expect(() => kindLabel(kind)).not.toThrow();
@@ -454,5 +463,157 @@ describe('library move row', () => {
     expect(graphCaption(move({ status: 'downloading', speed_bps: 0 }))).toBe('Copying files');
     expect(graphCaption(move({ status: 'installing' }))).toBe('Updating paths');
     expect(etaText(move({ status: 'downloading', total_bytes: 10, speed_bps: 5 }))).toBe('');
+  });
+});
+
+describe('backup rows', () => {
+  const backup = (overrides: Partial<DownloadEntry>) =>
+    entry({
+      job: 'backup',
+      kind: 'backup_game',
+      title: 'Velvet Static',
+      platform: 'PlayStation',
+      drive_id: '/run/media/sam/SAMSUNG T7',
+      drive_name: 'Couch kit',
+      drive_label: 'SAMSUNG T7',
+      batch: 3,
+      ...overrides,
+    });
+
+  it('waits for the pack by name', () => {
+    expect(entryDetail(backup({ status: 'queued' }))).toBe('Waiting · to Couch kit');
+  });
+
+  it('downloads from the server with a percent', () => {
+    expect(entryDetail(backup({ status: 'downloading', downloaded_bytes: 45, total_bytes: 100 }))).toBe(
+      'Downloading from server 45%',
+    );
+    expect(entryDetail(backup({ status: 'downloading' }))).toBe('Downloading from server');
+  });
+
+  it('writes to the drive by its label', () => {
+    expect(
+      entryDetail(backup({ status: 'installing', install_processed_bytes: 70, install_total_bytes: 100 })),
+    ).toBe('Writing to SAMSUNG T7 70%');
+    expect(entryDetail(backup({ status: 'installing' }))).toBe('Writing to SAMSUNG T7');
+  });
+
+  it('reads Written to <pack> once complete', () => {
+    expect(entryDetail(backup({ status: 'completed', downloaded_bytes: 10 }))).toBe('Written to Couch kit');
+  });
+
+  it('names the reason when it fails', () => {
+    expect(entryDetail(backup({ status: 'failed', error: 'SAMSUNG T7 was removed' }))).toBe(
+      'Failed — SAMSUNG T7 was removed',
+    );
+    expect(entryDetail(backup({ status: 'cancelled' }))).toBe('Cancelled');
+    expect(entryDetail(backup({ status: 'cancelling' }))).toBe('Cancelling...');
+  });
+
+  it('words the removed drive summary row', () => {
+    const summary = backup({
+      kind: 'backup_cancelled',
+      status: 'cancelled',
+      title: '13 more items',
+      error: 'SAMSUNG T7 was removed',
+    });
+    expect(`${summary.title} · ${entryDetail(summary)}`).toBe(
+      '13 more items · Cancelled — SAMSUNG T7 was removed · backup again to finish',
+    );
+    expect(actionFor(summary.status, summary.kind)).toBe('dismiss');
+  });
+
+  it('badges every backup kind Backup', () => {
+    for (const kind of ['backup_game', 'backup_game_local', 'backup_emulator', 'backup_firmware', 'backup_cancelled'] as const) {
+      expect(kindLabel(kind)).toBe('Backup');
+    }
+  });
+
+  it('offers Cancel while writing, and Retry once it ends', () => {
+    expect(actionFor('installing', 'backup_emulator')).toBe('cancel');
+    expect(actionFor('queued', 'backup_game')).toBe('cancel');
+    expect(actionFor('failed', 'backup_firmware')).toBe('retry-dismiss');
+  });
+
+  it('reads the strip as Backing up <title> to <pack>', () => {
+    expect(footerLine([backup({ status: 'downloading', downloaded_bytes: 45, total_bytes: 100 })])).toBe(
+      'Backing up Velvet Static to Couch kit · 45% · downloading',
+    );
+    expect(
+      footerLine([backup({ status: 'installing', install_processed_bytes: 70, install_total_bytes: 100 })]),
+    ).toBe('Backing up Velvet Static to Couch kit · 70% · writing');
+    expect(footerLine([backup({ status: 'queued' })])).toBe('Backing up Velvet Static to Couch kit · — · waiting');
+  });
+
+  it('captions the write as going to the drive', () => {
+    expect(graphCaption(backup({ status: 'installing' }))).toBe('Writing to drive');
+  });
+
+  describe('a game copied from this computer', () => {
+    const local = (overrides: Partial<DownloadEntry>) => backup({ kind: 'backup_game_local', ...overrides });
+
+    it('gets its details from the server, then copies to the drive', () => {
+      expect(entryDetail(local({ status: 'queued' }))).toBe('Waiting · to Couch kit');
+      expect(entryDetail(local({ status: 'downloading', downloaded_bytes: 4, total_bytes: 10 }))).toBe(
+        'Getting details from server',
+      );
+      expect(
+        entryDetail(local({ status: 'installing', install_processed_bytes: 45, install_total_bytes: 100 })),
+      ).toBe('Copying from this computer to SAMSUNG T7 45%');
+      expect(entryDetail(local({ status: 'installing' }))).toBe('Copying from this computer to SAMSUNG T7');
+    });
+
+    it('finishes as Copied from this computer · Written to <pack>', () => {
+      expect(entryDetail(local({ status: 'completed' }))).toBe('Copied from this computer · Written to Couch kit');
+      expect(entryDetail(local({ status: 'failed', error: 'SAMSUNG T7 was removed' }))).toBe(
+        'Failed — SAMSUNG T7 was removed',
+      );
+    });
+
+    it('ends the strip with copying from this computer', () => {
+      expect(footerLine([local({ status: 'downloading' })])).toBe(
+        'Backing up Velvet Static to Couch kit · — · getting details',
+      );
+      expect(
+        footerLine([local({ status: 'installing', install_processed_bytes: 45, install_total_bytes: 100 })]),
+      ).toBe('Backing up Velvet Static to Couch kit · 45% · copying from this computer');
+    });
+
+    it('is a backup row: Cancel while copying, Retry once it ends', () => {
+      expect(actionFor('installing', 'backup_game_local')).toBe('cancel');
+      expect(actionFor('failed', 'backup_game_local')).toBe('retry-dismiss');
+    });
+  });
+});
+
+describe('install from a drive', () => {
+  const fromDrive = (overrides: Partial<DownloadEntry>) =>
+    entry({
+      title: 'Velvet Static',
+      drive_id: '/run/media/sam/SAMSUNG T7',
+      drive_name: 'Couch kit',
+      drive_label: 'SAMSUNG T7',
+      ...overrides,
+    });
+
+  it('reads Copying from <label> instead of Downloading', () => {
+    expect(
+      entryDetail(fromDrive({ status: 'downloading', downloaded_bytes: 512, total_bytes: 1024, speed_bps: 1024 })),
+    ).toBe('Copying from SAMSUNG T7 50% • 512 B / 1.0 KB • 1.0 KB/s');
+    expect(entryDetail(fromDrive({ status: 'downloading', downloaded_bytes: 512, speed_bps: 0 }))).toBe(
+      'Copying from SAMSUNG T7 • 512 B • 0 B/s',
+    );
+  });
+
+  it('names the drive in the strip', () => {
+    expect(footerLine([fromDrive({ status: 'downloading', downloaded_bytes: 45, total_bytes: 100 })])).toBe(
+      'Velvet Static · 45% · Copying from SAMSUNG T7',
+    );
+  });
+
+  it('keeps the plain wording for a server install', () => {
+    expect(entryDetail(entry({ status: 'downloading', total_bytes: 0, downloaded_bytes: 0 }))).toBe(
+      'Downloading • 0 B • 0 B/s',
+    );
   });
 });

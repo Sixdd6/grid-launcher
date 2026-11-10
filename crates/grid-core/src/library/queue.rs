@@ -7,6 +7,7 @@ use std::collections::VecDeque;
 
 use super::content::ContentKind;
 use super::LibraryError;
+use crate::backup::pack::PackOs;
 
 /// Identifies what one queued job is for. Two admissions with an equal key
 /// dedupe against each other; two admissions with unequal keys — including a
@@ -32,6 +33,39 @@ pub enum JobKey {
     /// The library move (phase 9b, `library::relocate`). There is only ever
     /// one, so the key carries nothing. Its row takes no slot.
     LibraryMove,
+    /// One item of a backup to a removable drive. `drive` is the drive key
+    /// (the mount path, or the drive letter on Windows), so the same item
+    /// queued for two drives does not dedupe.
+    Backup { drive: String, item: BackupItemKey },
+    /// The summary row [`QueueState::cancel_drive_queue`] leaves behind for
+    /// the waiting rows it removed. Keyed by its own id; never retried.
+    BackupSummary(u64),
+}
+
+/// What one backup row writes to a drive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackupItemKey {
+    /// A game, by its RomM rom id.
+    Game(i64),
+    /// One emulator release for one OS, by its profile name.
+    Emulator { name: String, os: PackOs },
+    /// The firmware of one platform, by its slug.
+    Firmware(String),
+}
+
+/// The drive and batch an entry belongs to. All blank / `0` for an entry
+/// that has nothing to do with a drive.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EntryMeta {
+    /// The drive key: the mount path, or the drive letter on Windows.
+    pub drive_id: String,
+    /// The pack name the user gave the drive.
+    pub drive_name: String,
+    /// The drive's volume label.
+    pub drive_label: String,
+    /// The backup batch, so the frontend raises one notification per
+    /// batch. `0` for none.
+    pub batch: u64,
 }
 
 /// Lifecycle state of one [`DownloadEntry`].
@@ -53,14 +87,18 @@ pub struct DownloadEntry {
     pub id: u64,
     /// `"game"` for a `JobKey::Rom` / `Content` / `NativeUpdate` entry,
     /// `"emulator"` for a `JobKey::Emulator` one, `"firmware"` for an
-    /// external one.
+    /// external one, `"backup"` for a `JobKey::Backup` one and the
+    /// `"backup_cancelled"` summary row.
     pub job: &'static str,
     /// What this entry installs: `"base"`, `"ps4_content"`,
     /// `"xbox360_content"`, `"native_update"`, `"emulator"`,
-    /// `"compat_tool"` or `"firmware"`. Finer-grained than `job`, which
-    /// only says which half of the pipeline owns the entry.
+    /// `"compat_tool"` or `"firmware"`; for a backup, `"backup_game"`,
+    /// `"backup_emulator"`, `"backup_firmware"` or `"backup_cancelled"`.
+    /// Finer-grained than `job`, which only says which half of the
+    /// pipeline owns the entry.
     pub kind: &'static str,
-    /// The rom id for a `"game"` entry; `0` for an `"emulator"` entry.
+    /// The rom id for a `"game"` entry and a backed-up game; `0` for an
+    /// `"emulator"` entry.
     pub rom_id: i64,
     /// The source id for an `"emulator"` entry; empty for a `"game"` entry.
     pub source_id: String,
@@ -77,6 +115,17 @@ pub struct DownloadEntry {
     /// doing (`"Copying games"`). Empty for every other entry.
     #[serde(default)]
     pub detail: String,
+    /// The drive this entry writes to (a backup row) or copies from (an
+    /// install-from-drive row): its mount path, or its drive letter on
+    /// Windows. Empty for every other entry.
+    pub drive_id: String,
+    /// The pack name of that drive. Empty when `drive_id` is.
+    pub drive_name: String,
+    /// The volume label of that drive. A non-empty label on a `"game"` row
+    /// means it installs from the drive. Empty when `drive_id` is.
+    pub drive_label: String,
+    /// The backup batch this entry belongs to; `0` for none.
+    pub batch: u64,
     /// The admission key this entry was created from. Kept for dedupe and
     /// `retryable`; the public `job`/`rom_id`/`source_id` fields above are
     /// derived from it once, at insertion.
@@ -149,6 +198,10 @@ pub enum CancelAction {
     /// The entry was queued: it was removed from `waiting` and marked
     /// `Cancelled`.
     RemovedFromQueue,
+    /// The entry is a backup row writing to its drive (it owns the
+    /// finalize slot): status is now `Cancelling`: the caller must flip the
+    /// writer's cancellation flag. Only a backup's write is cancellable.
+    ActiveWrite,
     /// The entry does not exist, or is not cancellable in its current
     /// status (e.g. already finalizing or terminal).
     Ignored,
@@ -180,6 +233,20 @@ impl QueueState {
         platform: &str,
         kind: &'static str,
     ) -> Admission {
+        self.admit_with(key, title, platform, kind, EntryMeta::default())
+    }
+
+    /// [`Self::admit`], with the drive and batch the entry belongs to. A
+    /// `JobKey::Backup` entry gets `job` `"backup"`; for a game item its
+    /// `rom_id` is the game's.
+    pub fn admit_with(
+        &mut self,
+        key: JobKey,
+        title: &str,
+        platform: &str,
+        kind: &'static str,
+        meta: EntryMeta,
+    ) -> Admission {
         if self.has_pending(&key) {
             return Admission::Duplicate;
         }
@@ -201,7 +268,22 @@ impl QueueState {
             JobKey::External(_) => ("firmware", 0, String::new()),
             // Never reached either: `admit_library_move` creates its own row.
             JobKey::LibraryMove => ("library", 0, String::new()),
+            JobKey::Backup { item, .. } => {
+                let rom_id = match item {
+                    BackupItemKey::Game(rom_id) => *rom_id,
+                    BackupItemKey::Emulator { .. } | BackupItemKey::Firmware(_) => 0,
+                };
+                ("backup", rom_id, String::new())
+            }
+            // Never reached: `cancel_drive_queue` creates its own row.
+            JobKey::BackupSummary(_) => ("backup", 0, String::new()),
         };
+        let EntryMeta {
+            drive_id,
+            drive_name,
+            drive_label,
+            batch,
+        } = meta;
         self.entries.push(DownloadEntry {
             id,
             job,
@@ -218,6 +300,10 @@ impl QueueState {
             install_total_bytes: 0,
             error: String::new(),
             detail: String::new(),
+            drive_id,
+            drive_name,
+            drive_label,
+            batch,
             key,
         });
 
@@ -256,6 +342,10 @@ impl QueueState {
             install_total_bytes: 0,
             error: String::new(),
             detail: String::new(),
+            drive_id: String::new(),
+            drive_name: String::new(),
+            drive_label: String::new(),
+            batch: 0,
             key: JobKey::External(id),
         });
         id
@@ -309,6 +399,10 @@ impl QueueState {
             install_total_bytes: 0,
             error: String::new(),
             detail: String::new(),
+            drive_id: String::new(),
+            drive_name: String::new(),
+            drive_label: String::new(),
+            batch: 0,
             key: JobKey::LibraryMove,
         });
         Some(id)
@@ -319,6 +413,79 @@ impl QueueState {
         if let Some(entry) = self.entry_mut(id) {
             entry.detail = detail.to_string();
         }
+    }
+
+    /// Sets the drive and batch of `id` (an install-from-drive row, whose
+    /// drive is known only once it is planned). No-op when `id` is unknown.
+    pub fn set_drive_meta(&mut self, id: u64, meta: EntryMeta) {
+        if let Some(entry) = self.entry_mut(id) {
+            entry.drive_id = meta.drive_id;
+            entry.drive_name = meta.drive_name;
+            entry.drive_label = meta.drive_label;
+            entry.batch = meta.batch;
+        }
+    }
+
+    /// The drive `drive_id` is gone: removes every WAITING entry tied to it
+    /// (backup rows and install-from-drive rows alike) from the queue and
+    /// from the list, and returns their ids so the caller can drop their
+    /// pending payloads. Never touches a slot owner: the caller ends the
+    /// active item through its own flag.
+    ///
+    /// When at least one entry was removed, one `Cancelled` summary row
+    /// (`job` `"backup"`, `kind` `"backup_cancelled"`) takes their place:
+    /// titled with the item's own title for one, else `"<n> more items"`,
+    /// with `reason` as its error and the first removed entry's drive and
+    /// batch. A blank `drive_id` matches nothing.
+    pub fn cancel_drive_queue(&mut self, drive_id: &str, reason: &str) -> Vec<u64> {
+        if drive_id.is_empty() {
+            return Vec::new();
+        }
+        let removed: Vec<u64> = self
+            .waiting
+            .iter()
+            .copied()
+            .filter(|&id| {
+                self.entry(id)
+                    .is_some_and(|entry| entry.drive_id == drive_id)
+            })
+            .collect();
+        let Some(first) = removed.first().and_then(|&id| self.entry(id)).cloned() else {
+            return removed;
+        };
+        self.waiting.retain(|id| !removed.contains(id));
+        self.entries.retain(|entry| !removed.contains(&entry.id));
+
+        let title = if removed.len() == 1 {
+            first.title.clone()
+        } else {
+            format!("{} more items", removed.len())
+        };
+        let id = self.alloc_id();
+        self.entries.push(DownloadEntry {
+            id,
+            job: "backup",
+            kind: "backup_cancelled",
+            rom_id: 0,
+            source_id: String::new(),
+            title,
+            platform: first.platform,
+            status: DownloadStatus::Cancelled,
+            downloaded_bytes: 0,
+            total_bytes: 0,
+            speed_bps: 0.0,
+            install_processed_bytes: 0,
+            install_total_bytes: 0,
+            error: reason.to_string(),
+            detail: String::new(),
+            drive_id: first.drive_id,
+            drive_name: first.drive_name,
+            drive_label: first.drive_label,
+            batch: first.batch,
+            key: JobKey::BackupSummary(id),
+        });
+        self.prune_terminal();
+        removed
     }
 
     /// Ends a [`Self::admit_library_move`] row: a blank `error` completes
@@ -387,12 +554,14 @@ impl QueueState {
 
     /// The id of the oldest entry for `rom_id` that has not reached a
     /// terminal status yet (`Queued`, `Downloading` or `Installing`), or
-    /// `None` when the game has no live entry.
+    /// `None` when the game has no live entry. A backup row is not an
+    /// install of the game, so it never counts.
     pub fn first_live_for_rom(&self, rom_id: i64) -> Option<u64> {
         self.entries
             .iter()
             .find(|entry| {
                 entry.rom_id == rom_id
+                    && !matches!(entry.key, JobKey::Backup { .. })
                     && matches!(
                         entry.status,
                         DownloadStatus::Queued
@@ -428,7 +597,8 @@ impl QueueState {
     /// `Ok(())` with `skip_finalize` false → `Installing`, `finalize_active
     /// = Some(id)`. `Ok(())` with `skip_finalize` true (already installed)
     /// → `Completed` directly. `Err(LibraryError::Cancelled)` → `Cancelled`.
-    /// Any other `Err(e)` → `Failed` with `e`'s `Display` text as `error`.
+    /// Any other `Err(e)` → `Failed` with `e`'s `Display` text as `error`
+    /// (`DriveRemoved` included: "SAMSUNG T7 was removed").
     pub fn download_finished(
         &mut self,
         id: u64,
@@ -467,9 +637,11 @@ impl QueueState {
     /// slot (guards against a stale/duplicate completion call arriving
     /// after the slot has already moved on). Frees the finalize slot.
     /// `Ok(())` → `Completed`; when `warning` is non-empty it is stored in
-    /// `error` even though the entry completed. `Err(e)` → `Failed` with
-    /// `e`'s `Display` text as `error`, with `warning` appended after a
-    /// newline when non-empty.
+    /// `error` even though the entry completed. `Err(LibraryError::Cancelled)`
+    /// (a backup write cancelled through [`CancelAction::ActiveWrite`]) →
+    /// `Cancelled`, with `warning` as `error`. Any other `Err(e)` → `Failed`
+    /// with `e`'s `Display` text as `error` (`DriveRemoved` included), with
+    /// `warning` appended after a newline when non-empty.
     pub fn finalize_finished(&mut self, id: u64, result: Result<(), LibraryError>, warning: &str) {
         if self.finalize_active != Some(id) {
             return;
@@ -483,6 +655,10 @@ impl QueueState {
         match result {
             Ok(()) => {
                 entry.status = DownloadStatus::Completed;
+                entry.error = warning.to_string();
+            }
+            Err(LibraryError::Cancelled) => {
+                entry.status = DownloadStatus::Cancelled;
                 entry.error = warning.to_string();
             }
             Err(e) => {
@@ -512,14 +688,24 @@ impl QueueState {
         Some(id)
     }
 
-    /// Requests cancellation of `id`. See [`CancelAction`] for the three
-    /// outcomes.
+    /// Requests cancellation of `id`. See [`CancelAction`] for the
+    /// outcomes. A finalize that is not a backup's write is not cancellable.
     pub fn request_cancel(&mut self, id: u64) -> CancelAction {
         if self.download_active == Some(id) {
             if let Some(entry) = self.entry_mut(id) {
                 entry.status = DownloadStatus::Cancelling;
             }
             return CancelAction::ActiveDownload;
+        }
+
+        if self.finalize_active == Some(id) {
+            return match self.entry_mut(id) {
+                Some(entry) if matches!(entry.key, JobKey::Backup { .. }) => {
+                    entry.status = DownloadStatus::Cancelling;
+                    CancelAction::ActiveWrite
+                }
+                _ => CancelAction::Ignored,
+            };
         }
 
         if let Some(pos) = self.waiting.iter().position(|&waiting_id| waiting_id == id) {
@@ -560,9 +746,13 @@ impl QueueState {
     }
 
     /// `Some(key)` when `id`'s entry is `Failed` or `Cancelled`; `None`
-    /// otherwise (including when `id` is unknown).
+    /// otherwise (including when `id` is unknown, and for a
+    /// `"backup_cancelled"` summary row, which offers Dismiss only).
     pub fn retryable(&self, id: u64) -> Option<JobKey> {
         let entry = self.entry(id)?;
+        if matches!(entry.key, JobKey::BackupSummary(_)) {
+            return None;
+        }
         match entry.status {
             DownloadStatus::Failed | DownloadStatus::Cancelled => Some(entry.key.clone()),
             _ => None,
@@ -587,7 +777,7 @@ impl QueueState {
 
     /// Whether `key` is already active (download or finalize slot) or
     /// sitting in `waiting`.
-    fn has_pending(&self, key: &JobKey) -> bool {
+    pub fn has_pending(&self, key: &JobKey) -> bool {
         let active = [self.download_active, self.finalize_active]
             .into_iter()
             .flatten()
@@ -1497,6 +1687,341 @@ mod tests {
         assert_eq!(third, 3);
     }
 
+    // --- backups ----------------------------------------------------------
+
+    const T7: &str = "/run/media/samm/SAMSUNG T7";
+    const SANDISK: &str = "/run/media/samm/SANDISK";
+
+    fn meta(drive: &str, batch: u64) -> EntryMeta {
+        EntryMeta {
+            drive_id: drive.to_string(),
+            drive_name: "Couch kit".to_string(),
+            drive_label: drive.rsplit('/').next().unwrap().to_string(),
+            batch,
+        }
+    }
+
+    fn backup_key(drive: &str, item: BackupItemKey) -> JobKey {
+        JobKey::Backup {
+            drive: drive.to_string(),
+            item,
+        }
+    }
+
+    fn admit_backup(state: &mut QueueState, drive: &str, item: BackupItemKey, batch: u64) -> u64 {
+        let kind = match item {
+            BackupItemKey::Game(_) => "backup_game",
+            BackupItemKey::Emulator { .. } => "backup_emulator",
+            BackupItemKey::Firmware(_) => "backup_firmware",
+        };
+        match state.admit_with(
+            backup_key(drive, item),
+            "Item",
+            "Platform",
+            kind,
+            meta(drive, batch),
+        ) {
+            Admission::Start(id) | Admission::Queued(id) => id,
+            Admission::Duplicate => panic!("unexpected duplicate"),
+        }
+    }
+
+    #[test]
+    fn a_backup_row_carries_its_drive_and_batch_and_job_backup() {
+        let mut state = QueueState::default();
+        let id = admit_backup(&mut state, T7, BackupItemKey::Game(42), 7);
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.job, "backup");
+        assert_eq!(entry.kind, "backup_game");
+        assert_eq!(entry.rom_id, 42);
+        assert_eq!(entry.drive_id, T7);
+        assert_eq!(entry.drive_name, "Couch kit");
+        assert_eq!(entry.drive_label, "SAMSUNG T7");
+        assert_eq!(entry.batch, 7);
+
+        let emu = admit_backup(
+            &mut state,
+            T7,
+            BackupItemKey::Emulator {
+                name: "DuckStation".into(),
+                os: PackOs::Windows,
+            },
+            7,
+        );
+        assert_eq!(state.entry(emu).unwrap().rom_id, 0);
+        assert_eq!(state.entry(emu).unwrap().job, "backup");
+
+        // A plain admit leaves every drive field blank.
+        let rom = match state.admit(JobKey::Rom(1), "Game", "SNES", "base") {
+            Admission::Queued(id) => id,
+            other => panic!("expected Queued, got {other:?}"),
+        };
+        let entry = state.entry(rom).unwrap();
+        assert_eq!(entry.drive_id, "");
+        assert_eq!(entry.drive_label, "");
+        assert_eq!(entry.batch, 0);
+
+        // The serde output carries the new fields.
+        let json = serde_json::to_value(state.entry(id).unwrap()).unwrap();
+        assert_eq!(json["job"], "backup");
+        assert_eq!(json["drive_id"], T7);
+        assert_eq!(json["drive_name"], "Couch kit");
+        assert_eq!(json["drive_label"], "SAMSUNG T7");
+        assert_eq!(json["batch"], 7);
+    }
+
+    #[test]
+    fn a_backup_row_is_not_a_live_install_of_its_game() {
+        let mut state = QueueState::default();
+        admit_backup(&mut state, T7, BackupItemKey::Game(42), 1);
+        assert_eq!(state.first_live_for_rom(42), None);
+    }
+
+    #[test]
+    fn backup_rows_dedupe_per_drive_and_item() {
+        let mut state = QueueState::default();
+        admit_backup(&mut state, T7, BackupItemKey::Game(42), 1);
+        let again = state.admit_with(
+            backup_key(T7, BackupItemKey::Game(42)),
+            "Item",
+            "Platform",
+            "backup_game",
+            meta(T7, 2),
+        );
+        assert_eq!(again, Admission::Duplicate);
+
+        // The same game for another drive, an install of the game, and
+        // another OS of the same emulator are all different jobs.
+        assert!(matches!(
+            state.admit_with(
+                backup_key(SANDISK, BackupItemKey::Game(42)),
+                "Item",
+                "Platform",
+                "backup_game",
+                meta(SANDISK, 3),
+            ),
+            Admission::Queued(_)
+        ));
+        assert!(matches!(
+            state.admit(JobKey::Rom(42), "Game", "SNES", "base"),
+            Admission::Queued(_)
+        ));
+        let linux = BackupItemKey::Emulator {
+            name: "DuckStation".into(),
+            os: PackOs::Linux,
+        };
+        let windows = BackupItemKey::Emulator {
+            name: "DuckStation".into(),
+            os: PackOs::Windows,
+        };
+        admit_backup(&mut state, T7, linux.clone(), 1);
+        admit_backup(&mut state, T7, windows, 1);
+        assert_eq!(
+            state.admit_with(
+                backup_key(T7, linux),
+                "Item",
+                "Platform",
+                "backup_emulator",
+                meta(T7, 1),
+            ),
+            Admission::Duplicate
+        );
+        admit_backup(&mut state, T7, BackupItemKey::Firmware("psx".into()), 1);
+        assert_eq!(
+            state.admit_with(
+                backup_key(T7, BackupItemKey::Firmware("psx".into())),
+                "Item",
+                "Platform",
+                "backup_firmware",
+                meta(T7, 1),
+            ),
+            Admission::Duplicate
+        );
+    }
+
+    #[test]
+    fn set_drive_meta_tags_an_install_from_drive_row() {
+        let mut state = QueueState::default();
+        let id = admit_idle(&mut state, 5);
+        state.set_drive_meta(id, meta(T7, 0));
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.job, "game");
+        assert_eq!(entry.drive_id, T7);
+        assert_eq!(entry.drive_label, "SAMSUNG T7");
+        state.set_drive_meta(999, meta(T7, 0));
+    }
+
+    #[test]
+    fn cancel_drive_queue_collapses_that_drives_waiting_rows_into_one_summary() {
+        let mut state = QueueState::default();
+        // The slot owner is a backup row for the removed drive.
+        let active = admit_backup(&mut state, T7, BackupItemKey::Game(1), 4);
+        let waiting_backup = admit_backup(&mut state, T7, BackupItemKey::Game(2), 4);
+        let other_drive = admit_backup(&mut state, SANDISK, BackupItemKey::Game(3), 5);
+        let plain = match state.admit(JobKey::Rom(9), "Game", "SNES", "base") {
+            Admission::Queued(id) => id,
+            other => panic!("expected Queued, got {other:?}"),
+        };
+        // An install-from-drive row for the removed drive.
+        let from_drive = match state.admit(JobKey::Rom(10), "Game", "SNES", "base") {
+            Admission::Queued(id) => id,
+            other => panic!("expected Queued, got {other:?}"),
+        };
+        state.set_drive_meta(from_drive, meta(T7, 0));
+        let firmware = admit_backup(&mut state, T7, BackupItemKey::Firmware("psx".into()), 4);
+
+        let removed = state.cancel_drive_queue(T7, "SAMSUNG T7 was removed");
+        assert_eq!(removed, vec![waiting_backup, from_drive, firmware]);
+        for id in &removed {
+            assert!(state.entry(*id).is_none(), "{id} left the list");
+        }
+
+        // The slot owner and the other rows are untouched.
+        assert_eq!(
+            state.entry(active).unwrap().status,
+            DownloadStatus::Downloading
+        );
+        assert_eq!(
+            state.entry(other_drive).unwrap().status,
+            DownloadStatus::Queued
+        );
+        assert_eq!(state.entry(plain).unwrap().status, DownloadStatus::Queued);
+
+        let summaries: Vec<DownloadEntry> = state
+            .snapshot()
+            .entries
+            .into_iter()
+            .filter(|entry| entry.kind == "backup_cancelled")
+            .collect();
+        assert_eq!(summaries.len(), 1);
+        let summary = &summaries[0];
+        assert_eq!(summary.job, "backup");
+        assert_eq!(summary.status, DownloadStatus::Cancelled);
+        assert_eq!(summary.title, "3 more items");
+        assert_eq!(summary.error, "SAMSUNG T7 was removed");
+        assert_eq!(summary.batch, 4, "the first removed row's batch");
+        assert_eq!(summary.drive_id, T7);
+        assert_eq!(summary.drive_label, "SAMSUNG T7");
+        assert_eq!(state.retryable(summary.id), None, "Dismiss only");
+
+        // The queue moves on past the removed rows, in order.
+        state.download_finished(
+            active,
+            Err(LibraryError::DriveRemoved("SAMSUNG T7 was removed".into())),
+            false,
+        );
+        assert_eq!(state.next_ready(), Some(other_drive));
+
+        // A second call for the same drive finds nothing and adds no row.
+        assert!(state.cancel_drive_queue(T7, "again").is_empty());
+        assert!(state.cancel_drive_queue("", "blank").is_empty());
+        assert_eq!(
+            state
+                .snapshot()
+                .entries
+                .iter()
+                .filter(|entry| entry.kind == "backup_cancelled")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn cancel_drive_queue_names_a_single_removed_item() {
+        let mut state = QueueState::default();
+        admit_idle(&mut state, 1);
+        let id = match state.admit_with(
+            backup_key(T7, BackupItemKey::Game(2)),
+            "Aladdin",
+            "Sega Genesis",
+            "backup_game",
+            meta(T7, 3),
+        ) {
+            Admission::Queued(id) => id,
+            other => panic!("expected Queued, got {other:?}"),
+        };
+        assert_eq!(state.cancel_drive_queue(T7, "gone"), vec![id]);
+        let summary = state.snapshot().entries[0].clone();
+        assert_eq!(summary.kind, "backup_cancelled");
+        assert_eq!(summary.title, "Aladdin");
+        assert_eq!(summary.platform, "Sega Genesis");
+    }
+
+    #[test]
+    fn a_backup_write_can_be_cancelled_and_ends_cancelled() {
+        let mut state = QueueState::default();
+        let id = admit_backup(&mut state, T7, BackupItemKey::Game(1), 1);
+        state.download_finished(id, Ok(()), false);
+        assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Installing);
+
+        assert_eq!(state.request_cancel(id), CancelAction::ActiveWrite);
+        assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Cancelling);
+        assert!(state.snapshot().has_live_entry());
+
+        state.finalize_finished(id, Err(LibraryError::Cancelled), "");
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.status, DownloadStatus::Cancelled);
+        assert_eq!(entry.error, "");
+        assert_eq!(
+            state.retryable(id),
+            Some(backup_key(T7, BackupItemKey::Game(1)))
+        );
+    }
+
+    #[test]
+    fn a_non_backup_finalize_stays_uncancellable() {
+        let mut state = QueueState::default();
+        let id = admit_idle(&mut state, 1);
+        state.download_finished(id, Ok(()), false);
+        assert_eq!(state.request_cancel(id), CancelAction::Ignored);
+        assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Installing);
+    }
+
+    #[test]
+    fn a_removed_drive_fails_the_row_with_its_text() {
+        let removed = || LibraryError::DriveRemoved("SAMSUNG T7 was removed".into());
+        let mut state = QueueState::default();
+
+        // While downloading into staging.
+        let downloading = admit_backup(&mut state, T7, BackupItemKey::Game(1), 1);
+        state.download_finished(downloading, Err(removed()), false);
+        let entry = state.entry(downloading).unwrap();
+        assert_eq!(entry.status, DownloadStatus::Failed);
+        assert_eq!(entry.error, "SAMSUNG T7 was removed");
+
+        // While writing to the drive.
+        let writing = admit_backup(&mut state, T7, BackupItemKey::Game(2), 1);
+        state.download_finished(writing, Ok(()), false);
+        state.finalize_finished(writing, Err(removed()), "");
+        let entry = state.entry(writing).unwrap();
+        assert_eq!(entry.status, DownloadStatus::Failed);
+        assert_eq!(entry.error, "SAMSUNG T7 was removed");
+        assert!(state.retryable(writing).is_some());
+    }
+
+    #[test]
+    fn a_drive_summary_row_counts_toward_the_history_cap() {
+        let mut state = QueueState::default();
+        for rom in 1..=(TERMINAL_HISTORY as i64) {
+            let id = admit_idle(&mut state, rom);
+            state.download_finished(id, Ok(()), true);
+        }
+        admit_idle(&mut state, 1000);
+        admit_backup(&mut state, T7, BackupItemKey::Game(1001), 1);
+        state.cancel_drive_queue(T7, "gone");
+        assert!(
+            state.entry(1).is_none(),
+            "the oldest terminal row was pruned"
+        );
+        let terminal = state
+            .snapshot()
+            .entries
+            .iter()
+            .filter(|entry| !entry.status.is_live())
+            .count();
+        assert_eq!(terminal, TERMINAL_HISTORY);
+    }
+
     // --- terminal history cap (design §8: "Completed keeps the last 50") --
 
     #[test]
@@ -1522,7 +2047,7 @@ mod tests {
             let id = admit_idle(&mut state, rom);
             state.download_finished(id, Ok(()), true);
         }
-        // A failed finalize is terminal and evicts id 1.
+        // A cancelled finalize is terminal and evicts id 1.
         let failed = admit_idle(&mut state, 1000);
         state.download_finished(failed, Ok(()), false);
         state.finalize_finished(failed, Err(LibraryError::Cancelled), "");

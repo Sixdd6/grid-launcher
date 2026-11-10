@@ -3,7 +3,14 @@
 // hidden), so every event shows one card whichever view started it or is
 // open. The wording and batching live in `notices.ts`.
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { api, EMULATOR_INSTALLED_EVENT, type EmulatorInstalledEvent } from '../api';
+import {
+  api,
+  EMULATOR_INSTALLED_EVENT,
+  type EmulatorInstalledEvent,
+  type OsChangeOutcome,
+  type PackOs,
+} from '../api';
+import { BackupBatches, osChangeHint } from '../backups/notices';
 import { toLaunchFailure } from '../launchError';
 import { markCurrent } from '../stores/emulatorUpdates.svelte';
 import { onSnapshot } from '../stores/downloads.svelte';
@@ -60,6 +67,37 @@ function dropHint(sourceId: string): void {
   hints.delete(sourceId);
 }
 
+// One card per backup batch (backups/notices.ts), app-wide like the rest.
+const backups = new BackupBatches();
+let backupTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Shows the queued cards of batches that stopped growing, and re-arms for the next. */
+function pumpBackups(): void {
+  if (backupTimer !== null) clearTimeout(backupTimer);
+  backupTimer = null;
+  for (const n of backups.due(Date.now())) notify(n);
+  const wait = backups.nextDueIn(Date.now());
+  if (wait !== null) backupTimer = setTimeout(pumpBackups, wait);
+}
+
+/**
+ * Words the backup batch `set_drive_os` queued as an OS change: its queued
+ * card reads "Windows builds of 2 emulators added to the backup queue for
+ * Couch kit" (and its done card "Windows builds of 2 emulators backed up to
+ * Couch kit") instead of the generic batch wording.
+ *
+ * Settings › Backup drives calls it with the command's answer and the OSes
+ * the user ticked that the drive did not have yet, right after
+ * `api.setDriveOs` resolves. Does nothing when `outcome.batch` is 0 (nothing
+ * was queued). The batch's queued card waits `BATCH_SETTLE_MS` after its
+ * last row arrives, so a call made as soon as the command resolves is in
+ * time; a later call still words the done card.
+ */
+export function expectOsChangeBatch(outcome: OsChangeOutcome, added: readonly PackOs[]): void {
+  const hint = osChangeHint(outcome, added);
+  if (hint) backups.hint(outcome.batch, hint);
+}
+
 /**
  * Launches `romId`, announcing it, and reports a refusal as an error card.
  * Rethrows the failure (as a `LaunchFailure`) so the caller can still offer
@@ -94,6 +132,8 @@ export async function installGame(romId: number, title: string): Promise<void> {
 export function initNotifications(): () => void {
   let book: StatusBook | null = null;
   const offDownloads = onSnapshot((entries, first) => {
+    for (const n of backups.observe(entries, first, Date.now())) notify(n);
+    pumpBackups();
     const { book: next, transitions } = diffSnapshot(first ? null : book, entries);
     book = next;
     for (const t of transitions) {
@@ -121,6 +161,8 @@ export function initNotifications(): () => void {
   ];
   return () => {
     offDownloads();
+    if (backupTimer !== null) clearTimeout(backupTimer);
+    backupTimer = null;
     offSessions();
     coalescer.flush();
     for (const p of pending) void p.then((off) => off());

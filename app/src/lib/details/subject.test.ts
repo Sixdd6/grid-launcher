@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import type { GameSummary, InstalledGame, RomDetail } from '../api';
-import { fromInstalled, fromSummary, mergeDetail, summaryOf } from './subject';
+import type { DriveGame, GameSummary, InstalledGame, RomDetail } from '../api';
+import { parseDriveAssetUrl } from '../backups/driveArt';
+import {
+  detailApplies,
+  driveCopyLines,
+  fromDriveGame,
+  fromDriveText,
+  fromInstalled,
+  fromSummary,
+  mergeDetail,
+  releaseSeconds,
+  summaryOf,
+  versionSource,
+} from './subject';
 
 function row(overrides: Partial<InstalledGame>): InstalledGame {
   return {
@@ -60,6 +72,8 @@ function game(overrides: Partial<GameSummary>): GameSummary {
     created_at: '',
     first_release_date: null,
     logo_url: '',
+    fs_size_bytes: 0,
+    largest_file_bytes: 0,
     ...overrides,
   };
 }
@@ -170,6 +184,13 @@ describe('summaryOf', () => {
       path_cover_large: '/l.png',
       screenshot_urls: [],
       fanart_urls: [],
+      platform_display_name: '',
+      genres: [],
+      created_at: '',
+      first_release_date: null,
+      logo_url: '',
+      fs_size_bytes: 0,
+      largest_file_bytes: 0,
     });
   });
 });
@@ -205,6 +226,8 @@ function detail(overrides: Partial<RomDetail>): RomDetail {
     video_path: '',
     is_identified: false,
     related: [],
+    achievement_count: 0,
+    logo_url: '',
     ...overrides,
   };
 }
@@ -281,5 +304,111 @@ describe('mergeDetail', () => {
     expect(merged.platformName).toBe(stored.platformName);
     expect(merged.romId).toBe(stored.romId);
     expect(merged.source).toBe('installed');
+  });
+});
+
+function driveGame(overrides: Partial<DriveGame> = {}): DriveGame {
+  return {
+    rom_id: 7, server: 'https://romm.home.lan', name: 'Cinder Peaks', platform: 'psx', platform_name: 'PlayStation',
+    size: 700, files_max: 700, cover: 'assets/psx/Cinder Peaks/cover.jpg', installed: false, summary: 'A climb.',
+    region: 'USA', languages: '', tags: '', revision: '', rating: '82', companies: ['Ember', 'Soot'],
+    release_date: '1998-03-01', genres: ['Platform', 'Puzzle'], game_modes: [], franchises: [], players: '1',
+    version: '', fanart: 'assets/psx/Cinder Peaks/fanart.jpg', logo: '',
+    screenshots: ['assets/psx/Cinder Peaks/screenshots/screenshot-01.jpg'], added: '2026-11-07T09:01:00Z',
+    installed_copy: false, installed_version: '', outdated: false, saves_copied: false,
+    ...overrides,
+  };
+}
+
+const t7 = { key: '/run/media/me/T7', label: 'SAMSUNG T7', mount: '/run/media/me/T7', pack: { name: 'Couch kit' } } as const;
+
+describe('fromDriveGame (GameBackups README, "Details from a drive")', () => {
+  // A cast: only the pack's name is read.
+  const drive = t7 as unknown as Parameters<typeof fromDriveGame>[1];
+
+  it('names the drive it came from: "From Couch kit"', () => {
+    const subject = fromDriveGame(driveGame(), drive);
+    expect(subject.source).toBe('drive');
+    expect(subject.drive).toEqual({ key: t7.key, name: 'Couch kit', label: 'SAMSUNG T7', server: 'https://romm.home.lan' });
+    expect(fromDriveText(subject)).toBe('From Couch kit');
+    expect(fromDriveText(fromInstalled(row({})))).toBe('');
+  });
+
+  it('takes the art from the drive, through drive_asset', () => {
+    const subject = fromDriveGame(driveGame(), drive);
+    expect(parseDriveAssetUrl(subject.coverLarge!)).toEqual({ key: t7.key, rel: 'assets/psx/Cinder Peaks/cover.jpg' });
+    expect(subject.coverSmall).toBe(subject.coverLarge);
+    expect(subject.fanartUrls.map((u) => parseDriveAssetUrl(u)?.rel)).toEqual(['assets/psx/Cinder Peaks/fanart.jpg']);
+    expect(subject.screenshotUrls).toHaveLength(1);
+  });
+
+  it('has no cover and no fanart where the pack names none', () => {
+    const subject = fromDriveGame(driveGame({ cover: '', fanart: '', screenshots: [] }), drive);
+    expect(subject.coverLarge).toBeNull();
+    expect(subject.fanartUrls).toEqual([]);
+    expect(subject.screenshotUrls).toEqual([]);
+  });
+
+  it('carries the pack\'s details: summary, genres, platform, release date, companies', () => {
+    const subject = fromDriveGame(driveGame(), drive);
+    expect(subject.romId).toBe(7);
+    expect(subject.platformName).toBe('PlayStation');
+    expect(subject.platformSlug).toBe('psx');
+    expect(subject.description).toBe('A climb.');
+    expect(subject.genres).toBe('Platform, Puzzle');
+    expect(subject.releaseDate).toBe('888710400');
+    expect(subject.companies).toBe('Ember, Soot');
+  });
+
+  it('merges a server detail only from the server the game was backed up from', () => {
+    const subject = fromDriveGame(driveGame(), drive);
+    expect(detailApplies(subject, 'https://user:pw@ROMM.home.lan:443/')).toBe(true);
+    expect(detailApplies(subject, 'https://elsewhere.lan')).toBe(false);
+    expect(detailApplies(subject, '')).toBe(false);
+    expect(detailApplies(fromInstalled(row({})), 'https://elsewhere.lan')).toBe(true);
+  });
+
+  it('says a copy of an installed game is one, with its version', () => {
+    expect(driveCopyLines(fromDriveGame(driveGame(), drive))).toEqual([]);
+    expect(driveCopyLines(fromDriveGame(driveGame({ installed_copy: true, installed_version: 'v1.1' }), drive))).toEqual([
+      'A copy of an installed game · v1.1',
+    ]);
+    expect(
+      driveCopyLines(fromDriveGame(driveGame({ installed_copy: true, installed_version: 'v1.1', outdated: true }), drive)),
+    ).toEqual(['A copy of an installed game · v1.1 (the server had newer files)']);
+    expect(driveCopyLines(fromDriveGame(driveGame({ installed_copy: true }), drive))).toEqual(['A copy of an installed game']);
+    expect(driveCopyLines(fromInstalled(row({})))).toEqual([]);
+  });
+
+  it('adds the Wine-prefix line for a Windows copy', () => {
+    const win = driveGame({ installed_copy: true, installed_version: 'v2.0', platform: 'win', platform_name: 'Windows' });
+    expect(driveCopyLines(fromDriveGame(win, drive))).toEqual([
+      'A copy of an installed game · v2.0',
+      'Its Wine prefix wasn’t copied, so saves kept there aren’t on the drive',
+    ]);
+  });
+
+  it('says when a Windows game\'s saves came along from its Wine prefix', () => {
+    const win = { platform: 'win', platform_name: 'Windows', saves_copied: true };
+    expect(driveCopyLines(fromDriveGame(driveGame({ ...win, installed_copy: true, installed_version: 'v2.0' }), drive))).toEqual([
+      'A copy of an installed game · v2.0',
+      'Saves from its Wine prefix are included',
+    ]);
+    expect(driveCopyLines(fromDriveGame(driveGame(win), drive))).toEqual(['Saves from its Wine prefix are included']);
+    expect(driveCopyLines(fromInstalled(row({})))).toEqual([]);
+  });
+
+  it('reads its version like a server game', () => {
+    expect(versionSource(fromDriveGame(driveGame(), drive))).toBe('server');
+    expect(versionSource(fromInstalled(row({})))).toBe('installed');
+  });
+});
+
+describe('releaseSeconds', () => {
+  it('turns a pack date into the seconds the header reads, like grid-core', () => {
+    expect(releaseSeconds('1993-11-11')).toBe('752976000');
+    expect(releaseSeconds('752976000')).toBe('752976000');
+    expect(releaseSeconds('soon')).toBe('');
+    expect(releaseSeconds('')).toBe('');
   });
 });

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  backupAction,
+  onDrivesLine,
   candidateLabel,
   contentButtons,
   installDirOf,
@@ -169,5 +171,26 @@ describe('launchSourceNote', () => {
     expect(launchSourceNote('sidecar', '/games/Side/game/Game.exe', shown)).toBe('');
     expect(launchSourceNote('user', shown, shown)).toBe('');
     expect(launchSourceNote('', shown, shown)).toBe('');
+  });
+});
+
+describe('backupAction', () => {
+  it('is enabled while connected', () => {
+    expect(backupAction(true)).toEqual({ disabled: false, reason: '' });
+  });
+
+  it('is disabled offline with the reason', () => {
+    expect(backupAction(false)).toEqual({ disabled: true, reason: 'Connect to a server to backup games' });
+  });
+});
+
+describe('onDrivesLine', () => {
+  it('names the packs holding the game, once each', () => {
+    expect(onDrivesLine(['Couch kit'])).toBe('On Couch kit');
+    expect(onDrivesLine(['Couch kit', 'Classic Platformers', 'Couch kit'])).toBe('On Couch kit, Classic Platformers');
+  });
+
+  it('is empty when no connected drive holds it', () => {
+    expect(onDrivesLine([])).toBe('');
   });
 });

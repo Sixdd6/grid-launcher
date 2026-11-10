@@ -36,7 +36,8 @@ use std::time::Duration;
 use crate::config_write::modify_config;
 use grid_core::cloud::folder_filter::FolderPolicy;
 use grid_core::cloud::native::{
-    normalize_manual_save_path, resolve_native_save_dir, visible_native_paths,
+    normalize_manual_save_path, resolve_native_save_dir, row_wine_prefix, visible_native_paths,
+    OwnedWinePrefix, WinePrefix,
 };
 use grid_core::cloud::ops::native::manual_paths_key;
 use grid_core::cloud::ops::restore::SaveRestoreReport;
@@ -435,7 +436,10 @@ impl CloudService {
             .any(|g| games_match_identity(g, &cloud_game));
         let pcgw_paths = Self::persisted_pcgw_paths(&inputs.config, &cloud_game);
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
-        let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
+        let ctx = inputs.context(
+            &pcgw_paths,
+            wine_prefix.as_ref().map(OwnedWinePrefix::as_prefix),
+        );
         let mut caches = self.caches.lock().await;
         let entry = ops::resolved_cloud_emulator_entry(&ctx, &mut caches, &cloud_game, save_type);
         let supported =
@@ -463,7 +467,10 @@ impl CloudService {
         let cloud_game = cloud_game_from_input(&game);
         let pcgw_paths = Self::persisted_pcgw_paths(&inputs.config, &cloud_game);
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
-        let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
+        let ctx = inputs.context(
+            &pcgw_paths,
+            wine_prefix.as_ref().map(OwnedWinePrefix::as_prefix),
+        );
         let mut caches = self.caches.lock().await;
         let records =
             ops::fetch_cloud_records(&client, &ctx, &mut caches, &cloud_game, save_type).await?;
@@ -512,7 +519,10 @@ impl CloudService {
         }
         let pcgw_paths = Self::persisted_pcgw_paths(&inputs.config, &cloud_game);
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
-        let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
+        let ctx = inputs.context(
+            &pcgw_paths,
+            wine_prefix.as_ref().map(OwnedWinePrefix::as_prefix),
+        );
         let mut caches = self.caches.lock().await;
         let report = ops::upload::upload_cloud_files_for_game(
             &client,
@@ -558,7 +568,10 @@ impl CloudService {
         let cloud_game = cloud_game_from_input(&game);
         let pcgw_paths = Self::persisted_pcgw_paths(&inputs.config, &cloud_game);
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
-        let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
+        let ctx = inputs.context(
+            &pcgw_paths,
+            wine_prefix.as_ref().map(OwnedWinePrefix::as_prefix),
+        );
         let mut caches = self.caches.lock().await;
 
         let selected: Option<Value> = match record_id {
@@ -668,19 +681,19 @@ impl CloudService {
         // read, so they need the same wine prefix the upload/restore paths
         // use (N14).
         let installed = blocking_installed(install).await?;
-        let wine_prefix = wine_prefix_from(&installed, &cloud_game);
+        let wine_prefix = wine_prefix_from(&installed, &cloud_game, &config.default_compat_tool);
 
         let windows_documents = windows_documents_dir();
         Ok(NativeSavePathsDto {
             pcgw: native_path_entries(
                 &visible_pcgw,
                 windows_documents.as_deref(),
-                wine_prefix.as_deref(),
+                wine_prefix.as_ref().map(OwnedWinePrefix::as_prefix),
             ),
             manual: native_path_entries(
                 &visible_manual,
                 windows_documents.as_deref(),
-                wine_prefix.as_deref(),
+                wine_prefix.as_ref().map(OwnedWinePrefix::as_prefix),
             ),
         })
     }
@@ -841,7 +854,10 @@ impl CloudService {
         // return without a request.
         let pcgw_paths = self.ensure_pcgw_paths(config_path, &cloud_game).await;
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
-        let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
+        let ctx = inputs.context(
+            &pcgw_paths,
+            wine_prefix.as_ref().map(OwnedWinePrefix::as_prefix),
+        );
         let mut caches = self.caches.lock().await;
         let mut combined = SyncStateUpdate::default();
 
@@ -933,7 +949,10 @@ impl CloudService {
         let cloud_game = cloud_game_from_installed(installed_game);
         let pcgw_paths = Self::persisted_pcgw_paths(&inputs.config, &cloud_game);
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
-        let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
+        let ctx = inputs.context(
+            &pcgw_paths,
+            wine_prefix.as_ref().map(OwnedWinePrefix::as_prefix),
+        );
         let mut caches = self.caches.lock().await;
         let save_entry =
             ops::resolved_cloud_emulator_entry(&ctx, &mut caches, &cloud_game, SaveType::Save);
@@ -1093,14 +1112,11 @@ impl CloudService {
             return;
         };
         let cloud_game = cloud_game_from_installed(installed_game);
-        let wine_prefix = {
-            let prefix = installed_game.native_wineprefix.trim();
-            if prefix.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(prefix))
-            }
-        };
+        let wine_prefix = row_wine_prefix(
+            installed_game,
+            &config.default_compat_tool,
+            grid_core::platform::home_dir().as_deref(),
+        );
         let key = game_key(&cloud_game);
         if key.is_empty() {
             return;
@@ -1169,7 +1185,7 @@ impl CloudService {
         config_dir: PathBuf,
         config_path: PathBuf,
         key: String,
-        wine_prefix: Option<PathBuf>,
+        wine_prefix: Option<OwnedWinePrefix>,
     ) -> Vec<CloudMessage> {
         let now = unix_now_f64();
         let pcgw_paths = self.ensure_pcgw_paths(&config_path, &game).await;
@@ -1190,7 +1206,7 @@ impl CloudService {
             active_sessions: &[],
             now,
             pcgw_paths: &pcgw_paths,
-            wine_prefix: wine_prefix.as_deref(),
+            wine_prefix: wine_prefix.as_ref().map(OwnedWinePrefix::as_prefix),
         };
 
         let mut caches = CloudCaches::default();
@@ -1304,8 +1320,8 @@ impl Inputs {
     /// (`crates/grid-core/src/cloud/ops/native.rs:83,177,237,241`) never
     /// translated `%APPDATA%` and friends into the prefix on Linux — native
     /// upload and restore silently scanned host paths that do not exist.
-    fn wine_prefix_for(&self, game: &CloudGame) -> Option<PathBuf> {
-        wine_prefix_from(&self.installed, game)
+    fn wine_prefix_for(&self, game: &CloudGame) -> Option<OwnedWinePrefix> {
+        wine_prefix_from(&self.installed, game, &self.config.default_compat_tool)
     }
 
     /// `pcgw_paths` is threaded in by the caller (Task 18: [`CloudService::persisted_pcgw_paths`],
@@ -1316,7 +1332,7 @@ impl Inputs {
     fn context<'a>(
         &'a self,
         pcgw_paths: &'a [String],
-        wine_prefix: Option<&'a Path>,
+        wine_prefix: Option<WinePrefix<'a>>,
     ) -> CloudContext<'a> {
         CloudContext {
             config: &self.config,
@@ -1928,16 +1944,28 @@ pub struct NativeSavePathsDto {
     pub manual: Vec<NativeSavePathEntryDto>,
 }
 
-/// `game`'s wine prefix, from the registry row that matches it by identity.
-/// `None` when the game is not installed, or when the row has no prefix (a
-/// Windows host, or a game installed before prefixes were recorded).
-fn wine_prefix_from(installed: &[InstalledGame], game: &CloudGame) -> Option<PathBuf> {
+/// `game`'s wine prefix, from the registry row that matches it by identity,
+/// with the user folder its saves are under (`steamuser` for Proton, this
+/// computer's user name for Wine: [`row_wine_prefix`], which reads the
+/// prefix and the compat tool the launcher would use, `default_compat_tool`
+/// being the config's Windows default). `None` when the game is not
+/// installed, or when the row has no prefix (a Windows host, or a game
+/// installed before prefixes were recorded).
+fn wine_prefix_from(
+    installed: &[InstalledGame],
+    game: &CloudGame,
+    default_compat_tool: &str,
+) -> Option<OwnedWinePrefix> {
     installed
         .iter()
         .find(|row| games_match_identity(&cloud_game_from_installed(row), game))
-        .map(|row| row.native_wineprefix.trim().to_string())
-        .filter(|prefix| !prefix.is_empty())
-        .map(PathBuf::from)
+        .and_then(|row| {
+            row_wine_prefix(
+                row,
+                default_compat_tool,
+                grid_core::platform::home_dir().as_deref(),
+            )
+        })
 }
 
 /// Builds the DTO rows for `paths`, resolving each one for display.
@@ -1947,7 +1975,7 @@ fn wine_prefix_from(installed: &[InstalledGame], game: &CloudGame) -> Option<Pat
 fn native_path_entries(
     paths: &[String],
     windows_documents: Option<&Path>,
-    wine_prefix: Option<&Path>,
+    wine_prefix: Option<WinePrefix<'_>>,
 ) -> Vec<NativeSavePathEntryDto> {
     paths
         .iter()
@@ -2246,7 +2274,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            inputs.wine_prefix_for(&game),
+            inputs.wine_prefix_for(&game).map(|prefix| prefix.path),
             Some(PathBuf::from("/library/Windows/My Game/prefix"))
         );
 
@@ -2295,8 +2323,12 @@ mod tests {
         };
         let pcgw: Vec<String> = Vec::new();
         let prefix = PathBuf::from("/prefix");
-        let ctx = inputs.context(&pcgw, Some(prefix.as_path()));
-        assert_eq!(ctx.wine_prefix, Some(prefix.as_path()));
+        let steam = WinePrefix::new(
+            prefix.as_path(),
+            grid_core::cloud::native::PrefixUser::Steam,
+        );
+        let ctx = inputs.context(&pcgw, Some(steam));
+        assert_eq!(ctx.wine_prefix, Some(steam));
     }
 
     /// Every cloud op resolves `%DOCUMENTS%` and redirected save paths

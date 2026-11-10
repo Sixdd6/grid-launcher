@@ -77,6 +77,67 @@ pub fn windows_documents_dir() -> Option<PathBuf> {
     None
 }
 
+/// The total bytes and the bytes free to this user on the volume that holds
+/// `path`, which must exist. `None` when they cannot be read.
+#[cfg(windows)]
+pub fn disk_space(path: &Path) -> Option<(u64, u64)> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut available: u64 = 0;
+    let mut total: u64 = 0;
+    // SAFETY: `wide` is NUL-terminated and outlives the call; the two out
+    // pointers are valid and the third optional one may be null.
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut available,
+            &mut total,
+            std::ptr::null_mut(),
+        )
+    };
+    (ok != 0).then_some((total, available))
+}
+
+/// The total bytes this user can use and the bytes free to this user on the
+/// volume that holds `path`, which must exist. Blocks kept for root are left
+/// out of both. `None` when they cannot be read.
+#[cfg(unix)]
+// The statvfs field types differ between targets (u32 on some 32-bit
+// ones), so the casts are needed there even where they are no-ops here.
+#[allow(clippy::unnecessary_cast)]
+pub fn disk_space(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::ffi::OsStrExt;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    // SAFETY: an all-zero `statvfs` is a valid value to be overwritten.
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `c_path` is NUL-terminated and `stat` is a valid out-pointer.
+    let rc = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
+    (rc == 0).then(|| {
+        let block = stat.f_frsize as u64;
+        let blocks = stat.f_blocks as u64;
+        let free = stat.f_bfree as u64;
+        let avail = stat.f_bavail as u64;
+        (
+            usable_blocks(blocks, free, avail).saturating_mul(block),
+            avail.saturating_mul(block),
+        )
+    })
+}
+
+/// The blocks this user can ever use: all of them less the ones the file
+/// system keeps for root (ext4 keeps 5% by default). Those are never free
+/// to GRID, so counting them would show them as other files in a usage bar.
+#[cfg(unix)]
+fn usable_blocks(blocks: u64, free: u64, avail: u64) -> u64 {
+    blocks.saturating_sub(free.saturating_sub(avail))
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn disk_space(_path: &Path) -> Option<(u64, u64)> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,6 +217,25 @@ mod tests {
             canonicalize(&dir).unwrap(),
             std::fs::canonicalize(&dir).unwrap()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn usable_blocks_leaves_out_the_root_reserve() {
+        // 1000 blocks, 300 free of which 250 are free to this user: 50 are
+        // kept for root.
+        assert_eq!(usable_blocks(1000, 300, 250), 950);
+        assert_eq!(usable_blocks(1000, 300, 300), 1000);
+        assert_eq!(usable_blocks(10, 300, 0), 0);
+    }
+
+    #[test]
+    fn disk_space_reads_the_volume_of_an_existing_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let (total, free) = disk_space(temp.path()).expect("space is readable");
+        assert!(total > 0);
+        assert!(free <= total);
+        assert_eq!(disk_space(&temp.path().join("missing")), None);
     }
 
     #[test]

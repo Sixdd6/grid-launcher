@@ -13,7 +13,9 @@ export type RestoreOutcome =
   | { kind: 'no_session'; server_url: string; username: string }
   | { kind: 'connected'; state: SessionState }
   | ({ kind: 'unauthorized' } & SessionUnauthorized)
-  | { kind: 'unreachable'; server_url: string; username: string; error: string };
+  | { kind: 'unreachable'; server_url: string; username: string; error: string }
+  /** `Config.offline`: the user chose to run without a server; no probe ran. */
+  | { kind: 'offline'; server_url: string; username: string };
 /** Emitted once when a live session gets a 401 (commands.rs `SESSION_UNAUTHORIZED_EVENT`). */
 export const SESSION_UNAUTHORIZED_EVENT = 'session-unauthorized';
 export type Platform = {
@@ -72,6 +74,10 @@ export type GameSummary = {
   first_release_date: number | null;
   /** The server's clear logo, resolved + host-filtered; `''` when none. */
   logo_url: string;
+  /** The ROM's size on the server's disk (`fs_size_bytes`), all files; 0 when unknown. */
+  fs_size_bytes: number;
+  /** The largest top-level game file, in bytes; `null` when the list carried no files. */
+  largest_file_bytes: number | null;
 };
 
 /** `discover_feed`: Server › Discover's two lists, already filtered and
@@ -103,6 +109,10 @@ export type RomFile = {
   last_modified: string;
   /** RomM's file category (e.g. `"update"`, `"dlc"`); `''` for an ordinary game file. */
   category: string;
+  /** The file's MD5 as the server states it; `''` when none. */
+  md5_hash: string;
+  /** The file's SHA-1 as the server states it; `''` when none. */
+  sha1_hash: string;
 };
 
 /** One Overview "Related" chip. Mirrors `grid_core::romm::RelatedGame`. */
@@ -142,6 +152,8 @@ export type RomDetail = {
   /** How many achievements RomM lists for the ROM; the Achievements tab
    *  shows only when this is above zero. */
   achievement_count: number;
+  /** The game's clear logo, resolved + host-filtered; `''` when none. */
+  logo_url: string;
 };
 
 /** One Achievements tab row. Mirrors `grid_core::romm::achievements::AchievementRow`. */
@@ -338,8 +350,10 @@ export type DownloadStatus =
 
 // Which half of the install pipeline owns an entry. `'firmware'` is an
 // EXTERNAL row: the background firmware installer moves its own bytes, so
-// the entry takes no queue slot and reports no progress.
-export type DownloadJob = 'game' | 'emulator' | 'firmware' | 'library';
+// the entry takes no queue slot and reports no progress. `'backup'` is one
+// item of a backup to a drive: `downloading` from the server into staging,
+// then `installing` while it writes to the drive.
+export type DownloadJob = 'game' | 'emulator' | 'firmware' | 'library' | 'backup';
 
 // What an entry installs — finer-grained than `job`.
 export type DownloadKind =
@@ -355,7 +369,17 @@ export type DownloadKind =
   // row. It takes no queue slot; its Cancel and Retry are the move's own
   // commands. `downloading` while it copies (cancellable), `installing`
   // while it commits and cleans up (not cancellable).
-  | 'library_move';
+  | 'library_move'
+  // Game backups (`job: 'backup'`): one game, one emulator release for one
+  // OS, or one platform's firmware written to a drive.
+  | 'backup_game'
+  // A game copied from this computer's install instead of downloaded.
+  | 'backup_game_local'
+  | 'backup_emulator'
+  | 'backup_firmware'
+  // The one `cancelled` row that stands for the waiting backup rows of a
+  // removed drive ("13 more items"). Dismiss only, never Retry.
+  | 'backup_cancelled';
 
 export type DownloadEntry = {
   id: number;
@@ -374,9 +398,230 @@ export type DownloadEntry = {
   error: string;
   /** One line of free text: what a library move is doing ("games/ · 1.2 of 5.6 GB"). Empty for every other row. */
   detail: string;
+  /** The drive a backup row writes to, or an install-from-drive row copies from: its mount path, or its drive letter on Windows. `''` for every other row. */
+  drive_id: string;
+  /** That drive's pack name. `''` when `drive_id` is. */
+  drive_name: string;
+  /** That drive's volume label. Non-empty on a `game` row: it installs from the drive ("Copying from <label>"). */
+  drive_label: string;
+  /** The backup batch, for one notification per batch. `0` for none. */
+  batch: number;
 };
 
 export type DownloadsSnapshot = { entries: DownloadEntry[] };
+
+// ── Game backups (plan §1.3; commands in app/src-tauri/src/commands/backups.rs). ──
+
+/** An OS a backup drive carries emulators for. Mirrors `grid_core::backup::pack::PackOs`. */
+export type PackOs = 'linux' | 'windows';
+
+/** What GRID found on a connected drive. */
+export type DriveStatus = 'ready' | 'not_set_up' | 'read_only' | 'unreadable' | 'newer_format';
+
+/** `os` is `null` for an OS tag this build does not know. */
+export type PackSummaryEmulator = { name: string; version: string; os: PackOs | null };
+
+/** A game on a drive, by the server it came from (Details' "On <pack>" line). */
+export type PackRomRef = { server: string; rom_id: number };
+
+export type PackSummary = {
+  name: string;
+  os: PackOs[];
+  game_count: number;
+  gridpack_bytes: number;
+  emulators: PackSummaryEmulator[];
+  /** Platform names. */
+  firmware: string[];
+  /** RFC 3339 UTC. */
+  updated: string;
+  rom_ids: PackRomRef[];
+};
+
+/** A connected drive. `key` is the mount path, or the drive letter on Windows; a pack has no id. */
+export type DriveInfo = {
+  key: string;
+  mount: string;
+  label: string;
+  /** The display file system name: FAT32, exFAT, NTFS, ext4… */
+  fs: string;
+  fat32: boolean;
+  total_bytes: number;
+  free_bytes: number;
+  read_only: boolean;
+  status: DriveStatus;
+  /** Why the drive's index can't be read (`unreadable`), else `''`. */
+  problem: string;
+  pack: PackSummary | null;
+};
+
+/** A set-up drive GRID has seen, keyed by its mount path or drive letter. */
+export type RememberedDrive = {
+  mount: string;
+  name: string;
+  label: string;
+  fs: string;
+  total_bytes: number;
+  game_count: number;
+  /** RFC 3339 UTC. */
+  last_seen: string;
+};
+
+/** `list_drives` and the `drives-changed` event payload. `remembered` lists only the drives that are not connected. */
+export type DrivesSnapshot = { connected: DriveInfo[]; remembered: RememberedDrive[] };
+
+/** One game on a drive (Library › Backup drives and Details). Paths are relative to `gridpack/`. */
+export type DriveGame = {
+  rom_id: number;
+  server: string;
+  name: string;
+  platform: string;
+  platform_name: string;
+  size: number;
+  /** The largest single file, for the FAT32 limit. */
+  files_max: number;
+  cover: string;
+  installed: boolean;
+  summary: string;
+  region: string;
+  languages: string;
+  tags: string;
+  revision: string;
+  rating: string;
+  companies: string[];
+  release_date: string;
+  genres: string[];
+  game_modes: string[];
+  franchises: string[];
+  players: string;
+  version: string;
+  fanart: string;
+  logo: string;
+  screenshots: string[];
+  /** RFC 3339 UTC: when it was backed up. */
+  added: string;
+  /** A copy of the install on the computer that backed it up, not the server's files. */
+  installed_copy: boolean;
+  /** The installed copy's version (`"v1.2"`), else `''`. */
+  installed_version: string;
+  /** The server had newer files when the installed copy was backed up. */
+  outdated: boolean;
+  /** A Windows game whose saves were copied out of its Wine prefix. */
+  saves_copied: boolean;
+};
+
+/**
+ * What to backup. `platform_ids` (optional) are the platforms the games are
+ * on, when the caller knows them: the plan then reads one game list per
+ * platform instead of one detail per game.
+ */
+export type BackupRequest = { rom_ids: number[]; platform_ids?: number[]; title: string };
+
+/** A game a backup plan names without writing it. Mirrors `grid_core::backup::plan::PlanGameRef`. */
+export type PlanGameRef = { rom_id: number; name: string };
+
+export type PlanEmulator = {
+  name: string;
+  os: PackOs[];
+  /** `null` when the size is not known before the download. */
+  bytes: number | null;
+  already: boolean;
+  /** Why it goes for fewer computers than the pack, or not at all; else `''`. */
+  note: string;
+};
+
+export type PlanFirmware = { platform_name: string; files: number; bytes: number; already: boolean };
+
+/** The Steam Linux Runtime a backup can carry. Mirrors `grid_core::backup::plan::PlanRuntime`. */
+export type PlanRuntime = {
+  /** "Steam Linux Runtime". */
+  name: string;
+  /** `null` when the size is not known. */
+  bytes: number | null;
+  already: boolean;
+  /** `include_runtime` was set: it is in this backup. */
+  included: boolean;
+};
+
+/** `plan_backup`'s answer. Mirrors `grid_core::backup::plan::BackupPlan`. */
+export type BackupPlan = {
+  /** The drive key. */
+  drive: string;
+  games_to_write: number[];
+  skipped: PlanGameRef[];
+  too_big: PlanGameRef[];
+  emulators: PlanEmulator[];
+  firmware: PlanFirmware[];
+  /** Why the firmware checkbox is disabled, else `''`. */
+  firmware_reason: string;
+  /** The "Make Windows games work offline" line: set when the pack is for Linux and Windows games are being written, ticked or not. */
+  runtime: PlanRuntime | null;
+  bytes_to_write: number;
+  /** The drive's free space less what other queued or running backups still hold on it. */
+  free_bytes: number;
+  /** The drive's space other queued or running backups hold (0 when none). */
+  reserved_bytes: number;
+  fits: boolean;
+  /** Some requested game is installed on this computer (shows "Copy installed games from this computer"). */
+  local_available: boolean;
+  /** The `use_local` the plan was made with. */
+  use_local: boolean;
+  /** Where each game being written comes from. */
+  sources: PlanSource[];
+  /** Eligible local games the server has newer files for. */
+  outdated: PlanOutdated[];
+  /** Out-of-date local games with no choice yet, while `use_local` is on. */
+  needs_choice: number;
+  /** The part of `bytes_to_write` copied from this computer. */
+  local_bytes: number;
+  /** The part of `bytes_to_write` downloaded from the server. */
+  download_bytes: number;
+};
+
+/** Where a game in a backup comes from. Mirrors `grid_core::backup::plan::SourceChoice`. */
+export type SourceChoice = 'local' | 'download';
+
+/** The user's pick for one out-of-date local game. Mirrors `commands::backups::SourcePick`. */
+export type SourcePick = { rom_id: number; source: SourceChoice };
+
+/** One game being written and where it comes from. Mirrors `grid_core::backup::plan::PlanSource`. */
+export type PlanSource = {
+  rom_id: number;
+  name: string;
+  source: SourceChoice;
+  /** Why it downloads although it is installed here, else `''`. */
+  note: string;
+};
+
+/** An eligible local game the server has newer files for. Mirrors `grid_core::backup::plan::PlanOutdated`. */
+export type PlanOutdated = {
+  rom_id: number;
+  name: string;
+  /** `"v1.2"`, or `''` when there is no version tag. */
+  installed_version: string;
+  server_version: string;
+  /** The user's pick, if any. */
+  choice: SourceChoice | null;
+};
+
+export type BackupQueued = { batch: number; games: number; emulators: number; firmware: number };
+
+/** `set_drive_os`'s answer. `batch` is 0 when nothing was queued. */
+export type OsChangeOutcome = { batch: number; queued: number; removed: number };
+
+/** `install_from_drive`'s answer: one toast line per extra item it queued ("DuckStation from Couch kit added to download queue"). */
+export type DriveInstallOutcome = { notices: string[] };
+
+/** The `backup-notice` event payload: a toast the backend raised ("PlayStation firmware installed from Couch kit"). */
+export type BackupNotice = { message: string; error: boolean };
+
+/** `get_backup_settings`'s answer. */
+export type BackupSettings = { include_firmware: boolean };
+
+/** Emitted with a `DrivesSnapshot`, only when the snapshot changes (drive_service.rs `DRIVES_CHANGED_EVENT`). */
+export const DRIVES_CHANGED_EVENT = 'drives-changed';
+
+/** Emitted with a `BackupNotice` for a toast the backend decides on (drive_service.rs `BACKUP_NOTICE_EVENT`). */
+export const BACKUP_NOTICE_EVENT = 'backup-notice';
 
 export type GameSession = {
   id: number;
@@ -1047,4 +1292,74 @@ export const api = {
   openReleasePage: (url: string) => invoke<void>('open_release_page', { url }),
   pythonImportNotice: () => invoke<PythonImportReport | null>('python_import_notice'),
   layoutMigrationNotice: () => invoke<LayoutMigrationNotice | null>('layout_migration_notice'),
+
+  // Game backups. Every drive command names a drive by its `key` (the mount
+  // path, or the drive letter on Windows) from the latest scan.
+  listDrives: () => invoke<DrivesSnapshot>('list_drives'),
+  /** Writes an empty pack. Refuses a mount the current scan did not find. */
+  setupDrive: (mount: string, name: string, os: PackOs[]) =>
+    invoke<DriveInfo>('setup_drive', { mount, name, os }),
+  renameDrive: (key: string, name: string) => invoke<void>('rename_drive', { key, name }),
+  /** Removing an OS works offline; adding one queues emulator builds and needs a server. */
+  setDriveOs: (key: string, os: PackOs[]) => invoke<OsChangeOutcome>('set_drive_os', { key, os }),
+  /** The bytes "Remove GRID files" would free. */
+  removeGridFilesSize: (key: string) => invoke<number>('remove_grid_files_size', { key }),
+  removeGridFiles: (key: string) => invoke<void>('remove_grid_files', { key }),
+  /** Drops a remembered (not connected) drive; takes its mount, as `RememberedDrive` has no key. */
+  forgetDrive: (mount: string) => invoke<void>('forget_drive', { mount }),
+  openDriveFolder: (key: string) => invoke<void>('open_drive_folder', { key }),
+  driveGames: (key: string) => invoke<DriveGame[]>('drive_games', { key }),
+  /** Seeds the image cache from a pack-relative art path; answers the cache path. */
+  driveAsset: (key: string, rel: string) => invoke<string>('drive_asset', { key, rel }),
+  /**
+   * `includeRuntime`: carry the Steam Linux Runtime ("Make Windows games work offline"); omitted, false.
+   * `useLocal`: "Copy installed games from this computer"; omitted, true.
+   * `choices`: the picks for out-of-date local games (a rom id picked twice keeps the last pick).
+   */
+  planBackup: (
+    key: string,
+    request: BackupRequest,
+    includeFirmware: boolean,
+    includeRuntime?: boolean,
+    useLocal?: boolean,
+    choices?: SourcePick[],
+  ) =>
+    invoke<BackupPlan>('plan_backup', {
+      key,
+      request,
+      includeFirmware,
+      includeRuntime: includeRuntime ?? null,
+      useLocal: useLocal ?? null,
+      choices: choices ?? null,
+    }),
+  /**
+   * Same options as `planBackup`. Needs a server ("Backing up needs a server"); refused while an
+   * out-of-date local game has no pick ("Choose which copy to backup for 2 games").
+   */
+  startBackup: (
+    key: string,
+    request: BackupRequest,
+    includeFirmware: boolean,
+    includeRuntime?: boolean,
+    useLocal?: boolean,
+    choices?: SourcePick[],
+  ) =>
+    invoke<BackupQueued>('start_backup', {
+      key,
+      request,
+      includeFirmware,
+      includeRuntime: includeRuntime ?? null,
+      useLocal: useLocal ?? null,
+      choices: choices ?? null,
+    }),
+  /** `server` is the game's `DriveGame.server`; omitted, the first game on the drive with that rom id. */
+  installFromDrive: (key: string, romId: number, server?: string) =>
+    invoke<DriveInstallOutcome>('install_from_drive', { key, romId, server: server ?? null }),
+  /** Answers how many games were removed. Refused while the drive has a live backup row. */
+  removeFromDrive: (key: string, romIds: number[], server?: string) =>
+    invoke<number>('remove_from_drive', { key, romIds, server: server ?? null }),
+  getBackupSettings: () => invoke<BackupSettings>('get_backup_settings'),
+  setBackupIncludeFirmware: (value: boolean) => invoke<void>('set_backup_include_firmware', { value }),
+  /** Offline mode: sets `Config.offline` and drops any live client. */
+  useWithoutServer: () => invoke<void>('use_without_server'),
 };

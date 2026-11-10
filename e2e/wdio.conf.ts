@@ -64,6 +64,11 @@ const appEnv: Record<string, string> = {
   // e2e feature only). e2e.sh sets E2E_FORCE_COPY_MOVE for the
   // `library-move` group only.
   ...(process.env.E2E_FORCE_COPY_MOVE ? { GRID_LAUNCHER_E2E_FORCE_COPY_MOVE: '1' } : {}),
+  // GRID_LAUNCHER_E2E_DRIVE_ROOTS replaces the removable-drive probe: every
+  // child folder of these roots is a mounted drive (grid-core
+  // backup/drives.rs, e2e feature only). e2e.sh sets E2E_DRIVE_ROOTS for the
+  // `backups` group only; every other group keeps the OS probe.
+  ...(process.env.E2E_DRIVE_ROOTS ? { GRID_LAUNCHER_E2E_DRIVE_ROOTS: process.env.E2E_DRIVE_ROOTS } : {}),
   ...(process.env.GRID_E2E_ARGV_FILE
     ? { GRID_E2E_ARGV_FILE: process.env.GRID_E2E_ARGV_FILE }
     : {}),

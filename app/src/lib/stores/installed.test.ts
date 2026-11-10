@@ -6,6 +6,7 @@ function row(overrides: Partial<InstalledGame>): InstalledGame {
   return {
     title: 'Chrono Trigger',
     platform: 'SNES',
+    platform_slug: '',
     rom_id: 42,
     rom_file_name: 'chrono.sfc',
     archive_path: '',
@@ -54,6 +55,13 @@ function game(overrides: Partial<GameSummary>): GameSummary {
     path_cover_large: null,
     screenshot_urls: [],
     fanart_urls: [],
+    platform_display_name: '',
+    genres: [],
+    created_at: '',
+    first_release_date: null,
+    logo_url: '',
+    fs_size_bytes: 0,
+    largest_file_bytes: 0,
     ...overrides,
   };
 }

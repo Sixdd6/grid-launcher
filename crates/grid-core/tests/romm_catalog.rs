@@ -1,7 +1,7 @@
 use grid_core::romm::RommClient;
 use grid_core::secrets::Credential;
 use secrecy::SecretString;
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn client(uri: &str) -> RommClient {
@@ -231,4 +231,52 @@ async fn recent_games_asks_for_one_ordered_page() {
     assert_eq!(games.len(), 1);
     assert_eq!(games[0].first_release_date, Some(1_762_000_000));
     assert_eq!(games[0].created_at, "2026-11-06T07:42:09+00:00");
+}
+
+/// Backup planning asks for each game's file entries (`with_files=true`) so
+/// the FAT32 check reads the largest file; the plain listing behind the
+/// Server grid never sends `with_files` and leaves the largest file unknown.
+#[tokio::test]
+async fn only_games_with_files_asks_for_file_entries() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/roms"))
+        .and(query_param("platform_ids", "7"))
+        .and(query_param("with_files", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "items": [{
+                "id": 1, "name": "Two Discs", "platform_id": 7,
+                "fs_size_bytes": 6_000_000_000_i64,
+                "files": [
+                    { "id": 1, "file_name": "disc1.iso", "file_size_bytes": 3_000_000_000_i64,
+                      "is_top_level": true, "category": null },
+                    { "id": 2, "file_name": "disc2.iso", "file_size_bytes": 3_000_000_000_i64,
+                      "is_top_level": true, "category": null }
+                ]
+            }],
+            "total": 1
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/roms"))
+        .and(query_param("platform_ids", "7"))
+        .and(query_param_is_missing("with_files"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "items": [{
+                "id": 1, "name": "Two Discs", "platform_id": 7,
+                "fs_size_bytes": 6_000_000_000_i64
+            }],
+            "total": 1
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let romm = client(&server.uri());
+    let with_files = romm.games_with_files(7).await.unwrap();
+    assert_eq!(with_files[0].largest_file_bytes, Some(3_000_000_000));
+    let plain = romm.games(7).await.unwrap();
+    assert_eq!(plain[0].fs_size_bytes, 6_000_000_000);
+    assert_eq!(plain[0].largest_file_bytes, None);
 }

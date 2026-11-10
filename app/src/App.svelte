@@ -11,6 +11,7 @@
   import { init as initSessions } from './lib/stores/sessions.svelte';
   import { init as initCompatTools } from './lib/stores/compatTools.svelte';
   import { init as initUpdates } from './lib/stores/updates.svelte';
+  import { init as initDrives } from './lib/stores/drives.svelte';
   import { initAppUpdate } from './lib/stores/appUpdate.svelte';
   import { initPythonImport } from './lib/stores/pythonImport.svelte';
   import { initLayoutMigration } from './lib/stores/layoutMigration.svelte';
@@ -108,11 +109,13 @@
     const unSessions = session.phase === 'shell' ? initSessions() : undefined;
     const unCompatTools = session.phase === 'shell' ? initCompatTools() : undefined;
     const unUpdates = session.phase === 'shell' ? initUpdates() : undefined;
+    const unDrives = session.phase === 'shell' ? initDrives() : undefined;
     return () => {
       unDownloads?.then((f) => f());
       unSessions?.then((f) => f());
       unCompatTools?.then((f) => f());
       unUpdates?.then((f) => f());
+      unDrives?.then((f) => f());
     };
   });
 </script>

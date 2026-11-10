@@ -3578,3 +3578,199 @@ async fn the_update_check_pickup_skips_the_users_choice_without_a_download() {
     );
     harness.server.verify().await;
 }
+
+// --- free space ---------------------------------------------------------------
+
+/// A library folder that reports `free` bytes free, on one filesystem.
+fn library_with_free(harness: &Harness, free: u64) {
+    use grid_core::library::space::{FsKey, SpaceProbe};
+    harness.service.set_space_probe(SpaceProbe {
+        free: Arc::new(move |_| Some(free)),
+        key: Arc::new(|_| Some(FsKey::Device(1))),
+    });
+}
+
+async fn wait_ledger_empty(harness: &Harness) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !harness.service.space_ledger().is_empty() {
+        assert!(Instant::now() < deadline, "the space was never released");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn an_install_that_does_not_fit_is_refused_before_admission() {
+    use grid_core::library::space::SPACE_MARGIN;
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("chrono.zip"),
+        &[("game.sfc", &[7u8; 200])],
+    );
+    let size = bytes.len() as u64;
+    harness
+        .mount_detail(
+            1,
+            detail_json(
+                1,
+                "Chrono Trigger",
+                "SNES",
+                "chrono.zip",
+                &[file_spec(11, "chrono.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(1, "chrono.zip", bytes, 0).await;
+    // The download fits; the download plus its extraction does not.
+    library_with_free(&harness, SPACE_MARGIN + size + 1);
+
+    let error = harness
+        .service
+        .install(harness.client.clone(), 1)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "There isn't enough free space in the library folder for Chrono Trigger (needs {} B, {} B available)",
+            size * 2,
+            size + 1
+        )
+    );
+    assert!(harness.service.snapshot().entries.is_empty());
+    assert!(harness.service.space_ledger().is_empty());
+}
+
+#[tokio::test]
+async fn a_queued_install_holds_its_space_until_it_finishes() {
+    use grid_core::library::space::SPACE_MARGIN;
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let first = write_zip(&staging.path().join("one.zip"), &[("one.sfc", &[1u8; 300])]);
+    let second = write_zip(&staging.path().join("two.zip"), &[("two.sfc", &[2u8; 300])]);
+    let peak = 2 * first.len() as u64;
+    harness
+        .mount_detail(
+            1,
+            detail_json(
+                1,
+                "One",
+                "SNES",
+                "one.zip",
+                &[file_spec(11, "one.zip", first.len())],
+            ),
+        )
+        .await;
+    harness
+        .mount_detail(
+            2,
+            detail_json(
+                2,
+                "Two",
+                "SNES",
+                "two.zip",
+                &[file_spec(21, "two.zip", second.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(1, "one.zip", first, 400).await;
+    harness.mount_content(2, "two.zip", second, 0).await;
+    // Room for one install at its peak, not two.
+    library_with_free(&harness, SPACE_MARGIN + peak + peak / 2);
+
+    harness
+        .service
+        .install(harness.client.clone(), 1)
+        .await
+        .unwrap();
+    let first_id = harness.newest_entry_id();
+    let error = harness
+        .service
+        .install(harness.client.clone(), 2)
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .starts_with("There isn't enough free space in the library folder for Two (needs"),
+        "{error}"
+    );
+    // Installing the queued game again is ignored, not refused.
+    harness
+        .service
+        .install(harness.client.clone(), 1)
+        .await
+        .unwrap();
+    assert_eq!(harness.service.snapshot().entries.len(), 1);
+
+    let done = harness.wait_terminal(first_id).await;
+    assert_eq!(done.status, DownloadStatus::Completed, "{}", done.error);
+    wait_ledger_empty(&harness).await;
+    harness
+        .service
+        .install(harness.client.clone(), 2)
+        .await
+        .unwrap();
+    let second_id = harness.newest_entry_id();
+    let done = harness.wait_terminal(second_id).await;
+    assert_eq!(done.status, DownloadStatus::Completed, "{}", done.error);
+    wait_ledger_empty(&harness).await;
+}
+
+#[tokio::test]
+async fn a_zip_that_unpacks_bigger_than_estimated_fails_before_extracting() {
+    use grid_core::library::space::SPACE_MARGIN;
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    // Zeros deflate to almost nothing: the estimate (the archive's size
+    // again) is far below the real 256 KB.
+    let path = staging.path().join("tiny.zip");
+    {
+        let file = fs::File::create(&path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("game.sfc", options).unwrap();
+        zip.write_all(&vec![0u8; 256 * 1024]).unwrap();
+        zip.finish().unwrap();
+    }
+    let bytes = fs::read(&path).unwrap();
+    assert!(bytes.len() < 4096);
+    harness
+        .mount_detail(
+            1,
+            detail_json(
+                1,
+                "Tiny",
+                "SNES",
+                "tiny.zip",
+                &[file_spec(11, "tiny.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(1, "tiny.zip", bytes, 0).await;
+    library_with_free(&harness, SPACE_MARGIN + 64 * 1024);
+
+    harness
+        .service
+        .install(harness.client.clone(), 1)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Failed);
+    assert!(
+        entry
+            .error
+            .starts_with("There isn't enough free space in the library folder for Tiny (needs"),
+        "{}",
+        entry.error
+    );
+    let platform = harness.library.join("games").join("SNES");
+    assert!(
+        !platform.join("tiny.zip").exists(),
+        "the download is removed"
+    );
+    assert!(!platform.join("tiny").exists(), "nothing was extracted");
+    wait_ledger_empty(&harness).await;
+}
