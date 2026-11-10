@@ -6,7 +6,10 @@
 import type { CloudRecord, SaveScope, SaveType } from '../../api';
 import type { DetailsTab } from '../../details/tabs';
 import { DETAILS_TAB_LABELS } from '../../details/tabs';
-import { epochDate } from '../../details/header';
+import { ago, daysSince } from '../tabs/server/discoverRows';
+import { formatDay } from '../../discover/feed';
+import { summaryLine, unlockDate } from '../../details/achievements';
+import type { AchievementsView } from '../../api';
 import type { MediaItem } from '../../details/media';
 
 /** One run of text in a line; `b` is bold (the prototype's `<b>`). */
@@ -137,6 +140,8 @@ export type LeftInput = {
   unlinked: boolean;
   noId: boolean;
   lastPlayedAt: number;
+  /** Now, in epoch seconds (for "Last played <when>"). */
+  nowSeconds: number;
   /** The desktop's launch line ("Snes9x", "RetroArch · snes9x", "No
    *  default emulator"); '' for a native game, which states none. */
   launchTarget: string;
@@ -151,9 +156,10 @@ export type LeftInput = {
   driveCopy: string[];
 };
 
-/** "Last played <when or never>" (item 272). */
-export function lastPlayedWhen(lastPlayedAt: number): string {
-  return epochDate(lastPlayedAt) || 'never';
+/** "Last played <when or never>" (item 272): relative, as the hero's
+ *  "Played <when>" (items 161–162). */
+export function lastPlayedWhen(lastPlayedAt: number, nowSeconds: number): string {
+  return lastPlayedAt > 0 ? ago(daysSince(lastPlayedAt, nowSeconds)) : 'never';
 }
 
 /** The left column's status lines (items 272–273, 281–282, 432–433, 436). */
@@ -171,7 +177,7 @@ export function leftLines(i: LeftInput): Line[] {
   else if (i.unlinked) lines.push([{ text: 'Not linked to a server game.', b: true }, { text: ' Play, cloud saves and updates need the link.' }]);
   else if (i.noId) lines.push([{ text: 'This entry has no server id' }]);
   else if (i.installed) {
-    lines.push([{ text: 'Last played ' }, { text: lastPlayedWhen(i.lastPlayedAt), b: true }]);
+    lines.push([{ text: 'Last played ' }, { text: lastPlayedWhen(i.lastPlayedAt, i.nowSeconds), b: true }]);
     if (i.launchTarget !== '') {
       const emu = i.launchTarget === 'No default emulator' ? 'no emulator' : i.launchTarget;
       lines.push([{ text: 'Launches with ' }, { text: emu, b: true }]);
@@ -211,6 +217,13 @@ export type Fact = { key: string; label: string; value: string };
  *  value, in its order. */
 export function factsOf(rows: readonly (readonly [string, string, string])[]): Fact[] {
   return rows.filter(([, , v]) => v.trim() !== '').map(([key, label, value]) => ({ key, label, value }));
+}
+
+/** The Release fact (item 295): "d Mon yyyy" in UTC, as the prototype's
+ *  relDate; '' for 0, never or a value that isn't a number. */
+export function releaseFact(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  return formatDay(seconds * 1000);
 }
 
 /** Related shows up to six games (item 295). */
@@ -469,4 +482,23 @@ export function saveFolderBrowserTitle(title: string): string {
 /** A on a save location: asks first, naming the row's path. */
 export function removeLocationConfirm(raw: string): ConfirmWords {
   return { title: 'Remove this save location?', body: raw, ok: 'Remove' };
+}
+
+/** The Achievements summary (item 315): the desktop's line, but with
+ *  "· <h> hardcore" always shown once progress is known, 0 included. */
+export function achSummary(view: AchievementsView): string {
+  const line = summaryLine(view);
+  if (!view.progress_known || view.summary.hardcore > 0) return line;
+  return `${line} · 0 hardcore`;
+}
+
+/** "<when>" in "Unlocked <when>" (item 315): relative, as the prototype's
+ *  ago(). RomM's stamp (`2024-03-02 10:00:00`, UTC) falls back to its date
+ *  when it can't be read. */
+export function unlockedWhen(raw: string | null, nowSeconds: number): string {
+  if (!raw) return '';
+  const t = raw.trim();
+  const iso = t.replace(' ', 'T');
+  const ms = Date.parse(/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`);
+  return Number.isNaN(ms) ? unlockDate(t) : ago(daysSince(ms / 1000, nowSeconds));
 }

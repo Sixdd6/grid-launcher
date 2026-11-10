@@ -116,6 +116,7 @@
       unlinked,
       noId,
       lastPlayedAt: row?.last_played_at ?? 0,
+      nowSeconds: Date.now() / 1000,
       launchTarget: d.launchTarget,
       installBlocked: d.installBlocked,
       size,

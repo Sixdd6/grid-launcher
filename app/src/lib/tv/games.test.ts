@@ -28,12 +28,15 @@ describe('TV games', () => {
     expect(queueTag(liveInstall([entry({ status: 'downloading', job: 'backup' })], 501))).toBeNull();
   });
 
-  it('X: Play when installed, Install when not, nothing while installing, missing, unlinked or offline', () => {
+  it('X (item 192): Play when installed, Install when not, nothing while installing or updating, missing, unlinked or offline', () => {
     const server = gameFromSummary(summary(), 'SNES', 'snes', null, new Set());
     expect(quickFor(server, null, true)?.label).toBe('Install');
     expect(quickFor(server, null, false)).toBeNull();
     expect(quickFor(server, { queued: true, pct: 0 }, true)).toBeNull();
     expect(quickFor(gameFromRow(row(), new Set()), null, false)?.label).toBe('Play');
+    // Item 192: an installed game with an update downloading or queued has no X.
+    expect(quickFor(gameFromRow(row(), new Set([42])), { queued: false, pct: 40 }, true)).toBeNull();
+    expect(quickFor(gameFromRow(row(), new Set([42])), { queued: true, pct: 0 }, true)).toBeNull();
     expect(quickFor(gameFromRow(row({ missing: true }), new Set()), null, true)).toBeNull();
     expect(quickFor(gameFromRow(row({ rom_id: null }), new Set()), null, true)).toBeNull();
   });

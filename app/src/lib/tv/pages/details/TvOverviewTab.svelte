@@ -5,7 +5,7 @@
   // (its covers go Up to the summary, item 298) and the facts panel. The
   // facts are the desktop's Overview facts that have a value.
   import type { DetailsStore } from '../../../details/detailsStore.svelte';
-  import { developerOf, epochDate } from '../../../details/header';
+  import { developerOf } from '../../../details/header';
   import { contentFact, descriptionParagraphs, sizeFact, versionFact } from '../../../details/overview';
   import { normalizeTitle, relatedOnServer } from '../../../details/related';
   import { installed, isInstalled, matchesInstalled } from '../../../stores/installed.svelte';
@@ -14,7 +14,7 @@
   import { gameFromSummary, type TvGame } from '../../games';
   import TvGameCover from '../../ui/TvGameCover.svelte';
   import TvTrack from '../../ui/TvTrack.svelte';
-  import { factsOf, RELATED_MAX } from '../details';
+  import { factsOf, RELATED_MAX, releaseFact } from '../details';
 
   let { d }: { d: DetailsStore } = $props();
 
@@ -43,7 +43,7 @@
     return factsOf([
       ['developer', 'Developer', developerOf(companies)],
       ['companies', 'Companies', companies],
-      ['release', 'Release', epochDate(Number(detail?.first_release_date || d.subject.releaseDate || ''))],
+      ['release', 'Release', releaseFact(Number(detail?.first_release_date || d.subject.releaseDate || ''))],
       ['genres', 'Genres', d.genres],
       ['modes', 'Game modes', detail?.game_modes ?? ''],
       ['players', 'Players', detail?.player_count ?? ''],

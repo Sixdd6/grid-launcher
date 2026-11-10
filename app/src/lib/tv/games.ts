@@ -156,19 +156,19 @@ export type TvQuick = Extract<QuickKind, 'play' | 'install' | 'install-drive'>;
 /**
  * X on a cover (tvmode.js `quickLabel`): Play when installed, Install from
  * drive on a drive's cover, Install when not (and a server answers);
- * nothing while it installs, for a missing or unlinked game, or with no
- * server.
+ * nothing while a download job for it is live (an update too: item 192),
+ * for a missing or unlinked game, or with no server.
  */
 export function quickFor(
   game: TvGame,
   live: LiveInstall | null,
   connected: boolean,
 ): { kind: TvQuick; label: string } | null {
+  if (live !== null) return null;
   const q = quickAction({
     installed: game.installed,
     romId: game.romId,
     missing: game.missing,
-    live: live ? (live.queued ? 'queued' : 'downloading') : null,
     fromDrive: game.drive !== undefined,
     connected,
   });

@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { MediaItem } from '../../details/media';
 import { readStep } from '../focus/reveal';
 import {
+  achSummary,
+  releaseFact,
+  unlockedWhen,
   ADD_SAVE_FOLDER,
   BACKUP_NEEDS_SERVER,
   LIBRARY_FOLDER_BROWSER_TITLE,
@@ -67,6 +70,7 @@ const left: LeftInput = {
   unlinked: false,
   noId: false,
   lastPlayedAt: 0,
+  nowSeconds: 1_762_560_000 + 2 * 86_400,
   launchTarget: 'Snes9x',
   installBlocked: '',
   size: '',
@@ -124,11 +128,13 @@ describe('the left column (items 272–273, 281–282, 432–433, 436)', () => {
   it('installed: last played and the emulator', () => {
     expect(text(leftLines({ ...left, installed: true }))).toEqual(['Last played <b>never</b>', 'Launches with <b>Snes9x</b>']);
     expect(text(leftLines({ ...left, installed: true, lastPlayedAt: 1_762_560_000, launchTarget: 'No default emulator' }))).toEqual([
-      'Last played <b>2025-11-08</b>',
+      'Last played <b>2 days ago</b>',
       'Launches with <b>no emulator</b>',
     ]);
     expect(text(leftLines({ ...left, installed: true, launchTarget: '' }))).toEqual(['Last played <b>never</b>']);
-    expect(lastPlayedWhen(0)).toBe('never');
+    expect(lastPlayedWhen(0, 1_762_560_000)).toBe('never');
+    expect(lastPlayedWhen(1_762_560_000, 1_762_560_000 + 3600)).toBe('today');
+    expect(lastPlayedWhen(1_762_560_000, 1_762_560_000 + 86_400)).toBe('yesterday');
   });
 
   it('not installed: the size, or why it would not install', () => {
@@ -276,5 +282,37 @@ describe('refusal prompts and save locations (checklist 529–531)', () => {
     expect(SAVE_FOLDER_ADDED).toBe('Save folder added');
     expect(saveFolderBrowserTitle('My Game')).toBe('Save folder for My Game');
     expect(removeLocationConfirm('<home>/saves')).toEqual({ title: 'Remove this save location?', body: '<home>/saves', ok: 'Remove' });
+  });
+});
+
+describe('achievements (item 315)', () => {
+  const view = (hardcore: number, progress_known = true) => ({
+    progress_known,
+    summary: { earned: 3, total: 40, points_earned: 30, points_total: 400, hardcore },
+    rows: [],
+  });
+
+  it('always ends with "· <h> hardcore" when progress is known, 0 included', () => {
+    expect(achSummary(view(1) as never)).toBe('3 of 40 unlocked · 30 of 400 points · 1 hardcore');
+    expect(achSummary(view(0) as never)).toBe('3 of 40 unlocked · 30 of 400 points · 0 hardcore');
+    expect(achSummary(view(0, false) as never)).toBe('40 achievements · 400 points');
+  });
+
+  it('"Unlocked <when>" is relative', () => {
+    const now = Date.parse('2024-03-06T12:00:00Z') / 1000;
+    expect(unlockedWhen('2024-03-02 10:00:00', now)).toBe('4 days ago');
+    expect(unlockedWhen('2024-03-06T08:00:00+00:00', now)).toBe('today');
+    expect(unlockedWhen('2024-03-05 08:00:00', now)).toBe('yesterday');
+    expect(unlockedWhen('soon', now)).toBe('soon');
+    expect(unlockedWhen(null, now)).toBe('');
+  });
+});
+
+describe('the Release fact (item 295)', () => {
+  it('reads "d Mon yyyy" in UTC; blank without a date', () => {
+    expect(releaseFact(795_571_200)).toBe('19 Mar 1995');
+    expect(releaseFact(0)).toBe('');
+    expect(releaseFact(Number(''))).toBe('');
+    expect(releaseFact(Number('x'))).toBe('');
   });
 });
