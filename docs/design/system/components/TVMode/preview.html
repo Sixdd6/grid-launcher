@@ -476,6 +476,8 @@ function move(dir) {
       /* The nearest line past the list, then its first item in reading order. */
       out.sort(function (x, y) { var X = rc(x), Y = rc(y); var d = axis === 'v' ? (fwd ? X.top - Y.top : Y.bottom - X.bottom) : (fwd ? X.left - Y.left : Y.right - X.right); return Math.abs(d) > 8 ? d : (axis === 'v' ? X.left - Y.left : X.top - Y.top); });
       t = out[0];
+      /* Back into a button group: the button you left it from, while it is still there. */
+      var tg = t && t.closest('[data-nav]'); if (tg && tg._last && tg.contains(tg._last) && tg._last.offsetParent) t = tg._last;
     }
     if (!t) return;
   }
