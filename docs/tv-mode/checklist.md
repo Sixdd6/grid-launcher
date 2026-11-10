@@ -462,7 +462,7 @@ and "Conflicts" lists at the end are not part of the build.
 
 ### General
 
-- [ ] 360. An overlay covers the stage with a `scrim` and a 6px backdrop blur, but not the top bar's information or the hint bar (src: tvmode.css `.layer`).
+- [ ] 360. An overlay covers the stage and the top bar with a `scrim` and a 6px backdrop blur, but not the hint bar; notification cards stay above it (src: tvmode.css `.layer`; consultant decision after P6).
 - [ ] 361. Focus stays inside the top overlay until it closes (src: tvmode.js `scope`).
 
 ### Menu
