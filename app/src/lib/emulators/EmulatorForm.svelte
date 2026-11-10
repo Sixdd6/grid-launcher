@@ -5,19 +5,16 @@
   // under "Cloud saves (advanced)". The fields seed from `entry` on mount
   // only — a parent that changes which entry is edited wraps this in
   // `{#key entry.name}`.
-  import { api, type EmulatorEntry, type ProfileSummary } from '../api';
+  import { type EmulatorEntry, type ProfileSummary } from '../api';
   import { pickFile } from '../pickers';
   import {
-    addedEmulatorToast,
     applyWhichEmulator,
     emulatorFormValues,
-    entryPatch,
-    normalizeSaveStrategy,
     SAVE_STRATEGIES,
     SAVE_STRATEGY_LABELS,
     SOMETHING_ELSE,
   } from './form';
-  import { pushToast } from '../stores/toasts.svelte';
+  import { profileFill, saveEmulatorForm } from './formSave';
 
   let {
     mode,
@@ -53,18 +50,13 @@
     return err instanceof Error ? err.message : String(err);
   }
 
+  // Best-effort autofill only (formSave.ts): the form stays as typed when
+  // nothing matches.
   async function autoFillFromPath() {
-    if (formName.trim() !== '' || formArgs.trim() !== '') return;
-    const path = formPath.trim();
-    if (!path) return;
-    try {
-      const profile = await api.matchProfile(path);
-      if (profile) {
-        formName = profile.name;
-        formArgs = profile.args;
-      }
-    } catch {
-      // Best-effort autofill only — leave the form as typed on failure.
+    const fill = await profileFill(formPath, { name: formName, args: formArgs });
+    if (fill) {
+      formName = fill.name;
+      formArgs = fill.args;
     }
   }
 
@@ -100,32 +92,21 @@
   }
 
   async function save() {
-    // `originalName` is what `save_emulator` uses to find-and-replace a
-    // renamed entry; blank means "insert". The fields the form does not
-    // show (install provenance, autoconfig paths) are spread back from
-    // `entry` untouched instead of being dropped on save.
-    const originalName = mode === 'add' ? '' : (entry?.name ?? '');
-    const patch = entryPatch({
-      name: formName,
-      path: formPath,
-      args: formArgs,
-      saveStrategy: normalizeSaveStrategy(formSaveStrategy),
-      ignoreFiles: formIgnoreFiles,
-      ignoreExtensions: formIgnoreExtensions,
-      savePaths: formSavePaths,
-      statePaths: formStatePaths,
-    });
-    const next: EmulatorEntry = {
-      ...(mode === 'edit' && entry ? entry : {}),
-      ...patch,
-    };
+    // The fields the form does not show are spread back from `entry`, and
+    // only a NEW manual entry gets a card (formSave.ts).
     formError = null;
     formPending = true;
     try {
-      await api.saveEmulator(originalName, next);
-      // `_save_emulator_entry` toasts only for a NEW manual entry
-      // (emulator_ui_mixin.py:1590-1591) — an edit stays silent.
-      if (mode === 'add') pushToast(addedEmulatorToast(patch.name));
+      await saveEmulatorForm(mode, entry, {
+        name: formName,
+        path: formPath,
+        args: formArgs,
+        saveStrategy: formSaveStrategy,
+        ignoreFiles: formIgnoreFiles,
+        ignoreExtensions: formIgnoreExtensions,
+        savePaths: formSavePaths,
+        statePaths: formStatePaths,
+      });
       onSaved();
     } catch (err) {
       formError = errorMessage(err);

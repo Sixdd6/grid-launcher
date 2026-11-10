@@ -18,24 +18,10 @@
   // Focus on each step lands on the first control that is safe to press: the
   // folder field, then "Leave on disk", then "Back". The dialog's label and
   // description follow the step, and a polite live region announces the step.
-  import {
-    api,
-    type LibraryMoveStartOutcome,
-    type LibraryPathCheck,
-    type MovePreview,
-    type StartFreshOutcome,
-    type StartFreshPreview,
-  } from '../api';
+  import { type LibraryMoveStartOutcome, type StartFreshOutcome } from '../api';
   import { pickFolder } from '../pickers';
-  import {
-    canMove,
-    canStartFresh,
-    formatBytes,
-    moveItemLine,
-    movePreviewSummary,
-    previewSummary,
-    type ChangeStep,
-  } from './library';
+  import { formatBytes, moveItemLine, movePreviewSummary, previewSummary } from './library';
+  import { LibraryChange } from './libraryChange.svelte';
 
   let {
     currentPath,
@@ -52,114 +38,37 @@
     onClose: () => void;
   } = $props();
 
-  let step = $state<ChangeStep>('choose');
-  let typed = $state('');
-  let check = $state<LibraryPathCheck | null>(null);
-  let checking = $state(false);
-  let preview = $state<StartFreshPreview | null>(null);
-  let pending = $state(false);
-  let error = $state<string | null>(null);
+  // The flow (libraryChange.svelte.ts): the steps, the folder check, the
+  // previews and the calls. The aliases keep the markup reading as before.
+  const lc = new LibraryChange(() => currentPath, {
+    onDone: (outcome, deleted) => onDone(outcome, deleted),
+    onMoveStarted: (outcome) => onMoveStarted(outcome),
+    onClose: () => onClose(),
+  });
+  let step = $derived(lc.step);
+  let typed = $derived(lc.typed);
+  let check = $derived(lc.check);
+  let checking = $derived(lc.checking);
+  let preview = $derived(lc.preview);
+  let pending = $derived(lc.pending);
+  let error = $derived(lc.error);
+  let movePreview = $derived(lc.movePreview);
+  let ready = $derived(lc.ready);
+  let moveReady = $derived(lc.moveReady);
+  let hasOldRoot = $derived(lc.hasOldRoot);
+  let moveTone = $derived(lc.moveTone);
+  let moveHint = $derived(lc.moveHint);
+  let meta = $derived(lc.meta);
+
   let panelEl = $state<HTMLElement | null>(null);
   let inputEl = $state<HTMLInputElement | null>(null);
   let keepEl = $state<HTMLButtonElement | null>(null);
   let deleteBackEl = $state<HTMLButtonElement | null>(null);
   let moveBackEl = $state<HTMLButtonElement | null>(null);
-  let movePreview = $state<MovePreview | null>(null);
-
-  let ready = $derived(canStartFresh(check, typed) && !checking);
-  let moveReady = $derived(canMove(check, typed, currentPath) && !checking);
-  let hasOldRoot = $derived(currentPath.trim() !== '');
-
-  // How the move-confirm summary reads, from the preview alone (presentation
-  // only; the backend still refuses a move that does not fit). A same-drive
-  // move copies nothing, so space is no concern. A copy needs `required_bytes`
-  // (the copied bytes plus a safety margin): below that the drive is short,
-  // within a quarter above it the space is tight, and an unreadable figure is
-  // flagged rather than assumed to be fine.
-  type MoveTone = 'ok' | 'warn' | 'bad';
-  let moveTone = $derived.by((): MoveTone => {
-    const p = movePreview;
-    if (p === null || p.copy_bytes === 0) return 'ok';
-    if (p.free_bytes === null) return 'warn';
-    if (p.free_bytes < p.required_bytes) return 'bad';
-    if (p.free_bytes < p.required_bytes * 1.25) return 'warn';
-    return 'ok';
-  });
-  let moveHint = $derived.by((): string => {
-    const p = movePreview;
-    if (p === null || p.items.length === 0) return '';
-    if (p.copy_bytes === 0) return 'Each folder is renamed. Nothing is copied.';
-    if (moveTone === 'bad') {
-      return 'The new drive does not have enough free space for this move. Free up space or choose another folder.';
-    }
-    if (p.free_bytes === null) return 'GRID could not read the free space on the new drive.';
-    if (moveTone === 'warn') return 'Space is tight: the new drive has little room to spare.';
-    return 'Files are copied and checked first. The old copies are removed afterwards.';
-  });
-
-  // What the header says per step: the eyebrow, the dialog's accessible name
-  // (the heading) and its accessible description.
-  const STEP_META: Record<ChangeStep, { n: number; eyebrow: string; title: string; desc: string }> = {
-    choose: {
-      n: 1,
-      eyebrow: 'Step 1 · Choose folder',
-      title: 'Change library folder',
-      desc: 'Choose the folder for your library. Type its full path or pick it with Browse….',
-    },
-    'fresh-ask': {
-      n: 2,
-      eyebrow: 'Step 2 · Old games',
-      title: 'Delete the old game files, or leave them on disk?',
-      desc: 'Either way, the games in the old folder leave your library. Emulators and saves stay where they are.',
-    },
-    'delete-confirm': {
-      n: 3,
-      eyebrow: 'Step 3 · Final check',
-      title: 'Delete these game files?',
-      desc: 'This cannot be undone. Only the folders listed below are removed.',
-    },
-    'move-confirm': {
-      n: 2,
-      eyebrow: 'Step 2 · Move',
-      title: 'Move your library to the new folder?',
-      desc: 'Games, emulators and saves move in the background. You can follow the move in Downloads.',
-    },
-  };
-  let meta = $derived(STEP_META[step]);
-
-  function errorMessage(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
-  }
 
   // Ask the backend about the typed folder, 250 ms after the last change. A
   // stale answer (the field changed meanwhile) is dropped.
-  $effect(() => {
-    const value = typed.trim();
-    check = null;
-    if (value === '') {
-      checking = false;
-      return;
-    }
-    checking = true;
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      api
-        .checkLibraryPath(value)
-        .then((result) => {
-          if (!cancelled) check = result;
-        })
-        .catch((err) => {
-          if (!cancelled) error = errorMessage(err);
-        })
-        .finally(() => {
-          if (!cancelled) checking = false;
-        });
-    }, 250);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  });
+  $effect(() => lc.checkTyped());
 
   // Declared before the focus effects below: it must read the opener before
   // this dialog moves focus into itself.
@@ -190,84 +99,36 @@
 
   async function browse() {
     const picked = await pickFolder('Select Library Folder');
-    if (picked !== null) typed = picked;
+    if (picked !== null) lc.typed = picked;
   }
 
-  async function run(deleteFiles: boolean) {
-    if (pending || check === null || check.status !== 'ok') return;
-    pending = true;
-    error = null;
-    try {
-      const outcome = deleteFiles
-        ? await api.libraryStartFreshDelete(check.path, currentPath)
-        : await api.libraryStartFreshKeep(check.path, currentPath);
-      onDone(outcome, deleteFiles);
-    } catch (err) {
-      error = errorMessage(err);
-    } finally {
-      pending = false;
-    }
+  function run(deleteFiles: boolean) {
+    return lc.run(deleteFiles);
   }
 
   function startFresh() {
-    if (!ready) return;
-    error = null;
-    if (hasOldRoot) step = 'fresh-ask';
-    else void run(false);
+    lc.startFresh();
   }
 
-  async function askDelete() {
-    if (pending) return;
-    step = 'delete-confirm';
-    preview = null;
-    error = null;
-    try {
-      preview = await api.libraryStartFreshPreview();
-    } catch (err) {
-      error = errorMessage(err);
-    }
+  function askDelete() {
+    return lc.askDelete();
   }
 
   // Move existing files (9b): the preview first, then the start.
-  async function askMove() {
-    if (pending || !moveReady || check === null || check.status !== 'ok') return;
-    step = 'move-confirm';
-    movePreview = null;
-    error = null;
-    try {
-      const outcome = await api.libraryMovePreview(check.path);
-      if (outcome.status === 'ok') movePreview = outcome.preview;
-      else error = outcome.message;
-    } catch (err) {
-      error = errorMessage(err);
-    }
+  function askMove() {
+    return lc.askMove();
   }
 
-  async function startMove() {
-    if (pending || movePreview === null || check === null || check.status !== 'ok') return;
-    pending = true;
-    error = null;
-    try {
-      const outcome = await api.libraryMoveStart(check.path);
-      if (outcome.status === 'started') onMoveStarted(outcome);
-      else error = outcome.message;
-    } catch (err) {
-      error = errorMessage(err);
-    } finally {
-      pending = false;
-    }
+  function startMove() {
+    return lc.startMove();
   }
 
   function back() {
-    if (pending) return;
-    error = null;
-    if (step === 'delete-confirm') step = 'fresh-ask';
-    else if (step === 'fresh-ask' || step === 'move-confirm') step = 'choose';
-    else onClose();
+    lc.back();
   }
 
   function cancel() {
-    if (!pending) onClose();
+    lc.cancel();
   }
 
   function focusables(): HTMLElement[] {
@@ -339,7 +200,7 @@
               id="library-new-path"
               data-testid="library-new-path-input"
               bind:this={inputEl}
-              bind:value={typed}
+              bind:value={lc.typed}
               placeholder="/path/to/library"
               autocomplete="off"
               spellcheck="false"

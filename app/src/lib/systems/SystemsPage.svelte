@@ -3,82 +3,39 @@
   // server" to "Add an emulator manually"): every emulator choice, install,
   // update and the Windows (Proton) setup in one page. One row per server
   // system with an emulator picker that is also the installer and a status;
-  // systems with no emulator come first, open. `emulators/*.ts` holds the
-  // shared emulator rules; the row model is `rows.ts`.
-  import { listen } from '@tauri-apps/api/event';
+  // systems with no emulator come first, open. The data and every command
+  // are `systemsStore.svelte.ts`; `emulators/*.ts` holds the shared emulator
+  // rules; the row model is `rows.ts`. This file holds the layout, which
+  // rows are open, the ⋯ menu and the settings sheet.
   import { tick, untrack } from 'svelte';
-  import {
-    api,
-    FIRMWARE_PASS_FINISHED_EVENT,
-    SETUP_DEFAULTS_EVENT,
-    type CompanionLink,
-    type EmulatorEntry,
-    type EmulatorFacts,
-    type FirmwarePassFinished,
-    type LaunchDefaults,
-    type Platform,
-    type PlatformFirmwareStatus,
-    type PlatformSetup,
-    type ProfileSummary,
-    type Rpcs3FirmwareStatus,
-    type SetupChoice,
-    type SetupStarted,
-  } from '../api';
-  import { downloads } from '../stores/downloads.svelte';
-  import { pushToast } from '../stores/toasts.svelte';
-  import { expectQueued } from '../notifications/notifier';
-  import { SKIPPED_TOAST_MS, skippedRemovalText } from '../uninstallSkips';
-  import { emulatorTerminalSignature as terminalSignature } from '../emulators/installSignal';
-  import { defaultEmulatorKey, NO_CORE_VALUE, platformCoreSelect } from '../emulators/defaults';
+  import { type EmulatorEntry } from '../api';
+  import { NO_CORE_VALUE, platformCoreSelect } from '../emulators/defaults';
   import { isWindowsHost } from '../emulators/compatTools';
   import { dynamicEmulatorNotes, emulatorNotes } from '../emulators/notes';
-  import {
-    emulatorFirmwareRows,
-    firmwareAction,
-    firmwareFinishedToast,
-    firmwareStartedToast,
-    type EmulatorFirmwareRow,
-    type FirmwareRequest,
-  } from '../emulators/firmware';
-  import { checkOncePerSession, emulatorUpdates, recheck } from '../stores/emulatorUpdates.svelte';
-  import { isWindowsPlatform } from '../details/actions';
-  import { platformLabel } from '../server/platformLabel';
+  import { firmwareAction } from '../emulators/firmware';
+  import { emulatorUpdates } from '../stores/emulatorUpdates.svelte';
   import EmulatorForm from '../emulators/EmulatorForm.svelte';
   import Icon from '../Icon.svelte';
   import SystemRow from './SystemRow.svelte';
   import EmulatorBlock from './EmulatorBlock.svelte';
   import RowMenu from './RowMenu.svelte';
   import WindowsRow from './WindowsRow.svelte';
-  import {
-    isRpcs3Name,
-    pollUntilInstalled,
-    ps3FirmwareInstalled,
-    ps3FirmwareView,
-    withPs3Firmware,
-  } from './ps3Firmware';
+  import { ps3FirmwareView } from './ps3Firmware';
+  import { SystemsStore } from './systemsStore.svelte';
   import {
     alsoPlays,
     alsoPlaysText,
-    buildSystemRows,
     canPlay,
     companionParent,
     companionsOf,
     gamesText,
     installRecommendedLabel,
-    isInstalling,
-    liveEmulatorSources,
     missingCompanionText,
-    missingRecommended,
     missingText,
     otherEmulatorNote,
-    otherEmulators,
-    parsePick,
     pickerGroups,
     shortName,
-    statusOf,
-    systemFirmwareRequests,
     testKeyOf,
-    updateAvailable,
     versionText,
     type Companion,
     type SystemRow as Row,
@@ -89,91 +46,37 @@
   const windowsHost = isWindowsHost(navigator.platform);
 
   // --- Data --------------------------------------------------------------
-  let platforms = $state<Platform[]>([]);
-  let setupRows = $state<PlatformSetup[]>([]);
-  let defaults = $state<LaunchDefaults | null>(null);
-  let emulators = $state<EmulatorEntry[]>([]);
-  /** Each `companions` pairing (ShadPS4 and its Qt launcher) as installed. */
-  let companions = $state<CompanionLink[]>([]);
-  let compatible = $state<Record<string, string[]>>({});
-  let coreOptions = $state<Record<string, string[]>>({});
-  let pendingLabels = $state<string[]>([]);
-  let profiles = $state<ProfileSummary[]>([]);
-  let facts = $state<Map<string, EmulatorFacts>>(new Map());
-  let rpcs3Firmware = $state<Map<string, Rpcs3FirmwareStatus>>(new Map());
-  let loaded = $state(false);
-  let loadError = $state<string | null>(null);
-
-  let rows = $derived(buildSystemRows(setupRows, platforms, defaults, compatible));
-  let live = $derived(liveEmulatorSources(downloads.entries));
-  let installingRow = $derived((row: Row) => isInstalling(row, pendingLabels, live));
-  let missing = $derived(missingRecommended(rows, installingRow));
-  let others = $derived(otherEmulators(emulators, rows, companions));
-  let windowsGames = $derived(
-    platforms
-      .filter((p) => isWindowsPlatform(p.slug, platformLabel(p)))
-      .reduce<number | null>((n, p) => (n ?? 0) + p.rom_count, null),
-  );
-
-  function errorMessage(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
-  }
-
-  async function refreshEmulators() {
-    try {
-      // Best effort for the pairings: without them companions just show
-      // as Other emulators.
-      const [list, links] = await Promise.all([
-        api.listEmulators(),
-        api.emulatorCompanions().catch((): CompanionLink[] => []),
-      ]);
-      emulators = list;
-      companions = links;
-    } catch (err) {
-      loadError = errorMessage(err);
-    }
-  }
-
-  async function refreshDefaults() {
-    try {
-      defaults = await api.getLaunchDefaults();
-    } catch (err) {
-      loadError = errorMessage(err);
-    }
-  }
-
-  async function refreshSystems() {
-    try {
-      const [p, s] = await Promise.all([api.listPlatforms(), api.setupPlatformOptions()]);
-      platforms = p;
-      setupRows = s;
-      loadError = null;
-    } catch (err) {
-      loadError = errorMessage(err);
-    }
-  }
-
-  async function refreshPending() {
-    try {
-      pendingLabels = (await api.setupStatus()).pending;
-    } catch {
-      // Best effort: rows just don't say Installing… from it.
-    }
-  }
-
-  async function refreshAll() {
-    await Promise.all([refreshEmulators(), refreshDefaults(), refreshSystems(), refreshPending()]);
-    loaded = true;
-  }
+  // The aliases keep the markup reading as before.
+  const s = new SystemsStore(() => active);
+  let defaults = $derived(s.defaults);
+  let companions = $derived(s.companions);
+  let coreOptions = $derived(s.coreOptions);
+  let profiles = $derived(s.profiles);
+  let facts = $derived(s.facts);
+  let rpcs3Firmware = $derived(s.rpcs3Firmware);
+  let loaded = $derived(s.loaded);
+  let loadError = $derived(s.loadError);
+  let rows = $derived(s.rows);
+  let live = $derived(s.live);
+  let installingRow = $derived(s.installingRow);
+  let missing = $derived(s.missing);
+  let others = $derived(s.others);
+  let windowsGames = $derived(s.windowsGames);
+  let firmwarePending = $derived(s.firmwarePending);
+  let busyRows = $derived(s.busyRows);
+  let launching = $derived(s.launching);
+  let updating = $derived(s.updating);
+  let companionBusy = $derived(s.companionBusy);
+  let checking = $derived(s.checking);
+  let removing = $derived(s.removing);
 
   // Comes forward, or an emulator install reached its end: everything the
   // rows read may have changed (an entry added, a default applied).
-  let installSignature = $derived(terminalSignature(downloads.entries));
   $effect(() => {
-    void installSignature;
+    void s.installSignature;
     if (!active) return;
     untrack(() => {
-      void refreshAll();
+      void s.refreshAll();
     });
   });
 
@@ -182,185 +85,63 @@
   $effect(() => {
     if (!active || !loaded) return;
     untrack(() => {
-      void checkOncePerSession(emulators);
+      void s.checkOnce();
     });
   });
 
   $effect(() => {
     if (!active) return;
-    untrack(() => {
-      api
-        .listProfiles()
-        .then((p) => (profiles = p))
-        .catch(() => {});
-    });
+    untrack(() => s.loadProfiles());
   });
 
   // The compatibility and core answers depend on the platforms asked about
   // and on the emulator list.
-  let compatibilityKey = $derived(
-    JSON.stringify([platforms.map((p) => [p.name, p.slug]), emulators.map((e) => e.name)]),
-  );
   $effect(() => {
-    void compatibilityKey;
-    const refs = untrack(() => platforms.map((p) => ({ name: p.name, slug: p.slug })));
-    if (refs.length === 0) return;
-    api
-      .compatibleEmulators(refs)
-      .then((c) => (compatible = c))
-      .catch(() => {});
-    api
-      .retroarchCoreOptions(refs)
-      .then((c) => (coreOptions = c))
-      .catch(() => {});
+    void s.compatibilityKey;
+    s.loadCompatibility(untrack(() => s.platforms.map((p) => ({ name: p.name, slug: p.slug }))));
   });
 
   // The Eden notes' file probes and the RPCS3 firmware check, re-read when
   // the entry list changes, when the page is shown again, and when a
   // firmware download completes (the background PS3 firmware fetch may just
   // have put a PS3UPDAT.PUP in place).
-  let emulatorNames = $derived(emulators.map((e) => e.name).join('\n'));
-  let firmwareCompleted = $derived(
-    downloads.entries
-      .filter((e) => e.kind === 'firmware' && e.status === 'completed')
-      .map((e) => e.id)
-      .join(','),
-  );
   $effect(() => {
-    void emulatorNames;
-    void firmwareCompleted;
+    void s.emulatorNames;
+    void s.firmwareCompleted;
     if (!active) return;
-    const names = untrack(() => emulators.map((e) => e.name));
-    void Promise.all(
-      names.map(async (name) => {
-        try {
-          return [name, await api.emulatorFacts(name)] as const;
-        } catch {
-          return null;
-        }
-      }),
-    ).then((answers) => (facts = new Map(answers.filter((a) => a !== null))));
-    void Promise.all(
-      names.filter(isRpcs3Name).map(async (name) => {
-        try {
-          return [name, await api.rpcs3FirmwareStatus(name)] as const;
-        } catch {
-          return null;
-        }
-      }),
-    ).then((answers) => (rpcs3Firmware = new Map(answers.filter((a) => a !== null))));
+    s.loadFacts(untrack(() => s.emulators.map((e) => e.name)));
   });
 
   function ps3Installed(name: string): boolean {
-    return ps3FirmwareInstalled(rpcs3Firmware.get(name));
+    return s.ps3Installed(name);
   }
 
-  // RPCS3 shows its own install dialog after `--installfw`; poll briefly
-  // (every 3 s for 2 minutes, only while this page is shown) so the line
-  // turns to "installed" without a revisit.
-  async function installPs3Firmware(name: string) {
-    let ok: boolean;
-    try {
-      ok = await api.installPs3Firmware(name);
-    } catch (err) {
-      pushToast(errorMessage(err), 'error');
-      return;
-    }
-    pushToast(
-      ok
-        ? 'PS3 firmware installation started — follow the RPCS3 dialog to complete.'
-        : 'Could not launch RPCS3 to install firmware. Check the emulator path.',
-      ok ? 'success' : 'error',
-    );
-    if (!ok) return;
-    await pollUntilInstalled(
-      async () => {
-        const status = await api.rpcs3FirmwareStatus(name);
-        rpcs3Firmware = new Map(rpcs3Firmware).set(name, status);
-        return status.installed;
-      },
-      { intervalMs: 3000, attempts: 40, stopped: () => !active },
-    );
+  function installPs3Firmware(name: string) {
+    return s.installPs3Firmware(name);
   }
 
   // Setup's defaults land after each picked emulator's install.
-  $effect(() => {
-    const pending = listen(SETUP_DEFAULTS_EVENT, () => {
-      void refreshDefaults();
-      void refreshPending();
-    });
-    return () => {
-      void pending.then((off) => off());
-    };
-  });
+  $effect(() => s.watchSetupDefaults());
 
   // --- Firmware ----------------------------------------------------------
-  let firmwareStatus = $state<Record<string, PlatformFirmwareStatus>>({});
-  let firmwarePending = $state<Record<string, true>>({});
-  let firmwareRequests = $derived(systemFirmwareRequests(rows));
-  let firmwareSignature = $derived(firmwareRequests.map((r) => r.key).join(','));
-
-  function refreshFirmwareStatus(req: FirmwareRequest) {
-    api
-      .platformFirmwareStatus(req.platform.id, defaultEmulatorKey(req.platform), req.emulator)
-      .then((status) => (firmwareStatus = { ...firmwareStatus, [req.key]: status }))
-      .catch(() => {
-        const { [req.key]: _gone, ...rest } = firmwareStatus;
-        firmwareStatus = rest;
-      });
-  }
-
   $effect(() => {
-    void firmwareSignature;
+    void s.firmwareSignature;
     if (!active) return;
-    for (const req of untrack(() => firmwareRequests)) refreshFirmwareStatus(req);
+    for (const req of untrack(() => s.firmwareRequests)) s.refreshFirmwareStatus(req);
   });
 
-  $effect(() => {
-    const pending = listen<FirmwarePassFinished>(FIRMWARE_PASS_FINISHED_EVENT, (event) => {
-      const { platform_id: id, ok, failed } = event.payload;
-      for (const req of firmwareRequests.filter((r) => r.platform.id === id)) {
-        // Only an Install this page started says how it ended.
-        if (firmwarePending[req.key] === true) {
-          const { [req.key]: _done, ...rest } = firmwarePending;
-          firmwarePending = rest;
-          const toast = firmwareFinishedToast(defaultEmulatorKey(req.platform), req.emulator, ok, failed);
-          pushToast(toast.text, toast.level);
-        }
-        refreshFirmwareStatus(req);
-      }
-    });
-    return () => {
-      void pending.then((off) => off());
-    };
-  });
+  $effect(() => s.watchFirmwarePasses());
 
-  function firmwareLine(row: Row): EmulatorFirmwareRow | null {
-    if (row.emulator === '' || row.platform === null) return null;
-    const id = row.platform.id;
-    return (
-      emulatorFirmwareRows(row.emulator, platforms, compatible, defaults, firmwareStatus).find(
-        (f) => f.platformId === id,
-      ) ?? null
-    );
+  function firmwareLine(row: Row) {
+    return s.firmwareLine(row);
   }
 
   function installFirmware(row: Row) {
-    const req = firmwareRequests.find((r) => r.platform.id === row.platform?.id && r.emulator === row.emulator);
-    if (!req) return;
-    const name = defaultEmulatorKey(req.platform);
-    firmwarePending = { ...firmwarePending, [req.key]: true };
-    pushToast(firmwareStartedToast(name, req.emulator));
-    api.installFirmwareForPlatform(req.platform.id, name, req.emulator).catch((err) => {
-      const { [req.key]: _failed, ...rest } = firmwarePending;
-      firmwarePending = rest;
-      pushToast(`Could not install ${name} firmware: ${errorMessage(err)}`, 'error');
-    });
+    s.installFirmware(row);
   }
 
   // --- Rows --------------------------------------------------------------
   let openRows = $state<Record<string, boolean>>({});
-  let busyRows = $state<Record<string, true>>({});
 
   function isOpen(row: Row): boolean {
     return row.emulator === '' || openRows[row.key] === true;
@@ -393,148 +174,50 @@
   });
 
   function rowStatus(row: Row) {
-    const fw = firmwareLine(row);
-    const action = withPs3Firmware(
-      fw ? firmwareAction(fw, firmwarePending[fw.key] === true, false) : null,
-      ps3Installed(row.emulator),
-    );
-    const status = statusOf({
-      emulator: row.emulator,
-      installing: installingRow(row) || busyRows[row.key] === true,
-      firmware: action,
-      updateAvailable: updateAvailable(row.emulator, companions, (name) => emulatorUpdates.hasUpdate(name)),
-    });
-    const text = status === 'installing' && action === 'requested' && !installingRow(row) ? 'Installing firmware…' : null;
-    return { status, text };
-  }
-
-  function started(result: SetupStarted) {
-    for (const e of result.errors) pushToast(e, 'error');
-  }
-
-  // Each queued install announces itself ("Installing <name>…", one summary
-  // card for several) from the downloads queue (notifications/notifier.ts).
-  async function install(choices: SetupChoice[]) {
-    if (choices.length === 0) return;
-    const marks = Object.fromEntries(choices.map((c) => [c.platform, true as const]));
-    busyRows = { ...busyRows, ...marks };
-    try {
-      const result = await api.installForSystems(choices);
-      started(result);
-      await Promise.all([refreshPending(), refreshDefaults()]);
-    } catch (err) {
-      pushToast(errorMessage(err), 'error');
-    } finally {
-      const next = { ...busyRows };
-      for (const c of choices) delete next[c.platform];
-      busyRows = next;
-    }
+    return s.rowStatus(row);
   }
 
   function installRecommended(row: Row) {
-    if (row.recommended === null) return;
-    void install([{ platform: row.key, source_id: row.recommended.source_id }]);
+    void s.installRecommended(row);
   }
 
   function installAllRecommended() {
-    void install(missing);
+    void s.installAllRecommended();
   }
 
   async function onPick(row: Row, value: string, select: HTMLSelectElement) {
-    const pick = parsePick(value);
-    if (pick.kind === 'install') {
-      await install([{ platform: row.key, source_id: pick.sourceId }]);
-    } else {
-      busyRows = { ...busyRows, [row.key]: true };
-      try {
-        await api.setDefaultEmulator(row.key, pick.kind === 'use' ? pick.name : '');
-        await Promise.all([refreshDefaults(), refreshPending()]);
-        if (pick.kind === 'use') openRows = { ...openRows, [row.key]: true };
-      } catch (err) {
-        pushToast(errorMessage(err), 'error');
-      } finally {
-        const { [row.key]: _done, ...rest } = busyRows;
-        busyRows = rest;
-      }
-    }
-    // An install pick is not the system's emulator yet: show the real one.
-    const current = rows.find((r) => r.key === row.key);
-    if (current) select.value = pickerGroups(current).selected;
+    const result = await s.pick(row, value);
+    if (result.opened) openRows = { ...openRows, [row.key]: true };
+    select.value = result.selected;
   }
 
-  async function onCoreChange(row: Row, core: string) {
-    try {
-      await api.setRetroarchCore(row.key, core);
-      await refreshDefaults();
-    } catch (err) {
-      pushToast(errorMessage(err), 'error');
-    }
+  function onCoreChange(row: Row, core: string) {
+    return s.changeCore(row, core);
   }
 
   // --- The emulator line --------------------------------------------------
-  let launching = $state<string | null>(null);
-  let updating = $state<string | null>(null);
-
   function entryFor(name: string): EmulatorEntry | undefined {
-    return emulators.find((e) => e.name === name);
+    return s.entryFor(name);
   }
 
-  async function openEmulator(name: string) {
-    launching = name;
-    try {
-      const warning = await api.launchEmulator(name);
-      if (warning) pushToast(warning, 'error');
-    } catch (err) {
-      pushToast(errorMessage(err), 'error');
-    } finally {
-      launching = null;
-    }
+  function openEmulator(name: string) {
+    return s.openEmulator(name);
   }
 
-  async function updateEmulator(name: string) {
-    updating = name;
-    // The queue entry then reads "Updating <name>…", not "Installing".
-    expectQueued(entryFor(name)?.source_id ?? '', { update: true });
-    try {
-      await api.updateEmulator(name);
-    } catch (err) {
-      pushToast(errorMessage(err), 'error');
-    } finally {
-      updating = null;
-    }
+  function updateEmulator(name: string) {
+    return s.updateEmulator(name);
   }
 
-  // A missing companion's Install (installing or updating its parent adds
-  // it too). Keyed by `source_id`, like the Downloads rows it waits on.
-  let companionBusy = $state<Record<string, true>>({});
-
-  async function installCompanion(c: Companion) {
-    if (c.sourceId === null) return;
-    const id = c.sourceId;
-    companionBusy = { ...companionBusy, [id]: true };
-    try {
-      await api.installEmulator(id);
-    } catch (err) {
-      pushToast(errorMessage(err), 'error');
-    } finally {
-      const { [id]: _done, ...rest } = companionBusy;
-      companionBusy = rest;
-    }
+  function installCompanion(c: Companion) {
+    return s.installCompanion(c);
   }
 
-  let checking = $derived(emulatorUpdates.running);
-
-  async function checkForUpdates() {
-    await recheck(emulators);
-    const count = emulators.filter((e) => emulatorUpdates.hasUpdate(e.name)).length;
-    pushToast(
-      count === 0 ? 'Every emulator is up to date.' : `${count === 1 ? '1 update' : `${count} updates`} available.`,
-    );
+  function checkForUpdates() {
+    return s.checkForUpdates();
   }
 
   // --- The ⋯ menu ----------------------------------------------------------
   let menu = $state<{ where: string; name: string; anchor: HTMLElement } | null>(null);
-  let removing = $state(false);
 
   function toggleMenu(where: string, name: string, anchor: HTMLElement) {
     menu = menu?.where === where ? null : { where, name, anchor };
@@ -542,27 +225,14 @@
 
   async function showFolder(name: string) {
     menu = null;
-    try {
-      await api.showEmulatorFolder(name);
-    } catch (err) {
-      pushToast(errorMessage(err), 'error');
-    }
+    await s.showFolder(name);
   }
 
   async function removeEmulator(name: string) {
-    removing = true;
-    try {
-      const report = await api.deleteEmulator(name);
-      pushToast(skippedRemovalText(report?.skipped), 'error', SKIPPED_TOAST_MS);
-      pushToast(`${name} removed`);
-      if (sheet?.mode === 'edit' && sheet.entry.name === name) sheet = null;
-      menu = null;
-      await refreshAll();
-    } catch (err) {
-      pushToast(errorMessage(err), 'error');
-    } finally {
-      removing = false;
-    }
+    if (!(await s.removeEmulator(name))) return;
+    if (sheet?.mode === 'edit' && sheet.entry.name === name) sheet = null;
+    menu = null;
+    await s.refreshAll();
   }
 
   // --- The settings sheet ---------------------------------------------------
@@ -579,7 +249,7 @@
     sheet = null;
     // A manual add sets no system's emulator (only an install or the user's
     // own pick does); the lists just learn about it.
-    await refreshAll();
+    await s.refreshAll();
   }
 </script>
 

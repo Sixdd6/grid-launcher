@@ -329,6 +329,32 @@ session exists and `Shell.svelte` afterwards.
   last Discover feed per server, kept for the app's life, and the per-platform Recently
   added lists). `lib/downloads/actions.ts` (a Downloads row's Cancel, Retry and Dismiss,
   including a library move's own commands).
+- Shared screen logic, the rest of what a second UI needs: each module holds a screen's
+  data, its derived state and its commands, and the component is a thin view that adds
+  layout, focus and two-click confirms. The classes take getters for their inputs, and
+  their loaders read those inputs before their first await, so a view calls each loader
+  from its own `$effect`.
+  `lib/details/detailsStore.svelte.ts` (`DetailsStore`: the ROM detail overlay, launch
+  defaults, the Related filter, the install-block reason, content availability, the
+  cloud panel facts, the media failure map, the install state and the main button group,
+  and every Details action — install, uninstall, update, cancel, content, play, stop,
+  link, locate, remove from library, drive install and remove, Backup to drive),
+  `lib/details/linkList.svelte.ts` (the Link to server game list and pick),
+  `lib/details/cloudStore.svelte.ts` (`CloudStore`: one saves or states panel — records,
+  upload, restore and delete with the restore-all offer, native save folders),
+  `lib/details/nativeSettingsStore.ts` (Game Settings load, save, reload from server),
+  `lib/systems/systemsStore.svelte.ts` (`SystemsStore`: Settings › Systems' data and
+  commands, including firmware and PS3 firmware, and Install recommended's running count),
+  `lib/emulators/formSave.ts` (the settings sheet's profile autofill and save),
+  `lib/settings/libraryChange.svelte.ts` (`LibraryChange`: the change-library steps,
+  folder check, previews, Move and Start fresh), `lib/settings/raActions.ts` (the
+  RetroAchievements commands; the secrets stay in the caller's fields),
+  `lib/backups/backupPlan.svelte.ts` (`BackupPlanStore`: the per-drive plans, picks and
+  Start), `lib/backups/driveActions.ts` (a drive's set up, rename, computers, GRID files,
+  folder, forget), `lib/setup/chooseSystems.svelte.ts` (`ChooseSystems`: first-run rows,
+  ticks, the Proton row, Install, Skip), `lib/connectFlow.ts` (Connect's library folder,
+  Use without a server, the connect) and `relocateTo` in
+  `stores/libraryUnreachable.svelte.ts` (the unreachable-library dialog's Relocate).
 
 - `lib/api.ts` — the single `invoke` boundary. Every command wrapper and every payload
   type lives here, and the type field names mirror the Rust structs' serde output

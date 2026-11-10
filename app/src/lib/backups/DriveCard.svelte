@@ -6,13 +6,10 @@
   // `backups/drives.ts`; this file holds only the inline forms' state and
   // the command calls. After a command the drives store is pulled again, so
   // the card re-renders from the new snapshot.
-  import { api, type DriveInfo, type PackOs, type RememberedDrive } from '../api';
+  import { type DriveInfo, type PackOs, type RememberedDrive } from '../api';
   import Icon from '../Icon.svelte';
-  import { expectOsChangeBatch } from '../notifications/notifier';
-  import { refresh } from '../stores/drives.svelte';
-  import { pushToast } from '../stores/toasts.svelte';
+  import * as actions from './driveActions';
   import {
-    addedOses,
     defaultPackName,
     driveCardModel,
     emulatorNames,
@@ -20,7 +17,6 @@
     osChanged,
     osChangeError,
     osChangeHelp,
-    osChangeToasts,
     PACK_OSES,
     packFacts,
     rememberedCardModel,
@@ -118,10 +114,8 @@
     if (!d || setupProblem !== null) return;
     const name = setupName.trim();
     void run(async () => {
-      await api.setupDrive(d.mount, name, setupOs);
+      await actions.setUpDrive(d, name, setupOs);
       mode = 'idle';
-      pushToast(`${name} is ready for backups`);
-      await refresh();
     });
   }
 
@@ -139,9 +133,8 @@
       return;
     }
     void run(async () => {
-      await api.renameDrive(d.key, name);
+      await actions.renameDrive(d, name);
       mode = 'idle';
-      await refresh();
     });
   }
 
@@ -158,17 +151,12 @@
       close();
       return;
     }
-    const before = [...pack.os];
     const after = [...osNext];
     void run(async () => {
       // Adding a computer needs a server; the backend's refusal ("Adding a
       // computer needs a server") stays on the form as its error line.
-      const outcome = await api.setDriveOs(d.key, after);
-      // The queued builds are announced by the backup batch's own cards.
-      expectOsChangeBatch(outcome, addedOses(before, after));
+      await actions.changeDriveOs(d, after);
       mode = 'idle';
-      for (const line of osChangeToasts(pack.name, before, after, outcome)) pushToast(line);
-      await refresh();
     });
   }
 
@@ -178,7 +166,7 @@
     void run(async () => {
       // The size is measured on the drive; when that fails the pack's own
       // count is the best figure there is.
-      wipeBytes = await api.removeGridFilesSize(d.key).catch(() => d.pack?.gridpack_bytes ?? 0);
+      wipeBytes = await actions.gridFilesSize(d);
       mode = 'confirm';
     });
   }
@@ -187,24 +175,21 @@
     const d = drive;
     if (!d) return;
     void run(async () => {
-      await api.removeGridFiles(d.key);
+      await actions.removeGridFiles(d);
       mode = 'idle';
-      pushToast(`GRID files removed from ${d.label}`);
-      await refresh();
     });
   }
 
   function openFolder() {
     if (!drive) return;
-    api.openDriveFolder(drive.key).catch((err) => pushToast(errorText(err), 'error'));
+    actions.openDriveFolder(drive);
   }
 
   function forget() {
     const r = remembered;
     if (!r) return;
     void run(async () => {
-      await api.forgetDrive(r.mount);
-      await refresh();
+      await actions.forgetDrive(r);
     });
   }
 

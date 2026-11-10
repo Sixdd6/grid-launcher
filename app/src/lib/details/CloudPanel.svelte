@@ -1,34 +1,15 @@
 <script lang="ts">
-  import {
-    api,
-    type CloudMessage,
-    type CloudPanelInfo,
-    type CloudRecord,
-    type InstalledGame,
-    type NativeSavePaths,
-    type SaveType,
-  } from '../api';
+  import { type CloudPanelInfo, type CloudRecord, type InstalledGame, type SaveType } from '../api';
   import Icon from '../Icon.svelte';
   import {
     cloudRecordSummary,
-    cloudSectionTitle,
     cloudRecordTitle,
-    createRequestGuard,
-    deleteConfirmText,
     recordsStatusLine,
-    restoreAllConfirmText,
-    restoreConfirmText,
-    sharedScopeWarning,
     uploadButtonLabel,
     uploadedLine,
   } from './cloud';
-  import {
-    nativePathsEmptyLabel,
-    nativePathsStatusLine,
-    nativeUploadEnabled,
-    nativeUploadTooltip,
-    type NativePathsPhase,
-  } from './nativePaths';
+  import { nativePathsEmptyLabel, nativePathsStatusLine } from './nativePaths';
+  import { CloudStore } from './cloudStore.svelte';
   import { pickFolder } from '../pickers';
 
   let {
@@ -45,242 +26,68 @@
     isNative: boolean;
   } = $props();
 
-  // Native saves bypass the emulator-resolution block reason entirely
-  // (`_refresh_native_save_panel`, details_view_mixin.py:1148-1237): the
-  // path-list section below drives its own enablement/messages instead of
-  // `panelInfo.supported`/`block_reason`. States are never supported for
-  // native games (details_cloud_mode_supported returns false), so this
-  // combination is only reachable defensively.
-  let nativeSave = $derived(isNative && saveType === 'save');
-  let nativeStateBlocked = $derived(isNative && saveType === 'state');
+  // The panel's data and actions (cloudStore.svelte.ts). The aliases keep
+  // the markup reading as before.
+  const c = new CloudStore(() => ({ game, gameTitle, saveType, panelInfo, isNative }));
 
-  // `_refresh_details_cloud_panel`'s `compatibility_reason` early return
-  // (details_view_mixin.py:1000-1006): when the emulator-resolution gate
-  // is unsupported, the panel shows the block reason only — upload stays
-  // visible but disabled, and no records fetch is attempted. Native saves
-  // never hit this (they bypass `panelInfo` entirely); this is normally
-  // unreachable while `supported` also gates the toggle button itself, but
-  // guards against a panel left open across a `panelInfo` refresh that
-  // flips it to false.
-  let recordsBlocked = $derived(nativeStateBlocked || (!nativeSave && !panelInfo.supported));
-
-  let panelLabel = $derived(cloudSectionTitle(saveType, panelInfo.scope));
-  /** Shared emulator media: restoring or deleting one entry affects every
-   *  game on that emulator, so the list says so up front, not only in the
-   *  confirmation. */
-  let sharedNote = $derived(saveType === 'save' ? sharedScopeWarning(panelInfo.scope, '') : '');
-  let kindLabel = $derived(saveType === 'save' ? 'saves' : 'states');
-
-  let records = $state<CloudRecord[]>([]);
-  let recordsLoading = $state(true);
-  let recordsError = $state<string | null>(null);
-
-  let nativePaths = $state<NativeSavePaths | null>(null);
-  let nativePathsLoading = $state(false);
-  let nativePathsAttempted = $state(false);
-  let manualPathInput = $state('');
-  let manualPathPending = $state(false);
-  let manualPathError = $state<string | null>(null);
-
-  let uploadPending = $state(false);
-  let uploadMessages = $state<CloudMessage[]>([]);
-  let uploadError = $state<string | null>(null);
-
-  let actionPendingId = $state<number | null>(null);
-  let actionError = $state<string | null>(null);
-  // G1-Q: a restore that skipped save folders not matched to the game says so
-  // here, and the panel offers a confirmed "restore all" (`folders`).
-  let actionNotice = $state<string | null>(null);
-  let confirmState = $state<{
-    kind: 'restore' | 'restore-all' | 'delete';
-    record: CloudRecord;
-    folders?: string[];
-  } | null>(null);
-
-  const recordsGuard = createRequestGuard();
-  const nativeGuard = createRequestGuard();
-
-  function errorMessage(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
-  }
-
-  async function loadRecords() {
-    if (recordsBlocked) {
-      recordsLoading = false;
-      return;
-    }
-    const id = recordsGuard.next();
-    recordsLoading = true;
-    recordsError = null;
-    try {
-      const result = await api.cloudRecords(game, saveType);
-      if (!recordsGuard.isCurrent(id)) return; // a newer fetch superseded this one
-      records = result;
-    } catch (err) {
-      if (!recordsGuard.isCurrent(id)) return;
-      recordsError = errorMessage(err);
-    } finally {
-      if (recordsGuard.isCurrent(id)) recordsLoading = false;
-    }
-  }
-
-  async function loadNativePaths() {
-    const id = nativeGuard.next();
-    nativePathsLoading = true;
-    try {
-      const result = await api.nativeSavePaths(game);
-      if (!nativeGuard.isCurrent(id)) return;
-      nativePaths = result;
-    } catch (err) {
-      if (!nativeGuard.isCurrent(id)) return;
-      manualPathError = errorMessage(err);
-    } finally {
-      if (nativeGuard.isCurrent(id)) {
-        nativePathsLoading = false;
-        nativePathsAttempted = true;
-      }
-    }
-  }
+  let nativeSave = $derived(c.nativeSave);
+  let nativeStateBlocked = $derived(c.nativeStateBlocked);
+  let recordsBlocked = $derived(c.recordsBlocked);
+  let panelLabel = $derived(c.panelLabel);
+  let sharedNote = $derived(c.sharedNote);
+  let kindLabel = $derived(c.kindLabel);
+  let records = $derived(c.records);
+  let recordsLoading = $derived(c.recordsLoading);
+  let recordsError = $derived(c.recordsError);
+  let nativePaths = $derived(c.nativePaths);
+  let manualPathPending = $derived(c.manualPathPending);
+  let manualPathError = $derived(c.manualPathError);
+  let uploadPending = $derived(c.uploadPending);
+  let uploadMessages = $derived(c.uploadMessages);
+  let uploadError = $derived(c.uploadError);
+  let actionPendingId = $derived(c.actionPendingId);
+  let actionError = $derived(c.actionError);
+  let actionNotice = $derived(c.actionNotice);
+  let confirmState = $derived(c.confirmState);
+  let nativePhase = $derived(c.nativePhase);
+  let nativePathCount = $derived(c.nativePathCount);
+  let uploadEnabled = $derived(c.uploadEnabled);
+  let uploadTooltip = $derived(c.uploadTooltip);
+  let confirmText = $derived(c.confirmText);
 
   $effect(() => {
-    void game;
-    void saveType;
-    loadRecords();
-    if (nativeSave && !recordsBlocked) loadNativePaths();
+    c.load();
   });
 
-  // The lookup is "loading" until `loadNativePaths()` settles, success or
-  // failure: `native_save_paths` can itself error (e.g. `blocking_load_config`
-  // failing before the PCGW step ever runs), leaving `nativePaths` null
-  // forever, so phase must track the attempt rather than a non-null result.
-  let nativePhase = $derived<NativePathsPhase>(
-    nativePathsLoading || !nativePathsAttempted ? 'loading' : 'loaded'
-  );
-  let nativePathCount = $derived((nativePaths?.pcgw.length ?? 0) + (nativePaths?.manual.length ?? 0));
-  let nativeUploadIsEnabled = $derived(
-    nativeUploadEnabled(nativePhase, nativePathCount, game.rom_id !== null, uploadPending)
-  );
-  let nativeUploadHint = $derived(
-    nativeUploadTooltip(nativePhase, nativePathCount, game.rom_id !== null)
-  );
-
-  let uploadEnabled = $derived(
-    nativeSave ? nativeUploadIsEnabled : !nativeStateBlocked && panelInfo.supported && !uploadPending
-  );
-  let uploadTooltip = $derived(
-    nativeSave ? nativeUploadHint : panelInfo.supported ? '' : panelInfo.block_reason
-  );
-
-  async function handleUpload() {
-    uploadPending = true;
-    uploadMessages = [];
-    uploadError = null;
-    try {
-      const report = await api.cloudUpload(game, saveType);
-      uploadMessages = report.messages;
-      if (report.uploaded > 0) await loadRecords();
-    } catch (err) {
-      uploadError = errorMessage(err);
-    } finally {
-      uploadPending = false;
-    }
+  function handleUpload() {
+    void c.upload();
   }
 
   function requestRestore(record: CloudRecord) {
-    if (!record.restorable) return;
-    confirmState = { kind: 'restore', record };
+    c.requestRestore(record);
   }
 
   function requestDelete(record: CloudRecord) {
-    confirmState = { kind: 'delete', record };
+    c.requestDelete(record);
   }
 
-  let confirmText = $derived(
-    confirmState === null
-      ? null
-      : confirmState.kind === 'restore'
-        ? restoreConfirmText(saveType, gameTitle, confirmState.record.restore_tooltip ?? '')
-        : confirmState.kind === 'restore-all'
-          ? restoreAllConfirmText(gameTitle, confirmState.folders ?? [])
-          : deleteConfirmText(
-              saveType,
-              cloudRecordTitle(confirmState.record, saveType),
-              sharedScopeWarning(panelInfo.scope, confirmState.record.emulator)
-            )
-  );
-
-  async function confirmAction() {
-    if (!confirmState) return;
-    const { kind, record } = confirmState;
-    confirmState = null;
-    actionPendingId = record.id;
-    actionError = null;
-    actionNotice = null;
-    try {
-      if (kind === 'restore' || kind === 'restore-all') {
-        const restoreAll = kind === 'restore-all';
-        const report = await api.cloudRestore(game, saveType, String(record.id), restoreAll);
-        const text = report.messages.map((m) => m.text).join(' ');
-        if (report.ok) {
-          if (report.skipped_folders.length > 0) actionNotice = text;
-          await loadRecords();
-        } else {
-          actionError = text || 'Restore failed.';
-        }
-        // G1-Q: offer every folder only after the user saw which were skipped.
-        if (!restoreAll && report.skipped_folders.length > 0) {
-          confirmState = { kind: 'restore-all', record, folders: report.skipped_folders };
-        }
-      } else {
-        await api.cloudDelete(saveType, record.id);
-        await loadRecords();
-      }
-    } catch (err) {
-      actionError = errorMessage(err);
-    } finally {
-      actionPendingId = null;
-    }
+  function confirmAction() {
+    void c.confirmAction();
   }
 
-  async function handleAddManualPath() {
-    const path = manualPathInput.trim();
-    if (!path) return;
-    manualPathPending = true;
-    manualPathError = null;
-    try {
-      await api.nativeAddManualSavePath(game, path);
-      manualPathInput = '';
-      await loadNativePaths();
-      await loadRecords();
-    } catch (err) {
-      manualPathError = errorMessage(err);
-    } finally {
-      manualPathPending = false;
-    }
+  function handleAddManualPath() {
+    void c.addManualPath();
   }
 
   async function browseManualPath() {
     const picked = await pickFolder('Select Save Folder');
     if (picked === null) return;
-    manualPathInput = picked;
-    await handleAddManualPath();
+    c.manualPathInput = picked;
+    await c.addManualPath();
   }
 
-  // Both lists' rows remove the same way (`_pcgw_remove_path_for_game`,
-  // details_view_mixin.py:1218-1230): the backend deletes a manual path and
-  // suppresses a PCGW one, so the caller passes only the row's raw value.
-  async function handleRemoveSavePath(path: string) {
-    manualPathPending = true;
-    manualPathError = null;
-    try {
-      await api.nativeRemoveSavePath(game, path);
-      await loadNativePaths();
-      await loadRecords();
-    } catch (err) {
-      manualPathError = errorMessage(err);
-    } finally {
-      manualPathPending = false;
-    }
+  function handleRemoveSavePath(path: string) {
+    void c.removeSavePath(path);
   }
 </script>
 
@@ -417,13 +224,13 @@
           <div class="add-path">
             <input
               data-testid="cloud-native-path-input"
-              bind:value={manualPathInput}
+              bind:value={c.manualPathInput}
               placeholder="/path/to/save/folder"
               disabled={manualPathPending}
             />
             <button
               data-testid="cloud-native-path-add"
-              disabled={manualPathPending || !manualPathInput.trim()}
+              disabled={manualPathPending || !c.manualPathInput.trim()}
               onclick={handleAddManualPath}
             >
               Add
@@ -449,7 +256,7 @@
       <p class="confirm-message">{confirmText.message}</p>
       <div class="confirm-actions">
         <button data-testid="cloud-confirm-yes" onclick={confirmAction}>Yes</button>
-        <button data-testid="cloud-confirm-no" onclick={() => (confirmState = null)}>No</button>
+        <button data-testid="cloud-confirm-no" onclick={() => c.cancelConfirm()}>No</button>
       </div>
     </div>
   {/if}

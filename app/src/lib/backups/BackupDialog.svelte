@@ -6,34 +6,11 @@
   // shows comes from `dialog.ts`. The queued card is not raised here: the
   // batch notifications announce it (notifications/notifier.ts).
   import { untrack } from 'svelte';
-  import { api, type BackupPlan, type SourceChoice } from '../api';
+  import { type SourceChoice } from '../api';
   import Icon from '../Icon.svelte';
-  import { isWindowsPlatform } from '../details/actions';
-  import { drives } from '../stores/drives.svelte';
-  import { installed } from '../stores/installed.svelte';
-  import { session } from '../stores/session.svelte';
-  import { hostOf } from '../shell';
   import type { BackupDialogOpen } from './dialogState.svelte';
-  import {
-    anyLocal,
-    chooseAll,
-    chooseDrive,
-    dialogLede,
-    driveRow,
-    emulatorLine,
-    firmwareLine,
-    footerModel,
-    localLine,
-    noDrivesText,
-    outdatedRows,
-    planNotes,
-    runtimeLine,
-    sourcePicks,
-    sourceRows,
-    wineNote,
-    type LocalGameInfo,
-    type SourceChoices,
-  } from './dialog';
+  import { BackupPlanStore } from './backupPlan.svelte';
+  import { anyLocal, dialogLede } from './dialog';
 
   let {
     open,
@@ -46,152 +23,60 @@
     onSetUp: () => void;
   } = $props();
 
-  let includeFirmware = $state(true);
-  let includeRuntime = $state(false);
-  /** "Copy installed games from this computer" (ticked by default). */
-  let useLocal = $state(true);
-  /** The picks for out-of-date local games, by rom id. */
-  let choices = $state<Record<number, SourceChoice>>({});
-  let settingsLoaded = $state(false);
-  let chosen = $state<string | null>(null);
-  let plans = $state.raw<Record<string, BackupPlan>>({});
-  let planErrors = $state.raw<Record<string, string>>({});
-  /** Drive keys whose plan is being (re)made. */
-  let planning = $state.raw<ReadonlySet<string>>(new Set());
-  let starting = $state(false);
-  let startError = $state<string | null>(null);
+  // The plans, the picks and Start (backupPlan.svelte.ts). The aliases keep
+  // the markup reading as before; the checkboxes bind to the store.
+  const b = new BackupPlanStore(() => open);
+  let chosen = $derived(b.chosen);
+  let starting = $derived(b.starting);
+  let startError = $derived(b.startError);
+  let ready = $derived(b.ready);
+  let plan = $derived(b.plan);
+  let rows = $derived(b.rows);
+  let emus = $derived(b.emus);
+  let firmware = $derived(b.firmware);
+  let runtime = $derived(b.runtime);
+  let notes = $derived(b.notes);
+  let footer = $derived(b.footer);
+  let error = $derived(b.error);
+  let empty = $derived(b.empty);
+  let showSource = $derived(b.showSource);
+  let local = $derived(b.local);
+  let sources = $derived(b.sources);
+  let outdated = $derived(b.outdated);
+  let wine = $derived(b.wine);
+  let host = $derived(b.host);
   let panelEl = $state<HTMLElement | null>(null);
 
-  let ready = $derived(drives.ready);
-  let chosenDrive = $derived(ready.find((d) => d.key === chosen) ?? null);
-  let plan = $derived(chosen === null ? null : (plans[chosen] ?? null));
-  let rows = $derived(ready.map((d) => driveRow(d, plans[d.key] ?? null, d.key === chosen)));
-  let emus = $derived(plan ? emulatorLine(plan) : null);
-  let firmware = $derived(plan ? firmwareLine(plan) : null);
-  let runtime = $derived(plan ? runtimeLine(plan) : null);
-  let notes = $derived(plan && chosenDrive ? planNotes(plan, chosenDrive) : []);
-  let busy = $derived(chosen !== null && planning.has(chosen));
-  let footer = $derived(footerModel(busy ? null : plan));
-  let error = $derived(startError ?? (chosen !== null ? (planErrors[chosen] ?? null) : null));
-  let empty = $derived(noDrivesText(drives.connected));
-
-  // The Source section. The platform and the Windows flag of a game copied
-  // from this computer come from its registry row.
-  let localInfo = $derived.by(() => {
-    const map = new Map<number, LocalGameInfo>();
-    for (const r of installed.list) {
-      if (r.rom_id === null || map.has(r.rom_id)) continue;
-      map.set(r.rom_id, { platform: r.platform, windows: isWindowsPlatform(r.platform_slug, r.platform) });
-    }
-    return map;
-  });
-  const lookup = (romId: number) => localInfo.get(romId);
-  let host = $derived(hostOf(session.serverUrl));
-  let showSource = $derived(ready.length > 0 && plan !== null && plan.local_available);
-  let local = $derived(plan ? localLine(plan, host) : null);
-  let sources = $derived(plan && plan.use_local ? sourceRows(plan, choices, lookup) : null);
-  let outdated = $derived(plan ? outdatedRows(plan, choices) : null);
-  let wine = $derived(plan ? wineNote(plan, lookup) : '');
-
   function pick(romId: number, source: SourceChoice) {
-    choices = { ...choices, [romId]: source };
-    startError = null;
+    b.pick(romId, source);
   }
 
   function pickAll(source: SourceChoice) {
-    if (plan === null) return;
-    choices = chooseAll(plan, choices, source);
-    startError = null;
+    b.pickAll(source);
   }
 
   // The firmware default comes from Settings › Backup drives.
   $effect(() => {
-    api
-      .getBackupSettings()
-      .then((s) => (includeFirmware = s.include_firmware))
-      .catch(() => {
-        // Unreadable: the README's default (on) stands.
-      })
-      .finally(() => (settingsLoaded = true));
+    b.loadSettings();
   });
 
   // Keep a drive chosen while drives come and go.
   $effect(() => {
-    const next = chooseDrive(ready, untrack(() => chosen));
-    if (next !== untrack(() => chosen)) chosen = next;
+    b.keepChosen();
   });
-
-  let generation = 0;
 
   // Plans every ready drive again when a checkbox changes or a drive
   // appears, goes, or changes (its free space, its pack).
   $effect(() => {
-    if (!settingsLoaded) return;
-    const fw = includeFirmware;
-    const rt = includeRuntime;
-    const local = useLocal;
-    const picks = sourcePicks($state.snapshot(choices) as SourceChoices);
-    const keys = ready.map((d) => d.key);
-    void ready.map((d) => `${d.free_bytes}:${d.pack?.updated ?? ''}:${d.pack?.game_count ?? 0}`).join('|');
-    const request = $state.snapshot(open.request);
-    const first = untrack(() => chosen);
-    const mine = ++generation;
-    planning = new Set(keys);
-    const one = async (key: string) => {
-      try {
-        const p = await api.planBackup(key, request, fw, rt, local, picks);
-        if (mine !== generation) return;
-        plans = { ...plans, [key]: p };
-        if (key in planErrors) {
-          const rest = { ...planErrors };
-          delete rest[key];
-          planErrors = rest;
-        }
-      } catch (err) {
-        if (mine !== generation) return;
-        planErrors = { ...planErrors, [key]: err instanceof Error ? err.message : String(err) };
-      } finally {
-        if (mine === generation) {
-          const next = new Set(planning);
-          next.delete(key);
-          planning = next;
-        }
-      }
-    };
-    void (async () => {
-      const head = first !== null && keys.includes(first) ? first : keys[0];
-      if (head === undefined) return;
-      await one(head);
-      if (mine !== generation) return;
-      await Promise.all(keys.filter((k) => k !== head).map(one));
-    })();
+    b.planAll();
   });
 
   async function start() {
-    if (chosen === null || footer.disabled || starting) return;
-    starting = true;
-    startError = null;
-    try {
-      await api.startBackup(
-        chosen,
-        $state.snapshot(open.request),
-        includeFirmware,
-        includeRuntime,
-        useLocal,
-        sourcePicks($state.snapshot(choices) as SourceChoices),
-      );
-      open.onQueued?.();
-      onClose();
-    } catch (err) {
-      startError = err instanceof Error ? err.message : String(err);
-    } finally {
-      starting = false;
-    }
+    if (await b.start()) onClose();
   }
 
   function choose(key: string) {
-    chosen = key;
-    startError = null;
+    b.choose(key);
   }
 
   // Focus the dialog on open and hand focus back to the opener on close.
@@ -303,7 +188,7 @@
       <section class="sub" data-testid="backup-source">
         <h4>Source</h4>
         <label class="also">
-          <input data-testid="backup-use-local" type="checkbox" bind:checked={useLocal} />
+          <input data-testid="backup-use-local" type="checkbox" bind:checked={b.useLocal} />
           <span>
             <b>{local.label}</b>
             <span class="note" data-testid="backup-local-line">{local.note}</span>
@@ -401,7 +286,7 @@
           <input
             data-testid="backup-firmware"
             type="checkbox"
-            bind:checked={includeFirmware}
+            bind:checked={b.includeFirmware}
             disabled={firmware === null || firmware.disabled}
           />
           <span>
@@ -411,7 +296,7 @@
         </label>
         {#if runtime}
           <label class="also">
-            <input data-testid="backup-runtime" type="checkbox" bind:checked={includeRuntime} disabled={runtime.disabled} />
+            <input data-testid="backup-runtime" type="checkbox" bind:checked={b.includeRuntime} disabled={runtime.disabled} />
             <span>
               <b>{runtime.label}</b>
               <span class="note">{runtime.text}</span>

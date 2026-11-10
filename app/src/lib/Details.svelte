@@ -1,22 +1,7 @@
 <script lang="ts">
-  import {
-    api,
-    type CloudPanelInfo,
-    type ContentAvailability,
-    type ContentKind,
-    type DownloadStatus,
-    type GameSummary,
-    type LaunchDefaults,
-    type RomDetail,
-    type SaveType,
-  } from './api';
-  import { subjectFromDetails } from './background';
-  import { noteViewed } from './stores/lastViewed.svelte';
-  import { downloads } from './stores/downloads.svelte';
-  import { updates } from './stores/updates.svelte';
-  import { isInstalled, installed, matchesInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
+  import { type ContentKind, type GameSummary, type SaveType } from './api';
+  import { refresh as refreshInstalled } from './stores/installed.svelte';
   import { session } from './stores/session.svelte';
-  import { sessions } from './stores/sessions.svelte';
   import Icon from './Icon.svelte';
   import Image from './Image.svelte';
   import NativeSettings from './details/NativeSettings.svelte';
@@ -28,56 +13,20 @@
   import AchievementsTab from './details/AchievementsTab.svelte';
   import LinkPicker from './details/LinkPicker.svelte';
   import RemoveConfirm from './details/RemoveConfirm.svelte';
-  import { keptFolder, showsUnlinkedActions } from './details/unlinked';
-  import { missingActions } from './library/missing';
+  import { keptFolder } from './details/unlinked';
   import { pickFolder } from './pickers';
-  import * as run from './games/run';
-  import { fullIndex, galleryItems, viewableIndex, viewableItems } from './details/media';
-  import {
-    detailApplies,
-    driveCopyLines,
-    fromDriveText,
-    mergeDetail,
-    summaryOf,
-    versionSource,
-    type DetailsSubject,
-  } from './details/subject';
-  import { removeFromDrive } from './backups/install';
-  import { syntheticCloudGame, type CloudMode } from './details/cloud';
-  import {
-    backupAction,
-    contentButtons,
-    installLabel,
-    isContentPlatform,
-    isNativePlatform,
-    onDrivesLine,
-  } from './details/actions';
-  import { drives } from './stores/drives.svelte';
-  import { openBackup } from './backups/dialogState.svelte';
-  import { backupRequest } from './backups/dialog';
-  import { contentBlockReason } from './details/blocked';
-  import {
-    fileVersionLabel,
-    romFileNamesFor,
-    showsFilesVersionLine,
-    versionLabel,
-  } from './details/version';
-  import {
-    epochDate,
-    flagList,
-    headerLine,
-    lastPlayedText,
-    launchTargetLine,
-    ratingValue,
-    verificationLabel,
-  } from './details/header';
+  import { fullIndex, viewableIndex, viewableItems } from './details/media';
+  import { type DetailsSubject } from './details/subject';
+  import { type CloudMode } from './details/cloud';
+  import { installLabel } from './details/actions';
+  import { DetailsStore } from './details/detailsStore.svelte';
+  import { lastPlayedText, verificationLabel } from './details/header';
   import {
     DETAILS_TAB_LABELS,
     rememberTab,
     rememberedTab,
     shownTab,
     tabTestId,
-    visibleTabs,
     type DetailsTab,
   } from './details/tabs';
 
@@ -95,26 +44,60 @@
     initialCloudMode?: CloudMode;
   } = $props();
 
-  const LIVE_INSTALL_STATUSES: DownloadStatus[] = ['queued', 'downloading', 'installing', 'cancelling'];
+  // The game's data, install state and actions (details/detailsStore.svelte.ts).
+  // This file holds only the popup's own state: confirms, focus, the tab and
+  // the media viewer. The aliases below keep the markup reading as before.
+  const d = new DetailsStore(() => subject);
 
-  type PendingAction = 'install' | 'uninstall' | 'play' | 'stop' | null;
+  let detail = $derived(d.detail);
+  let coverSmall = $derived(d.coverSmall);
+  let coverLarge = $derived(d.coverLarge);
+  let mediaItems = $derived(d.mediaItems);
+  let failedMedia = $derived(d.failedMedia);
+  let description = $derived(d.description);
+  let serverTitles = $derived(d.serverTitles);
+  let pendingAction = $derived(d.pendingAction);
+  let pending = $derived(d.pending);
+  let error = $derived(d.error);
+  let umuOfferFor = $derived(d.umuOfferFor);
+  let cancelPending = $derived(d.cancelPending);
+  let contentActionKind = $derived(d.contentActionKind);
+  let updatePending = $derived(d.updatePending);
+  let liveEntry = $derived(d.liveEntry);
+  let installedNow = $derived(d.installedNow);
+  let liveSession = $derived(d.liveSession);
+  let platformSlug = $derived(d.platformSlug);
+  let isNative = $derived(d.isNative);
+  let buttons = $derived(d.buttons);
+  let installBlocked = $derived(d.installBlocked);
+  let updateBlocked = $derived(d.updateBlocked);
+  let dlcBlocked = $derived(d.dlcBlocked);
+  let installedRow = $derived(d.installedRow);
+  let cloudGame = $derived(d.cloudGame);
+  let unlinkedRow = $derived(d.unlinkedRow);
+  let heldRomIds = $derived(d.heldRomIds);
+  let missing = $derived(d.missing);
+  let locateError = $derived(d.locateError);
+  let locatePending = $derived(d.locatePending);
+  let removeTarget = $derived(d.removeTarget);
+  let launchTarget = $derived(d.launchTarget);
+  let updateLabel = $derived(d.updateLabel);
+  let version = $derived(d.version);
+  let serverVersion = $derived(d.serverVersion);
+  let installedVersion = $derived(d.installedVersion);
+  let savePanelInfo = $derived(d.savePanelInfo);
+  let statePanelInfo = $derived(d.statePanelInfo);
+  let cloudPanelInfoError = $derived(d.cloudPanelInfoError);
+  let backup = $derived(d.backup);
+  let onDrives = $derived(d.onDrives);
+  let fromDrive = $derived(d.fromDrive);
+  let driveCopy = $derived(d.driveCopy);
+  let header = $derived(d.header);
+  let ratingNumber = $derived(d.ratingNumber);
+  let flags = $derived(d.flags);
 
   let confirmingUninstall = $state(false);
-  let pendingAction = $state<PendingAction>(null);
-  let error = $state<string | null>(null);
-  // The error that offers the umu-launcher install (a Proton launch with no
-  // umu-run); `null` for any other. Compared by value, so a later action's
-  // own error never shows the offer.
-  let umuOfferFor = $state<string | null>(null);
   let panelEl = $state<HTMLElement | null>(null);
-
-  // Install specials (task-16-brief.md): Cancel for a live install,
-  // Install Update/DLC for installed PS4/Xbox 360 games, and the native
-  // Game Settings dialog.
-  let cancelPending = $state(false);
-  let contentAvailability = $state<ContentAvailability | null>(null);
-  let wasLive = $state(false);
-  let contentActionKind = $state<ContentKind | null>(null);
   let showNativeSettings = $state(false);
 
   // Design §7: last tab remembered per session, not per game.
@@ -124,47 +107,18 @@
     rememberTab(next);
   }
 
-  // Metadata overlay (task-10-brief.md): the subject carries whatever the
-  // grid it opened from already had on hand; the full `RomDetail` fills in
-  // the gaps. The redesigned tabs read `files`, `related`, the IGDB block
-  // and the media fields off it, none of which the registry stores, so the
-  // fetch now runs for every rom with a server id rather than only for a
-  // subject with no screenshots. It stays a display overlay: `subject` is
-  // the caller's data and is never mutated.
-  let detail = $state<RomDetail | null>(null);
-  let launchDefaults = $state<LaunchDefaults | null>(null);
-
-  let merged = $derived(detail === null ? subject : mergeDetail(subject, detail));
-
   // Achievements shows only for a ROM whose RomM detail lists achievements;
   // a remembered Achievements choice falls back to Overview elsewhere.
-  let tabs = $derived(visibleTabs(detail?.achievement_count));
+  let tabs = $derived(d.tabs);
   let activeTab = $derived(shownTab(tab, tabs));
 
-  // The grid already reported what IT knew when the popup opened (a summary
-  // has a cover and, since round 4, the list payload's screenshots); once the
-  // detail lands, the merged subject is strictly richer — it is the only
-  // place fanart is ever known. Reporting again is idempotent when nothing
-  // changed, because `noteViewed` just replaces the subject.
+  // The grid already reported what IT knew when the popup opened; once the
+  // detail lands, the merged subject is strictly richer (the only place
+  // fanart is ever known). Reporting again is idempotent.
   $effect(() => {
-    // A drive's art is not on a server the background layer can build from.
-    if (subject.source === 'drive') return;
-    noteViewed(subjectFromDetails(merged));
+    d.reportViewed();
   });
-  let coverSmall = $derived(merged.coverSmall);
-  let coverLarge = $derived(merged.coverLarge);
-  let screenshotUrls = $derived(merged.screenshotUrls);
 
-  // The gallery lives here, not in MediaTab: the viewer is rendered above
-  // the whole dialog, so both need the same list and the same indices.
-  let mediaItems = $derived(
-    galleryItems({
-      title: subject.name,
-      screenshotUrls,
-      youtubeVideoId: detail?.youtube_video_id ?? '',
-      videoPath: detail?.video_path ?? '',
-    })
-  );
   // Which picture the viewer is on, held as an index into `mediaItems` — the
   // FULL list, not the filtered one. A screenshot that fails while the viewer
   // is open shortens `viewerItems` under it, and a position in that shrinking
@@ -172,13 +126,8 @@
   // because `mediaItems` only changes when the game does. `null` means the
   // viewer is closed.
   let viewerAnchor = $state<number | null>(null);
-  // One failure map for the Media tab AND the fullscreen viewer: the viewer
-  // is rendered outside the tab (above the whole dialog), so a map owned by
-  // either one would let the two disagree about which screenshot is dead.
-  // Keyed by URL, exactly like OverviewTab's own `failedScreenshots`.
-  let failedMedia = $state<Record<string, true>>({});
   function markMediaFailed(url: string) {
-    failedMedia = { ...failedMedia, [url]: true };
+    d.markMediaFailed(url);
   }
   // The viewer walks the same list the gallery shows, so a screenshot whose
   // image 404s is skipped instead of paged onto. `viewerIndex` is the anchor's
@@ -197,173 +146,40 @@
       panelEl?.focus();
     }
   });
-  let description = $derived(merged.description);
-  let rating = $derived(merged.rating);
-  let genres = $derived(merged.genres);
 
   $effect(() => {
-    if (subject.romId === null) return; // no server id: nothing to overlay
-    if (!session.connected) return;
-    // A drive game's id belongs to the server it was backed up from.
-    if (!detailApplies(subject, session.serverUrl)) return;
-    api
-      .getRomDetail(subject.romId)
-      .then((fetched) => {
-        detail = fetched;
-      })
-      .catch(() => {}); // offline/removed rom: the subject's own data stands
+    d.loadDetail();
   });
 
   $effect(() => {
-    api
-      .getLaunchDefaults()
-      .then((d) => (launchDefaults = d))
-      .catch(() => {}); // unreadable config: the emulator row says "No default emulator"
+    d.loadLaunchDefaults();
   });
 
-  // Design §7 Overview: Related is filtered against the platform's own game
-  // list. Fetched once the detail names the platform id; a failure leaves
-  // the list empty, which renders no Related row at all rather than a row
-  // of titles the user may not have.
-  let serverTitles = $state<string[]>([]);
+  $effect(() => d.loadServerTitles());
 
   $effect(() => {
-    const platformId = detail?.platform_id ?? null;
-    if (platformId === null || !session.connected) return;
-    if (detail !== null && detail.related.length === 0) return; // nothing to filter
-    let cancelled = false;
-    api
-      .listGames(platformId)
-      .then((games) => {
-        if (!cancelled) serverTitles = games.map((g) => g.name);
-      })
-      .catch(() => {}); // offline/refused: no Related row rather than a wrong one
-    return () => {
-      cancelled = true;
-    };
+    d.refreshInstallBlocked();
   });
 
-  let pending = $derived(pendingAction !== null);
-  let summary = $derived(summaryOf(subject));
-  let liveEntry = $derived(
-    subject.romId !== null
-      ? downloads.entries.find((e) => e.rom_id === subject.romId && LIVE_INSTALL_STATUSES.includes(e.status))
-      : undefined
-  );
-  let installedNow = $derived(isInstalled(summary, subject.platformName));
-  let liveSession = $derived(subject.romId !== null ? sessions.sessionFor(subject.romId) : undefined);
-
-  let isContent = $derived(isContentPlatform(subject.platformName));
-  // One native predicate for the whole popup (user ruling 2026-09-08): the
-  // install label, the native Game Settings button, and the Saves tab's PC
-  // save-folder mode all read the same answer.
-  // The server platform slug decides first (user bug 2026-10-10: a custom
-  // display name on slug `win` is still native). A registry row the
-  // backfill has not reached gets it from the ROM detail (`mergeDetail`).
-  let platformSlug = $derived(merged.platformSlug);
-  let isNative = $derived(isNativePlatform(platformSlug, subject.platformName));
-  let buttons = $derived(contentButtons(contentAvailability, installedNow, liveEntry !== undefined));
-
-  // The primary button's reason needs the configured emulator list, so it
-  // comes from the backend; a failure leaves it blank rather than guessing.
-  let installBlocked = $state('');
   $effect(() => {
-    // A drive install brings the system's emulator from the drive when it
-    // has one, so the server-side reason would not hold.
-    if (installedNow || subject.drive !== undefined) {
-      installBlocked = '';
-      return;
-    }
-    const platform = subject.platformName;
-    const slug = platformSlug;
-    api
-      .installBlockReason(platform, slug)
-      .then((reason) => (installBlocked = reason))
-      .catch(() => (installBlocked = ''));
+    d.refreshContentAvailability();
   });
 
-  let updateBlocked = $derived(
-    contentBlockReason('update', subject.platformName, installedNow, subject.romId, buttons.update)
-  );
-  let dlcBlocked = $derived(
-    contentBlockReason('dlc', subject.platformName, installedNow, subject.romId, buttons.dlc)
-  );
-
-  // Fetched once the subject is installed-and-a-content-platform, and
-  // re-fetched right after a live install for it finishes (`wasLive` tracks
-  // the previous liveEntry-defined-ness across effect runs).
-  $effect(() => {
-    if (subject.romId === null || !installedNow || !isContent) {
-      contentAvailability = null;
-      wasLive = liveEntry !== undefined;
-      return;
-    }
-    const live = liveEntry !== undefined;
-    const justFinished = wasLive && !live;
-    wasLive = live;
-    if (live || (contentAvailability !== null && !justFinished)) return;
-    api
-      .contentAvailability(subject.romId)
-      .then((avail) => (contentAvailability = avail))
-      .catch(() => (contentAvailability = null));
-  });
-
-  // Cloud saves/states (task-19-brief.md). `cloudGame` is the InstalledGame
-  // registry row when one exists, else a synthetic stand-in built from the
-  // subject.
-  let installedRow = $derived(installed.list.find((row) => matchesInstalled(row, summary, subject.platformName)) ?? null);
-  // A row the slug backfill has not reached borrows the slug the ROM detail
-  // carries, so the cloud commands see the same nativeness as the popup.
-  let cloudGame = $derived(
-    installedRow
-      ? { ...installedRow, platform_slug: installedRow.platform_slug || platformSlug }
-      : syntheticCloudGame(summary, subject.platformName, platformSlug)
-  );
-
-  // Q4: an installed row with no server rom id. Details offers "Link to
-  // server game" and "Remove from library (keeps files)" for it instead of
-  // the server-backed actions.
-  let unlinkedRow = $derived(showsUnlinkedActions(subject.romId, installedRow) ? installedRow : null);
-  let heldRomIds = $derived(
-    new Set(installed.list.flatMap((row) => (row.rom_id === null ? [] : [row.rom_id]))),
-  );
   let showLinkPicker = $state(false);
   let showRemoveConfirm = $state(false);
 
-  /** Runs a game action whose refusal the caller shows from a thrown error
-   *  (the Link picker and the Remove confirm show it inside themselves). */
-  async function orThrow(outcome: Promise<run.RunOutcome>): Promise<void> {
-    const done = await outcome;
-    if (done.kind !== 'ok') throw new Error(done.reason);
-  }
-
   async function linkTo(rom: GameSummary) {
-    if (unlinkedRow === null) return;
     // The opener sees the row gain its rom id in the refreshed list and
-    // re-opens Details on it (Library.svelte).
-    await orThrow(run.linkGame(unlinkedRow.title, unlinkedRow.platform, rom.id));
+    // re-opens Details on it (Library.svelte). A refusal throws to the picker.
+    if (unlinkedRow === null) return;
+    await d.linkTo(rom);
     showLinkPicker = false;
   }
 
-  // 9c: the row's files are not on disk (the backend's reconcile pass sets
-  // the flag on every listing). Details offers Locate… and Remove from
-  // library (keeps files); Play and Uninstall are disabled with the reason.
-  let missing = $derived(missingActions(installedRow));
   let locatePath = $state('');
-  let locateError = $state<string | null>(null);
-  let locatePending = $state(false);
-
-  // The row the Remove confirm acts on: an unlinked row (Q4) or a missing one.
-  let removeTarget = $derived(unlinkedRow ?? (missing.showMissing ? installedRow : null));
 
   async function locate(folder: string) {
-    if (installedRow === null || folder.trim() === '') return;
-    locateError = null;
-    locatePending = true;
-    const outcome = await run.locateGame(installedRow.title, installedRow.platform, folder);
-    if (outcome.kind === 'ok') locatePath = '';
-    else locateError = outcome.reason;
-    locatePending = false;
+    if (await d.locate(folder)) locatePath = '';
   }
 
   async function locateWithPicker() {
@@ -372,86 +188,30 @@
   }
 
   async function removeFromLibrary() {
-    if (removeTarget === null) return;
-    await orThrow(run.removeFromLibrary(removeTarget.title, removeTarget.platform));
+    if (!(await d.removeFromLibrary())) return;
     showRemoveConfirm = false;
     onClose();
   }
-  // `''` from `launchTargetLine` means "no launch target to state" — today
-  // only a native platform, whose game runs its own executable.
-  let launchTarget = $derived(launchTargetLine(launchDefaults, subject.platformName, platformSlug));
-
-  // Server-side game updates (doc 10). `updateLabel` is null when the rom
-  // has no update, which also hides the button. `version` is the header row:
-  // the version tag parsed out of the file name for Windows/PC, else the raw
-  // revision.
-  let updateLabel = $derived(installedNow ? updates.labelFor(subject.romId) : null);
-  let version = $derived(
-    versionLabel(
-      subject.platformName,
-      romFileNamesFor(versionSource(subject), installedRow?.rom_file_name ?? '', detail?.fs_name ?? ''),
-      detail?.revision || installedRow?.revision || ''
-    )
-  );
-
-  // D-UI-10, per side. The server side reads the top-level file's own
-  // timestamp; the installed side has no server timestamp to fall back on,
-  // so it falls back to when the install landed. Those two fallbacks are
-  // different quantities, so the whole comparison is gated to PC platforms
-  // (`showsFilesVersionLine`); off PC both sides are '' and the Overview
-  // drops the Version fact.
-  let versionLineShown = $derived(showsFilesVersionLine(subject.platformName));
-  let topLevelFile = $derived(detail?.files.find((f) => f.is_top_level) ?? detail?.files[0] ?? null);
-  let serverVersion = $derived(
-    versionLineShown && detail
-      ? fileVersionLabel(detail.fs_name, topLevelFile?.last_modified ?? '')
-      : ''
-  );
-  let installedVersion = $derived(
-    versionLineShown && installedRow
-      ? fileVersionLabel(installedRow.rom_file_name, '') || epochDate(installedRow.installed_at)
-      : ''
-  );
 
   // The update's queued and "<title> updated" cards come from the downloads
   // queue (notifications/notifier.ts), so they show with Details closed too.
   let confirmingUpdate = $state(false);
-  let updatePending = $state(false);
 
   /** The kind the Saves tab shows; a card's "Cloud sync" opens on saves. */
   let cloudKind = $state<SaveType>(initialCloudMode === 'state' ? 'state' : 'save');
-  let savePanelInfo = $state<CloudPanelInfo | null>(null);
-  let statePanelInfo = $state<CloudPanelInfo | null>(null);
-  let cloudPanelInfoError = $state<string | null>(null);
 
   $effect(() => {
     panelEl?.focus();
   });
 
   $effect(() => {
-    if (subject.romId === null) return; // no server id: nothing to manage cloud saves for
-    api
-      .cloudPanelInfo(cloudGame, 'save')
-      .then((info) => (savePanelInfo = info))
-      .catch((err) => (cloudPanelInfoError = errorMessage(err)));
-    api
-      .cloudPanelInfo(cloudGame, 'state')
-      .then((info) => (statePanelInfo = info))
-      .catch((err) => (cloudPanelInfoError = errorMessage(err)));
+    d.loadCloudPanelInfo();
   });
 
-  function errorMessage(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
-  }
-
   async function handleInstall() {
-    if (subject.romId === null) return;
-    error = null;
-    pendingAction = 'install';
     // The queued card and a refusal's error card are games/run.ts's.
-    const outcome = await run.installServerGame(subject.romId, subject.name);
-    if (outcome.kind === 'needs-library-folder') onLibraryPathUnset();
-    pendingAction = null;
+    const outcome = await d.install();
+    if (outcome?.kind === 'needs-library-folder') onLibraryPathUnset();
   }
 
   async function handleUninstallClick() {
@@ -460,17 +220,9 @@
       confirmingUninstall = true;
       return;
     }
-    error = null;
-    pendingAction = 'uninstall';
     // The uninstalled card, the kept-folders card and the refresh are games/run.ts's.
-    const outcome = await run.uninstallGame(subject.romId, subject.name);
-    if (outcome.kind === 'ok') {
-      onClose();
-    } else {
-      error = outcome.reason;
-      confirmingUninstall = false;
-    }
-    pendingAction = null;
+    if (await d.uninstall()) onClose();
+    else confirmingUninstall = false;
   }
 
   // Two-click confirm for native installs only (doc 10).
@@ -480,54 +232,24 @@
       confirmingUpdate = true;
       return;
     }
-    error = null;
-    updatePending = true;
-    const outcome = await run.updateGame(subject.romId);
-    if (outcome.kind !== 'ok') error = outcome.reason;
-    updatePending = false;
+    await d.update();
     confirmingUpdate = false;
   }
 
-  async function handleCancel() {
-    if (subject.romId === null) return;
-    error = null;
-    cancelPending = true;
-    const outcome = await run.cancelInstall(subject.romId);
-    if (outcome.kind !== 'ok') error = outcome.reason;
-    cancelPending = false;
+  function handleCancel() {
+    void d.cancel();
   }
 
-  async function handleInstallContent(kind: ContentKind) {
-    if (subject.romId === null) return;
-    error = null;
-    contentActionKind = kind;
-    const outcome = await run.installContent(subject.romId, kind);
-    if (outcome.kind !== 'ok') error = outcome.reason;
-    contentActionKind = null;
+  function handleInstallContent(kind: ContentKind) {
+    void d.installContent(kind);
   }
 
-  async function handlePlay() {
-    if (subject.romId === null) return;
-    error = null;
-    pendingAction = 'play';
-    // "Launching <title>…" and a refusal are cards (games/run.ts). The
-    // reason also shows here only beside the umu-launcher install it needs.
-    const outcome = await run.playInstalled(subject.romId, subject.name);
-    if (outcome.kind !== 'ok') {
-      const missing = outcome.kind === 'needs-umu';
-      error = missing ? outcome.reason : null;
-      umuOfferFor = missing ? error : null;
-    }
-    pendingAction = null;
+  function handlePlay() {
+    void d.play();
   }
 
-  async function handleStop() {
-    if (!liveSession) return;
-    error = null;
-    pendingAction = 'stop';
-    const outcome = await run.stopGame(liveSession.id);
-    if (outcome.kind !== 'ok') error = outcome.reason;
-    pendingAction = null;
+  function handleStop() {
+    void d.stop();
   }
 
   function onKey(e: KeyboardEvent) {
@@ -541,71 +263,29 @@
     if (e.target === e.currentTarget) onClose();
   }
 
-  // GameBackups README: "Backup to drive…" under the install actions, and
-  // "On Couch kit" when a connected drive holds the game already.
-  let backup = $derived(backupAction(session.connected));
-  let onDrives = $derived(
-    subject.romId === null
-      ? ''
-      : onDrivesLine(drives.holdingRom(session.serverUrl, subject.romId).map((d) => d.pack?.name ?? d.label)),
-  );
-
+  // GameBackups README: "Backup to drive…" under the install actions.
+  // "Set up a drive…" leaves for Settings: Details closes behind it.
   function backUp() {
-    if (subject.romId === null || backup.disabled) return;
-    // "Set up a drive…" leaves for Settings: Details closes behind it.
-    openBackup({ request: backupRequest({ kind: 'game', name: subject.name }, [subject.romId]), onLeave: onClose });
+    d.backUp(onClose);
   }
 
   // Details from a drive (GameBackups README): Install from drive copies the
   // game from the drive, and Remove from drive… (two clicks) takes it off.
-  let fromDrive = $derived(fromDriveText(subject));
-  let driveCopy = $derived(driveCopyLines(subject));
   let confirmingDriveRemove = $state(false);
 
-  async function handleDriveInstall() {
-    const from = subject.drive;
-    if (from === undefined || subject.romId === null) return;
-    error = null;
-    pendingAction = 'install';
-    try {
-      await run.installFromDrive(from.key, { rom_id: subject.romId, name: subject.name, server: from.server });
-    } finally {
-      pendingAction = null;
-    }
+  function handleDriveInstall() {
+    void d.installFromDrive();
   }
 
   async function handleDriveRemove() {
-    const from = subject.drive;
-    if (from === undefined || subject.romId === null) return;
+    if (subject.drive === undefined || subject.romId === null) return;
     if (!confirmingDriveRemove) {
       confirmingDriveRemove = true;
       return;
     }
-    error = null;
-    try {
-      await removeFromDrive(from.key, from.name, [{ rom_id: subject.romId, name: subject.name, server: from.server }]);
-      onClose();
-    } catch (err) {
-      error = errorMessage(err);
-      confirmingDriveRemove = false;
-    }
+    if (await d.removeFromDrive()) onClose();
+    else confirmingDriveRemove = false;
   }
-
-  let header = $derived(
-    headerLine({
-      platformName: subject.platformName,
-      firstReleaseDate: detail?.first_release_date || subject.releaseDate || '',
-      companies: detail?.companies || subject.companies || '',
-      genres,
-    })
-  );
-  let ratingNumber = $derived(ratingValue(rating));
-  // `||`, not `??`: a loaded detail always carries strings, so `''` from the
-  // server would win over the registry's stored value under `??`.
-  let flags = $derived([
-    ...flagList(detail?.regions || installedRow?.regions || ''),
-    ...flagList(detail?.languages || installedRow?.languages || ''),
-  ]);
 </script>
 
 <div class="backdrop" onclick={onBackdropClick} role="presentation">

@@ -9,10 +9,10 @@
   // clamped rule the grids use, one column wide); ArrowUp on the first row
   // returns to the search box; Enter or Space on a row links it. Tab is
   // trapped inside the dialog and focus returns to the opener on close.
-  import { api, type GameSummary } from '../api';
+  import type { GameSummary } from '../api';
   import Icon from '../Icon.svelte';
   import { moveFocus } from '../focus/grid';
-  import { linkCandidates } from './unlinked';
+  import { LinkList } from './linkList.svelte';
 
   let {
     title,
@@ -30,11 +30,14 @@
     onClose: () => void;
   } = $props();
 
-  let games = $state<GameSummary[] | null>(null);
-  let loadError = $state<string | null>(null);
+  // The list and the pick (linkList.svelte.ts); this file holds the search
+  // text and the keyboard.
+  const list = new LinkList();
+  let games = $derived(list.games);
+  let loadError = $derived(list.loadError);
+  let pickingId = $derived(list.pickingId);
+  let pickError = $derived(list.pickError);
   let query = $state('');
-  let pickingId = $state<number | null>(null);
-  let pickError = $state<string | null>(null);
   let searchEl = $state<HTMLInputElement | null>(null);
   let panelEl = $state<HTMLElement | null>(null);
   let listEl = $state<HTMLUListElement | null>(null);
@@ -42,28 +45,11 @@
   // first), so Tab from the search box reaches Cancel without walking every row.
   let stopId = $state<number | null>(null);
 
-  let shown = $derived(games === null ? [] : linkCandidates(games, query, heldRomIds));
+  let shown = $derived(list.shown(query, heldRomIds));
   let trimmedQuery = $derived(query.trim());
   let tabStopId = $derived(shown.some((g) => g.id === stopId) ? stopId : (shown[0]?.id ?? null));
 
-  function errorMessage(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
-  }
-
-  $effect(() => {
-    let cancelled = false;
-    api
-      .listServerRomsForPlatform(platform)
-      .then((list) => {
-        if (!cancelled) games = list;
-      })
-      .catch((err) => {
-        if (!cancelled) loadError = errorMessage(err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  });
+  $effect(() => list.load(platform));
 
   $effect(() => {
     searchEl?.focus();
@@ -79,19 +65,10 @@
     };
   });
 
-  async function pick(rom: GameSummary) {
+  function pick(rom: GameSummary) {
     // `aria-disabled`, not `disabled`: a disabled button drops focus to the
     // page body and takes the keyboard out of the dialog mid-request.
-    if (pickingId !== null) return;
-    pickingId = rom.id;
-    pickError = null;
-    try {
-      await onPick(rom);
-    } catch (err) {
-      pickError = errorMessage(err);
-    } finally {
-      pickingId = null;
-    }
+    void list.pick(rom, onPick);
   }
 
   function rows(): HTMLButtonElement[] {

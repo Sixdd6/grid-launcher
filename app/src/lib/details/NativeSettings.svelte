@@ -4,8 +4,9 @@
   // and a read-only wine-prefix line. Same modal shape as Details.svelte
   // itself (backdrop + `role="dialog"`, Escape/backdrop/close-button
   // dismissal) so it reads as the same design language stacked on top.
-  import { api, type CompatTool, type NativeGameSettings } from '../api';
+  import { type CompatTool, type NativeGameSettings } from '../api';
   import Icon from '../Icon.svelte';
+  import { loadNativeSettings, reloadFromServer, saveNativeSettings } from './nativeSettingsStore';
   import { candidateLabel, compatToolNotice, installDirOf, isWindowsHost, launchSourceNote } from './actions';
 
   let {
@@ -76,19 +77,18 @@
     loading = true;
     loadError = null;
     try {
-      const result = await api.nativeGameSettings(romId);
-      settings = result;
-      selectedExecutable = result.executable || result.candidates[0] || '';
+      // The game's own compat tool, falling back to the configured default
+      // (nativeSettingsStore.ts).
+      const result = await loadNativeSettings(romId, !windowsHost && !noCompatReason);
+      settings = result.settings;
+      selectedExecutable = result.executable;
       parameters = result.parameters;
-
-      if (!windowsHost && !noCompatReason) {
-        try {
-          const dto = await api.listCompatTools();
-          compatTools = dto.tools;
-          // The game's own compat tool, falling back to the configured default.
-          selectedCompat = result.compat_tool || dto.default_tool;
-        } catch (err) {
-          compatToolsError = errorMessage(err);
+      if (result.compat !== null) {
+        if ('error' in result.compat) {
+          compatToolsError = result.compat.error;
+        } else {
+          compatTools = result.compat.tools;
+          selectedCompat = result.compat.selected;
         }
       }
     } catch (err) {
@@ -111,7 +111,7 @@
     saving = true;
     saveError = null;
     try {
-      await api.setNativeGameSettings(romId, selectedExecutable, parameters, selectedCompat);
+      await saveNativeSettings(romId, selectedExecutable, parameters, selectedCompat);
       onSaved();
       onClose();
     } catch (err) {
@@ -125,17 +125,11 @@
     reloading = true;
     reloadMessage = null;
     reloadFailed = false;
-    try {
-      const answer = await api.reloadNativeLaunch(romId);
-      reloadMessage = answer.message;
-      reloadFailed = answer.outcome === 'invalid';
-      await load();
-    } catch (err) {
-      reloadMessage = errorMessage(err);
-      reloadFailed = true;
-    } finally {
-      reloading = false;
-    }
+    const answer = await reloadFromServer(romId);
+    reloadMessage = answer.message;
+    reloadFailed = answer.failed;
+    if (answer.answered) await load();
+    reloading = false;
   }
 
   function onKey(e: KeyboardEvent) {

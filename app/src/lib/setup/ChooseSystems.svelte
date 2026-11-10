@@ -1,35 +1,11 @@
 <script lang="ts">
-  import {
-    api,
-    type CatalogEntry,
-    type CompatTool,
-    type Platform,
-    type PlatformSetup,
-    type SetupStarted,
-  } from '../api';
+  import { type SetupStarted } from '../api';
   import Icon from '../Icon.svelte';
   import SystemRow from '../systems/SystemRow.svelte';
-  import { gamesText, shortName, testKeyOf } from '../systems/rows';
-  import { protonInstallSource, protonPicker } from '../systems/proton';
+  import { gamesText, testKeyOf } from '../systems/rows';
   import { isWindowsHost } from '../emulators/compatTools';
-  import { isWindowsPlatform } from '../details/actions';
-  import { platformLabel } from '../server/platformLabel';
-  import { pushToast } from '../stores/toasts.svelte';
-  import {
-    canStart,
-    choices,
-    choosePicker,
-    compatChoice,
-    installCount,
-    pick,
-    primaryLabel,
-    protonPreselect,
-    rowState,
-    sortRows,
-    toggle,
-    toInstall,
-    type Selection,
-  } from './choices';
+  import { canStart, choosePicker, primaryLabel, rowState } from './choices';
+  import { ChooseSystems } from './chooseSystems.svelte';
 
   // First-run setup, after Connect: Choose your systems (ProposedApp README,
   // "Fresh start"). The same rows as Settings › Systems (SystemRow in tick
@@ -37,113 +13,48 @@
   // Linux a Windows row picks the default Proton version, GE-Proton
   // pre-selected. `onDone` hands the app on to the shell, with what was
   // started and the name shown for each install, or `null` when skipped.
-  // Later changes happen in Settings › Systems.
+  // Later changes happen in Settings › Systems. The data and the calls are
+  // `chooseSystems.svelte.ts`; the aliases keep the markup reading as before.
   let {
     onDone,
   }: { onDone: (started: SetupStarted | null, names: Record<string, string>) => void } = $props();
 
   const windowsHost = isWindowsHost(navigator.platform);
+  const cs = new ChooseSystems(windowsHost);
 
-  let rows = $state.raw<PlatformSetup[] | null>(null);
-  let loadError = $state<string | null>(null);
-  let selection = $state.raw<Selection>({});
-  let tools = $state.raw<CompatTool[]>([]);
-  let defaultTool = $state('');
-  let catalog = $state.raw<CatalogEntry[]>([]);
-  let platforms = $state.raw<Platform[]>([]);
-  /** The Windows row's value; `null` while unticked. */
-  let proton = $state<string | null>(null);
-  let windowsLoaded = $state(false);
-  let busy = $state(false);
-  let startError = $state<string | null>(null);
+  let rows = $derived(cs.rows);
+  let loadError = $derived(cs.loadError);
+  let selection = $derived(cs.selection);
+  let proton = $derived(cs.proton);
+  let windowsLoaded = $derived(cs.windowsLoaded);
+  let busy = $derived(cs.busy);
+  let startError = $derived(cs.startError);
+  let protonOptions = $derived(cs.protonOptions);
+  let protonDefault = $derived(cs.protonDefault);
+  let windowsGames = $derived(cs.windowsGames);
+  let button = $derived(cs.button);
 
-  async function load() {
-    loadError = null;
-    try {
-      rows = sortRows(await api.setupPlatformOptions());
-    } catch (e) {
-      loadError = String(e);
-    }
-  }
-
-  // Best effort: without them the Windows row just offers less.
-  async function loadWindows() {
-    if (windowsHost) return;
-    const [t, c, p] = await Promise.allSettled([
-      api.listCompatTools(),
-      api.listCompatToolCatalog(),
-      api.listPlatforms(),
-    ]);
-    if (t.status === 'fulfilled') {
-      tools = t.value.tools;
-      defaultTool = t.value.default_tool;
-    }
-    if (c.status === 'fulfilled') catalog = c.value;
-    if (p.status === 'fulfilled') platforms = p.value;
-    windowsLoaded = true;
+  function load() {
+    return cs.load();
   }
 
   $effect(() => {
-    load();
-    loadWindows();
-  });
-
-  let protonOptions = $derived(protonPicker(tools, catalog, defaultTool));
-  let protonDefault = $derived(protonPreselect(protonOptions));
-  let windowsGames = $derived(
-    platforms
-      .filter((p) => isWindowsPlatform(p.slug, platformLabel(p)))
-      .reduce<number | null>((n, p) => (n ?? 0) + p.rom_count, null),
-  );
-  let ticked = $derived(Object.keys(selection).length);
-  let button = $derived({
-    installs: rows === null ? 0 : installCount(rows, selection, proton),
-    ticked,
-    proton,
+    cs.load();
+    cs.loadWindows();
   });
 
   function tickWindows() {
-    proton = proton === null ? protonDefault : null;
-  }
-
-  /** The name each install is shown by on the setup card. */
-  function installNames(): Record<string, string> {
-    const names: Record<string, string> = {};
-    for (const option of toInstall(rows ?? [], selection)) names[option.source_id] = shortName(option.name);
-    const source = proton === null ? null : protonInstallSource(proton);
-    if (source !== null) names[source] = catalog.find((e) => e.source_id === source)?.name ?? source;
-    return names;
+    cs.tickWindows();
   }
 
   async function install() {
-    busy = true;
-    startError = null;
-    try {
-      const names = installNames();
-      const started = await api.startPlatformSetup(choices(selection), compatChoice(proton));
-      if (started.compat_set && started.queued.length === 0) {
-        const tool = protonOptions.installed.find((o) => o.value === proton);
-        pushToast(`Windows games will use ${tool?.label ?? 'the Proton version you picked'}`);
-      }
-      onDone(started, names);
-    } catch (e) {
-      startError = String(e);
-    } finally {
-      busy = false;
-    }
+    const done = await cs.install();
+    if (done !== null) onDone(done.started, done.names);
   }
 
   async function skip() {
-    busy = true;
-    try {
-      await api.skipPlatformSetup();
-    } catch {
-      // Not recorded: the chooser comes back on the next start, which is the
-      // honest outcome of a skip that could not be saved.
-    } finally {
-      busy = false;
-      onDone(null, {});
-    }
+    await cs.skip();
+    onDone(null, {});
   }
 </script>
 
@@ -184,10 +95,10 @@
           tick={{
             checked: isTicked,
             disabled: unavailable || busy,
-            onTick: () => (selection = toggle(selection, row)),
+            onTick: () => cs.tick(row),
           }}
           note={unavailable ? 'No emulator available' : !isTicked && state === 'installed' ? 'Installed' : null}
-          onPick={(value) => (selection = pick(selection, row, value))}
+          onPick={(value) => cs.pick(row, value)}
         />
       {/each}
       {#if !windowsHost}
@@ -203,7 +114,7 @@
           pickerDisabled={busy}
           tick={{ checked: proton !== null, disabled: protonDefault === null || busy, onTick: tickWindows }}
           note={windowsLoaded && protonDefault === null && proton === null ? 'No Proton version available' : null}
-          onPick={(value) => (proton = value)}
+          onPick={(value) => cs.pickProton(value)}
         />
       {/if}
     </ul>

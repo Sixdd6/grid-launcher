@@ -13,13 +13,8 @@
   // suite drives. Escape is swallowed on purpose.
   import { tick } from 'svelte';
   import { pickFolder } from './pickers';
-  import {
-    RELOCATE_PICKER_TITLE,
-    relocateError,
-    relocateNeedsPicker,
-    unreachableCopy,
-  } from './libraryUnreachable';
-  import { closeWithoutChanges, libraryUnreachable, relocateLibrary } from './stores/libraryUnreachable.svelte';
+  import { RELOCATE_PICKER_TITLE, relocateNeedsPicker, unreachableCopy } from './libraryUnreachable';
+  import { closeWithoutChanges, libraryUnreachable, relocateTo } from './stores/libraryUnreachable.svelte';
 
   let typed = $state('');
   let pending = $state(false);
@@ -50,13 +45,8 @@
     }
     pending = true;
     error = null;
-    try {
-      error = relocateError(await relocateLibrary(typed.trim()));
-    } catch (err) {
-      error = errorMessage(err);
-    } finally {
-      pending = false;
-    }
+    error = await relocateTo(typed);
+    pending = false;
     // The buttons were disabled while the call ran, which dropped focus.
     await tick();
     relocateEl?.focus();

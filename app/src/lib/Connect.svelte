@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { api } from './api';
-  import { session, connect, useOffline } from './stores/session.svelte';
+  import { session } from './stores/session.svelte';
+  import { loadLibraryField, saveConnectLibraryPath, startConnect, useWithoutServer as goOffline } from './connectFlow';
   import { pickFolder } from './pickers';
   import { untrack } from 'svelte';
   import { connectPrefill, type ConnectPrefill } from './connectPrefill';
-  import { canConnect, canUseOffline, libraryField } from './connectForm';
+  import { canConnect, canUseOffline } from './connectForm';
   import Icon from './Icon.svelte';
 
   // Seeded from the restored config (blank when there is none): a Python
@@ -35,20 +35,13 @@
   // Whether `libraryPath` has been settled: "Use without a server" needs a
   // folder and must not count the initial `null` as "already stored".
   let libraryKnown = $state(false);
+  // Unknown (an unreadable config) asks, with no suggestion; a folder typed
+  // here is stored before connecting either way (connectFlow.ts).
   $effect(() => {
-    Promise.all([api.getLibraryPath(), api.suggestedLibraryPath()])
-      .then(([stored, suggested]) => {
-        const field = libraryField(stored, suggested);
-        libraryPath = field.show ? field.initial : null;
-      })
-      .catch(() => {
-        // Unknown: ask, with no suggestion. A folder typed here is stored
-        // before connecting either way.
-        libraryPath = '';
-      })
-      .finally(() => {
-        libraryKnown = true;
-      });
+    void loadLibraryField().then((initial) => {
+      libraryPath = initial;
+      libraryKnown = true;
+    });
   });
 
   // Set only for the `setLibraryPath` await below, which runs BEFORE
@@ -63,14 +56,8 @@
   /** Stores a typed library folder. `false` (with `libraryError` set) when
    *  the backend refuses it; `true` when stored or when none was asked for. */
   async function saveLibraryPath(): Promise<boolean> {
-    if (libraryPath === null) return true;
-    try {
-      await api.setLibraryPath(libraryPath.trim());
-      return true;
-    } catch (e) {
-      libraryError = `That folder can't be used: ${e}`;
-      return false;
-    }
+    libraryError = await saveConnectLibraryPath(libraryPath);
+    return libraryError === null;
   }
 
   /** "Use without a server": only the library folder is needed. It is
@@ -82,8 +69,7 @@
     libraryError = null;
     secret = '';
     try {
-      if (!(await saveLibraryPath())) return;
-      await useOffline();
+      libraryError = await goOffline(libraryPath);
     } finally {
       submitting = false;
     }
@@ -110,7 +96,7 @@
       // state for the whole network round trip. Token auth identifies the
       // account by itself; the username input only exists for Basic mode,
       // so never send a stale one alongside a token.
-      connect(serverUrl, useToken ? '' : username, secret, useToken);
+      startConnect(serverUrl, username, secret, useToken);
       secret = ''; // never keep the plain secret in frontend state
     } finally {
       submitting = false;

@@ -1,19 +1,9 @@
 <script lang="ts">
   // Settings › RetroAchievements (design §10: "current form"), moved out of
   // Emulators.svelte (task-12-brief.md).
-  import { api, type RaFanOutRow, type RaStatus } from '../api';
-  import {
-    canLogin,
-    canSubmit,
-    CREDENTIALS_CLEARED_TOAST,
-    fanOutSummary,
-    LOGIN_MISSING_FIELDS_TOAST,
-    loginFailedToast,
-    loginToast,
-    rommSyncNotice,
-    statusLabel,
-  } from '../emulators/retroachievements';
-  import { pushToast } from '../stores/toasts.svelte';
+  import { type RaStatus } from '../api';
+  import { canLogin, canSubmit, statusLabel } from '../emulators/retroachievements';
+  import { clearRaCredentials, fetchRaStatus, raLogin, saveRaToken } from './raActions';
 
   let { active = true }: { active?: boolean } = $props();
 
@@ -38,40 +28,24 @@
 
   async function refreshRaStatus() {
     try {
-      raStatus = await api.getRetroachievementsStatus();
+      raStatus = await fetchRaStatus();
       raUsername = raStatus.username;
     } catch (err) {
       raError = errorMessage(err);
     }
   }
 
-  // U6: a saved username also goes to the RomM account (username only,
-  // never the token). Fire and forget: the local save already succeeded,
-  // and a RomM failure is a short notice, never an error on this form.
-  function syncUsernameToRomm() {
-    api
-      .syncRaUsernameToRomm()
-      .then((outcome) => {
-        const notice = rommSyncNotice(outcome);
-        if (notice) pushToast(notice, 'error');
-      })
-      .catch((err) => {
-        const notice = rommSyncNotice({ kind: 'failed', error: errorMessage(err) });
-        if (notice) pushToast(notice, 'error');
-      });
-  }
-
+  // The commands, their cards and the RomM username sync are raActions.ts's.
   async function handleRaSave() {
     if (!canSubmit(raUsername, raToken)) return;
     raError = null;
     raResultLine = null;
     raSavePending = true;
     try {
-      const rows: RaFanOutRow[] = await api.setRetroachievementsCredentials(raUsername, raToken);
+      const line = await saveRaToken(raUsername, raToken);
       raToken = '';
-      raResultLine = fanOutSummary(rows);
+      raResultLine = line;
       await refreshRaStatus();
-      syncUsernameToRomm();
     } catch (err) {
       raError = errorMessage(err);
     } finally {
@@ -81,28 +55,23 @@
 
   async function handleRaLogin() {
     if (!canLogin(raUsername, raPassword)) {
-      pushToast(LOGIN_MISSING_FIELDS_TOAST, 'error');
+      // Sends only the "fill in both fields" card; the form stays as it is.
+      void raLogin(raUsername, raPassword);
       return;
     }
     raError = null;
     raResultLine = null;
     raLoginPending = true;
-    try {
-      const result = await api.retroachievementsLogin(raUsername, raPassword);
-      raPassword = '';
+    const result = await raLogin(raUsername, raPassword);
+    raPassword = '';
+    if (result.kind === 'ok') {
       raToken = '';
-      raResultLine = fanOutSummary(result.fan_out);
-      pushToast(loginToast(result.username));
+      raResultLine = result.line;
       await refreshRaStatus();
-      syncUsernameToRomm();
-    } catch (err) {
-      raPassword = '';
-      const message = errorMessage(err);
-      raError = message;
-      pushToast(loginFailedToast(message), 'error');
-    } finally {
-      raLoginPending = false;
+    } else if (result.kind === 'failed') {
+      raError = result.error;
     }
+    raLoginPending = false;
   }
 
   async function handleRaClear() {
@@ -110,10 +79,9 @@
     raResultLine = null;
     raClearPending = true;
     try {
-      await api.clearRetroachievementsCredentials();
+      await clearRaCredentials();
       raPassword = '';
       raToken = '';
-      pushToast(CREDENTIALS_CLEARED_TOAST);
       await refreshRaStatus();
     } catch (err) {
       raError = errorMessage(err);
