@@ -626,3 +626,58 @@ From the consultant's Phase 13 rulings (README § Consultant decisions, last six
   work didn't touch.
 - **Checklist:** 31, 32, 132, 250, 364, 367, 533 reworded and ticked with their tests; new 535 (desktop no-emulator
   line, unit-tested only) and 536 (welcome card first time only, ticked).
+
+## After the embedded video player (2026-11-10)
+- **Trailers play inside GRID, desktop and TV.** `app/src-tauri/src/youtube_relay.rs` builds a relay page that the
+  loopback media server serves at `/<nonce>/yt.html?v=<id>&vol=<n>` (`media_server.rs` `relay_target`,
+  `serve_relay`; `MediaServer::relay_url`; command `youtube_embed_url`). The id is validated in Rust
+  (`youtube_relay::video_id`, now also behind `youtube_watch_url`), the query is parsed strictly
+  (`parse_relay_query`), and the page sends its own CSP with a per-response script nonce (`relay_csp`), plus
+  `Referrer-Policy: strict-origin-when-cross-origin` so YouTube sees only `http://127.0.0.1:<port>/`. The app CSP
+  adds only `frame-src http://127.0.0.1:*`; no capability changed, and the relay gets no IPC. Nothing logs either
+  nonce.
+- **Protocol** (`lib/details/youtubeRelay.ts`, the Rust page's inline script): relay → app `boot`, `linked`,
+  `ready`, `state`, `volume`, `error`; app → relay `hello`, `play`, `pause`, `toggle`, `seek`, `volume`. Both ends
+  check origin AND window. The relay loads YouTube's player only after the app's hello, so if messages can't pass,
+  the 10 s timeout falls back instead of showing a player the controller can't drive. `embedStep` is the fallback
+  state machine (resolving → loading → ready, or fallback on any YT error, `load`, no URL or the timeout).
+  `YoutubeEmbed.svelte` is the shared iframe (non-focusable; a click inside it hands focus back via `onFocusLost`).
+  The e2e runs prove the handshake passes both ways between `tauri://localhost` and the relay in WebKitGTK.
+- **Desktop** (`MediaViewer.svelte`): the trailer frame keeps the toast column (`TOAST_COLUMN_PX`) and the arrows
+  clear and is at least 480×270; "Watch on YouTube" is always under it; the fallback adds "This trailer can't play
+  in GRID.". `data-phase`, `data-reason` and `data-linked` on `media-viewer-trailer` are for e2e.
+- **TV** (`TvMediaViewer.svelte`, `mediaViewer.svelte.ts`, pure parts in `pages/details.ts`: `viewerShow`,
+  `viewerAction`, `viewerRepeats`, `viewerHints`): while a video shows (the YouTube player or a server video)
+  A Pause/Play, LB Back 10 s, RB Forward 10 s, LT Volume −, RT Volume +, Left/Right page, X Watch on YouTube, B
+  Close. A held LT/RT repeats like a direction (new `Layer.dirRepeat`, read by the router's `repeatKind`). The
+  video sits left of the notification column (tv.css `.viewer.vid`), the "Volume N%" readout is in that column, and
+  the caption shows the D-pad glyph. A trailer's poster (fallback) keeps LB/RB paging, with A "Watch on YouTube".
+  The server video's paused state comes from its play/pause events now: `bind:paused` called play() on a video
+  that can't play and left an unhandled rejection.
+- **Volume:** `[ui] video_volume` (0–100, default 50) in grid-core `UiSettings`, `normalize_ui_settings` (clamped),
+  `UiSettings` in api.ts and `payload()`; `setVideoVolume` stores it 500 ms after the last change
+  (`details/videoVolume.ts`: clamp, step, debounce). The desktop stores changes from the players' own controls (the
+  `<video>` volumechange event; the relay reports YT `getVolume` on each state change and every second while
+  playing).
+- **e2e:** wdio.conf.ts sets `GRID_LAUNCHER_E2E_YOUTUBE_API=http://127.0.0.1:9/iframe_api` (read by e2e builds
+  only, `youtube_relay::player_api`), so no run reaches YouTube (the container has network) and the fallback is
+  the same everywhere. images-a asserts the desktop fallback (`reason=error`, `linked=true`, the button under the
+  frame); new tv-details-d (fixture rom 601 now has a trailer and a server video) asserts the TV fallback, the
+  hints, LT/RT steps and the held repeat, the stored volume, the layout (nothing over the player, ≥480×270) and
+  Left back to the trailer.
+- **Follow-ups:** the Playing note reads "The game has the controller while it's in front. GRID listens again when
+  you switch back or the game closes" (", and uploads your save when it closes" with Upload after exit). Groups
+  without a mock forge point forge requests at `http://127.0.0.1:9` (e2e.sh `DEAD_FORGE_URL`).
+  `e2e/helpers/toasts.ts` awaits `$$(…).length` (the typecheck error was on main too). Two groups broken by earlier
+  work on this branch are fixed: content seeds PlayStation 4 as None (Install queued ShadPS4 ahead of the update
+  row), and tv-layout presses Connect's button (Start on Connect opens the startup Menu now).
+- **Docs:** README § Decided (two bullets; consultant E6 struck), checklist 303–305 and 322 reworded, new 537–543
+  (543, keyboard focus after a click in the player, is manual), SPEC § Media, BUILD.md (GStreamer VP9/Opus,
+  AppImage `bundleMediaFramework` not set, the e2e YouTube and forge isolation).
+- **Results:** gate PASS. Full `scripts/ctr.sh e2e`: every group passed but content, tv-details and tv-layout;
+  after the fixes above those three pass (with a build), and images, tv-shell and tv-settings pass again on the
+  final build.
+- **Still manual:** real YouTube playback in WebKitGTK (the .rpm on Fedora; the AppImage without
+  `bundleMediaFramework`), autoplay with sound, the controller mapping on real pads, volume persistence across a
+  restart, a click inside the player keeping Esc and the arrows working, and errors 101/150 on a trailer with
+  embedding off.
