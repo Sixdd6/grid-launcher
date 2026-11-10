@@ -22,6 +22,8 @@ export const SKIP_LABEL = 'Skip for now';
 export const CHANGE_EMULATOR = 'Change emulator';
 export const WINDOWS_LABEL = 'Windows';
 export const WINDOWS_SUB = 'Proton for Windows games';
+/** An unavailable system's value, and what A on it says. TODO(design): the
+ *  prototype has no unavailable system; this is the desktop's note. */
 export const NO_EMULATOR = 'No emulator available';
 export const NO_PROTON = 'No Proton version available';
 export const LOADING = 'Loading your systems…';

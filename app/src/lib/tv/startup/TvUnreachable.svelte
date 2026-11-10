@@ -53,6 +53,15 @@
   }
 
   async function quit() {
+    // e2e only (the build drops it otherwise): a spec counts the quit
+    // instead of letting the backend end its WebDriver session.
+    if (import.meta.env.VITE_E2E) {
+      const w = window as unknown as { __tvE2EHoldQuit?: boolean; __tvE2EQuits?: number };
+      if (w.__tvE2EHoldQuit) {
+        w.__tvE2EQuits = (w.__tvE2EQuits ?? 0) + 1;
+        return;
+      }
+    }
     try {
       await closeWithoutChanges();
     } catch (err) {

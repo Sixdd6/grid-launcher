@@ -12,10 +12,7 @@
   import { ChooseSystems } from '../../setup/chooseSystems.svelte';
   import { finishSetup } from '../../stores/session.svelte';
   import { startSetupRun } from '../../stores/setupRun.svelte';
-  import { tick } from 'svelte';
   import { tvf } from '../focus/actions';
-  import { focusables } from '../focus/dom';
-  import { focused, scope, setFocus } from '../nav.svelte';
   import Glyph from '../glyphs/Glyph.svelte';
   import { openList, type ListItem } from '../overlays/overlays.svelte';
   import { useScreen } from '../screen.svelte';
@@ -54,21 +51,6 @@
     if (v === null) return NO_PROTON;
     const all = [...cs.protonOptions.installed, ...cs.protonOptions.download];
     return unmarked(all.find((o) => o.value === v)?.label ?? v);
-  });
-
-  // The systems arrive after the screen: focus starts on the first one
-  // (it sat on the buttons, the only items there were), unless the player
-  // has moved since.
-  let rowsFocused = false;
-  $effect(() => {
-    if (cs.rows === null || rowsFocused) return;
-    rowsFocused = true;
-    void tick().then(() => {
-      const cur = focused();
-      if (cur && !cur.closest('#ch-btns')) return;
-      const first = focusables(scope()?.querySelector('#ch-rows') ?? null)[0];
-      if (first) setFocus(first, { instant: true });
-    });
   });
 
   function toList(items: EmulatorItem[], pick: (value: string | null) => void): ListItem[] {
@@ -170,11 +152,16 @@
         {/if}
       {/if}
     </div>
+    <!-- The buttons wait for the systems (or their failure), so focus
+         starts on the first system, and entering the buttons from the list
+         lands on Install (items 401, 405). -->
+    {#if cs.rows !== null || cs.loadError !== null}
     <div class="btns start-foot" data-nav="h" id="ch-btns">
       <TvButton k="ch-go" primary disabled={!installReady} testId="tv-choose-install" onA={() => void install()}>
         {cs.busy ? 'Starting…' : installLabel}
       </TvButton>
       <TvButton k="ch-skip" glyph="MENU" testId="tv-choose-skip" onA={() => void skip()}>{SKIP_LABEL}</TvButton>
     </div>
+    {/if}
   </div>
 </div>
