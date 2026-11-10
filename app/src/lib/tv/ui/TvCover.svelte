@@ -25,8 +25,10 @@
     width = undefined,
     art = null,
     quick = null,
+    testId = undefined,
     onA,
     onX = undefined,
+    onFocus = undefined,
   }: {
     k: string;
     title: string;
@@ -48,8 +50,11 @@
     art?: BackgroundSubject | null;
     /** X's label (Play, Install, Install from drive), or null for none. */
     quick?: string | null;
+    testId?: string;
     onA: () => void;
     onX?: () => void;
+    /** It took focus (Discover's hero follows it). */
+    onFocus?: () => void;
   } = $props();
 </script>
 
@@ -60,8 +65,12 @@
   data-al="Details"
   data-xl={quick ?? undefined}
   data-cover
+  data-testid={testId}
   style={width ? `--cw:${width}` : undefined}
-  use:tvf={{ a: onA, x: quick ? onX : undefined, focus: () => art && noteViewed(art) }}
+  use:tvf={{ a: onA, x: quick ? onX : undefined, focus: () => {
+      if (art) noteViewed(art);
+      onFocus?.();
+    } }}
 >
   <span class="cv-art">
     <span class="cv-img"><Image url={cover} alt={title} placeholder={title} /></span>

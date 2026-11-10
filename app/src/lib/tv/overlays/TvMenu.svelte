@@ -16,13 +16,14 @@
   import { reconnect } from '../reconnect';
   import { activeCount, menuHead, menuItems, type MenuItemKey } from './menu';
   import { quitBox } from './overlays.svelte';
+  import { goDiscover } from '../tabs/server/server.svelte';
 
   let items = $derived(menuItems(activeCount(downloads.entries), tvNotices.history.length));
 
   const RUN: Record<MenuItemKey, () => void> = {
-    // TODO(P7): select Discover on the Server rail; Server's `arrive` then
-    // focuses Discover's content (items 104, 365).
-    discover: () => void showTab('server'),
+    // Discover selected on the Server rail; Server's `arrive` then focuses
+    // Discover's content (items 104, 365).
+    discover: () => void goDiscover(),
     downloads: () => void showTab('downloads'),
     notifications: () => void pushPage({ title: 'Notifications', component: TvNotifications }, { fresh: true }),
     settings: () => void showTab('settings'),

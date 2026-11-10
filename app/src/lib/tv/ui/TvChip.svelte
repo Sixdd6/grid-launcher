@@ -13,6 +13,7 @@
     k = undefined,
     al = undefined,
     onA = undefined,
+    testId = undefined,
     children,
   }: {
     glyph?: GlyphButton;
@@ -21,12 +22,13 @@
     k?: string;
     al?: string;
     onA?: () => void;
+    testId?: string;
     children: Snippet;
   } = $props();
 </script>
 
 {#if onA && k}
-  <button class="chip" class:warn data-k={k} data-al={al} use:tvf={{ a: onA }}>{#if glyph}<Glyph button={glyph} />{/if}{@render children()}</button>
+  <button class="chip" class:warn data-k={k} data-al={al} data-testid={testId} use:tvf={{ a: onA }}>{#if glyph}<Glyph button={glyph} />{/if}{@render children()}</button>
 {:else}
-  <span class="chip" class:warn>{#if glyph}<Glyph button={glyph} />{/if}{@render children()}</span>
+  <span class="chip" class:warn data-testid={testId}>{#if glyph}<Glyph button={glyph} />{/if}{@render children()}</span>
 {/if}

@@ -34,6 +34,7 @@
   import TvLayer from './overlays/TvLayer.svelte';
   import { confirmBox, openKeyboard, openList, openMenu } from './overlays/overlays.svelte';
   import { notify } from '../notifications/notifier';
+  import { openDetails } from './gameActions';
   import TvToasts from './TvToasts.svelte';
   import TvBackground from './TvBackground.svelte';
   import TvHintBar from './TvHintBar.svelte';
@@ -105,6 +106,7 @@
         setPane(tvPaneFor(page));
         void showTab('settings');
       },
+      openDetails,
     }),
   );
 
