@@ -6,8 +6,8 @@
   // the pane, keeping focus on the row (233: rows keep their keys). Sliders
   // adjust with Left / Right while focused, with the D-pad "Adjust" hint
   // (230). The rows are the pane modules' (`panes/*.ts`); this screen holds
-  // what they read and runs what they ask for. P11 builds Systems and P13
-  // Backup drives.
+  // what they read and runs what they ask for. Systems is its own pane
+  // (TvSystemsPane); P13 builds Backup drives.
   import { api, type CloudSettings, type LibraryPathCheck, type RaStatus } from '../../../api';
   import { appUpdate, dismiss as dismissUpdate, refreshAppUpdateStatus } from '../../../stores/appUpdate.svelte';
   import { libraryMove } from '../../../stores/libraryMove.svelte';
@@ -40,6 +40,7 @@
   import TvRail from '../../ui/TvRail.svelte';
   import TvRailRow from '../../ui/TvRailRow.svelte';
   import TvRows from '../../ui/TvRows.svelte';
+  import TvSystemsPane from './TvSystemsPane.svelte';
   import { appearanceRows } from './panes/appearance';
   import type { ChoiceSpec } from './panes/choice';
   import { cloudRows } from './panes/cloud';
@@ -383,7 +384,7 @@
       case 'updates':
         return updatesRows({ version, checkedAt: appUpdate.checkedAt, now, release: appUpdate.stored, debug }, { openRelease, setDebug });
       default:
-        // TODO(P11): Systems. TODO(P13): Backup drives.
+        // Systems draws itself (TvSystemsPane). TODO(P13): Backup drives.
         return [];
     }
   }
@@ -402,7 +403,11 @@
     {/each}
   </TvRail>
   <div class="pane" id="pane" data-nav="v" data-enter="first" data-rail-target data-scroll="pane" data-testid="tv-pane">
-    <div class="pane-h"><h1 data-testid="tv-pane-title">{TV_PANE_LABELS[nav.pane]}</h1></div>
-    <TvRows {rows} />
+    {#if nav.pane === 'systems'}
+      <TvSystemsPane />
+    {:else}
+      <div class="pane-h"><h1 data-testid="tv-pane-title">{TV_PANE_LABELS[nav.pane]}</h1></div>
+      <TvRows {rows} />
+    {/if}
   </div>
 </div>
