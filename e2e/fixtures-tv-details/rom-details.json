@@ -1,0 +1,243 @@
+{
+  "601": {
+    "id": 601,
+    "name": "SaveSyncManual",
+    "fs_name_no_ext": "SaveSyncManual",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "SaveSyncManual.zip",
+    "summary": "Cloud-saves E2E fixture: manual upload.",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 6001,
+        "file_name": "SaveSyncManual.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  },
+  "602": {
+    "id": 602,
+    "name": "SaveSyncLaunch",
+    "fs_name_no_ext": "SaveSyncLaunch",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "SaveSyncLaunch.zip",
+    "summary": "Cloud-saves E2E fixture: auto-download-on-launch and auto-upload-on-exit.",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 6002,
+        "file_name": "SaveSyncLaunch.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  },
+  "603": {
+    "id": 603,
+    "name": "SaveSyncRetention",
+    "fs_name_no_ext": "SaveSyncRetention",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "SaveSyncRetention.zip",
+    "summary": "SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps.\nSaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps.\nSaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps.\nSaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps.\nSaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps. SaveSyncRetention is the Details fixture with a long summary, long enough to read through in steps.",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 6003,
+        "file_name": "SaveSyncRetention.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": {
+      "average_rating": 8.4,
+      "genres": [
+        "RPG"
+      ],
+      "companies": [
+        "Fixture Works"
+      ],
+      "first_release_date": 795571200000,
+      "franchises": [],
+      "game_modes": [
+        "Single player"
+      ],
+      "player_count": "1"
+    },
+    "igdb_metadata": {
+      "similar_games": [
+        {
+          "id": 1,
+          "name": "SaveSyncManual",
+          "slug": "a",
+          "type": "game",
+          "cover_url": ""
+        },
+        {
+          "id": 2,
+          "name": "SaveSyncLaunch",
+          "slug": "b",
+          "type": "game",
+          "cover_url": ""
+        },
+        {
+          "id": 3,
+          "name": "A Game Nobody Owns",
+          "slug": "c",
+          "type": "game",
+          "cover_url": ""
+        }
+      ]
+    }
+  },
+  "604": {
+    "id": 604,
+    "name": "Link Target",
+    "fs_name_no_ext": "Link Target",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "Link Target.zip",
+    "summary": "TV Details fixture: Link Target.",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 6041,
+        "file_name": "Link Target.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  },
+  "605": {
+    "id": 605,
+    "name": "Lost Cart",
+    "fs_name_no_ext": "Lost Cart",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "Lost Cart.zip",
+    "summary": "TV Details fixture: Lost Cart.",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 6051,
+        "file_name": "Lost Cart.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  },
+  "801": {
+    "id": 801,
+    "name": "No Emu Game",
+    "fs_name_no_ext": "No Emu Game",
+    "platform_id": 3,
+    "platform_display_name": "Nintendo 64",
+    "fs_name": "No Emu Game.zip",
+    "summary": "TV Details fixture: No Emu Game.",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 8011,
+        "file_name": "No Emu Game.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  },
+  "701": {
+    "id": 701,
+    "name": "My Game",
+    "fs_name_no_ext": "mygame",
+    "platform_id": 2,
+    "platform_display_name": "Windows",
+    "fs_name": "mygame.zip",
+    "summary": "A Windows fixture: one archive holding MyGame/mygame.exe, plus a game.json sidecar.",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 4001,
+        "file_name": "mygame.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      },
+      {
+        "id": 4002,
+        "file_name": "game.json",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  }
+}

@@ -147,6 +147,15 @@ STAGE_GROUPS=(
   # folders, filtering at once, the header, sort, live search, Details,
   # Install from drive and an unplugged drive.
   "tv-library:specs/tv-library.spec.ts"
+  # TV mode's Details and its pages (docs/tv-mode/plan.md P9) on their own
+  # fixtures (the cloud-saves games, a Windows game, a Nintendo 64 game with
+  # no emulator) with saves that change when uploaded or deleted. (a)
+  # connects on the desktop: Details' buttons, tabs, reading, the right
+  # stick, Saves, Uninstall's confirmation, Playing and the gate; (b) --tv:
+  # Link to server game, Locate… through the folder browser, Game settings;
+  # (c) --tv: the platform search rule, Search everything's failure and the
+  # launch card's "Set up <Platform>".
+  "tv-details:specs/tv-details-a.spec.ts specs/tv-details-b.spec.ts specs/tv-details-c.spec.ts"
   # Windowed TV grids (plan risk R8) on the 2500-game large-platform
   # fixtures: a Server platform and a Library of 600 seeded installed games;
   # focus moves through them smoothly and covers load as they scroll in.
@@ -526,6 +535,7 @@ mock_args_for_group() {
     # installs with its Qt launcher companion from the mock forge.
     systems) printf -- '--fixtures-dir fixtures-systems' ;;
     discover|tv-server) printf -- '--fixtures-dir fixtures-discover' ;;
+    tv-details) printf -- '--fixtures-dir fixtures-tv-details --stateful-saves' ;;
     # An "Emulators" platform with one package (rom 801) that zips the mock
     # forge's PCSX2 AppImage stub, plus a PS2 platform for the defaults.
     server-emulator) printf -- '--fixtures-dir fixtures-server-emulator' ;;
@@ -599,6 +609,7 @@ seed_script_for_group() {
     tv-shell) printf '%s' "$E2E_DIR/seed/tv-shell-seed.mjs" ;;
     tv-server) printf '%s' "$E2E_DIR/seed/tv-server-seed.mjs" ;;
     tv-library) printf '%s' "$E2E_DIR/seed/tv-library-seed.mjs" ;;
+    tv-details) printf '%s' "$E2E_DIR/seed/tv-details-seed.mjs" ;;
     tv-large-platform) printf '%s' "$E2E_DIR/seed/tv-large-platform-seed.mjs" ;;
     *) printf '' ;;
   esac

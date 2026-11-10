@@ -272,7 +272,7 @@ describe('tv-library: the Library tab', () => {
     await key('ArrowRight');
     await waitFocused('lg102');
     await key('Enter');
-    await $(testId('tv-details-stub')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'A never opened Details' });
+    await $(testId('tv-details')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'A never opened Details' });
     await waitText('tv-crumb', /Bravo Run/);
     await key('Escape');
     await waitFocused('lg102', 'B did not come back to the cover');

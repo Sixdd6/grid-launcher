@@ -1,0 +1,57 @@
+{
+  "1": [
+    {
+      "id": 601,
+      "name": "SaveSyncManual",
+      "fs_name_no_ext": "SaveSyncManual",
+      "platform_id": 1,
+      "path_cover_small": null
+    },
+    {
+      "id": 602,
+      "name": "SaveSyncLaunch",
+      "fs_name_no_ext": "SaveSyncLaunch",
+      "platform_id": 1,
+      "path_cover_small": null
+    },
+    {
+      "id": 603,
+      "name": "SaveSyncRetention",
+      "fs_name_no_ext": "SaveSyncRetention",
+      "platform_id": 1,
+      "path_cover_small": null
+    },
+    {
+      "id": 604,
+      "name": "Link Target",
+      "fs_name_no_ext": "Link Target",
+      "platform_id": 1,
+      "path_cover_small": null
+    },
+    {
+      "id": 605,
+      "name": "Lost Cart",
+      "fs_name_no_ext": "Lost Cart",
+      "platform_id": 1,
+      "path_cover_small": null
+    }
+  ],
+  "2": [
+    {
+      "id": 701,
+      "name": "My Game",
+      "fs_name_no_ext": "mygame",
+      "platform_id": 2,
+      "path_cover_small": null
+    }
+  ],
+  "3": [
+    {
+      "id": 801,
+      "name": "No Emu Game",
+      "fs_name_no_ext": "No Emu Game",
+      "platform_id": 3,
+      "path_cover_small": null
+    }
+  ]
+}

@@ -147,8 +147,7 @@ describe('tv-server: the Server tab', () => {
 
   it('A opens Details over the tab, and B comes back to the cover (items 93, 172)', async () => {
     await key('Enter');
-    // TODO(P9): TvDetails replaces the stand-in page.
-    await $(testId('tv-details-stub')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'A never opened Details' });
+    await $(testId('tv-details')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'A never opened Details' });
     await waitText('tv-crumb', /Upcoming Thing/);
     await key('Escape');
     await waitFocused('r504', 'B did not come back to the cover');

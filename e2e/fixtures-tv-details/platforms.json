@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "name": "Super Nintendo Entertainment System",
+    "slug": "snes",
+    "rom_count": 5,
+    "custom_name": null,
+    "display_name": "Super Nintendo Entertainment System"
+  },
+  {
+    "id": 2,
+    "name": "Windows",
+    "slug": "win",
+    "rom_count": 1,
+    "custom_name": null,
+    "display_name": "Windows"
+  },
+  {
+    "id": 3,
+    "name": "Nintendo 64",
+    "slug": "n64",
+    "rom_count": 1,
+    "custom_name": null,
+    "display_name": "Nintendo 64"
+  }
+]

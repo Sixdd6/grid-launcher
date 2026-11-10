@@ -1017,6 +1017,21 @@ async function handleRequest(req, res, state) {
   if (req.method === "POST" && pathname === "/api/saves") {
     logEntry.query = Object.fromEntries(requestUrl.searchParams.entries());
     logEntry.multipart = parseMultipart(body, req.headers["content-type"]);
+    if (state.statefulSaves) {
+      const q = logEntry.query;
+      const file = (logEntry.multipart ?? []).find((p) => p.filename !== undefined);
+      const record = {
+        id: state.nextSaveId++,
+        emulator: q.emulator ?? "",
+        file_name: file?.filename ?? "upload.sav",
+        slot: q.slot ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      const romId = String(q.rom_id ?? "");
+      state.saveRecordsByRom[romId] = [record, ...(state.saveRecordsByRom[romId] ?? [])];
+      sendJson(res, 200, record);
+      return;
+    }
     sendJson(res, 200, {});
     return;
   }
@@ -1026,6 +1041,12 @@ async function handleRequest(req, res, state) {
       logEntry.bodyJson = JSON.parse(body.toString("utf8"));
     } catch {
       logEntry.bodyJson = null;
+    }
+    if (state.statefulSaves && Array.isArray(logEntry.bodyJson?.saves)) {
+      const gone = new Set(logEntry.bodyJson.saves.map(String));
+      for (const [romId, records] of Object.entries(state.saveRecordsByRom)) {
+        state.saveRecordsByRom[romId] = records.filter((r) => !gone.has(String(r.id)));
+      }
     }
     sendJson(res, 200, {});
     return;
@@ -1102,8 +1123,15 @@ export async function startMockRomm({
   fixturesDir = DEFAULT_FIXTURES_DIR,
   defaultThrottleMs = 0,
   coverDelayMs = 0,
+  statefulSaves = false,
 } = {}) {
   const state = await loadFixtures(fixturesDir);
+  // `--stateful-saves` (the `tv-details` stage group): an uploaded save
+  // joins its rom's records, newest first, and a deleted one leaves them,
+  // so a list reloaded after either shows the change. Off by default: the
+  // other groups assert on the canned records alone.
+  state.statefulSaves = statefulSaves;
+  state.nextSaveId = 50_000;
   state.requestLog = [];
   state.coverDelayMs = coverDelayMs;
   // Server-wide fallback used when a content request carries no explicit
@@ -1179,7 +1207,12 @@ if (isMainModule()) {
   let defaultThrottleMs = 0;
   let coverDelayMs = 0;
   let fixturesDir = DEFAULT_FIXTURES_DIR;
+  let statefulSaves = false;
   for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--stateful-saves") {
+      statefulSaves = true;
+      continue;
+    }
     if (args[i] === "--port" && args[i + 1]) {
       port = Number(args[i + 1]);
       i++;
@@ -1195,7 +1228,7 @@ if (isMainModule()) {
     }
   }
 
-  const handle = await startMockRomm({ port, defaultThrottleMs, coverDelayMs, fixturesDir });
+  const handle = await startMockRomm({ port, defaultThrottleMs, coverDelayMs, fixturesDir, statefulSaves });
   console.log(`mock RomM server listening at ${handle.url}`);
 
   const shutdown = async () => {

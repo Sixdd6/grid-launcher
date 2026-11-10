@@ -181,7 +181,7 @@ describe('tv-large-platform: windowed grids', () => {
   it('comes back from Details to the same cover deep in the grid', async () => {
     const k = (await focused())!;
     await key('Enter');
-    await $(testId('tv-details-stub')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'A never opened Details' });
+    await $(testId('tv-details')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'A never opened Details' });
     await key('Escape');
     await waitFocused(k, 'B did not come back to the cover');
     await assertNoClipping();
