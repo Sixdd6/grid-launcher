@@ -131,3 +131,28 @@ export function parentOf(path: string): string {
   if (i === 0) return p.slice(0, 1);
   return p.slice(0, i);
 }
+
+// ---- Settings › Connection › Edit connection… (consultant ruling E3): the
+// Connect screen as a page over Settings. The server, the sign-in method and
+// the username are filled in; the token or password is typed again. No
+// library folder (the library stays) and no Use without a server.
+
+export const EDIT_CONNECTION_LABEL = 'Edit connection…';
+export const EDIT_CONNECTION_SUB = 'Change the server or sign in again. Your library and settings stay.';
+
+/** The edit form's start: a session signed in with a password has a username. */
+export function editPrefill(s: { serverUrl: string; username: string }): { serverUrl: string; username: string; useToken: boolean; reason: null } {
+  return { serverUrl: s.serverUrl, username: s.username, useToken: s.username.trim() === '', reason: null };
+}
+
+/** The edit form's rows: Connect's without the library folder. */
+export function editFields(s: ConnectState): ConnectField[] {
+  return connectFields(s).filter((f) => f.key !== 'lib');
+}
+
+/** Connect on the edit form: the server and the credentials, no folder. */
+export function editButton(s: ConnectState, connecting: boolean): ConnectButton {
+  if (connecting) return { label: CONNECTING, disabled: true, why: CONNECTING_WHY };
+  const ready = connectReady({ ...s, lib: '-' });
+  return { label: 'Connect', disabled: !ready, why: `Fill in the server and the ${s.how === 'token' ? 'API token' : 'username and password'} first.` };
+}

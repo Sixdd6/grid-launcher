@@ -7,13 +7,16 @@ import { librarySelection, selectRail } from '../../../library/selection.svelte'
 import { driveRailKey, type RailKey } from '../../../library/rail';
 import type { LibrarySort } from '../../../library/sort';
 import { selEnd } from '../../select.svelte';
-import { DEFAULT_SORT } from './libraryHeader';
+import { DEFAULT_DRIVE_SORT, DEFAULT_SORT } from './libraryHeader';
+import type { DriveSort } from '../../../library/drive';
 import { DEFAULT_FOLDS, railRowKey, type FolderId, type Folds } from './libraryRail';
 import { rememberFocus, showTab } from '../../nav.svelte';
 
-export const lib = $state<{ query: string; sort: LibrarySort; folds: Folds }>({
+export const lib = $state<{ query: string; sort: LibrarySort; driveSort: DriveSort; folds: Folds }>({
   query: '',
   sort: DEFAULT_SORT,
+  // A Backup drive's sort, apart from the Library's (ruling E5).
+  driveSort: DEFAULT_DRIVE_SORT,
   folds: { ...DEFAULT_FOLDS },
 });
 

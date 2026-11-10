@@ -107,17 +107,26 @@ describe('Cloud saves pane (items 241–242)', () => {
 });
 
 describe('Connection pane (items 243–244)', () => {
-  const acts = { reconnect: vi.fn(), connectToServer: vi.fn(), disconnect: vi.fn() };
+  const acts = { reconnect: vi.fn(), connectToServer: vi.fn(), disconnect: vi.fn(), editConnection: vi.fn(), openServerPage: vi.fn(), openConfigFolder: vi.fn() };
 
-  it('shows the server, user and credential line, then Reconnect and Disconnect', () => {
+  it('shows the server, user and credential line, then Reconnect, Open RomM in browser, Edit connection…, Disconnect and Open config folder (ruling E1–3)', () => {
     const rows = connectionRows({ connected: true, offline: false, serverUrl: 'http://romm.local', username: 'sam' }, acts);
     expect(summary(rows)).toEqual([
       ['info', 'Server', '', 'http://romm.local'],
       ['info', 'User', '', 'sam'],
       ['info', 'Credential', '', 'Stored in the system keyring · verified'],
       ['action', 'Reconnect', '', ''],
+      ['action', 'Open RomM in browser', "Opens your server's site in desktop mode", ''],
+      ['action', 'Edit connection…', 'Change the server or sign in again. Your library and settings stay.', ''],
       ['action', 'Disconnect', 'Returns to Connect. Your library and settings stay.', ''],
+      ['action', 'Open config folder', 'Opens the file manager in desktop mode', ''],
     ]);
+    (byKey(rows, 'edit') as { run: () => void }).run();
+    expect(acts.editConnection).toHaveBeenCalled();
+    (byKey(rows, 'server-page') as { run: () => void }).run();
+    expect(acts.openServerPage).toHaveBeenCalled();
+    (byKey(rows, 'config-folder') as { run: () => void }).run();
+    expect(acts.openConfigFolder).toHaveBeenCalled();
     expect(byKey(rows, 'disconnect').danger).toBe(true);
     (byKey(rows, 'disconnect') as { run: () => void }).run();
     expect(acts.disconnect).toHaveBeenCalledWith(disconnectWords('http://romm.local'));
@@ -136,6 +145,7 @@ describe('Connection pane (items 243–244)', () => {
       ['info', 'User', '', 'Not set'],
       ['info', 'Credential', '', 'Not used offline'],
       ['action', 'Connect to a server…', '', ''],
+      ['action', 'Open config folder', 'Opens the file manager in desktop mode', ''],
     ]);
   });
 });

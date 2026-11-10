@@ -31,7 +31,7 @@
   import { TV_PANES, TV_PANE_LABELS, type TvPane } from '../../../uiMode';
   import { openFolderBrowser } from '../../gameActions';
   import { controllers } from '../../input/router.svelte';
-  import { nav, setPane } from '../../nav.svelte';
+  import { nav, pushPage, setPane } from '../../nav.svelte';
   import { confirmBox, openKeyboard, openList, quitBox } from '../../overlays/overlays.svelte';
   import { reconnect } from '../../reconnect';
   import type { Row } from '../../rows';
@@ -45,6 +45,7 @@
   import type { ChoiceSpec } from './panes/choice';
   import { cloudRows } from './panes/cloud';
   import { connectionRows } from './panes/connection';
+  import TvConnect from '../../startup/TvConnect.svelte';
   import {
     browserStart,
     CHANGE_LIBRARY_TITLE,
@@ -373,6 +374,9 @@
             reconnect: () => void reconnect(),
             connectToServer,
             disconnect: (w) => void confirmBox({ ...w, danger: true, onOk: () => void disconnect() }),
+            editConnection: () => void pushPage({ title: 'Connect', component: TvConnect, props: { edit: true } }),
+            openServerPage: () => void leaveTv(nav.tab, nav.pane).then(() => api.openServerPage().catch(() => {})),
+            openConfigFolder: () => void leaveTv(nav.tab, nav.pane).then(() => api.openConfigFolder().catch(() => {})),
           },
         );
       case 'library':

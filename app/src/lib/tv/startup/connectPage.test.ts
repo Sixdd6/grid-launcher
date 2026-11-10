@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  editButton,
+  editFields,
+  editPrefill,
   connectButtons,
   connectedText,
   connectFields,
@@ -105,5 +108,22 @@ describe('Connect enablement (item 397) and Use without a server (item 515)', ()
     expect(parentOf('/GRID')).toBe('/');
     expect(parentOf('')).toBe('');
     expect(parentOf('C:\\Games\\GRID')).toBe('C:\\Games');
+  });
+});
+
+describe('Edit connection… (ruling E3)', () => {
+  const st = { url: 'https://romm.lan', how: 'token' as const, user: '', secretTyped: false, lib: '' };
+
+  it('starts from the session: a password session has a username', () => {
+    expect(editPrefill({ serverUrl: 'https://romm.lan', username: '' })).toEqual({ serverUrl: 'https://romm.lan', username: '', useToken: true, reason: null });
+    expect(editPrefill({ serverUrl: 'https://romm.lan', username: 'sam' }).useToken).toBe(false);
+  });
+
+  it("shows Connect's rows without the library folder; Connect needs no folder", () => {
+    expect(editFields(st).map((f) => f.key)).toEqual(['url', 'how', 'token']);
+    expect(editFields({ ...st, how: 'password' }).map((f) => f.key)).toEqual(['url', 'how', 'user', 'password']);
+    expect(editButton(st, false)).toMatchObject({ label: 'Connect', disabled: true, why: 'Fill in the server and the API token first.' });
+    expect(editButton({ ...st, secretTyped: true }, false).disabled).toBe(false);
+    expect(editButton({ ...st, secretTyped: true }, true)).toMatchObject({ label: 'Connecting…', disabled: true });
   });
 });

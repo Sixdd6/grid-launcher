@@ -122,6 +122,24 @@ describe('the System page', () => {
     expect(shape(rows)).toEqual(expect.arrayContaining(['comp-qt-ver ShadPS4 Qt Launcher = 1.0', 'comp-qt-open Open ShadPS4 Qt Launcher', 'comp-other-install Install Other Tool']));
   });
 
+  it('an installed companion has its settings and Remove (ruling E4)', () => {
+    const a = actions();
+    const rows = systemPageRows(emulator({ emu: line('ShadPS4'), companions: [{ kind: 'installed', key: 'qt', line: line('ShadPS4 Qt Launcher', { version: '1.0' }) }] }), a);
+    const keys = rows.map((r) => r.key);
+    expect(keys.slice(keys.indexOf('comp-qt-open'), keys.indexOf('comp-qt-open') + 3)).toEqual(['comp-qt-open', 'comp-qt-settings', 'comp-qt-remove']);
+    const settings = rows.find((r) => r.key === 'comp-qt-settings');
+    expect(settings).toMatchObject({ label: 'ShadPS4 Qt Launcher settings', sub: 'Program, launch options, cloud save folders' });
+    const remove = rows.find((r) => r.key === 'comp-qt-remove');
+    expect(remove).toMatchObject({ label: 'Remove ShadPS4 Qt Launcher', danger: true });
+    if (settings?.type === 'action') settings.run();
+    if (remove?.type === 'action') remove.run();
+    expect(a.settings).toHaveBeenCalledWith('ShadPS4 Qt Launcher');
+    expect(a.remove).toHaveBeenCalledWith('ShadPS4 Qt Launcher');
+    expect(removeConfirm('ShadPS4 Qt Launcher', null)).toEqual({ title: 'Remove ShadPS4 Qt Launcher?', body: 'Games and saves stay.', ok: 'Remove' });
+    const busy = systemPageRows(emulator({ emu: line('ShadPS4'), removing: true, companions: [{ kind: 'installed', key: 'qt', line: line('ShadPS4 Qt Launcher') }] }), a);
+    expect(busy.find((r) => r.key === 'comp-qt-remove')).toMatchObject({ disabled: true });
+  });
+
   it('Remove asks with the system named (item 333)', () => {
     expect(removeConfirm('PCSX2', 'PlayStation 2')).toEqual({
       title: 'Remove PCSX2?',

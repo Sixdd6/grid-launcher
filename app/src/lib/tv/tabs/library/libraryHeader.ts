@@ -2,7 +2,7 @@
 // 187–191, 421–423; tvmode.js `libPaint`, `libList`, `sortSheet`). Pure.
 import type { DriveGame, DriveInfo, InstalledGame } from '../../../api';
 import { sizeText } from '../../../backups/dialog';
-import { driveLabel } from '../../../library/drive';
+import { DRIVE_SORTS, driveLabel, driveSortLabel, type DriveSort } from '../../../library/drive';
 import type { RailKey } from '../../../library/rail';
 import { sortGames, titleContains, type LibrarySort } from '../../../library/sort';
 
@@ -35,37 +35,14 @@ export function libraryGrid(rows: InstalledGame[], query: string, sort: LibraryS
 }
 
 /**
- * A drive's games, searched and sorted by the same four orders: Recently
- * played and Recently installed by this computer's copy (games not installed
- * last, by title), Title, Platform.
+ * LT on a Backup drive (ruling E5): the desktop drive grid's sorts (Title,
+ * Platform, Recently backed up, Largest first), remembered apart from the
+ * Library sort for the session, Title first.
  */
-export function driveGrid(
-  games: readonly DriveGame[],
-  query: string,
-  sort: LibrarySort,
-  rowFor: (g: DriveGame) => InstalledGame | null,
-): DriveGame[] {
-  const fold = (s: string) => s.trim().toLowerCase();
-  const byTitle = (a: DriveGame, b: DriveGame) => {
-    const x = fold(a.name);
-    const y = fold(b.name);
-    return x === y ? 0 : x < y ? -1 : 1;
-  };
-  const stamp = (g: DriveGame) => {
-    const r = rowFor(g);
-    if (!r) return 0;
-    return sort === 'played' ? r.last_played_at : r.installed_at;
-  };
-  const out = games.filter((g) => titleContains(g.name, query));
-  if (sort === 'title') out.sort(byTitle);
-  else if (sort === 'platform')
-    out.sort((a, b) => {
-      const pa = fold(a.platform_name);
-      const pb = fold(b.platform_name);
-      return pa === pb ? byTitle(a, b) : pa < pb ? -1 : 1;
-    });
-  else out.sort((a, b) => stamp(b) - stamp(a) || byTitle(a, b));
-  return out;
+export const DEFAULT_DRIVE_SORT: DriveSort = 'title';
+
+export function driveSortItems(current: DriveSort): { sort: DriveSort; label: string; checked: boolean }[] {
+  return DRIVE_SORTS.map((sort) => ({ sort, label: driveSortLabel(sort), checked: sort === current }));
 }
 
 export type EmptyState = {

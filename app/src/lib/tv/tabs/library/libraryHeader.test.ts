@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { sortLabel } from '../../../library/sort';
 import { driveGame, driveInfo, packSummary, row } from '../../fixtures.test-util';
-import { countLine, DEFAULT_SORT, driveChips, driveCountLine, driveEmptyState, driveGrid, emptyState, libraryGrid, searching, SEARCH_TITLE, SORT_TITLE, TV_SORTS } from './libraryHeader';
+import { countLine, DEFAULT_SORT, driveChips, driveCountLine, driveEmptyState, DEFAULT_DRIVE_SORT, driveSortItems, emptyState, libraryGrid, searching, SEARCH_TITLE, SORT_TITLE, TV_SORTS } from './libraryHeader';
 
 describe('the TV Library header (items 185, 187–191)', () => {
   it('counts games', () => {
@@ -54,15 +54,14 @@ describe('a Backup drive in the Library (items 421–423)', () => {
     expect(driveChips(driveInfo('/m/x', { pack: packSummary({ firmware: ['PS2'] }) }))).toEqual({ emulators: 'none', firmware: '1 system' });
   });
 
-  it('sorts and searches the drive games, played and installed by this computer\'s copy', () => {
-    const games = [driveGame({ rom_id: 1, name: 'Bravo', platform_name: 'PS2' }), driveGame({ rom_id: 2, name: 'Alpha', platform_name: 'PSX' }), driveGame({ rom_id: 3, name: 'Charlie', platform_name: 'GC' })];
-    const rows = new Map([[3, row({ rom_id: 3, last_played_at: 50, installed_at: 1 })], [1, row({ rom_id: 1, last_played_at: 10, installed_at: 9 })]]);
-    const rowFor = (g: { rom_id: number }) => rows.get(g.rom_id) ?? null;
-    expect(driveGrid(games, '', 'played', rowFor).map((g) => g.name)).toEqual(['Charlie', 'Bravo', 'Alpha']);
-    expect(driveGrid(games, '', 'installed', rowFor).map((g) => g.name)).toEqual(['Bravo', 'Charlie', 'Alpha']);
-    expect(driveGrid(games, '', 'title', rowFor).map((g) => g.name)).toEqual(['Alpha', 'Bravo', 'Charlie']);
-    expect(driveGrid(games, '', 'platform', rowFor).map((g) => g.name)).toEqual(['Charlie', 'Bravo', 'Alpha']);
-    expect(driveGrid(games, 'ar', 'title', rowFor).map((g) => g.name)).toEqual(['Charlie']);
+  it('LT on a drive offers the drive sorts, Title first (ruling E5)', () => {
+    expect(DEFAULT_DRIVE_SORT).toBe('title');
+    expect(driveSortItems('size').map((i) => [i.sort, i.label, i.checked])).toEqual([
+      ['title', 'Title', false],
+      ['platform', 'Platform', false],
+      ['added', 'Recently backed up', false],
+      ['size', 'Largest first', true],
+    ]);
   });
 
   it('says why a drive grid is empty', () => {

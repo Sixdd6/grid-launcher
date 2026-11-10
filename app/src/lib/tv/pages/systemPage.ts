@@ -217,6 +217,9 @@ export function systemPageRows(m: SystemPageModel, a: SystemPageActions): Row[] 
         if (c.kind === 'installed') {
           rows.push(...lineRows(`comp-${c.key}-`, c.line, a, { label: c.line.name, sub: 'Companion' }));
           rows.push({ type: 'action', key: `comp-${c.key}-open`, label: `Open ${c.line.name}`, sub: OPEN_SUB, run: () => a.open(c.line.name) });
+          // Its settings and Remove (ruling E4; "Remove <Companion>?" / "Games and saves stay.").
+          rows.push({ type: 'action', key: `comp-${c.key}-settings`, label: `${c.line.name} settings`, sub: SETTINGS_SUB, run: () => a.settings(c.line.name) });
+          rows.push({ type: 'action', key: `comp-${c.key}-remove`, label: `Remove ${c.line.name}`, danger: true, ...busy(m.removing), run: () => a.remove(c.line.name) });
         } else if (c.canInstall) {
           rows.push({
             type: 'action',

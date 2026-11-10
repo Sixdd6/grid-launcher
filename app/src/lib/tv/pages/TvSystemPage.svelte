@@ -172,14 +172,16 @@
   }
 
   function remove(name: string) {
-    const label = model.kind === 'emulator' ? model.system : null;
+    // A companion (ruling E4) names no system, and the page stays.
+    const companion = model.kind === 'emulator' && name !== model.emu.name;
+    const label = model.kind === 'emulator' && !companion ? model.system : null;
     void confirmBox({
       ...removeConfirm(name, label),
       danger: true,
       onOk: async () => {
         if (!(await s.removeEmulator(name))) return;
         await s.refreshAll();
-        void popPage();
+        if (!companion) void popPage();
       },
     });
   }

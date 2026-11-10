@@ -8,6 +8,11 @@
   // missing while it is disabled (ruling 6). A rejected credential, or a
   // connect that failed, comes back here with the reason above the rows.
   //
+  // With `edit` (Settings › Connection › Edit connection…, ruling E3) it is
+  // a page over Settings: server, sign in with and the credential, no library
+  // folder and no Use without a server. Connect reconnects, goes back and
+  // says "Connected to <URL>"; B goes back with nothing changed.
+  //
   // The secret stays in `connectForm.svelte.ts` (a plain local, never
   // reactive, never logged), and is handed straight to the connect.
   import { api } from '../../api';
@@ -16,13 +21,17 @@
   import { pushToast } from '../../stores/toasts.svelte';
   import { tvf } from '../focus/actions';
   import { openFolderBrowser } from '../gameActions';
-  import { focused } from '../nav.svelte';
+  import { focused, popPage } from '../nav.svelte';
   import { openKeyboard, openList } from '../overlays/overlays.svelte';
   import { useScreen } from '../screen.svelte';
   import TvButton from '../ui/TvButton.svelte';
   import {
     connectButtons,
     connectedText,
+    editButton,
+    editFields,
+    editPrefill,
+    EDIT_CONNECTION_SUB,
     connectFields,
     connectReady,
     CONNECT_SUB,
@@ -41,14 +50,29 @@
     SIGN_IN_LABELS,
     type FieldKey,
   } from './connectPage';
-  import { connectForm as f, libraryToSave, setSecret, takeSecret } from './connectForm.svelte';
+  import { connectForm as f, libraryToSave, resetConnectForm, setSecret, takeSecret } from './connectForm.svelte';
+  import { onDestroy, untrack } from 'svelte';
 
-  let fields = $derived(connectFields(f));
-  let ready = $derived(connectReady(f));
+  let { edit: editProp = false }: { edit?: boolean } = $props();
+  // Which form this is never changes while it is on show.
+  const editing = untrack(() => editProp);
+
+  // The edit form starts from the session, with no reason showing; leaving
+  // it drops a typed secret.
+  if (editing) {
+    session.error = null;
+    resetConnectForm(editPrefill(session));
+  }
+  onDestroy(() => {
+    if (editing) takeSecret();
+  });
+
+  let fields = $derived(editing ? editFields(f) : connectFields(f));
+  let connecting = $state(false);
+  let ready = $derived(editing ? !editButton(f, false).disabled : connectReady(f));
   let canOffline = $derived(offlineReady(f));
   let reason = $derived(f.reason ?? session.error);
-  let connecting = $state(false);
-  let btns = $derived(connectButtons(f, connecting));
+  let btns = $derived(editing ? { go: editButton(f, connecting), offline: { label: '', disabled: true } } : connectButtons(f, connecting));
 
   function edit(key: FieldKey) {
     if (key === 'how') {
@@ -115,17 +139,22 @@
     f.reason = null;
     session.error = null;
     try {
-      const refused = await saveConnectLibraryPath(libraryToSave());
-      if (refused !== null) {
-        f.reason = refused;
-        return;
+      if (!editing) {
+        const refused = await saveConnectLibraryPath(libraryToSave());
+        if (refused !== null) {
+          f.reason = refused;
+          return;
+        }
+        if (libraryToSave() !== null) f.libStored = f.lib.trim();
       }
-      if (libraryToSave() !== null) f.libStored = f.lib.trim();
       const token = f.how === 'token';
       // Handed straight over; the field is blank again in the same tick.
       const pending = connect(f.url.trim(), token ? '' : f.user, takeSecret(), token);
       await pending;
-      if (session.error === null && session.phase !== 'none') pushToast(connectedText(session.serverUrl || f.url.trim()));
+      if (session.error === null && session.phase !== 'none') {
+        pushToast(connectedText(session.serverUrl || f.url.trim()));
+        if (editing) void popPage();
+      }
     } finally {
       f.busy = false;
       connecting = false;
@@ -154,10 +183,10 @@
   });
 </script>
 
-<div class="start" data-testid="tv-connect">
+<div class="start" data-testid={editing ? 'tv-edit-connection' : 'tv-connect'}>
   <div class="start-box" data-nav="v">
     <h1>{CONNECT_TITLE}</h1>
-    <p class="sub">{CONNECT_SUB}</p>
+    <p class="sub">{editing ? EDIT_CONNECTION_SUB : CONNECT_SUB}</p>
     {#if reason}<p class="errline" role="alert" data-testid="tv-connect-reason">{reason}</p>{/if}
     <div class="start-body" data-nav="v" id="cf-rows">
       {#each fields as fl (fl.key)}
@@ -177,9 +206,11 @@
       <TvButton k="cf-go" primary disabled={btns.go.disabled} why={btns.go.why} testId="tv-connect-go" onA={() => void connectNow()}>
         {btns.go.label}
       </TvButton>
-      <span class="or">or</span>
-      <TvButton k="cf-none" disabled={btns.offline.disabled} why={btns.offline.why} testId="tv-connect-offline" onA={() => void offlineNow()}>{btns.offline.label}</TvButton>
+      {#if !editing}
+        <span class="or">or</span>
+        <TvButton k="cf-none" disabled={btns.offline.disabled} why={btns.offline.why} testId="tv-connect-offline" onA={() => void offlineNow()}>{btns.offline.label}</TvButton>
+      {/if}
     </div>
-    <p class="note" style="margin:.8rem 0 0">{NO_SERVER_NOTE}</p>
+    {#if !editing}<p class="note" style="margin:.8rem 0 0">{NO_SERVER_NOTE}</p>{/if}
   </div>
 </div>

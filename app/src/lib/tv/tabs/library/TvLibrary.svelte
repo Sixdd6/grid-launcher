@@ -12,6 +12,7 @@
   import { driveKeyOf, matchesRail, type RailKey } from '../../../library/rail';
   import { librarySelection, selectRail } from '../../../library/selection.svelte';
   import { sortLabel } from '../../../library/sort';
+  import { driveGrid, driveSortLabel } from '../../../library/drive';
   import { drives } from '../../../stores/drives.svelte';
   import { installed, refresh as refreshInstalled } from '../../../stores/installed.svelte';
   import { session } from '../../../stores/session.svelte';
@@ -33,7 +34,7 @@
   import TvRail from '../../ui/TvRail.svelte';
   import TvRailRow from '../../ui/TvRailRow.svelte';
   import { driveGamesCache, lib, selectLibRail, toggleFold } from './library.svelte';
-  import { driveChips, driveCountLine, driveEmptyState, driveGrid, emptyState, libraryGrid, countLine, searching, SEARCH_TITLE, SORT_TITLE, TV_SORTS, type EmptyState } from './libraryHeader';
+  import { driveChips, driveCountLine, driveEmptyState, driveSortItems, emptyState, libraryGrid, countLine, searching, SEARCH_TITLE, SORT_TITLE, TV_SORTS, type EmptyState } from './libraryHeader';
   import { backupAllLabel, FOLDER_LABELS, platformBackupIds, folderHint, folderKey, folderOf, libraryRail, NO_DRIVES, railEntry, railRowKey, type FolderId } from './libraryRail';
 
   // "Now" once per rail recompute, as the desktop's Library reads it.
@@ -110,7 +111,7 @@
   function gridFor(query: string): TvGame[] {
     if (driveKey !== null) {
       const list = driveGamesFor === driveKey && driveGames ? driveGames : [];
-      return driveGrid(list, query, lib.sort, rowFor).map((g) => gameFromDrive(driveKey!, g, rowFor(g), updateIds));
+      return driveGrid(list, query, lib.driveSort).map((g) => gameFromDrive(driveKey!, g, rowFor(g), updateIds));
     }
     const rows = visibleLibraryGames(installed.list).filter((r) => matchesRail(r, selected.key, updateIds, nowSeconds));
     return libraryGrid(rows, query, lib.sort).map((r) => gameFromRow(r, updateIds));
@@ -222,6 +223,13 @@
   }
 
   function sortList() {
+    if (driveKey !== null) {
+      void openList({
+        title: SORT_TITLE,
+        items: driveSortItems(lib.driveSort).map((i) => ({ label: i.label, checked: i.checked, testId: `tv-drive-sort-${i.sort}`, onPick: () => (lib.driveSort = i.sort) })),
+      });
+      return;
+    }
     void openList({
       title: SORT_TITLE,
       items: TV_SORTS.map((s) => ({ label: sortLabel(s), checked: lib.sort === s, testId: `tv-lib-sort-${s}`, onPick: () => (lib.sort = s) })),
@@ -286,6 +294,7 @@
         {/if}
         <span class="sp"></span>
         <TvChip glyph="RT">Select</TvChip>
+        <TvChip glyph="LT" testId="tv-lib-sort">Sort: <b>{driveSortLabel(lib.driveSort)}</b></TvChip>
       </div>
     {:else}
       <div class="vh" id="lib-h" data-testid="tv-lib-header">
