@@ -14,7 +14,7 @@ and "Conflicts" lists at the end are not part of the build.
 
 ## 1. Shell & sizing
 
-- [ ] 1. TV mode is a fullscreen interface that reaches every feature on main with a game controller alone (src: README intro).
+- [x] 1. TV mode is a fullscreen interface that reaches every feature on main with a game controller alone (src: README intro). (final audit: the six missing paths added in 2b25062 and 6b8461f; walk with a pad on the .rpm)
 - [x] 2. Every measure is in rem, and the root font size is the viewport height / 54 (20px at 1080p), so the layout is the same at 720p, 1080p and 4K (src: README § The shell › Size).
 - [x] 3. No text is smaller than 0.85rem (17px at 1080p); body text is 1.05–1.1rem (src: README § The shell › Size). (P14: tv-layout assertMinText at 720p, 1080p and 4K)
 - [x] 4. The window itself never scrolls: only the designated areas (rows, grids, rails, panes, lists, pages, Details tab bodies, list overlays) scroll (src: tvmode.css `html, body`; tvmode.js `SCROLLERS`). (P14: tv-layout assertNoDocumentScroll)
@@ -554,7 +554,7 @@ and "Conflicts" lists at the end are not part of the build.
 
 ### General
 
-- [ ] 418. TV mode uses the Game backups design's drives, words, rules, states and notifications; only the controls change for a controller, and anything not listed here matches the GB card (src: README § Game backups).
+- [x] 418. TV mode uses the Game backups design's drives, words, rules, states and notifications; only the controls change for a controller, and anything not listed here matches the GB card (src: README § Game backups). (final audit: PARTIAL only through 428 and 450, both fixed in ca95034)
 - [x] 419. Backup is written as one word in all copy, even as a verb (src: README § Game backups; project memory "UI word Backup").
 
 ### Library › Backup drives
