@@ -262,7 +262,8 @@ The shell owns *when* things run; grid-core owns *what* they do.
 - TV mode's native half — `cli.rs` (`--tv`, the only flag read; the mode is never
   persisted), `gamepad/` (the controller reader: `mapping.rs` turns raw input into
   `button` / `stick` / `trigger` events by physical position, `gate.rs` lets input
-  through only while TV mode is on, the window is focused and no game runs, and sends
+  through only while TV mode is on and the window is focused (a running game doesn't
+  close it, so the Playing page hears the controller while GRID is in front), and sends
   `released_all` when it closes, `identity.rs` names a controller; `mod.rs` owns the
   `gamepad-poll` thread, started the first time TV mode turns on, and the `gamepad`
   event) and `commands/tv.rs` (`get_ui_mode` / `set_ui_mode` with fullscreen,

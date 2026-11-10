@@ -636,6 +636,16 @@ native games, Uninstall, and a cloud button that opens the Saves tab. Under them
 states when the game was last played and which emulator — and, for RetroArch, which core —
 would launch it.
 
+**A system with no emulator.** When the game isn't installed and its system has no
+emulator (and isn't set to None on purpose), a line under Install reads "No emulator for
+<system>. Install installs <rec> too." when GRID can install a recommended emulator for
+it, and Install then queues the game and installs that emulator too (the same install as
+Settings › Systems' per-system button). While that emulator installs the line reads
+"<rec> is installing." and Install brings only the game. With no recommendation it reads
+"No emulator for <system>. Add one in Settings › Systems." The line replaces the
+button's hover reason. TV mode's Details does the same, and there the game's queued card
+adds "<rec> installs with it".
+
 **Backups in Details.** Under the install actions sits **Backup to drive…**, which opens
 the Backup dialog for this game (offline it is disabled, and a line reads "Connect to a
 server to backup games."). It is not shown for a Missing game. When connected drives
@@ -1137,13 +1147,15 @@ testable statement.
   is always the desktop one, so a desktop start never opens fullscreen.
 - Where GRID opens follows the same rule as the desktop (Where GRID opens, under Top Bar):
   Server › Discover when connected, else the Library (on the first connected Backup drive
-  without a server). A "Welcome to TV mode" card shows each time TV mode opens.
+  without a server). A "Welcome to TV mode" card shows the first time TV mode opens
+  (`[ui] tv_welcomed`); Menu › Controls shows it again.
 
 ## Controllers
-- GRID reads controllers natively (a Rust reader, only while TV mode is on). Input is
-  ignored while a game runs and while GRID's window isn't focused, so the game gets the
-  controller; GRID listens again when the game closes. The Home / Guide button does
-  nothing.
+- GRID reads controllers natively (a Rust reader, only while TV mode is on). Input
+  reaches GRID only while its window is focused, so a game in front gets the controller.
+  While a game runs and GRID's window is focused, presses reach the Playing page (Back to
+  the game, Stop game). When the last game closes GRID comes back to the front and
+  listens again. The Home / Guide button does nothing.
 - **Button assignments** (Settings › TV mode): Xbox style (bottom selects, right goes
   back) or Nintendo style (right selects, bottom goes back), per controller and kept per
   controller. A controller starts on its own layout's style. With several controllers,
@@ -1185,8 +1197,9 @@ testable statement.
   lists, confirmations (Cancel focused; a destructive action always asks) and the
   on-screen keyboard.
 - **Startup:** Connect (with View to paste and Use without a server), Choose your systems
-  (Start skips) with the setup card, and the unreachable-library dialog. The Menu isn't
-  available on them.
+  (Start skips) with the setup card, and the unreachable-library dialog. On Connect and
+  the unreachable-library dialog Start opens a short Menu: Switch to desktop mode and
+  Quit GRID.
 - **Game backups** are the Game backups design with a controller's controls: select mode
   on RT, the Backup page as a page whose main button Start presses, Backup drives rows in
   the Library rail, and Settings › Backup drives with a page per drive.

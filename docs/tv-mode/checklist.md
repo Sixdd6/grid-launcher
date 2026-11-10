@@ -49,8 +49,8 @@ and "Conflicts" lists at the end are not part of the build.
 ### Controller reading
 
 - [x] 30. Controllers are read natively in Rust by a gilrs reader that runs for TV mode only and sends button events to the UI (src: README § Decided Implementation).
-- [x] 31. No controller input is acted on while a game is running (src: README § Decided Implementation; README § Pages › Playing). (final audit: verified in code)
-- [x] 32. No controller input is acted on while the GRID window isn't focused (src: README § Decided Implementation). (final audit: verified in code)
+- [x] 31. While a game is running, controller input is acted on only while GRID's window is focused, and then it drives the Playing page (Back to the game, Stop game) (src: README § Decided Implementation, user decision 2026-11-10; replaces "no controller input while a game is running"). (verified 2026-11-10: gate.rs tests; tv-details-a "the controller drives it while GRID is focused")
+- [x] 32. No controller input is acted on while the GRID window isn't focused (a game running or not) or while TV mode is off (src: README § Decided Implementation, user decision 2026-11-10). (verified 2026-11-10: gate.rs tests)
 - [ ] 33. When the game closes, GRID listens to the controller again and then shows the save upload notices (src: README § Pages › Playing).
 - [x] 34. The logical inputs are A, B, X, Y, LB, RB, LT, RT, View, Menu, the D-pad, the left stick and the right stick (src: README § Try it; tvmode.js `PADB`). (final audit: verified in code)
 - [x] 35. The left stick moves focus like the D-pad once it passes half of its travel (0.5) on an axis (src: README § Try it; tvmode.js `pollPads`).
@@ -179,7 +179,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 129. The A hint names the focused item's action ("Details" on a cover, "Open" on a rail row, "Switch", "Select" or "Edit" on a settings row, …), and is left out when the item is disabled (src: tvmode.js `hintsNow`, `srow`).
 - [x] 130. The X hint on a cover is its quick action: "Play" when installed, "Install from drive" on a drive's grid, "Install" otherwise; none while it is queued or installing, when it is Missing or unlinked, or for a game not installed while offline (src: README § Try it; tvmode.js `quickLabel`).
 - [x] 131. The X hint elsewhere is the item's own extra action ("Change emulator", "Install <emulator>", "Backup all N…") (src: tvmode.js `hintsNow`).
-- [x] 132. The Menu hint is left out on startup screens and where Start presses the page's main button (src: tvmode.js `hintsNow`).
+- [x] 132. The Menu hint is left out where Start presses the page's main button; on Connect and the unreachable library it reads Menu "Menu" (src: tvmode.js `hintsNow`; user decision 2026-11-10). (verified 2026-11-10: hints.test; tv-startup-a, tv-startup-b)
 - [x] 133. On startup screens there is no Back hint (src: tvmode.js `hintsNow`).
 - [x] 134. Every hint is clickable and does what pressing its button does (src: README § Hint bar; tvmode.js `click`). (final audit: verified in code)
 - [x] 135. The left side shows the name of the controller in use (src: README § Hint bar; tvmode.js `paintHints`).
@@ -315,7 +315,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 247. Picking another folder opens the list "Move to <path>?" (with the desktop's copy summary) offering Move existing files ("Runs in Downloads") and Start fresh ("Leave or delete the old files") (src: tvmode.js `changeLibrary`).
 - [x] 248. Move existing files adds a Library row to Downloads and notifies "Moving the library to <path>…" / "Installs and launches wait until it finishes", then "Library moved" (src: tvmode.js `changeLibrary`, tick).
 - [x] 249. Start fresh asks in a list "Delete the old game files, or leave them on disk?" with Leave them on disk and Delete them (<size>) (danger); Delete asks "Delete <size> of game files?" / "games/ in <old folder> is removed. Emulators and saves stay. This can't be undone." with Delete (danger) (src: tvmode.js `changeLibrary`).
-- [x] 250. RetroAchievements has Username (text), Token (masked text, "Write-only: GRID never shows it again", the keyboard opens empty), Save ("Sets the login in every emulator that supports it") and Clear (danger) (src: tvmode.js `paneRows('ra')`).
+- [x] 250. RetroAchievements has Username (text), Token (masked text, "Write-only: GRID never shows it again", the keyboard opens empty), Save ("Sets the login in every emulator that supports it") and Clear (danger) (src: tvmode.js `paneRows('ra')`), in the order of item 533. (verified 2026-11-10: panes.test)
 - [x] 251. Saving the RetroAchievements login notifies "RetroAchievements login saved"; Clear notifies "RetroAchievements login cleared" (src: tvmode.js `paneRows('ra')`).
 - [x] 252. Systems starts with its heading and the buttons "Install recommended (<n>)" (primary, when systems lack an emulator), Check for updates and Add manually (src: README § Settings; tvmode.js `systemsPane`).
 - [x] 253. While Install recommended runs, its button reads "Installing <n> emulators…" ("1 emulator") and can't be pressed again (src: README § The shell › Focus; tvmode.js `systemsPane`).
@@ -356,7 +356,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 285. Update asks "Update <title>?" / "Saves and configuration are kept." with Update, then notifies "Update for <title> added to download queue" (src: tvmode.js `ACT.update`).
 - [x] 286. Uninstall asks "Uninstall <title>?" / "Its files are deleted from this computer. Cloud saves stay on your server." with Uninstall (danger), then notifies "<title> uninstalled" (src: tvmode.js `ACT.uninstall`).
 - [x] 287. Remove from library asks "Remove <title> from the library?" / "Only the library entry goes. Its folder stays on disk: <path>." with Remove from library (danger), then notifies "<title> removed from the library" and goes back (src: tvmode.js `ACT.removeRow`).
-- [x] 288. Install adds the game to the queue and notifies "<title> added to download queue" (with "<emulator> installs with it" when the system has no emulator) and the action Open Downloads (src: tvmode.js `install`).
+- [x] 288. Install adds the game to the queue and notifies "<title> added to download queue" (with "<emulator> installs with it" when the system has no emulator) and the action Open Downloads (src: tvmode.js `install`). The desktop's Details installs the recommended emulator with the game too, without the second line (user decision 2026-11-10).
 - [x] 289. Install while the server can't be reached notifies the error "Couldn't add <title> to the download queue: the server can't be reached" (src: tvmode.js `install`). (final audit: verified in code)
 - [x] 290. Locate… opens the folder browser titled "Where is <title>?"; a good pick notifies "<title> found" / "Plays from <path>", a wrong one the error "Couldn't find <title> in <path>" / "Pick the folder that holds the game." (src: tvmode.js `ACT.locate`).
 - [x] 291. The tabs are Overview, Media, Saves, and Achievements when the server lists any, between LB and RB glyphs; the current tab is underlined in `primary` (src: README § Details; tvmode.js `details`; tvmode.css `.ttab.on`).
@@ -469,10 +469,10 @@ and "Conflicts" lists at the end are not part of the build.
 
 - [x] 362. Menu (Start) opens a 30rem panel from the right (src: README § Overlays › Menu; tvmode.css `.guide`).
 - [x] 363. The panel's head shows the clock (2.2rem) and "<user> · <server host>", or "Offline" (src: README § Menu; tvmode.js `guideMenu`).
-- [x] 364. The items, in order: Discover, Downloads (with " · <n> active" counting active and queued rows), Notifications (" · <n>"), Settings, Reconnect, Switch to desktop mode, Quit GRID (src: README § Menu; tvmode.js `guideMenu`).
+- [x] 364. The items, in order: Discover, Downloads (with " · <n> active" counting active and queued rows), Notifications (" · <n>"), Settings, Controls (shows the welcome card again), Reconnect, Switch to desktop mode, Quit GRID (src: README § Menu; tvmode.js `guideMenu`; Controls: user decision 2026-11-10). (verified 2026-11-10: menu.test; tv-shell-d)
 - [x] 365. Discover closes pages and shows Server › Discover with focus on its content; Downloads and Settings close pages and show that tab (src: tvmode.js `guideMenu`).
 - [x] 366. The Menu's hints are A "Select" and B "Close" (src: tvmode.js `guideMenu`).
-- [x] 367. The Menu is not available on the startup screens (src: tvmode.js `press`).
+- [x] 367. On Connect and the unreachable library, Menu (Start) opens a short Menu in the Menu panel's style with only Switch to desktop mode and Quit GRID; Choose your systems keeps Start as Skip for now (src: user decision 2026-11-10, overturning tvmode.js `press` and ruling 6). (verified 2026-11-10: press.test, menu.test; tv-startup-a, tv-startup-b)
 
 ### Lists
 
@@ -576,7 +576,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 431. Its buttons are Install from drive (or Play when installed, or Cancel while installing) and Remove from drive… (src: README § Details from a drive; tvmode.js `details`).
 - [x] 432. The left column says where the copy is: "Installed on this computer." when installed, "From <pack> · <size>" and "Installing copies it from the drive, no network needed." (src: README § Details from a drive; tvmode.js `details`).
 - [x] 433. A copy of an installed game adds the GB card's lines ("A copy of an installed game · v1.1", "(the server had newer files)", and the Wine prefix lines for Windows games) (src: GB card § Library › Backup drives).
-- [x] 434. Remove from drive… asks "Remove <title> from <pack>?" / "Its files leave the drive. The copy installed on this computer stays." ("You can back it up again later." when not installed) with Remove from drive (danger), notifies "<title> removed from <pack>" and goes back (src: README § Details from a drive; tvmode.js `ACT.removeFromDrive`). (desktop wording, intro rule)
+- [x] 434. Remove from drive… asks "Remove <title> from <pack>?" / "Its files leave the drive. The copy installed on this computer stays." ("It can be backed up again later." when not installed; the user chose this wording, 2026-11-10) with Remove from drive (danger), notifies "<title> removed from <pack>" and goes back (src: README § Details from a drive; tvmode.js `ACT.removeFromDrive`). (desktop wording, intro rule)
 
 ### Details › Backup to drive…
 
@@ -761,5 +761,12 @@ The Fable consultant ruled on every conflict above; the rulings are recorded in 
 - [x] 530. Install refused for no library folder opens "Set a library folder" / "GRID installs games into a library folder, and none is set. Choose one, then press Install again." / "Choose a folder…" → folder browser "Library folder" at home, Y saves; success card "Library folder set" with the path; refusal = error card with the reason; Install is pressed again by the user. (src: README § Consultant decisions)
 - [x] 531. Details › Saves (kind Saves) on a native game shows "Save locations" with the desktop's status line, rows (raw path over expanded path; PCGamingWiki rows first), A on a row confirms "Remove this save location?" (danger "Remove"), focus to the row in its place; "Add a save folder…" opens "Save folder for <title>", Y adds ("Save folder added"); Upload latest keeps "Add a save location to enable uploads." until a row exists. (src: README § Consultant decisions)
 - [x] 532. Settings › TV mode › Button assignments with no controller: disabled, line "For the controller in use", value "Xbox style", A says "Connect a controller to choose its buttons. Each controller keeps its own choice."; re-enables when a pad connects. (src: README § Consultant decisions)
-- [x] 533. Settings › RetroAchievements rows: Username, Token, Save, Password (masked, opens empty, sub "Write-only: used once to log in, never kept"), Log In (sub "Signs in with your password and saves the token it gets"), Clear. Save disabled until username + token ("Enter a username and a token first." / "Enter a token first." / "Enter a username first."); Log In disabled until username + password (same pattern with "password"); Log In runs raLogin, blanks the password, refreshes status. (src: README § Consultant decisions)
+- [x] 533. Settings › RetroAchievements rows: Username, Password (masked, opens empty, sub "Write-only: used once to log in, never kept"), Log In (sub "Signs in with your password and saves the token it gets"), Token, Save, Clear (order: user decision 2026-11-10). Save disabled until username + token ("Enter a username and a token first." / "Enter a token first." / "Enter a username first."); Log In disabled until username + password (same pattern with "password"); Log In runs raLogin, blanks the password, refreshes status. (src: README § Consultant decisions) (verified 2026-11-10: panes.test)
 - [x] 534. Downloads: a live firmware row is disabled, A says "Installing firmware — this step cannot be cancelled" (library move: "Updating paths — this step cannot be cancelled"); an extracting install's A hint reads "Details" and its list offers only "Open <title>". (src: README § Consultant decisions)
+
+## Added after the user's decisions (2026-11-10)
+
+The user's decisions are recorded in docs/design/system/components/TVMode/README.md § Decided (2026-11-10) and override any item they touch.
+
+- [ ] 535. Desktop Details, for a game not installed whose system has no emulator (not set to None) and a recommendation: a line under Install reads "No emulator for <system>. Install installs <rec> too." (no hover reason), and Install queues the game and installs the recommendation; with none it reads "No emulator for <system>. Add one in Settings › Systems."; while the recommendation installs, "<rec> is installing." (src: README § Decided, 2026-11-10)
+- [x] 536. The "Welcome to TV mode" card shows the first time TV mode opens, once the main screen is up, and not again by itself (`[ui] tv_welcomed`); Menu › Controls shows it again (src: README § Decided, 2026-11-10) (verified 2026-11-10: uiSettings.test; tv-shell-d)

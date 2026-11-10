@@ -594,3 +594,35 @@ From the consultant's Phase 13 rulings (README § Consultant decisions, last six
   art accepted; G — `afterOverlays` deleted, `closeRefocus` jumps to a refound item.
 - **e2e added:** tv-settings (Edit connection round trip), tv-systems (companion rows and Remove), tv-backups-c
   (drive sorts).
+
+## After the user's decisions (2026-11-10)
+- **Desktop Install brings the recommended emulator.** The no-emulator logic moved out of `tv/pages/details.ts` and
+  TvDetails into `lib/details/noEmulator.ts` (pure: `systemRowFor`, `noEmulatorFor`, `noEmulatorText`,
+  `installsRecommended`, `noEmulatorSub`) and `lib/details/noEmulatorCheck.svelte.ts` (`NoEmulatorCheck`: reads a
+  `SystemsStore`, re-reads it after an emulator install, loads the compatible emulators, and its `install()` queues
+  the game and then `installRecommended(row)`). TvDetails uses it with `tvSystems` and the queued card's sub; the
+  desktop Details creates its own `SystemsStore` and shows the line under Install (`details-no-emulator`), with no
+  sub (the desktop Toast shows no second line). `SystemsStore.compatibleReady` gates the line: before the
+  compatible emulators are in, every row reads as having none (this was a latent TV false positive when no Systems
+  screen had loaded them).
+- **Copy:** "It can be backed up again later." (details.ts, downloadRows.ts).
+- **Startup Menu:** `press()` answers `menu` on startup screens too; TvShell opens `openStartupMenu()` there (TvMenu
+  with `startup`: clock, Switch to desktop mode, Quit GRID; `leaveTv(null, null)` lets the desktop's start rule
+  decide). Connect (not Edit connection) has no main button now, so Start opens it and the hint bar shows Menu
+  "Menu"; the Connect button still says what is missing. The unreachable dialog binds MENU and shows A Select,
+  Menu Menu. Choose your systems keeps Start = Skip for now.
+- **Gate:** `Gate::open()` is `tv_active && window_focused`; `games_running` stays tracked for the bring-to-front.
+- **Welcome card:** `[ui] tv_welcomed` (config.rs, `normalize_ui_settings`, `UiSettings` in api.ts, `payload()`);
+  TvShell shows the card only while it is false and then saves it; Menu › Controls (after Settings) shows it again.
+- **RetroAchievements:** Username, Password, Log In, Token, Save, Clear.
+- **e2e:** tv-startup-a (Start opens the startup Menu on Connect, Quit asks, B closes; the Connect button's
+  `data-why`; Connect pressed by its button), tv-startup-b (the Menu over the unreachable dialog), tv-shell-d (no
+  welcome card on a later entry, Menu › Controls brings it back; Quit is `gm7`), tv-details-a (the controller drives
+  Playing while GRID is focused). The `install` and `downloads` groups now seed `e2e/seed/no-emulator-seed.mjs`
+  (their systems set to None), since Details' Install would otherwise queue a recommended emulator from the real
+  forge (those groups run no mock forge) and change their rows and counts.
+- **Results:** gate PASS. e2e PASS: tv-startup, tv-details, tv-settings, tv-shell, install (desktop Details),
+  downloads, ps3-install, backups. `npm run typecheck` in e2e/ reports one error in `helpers/toasts.ts:68` that this
+  work didn't touch.
+- **Checklist:** 31, 32, 132, 250, 364, 367, 533 reworded and ticked with their tests; new 535 (desktop no-emulator
+  line, unit-tested only) and 536 (welcome card first time only, ticked).

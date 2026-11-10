@@ -54,7 +54,7 @@ The Menu has a **Prototype only** section for states that need a trigger: first 
 ## Pages (pushed over a tab; B goes back)
 
 - **Details** — the cover and the last-played / emulator line on the left. On the right: title, header line, chips, then one row of buttons (Play / Install / Cancel install, Update, Game settings, Uninstall; Locate… and Remove from library for a missing game; Link to server game and Remove from library for an unlinked one), then the tabs, switched with LB / RB (switching focuses the new tab's first item, at the top of the tab; a tab with nothing to focus puts focus on the first button): **Overview** (summary, Related row, facts panel: Down from the buttons focuses the summary, and Down / Up read through a long one before moving on; Up from Related always returns to the summary; Up into the buttons scrolls the tab back to its top; the right stick scrolls the summary, Related row and facts panel together, as one page, from anywhere in Details, without moving focus), **Media** (Screenshots and Videos rows; A opens the fullscreen viewer, LB / RB step through), **Saves** (Saves | States switch, Upload latest, a list where A opens Restore / Delete, each confirmed; a deleted entry leaves the list and focus moves to the one now in its place, the newest left is marked Latest, an upload appears at the top as Latest, and an empty list says how saves get there) and **Achievements** (when the server lists any).
-- **Playing** — after Play, "Now playing" with the session time, Back to the game, and Stop game (confirmed). While a game runs, the game owns the controller and GRID ignores it. GRID listens again when the game closes, then shows the save upload notices.
+- **Playing** — after Play, "Now playing" with the session time, Back to the game, and Stop game (confirmed). While a game runs, the game owns the controller while its window has focus; while GRID's window has focus the controller drives this page (Decided, 2026-11-10). When the game closes GRID comes back to the front, then shows the save upload notices.
 - **System** (from Settings › Systems or a Server chip) — Emulator (a list with Installed and Download groups; picking a Download one installs it), version, Update to …, RetroArch core, firmware Install, Open the emulator, Emulator settings, Remove, setup tips. **Windows** has the Proton version, the umu-run line and Reinstall.
 - **Add an emulator manually / Emulator settings** — the desktop's settings sheet as rows: which emulator, name, program (folder browser), launch options, cloud-save strategy.
 - **Game settings** (native games) — launch file (a list; "Set by game.json" when it came from there), launch parameters, Reload launch info from server.
@@ -65,7 +65,7 @@ The Menu has a **Prototype only** section for states that need a trigger: first 
 
 ## Overlays
 
-- **Menu** (Menu button) — a panel from the right: clock, user and server, then Discover, Downloads (with the active count), Notifications, Settings, Reconnect, Switch to desktop mode, Quit GRID.
+- **Menu** (Menu button) — a panel from the right: clock, user and server, then Discover, Downloads (with the active count), Notifications, Settings, Controls (shows the welcome card again), Reconnect, Switch to desktop mode, Quit GRID. On Connect and the unreachable library it holds only Switch to desktop mode and Quit GRID, under the clock.
 - **Lists** — every choice is a centred list with a check on the current value; group headings (Installed / Download) are not focusable.
 - **Confirmations** — a destructive action always asks first, in a dialog whose Cancel is focused. (The desktop's two-click confirm doesn't work with a controller: a double press of A would confirm by accident.)
 - **On-screen keyboard** — slides up from the bottom over the hint bar's area: the field with a caret, four rows of keys, then Shift, symbols, Space, Delete and Done. Shortcuts: X deletes, Y adds a space, LB / RB move the caret, LT is Shift, Menu is Done, B cancels. Held typing buttons repeat like a keyboard key, after 500 ms and then 20 times a second: A on a letter, number, symbol, Space or Delete key, X (delete), Y (space) and LB / RB (caret), so a held X clears a search quickly. A held on Shift, symbols or Done doesn't repeat. A physical keyboard types straight in, and Enter is then Done. Masked fields (tokens, passwords) show dots. Search updates the results as you type.
@@ -74,9 +74,9 @@ The Menu has a **Prototype only** section for states that need a trigger: first 
 
 The box always fits between the top bar and the hint bar, so the screen itself never scrolls. A list longer than the space (a server with many systems) scrolls inside the box, under its title and above its buttons, which never leave view. The top bar already carries the GRID wordmark, so the box doesn't repeat it.
 
-- **Connect** — Server, Sign in with (API token / Username and password), the token or password, Library folder (folder browser), Connect. View pastes from the clipboard. A rejected token returns here with the reason, as on the desktop.
+- **Connect** — Server, Sign in with (API token / Username and password), the token or password, Library folder (folder browser), Connect. View pastes from the clipboard. Menu (Start) opens the short Menu (Switch to desktop mode, Quit GRID). A rejected token returns here with the reason, as on the desktop.
 - **Choose your systems** — the desktop rows as switches; A ticks, X changes the emulator, then Install N emulators or Skip for now. Down from the last system reaches the buttons; Menu (Start) skips from anywhere on the page, so a long list never has to be scrolled to skip. The setup card follows the installs, pinned to the top of the notification stack: one segment per install (each emulator once), empty while waiting; its first half fills while the emulator downloads and its second half while it installs, full when done (red if it failed). A line under the bar names the step: "DuckStation · downloading 62%", then "DuckStation · installing…". It has no countdown while anything is still installing; once the last install is done it says how many systems are ready and closes after 10 seconds.
-- **Unreachable library** — the blocking dialog with Relocate the library… (folder browser) and Close without changing anything; B does nothing.
+- **Unreachable library** — the blocking dialog with Relocate the library… (folder browser) and Close without changing anything; B does nothing; Menu (Start) opens the short Menu over it.
 
 ## Game backups
 
@@ -95,7 +95,7 @@ TV mode carries the whole Game backups design (the Game backups card, built on `
 
 ## Decided
 
-- **Implementation (2026-11-10):** TV mode reads controllers natively in Rust (a gilrs reader, for TV mode only), sending button events to the UI and ignoring input while a game is running or the window isn't focused. The Game backups branch (`feat/game-backups`) is merged into `feat/tv-mode`, so its TV screens are built in this work. Card size, game labels and card display stay desktop-only; TV mode has one cover size. The desktop changes (the TV button in the top bar, `--tv`, Open GRID on) are built on the same branch.
+- **Implementation (2026-11-10):** TV mode reads controllers natively in Rust (a gilrs reader, for TV mode only), sending button events to the UI only while GRID's window is focused. A running game doesn't close the gate: while a game runs and GRID's window has focus, presses reach GRID, which means the Playing page (Back to the game, Stop game…); while a game runs and GRID isn't focused, and whenever TV mode is off, input is ignored (user decision 2026-11-10, replacing "ignoring input while a game is running"). The Game backups branch (`feat/game-backups`) is merged into `feat/tv-mode`, so its TV screens are built in this work. Card size, game labels and card display stay desktop-only; TV mode has one cover size. The desktop changes (the TV button in the top bar, `--tv`, Open GRID on) are built on the same branch.
 - **Where GRID opens, in desktop and TV mode alike:** Server › Discover when it is connected to a RomM server; the Library when it isn't (the server can't be reached, or GRID is used without a server, where it opens on the first connected Backup drive). **Settings › Appearance › Open GRID on** (Automatic, Server › Discover, Library) can force either; forced Discover with no server opens on the Server tab's not-connected panel. This changes the desktop app too, where it opens on Discover today whether or not the server answers (2026-11-10).
 - **No Home tab:** its content is Server › Discover, the first Server rail row, and GRID opens there. The content stays as it was for now (2026-11-10).
 - **Button assignments** (Settings › TV mode) picks the bindings for the controller in use. **Xbox style** binds the face buttons as an Xbox pad: bottom selects (A), right goes back (B), left is X, top is Y. **Nintendo style** binds them as a Nintendo pad: right selects (A), bottom goes back (B), top is X, left is Y. Each controller starts on the style of its own layout and keeps its own choice: Nintendo controllers and 8BitDo's Nintendo-layout pads (Pro, SN30, Lite, Zero, Micro) start as Nintendo style; Xbox, PlayStation and the 8BitDo Ultimate start as Xbox style. So a Nintendo-layout pad set to Xbox style has all four face buttons rebound to the Xbox positions, and an Xbox-layout pad set to Nintendo style gets Nintendo bindings. With several controllers on, each uses its own, and the prompts and this row follow the controller pressed last. The row names the controller it applies to (2026-11-10).
@@ -104,6 +104,12 @@ TV mode carries the whole Game backups design (the Game backups card, built on `
 - **Entering and leaving:** a TV button in the desktop top bar opens TV mode, and so does starting GRID with `--tv`. Menu › Switch to desktop mode (also in Settings › TV mode) leaves. No other way in or out (2026-11-10).
 - **RT is select mode** on the Library and Server grids (2026-11-10).
 - **Start presses a page's main button** where a page has one: Skip for now on Choose your systems, Backup N games on the Backup page, Set up for GRID; while the button is disabled, Start says why (2026-11-10). Elsewhere Start opens the Menu.
+- **Desktop Install brings the recommended emulator, as TV mode does (2026-11-10).** When a game isn't installed and its system has no emulator, isn't set to None on purpose, and has a recommendation, the desktop's Details reads "No emulator for <system>. Install installs <rec> too." under Install, in place of the hover-only reason, and Install queues the game and also runs the Systems store's per-system install of the recommendation. With no recommendation it reads "No emulator for <system>. Add one in Settings › Systems."; while the recommendation installs, "<rec> is installing.". Both Details share the logic (`lib/details/noEmulator.ts`, `noEmulatorCheck.svelte.ts`). The queued card's "<rec> installs with it" stays TV-only: the desktop's cards show no second line.
+- **"It can be backed up again later." (2026-11-10)** is the user's wording for Remove from drive and Cancel backup, replacing "You can backup it again later.".
+- **Leaving TV mode from the startup screens (2026-11-10).** On Connect, Menu (Start) opens a short Menu in the Menu panel's style: "Switch to desktop mode" and "Quit GRID", under the clock; the hint bar shows Menu "Menu". The unreachable-library dialog has the same (Start opens it over the dialog; B comes back). Choose your systems keeps Start as Skip for now (its main button, above), which reaches the main screen and its Menu.
+- **The controller drives Playing while GRID is focused (2026-11-10):** see Implementation above.
+- **The welcome card shows the first time only (2026-11-10).** "Welcome to TV mode" shows the first time TV mode opens, once the main screen is up, and never by itself again (`[ui] tv_welcomed`). The prototype has no help entry, so the Menu has a **Controls** row (after Settings) that shows the card again.
+- **RetroAchievements rows in TV mode (2026-11-10):** Username, Password, Log In, then Token, Save and Clear.
 
 ## Consultant decisions (2026-11-10)
 
@@ -115,8 +121,8 @@ prototype, SPEC.md and the Game backups card. The user can overturn any of them.
 - A sideways row keeps the focused cover one row padding inside its edges: 1.2rem, since every row sits inside a panel.
 - The 8BitDo set shows − and + for View and Menu (read as "Minus" and "Plus").
 - The Home / Guide button does nothing in TV mode.
-- The Menu isn't available on the startup screens. On Connect, Start presses Connect (and says what's missing while it's disabled); on Choose your systems it skips.
-- While a game runs, GRID ignores the controller, so Playing's Back to the game and Stop game answer the mouse and keyboard; the page closes by itself when the game exits.
+- ~~The Menu isn't available on the startup screens.~~ Overturned by the user (Decided, 2026-11-10): on Connect and the unreachable library Start opens a short Menu; on Choose your systems it skips. Connect's button still says what's missing while it's disabled.
+- ~~While a game runs, GRID ignores the controller.~~ Overturned by the user (Decided, 2026-11-10): while GRID's window is focused the controller drives Playing. The page closes by itself when the game exits.
 - Cancel in Downloads asks first, for every kind of row (install, backup, library move).
 - RetroAchievements › Clear acts at once, as on the desktop; turning a computer off on a pack asks first, because it deletes that computer's emulator builds from the drive.
 - A Details tab with nothing to focus puts focus on the first button.
@@ -124,7 +130,7 @@ prototype, SPEC.md and the Game backups card. The user can overturn any of them.
 - The Backup page carries the Game backups card's space-set-aside line, the disabled Firmware reason, the Wine prefix note and the FAT32 over-4 GB note, with the desktop's wording.
 - Installing from a drive uses the Game backups card's notices: the game's card ("Copying from <label>"), its own card for the emulator ("<emulator> from <pack> added to download queue", then "<emulator> installed · Used for <system>") and for firmware ("<System> firmware installed from <pack>").
 - Set up for GRID starts with this computer's OS ticked.
-- The "Welcome to TV mode" card shows each time TV mode opens, once the main screen is up.
+- ~~The "Welcome to TV mode" card shows each time TV mode opens.~~ Overturned by the user (Decided, 2026-11-10): the first time only, and Menu › Controls shows it again.
 - Menu › Notifications keeps the whole session's notices; there is no visible cap.
 - Search everything shows its results on Done; Y on the results page reopens the keyboard and from then on the results follow every key.
 - Close without changing anything on the Unreachable library dialog quits GRID at once, with no second question.
@@ -145,13 +151,11 @@ prototype, SPEC.md and the Game backups card. The user can overturn any of them.
 - The umu-launcher and library-folder refusals open TV confirms whose bodies say what will happen ("<title> runs through Proton, which needs umu-run. umu-launcher downloads as a Downloads row; launch <title> again when it finishes." / "GRID installs games into a library folder, and none is set. Choose one, then press Install again."), with Install umu-launcher / Choose a folder…; the library folder browser is titled "Library folder", a saved folder shows "Library folder set · <path>", and Install is pressed again afterwards, as on the desktop.
 - Details › Saves on a native game lists its save locations under the cloud saves (heading "Save locations", the desktop's status line, raw path over expanded path); A on a row asks "Remove this save location?" (Remove, danger); "Add a save folder…" opens the folder browser "Save folder for <title>", Y adds it ("Save folder added").
 - Button assignments with no controller is disabled, reads "For the controller in use · Xbox style", and A says "Connect a controller to choose its buttons. Each controller keeps its own choice."
-- RetroAchievements in TV mode also has the desktop's Log In: Password (masked, write-only) and Log In rows after Save; Save and Log In are disabled until their fields are filled and A names the missing field ("Enter a token first.").
+- RetroAchievements in TV mode also has the desktop's Log In: Password (masked, write-only) and Log In rows; Save and Log In are disabled until their fields are filled and A names the missing field ("Enter a token first."). The order is the user's (Decided, 2026-11-10): Username, Password, Log In, Token, Save, Clear.
 - A live firmware row is disabled and A says "Installing firmware — this step cannot be cancelled"; an extracting install's A hint reads "Details" and its list offers only "Open <title>".
 - The emulator-installed card's second line "Used for <system>" comes from the backend (`used_for` on the `emulator-installed` event: the platforms whose default the install applied), so it shows only when a system really switched to that emulator; several read "Used for A and B"; the desktop card stays "<Name> installed".
 - Disabled-control reasons in Settings › Systems and the System page: "Still installing. Downloads shows the progress." (the Installing N emulators… button), "Already checking for updates." (Check for updates), "Still in progress. Try again when it finishes." (a row whose action runs), "Give the emulator a name first." (Save with no name).
 - The TV System page has no Show program folder; the desktop ⋯ menu keeps it, and Emulator settings › Program shows the path.
-
-Open questions for the user (not blocking): the order and wording of RetroAchievements' Password and Log In rows (not in the prototype); a controller-only way out of TV mode from Connect; whether a controller press should reach Playing when GRID's own window is focused; whether the welcome card shows every time or only the first time.
 
 - On Choose your systems a system nothing installable plays is a dimmed, unticked row reading "No emulator
   available", with no X; A says "No emulator GRID installs plays <System>. If you have one, add it in Settings ›
@@ -187,12 +191,13 @@ Open questions for the user (not blocking): the order and wording of RetroAchiev
 - Details for a game whose system has no emulator reads "No emulator for <system>. Install installs <rec> too." and
   Install also installs the recommended emulator (the Systems pane's own per-system install); the queued card adds
   "<rec> installs with it". With no recommendation: "No emulator for <system>. Add one in Settings › Systems." The
-  desktop keeps its hover reason until the user decides.
+  desktop does the same since the user's decision (Decided, 2026-11-10).
 - The Overview facts panel shows the desktop's ten facts (developer, companies, release, genres, game modes,
   players, franchises, size, version, content); Release reads "d Mon yyyy".
 - The Play card is the desktop's "Launching <title>…" alone; "Restored the latest cloud save" is not shown because
   the backend reports no restore.
-- "You can backup it again later." (Remove from drive, Cancel backup) — one word, per the UI rule.
+- "It can be backed up again later." (Remove from drive, Cancel backup) — the user chose this wording (Decided,
+  2026-11-10), replacing the consultant's "You can backup it again later.".
 - Settings › Connection adds Edit connection… (the Connect screen as a page, session kept), Open RomM in browser and
   Open config folder (both switch to desktop mode, like Open folder and Open release).
 - A companion emulator's rows are version, Update, Open, "<Companion> settings" and "Remove <Companion>" (confirmed
