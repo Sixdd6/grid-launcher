@@ -95,6 +95,7 @@ TV mode carries the whole Game backups design (the Game backups card, built on `
 
 ## Decided
 
+- **Implementation (2026-11-10):** TV mode reads controllers natively in Rust (a gilrs reader, for TV mode only), sending button events to the UI and ignoring input while a game is running or the window isn't focused. The Game backups branch (`feat/game-backups`) is merged into `feat/tv-mode`, so its TV screens are built in this work. Card size, game labels and card display stay desktop-only; TV mode has one cover size. The desktop changes (the TV button in the top bar, `--tv`, Open GRID on) are built on the same branch.
 - **Where GRID opens, in desktop and TV mode alike:** Server › Discover when it is connected to a RomM server; the Library when it isn't (the server can't be reached, or GRID is used without a server, where it opens on the first connected Backup drive). **Settings › Appearance › Open GRID on** (Automatic, Server › Discover, Library) can force either; forced Discover with no server opens on the Server tab's not-connected panel. This changes the desktop app too, where it opens on Discover today whether or not the server answers (2026-11-10).
 - **No Home tab:** its content is Server › Discover, the first Server rail row, and GRID opens there. The content stays as it was for now (2026-11-10).
 - **Button assignments** (Settings › TV mode) picks the bindings for the controller in use. **Xbox style** binds the face buttons as an Xbox pad: bottom selects (A), right goes back (B), left is X, top is Y. **Nintendo style** binds them as a Nintendo pad: right selects (A), bottom goes back (B), top is X, left is Y. Each controller starts on the style of its own layout and keeps its own choice: Nintendo controllers and 8BitDo's Nintendo-layout pads (Pro, SN30, Lite, Zero, Micro) start as Nintendo style; Xbox, PlayStation and the 8BitDo Ultimate start as Xbox style. So a Nintendo-layout pad set to Xbox style has all four face buttons rebound to the Xbox positions, and an Xbox-layout pad set to Nintendo style gets Nintendo bindings. With several controllers on, each uses its own, and the prompts and this row follow the controller pressed last. The row names the controller it applies to (2026-11-10).
@@ -104,9 +105,8 @@ TV mode carries the whole Game backups design (the Game backups card, built on `
 - **RT is select mode** on the Library and Server grids (2026-11-10).
 - **Start presses a page's main button** where a page has one: Skip for now on Choose your systems, Backup N games on the Backup page, Set up for GRID; while the button is disabled, Start says why (2026-11-10). Elsewhere Start opens the Menu.
 
-## Proposed defaults (to confirm)
+## Notes
 
-- **Desktop-only settings:** card size, game labels and card display stay desktop-only; TV mode has one cover size.
 - **Opening an emulator** on its own from TV mode works, but the emulator's own window needs a mouse or its own controller support.
 
 ## Not in this card
