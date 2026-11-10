@@ -8,6 +8,7 @@ import {
   companionParent,
   companionsOf,
   installRecommendedLabel,
+  installingRecommendedLabel,
   isInstalling,
   liveEmulatorSources,
   missingRecommended,
@@ -178,6 +179,11 @@ describe('installing', () => {
     const choices = missingRecommended(rows, (r) => r.key === 'Super Nintendo');
     expect(choices).toEqual([{ platform: 'PlayStation 2', source_id: 'PCSX2/pcsx2' }]);
     expect(installRecommendedLabel(choices.length)).toBe('Install recommended (1)');
+  });
+
+  it('Install recommended counts the emulators while it runs', () => {
+    expect(installingRecommendedLabel(1)).toBe('Installing 1 emulator…');
+    expect(installingRecommendedLabel(3)).toBe('Installing 3 emulators…');
   });
 });
 

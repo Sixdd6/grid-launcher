@@ -4,7 +4,7 @@
 // unreachable, App.svelte shows only the blocking dialog.
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { api, type LibraryRelocateOutcome, type LibraryUnreachableStatus } from '../api';
-import { isBlocking, relocateSuccessText } from '../libraryUnreachable';
+import { isBlocking, relocateError, relocateSuccessText } from '../libraryUnreachable';
 import { pushToast } from './toasts.svelte';
 
 const state = $state<{ status: LibraryUnreachableStatus | null }>({ status: null });
@@ -43,6 +43,19 @@ export async function relocateLibrary(path: string): Promise<LibraryRelocateOutc
     await refreshLibraryUnreachable();
   }
   return outcome;
+}
+
+/**
+ * The dialog's Relocate, for the desktop dialog and the TV screen alike:
+ * relocates to the typed folder and answers the line to show under the
+ * field (the refusal, or why the call failed), or `null` after a relocate.
+ */
+export async function relocateTo(typed: string): Promise<string | null> {
+  try {
+    return relocateError(await relocateLibrary(typed.trim()));
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
 }
 
 /** "Close without changing anything": the backend exits the app. */

@@ -217,6 +217,11 @@ export function installRecommendedLabel(count: number): string {
   return `Install recommended (${count})`;
 }
 
+/** Install recommended's label while it runs: "Installing 3 emulators…". */
+export function installingRecommendedLabel(count: number): string {
+  return `Installing ${count} ${count === 1 ? 'emulator' : 'emulators'}…`;
+}
+
 // --- Emulators across systems -------------------------------------------------
 
 /** The other systems that use `name`, by label. */
