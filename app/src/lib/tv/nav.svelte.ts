@@ -37,6 +37,8 @@ export type ScreenHooks = {
   /** After the screen is shown and focus restored: a screen may move focus
    *  (P7: arriving on Server › Discover focuses its content, item 104). */
   arrive?: () => void;
+  /** View, when no notice offers an action (Connect pastes, item 396). */
+  view?: () => void;
 };
 
 export type Page = {
@@ -197,6 +199,25 @@ export function resetNav(tab: TvTab, pane: TvPane | null): void {
   cur = null;
   curPlace = null;
   refreshFocus();
+}
+
+/**
+ * A startup screen takes the stage (P12; tvmode.js `startConnect`): its page
+ * is the only one, so B steps back out of a page pushed from it (the folder
+ * browser) but never past it (item 97). Overlays close; no tabs, no Menu.
+ */
+export async function resetStartup(page: Omit<Page, 'id'>): Promise<void> {
+  state.startup = true;
+  state.layers = [];
+  layerPrev.clear();
+  afterLayers = [];
+  state.selMode = false;
+  memory.clear();
+  if (cur) cur.classList.remove('f');
+  cur = null;
+  curPlace = null;
+  state.pages = [{ ...page, id: nextPageId++ }];
+  await showScreen();
 }
 
 export function attachRoots(stageEl: HTMLElement | null, layersEl: HTMLElement | null): void {

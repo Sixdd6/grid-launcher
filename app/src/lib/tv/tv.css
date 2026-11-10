@@ -294,12 +294,28 @@ html[data-ui='tv'] .tv .playing .logo { font-size: 3rem; margin: .4rem 0; white-
 html[data-ui='tv'] .tv .playing .pl-note { margin: 1.2rem auto 0; }
 html[data-ui='tv'] .tv .playing .btns { justify-content: center; margin-top: 1.6rem; }
 
-/* ---- Startup screens (P12 fills them): the box always fits between the bars. */
+/* ---- Startup screens (items 389–391; tvmode.css `.start`): the box always
+   fits between the bars; a long list scrolls inside it, under its title and
+   above its buttons, which never leave view. */
 html[data-ui='tv'] .tv .start { position: absolute; inset: 0; display: flex; padding: 1.2rem 2.4rem; overflow: hidden; }
 html[data-ui='tv'] .tv .start-box { margin: auto; width: 46rem; max-width: 100%; max-height: 100%; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 1.2rem; padding: 1.8rem 2.2rem; }
 html[data-ui='tv'] .tv .start-box h1 { margin: 0 0 .3rem; color: var(--text-h); font-size: 1.6rem; flex: 0 0 auto; }
 html[data-ui='tv'] .tv .start-box .sub { color: var(--text-muted); margin: 0 0 1.1rem; flex: 0 0 auto; }
+html[data-ui='tv'] .tv .start-box.wide { width: 64rem; }
+html[data-ui='tv'] .tv .start-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none; margin: -.5rem; padding: .5rem; }
+html[data-ui='tv'] .tv .start-body::-webkit-scrollbar { display: none; }
 html[data-ui='tv'] .tv .start-foot { flex: 0 0 auto; margin-top: 1.1rem; }
+html[data-ui='tv'] .tv .start-foot .or { color: var(--text-muted); align-self: center; }
+html[data-ui='tv'] .tv .start-box .srow { min-height: 3.2rem; padding: .4rem 1.2rem; margin-bottom: .25rem; }
+html[data-ui='tv'] .tv .start-box .note { flex: 0 0 auto; }
+html[data-ui='tv'] .tv .field { display: flex; align-items: center; gap: 1rem; min-height: 3.4rem; padding: .5rem 1.2rem; border-radius: .7rem; background: var(--field); margin-bottom: .5rem; border: 1px solid transparent; }
+html[data-ui='tv'] .tv .field .lab { width: 11rem; color: var(--text-muted); flex: 0 0 auto; }
+html[data-ui='tv'] .tv .field .v { flex: 1; min-width: 0; color: var(--text-h); font-size: 1.1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-ui='tv'] .tv .field .v.ph { color: var(--text-muted); font-style: italic; }
+html[data-ui='tv'] .tv .field.f { background: var(--selected); }
+html[data-ui='tv'] .tv .errline { color: var(--danger); margin: 0 0 .9rem; font-weight: 600; flex: 0 0 auto; }
+html[data-ui='tv'] .tv .start-box .sub .gl,
+html[data-ui='tv'] .tv .start-box .sub .gli { vertical-align: middle; }
 
 /* ---- Overlays (items 360–388; tvmode.css "Overlays"): a scrim with a 6px
    blur down to the hint bar, which keeps the overlay's hints (ruling 20). */

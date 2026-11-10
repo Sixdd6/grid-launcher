@@ -24,7 +24,7 @@ const RUNNING = new Set<DownloadEntry['status']>(['downloading', 'installing', '
  * compat tools alike (all `emulator`-job rows). After a retry the newest row
  * (highest `id`) decides.
  */
-function latestRows(queued: readonly string[], entries: readonly DownloadEntry[]): Map<string, DownloadEntry> {
+export function latestRows(queued: readonly string[], entries: readonly DownloadEntry[]): Map<string, DownloadEntry> {
   const latest = new Map<string, DownloadEntry>();
   for (const entry of entries) {
     if (entry.job !== 'emulator') continue;

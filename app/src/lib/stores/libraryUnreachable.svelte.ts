@@ -34,12 +34,20 @@ export async function initLibraryUnreachable(): Promise<UnlistenFn> {
   return unlisten;
 }
 
-/** Relocates the library to `path`. On success the dialog goes away. */
-export async function relocateLibrary(path: string): Promise<LibraryRelocateOutcome> {
-  const outcome = await api.libraryRelocate(path);
+/** What a relocate says once it is done; the desktop's card by default
+ *  (TV mode shows its own words, `tv/startup/unreachable.ts`). */
+export type RelocateNotice = (outcome: Extract<LibraryRelocateOutcome, { status: 'relocated' }>) => void;
+
+function desktopNotice(outcome: Extract<LibraryRelocateOutcome, { status: 'relocated' }>): void {
   const text = relocateSuccessText(outcome);
-  if (text !== null) {
-    pushToast(text, outcome.status === 'relocated' && outcome.report.length > 0 ? 'error' : 'success');
+  if (text !== null) pushToast(text, outcome.report.length > 0 ? 'error' : 'success');
+}
+
+/** Relocates the library to `path`. On success the dialog goes away. */
+export async function relocateLibrary(path: string, notice: RelocateNotice = desktopNotice): Promise<LibraryRelocateOutcome> {
+  const outcome = await api.libraryRelocate(path);
+  if (outcome.status === 'relocated') {
+    notice(outcome);
     await refreshLibraryUnreachable();
   }
   return outcome;
@@ -50,9 +58,9 @@ export async function relocateLibrary(path: string): Promise<LibraryRelocateOutc
  * relocates to the typed folder and answers the line to show under the
  * field (the refusal, or why the call failed), or `null` after a relocate.
  */
-export async function relocateTo(typed: string): Promise<string | null> {
+export async function relocateTo(typed: string, notice?: RelocateNotice): Promise<string | null> {
   try {
-    return relocateError(await relocateLibrary(typed.trim()));
+    return relocateError(await relocateLibrary(typed.trim(), notice));
   } catch (err) {
     return err instanceof Error ? err.message : String(err);
   }
