@@ -11,7 +11,7 @@ The card is a working prototype. Click inside it first, then use the keyboard as
 | D-pad / left stick | Arrow keys | Move focus. Held, it repeats after 400 ms, then every 90 ms |
 | (held, on the on-screen keyboard) | (held) | A, X, Y, LB and RB repeat after 500 ms, 20 times a second |
 | A | Enter | Select |
-| B | Esc or Backspace | Back. From a grid or pane, B goes to the rail; on a rail B does nothing; on Downloads (no rail) B goes Home |
+| B | Esc or Backspace | Back. From a grid or pane, B goes to the rail. At a tab's top level (a rail, Home, Downloads) B does nothing; LB / RB switch tabs |
 | X | X | The focused item's quick action: Play / Install on a cover, Change emulator on a system |
 | Y | Y | The screen's action: Search, Use this folder, Clear |
 | LB / RB | Q / E | Switch tabs (Home, Library, Server, Downloads, Settings); in Details, switch Details tabs |
