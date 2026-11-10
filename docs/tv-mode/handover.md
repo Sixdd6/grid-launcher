@@ -436,3 +436,79 @@ Code changes from the consultant's Phase 12 rulings (README § Consultant decisi
 - `notices.svelte.ts` `releaseNotice` keeps `pinned` (update its comment, `notices.svelte.test.ts`, `notices.ts`
   header, `TvSetupCard.svelte` comment); the setup card stays pinned through its 10 s countdown. The "after P12"
   note above about unpinning is superseded.
+
+## After P13: Game backups in TV mode
+- **Done from the pending lists:** the "after P11" consultant section: `emulator-installed` carries `used_for`
+  (app/src-tauri/src/commands.rs `used_for()` over the `Assigned` outcomes; lib.rs now emits it inside the
+  spawn_blocking after `apply_after_install`), `notifications/notices.ts` `Notice.sub`,
+  `emulatorInstalledNotice(name, fresh, usedFor)` ("Used for A and B", fresh installs only), the coalescer passes
+  `sub`; the Systems / System page / emulator form reasons take the ruled words and their TODO(design) markers are
+  gone; the TV System page never had Show program folder (closed). Also: a game queued from a drive gets the sub
+  "Copying from <label>" (item 426), and a finished drive copy's Downloads line reads "Installed from <label>"
+  (`downloadRows.ts`, item 425).
+- **Select mode** (`lib/tv/select.svelte.ts`, over the desktop's now generic `backups/selection.ts`): `select.on`,
+  `select.ids` (the covers' `TvGame.id`s), `selToggle / selPick / selAll / selKeep / selEnd / selAct`, pure
+  `selActOutcome`, `selBar`, `selHints`. The grid on show registers `registerSelectGrid({games, drive, connected,
+  act})` (TvLibrary, TvPlatform); nav's `selMode` reads `select.on`, `run()` handles `selToggle|selPick|selAll|
+  selAct` (selPick reads the cover's `data-sel`). Covers get `selectable` (TvGameCover → `sel` / `picked` on
+  TvCover). `ui/TvSelBar` (test ids `tv-selbar`, `-summary|-x|-y|-rt`) pins under the grid. Select mode ends on
+  another tab (`showTab`), another rail row (`selectLibRail`, Server `selectRail`, as the desktop's), the drive
+  going away (TvLibrary's fallback effect), a started backup and either drive action. The hint bar shows
+  `currentSelHints` while no page is pushed.
+- **Backup page** (`pages/TvBackupPage.svelte` over the shared `BackupPlanStore`; pure `pages/backupPage.ts`):
+  rows `bk-drive-<mount>` (radio), `bk-setup`, `bk-local`, `bk-wine`, `bk-ood-note`, `bk-ood-<rom>`, `bk-all-local`,
+  `bk-all-download`, `bk-each`, `bk-src-<rom>`, `bk-emus`, `bk-fw`, `bk-runtime`, `bk-note-<i>`, `bk-error`; each
+  as `tv-pr-<key>`. Opened by `backupActions.ts` `openBackupPage(subject, romIds, platformIds?)` from Details,
+  select mode's Y (Library, Server), Server's Backup all N… and X on a Library platform row (offline: the
+  "Backing up needs a server." card). Words come from `backups/dialog.ts` (lede, local line, source rows, emulator
+  line, notes, set-aside line) so desktop and TV can't drift.
+- **Rows pages:** `pages/pageRows.ts` (types), `ui/TvPageRows.svelte`, `pages/TvRowsPage.svelte` (title `tv-rows-title`,
+  sub `tv-rows-sub`, footer `tv-rows-summary`, main button `tv-rows-main` / key `main`, Start presses it, a
+  disabled one says why). The Backup page and the three drive pages use it.
+- **Settings › Backup drives:** `tabs/settings/TvDrivesPane.svelte` + pure `panes/drives.ts`; rows `dr-<mount>`
+  (test id `tv-drive-row`, `data-drive-key` = mount, `tv-drive-sub`, `tv-drive-status`), `tv-drives-none`,
+  `tv-drives-firmware` (`dr-fw`). Pages: `TvDrivePage` (rows `dp-os|space|games|emus|fw|last|folder|show|open|rename|
+  remove`), `TvDriveOsPage` (`os-linux|windows`; turning one off asks, ruling 9), `TvDriveSetupPage` (`su-name|
+  su-linux|su-windows|su-fat32|su-note`; this computer's OS ticked, ruling 14), pure `pages/drivePages.ts`. Show in
+  Library is `library.svelte.ts` `showDriveInLibrary` (`selectDriveRow` moved there from TvShell). Open folder
+  leaves TV mode, then opens the folder. `driveActions.ts` `setUpDrive` / `removeGridFiles` put the TV second
+  line on their cards ("<label> · <fs>", "<size> freed"; the desktop card is unchanged).
+- **Two nav fixes every screen gets:** `showScreen` blocks `stageChanged` until the new screen is drawn (the ring's
+  class mutation ran the observer before Svelte drew the new screen, so it restored focus among the old screen's
+  items: pushing a page from Settings or a Server grid selected Appearance / Discover). `restoreFocus`, when the
+  remembered item has gone and nothing is autofocus, lands on the rail's selected row instead of the first item
+  (a game removed from the drive while its Details was open used to select All games).
+- **e2e:** group `tv-backups` (fixtures-backups, fake drives, `backups-seed.mjs` variants `tv-backups-a…d`): a set up
+  a drive with Start, RT/A/X/Y, the Backup page, Start, Downloads; b unplug mid-backup (failed row, folded row, one
+  card, rail falls back, plug back in); c used without a server: select mode on a drive, Details from a drive,
+  X Install from drive with the drive's emulator and firmware notices, Backup all offline, Remove from drive…; d
+  firmware default, Change… refusal, a FAT32 setup and Rename…, Remove GRID files asks twice, Forget. VITE_E2E
+  builds expose `__tvE2E.notices()` (the session's notices, "title | sub") and `__tvE2E.memory()` (focus memory);
+  `helpers/tvBackups.ts` has `tap`, `tapK`, `waitNotice`, `pageRow`, `confirmDialog` (waits for its own layer, so
+  a second question can follow), `screenState` for failure messages.
+- **Checklist:** 94, 418, 419, 421–514, 520 built; 420 verified (tv-backups-b/c). 438 is the backend's refusal
+  (grid-core `BACKING_UP_LOCAL`) shown through the shared actions; not driven in a TV spec. The running backup in
+  the top bar (ruling 21) is `topbar.ts` from P5 (unit-tested); not asserted end to end (the e2e backups finish
+  too fast to catch it reliably).
+- **Decisions taken here (report them to the user):**
+  - Phase 8's question, merge the queued and the installed drive-copy cards? No: they stay two events, as the Game
+    backups card and README § The shell ("the same events and wording as the desktop") have them: "<title> added to
+    download queue · Copying from <label>", then "<title> installed"; the emulator and firmware get their own cards.
+  - Where the checklist quotes tvmode.js but the shared notifier has the desktop's words, TV keeps the desktop's
+    (README: notifications are the desktop's events and wording): the removal card "Removed <title> from <pack>"
+    (434, 451), the mid-backup removal card "<label> was removed. <n> of <m> items were written to <pack>." (492),
+    the OS-removal card (504), the lede "GRID downloads each game from <host> and writes it, …" (458), the runtime
+    line (475). The Backup page's own words (464 no-drive note, 467–469 version rows, 474 "<n> systems · <n> files",
+    481 reasons) follow the checklist.
+  - Select mode ends when the rail row changes (the desktop's rule; the prototype kept it).
+  - The firmware switch reads "None needed" when the plan has no firmware sets and "Already on the drive" when all
+    are there (no words in the sources); a still-planning drive's main button reads "Checking the drive…" with the
+    why "GRID is still checking the drive."
+- **For P14:** the "Pending for P14" section above is untouched. `tv-layout` should walk the Backup page (long:
+  per-game rows, notes), the drive pages and select mode's bar. `selKeep` drops picks a search hides (the desktop's
+  `keepOnly`); the prototype kept them.
+- **Results:** gate PASS; e2e `tv-backups` (a–d), `tv-shell`, `backups`, `tv-library`, `tv-details`, `tv-settings`,
+  `tv-server`, `tv-startup`, `tv-systems` pass (there is no `tv-downloads` group: Downloads is in `tv-settings`).
+  `tv-library` changed: its first test now walks up from the first drive to All games, because GRID used without
+  a server opens on the first drive (item 415, built in P12); it had passed only through the observer race fixed
+  above. The nav fix commit (d816ecb) imports `select.svelte.ts`, which lands in the next commit (7cbac73).
