@@ -398,7 +398,7 @@ and "Conflicts" lists at the end are not part of the build.
 ### Playing
 
 - [x] 321. Playing shows "NOW PLAYING", the title as a logo (3rem), "<Platform> · <emulator> · <m:ss>" with the session time counting up each second (src: README § Pages › Playing; tvmode.js `playing`).
-- [x] 322. Playing shows the note "The game has the controller while it runs. GRID listens again when it closes and uploads your save." (without " and uploads your save" when Upload after exit is off) (src: tvmode.js `playing`).
+- [x] 322. Playing shows the note "The game has the controller while it's in front. GRID listens again when you switch back or the game closes, and uploads your save when it closes." (without ", and uploads your save when it closes" when Upload after exit is off) (src: tvmode.js `playing`; reworded for README § Decided, 2026-11-10: the controller drives Playing while GRID is focused).
 - [x] 323. Playing has Back to the game (focused) and Stop game (danger) (src: README § Playing; tvmode.js `playing`).
 - [x] 324. Back to the game brings the game's window to the front, with GRID behind it (src: tvmode.js `ACT.resume`).
 - [x] 325. Stop game asks "Stop <title>?" / "Unsaved progress in the game is lost." with Stop game (danger); stopping goes back and, with Upload after exit on, notifies "Uploading the save for <title>…" then "Save uploaded for <title>" (src: README § Playing; tvmode.js `ACT.stop`).

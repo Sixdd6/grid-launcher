@@ -484,9 +484,10 @@ export function playingLine(platform: string, emulator: string, time: string): s
   return [platform, emulator, time].filter((p) => p.trim() !== '').join(' · ');
 }
 
-/** The note under it (item 322). */
+/** The note under it (item 322). The controller drives Playing whenever
+ *  GRID's window is focused (user decision 2026-11-10), so it says so. */
 export function playingNote(uploadOnExit: boolean): string {
-  return `The game has the controller while it runs. GRID listens again when it closes${uploadOnExit ? ' and uploads your save' : ''}.`;
+  return `The game has the controller while it's in front. GRID listens again when you switch back or the game closes${uploadOnExit ? ', and uploads your save when it closes' : ''}.`;
 }
 
 /** After the game closes with Upload after exit on (item 325). */

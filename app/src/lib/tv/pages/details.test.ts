@@ -257,8 +257,10 @@ describe('Playing, Link, Game settings', () => {
     expect(sessionTime(0)).toBe('0:00');
     expect(playingLine('SNES', 'Snes9x', '0:07')).toBe('SNES · Snes9x · 0:07');
     expect(playingLine('Windows', '', '0:07')).toBe('Windows · 0:07');
-    expect(playingNote(true)).toBe('The game has the controller while it runs. GRID listens again when it closes and uploads your save.');
-    expect(playingNote(false)).toBe('The game has the controller while it runs. GRID listens again when it closes.');
+    expect(playingNote(true)).toBe(
+      "The game has the controller while it's in front. GRID listens again when you switch back or the game closes, and uploads your save when it closes.",
+    );
+    expect(playingNote(false)).toBe("The game has the controller while it's in front. GRID listens again when you switch back or the game closes.");
   });
 
   it('a link row and the launch file line', () => {
