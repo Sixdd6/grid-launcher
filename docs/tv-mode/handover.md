@@ -94,3 +94,15 @@
 - **Still unverified:** window geometry after TV → quit → relaunch. The container can't check it:
   e2e builds don't register the window-state plugin (`#[cfg(not(feature = "e2e"))]` in lib.rs)
   and Xvfb has no window manager. Check by hand on the P14 .rpm.
+
+## Pending for the next phase (consultant, after P5)
+- Desktop TV button (app/src/lib/Shell.svelte, TODO(design)): make it a 28×28 `icon-btn` like the
+  theme toggle, new outline `tv` icon at size 18, colour `var(--text-h)`, shared `.icon-btn`
+  hover/focus states, no animation, kept just left of the light/dark toggle (after the update
+  badge); `aria-label` and `title` "Switch to TV mode"; keep `data-testid="tv-mode-button"`; drop
+  the `.tv-btn` text styles, add only `.tv-btn:disabled { color: var(--text-muted); cursor: default; }`.
+  Add to app/src/lib/icons.ts (outline, not in FILLED_ICONS) and mirror into
+  docs/design/prototype/icons.json:
+  `tv: 'M5 8h14a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5V9.5A1.5 1.5 0 0 1 5 8zM8 3.5l4 4.5 4-4.5'`
+- Space stays A (`' ': 'A'` in tv/input/buttons.ts); while the OSK is open the printable-key branch
+  runs first, so Space types a space and marks physical typing (Enter = Done).
