@@ -277,6 +277,23 @@ There are several main sections to the application with buttons across the top b
   again to finish", which offers only Dismiss. A failed or cancelled backup row can be
   retried while its drive is connected. An install from a drive reads "Copying from
   <label> 45%" while it copies.
+
+  **Free space.** Every queued or running job holds the space it will still add, and
+  every "does it fit" check uses what is left: the disk's free space, less what queued
+  and running jobs on that disk still hold, less a 64 MB safety margin. An install,
+  update or extra content from the server, an emulator install and an install from a
+  drive hold their peak in the library folder from the moment they are queued: the
+  download (the server's file sizes; when one is missing, the response's size once it
+  arrives) plus as much again when the download is extracted. A file already at its
+  destination needs no new space. When the peak does not fit, nothing is queued and the
+  error card reads "Couldn't add <Title> to the download queue: There isn't enough free
+  space in the library folder for <Title> (needs 1.2 GB, 800.0 MB available)". Before a
+  zip is extracted its real unpacked size (from its directory) replaces the estimate;
+  when that no longer fits, the download is deleted and the row fails with the same
+  reason. What a job has written stops counting against it (the disk already shows it),
+  and a job that finishes, fails or is cancelled gives its space back. Installing a game
+  that is already queued is ignored, never refused for space. A library move's space
+  check counts what queued jobs hold too.
 - **Settings** is a rail of eight panes in alphabetical order — Appearance, Backup
   drives, Cloud saves, Connection, Library, RetroAchievements, Systems, Updates — and
   opens on the first, Appearance.
@@ -784,9 +801,14 @@ Details.
   each game from <host> and writes it, with its art and details, to the drive's gridpack
   folder."
 - **Drive:** one radio row per connected, set-up, writable drive: the pack name, "<label>
-  · <file system>", the free space, and a usage bar where this backup's share is hatched.
-  A drive without room reads "Needs 76 GB · 61.4 GB free" in the danger colour, and the
-  main button reads "Not enough space". With none connected, the dialog says "No backup
+  · <file system>", the space left for this backup, and a usage bar where this backup's
+  share is hatched. The space left is the drive's free space less what queued and running
+  backups to the drive still hold (see Free space under Downloads); rows for games this
+  backup would write again are not counted twice. While some space is held the row reads
+  "60.2 GB available", with "1.2 GB set aside for queued backups" under the bar, which
+  shows the held share in a muted disk colour. A drive without room reads "Needs 76 GB ·
+  61.4 GB free" ("… available" while space is held) in the danger colour, and the main
+  button reads "Not enough space". With none connected, the dialog says "No backup
   drive connected", names any connected drive that is not set up, and offers **Set up a
   drive…**, which opens Settings › Backup drives (and closes Details).
 - **Source** sits between Drive and Also copy. It shows only when at least one requested
@@ -855,8 +877,14 @@ Details.
   size of its archive. The button reads "Choose for 2 games" (disabled) while an
   out-of-date game has no pick, "Nothing to backup" when there is nothing new, and "Not
   enough space" when it does not fit. The bytes to write plus a safety margin must fit
-  the free space. `start_backup` refuses a plan that still waits on a pick ("Choose
-  which copy to backup for 2 games").
+  the space left. `start_backup` refuses a plan that still waits on a pick ("Choose
+  which copy to backup for 2 games"). It then checks the space again and holds it in
+  one step, so two quick starts cannot both pass: when the backup no longer fits, nothing
+  is queued ("SAMSUNG T7 doesn't have enough free space (needs 76 GB, 61.4 GB
+  available)"). Each row holds its bytes on the drive and, unless it is copied from this
+  computer, its staging space in the library folder. What a row has written stops
+  counting; its staging space is given back once staging is deleted, and the rest when
+  the row ends.
 
 Backups run in Downloads (see Downloads above): each item downloads into a staging
 folder in the library (`<library>/.grid-staging/backup-<id>/`), then is written to the
@@ -894,8 +922,9 @@ planned like a server install. A copy written as the server's files has no such 
 and installs like any other drive game.
 - **Before it is queued,** GRID refuses a copy it cannot restore ("This backup needs a
   newer GRID": an unknown `archive` or `layout`), a pack path that is not safe, and a
-  library without room for the tree plus the safety margin ("There isn't enough free
-  space in the library folder for <Game>").
+  library without room for the tree (`tree_bytes`) after what queued jobs hold and the
+  safety margin ("There isn't enough free space in the library folder for <Game> (needs
+  X, Y available)"). The restore holds that space until it ends.
 - **Where it goes:** always the modern platform folder, `games/<Platform>/`. An
   `extracted` copy goes to `<platform>/<copy name>`; a `native` or `multi` copy to
   `<platform>/<game name>`, where a server install puts it; a `file` copy to

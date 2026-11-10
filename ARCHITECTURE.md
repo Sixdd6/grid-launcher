@@ -166,6 +166,21 @@ Modules as declared in `src/lib.rs`:
   service's sessions), so a game GRID launched is not copied (`RUNNING_NOW`).
   `local_backup_busy` makes uninstall, update and Locate… refuse a game a live local row
   is copying (`BACKING_UP_LOCAL`).
+  `space` is the space ledger, owned by `InstallService` (in memory only): each queued
+  or running job holds a `Reservation` per filesystem it adds bytes to (keyed by
+  `FsKey`: `st_dev` on unix, the volume root on Windows), and a check sees free − every
+  other job's outstanding (reserved − written) − `SPACE_MARGIN`. A job's
+  `space::JobSpace` rides on its payload (`InstallJob`, `EmulatorJob`, `BackupJob`), so
+  it is released whenever the payload drops (finished, failed, cancelled, panicked).
+  `InstallService::admit_meta` reserves a game or emulator job's estimated peak
+  (`install_estimate`, `emulator_estimate`) and refuses one that does not fit;
+  `start_backup_on` checks and reserves a whole batch (drive bytes and library staging)
+  in one `try_reserve`. Progress reaches the ledger through `on_download_progress` and
+  `on_install_progress` (by entry id, through a weak map); `check_extract_space` resizes
+  to a zip's real unpacked size before extracting. `drive_reserved` is the dialog
+  plan's `reserved_bytes`; the app hands the ledger to `LibraryMoveService` so a move's
+  free-space check counts it. `SpaceProbe` (free space and filesystem key) is
+  injectable for tests (`set_space_probe`).
   The registry is at v10: `source_server` records the server a row came from when that
   was not the live session (an install from a drive), `""` otherwise.
   `Registry::clear_foreign_rom_ids` is the relink guard: it clears `rom_id` on rows whose
