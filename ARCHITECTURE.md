@@ -256,6 +256,19 @@ The shell owns *when* things run; grid-core owns *what* they do.
   answers with the notices it words. `use_without_server` (commands.rs) turns on offline
   mode. `ensure_image` checks the image cache before the host filter, so a row installed
   from a drive shows its art whatever server it came from.
+- TV mode's native half — `cli.rs` (`--tv`, the only flag read; the mode is never
+  persisted), `gamepad/` (the controller reader: `mapping.rs` turns raw input into
+  `button` / `stick` / `trigger` events by physical position, `gate.rs` lets input
+  through only while TV mode is on, the window is focused and no game runs, and sends
+  `released_all` when it closes, `identity.rs` names a controller; `mod.rs` owns the
+  `gamepad-poll` thread, started the first time TV mode turns on, and the `gamepad`
+  event) and `commands/tv.rs` (`get_ui_mode` / `set_ui_mode` with fullscreen,
+  `gamepad_list`, `tv_yield_to_game`, `quit_app` and `exit_app`, which leaves
+  fullscreen before exiting so the window-state plugin saves the desktop geometry,
+  `list_folder` over `grid_core::fsbrowse`, `read_clipboard_text`, and under the `e2e`
+  feature `e2e_gamepad_inject`). `lib.rs` feeds the gate from the window's focus events
+  and the launch service's session snapshot, and brings GRID back to the front when the
+  last game ends in TV mode.
 - Services — `cloud_service.rs` (sync caches, auto-restore before launch, auto-upload
   after exit), `firmware_service.rs` (the background firmware triggers and their
   one-job-per-pass guard), `update_service.rs` (when the library is re-checked for server

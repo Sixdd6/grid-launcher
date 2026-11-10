@@ -65,6 +65,74 @@ export type UiSettings = {
 export type OpenOn = 'automatic' | 'discover' | 'library';
 export type TvPrompts = 'match' | 'xbox' | 'ps' | 'nintendo' | '8bitdo';
 export type TvAssignment = 'xbox' | 'nintendo';
+/** A connected controller (`gamepad::identity::PadInfo`). */
+export type PadInfo = {
+  /** This connection's id; every `gamepad` event carries it. */
+  id: number;
+  /** The model's key (gilrs UUID, 32 hex digits): Button assignments are
+   *  stored under it (`ui.tv_assignments`). Two pads of one model share it. */
+  key: string;
+  name: string;
+  vendor: number | null;
+  product: number | null;
+};
+/** A button by physical position. `south` is the bottom face button on every
+ *  pad; Button assignments (Xbox / Nintendo style) are applied by the UI.
+ *  `left_bumper` / `right_bumper` are LB / RB, `left_trigger` /
+ *  `right_trigger` LT / RT, `select` View, `start` Menu. `guide` is
+ *  reported and bound to nothing. */
+export type PadButton =
+  | 'south'
+  | 'east'
+  | 'west'
+  | 'north'
+  | 'left_bumper'
+  | 'right_bumper'
+  | 'left_trigger'
+  | 'right_trigger'
+  | 'select'
+  | 'start'
+  | 'guide'
+  | 'left_stick'
+  | 'right_stick'
+  | 'dpad_up'
+  | 'dpad_down'
+  | 'dpad_left'
+  | 'dpad_right';
+/** The `gamepad` event's payload (`GAMEPAD_EVENT`). Input arrives only while
+ *  TV mode is on, GRID's window is focused and no game runs; when that stops,
+ *  `released_all` says every held button is up. Buttons are sent on change
+ *  only (no repeats). Sticks: −1…1, Y positive up, sent when they move by
+ *  0.02 or more; triggers 0…1 (`button` down / up at 0.5 is sent too). */
+export type PadEvent =
+  | { kind: 'connected'; pad: PadInfo }
+  | { kind: 'disconnected'; id: number }
+  | { kind: 'button'; id: number; button: PadButton; down: boolean }
+  | { kind: 'stick'; id: number; stick: 'left' | 'right'; x: number; y: number }
+  | { kind: 'trigger'; id: number; trigger: 'left' | 'right'; value: number }
+  | { kind: 'released_all' };
+/** TV mode's controller events (`gamepad::GAMEPAD_EVENT`); payload `PadEvent`. */
+export const GAMEPAD_EVENT = 'gamepad';
+/** One synthetic input for `e2e_gamepad_inject` (e2e builds only): a raw
+ *  event goes through the same mapping and gate as a real controller. */
+export type GamepadRawEvent =
+  | { kind: 'pressed' | 'released'; button: PadButton }
+  | { kind: 'changed'; button: PadButton; value: number }
+  | {
+      kind: 'axis';
+      axis: 'left_stick_x' | 'left_stick_y' | 'right_stick_x' | 'right_stick_y' | 'dpad_x' | 'dpad_y';
+      value: number;
+    };
+export type GamepadInput =
+  | { kind: 'connect'; pad: PadInfo }
+  | { kind: 'disconnect'; id: number }
+  | { kind: 'input'; id: number; event: GamepadRawEvent }
+  | { kind: 'focus'; focused: boolean };
+export type UiMode = 'desktop' | 'tv';
+export type UiModeInfo = { mode: UiMode; started_with_tv: boolean; fullscreen: boolean };
+export type FolderEntry = { name: string; is_dir: boolean };
+/** One folder for TV mode's folder browser (`list_folder`). */
+export type FolderListing = { path: string; parent: string | null; entries: FolderEntry[] };
 export type GameSummary = {
   id: number;
   name: string;
@@ -1149,6 +1217,23 @@ export const api = {
   libraryRelocate: (path: string) => invoke<LibraryRelocateOutcome>('library_relocate', { path }),
   /** Exits the app without changing anything. */
   libraryUnreachableClose: () => invoke<void>('library_unreachable_close'),
+  /** Desktop or TV mode, whether GRID started with `--tv`, and fullscreen. */
+  getUiMode: () => invoke<UiModeInfo>('get_ui_mode'),
+  /** TV: fullscreen, controller reader on. Desktop: reader gated off
+   *  (`released_all`), fullscreen off. */
+  setUiMode: (mode: UiMode) => invoke<void>('set_ui_mode', { mode }),
+  /** The controllers connected now (empty until TV mode first turns on). */
+  gamepadList: () => invoke<PadInfo[]>('gamepad_list'),
+  /** Playing › Back to the game: minimizes GRID; it returns when the last game ends. */
+  tvYieldToGame: () => invoke<void>('tv_yield_to_game'),
+  /** Menu › Quit GRID (leaves fullscreen first, then exits). */
+  quitApp: () => invoke<void>('quit_app'),
+  /** One folder for TV mode's folder browser; `''` starts at home. */
+  listFolder: (path: string, files: boolean) => invoke<FolderListing>('list_folder', { path, files }),
+  /** The clipboard's text (Connect's View-to-paste). Never log it. */
+  readClipboardText: () => invoke<string>('read_clipboard_text'),
+  /** e2e builds only: synthetic controller input. */
+  e2eGamepadInject: (events: GamepadInput[]) => invoke<void>('e2e_gamepad_inject', { events }),
   getUiSettings: () => invoke<UiSettings>('get_ui_settings'),
   setUiSettings: (settings: UiSettings) => invoke<void>('set_ui_settings', { settings }),
   /** The `debug_prints` setting: `debug` rather than `info` logging.

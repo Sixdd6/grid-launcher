@@ -37,6 +37,11 @@ tauri-plugin-wdio = { version = "1.5.0", optional = true }
 tauri-plugin-wdio-webdriver = { version = "1.5.0", optional = true }
 tauri-plugin-dialog = "2"
 tauri-plugin-window-state = "2"
+# TV mode: View pastes the clipboard on Connect (`commands::tv::read_clipboard_text`,
+# through the Rust API only; no clipboard permission is granted to the webview).
+tauri-plugin-clipboard-manager = "2"
+# TV mode's controller reader (`gamepad/`). Needs libudev-dev on Linux.
+gilrs = "0.11"
 # The loopback media server's per-launch capability nonce (media_server.rs).
 getrandom = "0.3.4"
 

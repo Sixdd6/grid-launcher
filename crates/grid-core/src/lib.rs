@@ -7,6 +7,7 @@ pub mod cloud;
 pub mod config;
 pub mod fatx;
 pub mod firmware;
+pub mod fsbrowse;
 pub mod images;
 pub mod import_python;
 pub mod launch;

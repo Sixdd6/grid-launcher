@@ -1,10 +1,12 @@
 mod app_update;
+mod cli;
 mod cloud_service;
 mod commands;
 mod config_write;
 mod covers_dir;
 mod drive_service;
 mod firmware_service;
+mod gamepad;
 mod images;
 mod library_move_service;
 mod logging;
@@ -138,6 +140,9 @@ pub fn run() {
         .map(|c| c.debug_prints)
         .unwrap_or(true);
     logging::init(debug_prints);
+    // `--tv` starts GRID in TV mode (applied in `.setup()`); nothing else on
+    // the command line is read, and the mode is never persisted.
+    let cli = cli::parse_cli(std::env::args());
     let cache_dir = covers_dir::covers_dir(grid_core::config::data_dir_override());
     let session = Arc::new(SessionManager::new(
         Config::default_path(),
@@ -354,6 +359,8 @@ pub fn run() {
         python_import,
         layout_migration,
         drives: drive_service::DriveService::new(),
+        gamepad: gamepad::GamepadService::new(),
+        ui_mode: commands::tv::UiModeState::new(cli.tv),
     });
     // Embedded WebDriver automation server, gated behind the `e2e` cargo
     // feature so it never ships in a release build (see
@@ -375,12 +382,46 @@ pub fn run() {
     // XDG_RUNTIME_DIR and XDG_CACHE_HOME only). Registering it under the
     // harness would write into the developer's real home and make the Xvfb
     // window size carry between stage groups.
+    //
+    // Fullscreen is neither saved nor restored: it is TV mode's, and the
+    // mode is never persisted (a start without `--tv` is a desktop start).
+    // `commands::tv::exit_app` leaves fullscreen before exiting, so the
+    // exit save records the desktop size, not the screen's.
     #[cfg(not(feature = "e2e"))]
-    let builder = builder.plugin(tauri_plugin_window_state::Builder::new().build());
+    let builder = builder.plugin(
+        tauri_plugin_window_state::Builder::new()
+            .with_state_flags(
+                tauri_plugin_window_state::StateFlags::all()
+                    - tauri_plugin_window_state::StateFlags::FULLSCREEN,
+            )
+            .build(),
+    );
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        .plugin(tauri_plugin_clipboard_manager::init())
+        // TV mode's controller gate follows the window's focus, and a close
+        // from TV mode leaves fullscreen first (`commands::tv::exit_app`).
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            let state = window.state::<AppState>();
+            match event {
+                tauri::WindowEvent::Focused(focused) => {
+                    state.gamepad.set_window_focused(*focused);
+                }
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    let mode = state.ui_mode.mode();
+                    if mode == commands::tv::UiMode::Tv {
+                        api.prevent_close();
+                        commands::tv::exit_app(window.app_handle(), mode);
+                    }
+                }
+                _ => {}
+            }
+        })
+        .setup(move |app| {
             // The title carries the running version (doc 10): the About
             // surface and a bug report both read it from here.
             let version = app.package_info().version.to_string();
@@ -393,6 +434,21 @@ pub fn run() {
                 app.handle().clone(),
                 app.state::<AppState>().app_update.clone(),
             );
+            // TV mode's controller reader sends every input as the
+            // `gamepad` event; it starts with TV mode.
+            let handle = app.handle().clone();
+            app.state::<AppState>().gamepad.set_emitter(move |event| {
+                let _ = handle.emit(gamepad::GAMEPAD_EVENT, event);
+            });
+            if cli.tv {
+                if let Err(e) = commands::tv::apply_ui_mode(
+                    app.handle(),
+                    &app.state::<AppState>(),
+                    commands::tv::UiMode::Tv,
+                ) {
+                    tracing::warn!("--tv: TV mode did not start: {e}");
+                }
+            }
             // Grant the asset protocol the exact directory the session caches
             // covers in. The static scope in tauri.conf.json is
             // `$CACHE/grid-launcher/covers`, which matches the `ProjectDirs`
@@ -585,7 +641,20 @@ pub fn run() {
             }
             if let Ok(launch) = &state.launch {
                 let handle = app.handle().clone();
+                let gamepad = state.gamepad.clone();
                 launch.set_notify(Arc::new(move |snapshot| {
+                    // TV mode ignores the controller while a game runs. When
+                    // the last one ends, GRID (minimized by "Back to the
+                    // game") comes back to the front and listens again.
+                    let running = !snapshot.sessions.is_empty();
+                    let was_running = gamepad.games_running();
+                    gamepad.set_games_running(running);
+                    if was_running && !running && gamepad.tv_active() {
+                        if let Some(window) = handle.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                    }
                     let _ = handle.emit("sessions-changed", snapshot);
                 }));
                 // Settings sync before every emulated launch (doc 05
@@ -651,6 +720,15 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::tv::get_ui_mode,
+            commands::tv::set_ui_mode,
+            commands::tv::gamepad_list,
+            commands::tv::tv_yield_to_game,
+            commands::tv::quit_app,
+            commands::tv::list_folder,
+            commands::tv::read_clipboard_text,
+            #[cfg(feature = "e2e")]
+            commands::tv::e2e_gamepad_inject,
             commands::connect,
             commands::restore_session,
             commands::use_without_server,

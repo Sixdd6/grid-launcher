@@ -7,6 +7,7 @@ pub mod logging;
 pub mod relink;
 pub mod setup;
 pub mod specials;
+pub mod tv;
 pub mod updates;
 
 use crate::config_write::modify_config;
@@ -102,6 +103,10 @@ pub struct AppState {
     /// Backup drives: the 2 s scan, the remembered list and the firmware a
     /// drive install waits on. See `drive_service.rs`.
     pub drives: Arc<crate::drive_service::DriveService>,
+    /// TV mode's controller reader and its gate. See `gamepad/mod.rs`.
+    pub gamepad: Arc<crate::gamepad::GamepadService>,
+    /// Desktop or TV mode, never persisted. See `commands/tv.rs`.
+    pub ui_mode: tv::UiModeState,
 }
 
 /// Refuses a command that touches the library while a library move runs
