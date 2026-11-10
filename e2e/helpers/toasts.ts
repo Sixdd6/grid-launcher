@@ -65,6 +65,6 @@ export async function dismissToasts(): Promise<void> {
     }
   }
   await browser
-    .waitUntil(async () => (await $$(TOAST)).length === 0, { timeout: TRANSITION_TIMEOUT, interval: 100 })
+    .waitUntil(async () => (await $$(TOAST).length) === 0, { timeout: TRANSITION_TIMEOUT, interval: 100 })
     .catch(() => undefined);
 }
