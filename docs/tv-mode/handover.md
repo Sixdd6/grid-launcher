@@ -316,18 +316,6 @@
 - **Not done / for later:** Backup drives pane (P13) and Systems (P11) stay empty. RA's username + password login (the
   desktop's second form) isn't in the TV design. Connection has no "edit connection" (not in the design).
 
-## Pending for the next phase (consultant, after P10): checklist 532–534
-- app/src/lib/tv/tabs/settings/panes/tv.ts: `ASSIGN_NEEDS_PAD` = "Connect a controller to choose its buttons. Each
-  controller keeps its own choice."; line "For the controller in use", value "Xbox style"; drop TODO(design); tests.
-- app/src/lib/tv/tabs/settings/panes/ra.ts + TvSettings.svelte: dynamic SAVE/LOGIN reasons; `RaState.passwordTyped`,
-  `canLogin`; `RaActions.editPassword`, `login`; rows Password + Log In after Save (order: Username, Token, Save,
-  Password, Log In, Clear); password is a non-reactive local forgotten by `forgetRaTyping`, never logged/echoed;
-  Log In uses raActions.raLogin then blanks the password, resets tokenTyped, refreshes status. Tests; e2e if the mock
-  supports RA login.
-- app/src/lib/tv/tabs/downloads/downloadRows.ts: `rowWhy(e)` by kind (firmware → "Installing firmware — this step
-  cannot be cancelled"; library_move → "Updating paths — this step cannot be cancelled"; else CANCEL_EXTRACTING);
-  `rowA` returns 'Details' when only `open` remains; tests.
-
 ## After P11: Settings › Systems, the System page and the emulator form
 - **Done from the pending lists:** the Downloads Cancel wording (ruling 8, exact text: `downloadRows.ts`
   `cancelWords`, a queued install "It leaves the queue…", the backup body names the drive's label; no
@@ -391,3 +379,46 @@
   "Already checking for updates."; pages/systemPage.ts `BUSY_WHY` → "Still in progress. Try again when it finishes.";
   pages/emulatorForm.ts `NAME_NEEDED` stays "Give the emulator a name first."; remove the four TODO(design); tests.
 - No "Show program folder" on the TV System page (close the open item).
+
+## After P12: the startup screens and where TV opens
+- **Done from the pending lists:** checklist 532–534 (the "after P10" section, now removed). `panes/tv.ts`
+  `ASSIGN_NEEDS_PAD` is the ruled text and the row reads "Xbox style" with no controller; `panes/ra.ts` has
+  Password and Log In after Save (`saveWhy` / `loginWhy` name the missing field; `RaState.passwordTyped`,
+  `canLogin`; `RaActions.editPassword`, `login`); TvSettings keeps the password in a plain local forgotten with the
+  token, Log In runs `raLogin`, blanks it and refreshes the status. `downloadRows.ts` `rowWhy` by kind
+  (`FIRMWARE_WHY`, `MOVE_WHY`) and `rowA` "Details" when only Open remains. The "after P11" pending section
+  (Used for, Systems reasons, Show program folder) is untouched: held back from this phase.
+- **Phases** (`TvShell`): `phase` = loading | unreachable | connect | choose | shell, from `uiSettings.loaded`,
+  `libraryUnreachable.blocking` and `session.phase`. Each startup phase calls `nav.resetStartup(page)`: the
+  startup screen is the only page on nav's stack (so `press.ts`'s `pages > 1` rule lets B leave the folder
+  browser but never the screen, item 97) and TvStage draws it like any page. Entering `shell` runs `startShell()`:
+  the desktop view TV was entered from (first start only), else `initialView` (Discover selected on Server; the
+  first Backup drive selected, its folder open and its row focused without a server, also once the drives load
+  late: `pendingDrive`). The welcome card shows once per TvShell mount. `ScreenHooks.view` is the screen's View
+  when no card offers an action (TvShell's registered View).
+- **Screens** (`lib/tv/startup/`): `TvConnect` + pure `connectPage.ts` (rows, keyboard titles, `connectReady`,
+  `connectWhy`, `offlineReady`, `parentOf`) + `connectForm.svelte.ts` (the fields outlive the folder browser's
+  remount; the token or password is a plain module local, `setSecret` / `takeSecret`, only `secretTyped` is
+  reactive; the stored library is not stored again). Keys `cf-url|how|token|user|password|lib`, buttons
+  `cf-go|cf-none`; test ids `tv-connect`, `tv-cf-<key>` / `tv-cf-<key>-value`, `tv-connect-go|offline|reason`.
+  `TvChooseSystems` + pure `choose.ts` over the desktop's `ChooseSystems` class: rows `ch-<slug>` and `ch-windows`
+  (`tv-ch-row-*`, `tv-ch-val-*`), buttons `ch-go|ch-skip` (`tv-choose-install|skip`), intro `tv-choose-intro`.
+  None in the X list unticks the system. `TvUnreachable` (an empty base screen whose `arrive` opens the blocking
+  `TvUnreachableDialog` layer; `ur-relocate|ur-close`, `tv-unreachable*`) + `unreachable.ts`; Relocate closes the
+  dialog and pushes the folder browser (B there reopens it); `relocateTo(path, notice)` gained an optional notice
+  so TV says "Library relocated to <path>" / "No files were moved". `TvSetupCard` (renderless, mounted in the
+  shell phase) + pure `setupCard.ts` drive the P6 held / pinned notice from `setupRun` and the Downloads rows;
+  `setup/progress.ts` now exports `latestRows`. The card closing ends the run (`dismissSetupRun`).
+- **Rust:** e2e-only `e2e_clipboard_write(text)` (commands/tv.rs) seeds the clipboard for View-to-paste.
+- **e2e:** group `tv-startup` (first-run-setup fixtures, mock forge, `E2E_FIRST_RUN_SETUP`, drive roots, seeded per
+  spec by `seed/tv-startup-seed.mjs`, which empties the data dir first): a Connect / Choose / Start skips, b
+  unreachable + Relocate, c Use without a server → first drive, d Install 2 emulators + setup card, e Close sends the quit with no
+  question (the e2e build's `window.__tvE2EHoldQuit` counts it in `__tvE2EQuits` instead of exiting, which would
+  end the WebDriver session). The keyring credential is cleared before a, c and d. Choose your systems draws its
+  buttons only once the systems (or their failure) arrive, so focus starts on the first system.
+- **Deviations / open:** Connect reads "Connecting…" while the connect runs (the prototype connects at once);
+  a failed relocate shows the refusal as an error card and reopens the dialog; an unavailable system's A says
+  "No emulator available" (TODO(design) wording); a connect failure other than a rejected credential shows the
+  backend's message on the reason line. The unreachable dialog's two buttons wrap onto two lines in its 40rem box
+  (as on the prototype, same CSS), so Down, not Right, reaches Close. The setup card unpins when its countdown
+  starts (as on the prototype), so later cards can push it out before the 10 s end.
