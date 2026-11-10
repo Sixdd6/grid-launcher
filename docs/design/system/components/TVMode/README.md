@@ -21,7 +21,7 @@ The card is a working prototype. Click inside it first, then use the keyboard as
 | View (Back/Select) | V | Act on the newest notice that offers an action ("Open Downloads") |
 | Right stick | Page Up / Page Down | Scroll what you're reading (a Details tab, a list) without moving focus |
 
-A real controller also works in the preview, through the browser's Gamepad API. The prompts change to ✕ ○ □ △ when it is a PlayStation controller. Mouse hover and click work as well.
+A real controller also works in the preview, through the browser's Gamepad API, and the prompts follow its brand (see Button prompts). Mouse hover and click work as well.
 
 The Menu has a **Prototype only** section for states that need a trigger: first run (Connect), a rejected token, an unreachable server, an unreachable library, unplugging and plugging in the Couch kit drive (also mid-backup), and a failed install.
 
@@ -95,6 +95,8 @@ TV mode carries the whole Game backups design (the Game backups card, built on `
 
 ## Decided
 
+- **Button prompts** follow the controller's brand, from the USB vendor id: Xbox (Microsoft, and anything unrecognised), PlayStation (Sony), Nintendo, and 8BitDo, drawn as the **8BitDo Pro series** (A right, B bottom, X top, Y left; L / R, L2 / R2, Select / Start). 8BitDo pads in X-input mode report as Microsoft and get Xbox prompts. Settings › TV mode › Button prompts picks one by hand (Match my controller, Xbox, PlayStation, Nintendo, 8BitDo (Pro series)), and **Nintendo and 8BitDo buttons** picks the layout: **As labelled** (the default; the button marked A selects, B backs out) or **Xbox arrangement** (the bottom button selects, and the prompts show the letter printed there) (2026-11-10).
+- **Glyph art** comes from Kenney's Input Prompts (CC0), never with a brand logo; the Home / Guide button gets a neutral glyph (2026-11-10).
 - **Entering and leaving:** a TV button in the desktop top bar opens TV mode, and so does starting GRID with `--tv`. Menu › Switch to desktop mode (also in Settings › TV mode) leaves. No other way in or out (2026-11-10).
 - **RT is select mode** on the Library and Server grids (2026-11-10).
 - **Start presses a page's main button** where a page has one: Skip for now on Choose your systems, Backup N games on the Backup page, Set up for GRID; while the button is disabled, Start says why (2026-11-10). Elsewhere Start opens the Menu.
