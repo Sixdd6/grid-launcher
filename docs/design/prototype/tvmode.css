@@ -349,3 +349,11 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .bk-foot { display: flex; align-items: center; justify-content: flex-end; gap: 1.4rem; margin-top: 1.4rem; padding-top: 1.2rem; border-top: 1px solid var(--line); }
 .start-foot .or { color: var(--text-muted); align-self: center; }
 .status .dot.none { background: var(--text-muted); }
+
+/* ---- Server › Discover: Home's hero and rows inside the main area beside the rail. */
+#srv-main { position: relative; }
+#srv-main .home { inset: 0; }
+#srv-main .hero { padding: 0 1.2rem .4rem; flex-basis: 13.6rem; height: 13.6rem; }
+#srv-main .shelf h2 { margin: 0 1.2rem; }
+#srv-main .track { padding-left: 1.2rem; padding-right: 1.2rem; }
+#srv-main .shelf .empty { margin: 0 1.2rem; }

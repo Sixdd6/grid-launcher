@@ -75,7 +75,7 @@ var onDrive = function (g) { return readyDrives().filter(function (d) { return d
 var CFG = { theme: 'dark', art: true, fade: 45, blur: 40, hw: true, restore: true, upload: true, skipNewer: true, delay: 10, retain: 10,
   raUser: 'sam_plays', raToken: '', prompts: 'auto', assign: {}, bkFirmware: true, url: 'https://romm.home.lan', user: 'sam', lib: '/home/sam/Games/GRID', exitBtn: 'menu' };
 
-var S = { tab: 'home', pages: [], layers: [], offline: false, libRail: 'all', srvRail: 'PS', libQ: '', srvQ: '', libSort: 'Recently played', detTab: 'Overview', saveKind: 'Saves', notes: [], scheme: 'xbox', padName: '' };
+var S = { tab: 'server', pages: [], layers: [], offline: false, libRail: 'all', srvRail: 'discover', libQ: '', srvQ: '', libSort: 'Recently played', detTab: 'Overview', saveKind: 'Saves', notes: [], scheme: 'xbox', padName: '' };
 
 /* ------------------------------------------------------------------ glyphs */
 var GL = {
@@ -270,8 +270,11 @@ function move(dir) {
       /* The nearest line past the list, then its first item in reading order. */
       out.sort(function (x, y) { var X = rc(x), Y = rc(y); var d = axis === 'v' ? (fwd ? X.top - Y.top : Y.bottom - X.bottom) : (fwd ? X.left - Y.left : Y.right - X.right); return Math.abs(d) > 8 ? d : (axis === 'v' ? X.left - Y.left : X.top - Y.top); });
       t = out[0];
-      /* Back into a button group: the button you left it from, while it is still there. */
-      var tg = t && t.closest('[data-nav]'); if (tg && tg._last && tg.contains(tg._last) && tg._last.offsetParent) t = tg._last;
+      /* Into a rail: its selected row. Back into a button group: the button you left
+         it from, while it is still there. */
+      var tg = t && t.closest('[data-nav]');
+      if (tg && tg.dataset.enter === 'sel') t = tg.querySelector('.sel[data-f]') || t;
+      else if (tg && tg._last && tg.contains(tg._last) && tg._last.offsetParent) t = tg._last;
     }
     if (!t) return;
   }
@@ -300,7 +303,7 @@ function move(dir) {
 }
 
 /* ------------------------------------------------------------------ chrome */
-var TAB_ORDER = ['home', 'library', 'server', 'downloads', 'settings'];
+var TAB_ORDER = ['library', 'server', 'downloads', 'settings'];
 var TAB_NAME = { home: 'Home', library: 'Library', server: 'Server', downloads: 'Downloads', settings: 'Settings' };
 function paintTop() {
   var mid;
@@ -350,8 +353,10 @@ function hero(g) {
 
 /* ------------------------------------------------------------------ screens */
 var TABS = {};
-TABS.home = {
-  render: function () {
+/* Server › Discover: what Home showed, unchanged for now (2026-11-10): the hero for
+   the focused game over rows that scroll sideways. */
+function discoverHTML() {
+  {
     var lib = G.filter(function (g) { return g.inst; });
     var cont = lib.filter(function (g) { return g.played != null; }).sort(function (a, b) { return a.played - b.played; });
     var pref = ['PS', 'PS2', 'N64', 'GC', 'SNES', 'WIN', 'LINUX'];
@@ -359,16 +364,14 @@ TABS.home = {
     var ra = G.filter(function (g) { return g.added && nr.indexOf(g) < 0; }).sort(function (a, b) { return a.added - b.added; });
     var up = lib.filter(function (g) { return g.upd; });
     function shelf(id, name, list, extra) { return '<section class="shelf"><h2>' + name + (extra ? '<span>' + extra + '</span>' : '') + '</h2>' + (list.length ? '<div class="track" data-nav="h">' + list.map(function (g) { return cover(g, { k: id, plat: true }); }).join('') + '</div>' : '<p class="empty">' + (S.offline ? 'Needs the server. It comes back when GRID reconnects.' : 'Nothing here yet.') + '</p>') + '</section>'; }
-    return '<div class="home"><div class="hero" id="hero"></div><div class="rows">' +
+    return '<div class="home"><div class="hero" id="hero"></div><div class="rows" id="disc">' +
       shelf('c', 'Continue playing', cont) +
       (S.offline ? shelf('n', 'New releases', []) : shelf('n', 'New releases', nr, 'the last six months, on your systems')) +
       (S.offline ? '' : shelf('r', 'Recently added', ra, 'to your server')) +
       (up.length ? shelf('u', 'Updates', up, up.length + ' games') : '') +
       shelf('l', 'Your library', lib, lib.length + ' games') + '</div></div>';
-  },
-  hints: function () { return [['Y', 'Search']]; },
-  y: function () { searchAll(); }
-};
+  }
+}
 
 /* A folder in the Library rail: a header row that A opens and closes (the chevron
    turns), with its rows indented under it. Closed, it shows no rows; the grid's
@@ -436,12 +439,12 @@ TABS.server = {
     if (S.noServer) return '<div class="list"><div class="list-in"><div class="panel empty"><h2>Not connected to a server</h2>Your Library and Backup drives work without one.<div class="btns" style="margin-top:1.4rem"><button class="btn pri" data-f data-a="toConnect">Connect to a server…</button><button class="btn" data-f data-a="gotab" data-tab="library">Open Library</button></div></div></div></div>';
     if (S.offline) return '<div class="list"><div class="list-in"><div class="panel empty"><h2>Can\'t reach your server</h2>' + esc(CFG.url) + ' isn\'t answering. Your installed games still play from the Library.<div class="btns" style="margin-top:1.4rem"><button class="btn pri" data-f data-a="retry">Try again</button><button class="btn" data-f data-a="gotab" data-tab="library">Open Library</button></div></div></div></div>';
     var plats = Object.keys(PLAT);
-    return '<div class="split"><nav class="rail" data-nav="v" data-enter="sel"><h3>PLATFORMS</h3>' + plats.map(function (p) { return railItem(p, PLAT[p], G.filter(function (g) { return g.p === p; }).length, S.srvRail === p, 'srv'); }).join('') + '</nav><div class="main"><div class="vh" id="srv-h"></div><div class="scroll"><div class="grid" id="srv-grid" data-nav="grid" data-enter="first"></div></div><div class="selbar" id="selbar" hidden></div></div></div>';
+    return '<div class="split"><nav class="rail" data-nav="v" data-enter="sel">' + railItem('discover', 'Discover', null, S.srvRail === 'discover', 'srv') + '<hr><h3>PLATFORMS</h3>' + plats.map(function (p) { return railItem(p, PLAT[p], G.filter(function (g) { return g.p === p; }).length, S.srvRail === p, 'srv'); }).join('') + '</nav><div class="main" id="srv-main"></div></div>';
   },
   after: function () { if (!S.offline) srvPaint(); },
-  hints: function () { return S.offline ? [] : [['Y', 'Search'], ['RT', 'Select']]; },
-  rt: function () { if (!S.offline) selToggle(); },
-  y: function () { if (S.offline) return; openOSK({ title: 'Search ' + PLAT[S.srvRail], value: S.srvQ, kind: 'search', onInput: function (v) { S.srvQ = v; srvPaint(); }, onDone: function (v) { S.srvQ = v; srvPaint(); } }); }
+  hints: function () { return S.offline ? [] : S.srvRail === 'discover' ? [['Y', 'Search']] : [['Y', 'Search'], ['RT', 'Select']]; },
+  rt: function () { if (!S.offline && S.srvRail !== 'discover') selToggle(); },
+  y: function () { if (S.offline) return; if (S.srvRail === 'discover') return searchAll(); openOSK({ title: 'Search ' + PLAT[S.srvRail], value: S.srvQ, kind: 'search', onInput: function (v) { S.srvQ = v; srvPaint(); }, onDone: function (v) { S.srvQ = v; srvPaint(); } }); }
 };
 /* The header counts the platform's games and how many are installed; while a search
    narrows the grid it says how many of them match. Always the numbers the grid shows. */
@@ -451,6 +454,9 @@ function srvCount(p, shown) {
   return (S.srvQ ? shown.length + ' of ' + games + ' match' : games) + ' · ' + inst + ' installed';
 }
 function srvPaint() {
+  var m = $('srv-main'); if (!m) return;
+  if (S.srvRail === 'discover') { m.innerHTML = discoverHTML(); var f = m.querySelector('.cv'); if (f) hero(byId(f.dataset.id)); return; }
+  if (!$('srv-h')) m.innerHTML = '<div class="vh" id="srv-h"></div><div class="scroll"><div class="grid" id="srv-grid" data-nav="grid" data-enter="first"></div></div><div class="selbar" id="selbar" hidden></div>';
   var p = S.srvRail, L = G.filter(function (g) { return g.p === p && (!S.srvQ || g.t.toLowerCase().indexOf(S.srvQ.toLowerCase()) >= 0); }), s = sysOf(p), nat = p === 'WIN' || p === 'LINUX';
   var chips = '';
   if (!nat && s) {
@@ -866,7 +872,7 @@ function guideMenu() {
   var act = DL.filter(function (d) { return d.st === 'active' || d.st === 'queued'; }).length;
   var d = new Date(), clock = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
   var items = [
-    ['Home', function () { S.pages = []; S.tab = 'home'; render(); }],
+    ['Discover', function () { S.pages = []; S.tab = 'server'; S.srvRail = 'discover'; TABS.server._k = 'r-discover'; render(); }],
     ['Downloads' + (act ? ' · ' + act + ' active' : ''), function () { S.pages = []; S.tab = 'downloads'; render(); }],
     ['Notifications · ' + S.notes.length, notesPage],
     ['Settings', function () { S.pages = []; S.tab = 'settings'; render(); }],
@@ -972,7 +978,7 @@ var ACT = {
   /* A on a rail entry does what Right does: into the page beside it (the place you
      last left there, else its first control). */
   railOpen: function () {
-    var box = $('pane') || $('lib-grid') || $('srv-grid'); if (!box) return;
+    var box = $('pane') || $('lib-grid') || $('srv-grid') || $('disc'); if (!box) return;
     var L = focusables(box), el = box._last && box.contains(box._last) && box._last.offsetParent ? box._last : L[0];
     if (el) setFocus(el);
   },
@@ -997,9 +1003,9 @@ var ACT = {
   chGo: function () {
     var P = S.pages[S.pages.length - 1], names = [];
     Object.keys(P.pick).forEach(function (k) { var e = P.pick[k].emu; if (P.pick[k].on && e && names.indexOf(e) < 0) names.push(e); });
-    S.startup = false; S.pages = []; S.tab = 'home'; render(); setupCard(names);
+    S.startup = false; S.pages = []; S.tab = 'server'; S.srvRail = 'discover'; render(); setupCard(names);
   },
-  chSkip: function () { S.startup = false; S.pages = []; S.tab = 'home'; render(); }
+  chSkip: function () { S.startup = false; S.pages = []; S.tab = 'server'; S.srvRail = 'discover'; render(); }
 };
 function emuItems(id, curE, fn) {
   var items = [], groups = ['Installed', 'Download'];
@@ -1327,7 +1333,7 @@ function render() {
   var scr = S.pages.length ? S.pages[S.pages.length - 1] : TABS[S.tab];
   renderStage();
   INSTANT = true; if (!S.layers.length) restoreFocus(scr); INSTANT = false;
-  if (S.tab === 'home' && !S.pages.length && cur && !cur.dataset.hero) hero(byId(1));
+  if (S.tab === 'server' && S.srvRail === 'discover' && !S.pages.length && cur && !cur.dataset.hero) { var fc = document.querySelector('#disc .cv'); if (fc) hero(byId(fc.dataset.id)); }
   paintHints();
 }
 function repaint() {
