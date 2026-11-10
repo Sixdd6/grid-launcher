@@ -280,7 +280,15 @@ function move(dir) {
     if (!t) return;
   }
   else {
-    if (cont && axis === 'grid') {
+    /* An area of rows (Discover's shelves) leaves by its edges like a grid: Up
+       from the top row or Down from the bottom row only reaches what sits straight
+       past that edge (nothing on Discover, so focus stays), never the rail. */
+    var area = cur.closest('[data-edge]');
+    if (area && (dir === 'up' || dir === 'down')) {
+      t = pick(all.filter(function (e) { return area.contains(e); }));
+      if (!t) { var ar = rc(area); t = pick(all.filter(function (e) { if (area.contains(e)) return false; var b = rc(e); return b.right > ar.left && b.left < ar.right; })); if (!t) return; }
+    }
+    else if (cont && axis === 'grid') {
       t = pick(all.filter(function (e) { return cont.contains(e); }));
       /* Off a grid's edge, only to what sits straight past that edge (Server's
          header chips above the grid; the rail beside it), never diagonally: Up from
@@ -365,7 +373,7 @@ function discoverHTML() {
     var ra = G.filter(function (g) { return g.added && nr.indexOf(g) < 0; }).sort(function (a, b) { return a.added - b.added; });
     var up = lib.filter(function (g) { return g.upd; });
     function shelf(id, name, list, extra) { return '<section class="shelf"><h2>' + name + (extra ? '<span>' + extra + '</span>' : '') + '</h2>' + (list.length ? '<div class="track" data-nav="h">' + list.map(function (g) { return cover(g, { k: id, plat: true }); }).join('') + '</div>' : '<p class="empty">' + (S.offline ? 'Needs the server. It comes back when GRID reconnects.' : 'Nothing here yet.') + '</p>') + '</section>'; }
-    return '<div class="home"><div class="hero" id="hero"></div><div class="rows" id="disc">' +
+    return '<div class="home"><div class="hero" id="hero"></div><div class="rows" id="disc" data-edge="1">' +
       shelf('c', 'Continue playing', cont) +
       (S.offline ? shelf('n', 'New releases', []) : shelf('n', 'New releases', nr, 'the last six months, on your systems')) +
       (S.offline ? '' : shelf('r', 'Recently added', ra, 'to your server')) +
