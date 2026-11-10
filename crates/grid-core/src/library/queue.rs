@@ -777,7 +777,7 @@ impl QueueState {
 
     /// Whether `key` is already active (download or finalize slot) or
     /// sitting in `waiting`.
-    fn has_pending(&self, key: &JobKey) -> bool {
+    pub fn has_pending(&self, key: &JobKey) -> bool {
         let active = [self.download_active, self.finalize_active]
             .into_iter()
             .flatten()

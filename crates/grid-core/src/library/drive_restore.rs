@@ -150,6 +150,7 @@ pub(super) fn plan_restore(
         installed.rom_file_name.clone()
     };
     Ok(InstallJob {
+        space: None,
         rom_id: detail.id,
         mode: InstallMode::Base,
         content_kind: None,

@@ -256,6 +256,11 @@ pub fn run() {
     let install = registry
         .clone()
         .map(|registry| InstallService::new(registry, config_path.clone()));
+    // A library move's space check leaves room for what queued installs and
+    // backups still hold.
+    if let Ok(install) = &install {
+        library_move.set_space_ledger(install.space_ledger());
+    }
     // The data-root repair moved these entries' user data to the directory
     // the emulator really reads. One full autoconfig pass per entry writes
     // the keys a sync manages into the config files found there.

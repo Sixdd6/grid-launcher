@@ -24,7 +24,9 @@ use grid_core::config::{Config, PendingDefault};
 use grid_core::images::urls::resolve_image_url;
 use grid_core::launch::compat::{discover, request_compat_default, which_on_path};
 use grid_core::launch::profiles::load_profiles;
+use grid_core::library::backup_job::BackupItem;
 use grid_core::library::platforms::{is_native_platform, is_windows_platform};
+use grid_core::library::queue::BackupItemKey;
 use grid_core::library::registry::InstalledGame;
 use grid_core::library::update_detection::{game_has_server_update, ServerVersion};
 use grid_core::library::InstallService;
@@ -377,7 +379,7 @@ pub fn emulators_for_added_os(pack: &Pack, os: PackOs) -> Vec<EmulatorItem> {
         if pick.target_os(&[os], PackOs::host()).is_empty() {
             continue;
         }
-        items.push(EmulatorItem { pick, os });
+        items.push(EmulatorItem { pick, os, bytes: 0 });
     }
     items
 }
@@ -653,7 +655,9 @@ pub async fn set_drive_os(
             ensure_library_idle(&state)?;
             let mut target = scanned.target();
             target.name = pack.name.clone();
-            let queued = install.start_backup(client, target, items).map_err(err)?;
+            let queued = install
+                .start_backup_on(client, target, items, Some(scanned.drive.free_bytes))
+                .map_err(err)?;
             outcome.batch = queued.batch;
             outcome.queued = queued.emulators;
         }
@@ -1080,13 +1084,28 @@ async fn make_plan(
     }
     let (emulators, compat) = install.backup_emulator_choices(&games);
     let key = scanned.key();
-    let run = |sizes: &HashMap<(String, PackOs), u64>| {
+    // The space other queued or running jobs hold on the drive, less the
+    // rows for items this plan writes again (a start skips those).
+    let reserved = |planned: &Planned| {
+        let items = planned.items.clone();
+        let exclude: Vec<BackupItemKey> = items
+            .games
+            .into_iter()
+            .map(BackupItem::Game)
+            .chain(items.emulators.into_iter().map(BackupItem::Emulator))
+            .chain(items.firmware.into_iter().map(BackupItem::Firmware))
+            .map(|item| item.key())
+            .collect();
+        install.drive_reserved(&scanned.drive.mount, &key, &exclude)
+    };
+    let run_with = |sizes: &HashMap<(String, PackOs), u64>, reserved_bytes: u64| {
         plan::plan(&PlanInput {
             drive: &key,
             pack: &pack,
             server: &server,
             fat32: scanned.drive.fat32,
             free_bytes: scanned.drive.free_bytes,
+            reserved_bytes,
             games: &games,
             emulators: &emulators,
             compat_tool: compat.as_ref(),
@@ -1098,6 +1117,10 @@ async fn make_plan(
             choices: &options.choices,
             use_local: options.use_local,
         })
+    };
+    let run = |sizes: &HashMap<(String, PackOs), u64>| {
+        let first = run_with(sizes, 0);
+        run_with(sizes, reserved(&first))
     };
     let planned = run(&install.emulator_sizes());
     let mut to_size: Vec<EmulatorItem> = planned.items.emulators.clone();
@@ -1111,6 +1134,7 @@ async fn make_plan(
         to_size.push(EmulatorItem {
             pick: grid_core::backup::steam_runtime::runtime_pick(),
             os: PackOs::Linux,
+            bytes: 0,
         });
     }
     if !resolve_sizes || to_size.is_empty() {
@@ -1206,7 +1230,12 @@ pub async fn start_backup(
         ));
     }
     install
-        .start_backup(client, scanned.target(), planned.items)
+        .start_backup_on(
+            client,
+            scanned.target(),
+            planned.items,
+            Some(scanned.drive.free_bytes),
+        )
         .map_err(err)
 }
 

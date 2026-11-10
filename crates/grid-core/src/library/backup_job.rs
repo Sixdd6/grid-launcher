@@ -109,6 +109,26 @@ impl BackupItem {
         }
     }
 
+    /// What the row writes to the drive, as the plan counted it (0 for an
+    /// emulator of unknown size).
+    pub fn bytes(&self) -> u64 {
+        match self {
+            Self::Game(game) => game.bytes,
+            Self::Emulator(item) => item.bytes,
+            Self::Firmware(item) => item.bytes,
+        }
+    }
+
+    /// What the row stages in the library folder first: everything but a
+    /// game copied from this computer, which is written straight from its
+    /// install.
+    pub fn staging_bytes(&self) -> u64 {
+        match self {
+            Self::Game(game) if game.local => 0,
+            _ => self.bytes(),
+        }
+    }
+
     /// The row's title, platform column and kind.
     pub(crate) fn row(&self) -> (String, String, &'static str) {
         match self {
@@ -170,6 +190,9 @@ pub(crate) struct BackupJob {
     /// A Windows game's save folders and, when it is installed here with a
     /// Wine prefix, the saves to copy out of it. Set by the download phase.
     pub saves: Option<StagedSaves>,
+    /// The space this row holds: staging in the library folder, and its
+    /// bytes on the drive ([`super::space`]).
+    pub space: Option<Arc<super::space::JobSpace>>,
 }
 
 /// A Windows game's saves, as the download phase found them
@@ -209,6 +232,7 @@ impl BackupJob {
             staged: None,
             warnings: Vec::new(),
             saves: None,
+            space: None,
         }
     }
 }

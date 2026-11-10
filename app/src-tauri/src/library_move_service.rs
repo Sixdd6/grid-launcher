@@ -39,7 +39,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 use grid_core::config::Config;
@@ -53,6 +53,7 @@ use grid_core::library::relocate::{
 use grid_core::library::root_access::{
     library_in_use, library_root_access, validate_relocate_target, RootAccess, UnreachableReason,
 };
+use grid_core::library::space::SpaceLedger;
 use grid_core::library::InstallService;
 use serde::Serialize;
 
@@ -264,6 +265,9 @@ pub struct LibraryMoveService {
     last_error: Mutex<Option<String>>,
     probe: Arc<StrategyProbe>,
     free_space: Arc<FreeSpace>,
+    /// The install service's space ledger, once it exists: a move's space
+    /// check leaves room for what queued installs and backups still hold.
+    ledger: Arc<OnceLock<SpaceLedger>>,
     ticket_timeout: Duration,
 }
 
@@ -319,6 +323,15 @@ impl LibraryMoveService {
         ticket_timeout: Duration,
     ) -> Arc<Self> {
         let journal_path = relocate::journal_path(&config_path);
+        let ledger: Arc<OnceLock<SpaceLedger>> = Arc::default();
+        let reads = ledger.clone();
+        let free_space: Arc<FreeSpace> = Arc::new(move |path: &Path| {
+            let free = free_space(path)?;
+            Some(match reads.get() {
+                Some(ledger) => free.saturating_sub(ledger.outstanding_at(path)),
+                None => free,
+            })
+        });
         let gate = if journal_path.exists() {
             LibraryGate::closed(LIBRARY_MOVE_BUSY)
         } else {
@@ -337,6 +350,7 @@ impl LibraryMoveService {
             last_error: Mutex::new(None),
             probe,
             free_space,
+            ledger,
             ticket_timeout,
         })
     }
@@ -440,6 +454,12 @@ impl LibraryMoveService {
                 self.pending_resume.store(true, Ordering::SeqCst);
             }
         }
+    }
+
+    /// Hands the move the install service's space ledger (once, at
+    /// startup): free space then counts what queued jobs still hold.
+    pub fn set_space_ledger(&self, ledger: SpaceLedger) {
+        let _ = self.ledger.set(ledger);
     }
 
     /// True when startup left a Copy or Cleanup phase to resume.

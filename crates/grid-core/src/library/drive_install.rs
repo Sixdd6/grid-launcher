@@ -27,10 +27,10 @@ use serde_json::Value;
 use super::backup_job::DriveTarget;
 use super::queue::{EntryMeta, JobKey};
 use super::{
-    drive_copy, drive_restore, file_stem_of, is_emulators_platform, plan_install, platform_dir,
-    safe_file_name, server_entry_name, DriveSaves, DriveSource, EmulatorJob, GameSource,
-    InstallMode, InstallService, JobPayload, JobTarget, LibraryError, ResolvedPaths,
-    COMPAT_TOOL_PLATFORM, EMULATOR_PLATFORM, SERVER_SOURCE_PREFIX,
+    drive_copy, drive_restore, file_stem_of, is_emulators_platform, plan_install, safe_file_name,
+    server_entry_name, DriveSaves, DriveSource, EmulatorJob, GameSource, InstallMode,
+    InstallService, JobPayload, JobTarget, LibraryError, ResolvedPaths, COMPAT_TOOL_PLATFORM,
+    EMULATOR_PLATFORM, SERVER_SOURCE_PREFIX,
 };
 use crate::backup::archive::PartSource;
 use crate::backup::pack::{self, PackEmulator, PackError, PackGame, PackOs, PackSaves};
@@ -222,9 +222,9 @@ impl InstallService {
         let job = match &game.installed {
             None => plan_install(&detail, &library, GameSource::Drive(source))?,
             Some(installed) => {
-                let platform_root = platform_dir(&library, &detail.platform_name);
-                let free = crate::library::relocate::free_space(&platform_root);
-                drive_restore::plan_restore(&detail, game, installed, &library, source, free)?
+                // The free-space check is the ledger's, at admission
+                // (`InstallService::attach_space`), so queued installs count.
+                drive_restore::plan_restore(&detail, game, installed, &library, source, None)?
             }
         };
         let key = JobKey::Rom(job.rom_id);
@@ -330,6 +330,7 @@ impl InstallService {
                 LibraryError::Extract("No home folder for the Steam Linux Runtime".to_string())
             })?;
             let job = EmulatorJob {
+                space: None,
                 source_id: crate::backup::steam_runtime::RUNTIME_SOURCE_ID.to_string(),
                 profile_name: crate::backup::steam_runtime::RUNTIME_TITLE.to_string(),
                 profile_args: String::new(),
@@ -346,6 +347,7 @@ impl InstallService {
             (job, COMPAT_TOOL_PLATFORM, "compat_tool")
         } else if umu_launcher {
             let job = EmulatorJob {
+                space: None,
                 source_id: umu::UMU_SOURCE_ID.to_string(),
                 profile_name: umu::UMU_TITLE.to_string(),
                 profile_args: String::new(),
@@ -366,6 +368,7 @@ impl InstallService {
             needs_umu = profile.compat_tool_type == "proton";
             let configured_tag = configured_tag(profile.source.as_ref(), &entry.version);
             let job = EmulatorJob {
+                space: None,
                 source_id: entry.source_id.clone(),
                 profile_name: profile.name.clone(),
                 profile_args: profile.args.clone(),
@@ -415,6 +418,7 @@ impl InstallService {
                 )
             };
             let job = EmulatorJob {
+                space: None,
                 source_id: entry.source_id.clone(),
                 profile_name,
                 profile_args,

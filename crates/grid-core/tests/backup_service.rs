@@ -223,6 +223,7 @@ impl Harness {
                     name: name.to_string(),
                     platform_name: "GENESIS".into(),
                     local: false,
+                    bytes: 0,
                 })
                 .collect(),
             ..Default::default()
@@ -807,11 +808,13 @@ async fn backs_up_a_manual_emulator_archive_and_firmware() {
                 platforms: vec!["psx".into()],
             },
             os: host,
+            bytes: 0,
         }],
         firmware: vec![FirmwareItem {
             platform_id: 9,
             slug: "psx".into(),
             platform_name: "PlayStation".into(),
+            bytes: 0,
         }],
     };
     let queued = h
@@ -1462,4 +1465,86 @@ async fn a_running_windows_games_saves_are_not_copied() {
     assert_eq!(saves.folders.len(), 2);
     assert!(saves.parts.is_empty());
     assert!(!h.mount.join("gridpack").join("saves").exists());
+}
+
+/// Two batches for one small drive: the first holds its space while it is
+/// queued, so the second is refused before anything downloads; once the
+/// first is done its space is back.
+#[tokio::test]
+async fn a_second_batch_that_no_longer_fits_the_drive_is_refused() {
+    use grid_core::library::space::{FsKey, SpaceProbe, SPACE_MARGIN};
+    let h = Harness::new().await;
+    let one: &[u8] = &[1u8; 600];
+    let two: &[u8] = &[2u8; 600];
+    h.mount_game(1, "One", "genesis", "One.md", &[(11, "One.md", one)], 300)
+        .await;
+    h.mount_game(2, "Two", "genesis", "Two.md", &[(21, "Two.md", two)], 0)
+        .await;
+    // The drive and the library are told apart, and the library is roomy.
+    let mount = h.mount.clone();
+    h.service.set_space_probe(SpaceProbe {
+        free: Arc::new(|_| Some(u64::MAX / 4)),
+        key: Arc::new(move |p| {
+            Some(if p.starts_with(&mount) {
+                FsKey::Device(2)
+            } else {
+                FsKey::Device(1)
+            })
+        }),
+    });
+    // Room on the drive for one game, not two.
+    let drive_free = Some(SPACE_MARGIN + 1000);
+    let items = |rom_id: i64, name: &str| {
+        let mut items = Harness::items(&[(rom_id, name)]);
+        items.games[0].bytes = 600;
+        items
+    };
+
+    let first = h
+        .service
+        .start_backup_on(h.client.clone(), h.drive(), items(1, "One"), drive_free)
+        .unwrap();
+    assert_eq!(first.games, 1);
+    assert_eq!(h.service.reserved_at(&h.mount), 600);
+    // A plan that writes game 1 again does not count its own row.
+    let key = h.drive().key;
+    assert_eq!(
+        h.service.drive_reserved(
+            &h.mount,
+            &key,
+            &[grid_core::library::queue::BackupItemKey::Game(1)]
+        ),
+        0
+    );
+
+    let refused = h
+        .service
+        .start_backup_on(h.client.clone(), h.drive(), items(2, "Two"), drive_free)
+        .unwrap_err();
+    assert_eq!(
+        refused.to_string(),
+        format!("{LABEL} doesn't have enough free space (needs 600 B, 400 B available)")
+    );
+    assert!(h.row_for(2).is_none(), "nothing was queued for game 2");
+
+    // Starting the same game again is a duplicate, not a refusal.
+    let again = h
+        .service
+        .start_backup_on(h.client.clone(), h.drive(), items(1, "One"), drive_free)
+        .unwrap();
+    assert_eq!(again.games, 0);
+
+    let row = h.wait_terminal(1).await;
+    assert_eq!(row.status, DownloadStatus::Completed, "{row:#?}");
+    h.wait_for("the first batch's space to be released", |h| {
+        h.service.space_ledger().is_empty()
+    })
+    .await;
+    let second = h
+        .service
+        .start_backup_on(h.client.clone(), h.drive(), items(2, "Two"), drive_free)
+        .unwrap();
+    assert_eq!(second.games, 1);
+    let row = h.wait_terminal(2).await;
+    assert_eq!(row.status, DownloadStatus::Completed, "{row:#?}");
 }

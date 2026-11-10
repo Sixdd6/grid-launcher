@@ -83,7 +83,12 @@ pub struct BackupPlan {
     #[serde(default)]
     pub runtime: Option<PlanRuntime>,
     pub bytes_to_write: u64,
+    /// The drive's free space less what other queued or running backups
+    /// still hold on it (`reserved_bytes`).
     pub free_bytes: u64,
+    /// The drive's space other queued or running backups hold.
+    #[serde(default)]
+    pub reserved_bytes: u64,
     pub fits: bool,
     /// Some requested game is installed on this computer (shows "Copy
     /// installed games from this computer").
@@ -599,6 +604,9 @@ pub struct GameItem {
     pub platform_name: String,
     /// Copied from this computer's install instead of downloaded.
     pub local: bool,
+    /// What it writes to the drive: the local archive's size, or the
+    /// server's size.
+    pub bytes: u64,
 }
 
 /// One emulator row: one emulator for one OS.
@@ -606,6 +614,8 @@ pub struct GameItem {
 pub struct EmulatorItem {
     pub pick: EmulatorPick,
     pub os: PackOs,
+    /// The release's size, 0 when not known yet.
+    pub bytes: u64,
 }
 
 /// One firmware row: one platform's firmware.
@@ -614,6 +624,8 @@ pub struct FirmwareItem {
     pub platform_id: i64,
     pub slug: String,
     pub platform_name: String,
+    /// The firmware's size.
+    pub bytes: u64,
 }
 
 /// The rows a backup queues, in the order they run: games, then emulators,
@@ -641,6 +653,9 @@ pub struct PlanInput<'a> {
     pub server: &'a str,
     pub fat32: bool,
     pub free_bytes: u64,
+    /// The drive's space other queued or running backups still hold
+    /// ([`crate::library::space`]).
+    pub reserved_bytes: u64,
     pub games: &'a [PlanGame],
     /// The emulator choice per platform slug ([`choose_emulator`]).
     pub emulators: &'a [(String, EmulatorChoice)],
@@ -687,7 +702,8 @@ pub struct Planned {
 /// - Firmware for those systems goes when `include_firmware` is set and the
 ///   drive does not have it yet.
 /// - `fits` when the bytes to write, plus the write margin, fit the free
-///   space. An emulator of unknown size counts as 0.
+///   space less what other queued or running backups hold on the drive
+///   (`reserved_bytes`). An emulator of unknown size counts as 0.
 pub fn plan(input: &PlanInput<'_>) -> Planned {
     let mut items = BackupItems::default();
     let mut skipped = Vec::new();
@@ -774,6 +790,7 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
             name: game.name.clone(),
             platform_name: game.platform_name.clone(),
             local: archive.is_some(),
+            bytes: archive.unwrap_or(game.size),
         });
         systems.push(game);
     }
@@ -870,9 +887,15 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
             note,
         });
         for os in missing {
+            let bytes = input
+                .sizes
+                .get(&(pick.name.clone(), os))
+                .copied()
+                .unwrap_or(0);
             items.emulators.push(EmulatorItem {
                 pick: pick.clone(),
                 os,
+                bytes,
             });
         }
     }
@@ -892,6 +915,7 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
             items.emulators.push(EmulatorItem {
                 pick,
                 os: PackOs::Linux,
+                bytes: size.unwrap_or(0),
             });
         }
         Some(PlanRuntime {
@@ -934,6 +958,7 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
                 platform_id: set.platform_id,
                 slug: set.slug.clone(),
                 platform_name: set.platform_name.clone(),
+                bytes: set.bytes,
             });
         }
     }
@@ -948,7 +973,8 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
         String::new()
     };
 
-    let fits = bytes == 0 || bytes.saturating_add(SPACE_MARGIN) <= input.free_bytes;
+    let available = input.free_bytes.saturating_sub(input.reserved_bytes);
+    let fits = bytes == 0 || bytes.saturating_add(SPACE_MARGIN) <= available;
     Planned {
         plan: BackupPlan {
             drive: input.drive.to_string(),
@@ -960,7 +986,8 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
             firmware_reason,
             runtime,
             bytes_to_write: bytes,
-            free_bytes: input.free_bytes,
+            free_bytes: available,
+            reserved_bytes: input.reserved_bytes,
             fits,
             local_available,
             use_local: input.use_local,
@@ -1030,6 +1057,7 @@ mod tests {
         sizes: HashMap<(String, PackOs), u64>,
         fat32: bool,
         free: u64,
+        reserved: u64,
         include_firmware: bool,
         use_local: bool,
         choices: HashMap<i64, SourceChoice>,
@@ -1054,6 +1082,7 @@ mod tests {
                 sizes: HashMap::new(),
                 fat32: false,
                 free: 1 << 40,
+                reserved: 0,
                 include_firmware: true,
                 use_local: true,
                 choices: HashMap::new(),
@@ -1067,6 +1096,7 @@ mod tests {
                 server: SERVER,
                 fat32: self.fat32,
                 free_bytes: self.free,
+                reserved_bytes: self.reserved,
                 games: &self.games,
                 emulators: &self.emulators,
                 compat_tool: None,
@@ -1359,6 +1389,39 @@ mod tests {
     }
 
     #[test]
+    fn space_other_backups_hold_shrinks_what_fits() {
+        let mut fx = Fixture::new();
+        let total = 100 + 200 + 1000;
+        fx.free = total + SPACE_MARGIN + 500;
+        assert!(fx.run().plan.fits);
+        fx.reserved = 500;
+        let planned = fx.run();
+        assert!(planned.plan.fits);
+        assert_eq!(planned.plan.free_bytes, total + SPACE_MARGIN);
+        assert_eq!(planned.plan.reserved_bytes, 500);
+        fx.reserved = 501;
+        let planned = fx.run();
+        assert!(!planned.plan.fits);
+        assert_eq!(planned.plan.free_bytes, total + SPACE_MARGIN - 1);
+    }
+
+    #[test]
+    fn each_item_carries_the_bytes_it_writes() {
+        let mut fx = Fixture::new();
+        fx.sizes.insert(("DuckStation".into(), PackOs::Linux), 10);
+        let items = fx.run().items;
+        assert_eq!(
+            items.games.iter().map(|g| g.bytes).collect::<Vec<_>>(),
+            vec![100, 200]
+        );
+        let emulator_bytes: Vec<(PackOs, u64)> =
+            items.emulators.iter().map(|e| (e.os, e.bytes)).collect();
+        assert!(emulator_bytes.contains(&(PackOs::Linux, 10)));
+        assert!(emulator_bytes.contains(&(PackOs::Windows, 0)));
+        assert_eq!(items.firmware[0].bytes, 1000);
+    }
+
+    #[test]
     fn firmware_already_on_the_drive_is_not_written_and_disables_the_box() {
         let mut fx = Fixture::new();
         fx.pack.firmware.push(PackFirmware {
@@ -1439,6 +1502,7 @@ mod tests {
             server: SERVER,
             fat32: false,
             free_bytes: 1 << 40,
+            reserved_bytes: 0,
             games: &fx.games,
             emulators: &fx.emulators,
             compat_tool: Some(&tool),
@@ -1476,6 +1540,7 @@ mod tests {
             server: SERVER,
             fat32: false,
             free_bytes: 1 << 40,
+            reserved_bytes: 0,
             games: &fx.games,
             emulators: &fx.emulators,
             compat_tool: Some(&tool),
@@ -1508,6 +1573,7 @@ mod tests {
                 server: SERVER,
                 fat32: false,
                 free_bytes: 1 << 40,
+                reserved_bytes: 0,
                 games,
                 emulators: &[],
                 compat_tool: Some(&tool),
@@ -1603,6 +1669,7 @@ mod tests {
             server: SERVER,
             fat32: false,
             free_bytes: 1 << 40,
+            reserved_bytes: 0,
             games: &fx.games,
             emulators: &[],
             compat_tool: Some(&tool),

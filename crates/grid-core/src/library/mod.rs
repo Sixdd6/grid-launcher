@@ -29,6 +29,7 @@ pub mod relink;
 pub mod relocate;
 pub mod root_access;
 pub mod server_emulator;
+pub mod space;
 pub mod specials;
 pub mod update_detection;
 pub mod user_data_links;
@@ -341,6 +342,9 @@ struct InstallJob {
     /// ([`drive_restore::plan_restore`]): the job then has no targets, and
     /// its download and finalize steps are the restore's own.
     restore: Option<drive_restore::RestorePlan>,
+    /// The space this job holds in the library folder ([`space`]), set at
+    /// admission and released with the job.
+    space: Option<Arc<space::JobSpace>>,
 }
 
 /// Where an install's bytes come from. The plan and the finalize route are
@@ -477,6 +481,9 @@ struct EmulatorJob {
     /// Set for an emulator installed from a backup drive: the files to copy
     /// off the drive instead of downloading anything.
     local: Option<drive_install::LocalBuild>,
+    /// The space this job holds in the library folder ([`space`]), set at
+    /// admission and released with the job.
+    space: Option<Arc<space::JobSpace>>,
 }
 
 impl EmulatorJob {
@@ -577,6 +584,17 @@ enum JobPayload {
     /// One backup row (`backup_job`): download to staging, then write to
     /// the drive.
     Backup(Box<backup_job::BackupJob>),
+}
+
+impl JobPayload {
+    /// The space the job holds ([`space`]).
+    fn space(&self) -> Option<&Arc<space::JobSpace>> {
+        match self {
+            JobPayload::Game(job) => job.space.as_ref(),
+            JobPayload::Emulator(job) => job.space.as_ref(),
+            JobPayload::Backup(job) => job.space.as_ref(),
+        }
+    }
 }
 
 /// Whether a download from `provider` needs the GitHub API headers. Read
@@ -758,6 +776,7 @@ fn plan_install(
                 detail.filesize_bytes
             };
             InstallJob {
+                space: None,
                 rom_id: detail.id,
                 mode: InstallMode::Base,
                 content_kind: None,
@@ -787,6 +806,7 @@ fn plan_install(
                 })
                 .collect();
             InstallJob {
+                space: None,
                 rom_id: detail.id,
                 mode: InstallMode::Base,
                 content_kind: None,
@@ -849,6 +869,7 @@ fn plan_native_install(
     });
 
     InstallJob {
+        space: None,
         rom_id: detail.id,
         mode: InstallMode::Base,
         content_kind: None,
@@ -881,6 +902,81 @@ enum BaseRoute {
     Extract,
     /// Nothing to extract: the downloaded file is the install.
     Downloaded,
+}
+
+/// Whether `job` extracts its download next to it: a single-file game
+/// whose route is not [`BaseRoute::Downloaded`], and every add-on mode (an
+/// update or DLC archive is unpacked over the install).
+fn job_extracts(job: &InstallJob) -> bool {
+    if job.multi_file_game_dir.is_some() || job.restore.is_some() {
+        return false;
+    }
+    match job.mode {
+        InstallMode::Base | InstallMode::Update => {
+            base_finalize_route(
+                &job.detail.platform_slug,
+                &job.detail.platform_name,
+                &job.primary_archive,
+            ) != BaseRoute::Downloaded
+        }
+        InstallMode::Ps4Content | InstallMode::Xbox360Content | InstallMode::NativeUpdate => true,
+    }
+}
+
+/// What a game job adds to the library folder at its peak: the server's
+/// file sizes (unknown when any is missing), plus as much again when it is
+/// extracted. A restore needs its tree's size.
+fn install_estimate(job: &InstallJob) -> space::Estimate {
+    if let Some(plan) = &job.restore {
+        return space::Estimate {
+            download: Some(plan.installed.tree_bytes),
+            existing: 0,
+            extracts: false,
+        };
+    }
+    let download = job.targets.iter().try_fold(0u64, |sum, target| {
+        u64::try_from(target.expected_size)
+            .ok()
+            .filter(|size| *size > 0)
+            .map(|size| sum.saturating_add(size))
+    });
+    // A destination that is already there is skipped when complete, or
+    // truncated and replaced: either way it needs no new space.
+    let existing = job
+        .targets
+        .iter()
+        .filter_map(|target| fs::metadata(&target.dest).ok())
+        .filter(fs::Metadata::is_file)
+        .fold(0u64, |sum, meta| sum.saturating_add(meta.len()));
+    space::Estimate {
+        download: if job.targets.is_empty() {
+            None
+        } else {
+            download
+        },
+        existing,
+        extracts: job_extracts(job),
+    }
+}
+
+/// What an emulator job adds: a release copied off a drive has known
+/// sizes; a download's size is known only once its response arrives.
+/// Either is extracted.
+fn emulator_estimate(job: &EmulatorJob) -> space::Estimate {
+    let download = job.local.as_ref().and_then(|local| {
+        std::iter::once(&local.primary)
+            .chain(&local.supplementals)
+            .try_fold(0u64, |sum, path| {
+                fs::metadata(path)
+                    .ok()
+                    .map(|meta| sum.saturating_add(meta.len()))
+            })
+    });
+    space::Estimate {
+        download,
+        existing: 0,
+        extracts: true,
+    }
 }
 
 /// [`BaseRoute`] for `platform` and the downloaded `archive`. Pure, so the
@@ -963,6 +1059,7 @@ fn content_job(
     ));
 
     let mut job = InstallJob {
+        space: None,
         rom_id: detail.id,
         mode,
         content_kind: Some(kind),
@@ -1157,6 +1254,14 @@ pub struct InstallService {
     /// Whether a game is running ([`Self::set_running_check`]). `None`
     /// (grid-core tests that do not opt in): nothing counts as running.
     running_check: RwLock<Option<RunningCheck>>,
+    /// The space promised to queued and running jobs ([`space`]).
+    space: space::SpaceLedger,
+    /// How a volume's free space and filesystem are read
+    /// ([`Self::set_space_probe`] in tests).
+    space_probe: RwLock<space::SpaceProbe>,
+    /// Each admitted job's [`space::JobSpace`], by entry id, for the
+    /// progress callbacks. Weak: the job's payload owns it.
+    job_spaces: Mutex<HashMap<u64, std::sync::Weak<space::JobSpace>>>,
 }
 
 impl InstallService {
@@ -1214,6 +1319,9 @@ impl InstallService {
             drive_rows: Mutex::new(HashMap::new()),
             drive_copy_hook: RwLock::new(None),
             running_check: RwLock::new(None),
+            space: space::SpaceLedger::new(),
+            space_probe: RwLock::new(space::SpaceProbe::system()),
+            job_spaces: Mutex::new(HashMap::new()),
         })
     }
 
@@ -1624,6 +1732,7 @@ impl InstallService {
         let title = format!("{} (update)", detail.name);
         let platform = detail.platform_name.clone();
         let job = InstallJob {
+            space: None,
             rom_id,
             mode: InstallMode::NativeUpdate,
             content_kind: None,
@@ -1913,6 +2022,7 @@ impl InstallService {
             .unwrap()
             .insert(source_id.clone(), request.clone());
         let job = EmulatorJob {
+            space: None,
             source_id: source_id.clone(),
             profile_name: profile.name.clone(),
             profile_args: profile.args.clone(),
@@ -1958,6 +2068,7 @@ impl InstallService {
             .unwrap_or_else(|| "latest".to_string());
 
         let job = EmulatorJob {
+            space: None,
             source_id: source_id.clone(),
             profile_name: profile.name.clone(),
             profile_args: profile.args.clone(),
@@ -2062,6 +2173,7 @@ impl InstallService {
             .unwrap_or_else(|| "latest".to_string());
 
         let job = EmulatorJob {
+            space: None,
             source_id: source_id.clone(),
             profile_name: profile.name.clone(),
             profile_args: profile.args.clone(),
@@ -2122,6 +2234,7 @@ impl InstallService {
             return Err(LibraryError::Extract(UMU_LINUX_ONLY.to_string()));
         }
         let job = EmulatorJob {
+            space: None,
             source_id: umu::UMU_SOURCE_ID.to_string(),
             profile_name: umu::UMU_TITLE.to_string(),
             profile_args: String::new(),
@@ -2188,6 +2301,140 @@ impl InstallService {
         }
     }
 
+    // --- space ----------------------------------------------------------------
+
+    /// The ledger of space promised to queued and running jobs. Every clone
+    /// is the same ledger (the library move reads it).
+    pub fn space_ledger(&self) -> space::SpaceLedger {
+        self.space.clone()
+    }
+
+    /// Replaces how volumes are read (tests fake a small or full disk).
+    pub fn set_space_probe(&self, probe: space::SpaceProbe) {
+        *self.space_probe.write().unwrap() = probe;
+    }
+
+    fn space_probe(&self) -> space::SpaceProbe {
+        self.space_probe.read().unwrap().clone()
+    }
+
+    /// What queued and running jobs still hold on the filesystem of `path`.
+    pub fn reserved_at(&self, path: &Path) -> u64 {
+        (self.space_probe().key)(path).map_or(0, |key| self.space.outstanding(&key))
+    }
+
+    /// What queued and running jobs hold on the drive at `mount`, less
+    /// what the backup rows for `drive_key` whose items are in `exclude`
+    /// hold: a plan that would write those items again must not count them
+    /// twice (a start skips them).
+    pub fn drive_reserved(
+        &self,
+        mount: &Path,
+        drive_key: &str,
+        exclude: &[queue::BackupItemKey],
+    ) -> u64 {
+        let total = self.reserved_at(mount);
+        let rows = self.backup_rows.lock().unwrap();
+        let spaces = self.job_spaces.lock().unwrap();
+        let excluded = rows
+            .iter()
+            .filter(|(_, (drive, item))| drive.key == drive_key && exclude.contains(&item.key()))
+            .filter_map(|(id, _)| spaces.get(id).and_then(std::sync::Weak::upgrade))
+            .fold(0u64, |sum, space| {
+                sum.saturating_add(space.drive_outstanding())
+            });
+        total.saturating_sub(excluded)
+    }
+
+    /// Checks and reserves an install's estimated peak in the library
+    /// folder at `at`. Refused with "There isn't enough free space in the
+    /// library folder for <Game> (needs X, Y available)". A volume that
+    /// cannot be read is reserved without a check.
+    fn reserve_install(
+        &self,
+        title: &str,
+        at: &Path,
+        estimate: space::Estimate,
+    ) -> Result<Arc<space::JobSpace>, LibraryError> {
+        let probe = self.space_probe();
+        let reservation = match (probe.key)(at) {
+            None => None,
+            Some(key) => {
+                let bytes = estimate.peak();
+                match (probe.free)(at) {
+                    None => Some(self.space.reserve(key, bytes)),
+                    Some(free) => {
+                        let request = space::Request { key, bytes, free };
+                        match self.space.try_reserve(std::slice::from_ref(&request)) {
+                            Ok(mut held) => held.pop(),
+                            Err((_, shortfall)) => {
+                                return Err(LibraryError::Extract(
+                                    space::library_shortfall_message(title, shortfall),
+                                ))
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        Ok(Arc::new(space::JobSpace::install(
+            reservation,
+            estimate,
+            at.to_path_buf(),
+            title,
+            probe,
+        )))
+    }
+
+    /// Gives a game or emulator job its reservation, unless it has one.
+    /// A backup row is reserved by [`Self::start_backup_on`] instead.
+    fn attach_space(&self, payload: &mut JobPayload) -> Result<(), LibraryError> {
+        match payload {
+            JobPayload::Game(job) if job.space.is_none() => {
+                let at = match &job.restore {
+                    Some(plan) => plan.dest.clone(),
+                    None => job.primary_archive.clone(),
+                };
+                let estimate = install_estimate(job);
+                job.space = Some(self.reserve_install(&job.detail.name, &at, estimate)?);
+            }
+            JobPayload::Emulator(job) if job.space.is_none() => {
+                let estimate = emulator_estimate(job);
+                job.space = Some(self.reserve_install(&job.entry_name, &job.library, estimate)?);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn job_space(&self, id: u64) -> Option<Arc<space::JobSpace>> {
+        self.job_spaces
+            .lock()
+            .unwrap()
+            .get(&id)
+            .and_then(std::sync::Weak::upgrade)
+    }
+
+    /// The archive is down: before extracting, read its real uncompressed
+    /// size where that is cheap (a zip's central directory) and resize the
+    /// job's reservation to it. When that no longer fits the download is
+    /// removed and the job fails with the library-folder message.
+    fn check_extract_space(&self, job: &InstallJob) -> Result<(), LibraryError> {
+        let Some(space) = &job.space else {
+            return Ok(());
+        };
+        if !job_extracts(job) {
+            return Ok(());
+        }
+        let Some(extracted) = extract::zip_uncompressed_total(&job.primary_archive) else {
+            return Ok(());
+        };
+        space.resize_for_extract(extracted).map_err(|message| {
+            let _ = fs::remove_file(&job.primary_archive);
+            LibraryError::Extract(message)
+        })
+    }
+
     // --- backups ------------------------------------------------------------
 
     /// Queues a backup to `drive`: one row per item, games first, then
@@ -2206,15 +2453,31 @@ impl InstallService {
         drive: backup_job::DriveTarget,
         items: crate::backup::plan::BackupItems,
     ) -> Result<crate::backup::plan::BackupQueued, LibraryError> {
+        let free = (self.space_probe().free)(&drive.mount);
+        self.start_backup_on(client, drive, items, free)
+    }
+
+    /// [`Self::start_backup`] with the drive's free space as the caller's
+    /// drive scan read it (`None` when unknown: nothing is checked on the
+    /// drive).
+    ///
+    /// The rows' space is checked against the [`space`] ledger and reserved
+    /// in one step, so two quick starts can never both pass: the bytes to
+    /// write on the drive, and the staging space in the library folder.
+    /// When the batch does not fit nothing is queued: "<label> doesn't have
+    /// enough free space (needs X, Y available)". A row already queued for
+    /// the drive is skipped before the check.
+    pub fn start_backup_on(
+        self: &Arc<Self>,
+        client: Arc<RommClient>,
+        drive: backup_job::DriveTarget,
+        items: crate::backup::plan::BackupItems,
+        drive_free: Option<u64>,
+    ) -> Result<crate::backup::plan::BackupQueued, LibraryError> {
         self.check_library_gate()?;
         let library = self.library_root()?;
         self.drive_connected(&drive.key);
-        let batch = self.next_batch.fetch_add(1, Ordering::Relaxed) + 1;
-        let mut queued = crate::backup::plan::BackupQueued {
-            batch,
-            ..Default::default()
-        };
-        let rows = items
+        let rows: Vec<backup_job::BackupItem> = items
             .games
             .into_iter()
             .map(backup_job::BackupItem::Game)
@@ -2229,14 +2492,33 @@ impl InstallService {
                     .firmware
                     .into_iter()
                     .map(backup_job::BackupItem::Firmware),
-            );
-        for item in rows {
+            )
+            .collect();
+        let rows: Vec<backup_job::BackupItem> = {
+            let queue = self.queue.lock().unwrap();
+            rows.into_iter()
+                .filter(|item| {
+                    !queue.has_pending(&JobKey::Backup {
+                        drive: drive.key.clone(),
+                        item: item.key(),
+                    })
+                })
+                .collect()
+        };
+        let spaces = self.reserve_backup(&drive, &library, &rows, drive_free)?;
+        let batch = self.next_batch.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut queued = crate::backup::plan::BackupQueued {
+            batch,
+            ..Default::default()
+        };
+        for (item, space) in rows.into_iter().zip(spaces) {
             let admitted = self.admit_backup_item(
                 client.clone(),
                 drive.clone(),
                 item.clone(),
                 &library,
                 batch,
+                Some(space),
             )?;
             if admitted {
                 match item {
@@ -2249,6 +2531,64 @@ impl InstallService {
         Ok(queued)
     }
 
+    /// Checks and reserves, in one step, the space `rows` need: each row's
+    /// bytes on the drive (against `drive_free`) and its staging in the
+    /// library folder. One [`space::JobSpace`] per row, in order.
+    fn reserve_backup(
+        &self,
+        drive: &backup_job::DriveTarget,
+        library: &Path,
+        rows: &[backup_job::BackupItem],
+        drive_free: Option<u64>,
+    ) -> Result<Vec<Arc<space::JobSpace>>, LibraryError> {
+        let probe = self.space_probe();
+        let drive_key = (probe.key)(&drive.mount);
+        let staging_key = (probe.key)(library);
+        let staging_free = (probe.free)(library).unwrap_or(u64::MAX);
+        let drive_free = drive_free.unwrap_or(u64::MAX);
+        let mut requests: Vec<space::Request> = Vec::new();
+        let mut on_drive_flags: Vec<bool> = Vec::new();
+        let mut slots: Vec<(Option<usize>, Option<usize>)> = Vec::new();
+        for item in rows {
+            let mut push = |key: &Option<space::FsKey>, bytes: u64, free: u64, on_drive: bool| {
+                key.clone().map(|key| {
+                    requests.push(space::Request { key, bytes, free });
+                    on_drive_flags.push(on_drive);
+                    requests.len() - 1
+                })
+            };
+            let on_drive = push(&drive_key, item.bytes(), drive_free, true);
+            let staged = push(&staging_key, item.staging_bytes(), staging_free, false);
+            slots.push((on_drive, staged));
+        }
+        let held = self
+            .space
+            .try_reserve(&requests)
+            .map_err(|(index, shortfall)| {
+                LibraryError::Extract(if on_drive_flags[index] {
+                    space::drive_shortfall_message(&drive.label, shortfall)
+                } else {
+                    space::library_shortfall_message("this backup", shortfall)
+                })
+            })?;
+        let mut held: Vec<Option<space::Reservation>> = held.into_iter().map(Some).collect();
+        let mut take = |index: Option<usize>| index.and_then(|index| held[index].take());
+        Ok(rows
+            .iter()
+            .zip(slots)
+            .map(|(item, (on_drive, staged))| {
+                let staging = take(staged);
+                let on_drive = take(on_drive);
+                Arc::new(space::JobSpace::backup(
+                    staging,
+                    on_drive,
+                    &item.row().0,
+                    probe.clone(),
+                ))
+            })
+            .collect())
+    }
+
     /// Admits one backup row and remembers it for `retry`. `false` for a
     /// duplicate.
     fn admit_backup_item(
@@ -2258,6 +2598,7 @@ impl InstallService {
         item: backup_job::BackupItem,
         library: &Path,
         batch: u64,
+        space: Option<Arc<space::JobSpace>>,
     ) -> Result<bool, LibraryError> {
         let (title, platform, kind) = item.row();
         let key = JobKey::Backup {
@@ -2270,8 +2611,9 @@ impl InstallService {
             drive_label: drive.label.clone(),
             batch,
         };
-        let job =
+        let mut job =
             backup_job::BackupJob::new(drive.clone(), item.clone(), client, library.to_path_buf());
+        job.space = space;
         let admitted = self.admit_meta(
             key,
             &title,
@@ -2521,9 +2863,13 @@ impl InstallService {
             _ => return Err(not_connected()),
         }
         let library = self.library_root()?;
+        let free = (self.space_probe().free)(&drive.mount);
+        let space = self
+            .reserve_backup(&drive, &library, std::slice::from_ref(&item), free)?
+            .pop();
         self.dismiss(entry_id);
         let batch = self.next_batch.fetch_add(1, Ordering::Relaxed) + 1;
-        self.admit_backup_item(client, drive, item, &library, batch)?;
+        self.admit_backup_item(client, drive, item, &library, batch, space)?;
         Ok(())
     }
 
@@ -3129,6 +3475,18 @@ impl InstallService {
         payload: JobPayload,
         meta: EntryMeta,
     ) -> Result<Option<u64>, LibraryError> {
+        let mut payload = payload;
+        {
+            // A duplicate is ignored before its space is checked: the live
+            // job already holds it.
+            let queue = self.queue.lock().unwrap();
+            self.check_library_gate()?;
+            if queue.has_pending(&key) {
+                return Ok(None);
+            }
+        }
+        self.attach_space(&mut payload)?;
+        let space = payload.space().map(Arc::downgrade);
         let (admitted, start) = {
             let mut queue = self.queue.lock().unwrap();
             // Under the queue lock: a library move closes the gate first and
@@ -3159,6 +3517,11 @@ impl InstallService {
         let Some(admitted) = admitted else {
             return Ok(None);
         };
+        if let Some(space) = space {
+            let mut spaces = self.job_spaces.lock().unwrap();
+            spaces.retain(|_, held| held.strong_count() > 0);
+            spaces.insert(admitted, space);
+        }
         if let Some((id, payload)) = start {
             self.spawn_download(id, payload);
         }
@@ -3192,8 +3555,11 @@ impl InstallService {
             let owner = service.clone();
             let worker = tokio::spawn(async move {
                 let mut payload = payload;
+                let stop = cancel.clone();
                 let mut on_progress = move |downloaded, total, speed| {
-                    reporter.on_download_progress(id, downloaded, total, speed);
+                    if reporter.on_download_progress(id, downloaded, total, speed) {
+                        stop.store(true, Ordering::Relaxed);
+                    }
                 };
                 let result = match &mut payload {
                     JobPayload::Game(job) => match &job.source {
@@ -3323,6 +3689,11 @@ impl InstallService {
                 Err(LibraryError::DriveRemoved(reason))
             }
             (_, result) => result,
+        };
+        // A download stopped because the job no longer fits fails with why.
+        let result = match (result, payload.space().and_then(|space| space.shortfall())) {
+            (Err(LibraryError::Cancelled), Some(message)) => Err(LibraryError::Extract(message)),
+            (result, _) => result,
         };
         if let (JobPayload::Backup(job), Err(_)) = (&payload, &result) {
             backup_job::remove_staging(&job.staging);
@@ -3472,7 +3843,9 @@ impl InstallService {
     ) -> (Result<(), LibraryError>, String) {
         let mut warning = String::new();
         let result = match payload {
-            JobPayload::Game(job) => self.finalize_inner(id, job, &mut warning),
+            JobPayload::Game(job) => self
+                .check_extract_space(job)
+                .and_then(|()| self.finalize_inner(id, job, &mut warning)),
             JobPayload::Emulator(job) => self.finalize_emulator(id, job, &mut warning),
             JobPayload::Backup(job) => self.finalize_backup(id, job, cancel, &mut warning),
         };
@@ -3532,6 +3905,9 @@ impl InstallService {
             },
         };
         backup_job::remove_staging(&job.staging);
+        if let Some(space) = &job.space {
+            space.release_staging();
+        }
         for line in &warnings {
             append_warning(warning, line);
         }
@@ -4701,15 +5077,24 @@ impl InstallService {
         Ok(())
     }
 
-    fn on_download_progress(&self, id: u64, downloaded: u64, total: u64, speed: f64) {
+    /// Records download progress. `true` when the job no longer fits in the
+    /// library folder ([`space::JobSpace::on_download`]) and must stop.
+    fn on_download_progress(&self, id: u64, downloaded: u64, total: u64, speed: f64) -> bool {
+        let stop = self
+            .job_space(id)
+            .is_some_and(|space| space.on_download(downloaded, total));
         self.queue
             .lock()
             .unwrap()
             .set_progress(id, downloaded, total, speed);
         self.notify_throttled(DOWNLOAD_NOTIFY_INTERVAL);
+        stop
     }
 
     fn on_install_progress(&self, id: u64, processed: u64, total: u64) {
+        if let Some(space) = self.job_space(id) {
+            space.on_finalize(processed);
+        }
         self.queue
             .lock()
             .unwrap()

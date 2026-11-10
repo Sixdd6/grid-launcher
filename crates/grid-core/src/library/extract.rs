@@ -138,6 +138,26 @@ fn lowercase_suffix(path: &Path) -> Option<String> {
 
 // --- Public extraction entry point -----------------------------------------
 
+/// The total uncompressed size of a `.zip` archive, read from its central
+/// directory without extracting anything. `None` for any other format, or a
+/// zip that cannot be read (the caller keeps its estimate).
+pub fn zip_uncompressed_total(archive: &Path) -> Option<u64> {
+    let is_zip = archive
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"));
+    if !is_zip {
+        return None;
+    }
+    let file = fs::File::open(archive).ok()?;
+    let mut zip = zip::ZipArchive::new(file).ok()?;
+    let mut total: u64 = 0;
+    for index in 0..zip.len() {
+        let entry = zip.by_index_raw(index).ok()?;
+        total = total.saturating_add(entry.size());
+    }
+    Some(total)
+}
+
 /// Progress callback: `(processed_bytes, total_bytes)`. `total` is `0` when
 /// the format cannot cheaply compute an upfront total (tar); callers should
 /// treat that as "unknown" rather than "already done".
