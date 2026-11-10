@@ -167,6 +167,9 @@ function reveal(el) {
   else {
     var b = el.getBoundingClientRect(), pad = 1.2 * rem, top = b.top - pad, bot = b.bottom + pad;
     if (top < vr.top) y += top - vr.top; else if (bot > vr.bottom) y += Math.min(bot - vr.bottom, top - vr.top);
+    /* The first or last item scrolls all the way to that end, so headings above it
+       and notes below it ("No Backup drives connected") are never left out of view. */
+    var all = focusables(v); if (el === all[0]) y = 0; else if (el === all[all.length - 1]) y = v.scrollHeight;
   }
   y = Math.max(0, Math.min(y, v.scrollHeight - v.clientHeight));
   if (Math.abs(y - v.scrollTop) > 1) v.scrollTo({ top: y, behavior: how });
@@ -298,6 +301,17 @@ TABS.home = {
   y: function () { searchAll(); }
 };
 
+/* A folder in the Library rail: a header row that A opens and closes (the chevron
+   turns), with its rows indented under it. Closed, a folder holding the current
+   filter names it ("Platforms · PlayStation") and carries the selected mark, so
+   the choice never disappears. Open / closed is kept for the session. */
+S.folds = { plat: true, drives: true };
+function folder(id, label, n, holds, rows) {
+  var open = S.folds[id];
+  return '<button class="ri fold' + (!open && holds ? ' sel' : '') + '" data-f data-k="fold-' + id + '" data-a="fold" data-fold="' + id + '" data-al="' + (open ? 'Close' : 'Open') + '" aria-expanded="' + open + '">' +
+    '<span class="chev' + (open ? ' open' : '') + '">' + gIcon('chevronRight', 16) + '</span>' + label + (!open && holds ? '<span class="holds">· ' + holds + '</span>' : '') + '</button>' +
+    (open ? rows : '');
+}
 function railItem(key, label, n, on, nav) { return '<button class="ri' + (on ? ' sel' : '') + '" data-f data-k="r-' + key + '" data-onfocus="' + nav + '" data-key="' + key + '" data-a="railOpen" data-al="Open">' + label + (n != null ? '<span class="n">' + n + '</span>' : '') + '</button>'; }
 function libList() {
   var L = G.filter(function (g) { return g.inst; }), r = S.libRail;
@@ -313,8 +327,10 @@ TABS.library = {
   render: function () {
     var inst = G.filter(function (g) { return g.inst; }), plats = Object.keys(PLAT).filter(function (p) { return inst.some(function (g) { return g.p === p; }); });
     var rail = railItem('all', 'All games', inst.length, S.libRail === 'all', 'lib') + railItem('recent', 'Recent', inst.filter(function (g) { return g.played != null && g.played <= 30; }).length, S.libRail === 'recent', 'lib') +
-      railItem('updates', 'Updates', inst.filter(function (g) { return g.upd; }).length, S.libRail === 'updates', 'lib') + '<h3>PLATFORMS</h3>' +
-      plats.map(function (p) { return railItem(p, PLAT[p], inst.filter(function (g) { return g.p === p; }).length, S.libRail === p, 'lib'); }).join('');
+      railItem('updates', 'Updates', inst.filter(function (g) { return g.upd; }).length, S.libRail === 'updates', 'lib') + '<hr>' +
+      folder('plat', 'Platforms', plats.length, plats.indexOf(S.libRail) >= 0 ? PLAT[S.libRail] : '',
+        plats.map(function (p) { return railItem(p, PLAT[p], inst.filter(function (g) { return g.p === p; }).length, S.libRail === p, 'lib').replace('class="ri', 'class="ri sub'); }).join('')) +
+      folder('drives', 'Backup drives', 0, '', '<div class="ri-empty">No Backup drives connected</div>');
     return '<div class="split"><nav class="rail" data-nav="v">' + rail + '</nav><div class="main"><div class="vh" id="lib-h"></div><div class="scroll"><div class="grid" id="lib-grid" data-nav="grid" data-enter="first"></div></div></div></div>';
   },
   after: function () { libPaint(); },
@@ -838,6 +854,7 @@ var ACT = {
     openSheet({ title: d.t, sub: PLAT[d.p] + (d.kind ? ' · ' + d.kind : ''), items: items });
   },
   srow: srowAct,
+  fold: function (el) { S.folds[el.dataset.fold] = !S.folds[el.dataset.fold]; repaint(); },
   /* A on a rail entry does what Right does: into the page beside it (the place you
      last left there, else its first control). */
   railOpen: function () {
