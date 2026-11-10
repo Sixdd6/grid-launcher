@@ -645,15 +645,16 @@ TABS.home = {
 };
 
 /* A folder in the Library rail: a header row that A opens and closes (the chevron
-   turns), with its rows indented under it. Closed, a folder holding the current
-   filter names it ("Platforms · PlayStation") and carries the selected mark, so
-   the choice never disappears. Open / closed is kept for the session. */
+   turns), with its rows indented under it. Closed, it keeps only the row of the
+   current filter, when that filter is one of its rows, so the choice never
+   disappears; with All games, Recent or Updates chosen it shows no rows.
+   Open / closed is kept for the session. */
 S.folds = { plat: true, drives: true };
 function folder(id, label, n, holds, rows) {
-  var open = S.folds[id];
-  return '<button class="ri fold' + (!open && holds ? ' sel' : '') + '" data-f data-k="fold-' + id + '" data-a="fold" data-fold="' + id + '" data-al="' + (open ? 'Close' : 'Open') + '" aria-expanded="' + open + '">' +
-    '<span class="chev' + (open ? ' open' : '') + '">' + gIcon('chevronRight', 16) + '</span>' + label + (!open && holds ? '<span class="holds">· ' + holds + '</span>' : '') + '</button>' +
-    (open ? rows : '');
+  var open = S.folds[id], shown = rows;
+  if (!open) { var box = document.createElement('div'); box.innerHTML = rows; var sel = box.querySelector('.ri.sel'); shown = sel ? sel.outerHTML : ''; }
+  return '<button class="ri fold" data-f data-k="fold-' + id + '" data-a="fold" data-fold="' + id + '" data-al="' + (open ? 'Close' : 'Open') + '" aria-expanded="' + open + '">' +
+    '<span class="chev' + (open ? ' open' : '') + '">' + gIcon('chevronRight', 16) + '</span>' + label + '</button>' + shown;
 }
 function railItem(key, label, n, on, nav) { return '<button class="ri' + (on ? ' sel' : '') + '" data-f data-k="r-' + key + '" data-onfocus="' + nav + '" data-key="' + key + '" data-a="railOpen" data-al="Open">' + label + (n != null ? '<span class="n">' + n + '</span>' : '') + '</button>'; }
 function libList() {
@@ -666,14 +667,18 @@ function libList() {
   return L.sort(by[S.libSort]);
 }
 var LIB_NAMES = { all: 'All games', recent: 'Recent', updates: 'Updates' };
-TABS.library = {
-  render: function () {
+function libRailHTML() {
     var inst = G.filter(function (g) { return g.inst; }), plats = Object.keys(PLAT).filter(function (p) { return inst.some(function (g) { return g.p === p; }); });
     var rail = railItem('all', 'All games', inst.length, S.libRail === 'all', 'lib') + railItem('recent', 'Recent', inst.filter(function (g) { return g.played != null && g.played <= 30; }).length, S.libRail === 'recent', 'lib') +
       railItem('updates', 'Updates', inst.filter(function (g) { return g.upd; }).length, S.libRail === 'updates', 'lib') + '<hr>' +
       folder('plat', 'Platforms', plats.length, plats.indexOf(S.libRail) >= 0 ? PLAT[S.libRail] : '',
         plats.map(function (p) { return railItem(p, PLAT[p], inst.filter(function (g) { return g.p === p; }).length, S.libRail === p, 'lib').replace('class="ri', 'class="ri sub'); }).join('')) +
       folder('drives', 'Backup drives', 0, '', '<div class="ri-empty">No Backup drives connected</div>');
+    return rail;
+}
+TABS.library = {
+  render: function () {
+    var rail = libRailHTML();
     return '<div class="split"><nav class="rail" data-nav="v">' + rail + '</nav><div class="main"><div class="vh" id="lib-h"></div><div class="scroll"><div class="grid" id="lib-grid" data-nav="grid" data-enter="first"></div></div></div></div>';
   },
   after: function () { libPaint(); },
@@ -689,7 +694,14 @@ function libPaint() {
     '<div class="empty">' + (S.libQ ? '<h2>No games match “' + esc(S.libQ) + '”</h2>Press ' + gl('Y') + ' to change the search.' : S.libRail === 'updates' ? '<h2>Everything is up to date</h2>Games with a newer copy on your server show here.' : '<h2>No games here yet</h2>Install games from the Server tab.') + '</div>';
 }
 var ONF = {
-  lib: function (el) { if (S.libRail !== el.dataset.key) { S.libRail = el.dataset.key; S.libQ = ''; markRail(el); libPaint(); } },
+  lib: function (el) {
+    if (S.libRail === el.dataset.key) return;
+    S.libRail = el.dataset.key; S.libQ = ''; libPaint();
+    var closed = Object.keys(S.folds).some(function (f) { return !S.folds[f]; }), rail = el.closest('.rail');
+    if (!closed || !rail) { markRail(el); return; }
+    var k = el.dataset.k, top = rail.scrollTop; rail.innerHTML = libRailHTML(); rail.scrollTop = top;
+    var again = rail.querySelector('[data-k="' + k + '"]'); if (again) { INSTANT = true; setFocus(again); INSTANT = false; }
+  },
   srv: function (el) { if (S.srvRail !== el.dataset.key) { S.srvRail = el.dataset.key; S.srvQ = ''; markRail(el); srvPaint(); } },
   set: function (el) { if (S.setPane !== el.dataset.key) { S.setPane = el.dataset.key; markRail(el); setPaint(); } }
 };
