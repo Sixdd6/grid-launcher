@@ -40,6 +40,7 @@ const state = $state<{
   openOn: OpenOn;
   tvPrompts: TvPrompts;
   tvAssignments: Record<string, TvAssignment>;
+  tvWelcomed: boolean;
   /** The stored settings have been read (or the read failed and the
    *  defaults stand). The shell waits for it: Open GRID on decides the view
    *  it opens on. */
@@ -57,6 +58,7 @@ const state = $state<{
   openOn: 'automatic',
   tvPrompts: 'match',
   tvAssignments: {},
+  tvWelcomed: false,
   loaded: false,
 });
 
@@ -81,6 +83,7 @@ function payload(): UiSettings {
     open_on: state.openOn,
     tv_prompts: state.tvPrompts,
     tv_assignments: { ...state.tvAssignments },
+    tv_welcomed: state.tvWelcomed,
   };
 }
 
@@ -120,6 +123,9 @@ export const uiSettings = {
   },
   get tvAssignments(): Readonly<Record<string, TvAssignment>> {
     return state.tvAssignments;
+  },
+  get tvWelcomed(): boolean {
+    return state.tvWelcomed;
   },
   get loaded(): boolean {
     return state.loaded;
@@ -204,6 +210,7 @@ export async function initUiSettings(): Promise<() => void> {
     state.openOn = normalizeOpenOn(stored.open_on ?? '');
     state.tvPrompts = normalizeTvPrompts(stored.tv_prompts ?? '');
     state.tvAssignments = normalizeTvAssignments(stored.tv_assignments);
+    state.tvWelcomed = stored.tv_welcomed === true;
   } catch {
     // Defaults/mirror already in `state`.
   }
@@ -344,6 +351,13 @@ export function setTvThemeActive(on: boolean): void {
  *  redraw), then persists. */
 export async function setTvPrompts(choice: TvPrompts): Promise<void> {
   state.tvPrompts = choice;
+  await api.setUiSettings(payload());
+}
+
+/** TV mode's welcome card was shown: it doesn't show by itself again. */
+export async function setTvWelcomed(): Promise<void> {
+  if (state.tvWelcomed) return;
+  state.tvWelcomed = true;
   await api.setUiSettings(payload());
 }
 

@@ -23,24 +23,32 @@ describe('tv-startup (b): the unreachable library', () => {
     await connectPad(XBOX_PAD);
   });
 
-  it('blocks with the dialog: its words, Relocate focused, only A "Select" (items 409–411)', async () => {
+  it('blocks with the dialog: its words, Relocate focused, A "Select" and Menu (items 409–411)', async () => {
     expect(await $(`${testId('tv-unreachable')} h2`).getText()).toBe("Your library can't be reached");
     await waitText('tv-unreachable-body', `${missingRoot()} isn't there: its drive may not be connected. GRID can't run without it.`);
     expect(await text('tv-unreachable-relocate')).toBe('Relocate the library…');
     expect(await text('tv-unreachable-close')).toBe('Close without changing anything');
     await waitFocused('ur-relocate');
-    expect(await hints()).toEqual(['A Select']);
+    expect(await hints()).toEqual(['A Select', 'MENU Menu']);
     expect(await $(testId('tv-tabs')).isExisting()).toBe(false);
     expect(await $(testId('tv-connect')).isExisting()).toBe(false);
   });
 
-  it('B and Start do nothing on it (items 92, 367, 411)', async () => {
+  it('B does nothing on it; Start opens the startup Menu over it, and B comes back (items 92, 411; user decision 2026-11-10)', async () => {
     await key('Escape');
     await press('east');
-    await press('start');
     await browser.pause(300);
     expect(await $(testId('tv-unreachable')).isExisting()).toBe(true);
     expect(await $(testId('tv-menu')).isExisting()).toBe(false);
+    await waitFocused('ur-relocate');
+    await press('start');
+    await $(testId('tv-menu')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Start opened no Menu over the dialog' });
+    expect(
+      await browser.execute(() => Array.from(document.querySelectorAll('[data-testid="tv-menu"] .opt')).map((e) => e.textContent?.trim() ?? '')),
+    ).toEqual(['Switch to desktop mode', 'Quit GRID']);
+    await press('east');
+    await browser.waitUntil(async () => !(await $(testId('tv-menu')).isExisting()), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'B never closed the Menu' });
+    expect(await $(testId('tv-unreachable')).isExisting()).toBe(true);
     await waitFocused('ur-relocate');
     // The two buttons wrap onto two lines in the 40rem dialog (as on the
     // prototype): Right or Down reaches Close, Left or Up comes back.

@@ -59,6 +59,9 @@ export type UiSettings = {
   /** TV mode's "Button assignments": controller key → style
    *  (`ui.tv_assignments`). A controller with no entry uses its layout's. */
   tv_assignments: Record<string, TvAssignment>;
+  /** TV mode's welcome card has been shown (`ui.tv_welcomed`): it shows the
+   *  first time TV mode opens, then from Menu › Controls. */
+  tv_welcomed: boolean;
 };
 /** Where GRID opens: `automatic` (Server › Discover when connected, else the
  *  Library), or forced to `discover` or `library`. */

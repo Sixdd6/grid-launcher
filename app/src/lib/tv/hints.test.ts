@@ -28,8 +28,9 @@ describe('buildHints (items 128–133)', () => {
   it('no A on a disabled item', () => {
     expect(labels(base({ focus: { a: 'Select', disabled: true, x: null } }))).toEqual(['MENU Menu']);
   });
-  it('no Back and no Menu on startup screens', () => {
-    expect(labels(base({ startup: true, pages: 2 }))).toEqual(['A Select']);
+  it('no Back on startup screens, but Menu (user decision 2026-11-10)', () => {
+    expect(labels(base({ startup: true, pages: 2 }))).toEqual(['A Select', 'MENU Menu']);
+    expect(labels(base({ startup: true, main: true, screen: [{ button: 'MENU', label: 'Skip for now' }] }))).toEqual(['A Select', 'MENU Skip for now']);
   });
   it('no Menu where Start presses the page main button', () => {
     expect(labels(base({ pages: 1, main: true, screen: [{ button: 'MENU', label: 'Backup' }] }))).toEqual(['A Select', 'MENU Backup', 'B Back']);

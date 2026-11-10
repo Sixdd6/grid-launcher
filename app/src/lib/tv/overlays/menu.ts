@@ -3,7 +3,7 @@
 import type { DownloadEntry } from '../../api';
 import { hostOf } from '../../shell';
 
-export type MenuItemKey = 'discover' | 'downloads' | 'notifications' | 'settings' | 'reconnect' | 'desktop' | 'quit';
+export type MenuItemKey = 'discover' | 'downloads' | 'notifications' | 'settings' | 'controls' | 'reconnect' | 'desktop' | 'quit';
 
 /** The session state the Menu reads. */
 export type MenuSession = { connected: boolean; offline: boolean; username: string; serverUrl: string };
@@ -38,7 +38,21 @@ export function menuItems(active: number, notices: number, s: Pick<MenuSession, 
     { key: 'downloads', label: active > 0 ? `Downloads · ${active} active` : 'Downloads' },
     { key: 'notifications', label: `Notifications · ${notices}` },
     { key: 'settings', label: 'Settings' },
+    // Shows the welcome card again (user decision 2026-11-10).
+    { key: 'controls', label: 'Controls' },
     { key: 'reconnect', label: noServer(s) ? 'Connect to a server…' : 'Reconnect' },
+    { key: 'desktop', label: 'Switch to desktop mode' },
+    { key: 'quit', label: 'Quit GRID' },
+  ];
+}
+
+/**
+ * The Menu on a startup screen (Connect, Choose your systems, the
+ * unreachable library): only the ways out, so a controller alone can leave
+ * TV mode before GRID is set up (user decision 2026-11-10).
+ */
+export function startupMenuItems(): { key: MenuItemKey; label: string }[] {
+  return [
     { key: 'desktop', label: 'Switch to desktop mode' },
     { key: 'quit', label: 'Quit GRID' },
   ];

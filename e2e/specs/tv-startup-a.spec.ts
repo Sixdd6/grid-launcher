@@ -48,8 +48,9 @@ async function expectBoxFits(): Promise<void> {
 
 /**
  * Stage `tv-startup`, spec a (TV mode plan P12): a fresh profile started
- * with --tv. Connect through the on-screen keyboard: Start presses Connect
- * and names what is missing while it is disabled, View pastes from the
+ * with --tv. Connect through the on-screen keyboard: Start opens the startup
+ * Menu (Switch to desktop mode, Quit GRID), the Connect button names what is
+ * missing while it is disabled, View pastes from the
  * clipboard (seeded with the mock's non-secret address and the library
  * path), the folder browser and B, a rejected token comes back with the
  * reason, then Choose your systems, where Start skips, and GRID opens on
@@ -80,17 +81,41 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     expect(await $(testId('tv-connection')).isExisting()).toBe(false);
     expect(await $(testId('tv-clock')).isExisting()).toBe(true);
     await waitFocused('cf-url');
-    // No Back and no Menu (132, 133).
-    expect(await hints()).toEqual(['A Edit', 'VIEW Paste']);
+    // No Back (132); Menu opens the startup Menu (user decision 2026-11-10).
+    expect(await hints()).toEqual(['A Edit', 'VIEW Paste', 'MENU Menu']);
     await expectBoxFits();
   });
 
-  it('Start names what is missing while Connect is disabled, and opens no Menu (item 367, 397; ruling 6)', async () => {
+  it('Connect names what is missing while it is disabled (item 397)', async () => {
     expect(await $(testId('tv-connect-go')).getAttribute('aria-disabled')).toBe('true');
+    expect(await $(testId('tv-connect-go')).getAttribute('data-why')).toBe('Fill in the server, the API token and the library folder first.');
+  });
+
+  it('Start opens the startup Menu: Switch to desktop mode and Quit GRID; B closes it (user decision 2026-11-10)', async () => {
+    await waitFocused('cf-url');
     await press('start');
-    await waitToast('Fill in the server, the API token and the library folder first.');
-    expect(await $(testId('tv-menu')).isExisting()).toBe(false);
-    expect(await $(testId('tv-layer')).isExisting()).toBe(false);
+    await $(testId('tv-menu')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Start opened no Menu on Connect' });
+    await waitFocused('gm0');
+    const labels = (await browser.execute(() =>
+      Array.from(document.querySelectorAll('[data-testid="tv-menu"] .opt')).map((e) => e.textContent?.trim() ?? ''),
+    )) as string[];
+    expect(labels).toEqual(['Switch to desktop mode', 'Quit GRID']);
+    expect(await $(testId('tv-menu-clock')).isExisting()).toBe(true);
+    expect(await $(testId('tv-menu-head')).isExisting()).toBe(false);
+    expect(await hints()).toEqual(['A Select', 'B Close']);
+    await press('dpad_down');
+    await waitFocused('gm1');
+    await press('south');
+    await $(testId('tv-confirm')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    expect(await $(testId('tv-confirm')).$('h2').getText()).toBe('Quit GRID?');
+    await press('east');
+    await browser.waitUntil(async () => !(await $(testId('tv-layer')).isExisting()), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the Quit question never closed' });
+    await press('start');
+    await waitFocused('gm0');
+    await press('east');
+    await browser.waitUntil(async () => !(await $(testId('tv-menu')).isExisting()), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'B never closed the Menu' });
+    await waitFocused('cf-url');
+    expect(await $(testId('tv-connect')).isExisting()).toBe(true);
   });
 
   it('View pastes the clipboard into the focused field (item 396), and says so when there is nothing to paste', async () => {
@@ -117,7 +142,7 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
   it('Sign in with switches to Username and password, which Connect then names (items 393, 397)', async () => {
     await key('ArrowDown');
     await waitFocused('cf-how');
-    expect(await hints()).toEqual(['A Change', 'VIEW Paste']);
+    expect(await hints()).toEqual(['A Change', 'VIEW Paste', 'MENU Menu']);
     await key('Enter');
     expect(await listTitle()).toBe('Sign in with');
     await $(testId('tv-opt-password')).click();
@@ -125,8 +150,7 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     expect(await rowKeys('#cf-rows')).toEqual(['cf-url', 'cf-how', 'cf-user', 'cf-password', 'cf-lib']);
     expect(await fieldText('user')).toBe('Username Your RomM user');
     expect(await fieldText('password')).toBe('Password Your password');
-    await press('start');
-    await waitToast('Fill in the server, the username and password and the library folder first.');
+    expect(await $(testId('tv-connect-go')).getAttribute('data-why')).toBe('Fill in the server, the username and password and the library folder first.');
     await waitFocused('cf-how');
     await key('Enter');
     await listTitle();
@@ -173,7 +197,7 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     expect(await $(`${testId('tv-connect')} .note`).getText()).toBe(
       'Without a server, GRID needs only the library folder. Your Library and Backup drives work offline.',
     );
-    await press('start');
+    await $(testId('tv-connect-go')).click();
     await $(testId('tv-connect-reason')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'the rejected token gave no reason' });
     expect((await text('tv-connect-reason')).length).toBeGreaterThan(0);
     expect(await text('tv-connect-reason')).not.toContain(WRONG_TOKEN);
@@ -182,13 +206,13 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     await waitText('tv-cf-token-value', 'Paste or type your token');
   });
 
-  it('Start presses Connect: "Connected to <URL>", then Choose your systems (items 399, 400)', async () => {
+  it('Connect: "Connected to <URL>", then Choose your systems (items 399, 400)', async () => {
     await moveTo('cf-token', 'ArrowUp');
     await key('Enter');
     await typeKeys(FIXTURE_TOKEN);
     await key('Enter');
     await waitOskClosed();
-    await press('start');
+    await $(testId('tv-connect-go')).click();
     await waitToast(/^Connected to http/);
     await $(testId('tv-choose')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'Choose your systems never opened' });
   });

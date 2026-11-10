@@ -4,14 +4,16 @@
   // password, Library folder (the folder browser), Connect, "or", Use
   // without a server, and the note. A on a text field opens the keyboard;
   // the token and the password are masked and open empty. View pastes the
-  // clipboard into the focused field. Start presses Connect, or says what is
-  // missing while it is disabled (ruling 6). A rejected credential, or a
+  // clipboard into the focused field. Start opens the startup Menu (Switch
+  // to desktop mode, Quit GRID; user decision 2026-11-10); the Connect
+  // button says what is missing while it is disabled. A rejected credential, or a
   // connect that failed, comes back here with the reason above the rows.
   //
   // With `edit` (Settings › Connection › Edit connection…, ruling E3) it is
   // a page over Settings: server, sign in with and the credential, no library
   // folder and no Use without a server. Connect reconnects, goes back and
-  // says "Connected to <URL>"; B goes back with nothing changed.
+  // says "Connected to <URL>"; B goes back with nothing changed. There Start
+  // presses Connect, as a page's main button.
   //
   // The secret stays in `connectForm.svelte.ts` (a plain local, never
   // reactive, never logged), and is handed straight to the connect.
@@ -178,7 +180,7 @@
 
   useScreen({
     hints: () => [{ button: 'VIEW', label: 'Paste' }],
-    main: () => ({ disabled: btns.go.disabled, why: btns.go.why, press: () => void connectNow() }),
+    main: () => (editing ? { disabled: btns.go.disabled, why: btns.go.why, press: () => void connectNow() } : null),
     view: () => void paste(),
   });
 </script>

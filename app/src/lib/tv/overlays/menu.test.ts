@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DownloadEntry, DownloadStatus } from '../../api';
-import { activeCount, menuHead, menuItems } from './menu';
+import { activeCount, menuHead, menuItems, startupMenuItems } from './menu';
 
 describe('the Menu (items 363–364)', () => {
   it('heads with the user and server host, or Offline', () => {
@@ -28,11 +28,19 @@ describe('the Menu (items 363–364)', () => {
       'Downloads · 2 active',
       'Notifications · 5',
       'Settings',
+      'Controls',
       'Reconnect',
       'Switch to desktop mode',
       'Quit GRID',
     ]);
     expect(menuItems(0, 0)[1].label).toBe('Downloads');
     expect(menuItems(0, 0)[2].label).toBe('Notifications · 0');
+  });
+
+  it('on a startup screen offers only Switch to desktop mode and Quit GRID (user decision 2026-11-10)', () => {
+    expect(startupMenuItems().map((i) => [i.key, i.label])).toEqual([
+      ['desktop', 'Switch to desktop mode'],
+      ['quit', 'Quit GRID'],
+    ]);
   });
 });

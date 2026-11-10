@@ -71,12 +71,13 @@ export async function enterTv(view: View, settingsPage: SettingsPage | null = nu
 
 /** Menu › Switch to desktop mode and Settings › TV mode › Switch to desktop
  *  mode (item 523): the desktop window, on the same view. */
-export async function leaveTv(tab: TvTab, pane: TvPane): Promise<void> {
+export async function leaveTv(tab: TvTab | null, pane: TvPane | null): Promise<void> {
   if (state.busy || state.mode === 'desktop') return;
   state.busy = true;
   try {
     await api.setUiMode('desktop');
-    state.desktopStart = desktopViewFor(tab, pane);
+    // From a startup screen (no tab yet) the start rule decides.
+    state.desktopStart = tab === null || pane === null ? null : desktopViewFor(tab, pane);
     state.mode = 'desktop';
   } finally {
     state.busy = false;

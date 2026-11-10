@@ -64,8 +64,10 @@ async function menuLabels(): Promise<string[]> {
 
 /**
  * Stage `tv-shell`, part D (P6): overlays and notifications, with --tv on
- * the profile used without a server. The welcome card (ruling 15); the Menu
- * with its items and counts (items 362–366); overlay suppression (103) and
+ * the profile used without a server. The welcome card, shown by an earlier
+ * spec's first entry, doesn't show again and Menu › Controls brings it back
+ * (user decision 2026-11-10); the Menu with its items and counts (items
+ * 362–366); overlay suppression (103) and
  * click outside (76); Quit's confirmation with Cancel focused (373–376); a
  * list on its checked option, headings skipped (368–372); the on-screen
  * keyboard: pad shortcuts, held-X repeat, physical typing and Enter, masked
@@ -88,11 +90,24 @@ describe('tv-shell (d): overlays and notifications', () => {
     }
   });
 
-  it('shows the welcome card once the main screen is up (ruling 15, items 140, 144)', async () => {
+  it('shows the welcome card only the first time; Menu › Controls shows it again (items 140, 144; user decision 2026-11-10)', async () => {
+    // tv-shell-a entered TV mode first and saw it: this entry shows none.
+    await browser.pause(2000);
+    expect(await cardTitles()).not.toContain('Welcome to TV mode');
+    await press('start');
+    await $(testId('tv-menu')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await waitFocused('gm0');
+    for (let i = 0; i < 4; i++) await press('dpad_down');
+    await waitFocused('gm4');
+    expect((await $(testId('tv-menu-controls')).getText()).trim()).toBe('Controls');
+    await press('south');
+    await waitLayers(0);
     await browser.waitUntil(async () => (await cardTitles()).includes('Welcome to TV mode'), {
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'no welcome card',
+      timeoutMsg: 'Menu › Controls showed no welcome card',
     });
+    // Let the card finish sliding in before measuring it.
+    await browser.pause(800);
     const card = await browser.execute(() => {
       const el = Array.from(document.querySelectorAll('[data-testid="tv-toast"]')).find((c) => c.textContent?.includes('Welcome to TV mode'))!;
       const r = el.getBoundingClientRect();
@@ -118,7 +133,7 @@ describe('tv-shell (d): overlays and notifications', () => {
     expect(labels[1]).toBe('Downloads');
     expect(labels[2]).toMatch(/^Notifications · [1-9]\d*$/);
     // Used without a server (README § Consultant decisions).
-    expect(labels.slice(3)).toEqual(['Settings', 'Connect to a server…', 'Switch to desktop mode', 'Quit GRID']);
+    expect(labels.slice(3)).toEqual(['Settings', 'Controls', 'Connect to a server…', 'Switch to desktop mode', 'Quit GRID']);
     expect((await $(testId('tv-menu-head')).getText()).trim()).toBe('Offline · no server');
     expect(await $(testId('tv-menu-clock')).getText()).toMatch(/^\d\d:\d\d$/);
     expect(await hints()).toEqual(['A Select', 'B Close']);
@@ -126,7 +141,7 @@ describe('tv-shell (d): overlays and notifications', () => {
     expect(Math.abs(w - 30)).toBeLessThan(0.1);
     // Focus stays inside the Menu (item 361).
     for (let i = 0; i < 10; i++) await press('dpad_down');
-    await waitFocused('gm6');
+    await waitFocused('gm7');
     await press('east');
     await waitLayers(0);
     await waitFocused(before!);
@@ -156,8 +171,8 @@ describe('tv-shell (d): overlays and notifications', () => {
     const before = await focused();
     await press('start');
     await waitFocused('gm0');
-    for (let i = 0; i < 6; i++) await press('dpad_down');
-    await waitFocused('gm6');
+    for (let i = 0; i < 7; i++) await press('dpad_down');
+    await waitFocused('gm7');
     await press('south');
     await $(testId('tv-confirm')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await waitFocused('dlg-cancel');

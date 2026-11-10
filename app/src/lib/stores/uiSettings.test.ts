@@ -343,6 +343,7 @@ describe('background blur', () => {
       open_on: 'automatic',
       tv_prompts: 'match',
       tv_assignments: {},
+      tv_welcomed: false,
     });
   });
 
@@ -492,6 +493,21 @@ describe('Open GRID on and the TV keys', () => {
     expect(store.uiSettings.openOn).toBe('automatic');
     expect(store.uiSettings.tvPrompts).toBe('match');
     expect(store.uiSettings.tvAssignments).toEqual({});
+    expect(store.uiSettings.tvWelcomed).toBe(false);
+  });
+
+  it('remembers the welcome card was shown, once (user decision 2026-11-10)', async () => {
+    const { store, setUiSettings } = await loadStore({ tv_assignments: { aa: 'xbox' } });
+    await store.setTvWelcomed();
+    expect(store.uiSettings.tvWelcomed).toBe(true);
+    expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ tv_welcomed: true, tv_assignments: { aa: 'xbox' } }));
+    await store.setTvWelcomed();
+    expect(setUiSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads tv_welcomed back', async () => {
+    const { store } = await loadStore({ tv_welcomed: true });
+    expect(store.uiSettings.tvWelcomed).toBe(true);
   });
 
   it('is loaded even when the read fails', async () => {

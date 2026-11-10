@@ -86,9 +86,9 @@ describe('Start (items 100–102; ruling 6)', () => {
   it('says why while it is disabled', () => {
     expect(press('MENU', ctx({ screen: { ...ctx().screen, main: 'why' } }))).toEqual({ kind: 'mainWhy' });
   });
-  it('opens the Menu elsewhere, never on startup', () => {
+  it('opens the Menu elsewhere, startup screens included (user decision 2026-11-10)', () => {
     expect(press('MENU', ctx())).toEqual({ kind: 'menu' });
-    expect(press('MENU', ctx({ startup: true }))).toEqual({ kind: 'none' });
+    expect(press('MENU', ctx({ startup: true }))).toEqual({ kind: 'menu' });
   });
 });
 

@@ -159,3 +159,9 @@ export const MENU_HINTS: Hint[] = [
 export function openMenu(): Promise<number> {
   return openLayer({ component: TvMenu, cls: 'side', hints: MENU_HINTS });
 }
+
+/** The Menu on a startup screen: the same panel with only Switch to desktop
+ *  mode and Quit GRID (user decision 2026-11-10). */
+export function openStartupMenu(): Promise<number> {
+  return openLayer({ component: TvMenu, cls: 'side', hints: MENU_HINTS, props: { startup: true } });
+}

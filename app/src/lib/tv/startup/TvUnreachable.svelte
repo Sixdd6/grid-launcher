@@ -16,6 +16,7 @@
   import { closeWithoutChanges, libraryUnreachable, relocateTo } from '../../stores/libraryUnreachable.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import { openFolderBrowser } from '../gameActions';
+  import { openStartupMenu } from '../overlays/overlays.svelte';
   import { closeLayer, openLayer, topLayer } from '../nav.svelte';
   import { useScreen } from '../screen.svelte';
   import { parentOf } from './connectPage';
@@ -30,6 +31,12 @@
       component: TvUnreachableDialog,
       props: { root, onRelocate: relocate, onClose: quit },
       blocking: true,
+      // Menu opens the startup Menu over it (user decision 2026-11-10).
+      binds: { MENU: () => void openStartupMenu() },
+      hints: [
+        { button: 'A', label: 'Select' },
+        { button: 'MENU', label: 'Menu' },
+      ],
     });
   }
 

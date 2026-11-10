@@ -696,6 +696,7 @@ pub fn normalize_ui_settings(settings: UiSettings) -> UiSettings {
         hardware_acceleration: settings.hardware_acceleration,
         open_on: normalize_open_on(&settings.open_on),
         tv_prompts: normalize_tv_prompts(&settings.tv_prompts),
+        tv_welcomed: settings.tv_welcomed,
         tv_assignments: settings
             .tv_assignments
             .into_iter()
@@ -3547,6 +3548,7 @@ mod ui_settings_tests {
                 hardware_acceleration: true,
                 open_on: "automatic".to_string(),
                 tv_prompts: "match".to_string(),
+                tv_welcomed: false,
                 tv_assignments: BTreeMap::new(),
             }
         );

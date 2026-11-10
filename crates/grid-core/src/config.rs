@@ -151,6 +151,10 @@ pub struct UiSettings {
     /// `"ps"`, `"nintendo"` or `"8bitdo"`. A plain string, like `theme`.
     #[serde(default = "default_tv_prompts")]
     pub tv_prompts: String,
+    /// Whether TV mode's "Welcome to TV mode" card has been shown. It shows
+    /// the first time TV mode opens, then only from Menu › Controls.
+    #[serde(default)]
+    pub tv_welcomed: bool,
     /// TV mode's button assignments, per controller: the controller's key
     /// (its gilrs UUID as hex; two pads of one model share a key) →
     /// `"xbox"` or `"nintendo"`. A controller with no entry starts on the
@@ -209,6 +213,7 @@ impl Default for UiSettings {
             hardware_acceleration: default_hardware_acceleration(),
             open_on: default_open_on(),
             tv_prompts: default_tv_prompts(),
+            tv_welcomed: false,
             tv_assignments: BTreeMap::new(),
         }
     }
@@ -1505,6 +1510,7 @@ mod tests {
             ui: UiSettings {
                 open_on: "library".to_string(),
                 tv_prompts: "8bitdo".to_string(),
+                tv_welcomed: true,
                 tv_assignments: assignments.clone(),
                 ..Default::default()
             },
@@ -1519,6 +1525,7 @@ mod tests {
         let loaded = Config::load(&path).unwrap();
         assert_eq!(loaded.ui.open_on, "library");
         assert_eq!(loaded.ui.tv_prompts, "8bitdo");
+        assert!(loaded.ui.tv_welcomed);
         assert_eq!(loaded.ui.tv_assignments, assignments);
     }
 
@@ -1529,6 +1536,7 @@ mod tests {
         let loaded = load_text("schema_version = 1\n\n[ui]\ntheme = \"dark\"\n");
         assert_eq!(loaded.ui.open_on, "automatic");
         assert_eq!(loaded.ui.tv_prompts, "match");
+        assert!(!loaded.ui.tv_welcomed);
         assert!(loaded.ui.tv_assignments.is_empty());
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");

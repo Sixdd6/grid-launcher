@@ -23,8 +23,9 @@ export type HintInput = {
 
 /**
  * In order: A for the focused item (left out when it is disabled), X, the
- * screen's own hints, B "Back" on pages, Menu "Menu" (left out on startup
- * screens and where Start presses the page's main button).
+ * screen's own hints, B "Back" on pages (not on startup screens), Menu
+ * "Menu" (left out where Start presses the page's main button; a startup
+ * screen's Menu is the short one, user decision 2026-11-10).
  */
 export function buildHints(i: HintInput): Hint[] {
   if (i.layer) {
@@ -39,7 +40,7 @@ export function buildHints(i: HintInput): Hint[] {
   if (i.focus?.x) h.push({ button: 'X', label: i.focus.x });
   h.push(...i.screen);
   if (i.pages > 0 && !i.startup) h.push({ button: 'B', label: 'Back' });
-  if (!i.startup && !i.main) h.push({ button: 'MENU', label: 'Menu' });
+  if (!i.main) h.push({ button: 'MENU', label: 'Menu' });
   return h;
 }
 

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { APP_START_TIMEOUT, dataDir, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
-import { connectPad, invoke, key, press, waitFocused, waitTab, XBOX_PAD } from '../helpers/tv.js';
+import { connectPad, invoke, key, waitFocused, waitTab, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, moveTo, pageErrors, testId, typeKeys, waitOskClosed, waitText } from '../helpers/tvDetails.js';
 
 /** Two installs from the mock forge, each held back a moment. */
@@ -51,7 +51,7 @@ describe('tv-startup (d): Install N emulators and the setup card', () => {
     await invoke('e2e_clipboard_write', { text: path.join(dataDir(), 'library') });
     await key('v');
     await waitText('tv-cf-lib-value', path.join(dataDir(), 'library'));
-    await press('start');
+    await $(testId('tv-connect-go')).click();
     await $(testId('tv-choose')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'Choose your systems never opened' });
     await $(testId('tv-ch-row-ps2')).waitForExist({ timeout: TRANSITION_TIMEOUT });
   });

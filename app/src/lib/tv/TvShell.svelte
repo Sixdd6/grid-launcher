@@ -13,7 +13,7 @@
   import { registerNavigation } from '../stores/navigation.svelte';
   import { session } from '../stores/session.svelte';
   import { uiMode } from '../stores/uiMode.svelte';
-  import { setTvThemeActive, uiSettings } from '../stores/uiSettings.svelte';
+  import { setTvThemeActive, setTvWelcomed, uiSettings } from '../stores/uiSettings.svelte';
   import { initialView } from '../shell';
   import { tvPaneFor, tvTabFor } from '../uiMode';
   import { startClock } from './clock.svelte';
@@ -37,7 +37,7 @@
   import { attachNotices, showNotice, tvNotices, viewNewest } from './notices.svelte';
   import { WELCOME } from './notices';
   import TvLayer from './overlays/TvLayer.svelte';
-  import { confirmBox, openKeyboard, openList, openMenu } from './overlays/overlays.svelte';
+  import { confirmBox, openKeyboard, openList, openMenu, openStartupMenu } from './overlays/overlays.svelte';
   import { notify } from '../notifications/notifier';
   import { openDetails, openSystem } from './gameActions';
   import { selectDriveRow } from './tabs/library/library.svelte';
@@ -93,7 +93,6 @@
 
   let entered: Phase | null = null;
   let firstStart = true;
-  let welcomed = false;
   /** Used without a server before the drives were known: the first drive
    *  is selected once they are, unless the player has moved on (item 415). */
   let pendingDrive: string | null = null;
@@ -140,11 +139,13 @@
     if (!from && tab === 'server') selectServerRail('discover');
     if (start?.drive) selectDrive(start.drive);
     else if (!from && tab === 'library' && session.offline && !session.connected && !drives.loaded) pendingDrive = librarySelection.key;
-    // The welcome card, the first time the main screen is up (ruling 15).
+    // The welcome card, once the main screen is up the first time TV mode
+    // ever opens (`[ui] tv_welcomed`; Menu › Controls shows it again; user
+    // decision 2026-11-10).
     void showScreen().then(() => {
-      if (welcomed) return;
-      welcomed = true;
+      if (uiSettings.tvWelcomed) return;
       showNotice(WELCOME);
+      void setTvWelcomed().catch(() => {});
     });
   }
 
@@ -166,7 +167,9 @@
   // with an action (items 102, 148).
   $effect(() => {
     attachNotices(true);
-    registerMenu(() => void openMenu());
+    // A startup screen's Menu holds only the ways out (user decision
+    // 2026-11-10).
+    registerMenu(() => void (nav.startup ? openStartupMenu() : openMenu()));
     // View acts on the newest card with an action, else the screen's own
     // (Connect pastes, item 396).
     registerView(() => {

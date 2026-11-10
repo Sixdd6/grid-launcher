@@ -124,8 +124,9 @@ export function press(b: TvButton, ctx: PressContext): Command {
     // Start presses the page's main button, or says why (items 100–101).
     if (ctx.screen.main === 'press') return { kind: 'main' };
     if (ctx.screen.main === 'why') return { kind: 'mainWhy' };
-    // Elsewhere the Menu, which the startup screens don't have (ruling 6).
-    return ctx.startup ? NONE : { kind: 'menu' };
+    // Elsewhere the Menu; on a startup screen the shell opens the short one
+    // (Switch to desktop mode, Quit GRID; user decision 2026-11-10).
+    return { kind: 'menu' };
   }
   if (b === 'VIEW') return { kind: 'view' };
   return NONE;
