@@ -320,6 +320,34 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .desk .box { max-width: 40rem; }
 .desk h1 { color: var(--text-h); }
 
+/* ---- Game backups */
+/* A picked cover in select mode: a filled check top left, a primary ring, a little smaller. */
+.cv.pk .cv-art { transform: scale(.94); box-shadow: 0 0 0 .22rem var(--bg), 0 0 0 .42rem var(--primary); }
+.cv.pk.f .cv-art { transform: scale(1); box-shadow: var(--shadow-lift), 0 0 0 .22rem var(--bg), 0 0 0 .42rem var(--focus); }
+.pick { position: absolute; z-index: 2; top: .55rem; left: .55rem; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--primary); color: var(--on-primary); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 .15rem var(--bg); }
+.cv.pk .tag.upd, .cv.pk .tag.miss { left: 2.5rem; }
+/* The selection bar pins to the bottom of the grid panel. */
+.selbar { flex: 0 0 auto; display: flex; align-items: center; gap: 1.4rem; margin: 0 0 1.2rem; padding: .8rem 1.2rem; background: var(--overlay); border: 1px solid var(--line-strong); border-radius: 1rem; box-shadow: var(--shadow-overlay); color: var(--text-h); }
+.selbar[hidden] { display: none; }
+.selbar .sp { flex: 1; }
+.selbar .hint { display: inline-flex; align-items: center; gap: .5rem; font-weight: 600; }
+/* Radio rows (the Drive choice). */
+.radio { flex: 0 0 auto; width: 1.5rem; height: 1.5rem; border-radius: 50%; border: .15rem solid var(--line-strong); position: relative; }
+.radio.on { border-color: var(--primary); }
+.radio.on::after { content: ''; position: absolute; inset: .25rem; border-radius: 50%; background: var(--primary); }
+/* A drive's space: other files, then this backup's share (or GRID's files). */
+.ubar { display: flex; height: .4rem; width: 16rem; max-width: 100%; border-radius: .2rem; background: var(--field); overflow: hidden; margin: .5rem 0 .2rem; }
+.ubar.wide { width: 28rem; }
+.ubar b { display: block; height: 100%; background: var(--text-muted); opacity: .5; }
+.ubar i { display: block; height: 100%; background: repeating-linear-gradient(45deg, var(--graph-disk) 0 .3rem, transparent .3rem .5rem); }
+.ubar i.grid { background: var(--primary); }
+.srow.warnrow { box-shadow: inset .25rem 0 0 var(--warning-text); }
+.warning-text { color: var(--warning-text); font-weight: 600; }
+.srctag { font-size: .8rem; font-weight: 600; padding: .15rem .6rem; border-radius: 100px; border: 1px solid var(--line-strong); color: var(--text-muted); white-space: nowrap; }
+.bk-foot { display: flex; align-items: center; justify-content: flex-end; gap: 1.4rem; margin-top: 1.4rem; padding-top: 1.2rem; border-top: 1px solid var(--line); }
+.start-foot .or { color: var(--text-muted); align-self: center; }
+.status .dot.none { background: var(--text-muted); }
+
 </style></head>
 <body>
 <div class="tv">
@@ -399,8 +427,18 @@ var DL = [
   { id: 'd4', gid: 12, t: 'Kite Season', p: 'SNES', st: 'failed', kind: '', line: 'Failed · The server returned 503 (try again later)' }
 ];
 
+/* Backup drives (the Game backups design). Couch kit is connected and set up;
+   USB-1TB is connected but not set up; Travel stick is remembered, not connected. */
+var DRIVES = [
+  { id: 'couch', name: 'Couch kit', label: 'SAMSUNG T7', fs: 'exFAT', size: '1 TB', free: 61.4, status: 'ready', connected: true, os: { linux: true, windows: true }, games: [1, 4, 7, 12, 14, 17, 20, 19], last: '7 Nov 2026', emus: ['DuckStation', 'Dolphin', 'RetroArch'], fw: 2 },
+  { id: 'usb', name: '', label: 'USB-1TB', fs: 'FAT32', size: '1 TB', free: 912, status: 'new', connected: true, os: { linux: true, windows: false }, games: [], emus: [], fw: 0 },
+  { id: 'travel', name: 'Travel stick', label: 'KINGSTON', fs: 'exFAT', size: '128 GB', free: 40, status: 'ready', connected: false, seen: '3 days ago', os: { linux: true, windows: false }, games: [5, 13, 2, 16, 3], emus: ['RetroArch'], fw: 0 }
+];
+var driveOf = function (id) { return DRIVES.filter(function (d) { return d.id === id; })[0]; };
+var readyDrives = function () { return DRIVES.filter(function (d) { return d.connected && d.status === 'ready'; }); };
+var onDrive = function (g) { return readyDrives().filter(function (d) { return d.games.indexOf(g.id) >= 0; })[0]; };
 var CFG = { theme: 'dark', art: true, fade: 45, blur: 40, hw: true, restore: true, upload: true, skipNewer: true, delay: 10, retain: 10,
-  raUser: 'sam_plays', raToken: '', tvStart: 'last', prompts: 'auto', url: 'https://romm.home.lan', user: 'sam', lib: '/home/sam/Games/GRID', exitBtn: 'menu' };
+  raUser: 'sam_plays', raToken: '', tvStart: 'last', prompts: 'auto', bkFirmware: true, url: 'https://romm.home.lan', user: 'sam', lib: '/home/sam/Games/GRID', exitBtn: 'menu' };
 
 var S = { tab: 'home', pages: [], layers: [], offline: false, libRail: 'all', srvRail: 'PS', libQ: '', srvQ: '', libSort: 'Recently played', detTab: 'Overview', saveKind: 'Saves', notes: [], scheme: 'xbox', padName: '' };
 
@@ -416,7 +454,7 @@ function gl(b) { var t = GL[scheme()][b]; var round = t.length === 1; return '<s
 function ago(d) { return d === 0 ? 'today' : d === 1 ? 'yesterday' : d < 14 ? d + ' days ago' : Math.round(d / 7) + ' weeks ago'; }
 function relDate(d) { var x = new Date(2026, 10, 9 - d); return x.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][x.getMonth()] + ' ' + x.getFullYear(); }
 function emuFor(g) { if (g.native) return g.p === 'WIN' ? 'GE-Proton9-20' : 'Native'; var s = sysOf(g.p); return s && s.emu ? s.emu + (s.core ? ' · ' + s.core : '') : null; }
-function dlOf(g) { return DL.filter(function (d) { return d.gid === g.id && (d.st === 'active' || d.st === 'queued'); })[0]; }
+function dlOf(g) { return DL.filter(function (d) { return d.gid === g.id && d.kind !== 'Backup' && (d.st === 'active' || d.st === 'queued'); })[0]; }
 function cover(g, o) {
   o = o || {};
   var b = '';
@@ -424,10 +462,11 @@ function cover(g, o) {
   if (g.inst) b += '<i class="idot" aria-label="Installed"></i>';
   if (o.plat) b += '<span class="tag plat">' + g.p + '</span>';
   var d = dlOf(g); if (d) b += '<span class="tag q">' + (d.st === 'active' ? d.pct + '%' : 'Queued') + '</span>';
-  return '<button class="cv" data-f data-k="' + (o.k || 'g') + g.id + '" data-a="details" data-id="' + g.id + '" data-x="quick" data-hero="' + g.id + '" style="--c:' + g.c + '">' +
+  if (S.selMode && S.sel.indexOf(g.id) >= 0) b += '<span class="pick" aria-label="Selected">' + gIcon('check', 16) + '</span>';
+  return '<button class="cv' + (S.selMode && S.sel.indexOf(g.id) >= 0 ? ' pk' : '') + '" data-f data-k="' + (o.k || 'g') + g.id + '" data-a="details" data-id="' + g.id + '" data-x="quick" data-hero="' + g.id + '"' + (o.drive ? ' data-drive="' + o.drive + '"' : '') + ' style="--c:' + g.c + '">' +
     '<span class="cv-art">' + b + '<span class="ttl">' + esc(g.t) + '</span></span><span class="cv-l">' + esc(g.t) + '</span></button>';
 }
-function quickLabel(g) { if (!g) return null; if (dlOf(g)) return null; if (g.missing || g.unlinked) return null; return g.inst ? 'Play' : (S.offline ? null : 'Install'); }
+function quickLabel(g, drive) { if (!g) return null; if (dlOf(g)) return null; if (g.missing || g.unlinked) return null; if (g.inst) return 'Play'; if (drive) return 'Install from drive'; return S.offline ? null : 'Install'; }
 
 /* ------------------------------------------------------------------ notifications */
 function toast(t, o) {
@@ -533,6 +572,8 @@ function rc(e) { return e.getBoundingClientRect(); }
 function move(dir) {
   var all = focusables(); if (!cur || all.indexOf(cur) < 0) { restoreFocus(); return; }
   /* An explicit link wins over geometry: data-up / data-down on the item or a container names the data-k to go to. */
+  /* Right from a rail is A: into the grid or pane beside it, at its first item or where you left it. */
+  if (dir === 'right' && cur.closest('.rail') && cur.dataset.a === 'railOpen') { ACT.railOpen(); return; }
   var link = cur.closest('[data-' + dir + ']'), to = link && scope().querySelector('[data-k="' + link.getAttribute('data-' + dir) + '"]');
   if (to && to !== cur) { setFocus(to); return; }
   var a = rc(cur), ax = a.left + a.width / 2, ay = a.top + a.height / 2;
@@ -604,11 +645,12 @@ function paintTop() {
   var d = new Date(), clock = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
   $('top').innerHTML = '<div class="brand">' + gIcon('grid', 22) + 'GRID <small>TV</small></div>' + mid +
     '<div class="status">' + (act && !S.startup ? '<span class="dlmini">' + gIcon('download', 16) + esc(act.t) + ' <i><b style="width:' + act.pct + '%"></b></i> ' + act.pct + '%</span>' : '') +
-    (S.startup ? '' : '<span><i class="dot' + (S.offline ? ' offline' : '') + '"></i>' + (S.offline ? 'Offline' : esc(CFG.user)) + '</span>') + '<span class="clock">' + clock + '</span></div>';
+    (S.startup ? '' : '<span><i class="dot' + (S.noServer ? ' none' : S.offline ? ' offline' : '') + '"></i>' + (S.noServer ? 'Offline · no server' : S.offline ? 'Offline' : esc(CFG.user)) + '</span>') + '<span class="clock">' + clock + '</span></div>';
 }
 function paintHints() {
   var h = hintsNow(), left = '';
-  if (S.offline && !S.startup) left = '<span class="offline-pill">Offline</span><span>Your installed games still play. Server features return when GRID reconnects.</span>';
+  if (S.noServer && !S.startup) left = '<span>No server. Your Library and Backup drives work without one.</span>';
+  else if (S.offline && !S.startup) left = '<span class="offline-pill">Offline</span><span>Your installed games still play. Server features return when GRID reconnects.</span>';
   else if (S.padName) left = '<span>' + esc(S.padName) + '</span>';
   $('hints').innerHTML = '<div class="left">' + left + '</div>' + h.map(function (x) { return '<button class="hint" data-btn="' + x[0] + '">' + gl(x[0]) + esc(x[1]) + '</button>'; }).join('');
 }
@@ -619,12 +661,13 @@ function hintsNow() {
   var h = [], el = cur;
   var al = el && (el.dataset.al || (el.dataset.a === 'details' ? 'Details' : 'Select'));
   if (el && !el.disabled) h.push(['A', al]);
-  if (el && el.dataset.x === 'quick') { var q = quickLabel(byId(el.dataset.id)); if (q) h.push(['X', q]); }
+  if (selHints()) return selHints();
+  if (el && el.dataset.x === 'quick') { var q = quickLabel(byId(el.dataset.id), el.dataset.drive); if (q) h.push(['X', q]); }
   else if (el && el.dataset.xl) h.push(['X', el.dataset.xl]);
   var scr = S.pages.length ? S.pages[S.pages.length - 1] : TABS[S.tab];
   if (scr.hints) h = h.concat(scr.hints(el));
   if (S.pages.length && !S.startup) h.push(['B', 'Back']);
-  if (!S.startup) h.push(['MENU', 'Menu']);
+  if (!S.startup && !(scr.menu && (scr._main || scr._why))) h.push(['MENU', 'Menu']);
   return h;
 }
 var artIdx = 0;
@@ -671,7 +714,8 @@ function folder(id, label, n, holds, rows) {
 function railItem(key, label, n, on, nav) { return '<button class="ri' + (on ? ' sel' : '') + '" data-f data-k="r-' + key + '" data-onfocus="' + nav + '" data-key="' + key + '" data-a="railOpen" data-al="Open">' + label + (n != null ? '<span class="n">' + n + '</span>' : '') + '</button>'; }
 function libList() {
   var L = G.filter(function (g) { return g.inst; }), r = S.libRail;
-  if (r === 'recent') L = L.filter(function (g) { return g.played != null && g.played <= 30; });
+  if (r.indexOf('drv:') === 0) { var dv = driveOf(r.slice(4)); L = dv && dv.connected ? dv.games.map(byId) : []; }
+  else if (r === 'recent') L = L.filter(function (g) { return g.played != null && g.played <= 30; });
   else if (r === 'updates') L = L.filter(function (g) { return g.upd; });
   else if (r !== 'all') L = L.filter(function (g) { return g.p === r; });
   if (S.libQ) L = L.filter(function (g) { return g.t.toLowerCase().indexOf(S.libQ.toLowerCase()) >= 0; });
@@ -684,26 +728,33 @@ function libRailHTML() {
     var rail = railItem('all', 'All games', inst.length, S.libRail === 'all', 'lib') + railItem('recent', 'Recent', inst.filter(function (g) { return g.played != null && g.played <= 30; }).length, S.libRail === 'recent', 'lib') +
       railItem('updates', 'Updates', inst.filter(function (g) { return g.upd; }).length, S.libRail === 'updates', 'lib') + '<hr>' +
       folder('plat', 'Platforms', plats.length, plats.indexOf(S.libRail) >= 0 ? PLAT[S.libRail] : '',
-        plats.map(function (p) { return railItem(p, PLAT[p], inst.filter(function (g) { return g.p === p; }).length, S.libRail === p, 'lib').replace('class="ri', 'class="ri sub'); }).join('')) +
-      folder('drives', 'Backup drives', 0, '', '<div class="ri-empty">No Backup drives connected</div>');
+        plats.map(function (p) { var n = inst.filter(function (g) { return g.p === p; }).length; return railItem(p, PLAT[p], n, S.libRail === p, 'lib').replace('class="ri', 'class="ri sub').replace('data-a="railOpen"', 'data-a="railOpen" data-xl="Backup all ' + n + '…" data-xa="backupPlat" data-id="' + p + '"'); }).join('')) +
+      folder('drives', 'Backup drives', 0, '', readyDrives().length ? readyDrives().map(function (d) { return railItem('drv:' + d.id, esc(d.name), d.games.length, S.libRail === 'drv:' + d.id, 'lib').replace('class="ri', 'class="ri sub'); }).join('') : '<div class="ri-empty">No Backup drives connected</div>');
     return rail;
 }
 TABS.library = {
   render: function () {
     var rail = libRailHTML();
-    return '<div class="split"><nav class="rail" data-nav="v" data-enter="sel">' + rail + '</nav><div class="main"><div class="vh" id="lib-h"></div><div class="scroll"><div class="grid" id="lib-grid" data-nav="grid" data-enter="first"></div></div></div></div>';
+    return '<div class="split"><nav class="rail" data-nav="v" data-enter="sel">' + rail + '</nav><div class="main"><div class="vh" id="lib-h"></div><div class="scroll"><div class="grid" id="lib-grid" data-nav="grid" data-enter="first"></div></div><div class="selbar" id="selbar" hidden></div></div></div>';
   },
   after: function () { libPaint(); },
-  hints: function () { return [['Y', 'Search'], ['LT', 'Sort']]; },
+  hints: function () { return [['Y', 'Search'], ['LT', 'Sort'], ['RT', 'Select']]; },
+  rt: function () { selToggle(); },
   y: function () { openOSK({ title: 'Search your library', value: S.libQ, kind: 'search', onInput: function (v) { S.libQ = v; libPaint(); }, onDone: function (v) { S.libQ = v; libPaint(); } }); },
   lt: function () { sortSheet(); }
 };
 function sortSheet() { openSheet({ title: 'Sort by', items: ['Recently played', 'Recently installed', 'Title', 'Platform'].map(function (s) { return { label: s, checked: S.libSort === s, fn: function () { S.libSort = s; libPaint(); } }; }) }); }
 function libPaint() {
-  var L = libList(), name = LIB_NAMES[S.libRail] || PLAT[S.libRail];
-  $('lib-h').innerHTML = '<h1>' + name + '</h1><span class="cnt">' + L.length + ' game' + (L.length === 1 ? '' : 's') + '</span>' + (S.libQ ? '<span class="chip">Search: <b>' + esc(S.libQ) + '</b></span>' : '') + '<span class="sp"></span><span class="chip">' + gl('LT') + ' Sort: <b>' + S.libSort + '</b></span><span class="chip">' + gl('Y') + ' Search</span>';
+  var L = libList(), drv = S.libRail.indexOf('drv:') === 0 ? driveOf(S.libRail.slice(4)) : null, name = drv ? esc(drv.name) : LIB_NAMES[S.libRail] || PLAT[S.libRail];
+  if (drv) {
+    $('lib-h').innerHTML = '<h1>' + name + '</h1><span class="cnt">' + L.length + ' games · ' + (L.length * 1.66).toFixed(1) + ' GB · on ' + esc(drv.label) + '</span><span class="chip">Emulators: <b>' + drv.emus.join(', ') + '</b></span><span class="chip">Firmware: <b>' + drv.fw + ' systems</b></span><span class="sp"></span><span class="chip">' + gl('RT') + ' Select</span>';
+    $('lib-grid').innerHTML = L.length ? L.map(function (g) { return cover(g, { k: 'dg', plat: true, drive: drv.id }); }).join('') : '<div class="empty"><h2>' + name + ' is not connected</h2>Plug it in to see its games.</div>';
+    selPaint(L); return;
+  }
+  $('lib-h').innerHTML = '<h1>' + name + '</h1><span class="cnt">' + L.length + ' game' + (L.length === 1 ? '' : 's') + '</span>' + (S.libQ ? '<span class="chip">Search: <b>' + esc(S.libQ) + '</b></span>' : '') + '<span class="sp"></span><span class="chip">' + gl('RT') + ' Select</span><span class="chip">' + gl('LT') + ' Sort: <b>' + S.libSort + '</b></span><span class="chip">' + gl('Y') + ' Search</span>';
   $('lib-grid').innerHTML = L.length ? L.map(function (g) { return cover(g, { k: 'lg', plat: S.libRail === 'all' || S.libRail === 'recent' || S.libRail === 'updates' }); }).join('') :
     '<div class="empty">' + (S.libQ ? '<h2>No games match “' + esc(S.libQ) + '”</h2>Press ' + gl('Y') + ' to change the search.' : S.libRail === 'updates' ? '<h2>Everything is up to date</h2>Games with a newer copy on your server show here.' : '<h2>No games here yet</h2>Install games from the Server tab.') + '</div>';
+  selPaint(L);
 }
 var ONF = {
   lib: function (el) { if (S.libRail !== el.dataset.key) { S.libRail = el.dataset.key; S.libQ = ''; markRail(el); libPaint(); } },
@@ -714,12 +765,14 @@ function markRail(el) { el.parentNode.querySelectorAll('.ri').forEach(function (
 
 TABS.server = {
   render: function () {
+    if (S.noServer) return '<div class="list"><div class="list-in"><div class="panel empty"><h2>Not connected to a server</h2>Your Library and Backup drives work without one.<div class="btns" style="margin-top:1.4rem"><button class="btn pri" data-f data-a="toConnect">Connect to a server…</button><button class="btn" data-f data-a="gotab" data-tab="library">Open Library</button></div></div></div></div>';
     if (S.offline) return '<div class="list"><div class="list-in"><div class="panel empty"><h2>Can\'t reach your server</h2>' + esc(CFG.url) + ' isn\'t answering. Your installed games still play from the Library.<div class="btns" style="margin-top:1.4rem"><button class="btn pri" data-f data-a="retry">Try again</button><button class="btn" data-f data-a="gotab" data-tab="library">Open Library</button></div></div></div></div>';
     var plats = Object.keys(PLAT);
-    return '<div class="split"><nav class="rail" data-nav="v" data-enter="sel"><h3>PLATFORMS</h3>' + plats.map(function (p) { return railItem(p, PLAT[p], G.filter(function (g) { return g.p === p; }).length, S.srvRail === p, 'srv'); }).join('') + '</nav><div class="main"><div class="vh" id="srv-h"></div><div class="scroll"><div class="grid" id="srv-grid" data-nav="grid" data-enter="first"></div></div></div></div>';
+    return '<div class="split"><nav class="rail" data-nav="v" data-enter="sel"><h3>PLATFORMS</h3>' + plats.map(function (p) { return railItem(p, PLAT[p], G.filter(function (g) { return g.p === p; }).length, S.srvRail === p, 'srv'); }).join('') + '</nav><div class="main"><div class="vh" id="srv-h"></div><div class="scroll"><div class="grid" id="srv-grid" data-nav="grid" data-enter="first"></div></div><div class="selbar" id="selbar" hidden></div></div></div>';
   },
   after: function () { if (!S.offline) srvPaint(); },
-  hints: function () { return S.offline ? [] : [['Y', 'Search']]; },
+  hints: function () { return S.offline ? [] : [['Y', 'Search'], ['RT', 'Select']]; },
+  rt: function () { if (!S.offline) selToggle(); },
   y: function () { if (S.offline) return; openOSK({ title: 'Search ' + PLAT[S.srvRail], value: S.srvQ, kind: 'search', onInput: function (v) { S.srvQ = v; srvPaint(); }, onDone: function (v) { S.srvQ = v; srvPaint(); } }); }
 };
 /* The header counts the platform's games and how many are installed; while a search
@@ -737,17 +790,21 @@ function srvPaint() {
     chips = '<button class="chip' + (s.emu ? '' : ' warn') + '" data-f data-k="ch-emu" data-a="system" data-id="' + p + '" data-al="Open in Systems">' + (s.emu ? 'Emulator: <b>' + s.emu + '</b>' : 'No default emulator') + '</button>' +
       (s.fw === 'none' ? '<span class="chip">' + fw + '</span>' : '<button class="chip" data-f data-k="ch-fw" data-a="system" data-id="' + p + '" data-al="Open in Systems">' + fw + '</button>');
   }
-  $('srv-h').innerHTML = '<h1>' + PLAT[p] + '</h1><span class="cnt">' + srvCount(p, L) + '</span>' + chips + (S.srvQ ? '<span class="chip">Search: <b>' + esc(S.srvQ) + '</b></span>' : '') + '<span class="sp"></span><span class="chip">' + gl('Y') + ' Search</span>';
+  $('srv-h').innerHTML = '<h1>' + PLAT[p] + '</h1><span class="cnt">' + srvCount(p, L) + '</span>' + chips + (S.srvQ ? '<span class="chip">Search: <b>' + esc(S.srvQ) + '</b></span>' : '') + '<span class="sp"></span>' + (L.length ? '<button class="btn" data-f data-k="bk-all" data-a="backupPlat" data-id="' + p + '" data-al="Backup"' + (S.offline ? ' disabled data-why="Backing up needs a server."' : '') + '>Backup all ' + G.filter(function (g) { return g.p === p; }).length + '…</button>' : '') + '<span class="chip">' + gl('RT') + ' Select</span><span class="chip">' + gl('Y') + ' Search</span>';
   $('srv-grid').innerHTML = L.length ? L.map(function (g) { return cover(g, { k: 'sg' }); }).join('') : '<div class="empty"><h2>No games match “' + esc(S.srvQ) + '”</h2></div>';
+  selPaint(L);
 }
 
 TABS.downloads = {
   render: function () {
     function row(d) {
-      var line = d.st === 'active' ? 'Downloading · ' + d.pct + '% · 38.2 MB/s · 2 min left' : d.st === 'queued' ? 'Queued' : d.line;
+      var dv = d.drive && driveOf(d.drive), line;
+      if (d.kind === 'Backup') line = d.st === 'active' ? (d.pct < 50 ? (d.local ? 'Copying from this computer to ' + dv.label + ' ' : 'Downloading from server ') + d.pct * 2 + '%' : 'Writing to ' + dv.label + ' ' + (d.pct - 50) * 2 + '%') : d.st === 'queued' ? 'Waiting · to ' + esc(dv.name) : d.line;
+      else if (d.from) line = d.st === 'active' ? 'Copying from ' + d.from + ' · ' + d.pct + '%' : d.st === 'queued' ? 'Queued · from ' + d.from : d.line;
+      else line = d.st === 'active' ? 'Downloading · ' + d.pct + '% · 38.2 MB/s · 2 min left' : d.st === 'queued' ? 'Queued' : d.line;
       var spark = d.st === 'active' ? '<div class="spark"><svg viewBox="0 0 120 38" preserveAspectRatio="none"><polyline fill="none" stroke="var(--primary)" stroke-width="2" points="0,30 10,22 20,25 30,14 40,18 50,10 60,16 70,9 80,12 90,8 100,13 110,7 120,10"/><polyline fill="none" stroke="var(--graph-disk)" stroke-width="1.5" points="0,34 15,30 30,28 45,26 60,27 75,22 90,24 105,20 120,22"/></svg></div>' : '<div></div>';
       var al = d.st === 'active' || d.st === 'queued' ? 'Cancel' : d.st === 'failed' ? 'Retry or dismiss' : 'Dismiss';
-      return '<div class="lrow dl" data-f data-k="dl-' + d.id + '" data-a="dlrow" data-id="' + d.id + '" data-al="' + al + '"><div><div class="t">' + esc(d.t) + (d.kind ? '<span class="kind">' + d.kind + '</span>' : '') + '</div><div class="s' + (d.st === 'failed' ? ' err' : '') + '">' + PLAT[d.p] + ' · ' + line + '</div>' + (d.st === 'active' ? '<div class="pbar"><b style="width:' + d.pct + '%"></b></div>' : '') + '</div>' + spark + '<div class="s">' + (d.st === 'active' ? '38.2 MB/s' : '') + '</div></div>';
+      return '<div class="lrow dl" data-f data-k="dl-' + d.id + '" data-a="dlrow" data-id="' + d.id + '" data-al="' + al + '"><div><div class="t">' + esc(d.t) + (d.kind ? '<span class="kind">' + d.kind + '</span>' : '') + '</div><div class="s' + (d.st === 'failed' ? ' err' : '') + '">' + (PLAT[d.p] ? PLAT[d.p] + ' · ' : '') + line + '</div>' + (d.st === 'active' ? '<div class="pbar"><b style="width:' + d.pct + '%"></b></div>' : '') + '</div>' + spark + '<div class="s">' + (d.st === 'active' ? '38.2 MB/s' : '') + '</div></div>';
     }
     function seg(name, st) { var L = DL.filter(function (d) { return st.indexOf(d.st) >= 0; }); return '<section class="panel"><h2>' + name + '<span>' + L.length + '</span></h2><div data-nav="v">' + (L.length ? L.map(row).join('') : '<p class="note">Nothing ' + name.toLowerCase() + '.</p>') + '</div></section>'; }
     return '<div class="list"><div class="list-in">' + seg('Active', ['active']) + seg('Queued', ['queued']) + seg('Completed', ['done', 'failed', 'cancelled']) + '</div></div>';
@@ -757,7 +814,7 @@ TABS.downloads = {
 };
 
 /* ---- Settings */
-var PANES = [['appearance', 'Appearance'], ['cloud', 'Cloud saves'], ['connection', 'Connection'], ['library', 'Library'], ['ra', 'RetroAchievements'], ['systems', 'Systems'], ['tv', 'TV mode'], ['updates', 'Updates']];
+var PANES = [['appearance', 'Appearance'], ['drives', 'Backup drives'], ['cloud', 'Cloud saves'], ['connection', 'Connection'], ['library', 'Library'], ['ra', 'RetroAchievements'], ['systems', 'Systems'], ['tv', 'TV mode'], ['updates', 'Updates']];
 S.setPane = 'appearance';
 TABS.settings = {
   render: function () { return '<div class="split"><nav class="rail" data-nav="v" data-enter="sel">' + PANES.map(function (p) { return railItem(p[0], p[1], null, S.setPane === p[0], 'set'); }).join('') + '</nav><div class="pane" id="pane" data-nav="v" data-enter="first"></div></div>'; },
@@ -807,6 +864,7 @@ function paneRows(id) {
 function setPaint() {
   var id = S.setPane, pane = $('pane'); if (!pane) return;
   if (id === 'systems') { pane.innerHTML = systemsPane(); return; }
+  if (id === 'drives') { pane.innerHTML = drivesPane(); return; }
   var rows = paneRows(id);
   pane.innerHTML = '<div class="pane-h"><h1>' + PANES.filter(function (p) { return p[0] === id; })[0][1] + '</h1></div>' + rows.map(function (r, i) { return srow(r, id + i); }).join('');
   pane._rows = rows;
@@ -849,25 +907,34 @@ function systemsPane() {
 function push(p) { S.pages.push(p); render(); }
 function pop() { var p = S.pages.pop(); if (p && p.onClose) p.onClose(); render(); }
 
-function details(g) {
+function details(g, drv) {
   return {
-    title: g.t, id: g.id,
+    title: g.t, id: g.id, drv: drv,
     render: function () {
       var s = sysOf(g.p), d = dlOf(g), btn = [];
       var B = function (lab, a, pri, extra) { btn.push('<button class="btn' + (pri ? ' pri' : '') + (/Uninstall|Remove/.test(lab) ? ' dng' : '') + '" data-f data-k="db-' + a + '" data-a="' + a + '" data-id="' + g.id + '"' + (extra || '') + '>' + lab + '</button>'); };
-      if (g.unlinked) { B('Link to server game', 'link', 1); B('Remove from library (keeps files)', 'removeRow'); }
+      if (drv) {
+        if (d) B(d.st === 'active' ? 'Cancel install · ' + d.pct + '%' : 'Cancel · queued', 'cancelDl', 1);
+        else if (g.inst) B(gIcon('play', 18) + 'Play', 'play', 1);
+        else B(gIcon('download', 18) + 'Install from drive', 'installDrive', 1, ' data-drive="' + drv.id + '"');
+        B('Remove from drive…', 'removeFromDrive', 0, ' data-drive="' + drv.id + '"');
+      }
+      else if (g.unlinked) { B('Link to server game', 'link', 1); B('Remove from library (keeps files)', 'removeRow'); }
       else if (g.missing) { B('Locate…', 'locate', 1); B('Remove from library (keeps files)', 'removeRow'); }
       else if (d) B(d.st === 'active' ? 'Cancel install · ' + d.pct + '%' : 'Cancel · queued', 'cancelDl', 1);
       else if (g.inst) B(gIcon('play', 18) + 'Play', 'play', 1);
       else B(gIcon('download', 18) + (g.native ? 'Install app' : 'Install'), 'install', 1, S.offline ? ' disabled' : '');
       if (g.inst && g.upd && !g.missing) B('Update', 'update');
       if (g.inst && g.native && !g.missing) B('Game settings', 'gameSettings');
-      if (g.inst && !g.missing && !g.unlinked) B('Uninstall', 'uninstall');
+      if (g.inst && !g.missing && !g.unlinked && !drv) B('Uninstall', 'uninstall');
+      if (!drv && !g.unlinked) B('Backup to drive…', 'backup', 0, S.offline ? ' disabled data-why="Backing up needs a server."' : '');
       var tabs = ['Overview', 'Media', 'Saves'].concat(g.ach ? ['Achievements'] : []);
       if (tabs.indexOf(S.detTab) < 0) S.detTab = 'Overview';
       var lp = g.missing ? '<b>Files not found.</b> Play and Uninstall are unavailable until the files are found.' : g.unlinked ? '<b>Not linked to a server game.</b> Play, cloud saves and updates need the link.' : g.inst ? 'Last played <b>' + (g.played != null ? ago(g.played) : 'never') + '</b><br>Launches with <b>' + (emuFor(g) || 'no emulator') + '</b>' : (!g.native && s && !s.emu ? '<b>No emulator for ' + s.name + '.</b> Install installs ' + s.rec + ' too.' : 'Not installed · 1.2 GB');
+      var od = !drv && onDrive(g); if (od) lp += '<br>On <b>' + esc(od.name) + '</b>';
+      if (drv) lp = (g.inst ? 'Installed on this computer.<br>' : '') + 'From <b>' + esc(drv.name) + '</b> · 1.7 GB<br>Installing copies it from the drive, no network needed.';
       return '<div class="det"><div class="det-l">' + cover(g, { k: 'dc' }).replace('data-f ', '').replace('data-a="details"', '') + '<div class="lp">' + lp + '</div></div>' +
-        '<div class="det-r"><h1>' + esc(g.t) + '</h1><div class="hl">' + PLAT[g.p] + ' · ' + (2026 - Math.floor(g.rel / 365)) + ' · Lighthouse Works · Racing, Adventure · 8.4</div>' +
+        '<div class="det-r"><h1>' + esc(g.t) + '</h1><div class="hl">' + (drv ? 'From ' + esc(drv.name) + ' · ' : '') + PLAT[g.p] + ' · ' + (2026 - Math.floor(g.rel / 365)) + ' · Lighthouse Works · Racing, Adventure · 8.4</div>' +
         '<div class="chips">' + (g.inst ? '<span class="chip"><b>Installed</b></span>' : '') + (g.upd ? '<span class="chip warn">Update available</span>' : '') + '<span class="chip">Identified</span><span class="chip">USA · EN</span></div>' +
         '<div class="btns" data-nav="h">' + btn.join('') + '</div>' +
         '<div class="ttabs">' + gl('LB') + tabs.map(function (t) { return '<button class="ttab' + (t === S.detTab ? ' on' : '') + '" data-dtab="' + t + '">' + t + '</button>'; }).join('') + gl('RB') + '</div>' +
@@ -1039,11 +1106,11 @@ function connectPage() {
       function field(k, lab, val, mask, ph) { return '<div class="field" data-f data-k="cf-' + k + '" data-a="cfield" data-key="' + k + '" data-al="Edit"><span class="lab">' + lab + '</span><span class="v' + (val ? '' : ' ph') + '">' + (val ? (mask ? '••••••••••••' : esc(val)) : ph) + '</span></div>'; }
       return '<div class="start"><div class="start-box" data-nav="v"><h1>Connect to your RomM server</h1><p class="sub">Everything here works with a controller. A keyboard works too.</p>' +
         (S.connReason ? '<p class="errline">' + esc(S.connReason) + '</p>' : '') +
-        '<div class="start-body">' + field('url', 'Server', F.url, 0, 'https://…') +
+        '<div class="start-body" data-nav="v">' + field('url', 'Server', F.url, 0, 'https://…') +
         '<div class="field" data-f data-k="cf-how" data-a="cfield" data-key="how" data-al="Change"><span class="lab">Sign in with</span><span class="v">' + (F.how === 'token' ? 'API token' : 'Username and password') + '</span></div>' +
         (F.how === 'token' ? field('token', 'API token', F.token, 1, 'Paste or type your token') : field('user', 'Username', F.user || '', 0, 'Your RomM user') + field('token', 'Password', F.token, 1, 'Your password')) +
         field('lib', 'Library folder', F.lib, 0, '') + '</div>' +
-        '<div class="btns start-foot"><button class="btn pri" data-f data-k="cf-go" data-a="connectGo"' + (ready ? '' : ' disabled') + '>Connect</button></div></div></div>';
+        '<div class="btns start-foot" data-nav="h"><button class="btn pri" data-f data-k="cf-go" data-a="connectGo"' + (ready ? '' : ' disabled data-why="Fill in the server, the ' + (F.how === 'token' ? 'API token' : 'username and password') + ' and the library folder first."') + '>Connect</button><span class="or">or</span><button class="btn" data-f data-k="cf-none" data-a="noServer"' + (F.lib ? '' : ' disabled') + '>Use without a server</button></div><p class="note" style="margin:.8rem 0 0">Without a server, GRID needs only the library folder. Your Library and Backup drives work offline.</p></div></div>';
     },
     F: F, hints: function () { return [['VIEW', 'Paste']]; }
   };
@@ -1144,6 +1211,7 @@ function guideMenu() {
     ['Show: token rejected', function () { startConnect('The server rejected your token. Enter a new one.'); }],
     [S.offline ? 'Show: back online' : 'Show: server unreachable', function () { S.offline = !S.offline; if (!S.offline) toast('Connected to ' + CFG.url); else toast('Can\'t reach ' + CFG.url, { err: 1, s: 'Showing your library. GRID keeps trying.' }); render(); }],
     ['Show: unreachable library', unreachable],
+    [driveOf('couch').connected ? 'Show: unplug Couch kit' : 'Show: plug in Couch kit', unplugCouch],
     ['Show: a failed install', function () { toast('Couldn\'t install Kite Season: the server returned 503', { err: 1, act: ['Open Downloads', function () { S.pages = []; S.tab = 'downloads'; render(); }] }); }]
   ];
   var html = '<aside class="guide" data-nav="v"><div class="gh"><b>' + clock + '</b><span class="muted">' + (S.offline ? 'Offline' : esc(CFG.user) + ' · ' + esc(CFG.url.replace('https://', ''))) + '</span></div>' +
@@ -1185,8 +1253,8 @@ function play(g) {
   g.played = 0; push(playing(g));
 }
 var ACT = {
-  details: function (el) { push(details(byId(el.dataset.id))); },
-  quick: function (el) { var g = byId(el.dataset.id), q = quickLabel(g); if (q === 'Play') play(g); else if (q) install(g); },
+  details: function (el) { push(details(byId(el.dataset.id), el.dataset.drive ? driveOf(el.dataset.drive) : null)); },
+  quick: function (el) { var g = byId(el.dataset.id), q = quickLabel(g, el.dataset.drive); if (q === 'Play') play(g); else if (q === 'Install from drive') installFromDrive(g, driveOf(el.dataset.drive)); else if (q) install(g); },
   play: function (el) { play(byId(el.dataset.id)); },
   install: function (el) { install(byId(el.dataset.id)); },
   cancelDl: function (el) { var g = byId(el.dataset.id), d = dlOf(g); confirmBox({ title: 'Cancel ' + g.t + '?', body: 'The download stops and its files are removed. You can install it again later.', ok: 'Cancel install', danger: 1, fn: function () { d.st = 'cancelled'; d.line = 'Cancelled'; toast('Cancelled ' + g.t); advanceQueue(); repaint(); } }); },
@@ -1223,6 +1291,15 @@ var ACT = {
     openSheet({ title: d.t, sub: PLAT[d.p] + (d.kind ? ' · ' + d.kind : ''), items: items });
   },
   srow: srowAct,
+  pact: function (el) { var P = S.pages[S.pages.length - 1]; var fn = P && P._acts && P._acts[+el.dataset.i]; if (fn) fn(); },
+  backup: function (el) { var g = byId(el.dataset.id); openBackup([g.id], 'Backup ' + g.t); },
+  backupPlat: function (el) { var p = el.dataset.id, lib = !!el.closest('.rail'); if (S.offline) { toast('Backing up needs a server.', { err: 1 }); return; } var L = G.filter(function (g) { return g.p === p && (!lib || g.inst); }); openBackup(L.map(function (g) { return g.id; }), 'Backup ' + PLAT[p] + ' · ' + L.length + ' games'); },
+  installDrive: function (el) { installFromDrive(byId(el.dataset.id), driveOf(el.dataset.drive)); },
+  removeFromDrive: function (el) { var g = byId(el.dataset.id), d = driveOf(el.dataset.drive); confirmBox({ title: 'Remove ' + g.t + ' from ' + d.name + '?', body: 'Its files leave the drive. ' + (g.inst ? 'The copy installed on this computer stays.' : 'You can back it up again later.'), ok: 'Remove from drive', danger: 1, fn: function () { d.games.splice(d.games.indexOf(g.id), 1); toast(g.t + ' removed from ' + d.name); pop(); } }); },
+  drivePage: function (el) { drivePage(driveOf(el.dataset.id)); },
+  bkFwDefault: function () { CFG.bkFirmware = !CFG.bkFirmware; repaint(); },
+  noServer: function () { var F = S.pages[S.pages.length - 1].F; CFG.lib = F.lib; S.noServer = true; S.offline = true; S.startup = false; S.pages = []; var d = readyDrives()[0]; if (d) showDrive(d.id); else { S.tab = 'library'; render(); } toast('Using GRID without a server', { s: 'Your Library and Backup drives work offline' }); },
+  toConnect: function () { startConnect(); },
   fold: function (el) { S.folds[el.dataset.fold] = !S.folds[el.dataset.fold]; repaint(); },
   /* A on a rail entry does what Right does: into the page beside it (the place you
      last left there, else its first control). */
@@ -1246,7 +1323,7 @@ var ACT = {
     if (k === 'lib') { openBrowser({ title: 'Library folder', start: '/home/sam/Games', onPick: function (p) { F.lib = p; renderStage(); } }); return; }
     openOSK({ title: { url: 'Server address', token: F.how === 'token' ? 'API token' : 'Password', user: 'Username' }[k], value: k === 'token' ? '' : F[k], mask: k === 'token', kind: k === 'url' ? 'url' : 'text', onDone: function (v) { F[k] = v; renderStage(); } });
   },
-  connectGo: function () { var F = S.pages[S.pages.length - 1].F; CFG.url = F.url; CFG.lib = F.lib; toast('Connected to ' + F.url); S.pages = []; push(choosePage()); },
+  connectGo: function () { var F = S.pages[S.pages.length - 1].F; CFG.url = F.url; CFG.lib = F.lib; S.noServer = false; S.offline = false; toast('Connected to ' + F.url); S.pages = []; push(choosePage()); },
   chTick: function (el) { var P = S.pages[S.pages.length - 1]; P.pick[el.dataset.id].on = !P.pick[el.dataset.id].on; renderStage(); },
   chEmu: function (el) { var P = S.pages[S.pages.length - 1], id = el.dataset.id; openSheet({ title: 'Emulator for ' + sysOf(id).name, items: emuItems(id, P.pick[id].emu, function (e) { P.pick[id].emu = e; P.pick[id].on = true; renderStage(); }) }); },
   chGo: function () {
@@ -1304,6 +1381,263 @@ function viewer(i) {
   draw();
 }
 
+/* ------------------------------------------------------------------ game backups
+   The Game backups design in TV mode. The words, rules and states are the Game
+   backups card's; only the controls change for a controller. */
+
+/* Select mode on the Server and Library grids: RT turns it on and off (the
+   desktop's Select / Done), A picks a cover instead of opening Details, X picks all
+   or clears, Y acts on the picked games, B or RT leaves. A bar under the grid
+   counts them. There is no range pick (the desktop's Shift-click): Select all
+   covers that case. */
+S.selMode = false; S.sel = [];
+function selCtx() {
+  var drv = S.tab === 'library' && S.libRail.indexOf('drv:') === 0 ? driveOf(S.libRail.slice(4)) : null;
+  return { drive: drv, list: S.tab === 'library' ? libList() : G.filter(function (g) { return g.p === S.srvRail && (!S.srvQ || g.t.toLowerCase().indexOf(S.srvQ.toLowerCase()) >= 0); }) };
+}
+function selToggle() { S.selMode = !S.selMode; S.sel = []; repaint(); }
+function selPick(el) { var id = +el.dataset.id, i = S.sel.indexOf(id); if (i >= 0) S.sel.splice(i, 1); else S.sel.push(id); repaint(); }
+function selAll() { var L = selCtx().list; S.sel = S.sel.length === L.length ? [] : L.map(function (g) { return g.id; }); repaint(); }
+function selAct() {
+  if (!S.sel.length) { toast('Pick games first', { s: 'A picks the focused game; X picks them all.' }); return; }
+  var c = selCtx(), ids = S.sel.slice();
+  if (c.drive) {
+    openSheet({ title: ids.length + ' game' + (ids.length === 1 ? '' : 's') + ' on ' + c.drive.name, items: [
+      { label: 'Install ' + ids.length + ' game' + (ids.length === 1 ? '' : 's'), fn: function () { ids.forEach(function (id) { var g = byId(id); if (!g.inst && !dlOf(g)) installFromDrive(g, c.drive, true); }); toast(ids.length + ' games added to download queue', { s: 'Copying from ' + c.drive.label }); S.selMode = false; S.sel = []; repaint(); } },
+      { label: 'Remove ' + ids.length + ' from drive…', danger: 1, fn: function () { confirmBox({ title: 'Remove ' + ids.length + ' games from ' + c.drive.name + '?', body: 'Their files leave the drive. Games installed on this computer stay.', ok: 'Remove from drive', danger: 1, fn: function () { c.drive.games = c.drive.games.filter(function (x) { return ids.indexOf(x) < 0; }); toast(ids.length + ' games removed from ' + c.drive.name); S.selMode = false; S.sel = []; repaint(); } }); } }] });
+    return;
+  }
+  if (S.offline) { toast('Backing up needs a server.', { err: 1 }); return; }
+  openBackup(ids, 'Backup ' + ids.length + ' game' + (ids.length === 1 ? '' : 's'));
+}
+function selPaint(L) {
+  var bar = $('selbar'); if (!bar) return;
+  bar.hidden = !S.selMode; if (!S.selMode) return;
+  var c = selCtx(), gb = (S.sel.length * 1.4).toFixed(1), all = S.sel.length === L.length && L.length;
+  bar.innerHTML = '<b>' + S.sel.length + ' selected · ' + gb + ' GB</b><span class="sp"></span><span class="hint">' + gl('X') + (all ? 'All ' + L.length + ' selected · Clear' : 'Select all ' + L.length) + '</span><span class="hint">' + gl('Y') + (c.drive ? 'Install or remove' : 'Backup to drive…') + '</span><span class="hint">' + gl('RT') + 'Done</span>';
+}
+function selHints() {
+  if (!S.selMode || S.pages.length || S.layers.length) return null;
+  var c = selCtx(), L = c.list, on = cur && cur.classList.contains('cv') && S.sel.indexOf(+cur.dataset.id) >= 0;
+  return [['A', on ? 'Unpick' : 'Pick'], ['X', S.sel.length === L.length && L.length ? 'Clear all' : 'Select all'], ['Y', c.drive ? 'Install or remove' : 'Backup to drive…'], ['RT', 'Done']];
+}
+
+/* A page of rows, for the Backup page and the drive pages: headings, notes,
+   switches, radios, choices and actions, with the main button at the end. Start
+   presses the main button from anywhere on the page. */
+function rowsPage(o) {
+  return {
+    title: o.title, render: function () {
+      var rows = o.rows(), acts = [], self = this;
+      var html = rows.map(function (r) {
+        if (r.heading) return '<div class="sgroup">' + esc(r.heading) + '</div>';
+        if (r.note) return '<p class="note' + (r.warn ? ' warn' : '') + '" style="margin:.2rem 1.2rem .8rem">' + r.note + '</p>';
+        if (r.html) return r.html;
+        if (r.info) return '<div class="srow info"><div class="lab"><div class="t">' + esc(r.label) + '</div>' + (r.sub ? '<div class="s">' + r.sub + '</div>' : '') + '</div><div class="val">' + (r.val != null ? r.val : '') + '</div></div>';
+        var i = acts.push(r.fn) - 1;
+        var v = r.toggle != null ? '<span class="sw' + (r.toggle ? ' on' : '') + '"></span>' : (r.val != null ? r.val + ' ' : '') + '<span class="chev">' + gIcon('chevronRight', 18) + '</span>';
+        return '<div class="srow' + (r.danger ? ' dng' : '') + (r.warn ? ' warnrow' : '') + '" data-f data-k="' + o.key + i + '" data-a="pact" data-i="' + i + '" data-al="' + (r.al || (r.toggle != null ? 'Switch' : 'Select')) + '">' +
+          (r.radio != null ? '<span class="radio' + (r.radio ? ' on' : '') + '"></span>' : '') + '<div class="lab"><div class="t">' + r.label + '</div>' + (r.sub ? '<div class="s">' + r.sub + '</div>' : '') + '</div>' + (r.radio == null ? '<div class="val">' + v + '</div>' : '') + '</div>';
+      }).join('');
+      var m = o.main && o.main();
+      self._main = null; self._why = null;
+      if (m) {
+        var mi = acts.push(m.fn) - 1;
+        html += '<div class="bk-foot"><span class="muted">' + (m.summary || '') + '</span><button class="btn pri" data-f data-k="' + o.key + 'main" data-a="pact" data-i="' + mi + '"' + (m.disabled ? ' disabled data-why="' + esc(m.why || '') + '"' : '') + '>' + (m.disabled ? '' : gl('MENU')) + esc(m.label) + '</button></div>';
+        if (!m.disabled) self._main = m.fn; else self._why = m.why;
+      }
+      self._acts = acts;
+      return '<div class="page"><div class="page-in" data-nav="v"><h1>' + o.h1() + '</h1>' + (o.sub ? '<p class="sub">' + o.sub() + '</p>' : '') + html + '</div></div>';
+    },
+    hints: function () { return this._main ? [['MENU', o.mainHint || 'Confirm']] : []; },
+    /* Start presses the main button; while it is disabled, Start says why, as A on it does. */
+    menu: function () { if (this._main) { this._main(); return; } if (this._why) { toast(this._why, { err: 1 }); return; } return false; }
+  };
+}
+
+/* The Backup page: the desktop's backup dialog as a page (it is long, and a page
+   scrolls like every other list here): title, lede, Drive, Source, Also copy,
+   notes, then the summary and Backup N games, which opens focused. */
+function openBackup(ids, title) {
+  var F = { drive: (readyDrives()[0] || {}).id, local: true, fw: CFG.bkFirmware, offline: false, each: false, choice: {} };
+  var games = ids.map(byId), ood = games.filter(function (g) { return g.inst && g.upd; }), localG = games.filter(function (g) { return g.inst && !g.missing; });
+  var host = CFG.url.replace('https://', '');
+  push(rowsPage({
+    title: title, key: 'bk', h1: function () { return esc(title); }, mainHint: 'Backup',
+    sub: function () { return 'GRID ' + (localG.length && F.local ? 'copies games installed on this computer and downloads the rest from ' : 'downloads each game from ') + esc(host) + ', then writes each one, with its art and details, to the drive\'s gridpack folder.'; },
+    rows: function () {
+      var R = [], dv = driveOf(F.drive), skip = dv ? games.filter(function (g) { return dv.games.indexOf(g.id) >= 0; }) : [], todo = games.filter(function (g) { return skip.indexOf(g) < 0; });
+      R.push({ heading: 'Drive' });
+      if (!readyDrives().length) {
+        var raw = DRIVES.filter(function (d) { return d.connected && d.status === 'new'; })[0];
+        R.push({ note: 'No Backup drive is connected.' + (raw ? ' ' + raw.label + ' is connected but not set up for GRID.' : '') });
+        R.push({ label: 'Set up a drive…', fn: function () { S.pages = []; S.tab = 'settings'; S.setPane = 'drives'; render(); } });
+      }
+      readyDrives().forEach(function (d) {
+        var need = todo.length * 1.4, left = +(d.free - need).toFixed(1);
+        R.push({ radio: F.drive === d.id, al: 'Choose', label: esc(d.name) + ' <span class="muted">· ' + d.label + ' · ' + d.fs + '</span>',
+          sub: (left < 0 ? '<span class="err">Needs ' + need.toFixed(1) + ' GB · ' + d.free + ' GB free</span>' : left + ' GB left after this backup') + '<span class="ubar"><b style="width:' + Math.max(0, 100 - d.free / 10) + '%"></b><i style="width:' + Math.min(100, need / 10) + '%"></i></span>',
+          fn: function () { F.drive = d.id; renderStage(); } });
+      });
+      if (localG.length) {
+        R.push({ heading: 'Source' });
+        R.push({ toggle: F.local, label: 'Copy installed games from this computer', sub: F.local ? localG.length + ' game' + (localG.length === 1 ? '' : 's') + ' from this computer (' + (localG.length * 1.6).toFixed(1) + ' GB) · ' + (games.length - localG.length) + ' downloaded' + (ood.length ? ' · ' + ood.length + ' to choose' : '') : 'Every game downloads from ' + esc(host), fn: function () { F.local = !F.local; renderStage(); } });
+        if (F.local && ood.length) {
+          if (ood.length > 1) R.push({ note: ood.length + ' games have newer files on the server. Choose a copy for each.', warn: 1 });
+          ood.forEach(function (g) {
+            var c = F.choice[g.id];
+            R.push({ warn: !c, al: 'Choose', label: esc(g.t) + ': the server has newer files', sub: 'v1.2 on the server; this computer has v1.1', val: c === 'local' ? 'Use this computer\'s copy' : c === 'dl' ? 'Download v1.2' : '<span class="warning-text">Choose</span>',
+              fn: function () { openSheet({ title: g.t, sub: 'The server has newer files (v1.2; this computer has v1.1)', items: [{ label: 'Use this computer\'s copy', checked: c === 'local', fn: function () { F.choice[g.id] = 'local'; renderStage(); } }, { label: 'Download v1.2 from the server', checked: c === 'dl', fn: function () { F.choice[g.id] = 'dl'; renderStage(); } }] }); } });
+          });
+          if (ood.length > 1) {
+            R.push({ label: 'Use this computer\'s copies', fn: function () { ood.forEach(function (g) { F.choice[g.id] = 'local'; }); renderStage(); } });
+            R.push({ label: 'Download all', fn: function () { ood.forEach(function (g) { F.choice[g.id] = 'dl'; }); renderStage(); } });
+          }
+        }
+        if (F.local) {
+          R.push({ label: (F.each ? 'Hide' : 'Show') + ' each game', val: games.length, al: F.each ? 'Hide' : 'Show', fn: function () { F.each = !F.each; renderStage(); } });
+          if (F.each) games.forEach(function (g) {
+            var from = g.inst && !g.missing && !(g.upd && F.choice[g.id] !== 'local');
+            R.push({ info: 1, label: g.t, sub: PLAT[g.p] + (g.missing ? ' · Its files weren\'t found on this computer' : ''), val: '<span class="srctag">' + (g.inst && g.upd && !F.choice[g.id] ? 'Choose below' : from ? 'From this computer' : 'Download') + '</span>' });
+          });
+        }
+      }
+      R.push({ heading: 'Also copy' });
+      var emus = games.map(function (g) { var s = sysOf(g.p); return s && s.emu; }).filter(function (e, i, a) { return e && a.indexOf(e) === i && (!dv || dv.emus.indexOf(e) < 0); });
+      R.push({ info: 1, label: 'Emulators', sub: emus.length ? emus.join(', ') + ' for ' + (dv && dv.os.windows ? 'Linux and Windows' : 'Linux') + ' · ' + emus.length * 120 + ' MB' : 'Already on the drive', val: gIcon('check', 18) });
+      R.push({ toggle: F.fw, label: 'Firmware', sub: '2 systems · 5 files', fn: function () { F.fw = !F.fw; renderStage(); } });
+      if (games.some(function (g) { return g.p === 'WIN'; }) && dv && dv.os.linux) R.push({ toggle: F.offline, label: 'Make Windows games work offline', sub: 'Adds the Steam Linux Runtime (about 0.3 GB) so the first launch needs no network', fn: function () { F.offline = !F.offline; renderStage(); } });
+      if (skip.length) R.push({ note: skip.length + ' game' + (skip.length === 1 ? ' is' : 's are') + ' already on ' + esc(dv.name) + ' and will be skipped: ' + skip.map(function (g) { return esc(g.t); }).join(', ') });
+      return R;
+    },
+    main: function () {
+      var dv = driveOf(F.drive); if (!dv) return null;
+      var todo = games.filter(function (g) { return dv.games.indexOf(g.id) < 0; }), open = F.local ? ood.filter(function (g) { return !F.choice[g.id]; }).length : 0;
+      var copy = F.local ? localG.filter(function (g) { return todo.indexOf(g) >= 0 && !(g.upd && F.choice[g.id] !== 'local'); }).length : 0, dl = todo.length - copy;
+      var summary = (todo.length * 1.4).toFixed(1) + ' GB to write' + (copy && dl ? ' · ' + (dl * 1.4).toFixed(1) + ' GB to download' : '');
+      if (!todo.length) return { label: 'Nothing to backup', disabled: 1, why: 'Every game is already on ' + dv.name + '.', summary: summary };
+      if (open) return { label: 'Choose for ' + open + ' game' + (open === 1 ? '' : 's'), disabled: 1, why: 'Choose a copy for each game the server has newer files for.', summary: summary };
+      if (todo.length * 1.4 > dv.free) return { label: 'Not enough space', disabled: 1, why: dv.name + ' doesn\'t have room for this backup.', summary: summary };
+      return { label: 'Backup ' + todo.length + ' game' + (todo.length === 1 ? '' : 's'), summary: summary, fn: function () { startBackup(todo, dv, F); } };
+    }
+  }));
+}
+var BATCH = 0, BATCH_INFO = {};
+function startBackup(todo, dv, F) {
+  var b = ++BATCH, active = DL.some(function (d) { return d.st === 'active'; });
+  todo.forEach(function (g, i) { DL.push({ id: 'b' + b + '-' + g.id, gid: g.id, t: g.t, p: g.p, st: !active && i === 0 ? 'active' : 'queued', pct: 0, kind: 'Backup', drive: dv.id, batch: b, local: F.local && g.inst && !g.missing && !(g.upd && F.choice[g.id] !== 'local') }); });
+  var emus = todo.map(function (g) { var s = sysOf(g.p); return s && s.emu; }).filter(function (e, i, a) { return e && a.indexOf(e) === i && dv.emus.indexOf(e) < 0; });
+  emus.forEach(function (e) { DL.push({ id: 'b' + b + '-' + e, t: e + ' for ' + (dv.os.windows ? 'Linux and Windows' : 'Linux'), st: 'queued', pct: 0, kind: 'Backup', drive: dv.id, batch: b, emu: e }); });
+  if (F.fw) DL.push({ id: 'b' + b + '-fw', t: 'Firmware · 2 systems', st: 'queued', pct: 0, kind: 'Backup', drive: dv.id, batch: b });
+  BATCH_INFO[b] = { games: todo.length, emus: emus.length };
+  S.selMode = false; S.sel = [];
+  pop();
+  toast(todo.length + ' game' + (todo.length === 1 ? '' : 's') + ' added to the backup queue for ' + dv.name, { act: ['Open Downloads', function () { S.pages = []; S.tab = 'downloads'; render(); }] });
+}
+function backupRowDone(a) {
+  var dv = driveOf(a.drive);
+  a.st = 'done'; a.line = (a.local ? 'Copied from this computer · ' : '') + 'Written to ' + dv.name;
+  if (a.gid && dv.games.indexOf(a.gid) < 0) dv.games.push(a.gid);
+  if (a.emu && dv.emus.indexOf(a.emu) < 0) dv.emus.push(a.emu);
+  if (a.batch && !DL.some(function (d) { return d.batch === a.batch && (d.st === 'active' || d.st === 'queued'); })) {
+    var I = BATCH_INFO[a.batch];
+    toast(I.games + ' game' + (I.games === 1 ? '' : 's') + (I.emus ? ' and ' + I.emus + ' emulator' + (I.emus === 1 ? '' : 's') : '') + ' backed up to ' + dv.name);
+    dv.last = 'Today';
+  }
+}
+function installFromDrive(g, dv, quiet) {
+  var s = sysOf(g.p), active = DL.some(function (d) { return d.st === 'active'; });
+  DL.push({ id: 'i' + Date.now() + '-' + g.id, gid: g.id, t: g.t, p: g.p, st: active ? 'queued' : 'active', pct: 0, kind: '', from: dv.label });
+  if (!quiet) toast(g.t + ' added to download queue', { s: 'Copying from ' + dv.label + (!g.native && s && !s.emu ? ' · ' + s.rec + ' from ' + dv.name + ' installs with it' : ''), act: ['Open Downloads', function () { S.pages = []; S.tab = 'downloads'; render(); }] });
+  repaint();
+}
+/* Open the Library on a drive: the drive's rail row is focused, so the grid shows
+   its games (the rail filters as focus lands). */
+function showDrive(id) { S.pages = []; S.tab = 'library'; S.libRail = 'drv:' + id; S.folds.drives = true; TABS.library._k = 'r-drv:' + id; render(); }
+function unplugCouch() {
+  var dv = driveOf('couch');
+  if (!dv.connected) { dv.connected = true; toast('Couch kit connected', { s: dv.games.length + ' games · SAMSUNG T7' }); repaint(); return; }
+  dv.connected = false;
+  var act = DL.filter(function (d) { return d.kind === 'Backup' && d.drive === 'couch' && d.st === 'active'; })[0];
+  var rest = DL.filter(function (d) { return d.kind === 'Backup' && d.drive === 'couch' && d.st === 'queued'; });
+  if (act || rest.length) {
+    var written = DL.filter(function (d) { return d.kind === 'Backup' && d.drive === 'couch' && d.st === 'done'; }).length;
+    if (act) { act.st = 'failed'; act.line = 'Failed — SAMSUNG T7 was removed'; }
+    DL = DL.filter(function (d) { return rest.indexOf(d) < 0; });
+    if (rest.length) DL.push({ id: 'rm' + Date.now(), t: rest.length + ' more items', st: 'cancelled', kind: 'Backup', drive: 'couch', line: 'Cancelled — SAMSUNG T7 was removed · backup again to finish' });
+    advanceQueue();
+    toast('SAMSUNG T7 was removed during the backup', { err: 1, s: written + ' item' + (written === 1 ? ' was' : 's were') + ' written. Backup again to finish.' });
+  } else toast('Couch kit removed');
+  if (S.libRail === 'drv:couch') S.libRail = 'all';
+  if (S.selMode) { S.selMode = false; S.sel = []; }
+  repaint();
+}
+
+/* Settings › Backup drives: connected drives (set up or not), then the drives GRID
+   remembers, then the backup default. Each drive opens its own page. */
+function drivesPane() {
+  var con = DRIVES.filter(function (d) { return d.connected; }), away = DRIVES.filter(function (d) { return !d.connected && d.status === 'ready'; });
+  function row(d) {
+    var st = !d.connected ? '<span class="st">Not connected</span>' : d.status === 'ready' ? '<span class="st ok">Ready for backups</span>' : '<span class="st warn">Not set up</span>';
+    var sub = d.connected ? d.label + ' · ' + d.fs + ' · ' + d.size + (d.status === 'ready' ? ' · ' + d.games.length + ' games' : '') : 'Last seen ' + d.seen + ' · ' + d.games.length + ' games · ' + d.size;
+    return '<div class="srow" data-f data-k="dr-' + d.id + '" data-a="drivePage" data-id="' + d.id + '" data-al="Open"><div class="lab"><div class="t">' + esc(d.name || d.label) + '</div><div class="s">' + sub + '</div></div><div class="val">' + st + '<span class="chev">' + gIcon('chevronRight', 18) + '</span></div></div>';
+  }
+  return '<div class="pane-h"><h1>Backup drives</h1></div><div class="sgroup">Connected</div>' + (con.length ? con.map(row).join('') : '<p class="note" style="margin-left:1.2rem">No drives connected. Plug in a USB drive or SSD.</p>') +
+    (away.length ? '<div class="sgroup">Not connected</div>' + away.map(row).join('') : '') +
+    '<div class="sgroup">Every backup also copies</div><div class="srow" data-f data-k="dr-fw" data-a="bkFwDefault" data-al="Switch"><div class="lab"><div class="t">Firmware</div><div class="s">The server\'s firmware for the systems backed up. The Backup page starts with this.</div></div><div class="val"><span class="sw' + (CFG.bkFirmware ? ' on' : '') + '"></span></div></div>';
+}
+function drivePage(d) {
+  if (!d.connected) { openSheet({ title: d.name, sub: 'Last seen ' + d.seen + ' · ' + d.games.length + ' games · ' + d.size, items: [{ label: 'Forget ' + d.name, danger: 1, fn: function () { DRIVES.splice(DRIVES.indexOf(d), 1); toast(d.name + ' forgotten'); repaint(); } }] }); return; }
+  if (d.status !== 'ready') { push(setupPage(d)); return; }
+  push(rowsPage({
+    title: d.name, key: 'dp', h1: function () { return esc(d.name); }, sub: function () { return d.label + ' · ' + d.fs + ' · ' + d.size + ' · Ready for backups'; },
+    rows: function () {
+      var gridGB = +(d.games.length * 1.66).toFixed(1), other = Math.max(0, 1000 - d.free - gridGB);
+      return [
+        { label: 'For ' + (d.os.linux && d.os.windows ? 'Linux and Windows' : d.os.linux ? 'Linux' : 'Windows'), val: 'Change…', al: 'Change', fn: function () { push(osPage(d)); } },
+        { html: '<div class="srow info"><div class="lab"><div class="t">Space</div><div class="s"><span class="ubar wide"><b style="width:' + other / 10 + '%"></b><i class="grid" style="width:' + gridGB / 10 + '%"></i></span>Other files ' + other.toFixed(0) + ' GB · GRID ' + gridGB + ' GB · ' + d.free + ' GB free</div></div></div>' },
+        { info: 1, label: 'Games', val: d.games.length }, { info: 1, label: 'Emulators', val: d.emus.join(', ') || 'None' }, { info: 1, label: 'Firmware', val: d.fw + ' systems' },
+        { info: 1, label: 'Last backup', val: d.last || 'Never' }, { info: 1, label: 'Folder', val: '/run/media/sam/' + d.label + '/gridpack' },
+        { label: 'Show in Library', fn: function () { showDrive(d.id); } },
+        { label: 'Open folder', sub: 'Opens the file manager in desktop mode', fn: toDesktop },
+        { label: 'Rename…', val: esc(d.name), al: 'Rename', fn: function () { openOSK({ title: 'Pack name', value: d.name, onDone: function (v) { if (v.trim()) { d.name = v.trim(); renderStage(); toast('Renamed to ' + d.name); } } }); } },
+        { label: 'Remove GRID files…', danger: 1, sub: 'Deletes only the gridpack folder; games installed on this computer stay', fn: function () {
+          confirmBox({ title: 'Remove GRID files from ' + d.name + '?', body: 'The gridpack folder (' + gridGB + ' GB) is deleted from ' + d.label + '. Nothing else on the drive is touched, and the games installed on this computer stay.', ok: 'Continue', danger: 1, fn: function () {
+            confirmBox({ title: 'Delete ' + gridGB + ' GB from ' + d.label + '?', body: 'This can\'t be undone.', ok: 'Remove GRID files', danger: 1, fn: function () { d.status = 'new'; d.games = []; d.emus = []; d.fw = 0; d.free = +(d.free + gridGB).toFixed(1); toast('GRID files removed from ' + d.label, { s: gridGB + ' GB freed' }); pop(); } });
+          } });
+        } }
+      ];
+    }
+  }));
+}
+function osPage(d) {
+  return rowsPage({ title: 'Computers', key: 'os', h1: function () { return 'Computers this pack is for'; }, sub: function () { return 'Emulators go on the drive built for each one. At least one stays ticked.'; },
+    rows: function () {
+      return ['linux', 'windows'].map(function (os) {
+        var name = os === 'linux' ? 'Linux' : 'Windows';
+        return { toggle: d.os[os], label: name, fn: function () {
+          var on = !d.os[os]; if (!on && !d.os[os === 'linux' ? 'windows' : 'linux']) { toast('At least one computer stays ticked', { err: 1 }); return; }
+          d.os[os] = on; toast(on ? name + ' builds of ' + d.emus.length + ' emulators added to the backup queue for ' + d.name : name + ' builds removed from ' + d.name, { s: on ? '' : 'Games and firmware stay' }); renderStage();
+        } };
+      });
+    } });
+}
+function setupPage(d) {
+  var F = { name: d.label, linux: true, windows: false };
+  return rowsPage({ title: 'Set up ' + d.label, key: 'su', h1: function () { return 'Set up ' + esc(d.label) + ' for GRID'; }, sub: function () { return d.fs + ' · ' + d.size + ' · Not set up'; }, mainHint: 'Set up',
+    rows: function () {
+      var R = [
+        { label: 'Pack name', val: esc(F.name), al: 'Edit', fn: function () { openOSK({ title: 'Pack name', value: F.name, onDone: function (v) { if (v.trim()) F.name = v.trim(); renderStage(); } }); } },
+        { heading: 'Computers this pack is for' },
+        { toggle: F.linux, label: 'Linux', fn: function () { if (F.linux && !F.windows) return toast('At least one computer stays ticked', { err: 1 }); F.linux = !F.linux; renderStage(); } },
+        { toggle: F.windows, label: 'Windows', fn: function () { if (F.windows && !F.linux) return toast('At least one computer stays ticked', { err: 1 }); F.windows = !F.windows; renderStage(); } }];
+      if (d.fs === 'FAT32') R.push({ note: 'This drive is FAT32: files over 4 GB can\'t go on it. exFAT avoids that. GRID never formats a drive.', warn: 1 });
+      R.push({ note: 'GRID makes a gridpack folder at the drive\'s root and never touches anything outside it.' });
+      return R;
+    },
+    main: function () { return { label: 'Set up for GRID', fn: function () { d.name = F.name; d.os = { linux: F.linux, windows: F.windows }; d.status = 'ready'; toast(d.name + ' is ready for backups', { s: d.label + ' · ' + d.fs }); pop(); } }; } });
+}
+
 /* ------------------------------------------------------------------ render */
 var shownScr = null;
 function renderStage() {
@@ -1338,12 +1672,14 @@ function advanceQueue() { if (!DL.some(function (d) { return d.st === 'active'; 
 setInterval(function () {
   var a = DL.filter(function (d) { return d.st === 'active'; })[0]; if (!a) return;
   a.pct = Math.min(100, a.pct + 3 + Math.floor(Math.random() * 4));
-  if (a.pct >= 100) { a.st = 'done'; a.line = a.kind === 'Update' ? 'Updated' : a.kind === 'Library' ? 'Moved' : 'Installed · 1.2 GB'; var g = byId(a.gid); if (g) { g.inst = 1; } toast(a.kind === 'Library' ? 'Library moved' : a.t + (a.kind === 'Update' ? ' updated' : ' installed')); advanceQueue(); }
+  if (a.pct >= 100 && a.kind === 'Backup') { backupRowDone(a); advanceQueue(); }
+  else if (a.pct >= 100) { a.st = 'done'; a.line = a.kind === 'Update' ? 'Updated' : a.kind === 'Library' ? 'Moved' : a.from ? 'Installed from ' + a.from : 'Installed · 1.2 GB'; var g = byId(a.gid); if (g) { g.inst = 1; var sy = sysOf(g.p); if (a.from && sy && !sy.emu) { sy.emu = sy.rec; sy.status = 'Ready'; } } toast(a.kind === 'Library' ? 'Library moved' : a.t + (a.kind === 'Update' ? ' updated' : ' installed')); advanceQueue(); }
   /* A finished install changes the game everywhere it shows (the progress tag goes,
      the installed dot comes, the next queued game starts), so the screen redraws,
      keeping focus and scroll; under an open overlay it redraws when that closes.
      While it runs, only the percentage text changes. */
   var finished = a.st === 'done';
+  if (!finished && a.kind === 'Backup') { if (S.tab === 'downloads' && !S.pages.length && !S.layers.length) repaint(); else paintTop(); return; }
   if (S.layers.length) { paintTop(); if (finished) S.dirty = true; return; }
   if (finished || (S.tab === 'downloads' && !S.pages.length) || (S.pages.length && S.pages[S.pages.length - 1].id === a.gid)) { repaint(); return; }
   paintTop();
@@ -1387,7 +1723,8 @@ function press(b) {
       if (cur.dataset.gi != null) { var g1 = top.gi[+cur.dataset.gi]; closeLayer(); g1[1](); return; }
       if (cur.dataset.gp != null) { var g2 = top.gp[+cur.dataset.gp]; closeLayer(); g2[1](); return; }
     }
-    if (cur.disabled) return;
+    if (cur.disabled) { if (cur.dataset.why) toast(cur.dataset.why, { err: 1 }); return; }
+    if (S.selMode && !S.pages.length && cur.classList.contains('cv')) return selPick(cur);
     var a = cur.dataset.a; if (a && ACT[a]) return ACT[a](cur);
     return;
   }
@@ -1395,12 +1732,15 @@ function press(b) {
     if (top) { if (!top.blocking) closeLayer(); return; }
     if (S.startup) { if (S.pages.length > 1) pop(); return; }
     if (S.pages.length) return pop();
+    if (S.selMode) return selToggle();
     var rail = document.querySelector('.rail');
     if (rail && cur && !rail.contains(cur)) { var sel = rail.querySelector('.ri.sel') || rail.querySelector('[data-f]'); return setFocus(sel); }
     if (S.tab !== 'home') { S.tab = 'home'; render(); }
     return;
   }
   if (top) return;
+  if (S.selMode && !S.pages.length && (b === 'X' || b === 'Y')) return b === 'X' ? selAll() : selAct();
+  if (b === 'RT') { if (scr.rt) scr.rt(); return; }
   if (b === 'X') { if (cur && cur.dataset.x === 'quick') return ACT.quick(cur); if (cur && cur.dataset.xa && ACT[cur.dataset.xa]) return ACT[cur.dataset.xa](cur); if (scr.x) return scr.x(); return; }
   if (b === 'Y') { if (scr.y) scr.y(); return; }
   if (b === 'LT') { if (scr.lt) scr.lt(); return; }
@@ -1409,12 +1749,12 @@ function press(b) {
     if (S.pages.length || S.startup) return;
     var i = TAB_ORDER.indexOf(S.tab); S.tab = TAB_ORDER[(i + (b === 'LB' ? -1 : 1) + TAB_ORDER.length) % TAB_ORDER.length]; render(); return;
   }
-  if (b === 'MENU' && scr.menu) return scr.menu();
+  if (b === 'MENU' && scr.menu && scr.menu() !== false) return;
   if (b === 'MENU' || b === 'GUIDE') { if (!S.startup) guideMenu(); return; }
   if (b === 'VIEW') { var n = newestAction(); if (n) { n.remove(); n._act[1](); } else if (S.startup && scr.F) toast('Pasted from the clipboard'); return; }
 }
 
-var KEYMAP = { ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', Enter: 'A', ' ': 'A', Escape: 'B', Backspace: 'B', x: 'X', y: 'Y', q: 'LB', e: 'RB', z: 'LT', m: 'MENU', v: 'VIEW', g: 'GUIDE' };
+var KEYMAP = { r: 'RT', ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', Enter: 'A', ' ': 'A', Escape: 'B', Backspace: 'B', x: 'X', y: 'Y', q: 'LB', e: 'RB', z: 'LT', m: 'MENU', v: 'VIEW', g: 'GUIDE' };
 document.addEventListener('keydown', function (e) {
   if (e.key === 'PageDown' || e.key === 'PageUp') { e.preventDefault(); var v = $('tbody') || (cur && vScroller(cur)); if (v) v.scrollBy({ top: (e.key === 'PageDown' ? 1 : -1) * v.clientHeight * .7, behavior: glide() ? 'smooth' : 'auto' }); return; }
   var top = S.layers[S.layers.length - 1];

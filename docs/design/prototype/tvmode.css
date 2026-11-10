@@ -314,3 +314,31 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .desk { position: absolute; inset: 0; z-index: 40; background: var(--bg); display: flex; align-items: center; justify-content: center; text-align: center; }
 .desk .box { max-width: 40rem; }
 .desk h1 { color: var(--text-h); }
+
+/* ---- Game backups */
+/* A picked cover in select mode: a filled check top left, a primary ring, a little smaller. */
+.cv.pk .cv-art { transform: scale(.94); box-shadow: 0 0 0 .22rem var(--bg), 0 0 0 .42rem var(--primary); }
+.cv.pk.f .cv-art { transform: scale(1); box-shadow: var(--shadow-lift), 0 0 0 .22rem var(--bg), 0 0 0 .42rem var(--focus); }
+.pick { position: absolute; z-index: 2; top: .55rem; left: .55rem; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--primary); color: var(--on-primary); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 .15rem var(--bg); }
+.cv.pk .tag.upd, .cv.pk .tag.miss { left: 2.5rem; }
+/* The selection bar pins to the bottom of the grid panel. */
+.selbar { flex: 0 0 auto; display: flex; align-items: center; gap: 1.4rem; margin: 0 0 1.2rem; padding: .8rem 1.2rem; background: var(--overlay); border: 1px solid var(--line-strong); border-radius: 1rem; box-shadow: var(--shadow-overlay); color: var(--text-h); }
+.selbar[hidden] { display: none; }
+.selbar .sp { flex: 1; }
+.selbar .hint { display: inline-flex; align-items: center; gap: .5rem; font-weight: 600; }
+/* Radio rows (the Drive choice). */
+.radio { flex: 0 0 auto; width: 1.5rem; height: 1.5rem; border-radius: 50%; border: .15rem solid var(--line-strong); position: relative; }
+.radio.on { border-color: var(--primary); }
+.radio.on::after { content: ''; position: absolute; inset: .25rem; border-radius: 50%; background: var(--primary); }
+/* A drive's space: other files, then this backup's share (or GRID's files). */
+.ubar { display: flex; height: .4rem; width: 16rem; max-width: 100%; border-radius: .2rem; background: var(--field); overflow: hidden; margin: .5rem 0 .2rem; }
+.ubar.wide { width: 28rem; }
+.ubar b { display: block; height: 100%; background: var(--text-muted); opacity: .5; }
+.ubar i { display: block; height: 100%; background: repeating-linear-gradient(45deg, var(--graph-disk) 0 .3rem, transparent .3rem .5rem); }
+.ubar i.grid { background: var(--primary); }
+.srow.warnrow { box-shadow: inset .25rem 0 0 var(--warning-text); }
+.warning-text { color: var(--warning-text); font-weight: 600; }
+.srctag { font-size: .8rem; font-weight: 600; padding: .15rem .6rem; border-radius: 100px; border: 1px solid var(--line-strong); color: var(--text-muted); white-space: nowrap; }
+.bk-foot { display: flex; align-items: center; justify-content: flex-end; gap: 1.4rem; margin-top: 1.4rem; padding-top: 1.2rem; border-top: 1px solid var(--line); }
+.start-foot .or { color: var(--text-muted); align-self: center; }
+.status .dot.none { background: var(--text-muted); }
