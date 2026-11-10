@@ -269,25 +269,13 @@
   `up`, `fs-<name>` in `#fs-list`; link rows `lk<romId>`; Game settings rows `s-exe|s-params|s-compat|
   s-reload|s-save`.
 - **Not done / for later:** Backup to drive… (Details) does nothing yet: TODO(P13) the Backup page. Item
-  438 (refusals while a game is being backed up) is P13. Details › Saves doesn't manage a native game's
-  save folders (the desktop's PC save-folder list); upload still follows its rules.
+  438 (refusals while a game is being backed up) is P13.
 - **e2e:** group `tv-details` (fixtures `fixtures-tv-details`: the cloud-saves games, Link Target,
   Lost Cart, My Game on Windows, No Emu Game on Nintendo 64; seed `tv-details-seed.mjs`; mock flag
   `--stateful-saves`, so uploads join and deletes leave a rom's records). `helpers/tvDetails.ts` has
   `openLibraryDetails(title)`, `detButtons`/`waitButtons`, `bodyScroll`, `captureErrors`/`pageErrors`.
   The tv-server, tv-library and tv-large-platform specs now wait for `tv-details`.
 
-
-## Pending for the next phase (consultant, after P9): prompts and native save locations
-- Checklist 529–531 (README § Consultant decisions). Files: app/src/lib/tv/gameActions.ts (`offerUmu(title)`,
-  `promptLibraryFolder(title)`, `promptFor(outcome, title)`, the "Library folder set" card), app/src/lib/tv/pages/details.ts
-  + test (`umuConfirm(title)`, `libraryFolderConfirm(title)`, `LIBRARY_FOLDER_SET`, `LIBRARY_FOLDER_BROWSER_TITLE`,
-  save-location words `removeLocationConfirm(raw)`, `SAVE_FOLDER_ADDED`, `saveFolderBrowserTitle(title)`),
-  app/src/lib/tv/pages/TvDetails.svelte (pass the title), app/src/lib/tv/pages/details/TvSavesPanel.svelte (the
-  "Save locations" section on CloudStore.nativePaths/nativePhase/nativePathCount/addManualPath/removeSavePath,
-  list `#saves-locs` data-nav="v", keys `sl<raw>`), e2e in tv-details (library-folder confirm; add/remove a
-  location through the browser with the "My Game on Windows" fixture). Remove the handover line saying TV
-  Saves doesn't manage native save folders.
 
 ## After P10: Downloads and the Settings panes
 - **Downloads** (`tabs/downloads/TvDownloads.svelte`, pure `downloadRows.ts`): panels `tv-dl-seg-<active|queued|completed>`
@@ -328,17 +316,6 @@
 - **Not done / for later:** Backup drives pane (P13) and Systems (P11) stay empty. RA's username + password login (the
   desktop's second form) isn't in the TV design. Connection has no "edit connection" (not in the design).
 
-## Pending for the next phase: Downloads Cancel wording (consultant ruling 8, exact text)
-P10 used its own wording for backup and library-move rows; replace it in
-app/src/lib/tv/tabs/downloads/downloadRows.ts (+ test) with the ruled text:
-- Game / update / emulator / firmware row: "Cancel <title>?" / "The download stops and its files are removed. You can
-  install it again later." (queued: "It leaves the queue. You can install it again later.") / "Cancel install".
-- Backup row: "Cancel <title>?" / "The backup stops and what it wrote to <label> is removed. You can back it up again
-  later." / "Cancel backup".
-- Library move: "Cancel the move?" / "The files copied so far are removed and the library stays where it is." /
-  "Cancel move".
-- Then the card "Cancelled <title>". Danger action button, Cancel focused. Remove the TODO(design) markers.
-
 ## Pending for the next phase (consultant, after P10): checklist 532–534
 - app/src/lib/tv/tabs/settings/panes/tv.ts: `ASSIGN_NEEDS_PAD` = "Connect a controller to choose its buttons. Each
   controller keeps its own choice."; line "For the controller in use", value "Xbox style"; drop TODO(design); tests.
@@ -350,3 +327,53 @@ app/src/lib/tv/tabs/downloads/downloadRows.ts (+ test) with the ruled text:
 - app/src/lib/tv/tabs/downloads/downloadRows.ts: `rowWhy(e)` by kind (firmware → "Installing firmware — this step
   cannot be cancelled"; library_move → "Updating paths — this step cannot be cancelled"; else CANCEL_EXTRACTING);
   `rowA` returns 'Details' when only `open` remains; tests.
+
+## After P11: Settings › Systems, the System page and the emulator form
+- **Done from the pending lists:** the Downloads Cancel wording (ruling 8, exact text: `downloadRows.ts`
+  `cancelWords`, a queued install "It leaves the queue…", the backup body names the drive's label; no
+  TODO(design) left there; tv-settings checks the body, the button and its danger style). Checklist 529–531:
+  `details.ts` `umuConfirm(title)`, `libraryFolderConfirm()`, `LIBRARY_FOLDER_BROWSER_TITLE`, `LIBRARY_FOLDER_SET`,
+  `SAVE_LOCATIONS_HEADING`, `ADD_SAVE_FOLDER`, `SAVE_FOLDER_ADDED`, `saveFolderBrowserTitle`, `removeLocationConfirm`
+  (body = the raw path); `gameActions.ts` `promptFor(outcome, title)`, `offerUmu(title)`, `promptLibraryFolder()`
+  (card "Library folder set", sub the path; error card on refusal). `TvSavesPanel` lists a native game's save
+  locations under the records (`#saves-locs`, rows `sl<raw>` with `data-raw`, test id `tv-saves-loc`, then
+  `sl-add` "Add a save folder…", which opens the folder browser in the game's own folder). The browser page
+  remounts Details, so `det.locations` (detailsState) is bumped after an add and the new panel reloads.
+  The pending section for 532–534 is untouched (held back from this phase).
+- **One shared store** (`tv/systemsTv.svelte.ts`): `tvSystems` (a `SystemsStore`) outlives the remounts, so an
+  install, "Installing N emulators…" and the lists survive a System page and back. `useTvSystems()` (call from a
+  screen's script) runs what the desktop SystemsPage runs while shown; the setup-defaults and firmware-pass
+  listeners stay on for the session. Also `tvProton` (catalog, pending), `windowsNow()` (picker, status, tool
+  label), `openProtonList()`, `openEmulatorList(row)`.
+- **Pane** `tabs/settings/TvSystemsPane.svelte` (TvSettings draws it for `systems`), pure `panes/systems.ts`
+  (`recButton`, `systemItem`, `windowsItem`, `orderSystems`, `otherItems`, `checkingText`, `updatesSub`,
+  `installingCount`). Header buttons in `#sy-head`: `sy-rec` / `sy-chk` / `sy-add` (test ids `tv-sys-rec|check|add`);
+  rows `sy-<slug>` (`tv-sys-row-<slug>`, `tv-sys-sub-<slug>`, pill `tv-sys-status-<slug>` with `data-status`),
+  Windows `sy-windows`; Other emulators rows `sy-other-<name key>` or `tv-sys-other-empty`. Install recommended
+  shows "Installing N emulators…" (aria-disabled, why `REC_RUNNING`) while its press is queued and while
+  no-emulator systems still install; when it goes, focus takes the control in its place in `#sy-head`. Check for
+  updates: "Checking N emulators for updates…", then the desktop's result card with each update as its sub line.
+- **Pages** `pages/TvSystemPage.svelte` (props `system` = label or server name | `windows` | `emulator` for an
+  Other emulator), pure `pages/systemPage.ts` (`systemPageRows` per kind: emulator, none, windows, other; plus
+  `emulatorListItems`, `protonListItems`, `removeConfirm`, `pageSub`, `umuValue`). Row keys `s-emu|ver|update|core|
+  fw|ps3fw|open|settings|remove|tips|install|choose|proton|umu|umu-install|first`, companions `s-comp-<key>-*`.
+  `gameActions.openSystem(system)` pushes it (Server chips, "Set up <Platform>"); the stub is gone.
+  `pages/TvEmulatorForm.svelte` + pure `pages/emulatorForm.ts`, opened by `emulatorFormOpen.svelte.ts`
+  `openEmulatorForm(mode, entry)`: the fields are a `$state` object in the page's props, so the Program browser
+  (a page over the form) doesn't lose them. Rows `s-which|name|prog|args|strategy|save-paths|state-paths|
+  ignore-files|ignore-ext|save`.
+- **Install recommended's count:** `tvRec.keys` (systemsTv) holds the systems it was pressed for; `installingCount`
+  counts those (and any no-emulator system) still installing, since a system can show a fallback emulator (a
+  hand-added one with no profile plays every system) while its own install runs.
+- **Focus:** the pane is wrapped in a `data-edge` area, so Up from the header buttons stays in the pane (it used to
+  reach the rail and switch the pane); the system rows (`#sy-list`) and Other emulators (`#sy-others`) are their own
+  `data-nav="v"` lists, so Down from the header reaches the first row.
+- **Mock forge:** `POST /__e2e__/slow?ms=<n>` delays every download (not the api.github.com JSON) by n ms.
+- **e2e:** group `tv-systems` (`specs/tv-systems.spec.ts`, fixtures-systems + mock forge, no seed; connects on
+  the desktop). tv-details-c now opens the real System page from "Set up Nintendo 64" and covers 530 and 531;
+  tv-server's chip test waits for `tv-system-page`. Row text in specs: TvRows puts label, line and value in
+  separate divs with no spaces, so tv-systems reads rows with its own `rowText` (`.t`, `.s`, `.val` joined).
+- **Not done / open (TODO in code):** "Used for <system>" under "<emulator> installed" (item 260; the
+  `emulator-installed` event names no system); the why texts for the disabled Installing button, Check for updates
+  while checking, a busy row, and Save with no name are mine (TODO(design)); "Show program folder" (the desktop's ⋯
+  menu) isn't offered in TV.
