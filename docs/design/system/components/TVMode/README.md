@@ -93,6 +93,11 @@ TV mode carries the whole Game backups design (the Game backups card, built on `
 - **Settings › Backup drives** (second in the rail): Connected (set up or not), Not connected (remembered), then **Every backup also copies › Firmware**. A drive opens its page: For Linux and Windows (Change… opens the two switches, at least one stays on, with the notices the desktop gives), the space bar (other files, GRID, free), games, emulators, firmware, last backup, folder, Show in Library, Open folder (in desktop mode), Rename… (keyboard) and **Remove GRID files…**, which asks twice. A drive that isn't set up opens **Set up for GRID**: pack name, the two computers, the FAT32 warning and the note that only a gridpack folder is made; Start sets it up. A remembered drive offers Forget.
 - **Use without a server:** on Connect, after "or", beside Connect. It needs only the library folder, and opens the Library on the first connected Backup drive. The top bar reads "Offline · no server" (grey dot), the hint bar says the Library and Backup drives work without one, and Server shows "Not connected to a server" with **Connect to a server…**.
 
+## Decided
+
+- **RT is select mode** on the Library and Server grids (2026-11-10).
+- **Start presses a page's main button** where a page has one: Skip for now on Choose your systems, Backup N games on the Backup page, Set up for GRID; while the button is disabled, Start says why (2026-11-10). Elsewhere Start opens the Menu.
+
 ## Proposed defaults (to confirm)
 
 - **Entering and leaving:** a TV button in the desktop top bar, F11, and a `--tv` start option; Settings › TV mode › Open GRID in (the mode it was closed in / TV mode / desktop mode). Menu › Switch to desktop mode leaves.
