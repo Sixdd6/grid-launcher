@@ -12,6 +12,7 @@ const PS2 = 'Sony PlayStation 2';
 const DC = 'Sega Dreamcast';
 const PS4 = 'Sony PlayStation 4';
 const PCSX2 = 'PCSX2 (Playstation 2)';
+const QT_LAUNCHER = 'ShadPS4 Qt Launcher';
 
 const config = () => readFileSync(configPath(), 'utf-8');
 
@@ -395,6 +396,29 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
     await waitFocused('sy-chk', 'focus did not move to Check for updates');
     for (const k of ['dc', 'ps2', 'ps4']) expect(await statusOf(k)).not.toBe('none');
     await assertNoClipping();
+  });
+
+  it('a companion has its settings and Remove on the system page (ruling E4)', async () => {
+    await seek('sy-ps4');
+    await key('Enter');
+    await $(testId('tv-system-page')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await waitText('tv-crumb', new RegExp(PS4));
+    const comp = async (suffix: string) => (await pageRows()).find((k) => k.startsWith('comp-') && k.endsWith(`-${suffix}`)) ?? '';
+    await browser.waitUntil(async () => (await comp('remove')) !== '', { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'no companion Remove row' });
+    const rows = await pageRows();
+    const open = rows.indexOf(await comp('open'));
+    expect(rows.slice(open, open + 3)).toEqual([await comp('open'), await comp('settings'), await comp('remove')]);
+    expect(await rowText(`tv-row-${await comp('settings')}`)).toBe(`${QT_LAUNCHER} settings Program, launch options, cloud save folders`);
+    expect(await rowText(`tv-row-${await comp('remove')}`)).toBe(`Remove ${QT_LAUNCHER}`);
+    await seek(`s-${await comp('remove')}`);
+    await key('Enter');
+    await confirm(`Remove ${QT_LAUNCHER}?`, 'Games and saves stay.');
+    await waitToast(`${QT_LAUNCHER} removed`);
+    // The page stays, the companion now missing.
+    await browser.waitUntil(async () => (await comp('remove')) === '', { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the companion never went' });
+    expect(await $(testId('tv-system-page')).isExisting()).toBe(true);
+    await key('Escape');
+    await waitGone('tv-system-page');
   });
 
   it('a Server header chip opens the system page (item 200)', async () => {

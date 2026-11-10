@@ -55,6 +55,25 @@ describe('tv-backups-c: Backup drives without a server', () => {
     await driveCover();
   });
 
+  it('LT on a drive sorts by the drive sorts, remembered apart from the Library sort (ruling E5)', async () => {
+    await waitText('tv-lib-sort', 'Sort: Title');
+    await key('z');
+    await $(testId('tv-list')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    expect((await listOptions()).title).toBe('Sort by');
+    const labels = await browser.execute(() => Array.from(document.querySelectorAll('[data-testid^="tv-drive-sort-"]')).map((e) => e.textContent?.trim()));
+    expect(labels).toEqual(['Title', 'Platform', 'Recently backed up', 'Largest first']);
+    await tap(testId('tv-drive-sort-size'));
+    await waitGone('tv-list');
+    await waitText('tv-lib-sort', 'Sort: Largest first');
+    await driveCover();
+    // Back to Title for the tests that follow.
+    await key('z');
+    await $(testId('tv-list')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await tap(testId('tv-drive-sort-title'));
+    await waitGone('tv-list');
+    await waitText('tv-lib-sort', 'Sort: Title');
+  });
+
   it('select mode on a drive: Y lists Install and Remove; B leaves it (items 94, 439, 444–446, 449)', async () => {
     const k = await driveCover();
     if ((await focused()) !== k) await key('ArrowRight');

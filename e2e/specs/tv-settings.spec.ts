@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { APP_START_TIMEOUT, configPath, dataDir, FIXTURE_TOKEN, INSTALL_TIMEOUT, mockUrl, THROTTLED_DOWNLOAD_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { axis, connectPad, focused, hints, invoke, key, NINTENDO_PAD, promptSet, waitFocused, waitPromptSet, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
-import { captureErrors, moveTo, pageErrors, testId, text, waitGone, waitText } from '../helpers/tvDetails.js';
+import { captureErrors, moveTo, pageErrors, testId, text, typeKeys, waitGone, waitOskClosed, waitText } from '../helpers/tvDetails.js';
 
 const SNES = 'Super Nintendo Entertainment System';
 const oldRoot = () => path.join(dataDir(), 'library');
@@ -347,14 +347,44 @@ describe('tv-settings: Downloads and Settings', () => {
     expect(existsSync(path.join(oldRoot(), 'games', SNES))).toBe(true);
   });
 
-  it('Disconnect asks first, then returns to Connect (items 243–244)', async () => {
+  it('Edit connection… opens Connect as a page: B keeps the session, Connect reconnects and comes back (ruling E1–3)', async () => {
     await key('Escape');
     await moveTo('r-connection', 'ArrowUp');
     await waitText('tv-row-credential', /Stored in the system keyring · verified/);
     await key('ArrowRight');
     await waitFocused('s-reconnect');
-    await key('ArrowDown');
-    await waitFocused('s-disconnect');
+    await seek('s-server-page');
+    await seek('s-config-folder');
+    await seek('s-edit');
+    await key('Enter');
+    await $(testId('tv-edit-connection')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Edit connection never opened' });
+    await waitText('tv-crumb', /Connect/);
+    await waitText('tv-cf-url-value', /^http/);
+    expect(await $(testId('tv-cf-lib')).isExisting()).toBe(false);
+    expect(await $(testId('tv-connect-offline')).isExisting()).toBe(false);
+    // B: back with nothing changed.
+    await key('Escape');
+    await waitGone('tv-edit-connection');
+    await waitFocused('s-edit');
+    await waitText('tv-row-credential', /Stored in the system keyring · verified/);
+    // Again, with the token typed: Connect reconnects and comes back.
+    await key('Enter');
+    await $(testId('tv-edit-connection')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await seek('cf-token');
+    await key('Enter');
+    await typeKeys(FIXTURE_TOKEN);
+    await key('Enter');
+    await waitOskClosed();
+    await moveTo('cf-go', 'ArrowDown');
+    await key('Enter');
+    await waitToast(/^Connected to http/);
+    await waitGone('tv-edit-connection');
+    await waitText('tv-row-credential', /Stored in the system keyring · verified/);
+  });
+
+  it('Disconnect asks first, then returns to Connect (items 243–244)', async () => {
+    await waitFocused('s-edit');
+    await seek('s-disconnect');
     await key('Enter');
     await confirm(/^Disconnect from .+\?$/);
     await browser.waitUntil(async () => /Connect to your RomM server/.test(await text('tv-stage')), {
