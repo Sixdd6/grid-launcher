@@ -73,7 +73,7 @@ var driveOf = function (id) { return DRIVES.filter(function (d) { return d.id ==
 var readyDrives = function () { return DRIVES.filter(function (d) { return d.connected && d.status === 'ready'; }); };
 var onDrive = function (g) { return readyDrives().filter(function (d) { return d.games.indexOf(g.id) >= 0; })[0]; };
 var CFG = { theme: 'dark', art: true, fade: 45, blur: 40, hw: true, restore: true, upload: true, skipNewer: true, delay: 10, retain: 10,
-  raUser: 'sam_plays', raToken: '', prompts: 'auto', btnLayout: 'labels', bkFirmware: true, url: 'https://romm.home.lan', user: 'sam', lib: '/home/sam/Games/GRID', exitBtn: 'menu' };
+  raUser: 'sam_plays', raToken: '', prompts: 'auto', assign: {}, bkFirmware: true, url: 'https://romm.home.lan', user: 'sam', lib: '/home/sam/Games/GRID', exitBtn: 'menu' };
 
 var S = { tab: 'home', pages: [], layers: [], offline: false, libRail: 'all', srvRail: 'PS', libQ: '', srvQ: '', libSort: 'Recently played', detTab: 'Overview', saveKind: 'Saves', notes: [], scheme: 'xbox', padName: '' };
 
@@ -84,19 +84,28 @@ var GL = {
   nintendo: { A: 'A', B: 'B', X: 'X', Y: 'Y', LB: 'L', RB: 'R', LT: 'ZL', RT: 'ZR', VIEW: '−', MENU: '+', GUIDE: '⌂', LS: 'L3', RS: 'RS', DPAD: '✚' },
   '8bitdo': { A: 'A', B: 'B', X: 'X', Y: 'Y', LB: 'L', RB: 'R', LT: 'L2', RT: 'R2', VIEW: 'Select', MENU: 'Start', GUIDE: '⌂', LS: 'L3', RS: 'RS', DPAD: '✚' }
 };
-/* The roles (A = select, B = back, X, Y) sit where an Xbox controller has them.
-   Nintendo and 8BitDo Pro controllers print A on the right and B at the bottom:
-   "As labelled" (the default) keeps the printed letters, so the button marked A
-   selects; "Xbox arrangement" goes by position instead, so the bottom button
-   (marked B) selects and the prompts show the letters printed there. */
-var NLIKE = { nintendo: 1, '8bitdo': 1 }, SWAP = { A: 'B', B: 'A', X: 'Y', Y: 'X' };
-function scheme() { return CFG.prompts === 'auto' ? S.scheme : CFG.prompts; }
-function glyphText(b) { var sc = scheme(), k = NLIKE[sc] && CFG.btnLayout === 'xbox' && SWAP[b] ? SWAP[b] : b; return GL[sc][k]; }
+/* Roles: A selects, B goes back, X and Y are the screen's extra actions; which
+   physical button carries each letter is the controller's button assignment. */
+/* Button assignments: where the lettered buttons sit on the controller in use.
+   Xbox style has A at the bottom, B right, X left, Y top; Nintendo style has A
+   right, B bottom, X top, Y left. A always selects and B always goes back, so
+   the prompts show the same letters either way; the assignment only decides
+   which physical button is which. It is kept per controller, and guessed from it
+   until set: Nintendo controllers and 8BitDo's Nintendo-layout pads (Pro, SN30,
+   Lite, Zero, Micro) are Nintendo style; everything else, including the
+   Xbox-layout 8BitDo Ultimate, is Xbox style. */
+function guessAssign(id) { var name = id.replace(/\(.*?\)/g, ''); return /057e|nintendo|joy-con|switch/i.test(id) || /2dc8|8bitdo/i.test(id) && /\b(pro|sn30|lite|zero|micro)\b/i.test(name) ? 'nintendo' : 'xbox'; }
+function assignNow() { return S.padId ? (CFG.assign[S.padId] || guessAssign(S.padId)) : 'xbox'; }
+/* Prompts follow the controller: an Xbox-style 8BitDo pad (the Ultimate) prints
+   LB / RB / LT / RT like an Xbox pad, so it gets the Xbox set; the Pro set is for
+   Nintendo-style 8BitDo pads. */
+function scheme() { if (CFG.prompts !== 'auto') return CFG.prompts; return S.scheme === '8bitdo' && assignNow() === 'xbox' ? 'xbox' : S.scheme; }
+function glyphText(b) { return GL[scheme()][b]; }
 /* A prompt is the Kenney glyph for this controller and button, drawn as a mask in
    the theme's text colour; the text form stays as its label, and as the fallback
    for a button with no glyph (the Home / Guide button). */
 function gl(b) {
-  var sc = scheme(), k = NLIKE[sc] && CFG.btnLayout === 'xbox' && SWAP[b] ? SWAP[b] : b, src = window.TV_GLYPHS && TV_GLYPHS[sc] && TV_GLYPHS[sc][k];
+  var sc = scheme(), k = b, src = window.TV_GLYPHS && TV_GLYPHS[sc] && TV_GLYPHS[sc][k];
   if (src) return '<span class="gli" role="img" aria-label="' + esc(GL[sc][k]) + '" style="--g:url(&quot;' + src + '&quot;)"></span>';
   return glText(b);
 }
@@ -503,7 +512,7 @@ function paneRows(id) {
     { type: 'action', label: 'Clear', danger: 1, fn: function () { CFG.raToken = ''; setPaint(); toast('RetroAchievements login cleared'); } }];
   if (id === 'tv') return [
     { type: 'choice', key: 'prompts', label: 'Button prompts', sub: 'Which controller the on-screen buttons look like', opts: [['auto', 'Match my controller'], ['xbox', 'Xbox'], ['ps', 'PlayStation'], ['nintendo', 'Nintendo'], ['8bitdo', '8BitDo (Pro series)']] },
-    { type: 'choice', key: 'btnLayout', label: 'Nintendo and 8BitDo buttons', sub: 'They print A on the right and B at the bottom', opts: [['labels', 'As labelled: A selects'], ['xbox', 'Xbox arrangement: the bottom button selects']] },
+    { type: 'choice', key: 'assign', label: 'Button assignments', sub: S.padName ? 'For ' + S.padName + '. A selects and B goes back either way.' : 'For the controller in use. A selects and B goes back either way.', get: assignNow, set: function (v) { CFG.assign[S.padId || '_'] = v; }, opts: [['xbox', 'Xbox style'], ['nintendo', 'Nintendo style']] },
     { type: 'info', label: 'Controller', value: S.padName || 'None found · the keyboard works too' },
     { type: 'action', label: 'Switch to desktop mode', sub: 'Also in the Menu. To come back: the TV button in the desktop top bar, or start GRID with --tv', fn: toDesktop },
     { type: 'action', label: 'Quit GRID', fn: quitBox }];
@@ -524,7 +533,7 @@ function setPaint() {
 function srow(r, k) {
   var v = '';
   if (r.type === 'toggle') v = '<span class="sw' + (CFG[r.key] ? ' on' : '') + '"></span>';
-  if (r.type === 'choice') v = r.opts.filter(function (o) { return o[0] === CFG[r.key]; })[0][1] + ' <span class="chev">' + gIcon('chevronRight', 18) + '</span>';
+  if (r.type === 'choice') { var cv = r.get ? r.get() : CFG[r.key]; v = r.opts.filter(function (o) { return o[0] === cv; })[0][1] + ' <span class="chev">' + gIcon('chevronRight', 18) + '</span>'; }
   if (r.type === 'slider') { var pc = (CFG[r.key] - r.min) / (r.max - r.min) * 100; v = '<span class="adj-arrows">◀</span><span class="sl"><b style="width:' + pc + '%"></b><i style="left:' + pc + '%"></i></span><span style="min-width:6rem">' + r.fmt(CFG[r.key]) + '</span><span class="adj-arrows">▶</span>'; }
   if (r.type === 'text') v = (CFG[r.key] ? (r.mask ? '••••••••' : esc(CFG[r.key])) : '<i>Not set</i>') + ' <span class="chev">' + gIcon('chevronRight', 18) + '</span>';
   if (r.type === 'info') v = esc(r.value);
@@ -536,7 +545,7 @@ function rowOf(el) { var pane = el.closest('#pane, .page-in'); var rows = pane._
 function srowAct(el) {
   var r = rowOf(el); if (!r) return;
   if (r.type === 'toggle') { CFG[r.key] = !CFG[r.key]; repaintKeep(); if (r.key === 'art') hero(byId(1)); }
-  else if (r.type === 'choice') openSheet({ title: r.label, items: r.opts.map(function (o) { return { label: o[1], checked: CFG[r.key] === o[0], fn: function () { CFG[r.key] = o[0]; if (r.key === 'theme') applyTheme(); repaintKeep(); } }; }) });
+  else if (r.type === 'choice') openSheet({ title: r.label, sub: r.key === 'assign' ? (S.padName || 'The controller in use') : '', items: r.opts.map(function (o) { return { label: o[1], sub: r.key === 'assign' ? (o[0] === 'xbox' ? 'A at the bottom, B on the right' : 'A on the right, B at the bottom') : '', checked: (r.get ? r.get() : CFG[r.key]) === o[0], fn: function () { if (r.set) r.set(o[0]); else CFG[r.key] = o[0]; paintHints(); paintTop(); if (r.key === 'theme') applyTheme(); repaintKeep(); } }; }) });
   else if (r.type === 'text') openOSK({ title: r.label, value: r.mask ? '' : CFG[r.key], mask: r.mask, onDone: function (v) { CFG[r.key] = v; repaintKeep(); } });
   else if (r.type === 'action') r.fn(el);
 }
@@ -1464,7 +1473,7 @@ function stickScroll(px) {
 function pollPads() {
   var pads = navigator.getGamepads ? navigator.getGamepads() : [], now = performance.now(), any = null;
   for (var i = 0; i < pads.length; i++) { var p = pads[i]; if (!p) continue; any = p;
-    var MAP = PADB; if (NLIKE[S.scheme] && CFG.btnLayout !== 'xbox') { MAP = {}; for (var mk in PADB) MAP[mk] = PADB[mk]; MAP[0] = 'B'; MAP[1] = 'A'; MAP[2] = 'Y'; MAP[3] = 'X'; }
+    var MAP = PADB; if (assignNow() === 'nintendo') { MAP = {}; for (var mk in PADB) MAP[mk] = PADB[mk]; MAP[0] = 'B'; MAP[1] = 'A'; MAP[2] = 'Y'; MAP[3] = 'X'; }
     var st = {}; for (var k in MAP) if (p.buttons[k] && p.buttons[k].pressed) st[MAP[k]] = 1;
     var ry = p.axes[3] || 0; if (Math.abs(ry) > .25) stickScroll(ry * 22);
     var ax = p.axes[0] || 0, ay = p.axes[1] || 0; if (ax < -.5) st.LEFT = 1; if (ax > .5) st.RIGHT = 1; if (ay < -.5) st.UP = 1; if (ay > .5) st.DOWN = 1;
@@ -1475,7 +1484,7 @@ function pollPads() {
     }
     for (var h in held) if (!st[h]) delete held[h];
   }
-  if (any) { var name = any.id.replace(/\(.*?\)/g, '').trim() || 'Controller'; var brand = padBrand(any.id); if (name !== S.padName || brand !== S.scheme) { S.padName = name; S.scheme = brand; paintHints(); paintTop(); } }
+  if (any) { var name = any.id.replace(/\(.*?\)/g, '').trim() || 'Controller'; var brand = padBrand(any.id); if (any.id !== S.padId || brand !== S.scheme) { S.padName = name; S.padId = any.id; S.scheme = brand; paintHints(); paintTop(); if (S.tab === 'settings' && S.setPane === 'tv' && !S.pages.length && !S.layers.length) repaint(); } }
   requestAnimationFrame(pollPads);
 }
 requestAnimationFrame(pollPads);
