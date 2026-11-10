@@ -16,6 +16,7 @@ import {
   noticesFor,
   queueRefusedNotice,
   QuietQueued,
+  QueuedSubs,
   summaryText,
   type Notice,
   type StatusBook,
@@ -475,5 +476,19 @@ describe('installs from a drive (items 428, 450)', () => {
     quiet.add([3], 0);
     quiet.drop(3);
     expect(quiet.takes(q('C'), 3, 10)).toBe(false);
+  });
+});
+
+describe('a queued card\'s second line (ruling A)', () => {
+  it('goes on the game\'s next queued card once, within its time', () => {
+    const subs = new QueuedSubs(1000);
+    const q: Notice = { group: 'game-queued', text: 'A added to download queue', level: 'success', action: 'downloads' };
+    subs.add(7, 'PCSX2 installs with it', 0);
+    expect(subs.apply({ ...q, group: 'update-queued' }, 7, 1)).toEqual({ ...q, group: 'update-queued' });
+    expect(subs.apply(q, 8, 1)).toEqual(q);
+    expect(subs.apply(q, 7, 1)).toEqual({ ...q, sub: 'PCSX2 installs with it' });
+    expect(subs.apply(q, 7, 2)).toEqual(q);
+    subs.add(9, 'X', 0);
+    expect(subs.apply(q, 9, 5000)).toEqual(q);
   });
 });

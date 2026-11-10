@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { MediaItem } from '../../details/media';
+import type { SystemRow } from '../../systems/rows';
 import { readStep } from '../focus/reveal';
 import {
   achSummary,
+  seekTarget,
+  viewerHints,
+  noEmulatorFor,
+  noEmulatorSub,
+  systemRowFor,
   releaseFact,
   unlockedWhen,
   ADD_SAVE_FOLDER,
@@ -73,6 +79,7 @@ const left: LeftInput = {
   nowSeconds: 1_762_560_000 + 2 * 86_400,
   launchTarget: 'Snes9x',
   installBlocked: '',
+  noEmulator: null,
   size: '',
   onDrives: '',
   drive: null,
@@ -230,13 +237,13 @@ describe('saves (items 306–314)', () => {
   });
 });
 
-describe('action confirmations (items 284–287, 434)', () => {
+describe('action confirmations (items 284–287, 419, 434)', () => {
   it('words', () => {
     expect(cancelConfirm('Zelda').ok).toBe('Cancel install');
     expect(updateConfirm('Zelda')).toEqual({ title: 'Update Zelda?', body: 'Saves and configuration are kept.', ok: 'Update' });
     expect(uninstallConfirm('Zelda').body).toBe('Its files are deleted from this computer. Cloud saves stay on your server.');
     expect(removeRowConfirm('Zelda', '/g/Zelda').body).toBe('Only the library entry goes. Its folder stays on disk: /g/Zelda.');
-    expect(removeDriveConfirm('Zelda', 'Couch kit', false).body).toBe('Its files leave the drive. You can back it up again later.');
+    expect(removeDriveConfirm('Zelda', 'Couch kit', false).body).toBe('Its files leave the drive. You can backup it again later.');
     expect(removeDriveConfirm('Zelda', 'Couch kit', true).body).toBe('Its files leave the drive. The copy installed on this computer stays.');
   });
 });
@@ -314,5 +321,66 @@ describe('the Release fact (item 295)', () => {
     expect(releaseFact(0)).toBe('');
     expect(releaseFact(Number(''))).toBe('');
     expect(releaseFact(Number('x'))).toBe('');
+  });
+});
+
+describe('a system with no emulator (ruling A, items 273, 288)', () => {
+  const sys = (over: Partial<SystemRow>): SystemRow => ({
+    key: 'PlayStation 2',
+    label: 'PlayStation 2',
+    name: 'PlayStation 2',
+    slug: 'ps2',
+    romCount: 3,
+    platform: null,
+    emulator: '',
+    explicitNone: false,
+    installed: [],
+    downloads: [],
+    recommended: { source_id: 'pcsx2', name: 'PCSX2 (Playstation 2)', kind: 'standalone', installed: false } as SystemRow['recommended'],
+    core: null,
+    ...over,
+  });
+
+  it('finds the row by label, name or slug', () => {
+    const rows = [sys({}), sys({ key: 'SNES', label: 'SNES', name: 'Super Nintendo', slug: 'snes' })];
+    expect(systemRowFor(rows, 'PlayStation 2', '')?.slug).toBe('ps2');
+    expect(systemRowFor(rows, 'Super Nintendo', '')?.slug).toBe('snes');
+    expect(systemRowFor(rows, 'Other', 'snes')?.slug).toBe('snes');
+    expect(systemRowFor(rows, 'Other', '')).toBeUndefined();
+  });
+
+  it('reads "No emulator for <system>." and what Install brings', () => {
+    const rec = noEmulatorFor(sys({}), false);
+    expect(text(leftLines({ ...left, size: '1.2 GB', noEmulator: rec }))).toEqual(['<b>No emulator for PlayStation 2.</b> Install installs PCSX2 too.']);
+    expect(noEmulatorSub(rec)).toBe('PCSX2 installs with it');
+    const busy = noEmulatorFor(sys({}), true);
+    expect(text(leftLines({ ...left, noEmulator: busy }))).toEqual(['<b>No emulator for PlayStation 2.</b> PCSX2 is installing.']);
+    expect(noEmulatorSub(busy)).toBeNull();
+    const none = noEmulatorFor(sys({ recommended: null }), false);
+    expect(text(leftLines({ ...left, noEmulator: none }))).toEqual(['<b>No emulator for PlayStation 2.</b> Add one in Settings › Systems.']);
+    expect(noEmulatorSub(none)).toBeNull();
+  });
+
+  it('a system with an emulator, or set to None, says nothing of it', () => {
+    expect(noEmulatorFor(sys({ emulator: 'PCSX2' }), false)).toBeNull();
+    expect(noEmulatorFor(sys({ explicitNone: true }), false)).toBeNull();
+    expect(noEmulatorFor(undefined, false)).toBeNull();
+  });
+});
+
+describe('the media viewer on a server video (ruling E6)', () => {
+  const labels = (h: { button: string; label: string }[]) => h.map((x) => `${x.button} ${x.label}`);
+  it('A pauses or plays, LT and RT seek 10 s; a screenshot or trailer keeps LB / RB / B', () => {
+    expect(labels(viewerHints('video', false))).toEqual(['A Pause', 'LT Back 10 s', 'RT Forward 10 s', 'LB Previous', 'RB Next', 'B Close']);
+    expect(labels(viewerHints('video', true))[0]).toBe('A Play');
+    expect(labels(viewerHints('screenshot', false))).toEqual(['LB Previous', 'RB Next', 'B Close']);
+    expect(labels(viewerHints('youtube', false))).toEqual(['LB Previous', 'RB Next', 'B Close']);
+  });
+
+  it('a seek stays inside the video', () => {
+    expect(seekTarget(30, 120, 10)).toBe(40);
+    expect(seekTarget(5, 120, -10)).toBe(0);
+    expect(seekTarget(115, 120, 10)).toBe(120);
+    expect(seekTarget(5, NaN, 10)).toBe(15);
   });
 });

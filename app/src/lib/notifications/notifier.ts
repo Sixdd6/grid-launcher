@@ -31,6 +31,7 @@ import {
   noticesFor,
   queueRefusedNotice,
   QuietQueued,
+  QueuedSubs,
   type Hint,
   type Notice,
   type NoticeAction,
@@ -57,6 +58,13 @@ export function notify(notice: Notice): void {
 }
 
 const quiet = new QuietQueued();
+const subs = new QueuedSubs();
+
+/** Gives `romId`'s next queued card the second line `sub` (ruling A). Call
+ *  it before the install is queued. */
+export function expectQueuedSub(romId: number, sub: string): void {
+  subs.add(romId, sub, Date.now());
+}
 
 /**
  * Keeps the "<title> added to download queue" card of each of `romIds`' next
@@ -180,7 +188,7 @@ export function initNotifications(): () => void {
       const hint = sourceId === '' ? undefined : hintFor(sourceId);
       for (const n of noticesFor(t, { setupActive: setupRun.active, hint })) {
         if (t.from === null && quiet.takes(n, t.entry.rom_id, Date.now())) continue;
-        notify(n);
+        notify(t.from === null ? subs.apply(n, t.entry.rom_id, Date.now()) : n);
       }
       if (sourceId !== '' && (t.entry.status === 'completed' || t.entry.status === 'failed' || t.entry.status === 'cancelled')) {
         dropHint(sourceId);

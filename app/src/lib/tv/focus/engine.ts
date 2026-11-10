@@ -268,3 +268,12 @@ export function inPlace(enabled: number[], index: number): number | null {
   if (enabled.length === 0) return null;
   return enabled[Math.max(0, Math.min(index, enabled.length - 1))];
 }
+
+/**
+ * How focus returns when an overlay closes (item 117): the opener itself
+ * keeps its scroll; an item refound by key or in place after an in-place
+ * redraw under the overlay is jumped to.
+ */
+export function closeRefocus<T>(el: T, opener: T | null): { scroll: false } | { instant: true } {
+  return el === opener ? { scroll: false } : { instant: true };
+}

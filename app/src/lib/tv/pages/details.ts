@@ -10,6 +10,8 @@ import { ago, daysSince } from '../tabs/server/discoverRows';
 import { formatDay } from '../../discover/feed';
 import { summaryLine, unlockDate } from '../../details/achievements';
 import type { AchievementsView } from '../../api';
+import type { Hint } from '../hints';
+import { shortName, type SystemRow } from '../../systems/rows';
 import type { MediaItem } from '../../details/media';
 
 /** One run of text in a line; `b` is bold (the prototype's `<b>`). */
@@ -147,6 +149,8 @@ export type LeftInput = {
   launchTarget: string;
   /** The backend's reason the install would be refused; ''. */
   installBlocked: string;
+  /** The game's system has no emulator (ruling A, items 273, 288); null otherwise. */
+  noEmulator: NoEmulator | null;
   /** "1.2 GB", or ''. */
   size: string;
   /** "On Couch kit" when connected drives hold the game, or ''. */
@@ -160,6 +164,35 @@ export type LeftInput = {
  *  "Played <when>" (items 161–162). */
 export function lastPlayedWhen(lastPlayedAt: number, nowSeconds: number): string {
   return lastPlayedAt > 0 ? ago(daysSince(lastPlayedAt, nowSeconds)) : 'never';
+}
+
+/** A system with no emulator (ruling A, items 273, 288): its label, the
+ *  recommended emulator's short name (null with none) and whether that
+ *  recommendation is installing now. */
+export type NoEmulator = { system: string; rec: string | null; installing: boolean };
+
+/** The Systems row a game's platform belongs to: by label, server name or slug. */
+export function systemRowFor(rows: readonly SystemRow[], platformName: string, slug: string): SystemRow | undefined {
+  const name = platformName.trim();
+  return rows.find((r) => (name !== '' && (r.key === name || r.name === name)) || (slug !== '' && r.slug === slug));
+}
+
+/** Whether `row` (the game's system) has no emulator, and what Install brings. */
+export function noEmulatorFor(row: SystemRow | undefined, installing: boolean): NoEmulator | null {
+  if (!row || row.emulator !== '' || row.explicitNone) return null;
+  return { system: row.label, rec: row.recommended ? shortName(row.recommended.name) : null, installing };
+}
+
+/** "No emulator for <system>." and what Install does about it. */
+export function noEmulatorLine(n: NoEmulator): Line {
+  const tail = n.rec === null ? ' Add one in Settings › Systems.' : n.installing ? ` ${n.rec} is installing.` : ` Install installs ${n.rec} too.`;
+  return [{ text: `No emulator for ${n.system}.`, b: true }, { text: tail }];
+}
+
+/** Whether Install also installs the recommendation, and the queued card's
+ *  second line then ("<rec> installs with it"). */
+export function noEmulatorSub(n: NoEmulator | null): string | null {
+  return n && n.rec !== null && !n.installing ? `${n.rec} installs with it` : null;
 }
 
 /** The left column's status lines (items 272–273, 281–282, 432–433, 436). */
@@ -182,7 +215,8 @@ export function leftLines(i: LeftInput): Line[] {
       const emu = i.launchTarget === 'No default emulator' ? 'no emulator' : i.launchTarget;
       lines.push([{ text: 'Launches with ' }, { text: emu, b: true }]);
     }
-  } else if (i.installBlocked !== '') lines.push([{ text: i.installBlocked, b: true }]);
+  } else if (i.noEmulator) lines.push(noEmulatorLine(i.noEmulator));
+  else if (i.installBlocked !== '') lines.push([{ text: i.installBlocked, b: true }]);
   else lines.push([{ text: i.size ? `Not installed · ${i.size}` : 'Not installed' }]);
   if (i.onDrives !== '') {
     const pack = i.onDrives.replace(/^On /, '');
@@ -243,6 +277,29 @@ export function viewerCaption(items: readonly MediaItem[], index: number, title:
   if (item.kind !== 'screenshot') return `Trailer · ${title}`;
   const shots = items.filter((m) => m.kind === 'screenshot');
   return `Screenshot ${shots.indexOf(item) + 1} of ${shots.length} · ${title}`;
+}
+
+/** The viewer's hints (item 305). A server video adds A (Pause while it
+ *  plays, Play while paused) and LT / RT to seek 10 s (ruling E6). */
+export function viewerHints(kind: MediaItem['kind'] | null, paused: boolean): Hint[] {
+  const base: Hint[] = [
+    { button: 'LB', label: 'Previous' },
+    { button: 'RB', label: 'Next' },
+    { button: 'B', label: 'Close' },
+  ];
+  if (kind !== 'video') return base;
+  return [
+    { button: 'A', label: paused ? 'Play' : 'Pause' },
+    { button: 'LT', label: 'Back 10 s' },
+    { button: 'RT', label: 'Forward 10 s' },
+    ...base,
+  ];
+}
+
+/** Where a 10 s seek lands: inside the video. */
+export function seekTarget(current: number, duration: number, delta: number): number {
+  const end = Number.isFinite(duration) && duration > 0 ? duration : Infinity;
+  return Math.max(0, Math.min(end, current + delta));
 }
 
 /** LB / RB in the viewer: one step through screenshots and videos as one
@@ -368,7 +425,7 @@ export function removeRowConfirm(title: string, folder: string): ConfirmWords {
 export function removeDriveConfirm(title: string, pack: string, installed: boolean): ConfirmWords {
   return {
     title: `Remove ${title} from ${pack}?`,
-    body: `Its files leave the drive. ${installed ? 'The copy installed on this computer stays.' : 'You can back it up again later.'}`,
+    body: `Its files leave the drive. ${installed ? 'The copy installed on this computer stays.' : 'You can backup it again later.'}`,
     ok: 'Remove from drive',
   };
 }

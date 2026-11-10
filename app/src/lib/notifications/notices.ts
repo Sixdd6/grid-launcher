@@ -473,3 +473,28 @@ export class QuietQueued {
     return now - at <= this.ttlMs;
   }
 }
+
+/**
+ * A second line for a game's next "<title> added to download queue" card
+ * ("PCSX2 installs with it": TV Details installs the system's recommended
+ * emulator with the game, ruling A). Each id is used once; ids not used
+ * within `ttlMs` lapse.
+ */
+export class QueuedSubs {
+  private subs = new Map<number, { sub: string; at: number }>();
+
+  constructor(private readonly ttlMs: number = 60_000) {}
+
+  add(romId: number, sub: string, now: number): void {
+    this.subs.set(romId, { sub, at: now });
+  }
+
+  /** `notice` with its second line, when it is `romId`'s queued card and one waits. */
+  apply(notice: Notice, romId: number, now: number): Notice {
+    if (notice.group !== 'game-queued') return notice;
+    const held = this.subs.get(romId);
+    if (!held) return notice;
+    this.subs.delete(romId);
+    return now - held.at <= this.ttlMs ? { ...notice, sub: held.sub } : notice;
+  }
+}

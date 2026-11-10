@@ -8,7 +8,7 @@
   // focus; Up into the buttons scrolls it back to its top
   // (`data-read-reset`). Every fact and action is the shared DetailsStore's.
   import { openBackupPage } from '../backupActions';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import Image from '../../Image.svelte';
   import { DetailsStore } from '../../details/detailsStore.svelte';
   import { keptFolder } from '../../details/unlinked';
@@ -38,6 +38,9 @@
     cancelConfirm,
     detButtons,
     leftLines,
+    noEmulatorFor,
+    noEmulatorSub,
+    systemRowFor,
     locatedNotice,
     locateFailedNotice,
     locateTitle,
@@ -52,6 +55,8 @@
     type DetButton,
   } from './details';
   import { det } from './detailsState.svelte';
+  import { tvSystems } from '../systemsTv.svelte';
+  import { expectQueuedSub } from '../../notifications/notifier';
   import TvGameSettings from './TvGameSettings.svelte';
   import TvLinkPage from './TvLinkPage.svelte';
 
@@ -83,6 +88,16 @@
   $effect(() => {
     d.loadCloudPanelInfo();
   });
+
+  // A game whose system has no emulator (ruling A): Details reads the
+  // Systems store (loaded here when no Systems screen has yet), and re-reads
+  // it when an emulator install ends.
+  $effect(() => {
+    void tvSystems.installSignature;
+    untrack(() => void tvSystems.refreshAll());
+  });
+  let sysRow = $derived(d.isNative || subject.drive ? undefined : systemRowFor(tvSystems.rows, subject.platformName, d.platformSlug ?? ''));
+  let noEmulator = $derived(noEmulatorFor(sysRow, sysRow ? tvSystems.installingRow(sysRow) || tvSystems.busyRows[sysRow.key] === true : false));
 
   let live = $derived(liveInstall(downloads.entries, subject.romId));
   let installed = $derived(d.installedNow);
@@ -119,6 +134,7 @@
       nowSeconds: Date.now() / 1000,
       launchTarget: d.launchTarget,
       installBlocked: d.installBlocked,
+      noEmulator: installed ? null : noEmulator,
       size,
       onDrives: subject.drive === undefined ? d.onDrives : '',
       drive,
@@ -168,9 +184,19 @@
       case 'stop':
         ask(stopConfirm(title), true, () => void d.stop().then(sayError));
         return;
-      case 'install':
-        void d.install().then((outcome) => outcome && promptFor(outcome, title));
+      case 'install': {
+        // No emulator for the system: the recommendation installs too, and
+        // the game's queued card says so (ruling A, items 273, 288).
+        const rec = sysRow;
+        const sub = noEmulatorSub(noEmulator);
+        if (sub !== null && subject.romId !== null) expectQueuedSub(subject.romId, sub);
+        void d.install().then((outcome) => {
+          if (!outcome) return;
+          if (outcome.kind === 'ok' && sub !== null && rec) void tvSystems.installRecommended(rec);
+          promptFor(outcome, title);
+        });
         return;
+      }
       case 'install-drive':
         void d.installFromDrive();
         return;

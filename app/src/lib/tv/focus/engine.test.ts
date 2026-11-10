@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inPlace, move, restore, type Container, type Item, type Rect, type Snapshot } from './engine';
+import { closeRefocus, inPlace, move, restore, type Container, type Item, type Rect, type Snapshot } from './engine';
 
 // A little layout builder: items are boxes; containers are named groups.
 const R = (left: number, top: number, w: number, h: number): Rect => ({ left, top, right: left + w, bottom: top + h });
@@ -281,5 +281,14 @@ describe('inPlace', () => {
     expect(inPlace([10, 11, 12], 1)).toBe(11);
     expect(inPlace([10, 11], 5)).toBe(11);
     expect(inPlace([], 0)).toBeNull();
+  });
+});
+
+describe('closing an overlay (item 117)', () => {
+  it('the opener keeps its scroll; an item refound after an in-place redraw is jumped to', () => {
+    const opener = {};
+    expect(closeRefocus(opener, opener)).toEqual({ scroll: false });
+    expect(closeRefocus({}, opener)).toEqual({ instant: true });
+    expect(closeRefocus({}, null)).toEqual({ instant: true });
   });
 });

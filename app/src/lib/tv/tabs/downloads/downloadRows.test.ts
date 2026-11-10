@@ -109,7 +109,7 @@ describe('downloadRows', () => {
     expect(rowActions(move, 'commit').map((a) => a.label)).toEqual(['Retry']);
   });
 
-  it('asks before Cancel for every kind of row (ruling 8)', () => {
+  it('asks before Cancel for every kind of row (ruling 8; "backup" one word, item 419)', () => {
     expect(cancelWords(entry({ title: 'Kite Season', status: 'downloading' }))).toEqual({
       title: 'Cancel Kite Season?',
       body: 'The download stops and its files are removed. You can install it again later.',
@@ -122,7 +122,7 @@ describe('downloadRows', () => {
     });
     expect(cancelWords(entry({ job: 'backup', kind: 'backup_game', title: 'Kite Season', drive_name: 'Couch kit', drive_label: 'SAMSUNG T7' }))).toEqual({
       title: 'Cancel Kite Season?',
-      body: 'The backup stops and what it wrote to SAMSUNG T7 is removed. You can back it up again later.',
+      body: 'The backup stops and what it wrote to SAMSUNG T7 is removed. You can backup it again later.',
       ok: 'Cancel backup',
     });
     expect(cancelWords(entry({ job: 'library', kind: 'library_move' }))).toEqual({

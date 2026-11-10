@@ -4,7 +4,8 @@
   // height, and "(LB) Screenshot <i> of <n> · <title> (RB)" ("Trailer ·
   // <title>" for a video) under it. A trailer can't play inside GRID (the
   // desktop's reason: YouTube refuses embeds from the app), so A on it opens
-  // it in the browser; a server video plays in place.
+  // it in the browser; a server video plays in place, A pausing and playing
+  // it and LT / RT seeking 10 s (ruling E6; the controls stay for a mouse).
   import { api } from '../../api';
   import Image from '../../Image.svelte';
   import { trailerPoster, videoLoadMessage } from '../../details/media';
@@ -13,7 +14,7 @@
   import Glyph from '../glyphs/Glyph.svelte';
   import TvIcon from '../ui/TvIcon.svelte';
   import { viewerCaption } from './details';
-  import type { ViewerModel } from './mediaViewer.svelte';
+  import { toggleVideo, type ViewerModel } from './mediaViewer.svelte';
 
   let { model }: { model: ViewerModel } = $props();
 
@@ -55,7 +56,9 @@
   }
 
   function activate() {
-    if (item?.kind === 'youtube') api.openYoutubeVideo(item.videoId).catch((e: unknown) => pushToast(e instanceof Error ? e.message : String(e), 'error'));
+    // A server video: A pauses and plays it (ruling E6).
+    if (item?.kind === 'video') toggleVideo(model);
+    else if (item?.kind === 'youtube') api.openYoutubeVideo(item.videoId).catch((e: unknown) => pushToast(e instanceof Error ? e.message : String(e), 'error'));
   }
 </script>
 
@@ -86,7 +89,7 @@
       <div class="shot" style="aspect-ratio:16/9" data-testid="tv-viewer-video">
         {#if videoSrc}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <video src={videoSrc} autoplay controls></video>
+          <video src={videoSrc} autoplay controls bind:this={model.video} bind:paused={model.paused} data-testid="tv-viewer-videoel"></video>
         {:else if videoError}
           <span class="verr">{videoError}</span>
         {/if}
@@ -96,5 +99,5 @@
   {/if}
   <!-- The one focusable item, so focus stays inside the viewer; A on a
        trailer opens it in the browser. -->
-  <button class="sr" data-k="viewer" data-al={item?.kind === 'youtube' ? 'Watch on YouTube' : 'Select'} use:tvf={{ a: activate }}>media</button>
+  <button class="sr" data-k="viewer" data-al={item?.kind === 'youtube' ? 'Watch on YouTube' : item?.kind === 'video' ? (model.paused ? 'Play' : 'Pause') : 'Select'} use:tvf={{ a: activate }}>media</button>
 </div>

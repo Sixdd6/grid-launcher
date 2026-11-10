@@ -12,7 +12,7 @@ import { pushToast } from '../stores/toasts.svelte';
 import type { TvPane } from '../uiMode';
 import type { Hint } from './hints';
 import { handlersOf } from './focus/actions';
-import { restore, inPlace } from './focus/engine';
+import { closeRefocus, restore, inPlace } from './focus/engine';
 import { entryOf, focusables, isDisabled, loadScroll, moveIn, readScroll, reducedMotion, rememberLast, reveal, saveScroll } from './focus/dom';
 import { gridMove } from './focus/grid';
 import { materialize, windowOf, windowsIn } from './focus/windows';
@@ -61,8 +61,9 @@ export type Layer = {
   id: number;
   /** B and a click outside don't close it (the unreachable library). */
   blocking: boolean;
-  /** Its own hints, or null for A "Select", B "Back". */
-  hints: Hint[] | null;
+  /** Its own hints (a function when they change while it is open: the
+   *  media viewer's video), or null for A "Select", B "Back". */
+  hints: Hint[] | (() => Hint[]) | null;
   /** Buttons it binds itself (item 103: the keyboard, the media viewer);
    *  every other button but A, B and the directions does nothing. */
   binds: Partial<Record<TvButton, () => void>>;
@@ -121,8 +122,6 @@ const layerPrev = new Map<number, { el: HTMLElement | null; key: string | null; 
 let closing = false;
 /** Set while `showScreen` waits for the new screen to be drawn. */
 let showing = 0;
-/** Work that waits for the last overlay to close (item 117). */
-let afterLayers: (() => void)[] = [];
 
 const memory = new Map<string, { k: string | null; scroll?: Record<string, [number, number]> }>();
 const hooks = new Map<string, ScreenHooks>();
@@ -194,7 +193,6 @@ export function resetNav(tab: TvTab, pane: TvPane | null): void {
   state.pages = [];
   state.layers = [];
   layerPrev.clear();
-  afterLayers = [];
   selEnd();
   memory.clear();
   cur = null;
@@ -211,7 +209,6 @@ export async function resetStartup(page: Omit<Page, 'id'>): Promise<void> {
   state.startup = true;
   state.layers = [];
   layerPrev.clear();
-  afterLayers = [];
   selEnd();
   memory.clear();
   if (cur) cur.classList.remove('f');
@@ -261,8 +258,8 @@ export async function openLayer(spec: LayerSpec): Promise<number> {
 /**
  * Closes the top overlay (tvmode.js `closeLayer`): focus goes back to the
  * item it was opened from, or the item with its key after a redraw, else the
- * screen's focus; then its `onClose` runs, then anything that waited for the
- * overlays to close (item 117).
+ * screen's focus, jumping to a refound item (redraws under an overlay
+ * happen in place, item 117); then its `onClose` runs.
  */
 export async function closeLayer(): Promise<void> {
   const layer = state.layers[state.layers.length - 1];
@@ -294,21 +291,11 @@ export async function closeLayer(): Promise<void> {
     const rail = root.querySelector('[data-rail]');
     el = i === null ? (rail ? railSelected(rail) : null) : enabled[i];
   }
-  if (el) setFocus(el, { scroll: false });
+  // The opener itself keeps its place; one found again by key or in its
+  // place after an in-place redraw is jumped to (item 117).
+  if (el) setFocus(el, closeRefocus(el, prev.el));
   else restoreFocus();
   layer.onClose?.();
-  if (!state.layers.length && afterLayers.length) {
-    const run = afterLayers;
-    afterLayers = [];
-    for (const fn of run) fn();
-  }
-}
-
-/** Runs `fn` now, or once the last overlay closes (item 117: a redraw a
- *  finished install causes waits for the overlay). */
-export function afterOverlays(fn: () => void): void {
-  if (state.layers.length) afterLayers.push(fn);
-  else fn();
 }
 
 /** The screen registers its hooks; answers the function that drops them. */
