@@ -164,6 +164,15 @@ STAGE_GROUPS=(
   # slider, Theme, Button prompts and assignments per injected controller,
   # Change library folder › Start fresh › Leave, and Disconnect.
   "tv-settings:specs/tv-settings.spec.ts"
+  # TV mode's Settings › Systems, System page and emulator form
+  # (docs/tv-mode/plan.md P11) on the `systems` fixtures and the mock forge
+  # (slowed while Install recommended runs, so "Installing N emulators…"
+  # stays long enough to see). The spec connects on the desktop and enters
+  # TV mode: row order and pills, Windows, a Download pick, the update
+  # check, Remove, None, Add manually through the file-mode browser,
+  # Install recommended with focus moving to the control in its place, and
+  # a Server header chip.
+  "tv-systems:specs/tv-systems.spec.ts"
   # Windowed TV grids (plan risk R8) on the 2500-game large-platform
   # fixtures: a Server platform and a Library of 600 seeded installed games;
   # focus moves through them smoothly and covers load as they scroll in.
@@ -541,7 +550,7 @@ mock_args_for_group() {
     first-run-setup|settings-screens) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
     # The first-run-setup set plus a "Sony PlayStation 4", whose ShadPS4
     # installs with its Qt launcher companion from the mock forge.
-    systems) printf -- '--fixtures-dir fixtures-systems' ;;
+    systems|tv-systems) printf -- '--fixtures-dir fixtures-systems' ;;
     discover|tv-server) printf -- '--fixtures-dir fixtures-discover' ;;
     tv-details) printf -- '--fixtures-dir fixtures-tv-details --stateful-saves' ;;
     # An "Emulators" platform with one package (rom 801) that zips the mock
@@ -592,7 +601,7 @@ mock_args_for_group() {
 # `Sixdd6/grid-launcher`'s latest release through the same ForgeClient, so
 # the same redirect points it at the mock forge's release route.
 group_needs_forge() {
-  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "settings-screens" ]]
+  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" ]]
 }
 
 # The `launch` group's data dir is pre-seeded (Ruling A, task-7-brief.md):

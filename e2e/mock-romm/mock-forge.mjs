@@ -39,6 +39,9 @@
 //   exercise "Update from Source" against a real second release.
 //   POST /__e2e__/qtlauncher-release/updated → the same for the ShadPS4 Qt
 //   launcher's release list (the systems spec's companion update).
+//   POST /__e2e__/slow?ms=<n> → from here on, every download (anything not
+//   an api.github.com JSON answer) waits <n> ms first, so an install stays
+//   in flight long enough to watch (the tv-systems spec); ms=0 turns it off.
 //
 // Two rules this server exists to enforce at runtime:
 //   * NO credential ever reaches a forge. Any request carrying an
@@ -417,6 +420,20 @@ function handleRequest(req, res, state) {
     return;
   }
 
+  if (req.method === "POST" && pathname === "/__e2e__/slow") {
+    state.delayMs = Math.max(0, Number(requestUrl.searchParams.get("ms")) || 0);
+    sendJson(res, 200, { ms: state.delayMs });
+    return;
+  }
+
+  if (state.delayMs > 0 && req.method === "GET" && !pathname.startsWith("/api.github.com/")) {
+    setTimeout(() => route(req, res, state, pathname), state.delayMs);
+    return;
+  }
+  route(req, res, state, pathname);
+}
+
+function route(req, res, state, pathname) {
   if (req.method === "GET" && pathname === SHADPS4_RELEASE_PATH) {
     sendJson(res, 200, shadps4Release());
     return;
@@ -508,6 +525,8 @@ export async function startMockForge({ port = 0, logPath = DEFAULT_LOG_PATH } = 
     pcsx2Updated: false,
     /** Flipped by the control route: a newer Qt launcher prerelease is out. */
     qtLauncherUpdated: false,
+    /** Set by `/__e2e__/slow`: how long each download waits first. */
+    delayMs: 0,
     log(entry) {
       requestLog.push(entry);
       if (!logPath) return;
