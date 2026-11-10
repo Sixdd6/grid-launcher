@@ -21,6 +21,7 @@
     platform = null,
     queue = null,
     picked = false,
+    sel = undefined,
     label = true,
     width = undefined,
     art = null,
@@ -40,8 +41,10 @@
     platform?: string | null;
     /** "Queued" or "<n>%" while installing. */
     queue?: string | null;
-    /** Picked in select mode (P13). */
+    /** Picked in select mode (item 441). */
     picked?: boolean;
+    /** The id select mode picks it by, on a grid that has select mode. */
+    sel?: string;
     /** The title under the cover (grids); rows and Details show none. */
     label?: boolean;
     /** A width other than the 10rem cover (Details: 17rem). */
@@ -65,6 +68,7 @@
   data-al="Details"
   data-xl={quick ?? undefined}
   data-cover
+  data-sel={sel}
   data-testid={testId}
   style={width ? `--cw:${width}` : undefined}
   use:tvf={{ a: onA, x: quick ? onX : undefined, focus: () => {

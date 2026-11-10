@@ -7,6 +7,7 @@
   import { downloads } from '../../stores/downloads.svelte';
   import { session } from '../../stores/session.svelte';
   import { openGameDetails, runQuick } from '../gameActions';
+  import { select } from '../select.svelte';
   import { liveInstall, platformTag, queueTag, quickFor, type TvGame } from '../games';
   import TvCover from './TvCover.svelte';
 
@@ -17,6 +18,7 @@
     label = true,
     testId = undefined,
     onFocus = undefined,
+    selectable = false,
   }: {
     k: string;
     game: TvGame;
@@ -25,6 +27,8 @@
     label?: boolean;
     testId?: string;
     onFocus?: () => void;
+    /** On a grid with select mode (Library, a Server platform): A picks it there. */
+    selectable?: boolean;
   } = $props();
 
   let live = $derived(liveInstall(downloads.entries, game.romId));
@@ -45,6 +49,8 @@
   {label}
   {art}
   {testId}
+  sel={selectable ? game.id : undefined}
+  picked={selectable && select.picked(game.id)}
   quick={quick?.label ?? null}
   onA={() => openGameDetails(game)}
   onX={() => quick && void runQuick(game, quick.kind)}

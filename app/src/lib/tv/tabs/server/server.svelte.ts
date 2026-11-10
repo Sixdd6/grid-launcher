@@ -2,6 +2,7 @@
 // at a time, so the tab unmounts on every tab switch): the selected rail row,
 // the platform search, the Discover cover last focused, and the catalog
 // (tvmode.js `S.srvRail`, `S.srvQ`, `TABS.server._dk`). Kept per server.
+import { selEnd } from '../../select.svelte';
 import { api, type GameSummary } from '../../../api';
 import { Catalog } from '../../../server/catalog.svelte';
 import { platformLabel } from '../../../server/platformLabel';
@@ -40,6 +41,8 @@ export function serverCatalog(): Catalog {
 /** Selects a rail row; a new one clears the platform search (item 204). */
 export function selectRail(rail: SrvRail): void {
   if (srv.rail === rail) return;
+  // Another platform leaves select mode, as the desktop's does.
+  selEnd();
   srv.rail = rail;
   srv.query = '';
   if (rail !== 'discover') srv.pendingArrive = false;

@@ -4,16 +4,16 @@
 // Shared by Server and (Task 20) Library, so the two pick the same way.
 
 /** The picked game ids, in the order they were picked, and the last one clicked (the Shift-click anchor). */
-export type Selection = { readonly ids: readonly number[]; readonly anchor: number | null };
+export type Selection<T extends number | string = number> = { readonly ids: readonly T[]; readonly anchor: T | null };
 
-export const EMPTY_SELECTION: Selection = { ids: [], anchor: null };
+export const EMPTY_SELECTION: Selection<never> = { ids: [], anchor: null };
 
-export function isPicked(sel: Selection, id: number): boolean {
+export function isPicked<T extends number | string>(sel: Selection<T>, id: T): boolean {
   return sel.ids.includes(id);
 }
 
 /** A plain click: picks `id`, or unpicks it when it was picked. */
-export function toggle(sel: Selection, id: number): Selection {
+export function toggle<T extends number | string>(sel: Selection<T>, id: T): Selection<T> {
   const ids = sel.ids.includes(id) ? sel.ids.filter((x) => x !== id) : [...sel.ids, id];
   return { ids, anchor: id };
 }
@@ -35,7 +35,7 @@ export function pick(sel: Selection, id: number, shift: boolean, visible: readon
 }
 
 /** Every visible cover is picked (and there is at least one). */
-export function allPicked(sel: Selection, visible: readonly number[]): boolean {
+export function allPicked<T extends number | string>(sel: Selection<T>, visible: readonly T[]): boolean {
   return visible.length > 0 && visible.every((id) => sel.ids.includes(id));
 }
 
@@ -43,14 +43,14 @@ export function allPicked(sel: Selection, visible: readonly number[]): boolean {
  * "Select all N": picks every visible cover. Pressed again once they all
  * are ("All N selected"), it unpicks them.
  */
-export function selectAll(sel: Selection, visible: readonly number[]): Selection {
+export function selectAll<T extends number | string>(sel: Selection<T>, visible: readonly T[]): Selection<T> {
   if (allPicked(sel, visible)) return { ids: sel.ids.filter((id) => !visible.includes(id)), anchor: null };
   const ids = [...sel.ids];
   for (const id of visible) if (!ids.includes(id)) ids.push(id);
   return { ids, anchor: sel.anchor };
 }
 
-export function clear(): Selection {
+export function clear(): Selection<never> {
   return EMPTY_SELECTION;
 }
 
@@ -58,7 +58,7 @@ export function clear(): Selection {
  * Drops ids that are no longer in the view's list (a reload removed a
  * game), so the count and the size never include a game the user can't see.
  */
-export function keepOnly(sel: Selection, present: readonly number[]): Selection {
+export function keepOnly<T extends number | string>(sel: Selection<T>, present: readonly T[]): Selection<T> {
   const ids = sel.ids.filter((id) => present.includes(id));
   if (ids.length === sel.ids.length) return sel;
   return { ids, anchor: sel.anchor !== null && present.includes(sel.anchor) ? sel.anchor : null };

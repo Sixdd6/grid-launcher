@@ -13,6 +13,7 @@
   import { focused, scope, setFocus, showTab } from '../../nav.svelte';
   import { reconnect } from '../../reconnect';
   import { useScreen } from '../../screen.svelte';
+  import { selToggle } from '../../select.svelte';
   import { openSearchAll } from '../../pages/searchAll';
   import TvButton from '../../ui/TvButton.svelte';
   import TvRail from '../../ui/TvRail.svelte';
@@ -108,8 +109,8 @@
     },
     get rt() {
       if (mode !== 'online' || srv.rail === 'discover') return undefined;
-      // TODO(P13): select mode on the platform's grid (items 470–480).
-      return () => {};
+      // Select mode on the platform's grid (items 439–453).
+      return selToggle;
     },
     arrive,
   });

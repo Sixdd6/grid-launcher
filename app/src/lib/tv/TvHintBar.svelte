@@ -10,17 +10,22 @@
   import { buildHints, hintLeft } from './hints';
   import { controllers } from './input/router.svelte';
   import { focused, nav } from './nav.svelte';
+  import { currentSelHints, select } from './select.svelte';
 
   let hints = $derived.by(() => {
     const h = nav.hooks;
     const f = nav.focus;
+    // Picks change the A and X labels.
+    void select.ids;
+    void select.on;
     const main = h.main?.() ?? null;
     const layer = nav.layers[nav.layers.length - 1] ?? null;
     return buildHints({
       layer: layer ? { hints: layer.hints, blocking: layer.blocking } : null,
       focus: f.present ? { a: f.a, disabled: f.disabled, x: f.x } : null,
-      // TODO(P13): select mode's own hints.
-      select: null,
+      // Select mode's own hints replace the rest (item 446); the pages
+      // pushed over the grid keep theirs.
+      select: nav.pages.length === 0 ? currentSelHints(focused(), f.a) : null,
       // `f.key` and `f.a` are read above, so a focus change re-runs this.
       screen: h.hints?.(focused()) ?? [],
       pages: nav.pages.length,
