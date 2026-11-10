@@ -692,6 +692,8 @@ function paintHints() {
   if (S.noServer && !S.startup) left = '<span>No server. Your Library and Backup drives work without one.</span>';
   else if (S.offline && !S.startup) left = '<span class="offline-pill">Offline</span><span>Your installed games still play. Server features return when GRID reconnects.</span>';
   else if (S.padName) left = '<span>' + esc(S.padName) + '</span>';
+  else if (S.padState === 'blocked') left = '<span>This page isn\'t allowed to read controllers. Open the card on its own page, or use the keyboard.</span>';
+  else left = '<span>Controller: press any button on it</span>';
   $('hints').innerHTML = '<div class="left">' + left + '</div>' + h.map(function (x) { return '<button class="hint" data-btn="' + x[0] + '">' + gl(x[0]) + esc(x[1]) + '</button>'; }).join('');
 }
 function hintsNow() {
@@ -1849,8 +1851,14 @@ function stickScroll(px) {
   if (S.layers.length) return;
   var v = $('tbody') || (cur && vScroller(cur)); if (v) v.scrollBy({ top: px });
 }
+/* Browsers list a controller only after one of its buttons is pressed while the
+   page has focus, and a page may not be allowed to read controllers at all (an
+   embedded frame without the gamepad permission). The loop never stops on
+   either; the hint bar says which it is. */
 function pollPads() {
-  var pads = navigator.getGamepads ? navigator.getGamepads() : [], now = performance.now(), any = null;
+  var pads = [], now = performance.now(), any = null;
+  try { pads = navigator.getGamepads ? navigator.getGamepads() || [] : []; if (S.padState === 'blocked') { S.padState = ''; paintHints(); } }
+  catch (e) { if (S.padState !== 'blocked') { S.padState = 'blocked'; paintHints(); } requestAnimationFrame(pollPads); return; }
   for (var i = 0; i < pads.length; i++) { var p = pads[i]; if (!p) continue; any = p;
     var MAP = PADB; if (assignNow() === 'nintendo') { MAP = {}; for (var mk in PADB) MAP[mk] = PADB[mk]; MAP[0] = 'B'; MAP[1] = 'A'; MAP[2] = 'Y'; MAP[3] = 'X'; }
     var st = {}; for (var k in MAP) if (p.buttons[k] && p.buttons[k].pressed) st[MAP[k]] = 1;
@@ -1863,10 +1871,13 @@ function pollPads() {
     }
     for (var h in held) if (!st[h]) delete held[h];
   }
+  if (!any && S.padId) { S.padName = ''; S.padId = ''; paintHints(); }
   if (any) { var name = any.id.replace(/\(.*?\)/g, '').trim() || 'Controller'; var brand = padBrand(any.id); if (any.id !== S.padId || brand !== S.scheme) { S.padName = name; S.padId = any.id; S.scheme = brand; paintHints(); paintTop(); if (S.tab === 'settings' && S.setPane === 'tv' && !S.pages.length && !S.layers.length) repaint(); } }
   requestAnimationFrame(pollPads);
 }
 requestAnimationFrame(pollPads);
+addEventListener('gamepadconnected', function () { paintHints(); });
+addEventListener('gamepaddisconnected', function () { S.padName = ''; S.padId = ''; paintHints(); });
 
 /* ------------------------------------------------------------------ start */
 document.documentElement.setAttribute('data-theme', 'dark');

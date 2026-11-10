@@ -21,7 +21,7 @@ The card is a working prototype. Click inside it first, then use the keyboard as
 | View (Back/Select) | V | Act on the newest notice that offers an action ("Open Downloads") |
 | Right stick | Page Up / Page Down | Scroll what you're reading (a Details tab, a list) without moving focus |
 
-A real controller also works in the preview, through the browser's Gamepad API, and the prompts follow its brand (see Button prompts). Mouse hover and click work as well.
+A real controller also works in the preview, through the browser's Gamepad API, and the prompts follow its brand (see Button prompts). Press any button on it first: browsers list a controller only after that. A page embedded in another site may not be allowed to read controllers at all; the hint bar then says so, and the keyboard still works. Mouse hover and click work as well.
 
 The Menu has a **Prototype only** section for states that need a trigger: first run (Connect), a rejected token, an unreachable server, an unreachable library, unplugging and plugging in the Couch kit drive (also mid-backup), and a failed install.
 
