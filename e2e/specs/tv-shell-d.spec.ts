@@ -117,8 +117,9 @@ describe('tv-shell (d): overlays and notifications', () => {
     expect(labels[0]).toBe('Discover');
     expect(labels[1]).toBe('Downloads');
     expect(labels[2]).toMatch(/^Notifications · [1-9]\d*$/);
-    expect(labels.slice(3)).toEqual(['Settings', 'Reconnect', 'Switch to desktop mode', 'Quit GRID']);
-    expect((await $(testId('tv-menu-head')).getText()).trim()).toBe('Offline');
+    // Used without a server (README § Consultant decisions).
+    expect(labels.slice(3)).toEqual(['Settings', 'Connect to a server…', 'Switch to desktop mode', 'Quit GRID']);
+    expect((await $(testId('tv-menu-head')).getText()).trim()).toBe('Offline · no server');
     expect(await $(testId('tv-menu-clock')).getText()).toMatch(/^\d\d:\d\d$/);
     expect(await hints()).toEqual(['A Select', 'B Close']);
     const w = await browser.execute(() => document.querySelector('[data-testid="tv-menu"]')!.getBoundingClientRect().width / parseFloat(getComputedStyle(document.documentElement).fontSize));

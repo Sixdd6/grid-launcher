@@ -18,7 +18,7 @@
   import { quitBox } from './overlays.svelte';
   import { goDiscover } from '../tabs/server/server.svelte';
 
-  let items = $derived(menuItems(activeCount(downloads.entries), tvNotices.history.length));
+  let items = $derived(menuItems(activeCount(downloads.entries), tvNotices.history.length, session));
 
   const RUN: Record<MenuItemKey, () => void> = {
     // Discover selected on the Server rail; Server's `arrive` then focuses
