@@ -8,7 +8,7 @@ import { api, GAMEPAD_EVENT, type PadEvent, type PadInfo } from '../../api';
 import { uiSettings } from '../../stores/uiSettings.svelte';
 import type { PromptSet } from '../glyphs/glyphs';
 import { focusables, remPx, vScroller } from '../focus/dom';
-import { focused, handlePress, nav, scope, setFocus, showTab } from '../nav.svelte';
+import { focused, handlePress, nav, scope, setFocus, showTab, topLayer } from '../nav.svelte';
 import type { TvTab } from './press';
 import { buttonForKey, isDirection, type TvButton } from './buttons';
 import { assignmentFor, logicalButton, padBrand, padDisplayName } from './controllers';
@@ -52,17 +52,12 @@ export const controllers = {
 const KEYBOARD = -1;
 
 /**
- * Which held buttons repeat: directions, and (P6) the on-screen keyboard's
- * typing buttons. TODO(P6): answer 'typing' for A on a typing key, X, Y, LB
- * and RB while the keyboard is open (items 42–43).
+ * Which held buttons repeat: directions, and the on-screen keyboard's
+ * typing buttons while it is the top overlay (A on a typing key, X, Y, LB
+ * and RB; items 42–43). Asked at the press and at every repeat.
  */
-let typingRepeat: (b: TvButton) => boolean = () => false;
-export function setTypingRepeat(fn: ((b: TvButton) => boolean) | null): void {
-  typingRepeat = fn ?? (() => false);
-}
-
 function repeatKind(b: TvButton): RepeatKind {
-  if (typingRepeat(b)) return 'typing';
+  if (topLayer()?.typingRepeat?.(b, focused())) return 'typing';
   return isDirection(b) ? 'dir' : null;
 }
 
@@ -215,8 +210,14 @@ function onKeyDown(e: KeyboardEvent): void {
     v?.scrollBy({ top: (e.key === 'PageDown' ? 1 : -1) * v.clientHeight * 0.7, behavior: 'smooth' });
     return;
   }
-  // TODO(P6): while the on-screen keyboard is open, a printable key types
-  // straight in, Backspace deletes and Enter is Done (item 74).
+  // While the on-screen keyboard is open, a printable key types straight in
+  // (Space too), Backspace deletes and Enter is Done after physical typing
+  // (item 74). The system's key repeat types like a held key would.
+  const layer = topLayer();
+  if (layer?.keydown?.(e)) {
+    e.preventDefault();
+    return;
+  }
   const b = buttonForKey(e.key, { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey });
   if (!b) return;
   e.preventDefault();

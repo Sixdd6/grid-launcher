@@ -19,6 +19,8 @@
   import {
     attachRoots,
     nav,
+    registerMenu,
+    registerView,
     resetNav,
     restoreFocus,
     setPane,
@@ -27,11 +29,23 @@
     showTab,
     stageChanged,
   } from './nav.svelte';
+  import { attachNotices, showNotice, viewNewest } from './notices.svelte';
+  import { WELCOME } from './notices';
+  import TvLayer from './overlays/TvLayer.svelte';
+  import { confirmBox, openKeyboard, openList, openMenu } from './overlays/overlays.svelte';
+  import { notify } from '../notifications/notifier';
+  import TvToasts from './TvToasts.svelte';
   import TvBackground from './TvBackground.svelte';
   import TvHintBar from './TvHintBar.svelte';
   import TvStage from './TvStage.svelte';
   import TvTopBar from './TvTopBar.svelte';
   import TvButton from './ui/TvButton.svelte';
+
+  // e2e only (the build drops it otherwise): the overlays and a notice with
+  // an action, reachable before the screens that open them exist (P7–P13).
+  if (import.meta.env.VITE_E2E) {
+    (window as unknown as { __tvE2E?: unknown }).__tvE2E = { notify, openList, openKeyboard, confirmBox };
+  }
 
   let rootEl = $state<HTMLElement | null>(null);
   let stageEl = $state<HTMLElement | null>(null);
@@ -49,7 +63,23 @@
     const from = uiMode.tvStart;
     const tab = from ? from.tab : initialView(session.connected, session.offline, drives.firstLibraryDrive, uiSettings.openOn).view;
     resetNav(tab, from?.pane ?? null);
-    void showScreen();
+    // The welcome card, each time TV mode opens, once the main screen is
+    // up (ruling 15).
+    void showScreen().then(() => showNotice(WELCOME));
+  });
+
+  // TV mode's own card stack replaces the desktop's while it is up
+  // (items 139–150); Start opens the Menu and View acts on the newest card
+  // with an action (items 102, 148).
+  $effect(() => {
+    attachNotices(true);
+    registerMenu(() => void openMenu());
+    registerView(() => void viewNewest());
+    return () => {
+      registerMenu(null);
+      registerView(null);
+      attachNotices(false);
+    };
   });
 
   $effect(() => {
@@ -130,5 +160,10 @@
     {/if}
   </main>
   <TvHintBar />
-  <div class="layers" bind:this={layersEl}></div>
+  <div class="layers" bind:this={layersEl}>
+    {#each nav.layers as layer (layer.id)}
+      <TvLayer {layer} />
+    {/each}
+  </div>
+  <TvToasts />
 </div>

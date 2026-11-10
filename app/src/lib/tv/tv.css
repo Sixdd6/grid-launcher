@@ -201,9 +201,71 @@ html[data-ui='tv'] .tv .start-box h1 { margin: 0 0 .3rem; color: var(--text-h); 
 html[data-ui='tv'] .tv .start-box .sub { color: var(--text-muted); margin: 0 0 1.1rem; flex: 0 0 auto; }
 html[data-ui='tv'] .tv .start-foot { flex: 0 0 auto; margin-top: 1.1rem; }
 
+/* ---- Overlays (items 360–388; tvmode.css "Overlays"): a scrim with a 6px
+   blur down to the hint bar, which keeps the overlay's hints (ruling 20). */
+html[data-ui='tv'] .tv .layer { position: absolute; inset: 0 0 3.6rem 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: var(--scrim); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+html[data-ui='tv'] .tv .sheet { width: 36rem; max-height: 80vh; overflow-y: auto; scrollbar-width: none; background: var(--overlay); border: 1px solid var(--line); border-radius: 1rem; box-shadow: var(--shadow-overlay); padding: 1.4rem; }
+html[data-ui='tv'] .tv .sheet h2 { margin: 0 .6rem .3rem; font-size: 1.35rem; color: var(--text-h); }
+html[data-ui='tv'] .tv .sheet .sub { margin: 0 .6rem 1rem; color: var(--text-muted); }
+html[data-ui='tv'] .tv .opt { display: flex; align-items: center; gap: .8rem; width: 100%; min-height: 3.4rem; padding: .5rem 1rem; border-radius: .6rem; font-size: 1.1rem; color: var(--text-h); }
+html[data-ui='tv'] .tv .opt .s { color: var(--text-muted); font-size: .9rem; margin-left: auto; text-align: right; }
+html[data-ui='tv'] .tv .opt.f { background: var(--selected); }
+html[data-ui='tv'] .tv .opt.dng { color: var(--danger); }
+html[data-ui='tv'] .tv .opt .ck { width: 1.4rem; color: var(--primary); display: inline-flex; }
+html[data-ui='tv'] .tv .dialog { width: 40rem; background: var(--overlay); border: 1px solid var(--line); border-radius: 1rem; box-shadow: var(--shadow-overlay); padding: 1.8rem 2rem; }
+html[data-ui='tv'] .tv .dialog h2 { margin: 0 0 .6rem; font-size: 1.5rem; color: var(--text-h); }
+html[data-ui='tv'] .tv .dialog p { margin: 0 0 1.4rem; color: var(--text); font-size: 1.05rem; line-height: 1.55; }
+html[data-ui='tv'] .tv .dialog .btns { justify-content: flex-end; }
+
+html[data-ui='tv'] .tv .layer.kb { align-items: flex-end; }
+html[data-ui='tv'] .tv .osk { width: 100%; background: var(--overlay); border-top: 1px solid var(--line); box-shadow: var(--shadow-overlay); padding: 1.4rem 2.4rem 1.2rem; animation: tv-osk-in 220ms ease; }
+html[data-ui='tv'] .tv .osk-head { max-width: 62rem; margin: 0 auto 1rem; }
+html[data-ui='tv'] .tv .osk-head .t { color: var(--text-muted); font-size: .95rem; margin-bottom: .4rem; }
+html[data-ui='tv'] .tv .osk-val { font-size: 1.4rem; color: var(--text-h); background: var(--field); border-radius: .6rem; padding: .7rem 1rem; min-height: 3.2rem; white-space: pre; overflow: hidden; }
+html[data-ui='tv'] .tv .osk-val .caret { display: inline-block; width: .12rem; height: 1.5rem; background: var(--primary); vertical-align: -.25rem; animation: tv-blink 1s steps(1) infinite; }
+@keyframes tv-blink { 50% { opacity: 0; } }
+@keyframes tv-osk-in { from { transform: translateY(100%); } }
+html[data-ui='tv'] .tv .keys { max-width: 62rem; margin: 0 auto; display: flex; flex-direction: column; gap: .5rem; }
+html[data-ui='tv'] .tv .krow { display: flex; gap: .5rem; justify-content: center; }
+html[data-ui='tv'] .tv .key { flex: 0 0 4.6rem; height: 3.4rem; border-radius: .5rem; background: var(--surface); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; gap: .4rem; font-size: 1.2rem; color: var(--text-h); text-align: center; }
+html[data-ui='tv'] .tv .key.w2 { flex-basis: 9.6rem; }
+html[data-ui='tv'] .tv .key.w3 { flex-basis: 14.7rem; }
+html[data-ui='tv'] .tv .key.w5 { flex-basis: 24.9rem; }
+html[data-ui='tv'] .tv .key.on { background: var(--selected); }
+html[data-ui='tv'] .tv .key.pri { background: var(--primary); color: var(--on-primary); }
+html[data-ui='tv'] .tv .key.f { transform: scale(1.06); }
+
+/* The Menu: a 30rem panel from the right (item 362). */
+html[data-ui='tv'] .tv .layer.side { justify-content: flex-end; align-items: stretch; }
+html[data-ui='tv'] .tv .guide { width: 30rem; background: var(--overlay); border-left: 1px solid var(--line); box-shadow: var(--shadow-overlay); padding: 2rem 1.6rem; display: flex; flex-direction: column; gap: .3rem; overflow-y: auto; scrollbar-width: none; }
+html[data-ui='tv'] .tv .guide .gh { display: flex; align-items: baseline; justify-content: space-between; margin: 0 .6rem 1rem; }
+html[data-ui='tv'] .tv .guide .gh b { font-size: 2.2rem; color: var(--text-h); font-variant-numeric: tabular-nums; }
+html[data-ui='tv'] .tv .sheet::-webkit-scrollbar,
+html[data-ui='tv'] .tv .guide::-webkit-scrollbar { display: none; }
+
+/* ---- Notification cards (items 140–147): top right under the top bar,
+   never in the pointer's way. */
+html[data-ui='tv'] .tv .toasts { position: absolute; top: 5.4rem; right: 2.4rem; z-index: 30; display: flex; flex-direction: column; gap: .7rem; width: 26rem; pointer-events: none; }
+html[data-ui='tv'] .tv .toast { background: var(--surface-2); border: 1px solid var(--line); border-radius: .7rem; box-shadow: var(--shadow-overlay); padding: .9rem 1.1rem 1.1rem; position: relative; overflow: hidden; animation: tv-tin 220ms ease; }
+html[data-ui='tv'] .tv .toast.err { border-color: var(--danger); }
+html[data-ui='tv'] .tv .toast .tt { color: var(--text-h); font-weight: 600; font-size: 1rem; }
+html[data-ui='tv'] .tv .toast.err .tt { color: var(--danger); }
+html[data-ui='tv'] .tv .toast .ts { color: var(--text-muted); font-size: .9rem; margin-top: .2rem; }
+html[data-ui='tv'] .tv .toast .ta { margin-top: .5rem; display: flex; align-items: center; gap: .5rem; font-weight: 600; font-size: .9rem; color: var(--text-h); }
+html[data-ui='tv'] .tv .toast .tbar { position: absolute; left: 0; bottom: 0; height: .2rem; background: var(--primary); animation: tv-tbar linear forwards; }
+html[data-ui='tv'] .tv .toast.err .tbar { background: var(--danger); }
+html[data-ui='tv'] .tv .toast .segs { display: flex; gap: .25rem; margin-top: .6rem; }
+html[data-ui='tv'] .tv .toast .segs i { flex: 1; height: .3rem; border-radius: .15rem; background: var(--field); overflow: hidden; }
+html[data-ui='tv'] .tv .toast .segs i b { display: block; width: 0; height: 100%; background: var(--primary); }
+html[data-ui='tv'] .tv .toast .segs i.done b { width: 100% !important; }
+html[data-ui='tv'] .tv .toast .segs i.fail b { width: 100% !important; background: var(--danger); }
+@keyframes tv-tbar { from { width: 100%; } to { width: 0; } }
+@keyframes tv-tin { from { opacity: 0; transform: translateX(1rem); } }
+
 /* ---- Reduced motion (item 25): no focus transitions or growth; scrolls jump (dom.ts). */
 @media (prefers-reduced-motion: reduce) {
   html[data-ui='tv'] .tv .toast .tbar { animation: none; }
+  html[data-ui='tv'] .tv .osk { animation: none; }
   html[data-ui='tv'] .tv [data-f],
   html[data-ui='tv'] .tv .cv-art { transition: none; }
   html[data-ui='tv'] .tv .cv.f .cv-art,

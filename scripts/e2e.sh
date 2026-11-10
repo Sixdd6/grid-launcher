@@ -132,8 +132,9 @@ STAGE_GROUPS=(
   # `// e2e-app-args:` line. (a) --tv: bands, sizing, tabs, input, prompts and
   # assignments with injected controllers; (b) a desktop start: the TV button,
   # Switch to desktop mode on the same view; (c) a restart without --tv opens
-  # the desktop.
-  "tv-shell:specs/tv-shell-a.spec.ts specs/tv-shell-b.spec.ts specs/tv-shell-c.spec.ts"
+  # the desktop; (d, P6) --tv again: overlays, the on-screen keyboard, the
+  # Menu and the notification cards.
+  "tv-shell:specs/tv-shell-a.spec.ts specs/tv-shell-b.spec.ts specs/tv-shell-c.spec.ts specs/tv-shell-d.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.

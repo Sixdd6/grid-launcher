@@ -46,8 +46,35 @@ export type Page = {
   props?: Record<string, unknown>;
 };
 
-/** An overlay (P6 fills these in). */
-export type Layer = { id: number; blocking: boolean; hints: Hint[] | null };
+/**
+ * An overlay (P6; tvmode.js `openLayer`): a list, a confirmation, the
+ * on-screen keyboard, the Menu, or (P9) the media viewer. Focus stays inside
+ * the top one until it closes (item 361); closing it puts focus back on the
+ * item it was opened from, found again by its key after a redraw.
+ */
+export type Layer = {
+  id: number;
+  /** B and a click outside don't close it (the unreachable library). */
+  blocking: boolean;
+  /** Its own hints, or null for A "Select", B "Back". */
+  hints: Hint[] | null;
+  /** Buttons it binds itself (item 103: the keyboard, the media viewer);
+   *  every other button but A, B and the directions does nothing. */
+  binds: Partial<Record<TvButton, () => void>>;
+  /** A physical key while it is on top; answers true when it took it
+   *  (the keyboard's typing, item 74). */
+  keydown?: (e: KeyboardEvent) => boolean;
+  /** Held typing buttons repeat (the keyboard, items 42–43). */
+  typingRepeat?: (b: TvButton, focused: HTMLElement | null) => boolean;
+  /** Extra class on the scrim: `side` (the Menu), `kb` (the keyboard). */
+  cls: string;
+  component: Component<any>;
+  props: Record<string, unknown>;
+  onClose?: () => void;
+};
+
+export type LayerSpec = Omit<Layer, 'id' | 'blocking' | 'hints' | 'binds' | 'cls' | 'props'> &
+  Partial<Pick<Layer, 'blocking' | 'hints' | 'binds' | 'cls' | 'props'>>;
 
 type FocusInfo = { key: string | null; a: string; x: string | null; disabled: boolean; present: boolean };
 
@@ -81,6 +108,11 @@ let curPlace: { key: string | null; boxId: string | null; index: number } | null
 /** Set while a screen first appears or redraws: scrolls jump (item 114). */
 let instant = false;
 let nextPageId = 1;
+let nextLayerId = 1;
+/** Where each open layer was opened from (tvmode.js `o.prev`). */
+const layerPrev = new Map<number, { el: HTMLElement | null; key: string | null }>();
+/** Work that waits for the last overlay to close (item 117). */
+let afterLayers: (() => void)[] = [];
 
 const memory = new Map<string, { k: string | null; scroll?: Record<string, [number, number]> }>();
 const hooks = new Map<string, ScreenHooks>();
@@ -130,7 +162,13 @@ function screenKey(): string {
   return p ? `page:${p.id}` : `tab:${state.tab}`;
 }
 
-function mem(key = screenKey()) {
+/** Focus memory's key: the top overlay's while one is open, else the screen's. */
+function memKey(): string {
+  const l = state.layers[state.layers.length - 1];
+  return l ? `layer:${l.id}` : screenKey();
+}
+
+function mem(key = memKey()) {
   let m = memory.get(key);
   if (!m) {
     m = { k: null };
@@ -145,6 +183,8 @@ export function resetNav(tab: TvTab, pane: TvPane | null): void {
   if (pane !== null) state.pane = pane;
   state.pages = [];
   state.layers = [];
+  layerPrev.clear();
+  afterLayers = [];
   state.selMode = false;
   memory.clear();
   cur = null;
@@ -159,11 +199,71 @@ export function attachRoots(stageEl: HTMLElement | null, layersEl: HTMLElement |
 
 /** Where focus lives now: the top overlay, else the stage. */
 export function scope(): HTMLElement | null {
-  if (state.layers.length && layersRoot) {
-    const last = layersRoot.lastElementChild as HTMLElement | null;
-    if (last) return last;
+  const top = state.layers[state.layers.length - 1];
+  if (top && layersRoot) {
+    const el = layersRoot.querySelector<HTMLElement>(`[data-layer="${top.id}"]`);
+    if (el) return el;
   }
   return stage;
+}
+
+/** The top overlay, or null. */
+export function topLayer(): Layer | null {
+  return state.layers[state.layers.length - 1] ?? null;
+}
+
+/**
+ * Opens an overlay over the stage (tvmode.js `openLayer`): focus moves into
+ * it, to its `data-autofocus` item (Cancel, the checked option) or its first.
+ * Answers its id.
+ */
+export async function openLayer(spec: LayerSpec): Promise<number> {
+  const id = nextLayerId++;
+  layerPrev.set(id, { el: cur, key: cur?.getAttribute('data-k') ?? null });
+  state.layers = [
+    ...state.layers,
+    { blocking: false, hints: null, binds: {}, cls: '', props: {}, ...spec, id },
+  ];
+  await tick();
+  if (topLayer()?.id === id) restoreFocus();
+  return id;
+}
+
+/**
+ * Closes the top overlay (tvmode.js `closeLayer`): focus goes back to the
+ * item it was opened from, or the item with its key after a redraw, else the
+ * screen's focus; then its `onClose` runs, then anything that waited for the
+ * overlays to close (item 117).
+ */
+export async function closeLayer(): Promise<void> {
+  const layer = state.layers[state.layers.length - 1];
+  if (!layer) return;
+  const prev = layerPrev.get(layer.id) ?? { el: null, key: null };
+  layerPrev.delete(layer.id);
+  memory.delete(`layer:${layer.id}`);
+  state.layers = state.layers.slice(0, -1);
+  if (cur) cur.classList.remove('f');
+  cur = null;
+  await tick();
+  const root = scope();
+  let el: HTMLElement | null = null;
+  if (prev.el && prev.el.isConnected && root?.contains(prev.el)) el = prev.el;
+  else if (prev.key && root) el = focusables(root).find((e) => e.getAttribute('data-k') === prev.key) ?? null;
+  if (el) setFocus(el, { scroll: false });
+  else restoreFocus();
+  layer.onClose?.();
+  if (!state.layers.length && afterLayers.length) {
+    const run = afterLayers;
+    afterLayers = [];
+    for (const fn of run) fn();
+  }
+}
+
+/** Runs `fn` now, or once the last overlay closes (item 117: a redraw a
+ *  finished install causes waits for the overlay). */
+export function afterOverlays(fn: () => void): void {
+  if (state.layers.length) afterLayers.push(fn);
+  else fn();
 }
 
 /** The screen registers its hooks; answers the function that drops them. */
@@ -292,7 +392,7 @@ export function toRail(): void {
 }
 
 function saveScreen(): void {
-  if (stage) mem().scroll = saveScroll(stage);
+  if (stage) mem(screenKey()).scroll = saveScroll(stage);
 }
 
 /** After the screen changed: its scroll positions come back, then focus,
@@ -304,7 +404,7 @@ export async function showScreen(): Promise<void> {
   // rows): only a redraw of the same screen re-finds focus by key.
   curPlace = null;
   await tick();
-  if (stage) loadScroll(stage, mem().scroll);
+  if (stage) loadScroll(stage, mem(screenKey()).scroll);
   instant = true;
   try {
     if (!state.layers.length) restoreFocus();
@@ -324,11 +424,13 @@ export async function showTab(tab: TvTab): Promise<void> {
   await showScreen();
 }
 
-/** Pushes a page over the tab (item 319). */
-export async function pushPage(page: Omit<Page, 'id'>): Promise<number> {
+/** Pushes a page over the tab (item 319). With `fresh`, any pages close
+ *  first (Menu › Notifications, item 356). */
+export async function pushPage(page: Omit<Page, 'id'>, opts: { fresh?: boolean } = {}): Promise<number> {
   saveScreen();
   const id = nextPageId++;
-  state.pages = [...state.pages, { ...page, id }];
+  if (opts.fresh) for (const p of state.pages) memory.delete(`page:${p.id}`);
+  state.pages = [...(opts.fresh ? [] : state.pages), { ...page, id }];
   await showScreen();
   return id;
 }
@@ -393,7 +495,7 @@ function context(): PressContext {
   const m = h.main?.() ?? null;
   const layer = state.layers[state.layers.length - 1] ?? null;
   return {
-    layer: layer ? { blocking: layer.blocking } : null,
+    layer: layer ? { blocking: layer.blocking, binds: Object.keys(layer.binds) as TvButton[] } : null,
     pages: state.pages.length,
     startup: state.startup,
     selMode: state.selMode,
@@ -477,7 +579,12 @@ function run(cmd: Command): void {
     case 'view':
       viewHandler?.();
       return;
-    // TODO(P6): closeLayer — overlays arrive with TvLayer.
+    case 'closeLayer':
+      void closeLayer();
+      return;
+    case 'layerButton':
+      topLayer()?.binds[cmd.button]?.();
+      return;
     // TODO(P13): selToggle / selPick / selAll / selAct — select mode.
     default:
       return;

@@ -40,8 +40,8 @@ describe('A', () => {
 
 describe('B (items 92–97)', () => {
   it('closes an overlay unless it is blocking', () => {
-    expect(press('B', ctx({ layer: { blocking: false } }))).toEqual({ kind: 'closeLayer' });
-    expect(press('B', ctx({ layer: { blocking: true } }))).toEqual({ kind: 'none' });
+    expect(press('B', ctx({ layer: { blocking: false, binds: [] } }))).toEqual({ kind: 'closeLayer' });
+    expect(press('B', ctx({ layer: { blocking: true, binds: [] } }))).toEqual({ kind: 'none' });
   });
   it('pops a page', () => {
     expect(press('B', ctx({ pages: 1 }))).toEqual({ kind: 'pop' });
@@ -106,7 +106,23 @@ describe('other buttons', () => {
     expect(press('Y', ctx({ selMode: true }))).toEqual({ kind: 'selAct' });
   });
   it('an open overlay suppresses X, Y, LT, RT, LB, RB, Menu and View (item 103)', () => {
-    const c = ctx({ layer: { blocking: false }, screen: { x: true, y: true, lt: true, rt: true, lb: true, rb: true, main: 'press' } });
+    const c = ctx({ layer: { blocking: false, binds: [] }, screen: { x: true, y: true, lt: true, rt: true, lb: true, rb: true, main: 'press' } });
     for (const b of ['X', 'Y', 'LT', 'RT', 'LB', 'RB', 'MENU', 'VIEW'] as const) expect(press(b, c)).toEqual({ kind: 'none' });
+  });
+  it('an overlay that binds a button gets it first (the keyboard, item 383)', () => {
+    const binds = ['X', 'Y', 'LB', 'RB', 'LT', 'MENU'] as const;
+    const c = ctx({ layer: { blocking: false, binds }, screen: { x: true, y: true, lt: true, rt: true, lb: true, rb: true, main: 'press' } });
+    for (const b of binds) expect(press(b, c)).toEqual({ kind: 'layerButton', button: b });
+    expect(press('RT', c)).toEqual({ kind: 'none' });
+    expect(press('VIEW', c)).toEqual({ kind: 'none' });
+    expect(press('B', c)).toEqual({ kind: 'closeLayer' });
+    expect(press('A', c)).toEqual({ kind: 'activate' });
+    expect(press('UP', c)).toEqual({ kind: 'move', dir: 'up' });
+  });
+  it('a bound direction goes to the overlay (the media viewer)', () => {
+    expect(press('LEFT', ctx({ layer: { blocking: false, binds: ['LEFT'] } }))).toEqual({ kind: 'layerButton', button: 'LEFT' });
+  });
+  it('a slider does not adjust under an overlay', () => {
+    expect(press('LEFT', ctx({ layer: { blocking: false, binds: [] }, focus: focus({ adjust: true }) }))).toEqual({ kind: 'move', dir: 'left' });
   });
 });

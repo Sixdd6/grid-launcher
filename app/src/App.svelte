@@ -196,4 +196,7 @@
      before any session exists, and the user it was written for sees the
      Connect form, not the shell. `position: fixed` global chrome, so it
      needs no layout slot of its own. -->
-<Toast lead={session.phase === 'shell' && setupRun.active ? setupCard : undefined} />
+<!-- TV mode draws the same events as its own cards (lib/tv/TvToasts). -->
+{#if uiMode.mode !== 'tv'}
+  <Toast lead={session.phase === 'shell' && setupRun.active ? setupCard : undefined} />
+{/if}

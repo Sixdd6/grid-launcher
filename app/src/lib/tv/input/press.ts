@@ -4,9 +4,9 @@
 import { directionOf, isDirection, type Direction, type TvButton } from './buttons';
 
 export type PressContext = {
-  /** The top overlay, if one is open (P6 adds the keyboard and the media
-   *  viewer, which bind more buttons). */
-  layer: { blocking: boolean } | null;
+  /** The top overlay, if one is open, and the buttons it binds itself
+   *  (the on-screen keyboard, the media viewer). */
+  layer: { blocking: boolean; binds: readonly TvButton[] } | null;
   /** Pages pushed over the tab (or over the startup screen). */
   pages: number;
   /** A startup screen (Connect, Choose your systems) is showing. */
@@ -50,6 +50,9 @@ export type Command =
   /** A on a disabled control: say why (its data-why), as an error notice. */
   | { kind: 'why' }
   | { kind: 'closeLayer' }
+  /** A button the top overlay binds (the keyboard's X / Y / LB / RB / LT /
+   *  Menu, the media viewer's LB / RB). */
+  | { kind: 'layerButton'; button: TvButton }
   | { kind: 'pop' }
   | { kind: 'selToggle' }
   | { kind: 'selPick' }
@@ -70,6 +73,10 @@ const NONE: Command = { kind: 'none' };
 export function press(b: TvButton, ctx: PressContext): Command {
   const top = ctx.layer;
   const f = ctx.focus;
+
+  // The top overlay's own buttons come first (tvmode.js `press`: the
+  // keyboard, then the media viewer).
+  if (top && top.binds.includes(b)) return { kind: 'layerButton', button: b };
 
   if (isDirection(b)) {
     if (f?.adjust && (b === 'LEFT' || b === 'RIGHT') && !top) return { kind: 'adjust', delta: b === 'LEFT' ? -1 : 1 };
@@ -97,8 +104,8 @@ export function press(b: TvButton, ctx: PressContext): Command {
     return NONE;
   }
 
-  // An open overlay binds nothing else here (item 103); P6's keyboard and
-  // media viewer answer their own buttons before this runs.
+  // An open overlay binds nothing else (item 103): X, Y, LT, RT, LB, RB,
+  // Menu and View do nothing unless it bound them above.
   if (top) return NONE;
 
   if (ctx.selMode && ctx.pages === 0 && (b === 'X' || b === 'Y')) return { kind: b === 'X' ? 'selAll' : 'selAct' };
