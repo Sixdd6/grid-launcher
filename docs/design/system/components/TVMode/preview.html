@@ -1872,8 +1872,11 @@ function pollPads() {
   catch (e) { if (S.padState !== 'blocked') { S.padState = 'blocked'; paintHints(); } requestAnimationFrame(pollPads); return; }
   for (var i = 0; i < pads.length; i++) {
     var p = pads[i]; if (!p) continue; seen.push(p);
-    var MAP = PADB;
-    if ((CFG.assign[p.id] || guessAssign(p.id)) === 'nintendo') { MAP = {}; for (var mk in PADB) MAP[mk] = PADB[mk]; MAP[0] = 'B'; MAP[1] = 'A'; MAP[2] = 'Y'; MAP[3] = 'X'; }
+    var MAP;
+    /* Nintendo style swaps A / B and X / Y; Xbox style swaps X / Y only (2026-11-10). */
+    MAP = {}; for (var mk in PADB) MAP[mk] = PADB[mk];
+    if ((CFG.assign[p.id] || guessAssign(p.id)) === 'nintendo') { MAP[0] = 'B'; MAP[1] = 'A'; }
+    MAP[2] = 'Y'; MAP[3] = 'X';
     var st = {}; for (var k in MAP) if (p.buttons[k] && p.buttons[k].pressed) st[MAP[k]] = 1;
     var ax = p.axes[0] || 0, ay = p.axes[1] || 0; if (ax < -.5) st.LEFT = 1; if (ax > .5) st.RIGHT = 1; if (ay < -.5) st.UP = 1; if (ay > .5) st.DOWN = 1;
     var held = heldBy[p.index] || (heldBy[p.index] = {});
