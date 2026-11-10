@@ -136,16 +136,6 @@
   expose `window.__tvE2E = {notify, openList, openKeyboard, confirmBox}` (TvShell) until real
   screens open them; later specs should drive the real screens instead.
 
-## Pending for the next phase (consultant, after P6)
-- app/src/lib/tv/reconnect.ts: drop the TODO(design); keep the failure card as is ("Can't reach
-  <URL>", error, second line `session.lastError` verbatim when set, none when null, no action),
-  pushed only when the retry leaves the shell not connected (a 401 opens Connect, no card); make
-  Reconnect a no-op while `session.busy`.
-- app/src/lib/tv/overlays/menu.ts (+ test, TvMenu.svelte passes session state): when
-  `session.offline && !session.connected` the reconnect row reads "Connect to a server…" (same key,
-  same handler, which opens Connect) and `menuHead` reads "Offline · no server".
-- tv.css `.layer` stays inset 0 0 3.6rem (scrim covers the top bar); checklist 360 reworded.
-
 ## After P7: the Server tab
 - **Done from the P5 pending list:** the desktop TV button is a 28×28 `icon-btn` with the new
   outline `tv` icon (icons.ts + prototype icons.json); Space stays A with the OSK's typing branch
@@ -205,3 +195,51 @@
   partial = `.note.warn` `data-testid="tv-search-partial"` + the same Try again above the grid; retry re-runs the load
   with the loading heading; remove the `.catch(() => (all = []))` that produced "0 results". `setQuery` keeps the
   early return on blank (results page: emptied field = nothing typed), comment cites the ruling. Inline only, never cards.
+
+## After P8: the Library tab
+- **Done from the pending lists:** `reconnect.ts` does nothing while `session.busy`, its TODO(design) is gone
+  (card unchanged; `reconnect.test.ts`); `overlays/menu.ts` takes the session: used without a server the
+  Reconnect row reads "Connect to a server…" (same key and handler) and `menuHead` reads "Offline · no
+  server" (TvMenu passes `session`). The `.layer` scrim was a no-op. The P7 Search everything list is
+  still pending (P9, untouched here, as is the Server platform search).
+- **Library state** (`tabs/library/library.svelte.ts`): `lib.query`, `lib.sort` (LibrarySort, default
+  `played`), `lib.folds` ({plat, drives}, both open, kept for the session), `selectLibRail(key)` (clears
+  the search), `toggleFold(id)`, `driveGamesCache` (each drive's games, so a remount draws at once). The
+  selected row is the desktop's `librarySelection` (shared by both modes); a vanished row falls back to
+  All games, written back.
+- **Pure modules:** `libraryRail.ts` (`libraryRail()` over `library/rail.ts` → filters / platforms /
+  drives, keys `r-<RailKey>` e.g. `r-platform:sega-genesis`, `r-drive:<mount>`, folder headers
+  `fold-plat` / `fold-drives`, `NO_DRIVES`, `backupAllLabel`), `libraryHeader.ts` (`TV_SORTS`, `countLine`,
+  `libraryGrid`, `driveGrid` (the four TV sorts over drive games; played / installed by this computer's
+  copy), `emptyState`, `driveEmptyState`, `driveCountLine` (games shown and their size), `driveChips`
+  ("N systems")). Search ruling: a blank query is no filter; the Search chip and the no-match text show
+  only for a non-empty one; B on the keyboard restores the value it had.
+- **Screen** `TvLibrary`: covers `lg<id>` (installed rows) and `dg<romId>-<server>` (drive games),
+  test ids `tv-cover-<key>`, `tv-lib-name|count|search|sort|emus|fw|empty|no-drives|fold-*|rail-*`.
+  X on a platform row: offline → "Backing up needs a server."; online it is TODO(P13) (the Backup page).
+  RT is TODO(P13). Drive covers: `games.ts` `gameFromDrive` (cover via `driveAssetUrl`, installed from the
+  registry row by rom id or the drive's own flag), `quickFor` gives Install from drive, `runQuick` copies
+  it (`games/run.ts` `installFromDrive`), `subjectOf` gives `fromDriveGame` (Details stub until P9).
+- **Closed folder holding the selection:** its header gets `data-holds-sel`; the engine (`dom.ts`
+  snapshot) and `toRail` / `closeLayer` treat it as the rail's selected row, so B and Left land on it
+  instead of selecting another row (the prototype would have selected All games). Deliberate extension.
+- **Windowed grids (R8):** `ui/TvGrid` takes `items`, `key` (the cover's `data-k`), a `cell` snippet and
+  `listKey` (a new list scrolls to the top); without `items` it is the old plain grid. It renders the rows
+  meeting the view ±2 and the focused cover's row ±1 (`focus/grid.ts` `gridWindow`), spacers stand in for
+  the rest (exact pitch from two drawn rows; `overflow-anchor: none`). Each cover sits in a
+  `.gcell[data-i]` (`display: contents`) inside `[data-window][data-count]`. `focus/windows.ts` holds a
+  handle per grid; `nav.svelte.ts` moves by index inside (`gridMove`; only an edge goes spatial), renders
+  an unrendered cover before focusing it (restore by key, closeLayer, stageChanged), syncs windows around
+  `loadScroll` in `showScreen`; `dom.ts` `reveal` takes first / last by index. Used by Server platforms
+  and the Library; Search everything still uses a plain `.grid` (P9 may switch it).
+- **Notifier fix (shared with the desktop):** `initNotifications` started after the downloads store's
+  first snapshot (TV mode's offline start) took the next snapshot as its baseline, so the first install
+  of the session had no "added to download queue" card. It now starts from the store's current entries
+  (`downloads.hasSnapshot()`); notifier.test.ts covers it.
+- **e2e:** group `tv-library` (seed `tv-library-seed.mjs`: offline, three installed games, fake drive
+  TESTDRIVE with the "Travel kit" pack; `E2E_DRIVE_ROOTS` like `backups`) and `tv-large-platform`
+  (large-platform fixtures + 600 seeded installed games; connects on the desktop). Both capture page
+  errors.
+- **Not done / for later:** P13 owns the Backup page hooks, select mode, the drive's Install-from-drive
+  notices beyond the queue card (425–429) and Details from a drive. Where GRID opens on the first drive in
+  TV (item 415) is P12: TvShell doesn't select the drive row yet.
