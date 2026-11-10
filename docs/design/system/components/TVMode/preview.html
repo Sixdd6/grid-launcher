@@ -832,6 +832,13 @@ function details(g) {
     lb: function () { detTabStep(g, -1); }, rb: function () { detTabStep(g, 1); }
   };
 }
+/* Each game's cloud saves and states, newest first; the prototype keeps them for
+   the session so deleting and uploading show in the list. */
+function savesOf(g) {
+  S.saves = S.saves || {}; var key = g.id + ':' + S.saveKind;
+  if (!S.saves[key]) S.saves[key] = [['2 hours ago', '128 KB', 1], ['Yesterday, 21:40', '128 KB', 2], ['3 days ago', '126 KB', 3], ['12 Oct 2026', '120 KB', 4]].map(function (r) { return { when: r[0], size: r[1], slot: r[2] }; });
+  return S.saves[key];
+}
 function detTabStep(g, d) { var tabs = ['Overview', 'Media', 'Saves'].concat(g.ach ? ['Achievements'] : []); detShowTab(tabs[(tabs.indexOf(S.detTab) + d + tabs.length) % tabs.length]); }
 /* Switching a Details tab (LB / RB, or a click) focuses the tab's first item, at
    the top of the tab; a tab with nothing to focus leaves focus where it was. */
@@ -856,9 +863,9 @@ function detBody(g) {
   if (S.detTab === 'Saves') {
     if (g.unlinked || !g.inst && !g.played) return '<p class="note">' + (g.unlinked ? 'Cloud saves need the link to a server game.' : 'No cloud saves yet. They appear after you play.') + '</p>';
     var kinds = '<div class="seg" data-nav="h">' + ['Saves', 'States'].map(function (k) { return '<button data-f data-k="sk-' + k + '" data-a="saveKind" data-v="' + k + '" class="' + (S.saveKind === k ? 'on' : '') + '">' + k + '</button>'; }).join('') + '</div>';
-    var list = [['Latest', '2 hours ago', '128 KB'], ['', 'Yesterday, 21:40', '128 KB'], ['', '3 days ago', '126 KB'], ['', '12 Oct 2026', '120 KB']];
+    var list = savesOf(g);
     return '<div class="bar-h">' + kinds + '<h3 style="margin:0;color:var(--text-h);flex:1">' + (S.saveKind === 'Saves' ? 'Cloud Saves' : 'Cloud States') + '</h3><button class="btn" data-f data-k="up" data-a="uploadSave" data-id="' + g.id + '">' + gIcon('cloud', 18) + 'Upload latest ' + (S.saveKind === 'Saves' ? 'save' : 'state') + '</button></div><div data-nav="v">' +
-      list.map(function (r, i) { return '<div class="lrow" data-f data-k="sv' + i + '" data-a="saveRow" data-i="' + i + '" data-al="Restore or delete"><div class="grow"><div class="t">' + (emuFor(g) || 'DuckStation') + (r[0] ? ' <span class="latest">LATEST</span>' : '') + '</div><div class="s">' + r[1] + ' · ' + r[2] + (S.saveKind === 'States' ? ' · slot ' + (i + 1) : '') + '</div></div></div>'; }).join('') + '</div>';
+      (list.length ? list.map(function (r, i) { return '<div class="lrow" data-f data-k="sv' + i + '" data-a="saveRow" data-i="' + i + '" data-al="Restore or delete"><div class="grow"><div class="t">' + (emuFor(g) || 'DuckStation') + (i === 0 ? ' <span class="latest">LATEST</span>' : '') + '</div><div class="s">' + r.when + ' · ' + r.size + (S.saveKind === 'States' ? ' · slot ' + r.slot : '') + '</div></div></div>'; }).join('') : '<p class="note">No cloud ' + (S.saveKind === 'Saves' ? 'saves' : 'states') + ' for this game. Upload the latest one, or play and GRID uploads it when the game closes.</p>') + '</div>';
   }
   if (S.detTab === 'Achievements') {
     var rows = []; for (var i = 0; i < 8; i++) rows.push('<div class="lrow" data-f data-k="a' + i + '" data-al="Select"><span class="badge' + (i > 2 ? ' locked' : '') + '" style="--c:' + g.c + '"></span><div class="grow"><div class="t">' + ['First Light', 'Storm Chaser', 'Lighthouse Keeper', 'No Brakes', 'Coastline', 'Perfect Run', 'Night Courier', 'Full Cargo'][i] + '</div><div class="s">' + (i > 2 ? 'Finish a circuit without touching the water' : 'Unlocked ' + ago(i * 3 + 1) + (i === 0 ? ' · Hardcore' : '')) + '</div></div><span class="muted">' + (i + 1) * 5 + ' pts</span></div>');
@@ -1144,10 +1151,19 @@ var ACT = {
   locate: function (el) { var g = byId(el.dataset.id); openBrowser({ title: 'Where is ' + g.t + '?', start: '/mnt/storage/Games', onPick: function (p) { if (/Velvet Static|storage\/Games$/.test(p)) { g.missing = 0; toast(g.t + ' found', { s: 'Plays from ' + p }); renderStage(); } else toast('Couldn\'t find ' + g.t + ' in ' + p, { err: 1, s: 'Pick the folder that holds the game.' }); } }); },
   viewer: function (el) { viewer(+el.dataset.i); },
   saveKind: function (el) { S.saveKind = el.dataset.v; renderStage(); restoreFocus(); },
-  uploadSave: function (el) { toast('Uploading the latest ' + (S.saveKind === 'Saves' ? 'save' : 'state') + '…'); setTimeout(function () { toast((S.saveKind === 'Saves' ? 'Save' : 'State') + ' uploaded'); }, 1200); },
+  uploadSave: function (el) {
+    var g = byId(el.dataset.id), kind = S.saveKind, word = kind === 'Saves' ? 'save' : 'state';
+    toast('Uploading the latest ' + word + '…');
+    setTimeout(function () {
+      var was = S.saveKind; S.saveKind = kind; var list = savesOf(g); S.saveKind = was;
+      list.unshift({ when: 'Just now', size: '128 KB', slot: list.length + 1 });
+      toast((kind === 'Saves' ? 'Save' : 'State') + ' uploaded for ' + g.t);
+      var top = S.pages[S.pages.length - 1]; if (top && top.id === g.id && S.detTab === 'Saves' && S.saveKind === kind) repaint();
+    }, 1200);
+  },
   saveRow: function (el) { var g = byId(S.pages[S.pages.length - 1].id); openSheet({ title: (S.saveKind === 'Saves' ? 'Save' : 'State') + ' from ' + el.querySelector('.s').textContent.split(' · ')[0], items: [
     { label: 'Restore to this computer', fn: function () { confirmBox({ title: 'Restore this ' + (S.saveKind === 'Saves' ? 'save' : 'state') + '?', body: 'It replaces the ' + (S.saveKind === 'Saves' ? 'save' : 'state') + ' for ' + g.t + ' on this computer. The one there now is overwritten.', ok: 'Restore', fn: function () { toast((S.saveKind === 'Saves' ? 'Save' : 'State') + ' restored for ' + g.t); } }); } },
-    { label: 'Delete from the server', danger: 1, fn: function () { confirmBox({ title: 'Delete this ' + (S.saveKind === 'Saves' ? 'save' : 'state') + '?', body: 'It is removed from your server. This can\'t be undone.', ok: 'Delete', danger: 1, fn: function () { toast('Deleted from the server'); } }); } }] }); },
+    { label: 'Delete from the server', danger: 1, fn: function () { confirmBox({ title: 'Delete this ' + (S.saveKind === 'Saves' ? 'save' : 'state') + '?', body: 'It is removed from your server. This can\'t be undone.', ok: 'Delete', danger: 1, fn: function () { savesOf(g).splice(+el.dataset.i, 1); toast((S.saveKind === 'Saves' ? 'Save' : 'State') + ' deleted from the server'); repaint(); } }); } }] }); },
   resume: function () { toast('Back to the game', { s: 'GRID moves behind it' }); },
   stop: function (el) { var g = byId(el.dataset.id); confirmBox({ title: 'Stop ' + g.t + '?', body: 'Unsaved progress in the game is lost.', ok: 'Stop game', danger: 1, fn: function () { pop(); if (CFG.upload) { toast('Uploading the save for ' + g.t + '…'); setTimeout(function () { toast('Save uploaded for ' + g.t); }, 1400); } } }); },
   dlrow: function (el) {
