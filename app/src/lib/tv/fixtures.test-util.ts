@@ -1,5 +1,5 @@
 // Test fixtures for the TV mode modules' tests.
-import type { DownloadEntry, GameSummary, InstalledGame } from '../api';
+import type { DownloadEntry, DriveGame, DriveInfo, GameSummary, InstalledGame, PackSummary } from '../api';
 
 export function row(o: Partial<InstalledGame> = {}): InstalledGame {
   return {
@@ -28,3 +28,24 @@ export const entry = (o: Partial<DownloadEntry>): DownloadEntry =>
     downloaded_bytes: 0, total_bytes: 0, speed_bps: 0, install_processed_bytes: 0, install_total_bytes: 0,
     error: '', detail: '', drive_id: '', drive_name: '', drive_label: '', batch: 0, ...o,
   }) as DownloadEntry;
+
+export function packSummary(o: Partial<PackSummary> = {}): PackSummary {
+  return { name: 'Couch kit', os: ['linux'], game_count: 2, gridpack_bytes: 0, emulators: [], firmware: [], updated: '2026-11-09T00:00:00Z', rom_ids: [], ...o };
+}
+
+export function driveInfo(key: string, o: Partial<DriveInfo> = {}): DriveInfo {
+  return {
+    key, mount: key, label: 'SAMSUNG T7', fs: 'exFAT', fat32: false, total_bytes: 1, free_bytes: 1,
+    read_only: false, status: 'ready', problem: '', pack: packSummary(), ...o,
+  } as DriveInfo;
+}
+
+export function driveGame(o: Partial<DriveGame> = {}): DriveGame {
+  return {
+    rom_id: 901, server: 'https://romm.home.lan', name: 'Cinder Peaks', platform: 'ps2', platform_name: 'PlayStation 2',
+    size: 1_000_000_000, files_max: 0, cover: 'covers/901.png', installed: false, summary: 'On the drive.', region: '',
+    languages: '', tags: '', revision: '', rating: '', companies: [], release_date: '', genres: [], game_modes: [],
+    franchises: [], players: '', version: '', fanart: '', logo: '', screenshots: [], added: '2026-11-01T00:00:00Z',
+    installed_copy: false, installed_version: '', outdated: false, saves_copied: false, ...o,
+  } as DriveGame;
+}

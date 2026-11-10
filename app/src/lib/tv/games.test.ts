@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { entry, row, summary } from './fixtures.test-util';
-import { gameFromRow, gameFromSummary, liveInstall, platformTag, queueTag, quickFor } from './games';
+import { driveGame, entry, row, summary } from './fixtures.test-util';
+import { gameFromDrive, gameFromRow, gameFromSummary, liveInstall, platformTag, queueTag, quickFor } from './games';
 
 describe('TV games', () => {
   it('a server game: its cover, installed state from its row, update only when installed', () => {
@@ -36,5 +36,19 @@ describe('TV games', () => {
     expect(quickFor(gameFromRow(row(), new Set()), null, false)?.label).toBe('Play');
     expect(quickFor(gameFromRow(row({ missing: true }), new Set()), null, true)).toBeNull();
     expect(quickFor(gameFromRow(row({ rom_id: null }), new Set()), null, true)).toBeNull();
+  });
+
+  it('a drive game: its cover from the drive, installed from this computer, Install from drive', () => {
+    const g = gameFromDrive('/m/t7', driveGame(), null, new Set([901]));
+    expect(g).toMatchObject({ romId: 901, title: 'Cinder Peaks', platform: 'PlayStation 2', installed: false, update: false, row: null });
+    expect(g.cover).toContain('covers/901.png');
+    expect(g.drive?.key).toBe('/m/t7');
+    expect(quickFor(g, null, false)?.label).toBe('Install from drive');
+    expect(quickFor(g, null, false)?.kind).toBe('install-drive');
+    expect(quickFor(g, { queued: true, pct: 0 }, false)).toBeNull();
+    const i = gameFromDrive('/m/t7', driveGame(), row({ rom_id: 901, last_played_at: 7 }), new Set([901]));
+    expect(i).toMatchObject({ installed: true, update: true, lastPlayedAt: 7 });
+    expect(quickFor(i, null, false)?.label).toBe('Play');
+    expect(gameFromDrive('/m/t7', driveGame({ installed: true }), null, new Set()).installed).toBe(true);
   });
 });

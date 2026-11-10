@@ -67,7 +67,8 @@ describe('tv-shell (a): --tv', () => {
 
   it('opens on the Library rail, and moving through the rail filters at once (items 77, 105)', async () => {
     await waitFocused('r-all');
-    expect(await hints()).toEqual(['A Open', 'MENU Menu']);
+    // The Library's own hints (P8, item 193).
+    expect(await hints()).toEqual(['A Open', 'Y Search', 'LT Sort', 'RT Select', 'MENU Menu']);
     await key('ArrowDown');
     await waitFocused('r-recent');
     await expect($(`${testId('tv-library')} .vh h1`)).toHaveText('Recent');

@@ -3,7 +3,8 @@
 // installed row of the registry. Pure: the covers, the hero and Search
 // everything read these, and the shared stores feed them (tvmode.js
 // `cover`, `quickLabel`, `dlOf`).
-import type { DownloadEntry, GameSummary, InstalledGame } from '../api';
+import type { DownloadEntry, DriveGame, GameSummary, InstalledGame } from '../api';
+import { driveAssetUrl } from '../backups/driveArt';
 import { shortPlatformName } from '../cards/badges';
 import { liveInstallStatus } from '../discover/feed';
 import { percent } from '../downloads/format';
@@ -32,6 +33,8 @@ export type TvGame = {
   description: string;
   summary: GameSummary | null;
   row: InstalledGame | null;
+  /** Shown from a Backup drive: its key and the drive's record of the game. */
+  drive?: { key: string; game: DriveGame };
 };
 
 function releaseOf(raw: string): number | null {
@@ -88,6 +91,37 @@ export function gameFromRow(row: InstalledGame, updateIds: ReadonlySet<number>):
   };
 }
 
+/**
+ * A game on a Backup drive (Library › Backup drives): its cover from the
+ * drive, installed when this computer has it (`row`, or the drive's own
+ * record of that).
+ */
+export function gameFromDrive(
+  driveKey: string,
+  game: DriveGame,
+  row: InstalledGame | null,
+  updateIds: ReadonlySet<number>,
+): TvGame {
+  const installed = row !== null || game.installed;
+  return {
+    id: `${game.rom_id}-${encodeURIComponent(game.server)}`,
+    romId: game.rom_id,
+    title: game.name,
+    platform: game.platform_name.trim(),
+    platformSlug: game.platform,
+    cover: driveAssetUrl(driveKey, game.cover),
+    installed,
+    missing: row?.missing === true,
+    update: installed && updateIds.has(game.rom_id),
+    lastPlayedAt: row?.last_played_at ?? 0,
+    releasedAt: releaseOf(game.release_date),
+    description: game.summary,
+    summary: null,
+    row,
+    drive: { key: driveKey, game },
+  };
+}
+
 /** The platform tag in a mixed list (the desktop's chip text). */
 export function platformTag(game: TvGame): string {
   return shortPlatformName(game.platform);
@@ -116,22 +150,27 @@ export function queueTag(live: LiveInstall | null): string | null {
   return live.queued ? 'Queued' : `${live.pct}%`;
 }
 
+/** What X on a cover can do. */
+export type TvQuick = Extract<QuickKind, 'play' | 'install' | 'install-drive'>;
+
 /**
- * X on a cover (tvmode.js `quickLabel`): Play when installed, Install when
- * not (and a server answers); nothing while it installs, for a missing or
- * unlinked game, or with no server.
+ * X on a cover (tvmode.js `quickLabel`): Play when installed, Install from
+ * drive on a drive's cover, Install when not (and a server answers);
+ * nothing while it installs, for a missing or unlinked game, or with no
+ * server.
  */
 export function quickFor(
   game: TvGame,
   live: LiveInstall | null,
   connected: boolean,
-): { kind: Extract<QuickKind, 'play' | 'install'>; label: string } | null {
+): { kind: TvQuick; label: string } | null {
   const q = quickAction({
     installed: game.installed,
     romId: game.romId,
     missing: game.missing,
     live: live ? (live.queued ? 'queued' : 'downloading') : null,
+    fromDrive: game.drive !== undefined,
     connected,
   });
-  return q.kind === 'play' || q.kind === 'install' ? { kind: q.kind, label: q.label } : null;
+  return q.kind === 'play' || q.kind === 'install' || q.kind === 'install-drive' ? { kind: q.kind, label: q.label } : null;
 }
