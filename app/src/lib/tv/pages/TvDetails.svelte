@@ -8,7 +8,7 @@
   // focus; Up into the buttons scrolls it back to its top
   // (`data-read-reset`). Every fact and action is the shared DetailsStore's.
   import { openBackupPage } from '../backupActions';
-  import { tick, untrack } from 'svelte';
+  import { tick } from 'svelte';
   import Image from '../../Image.svelte';
   import { DetailsStore } from '../../details/detailsStore.svelte';
   import { keptFolder } from '../../details/unlinked';
@@ -38,9 +38,6 @@
     cancelConfirm,
     detButtons,
     leftLines,
-    noEmulatorFor,
-    noEmulatorSub,
-    systemRowFor,
     locatedNotice,
     locateFailedNotice,
     locateTitle,
@@ -56,7 +53,7 @@
   } from './details';
   import { det } from './detailsState.svelte';
   import { tvSystems } from '../systemsTv.svelte';
-  import { expectQueuedSub } from '../../notifications/notifier';
+  import { NoEmulatorCheck } from '../../details/noEmulatorCheck.svelte';
   import TvGameSettings from './TvGameSettings.svelte';
   import TvLinkPage from './TvLinkPage.svelte';
 
@@ -89,15 +86,10 @@
     d.loadCloudPanelInfo();
   });
 
-  // A game whose system has no emulator (ruling A): Details reads the
-  // Systems store (loaded here when no Systems screen has yet), and re-reads
-  // it when an emulator install ends.
-  $effect(() => {
-    void tvSystems.installSignature;
-    untrack(() => void tvSystems.refreshAll());
-  });
-  let sysRow = $derived(d.isNative || subject.drive ? undefined : systemRowFor(tvSystems.rows, subject.platformName, d.platformSlug ?? ''));
-  let noEmulator = $derived(noEmulatorFor(sysRow, sysRow ? tvSystems.installingRow(sysRow) || tvSystems.busyRows[sysRow.key] === true : false));
+  // A game whose system has no emulator (ruling A): the check shared with
+  // the desktop's Details reads TV mode's Systems store (loaded here when no
+  // Systems screen has yet) and re-reads it when an emulator install ends.
+  const noEmu = new NoEmulatorCheck(tvSystems, d, { queuedSub: true });
 
   let live = $derived(liveInstall(downloads.entries, subject.romId));
   let installed = $derived(d.installedNow);
@@ -134,7 +126,7 @@
       nowSeconds: Date.now() / 1000,
       launchTarget: d.launchTarget,
       installBlocked: d.installBlocked,
-      noEmulator: installed ? null : noEmulator,
+      noEmulator: noEmu.info,
       size,
       onDrives: subject.drive === undefined ? d.onDrives : '',
       drive,
@@ -184,19 +176,13 @@
       case 'stop':
         ask(stopConfirm(title), true, () => void d.stop().then(sayError));
         return;
-      case 'install': {
+      case 'install':
         // No emulator for the system: the recommendation installs too, and
         // the game's queued card says so (ruling A, items 273, 288).
-        const rec = sysRow;
-        const sub = noEmulatorSub(noEmulator);
-        if (sub !== null && subject.romId !== null) expectQueuedSub(subject.romId, sub);
-        void d.install().then((outcome) => {
-          if (!outcome) return;
-          if (outcome.kind === 'ok' && sub !== null && rec) void tvSystems.installRecommended(rec);
-          promptFor(outcome, title);
+        void noEmu.install().then((outcome) => {
+          if (outcome) promptFor(outcome, title);
         });
         return;
-      }
       case 'install-drive':
         void d.installFromDrive();
         return;

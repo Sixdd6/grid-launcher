@@ -117,6 +117,12 @@ export class SystemsStore {
   compatibilityKey = $derived(
     JSON.stringify([this.platforms.map((p) => [p.name, p.slug]), this.emulators.map((e) => e.name)]),
   );
+  /** The `compatibilityKey` the compatible answers were read for; '' before
+   *  the first answer. */
+  compatibleKey = $state('');
+  /** The compatible answers are in for the current platforms and emulators,
+   *  so a row's emulator (or its lack of one) can be trusted. */
+  compatibleReady = $derived(this.loaded && this.compatibleKey !== '' && this.compatibleKey === this.compatibilityKey);
   emulatorNames = $derived(this.emulators.map((e) => e.name).join('\n'));
   /** Changes when a firmware download completes (a PS3UPDAT.PUP may be in place). */
   firmwareCompleted = $derived(
@@ -212,9 +218,13 @@ export class SystemsStore {
   /** The compatible emulators and RetroArch cores for the given platforms. */
   loadCompatibility(refs: { name: string; slug: string }[]): void {
     if (refs.length === 0) return;
+    const key = this.compatibilityKey;
     api
       .compatibleEmulators(refs)
-      .then((c) => (this.compatible = c))
+      .then((c) => {
+        this.compatible = c;
+        this.compatibleKey = key;
+      })
       .catch(() => {});
     api
       .retroarchCoreOptions(refs)

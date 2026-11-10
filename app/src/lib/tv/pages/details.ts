@@ -11,7 +11,7 @@ import { formatDay } from '../../discover/feed';
 import { summaryLine, unlockDate } from '../../details/achievements';
 import type { AchievementsView } from '../../api';
 import type { Hint } from '../hints';
-import { shortName, type SystemRow } from '../../systems/rows';
+import { noEmulatorHead, noEmulatorTail, type NoEmulator } from '../../details/noEmulator';
 import type { MediaItem } from '../../details/media';
 
 /** One run of text in a line; `b` is bold (the prototype's `<b>`). */
@@ -166,33 +166,10 @@ export function lastPlayedWhen(lastPlayedAt: number, nowSeconds: number): string
   return lastPlayedAt > 0 ? ago(daysSince(lastPlayedAt, nowSeconds)) : 'never';
 }
 
-/** A system with no emulator (ruling A, items 273, 288): its label, the
- *  recommended emulator's short name (null with none) and whether that
- *  recommendation is installing now. */
-export type NoEmulator = { system: string; rec: string | null; installing: boolean };
-
-/** The Systems row a game's platform belongs to: by label, server name or slug. */
-export function systemRowFor(rows: readonly SystemRow[], platformName: string, slug: string): SystemRow | undefined {
-  const name = platformName.trim();
-  return rows.find((r) => (name !== '' && (r.key === name || r.name === name)) || (slug !== '' && r.slug === slug));
-}
-
-/** Whether `row` (the game's system) has no emulator, and what Install brings. */
-export function noEmulatorFor(row: SystemRow | undefined, installing: boolean): NoEmulator | null {
-  if (!row || row.emulator !== '' || row.explicitNone) return null;
-  return { system: row.label, rec: row.recommended ? shortName(row.recommended.name) : null, installing };
-}
-
-/** "No emulator for <system>." and what Install does about it. */
+/** "No emulator for <system>." and what Install does about it (ruling A,
+ *  items 273, 288; the line is shared with the desktop's Details). */
 export function noEmulatorLine(n: NoEmulator): Line {
-  const tail = n.rec === null ? ' Add one in Settings › Systems.' : n.installing ? ` ${n.rec} is installing.` : ` Install installs ${n.rec} too.`;
-  return [{ text: `No emulator for ${n.system}.`, b: true }, { text: tail }];
-}
-
-/** Whether Install also installs the recommendation, and the queued card's
- *  second line then ("<rec> installs with it"). */
-export function noEmulatorSub(n: NoEmulator | null): string | null {
-  return n && n.rec !== null && !n.installing ? `${n.rec} installs with it` : null;
+  return [{ text: noEmulatorHead(n), b: true }, { text: ` ${noEmulatorTail(n)}` }];
 }
 
 /** The left column's status lines (items 272–273, 281–282, 432–433, 436). */
@@ -425,7 +402,7 @@ export function removeRowConfirm(title: string, folder: string): ConfirmWords {
 export function removeDriveConfirm(title: string, pack: string, installed: boolean): ConfirmWords {
   return {
     title: `Remove ${title} from ${pack}?`,
-    body: `Its files leave the drive. ${installed ? 'The copy installed on this computer stays.' : 'You can backup it again later.'}`,
+    body: `Its files leave the drive. ${installed ? 'The copy installed on this computer stays.' : 'It can be backed up again later.'}`,
     ok: 'Remove from drive',
   };
 }

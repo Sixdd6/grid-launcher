@@ -638,6 +638,8 @@ group_needs_forge() {
 seed_script_for_group() {
   case "$1" in
     launch) printf '%s' "$E2E_DIR/seed/launch-seed.mjs" ;;
+    # Their systems set to None, so Details' Install brings no emulator.
+    install|downloads) printf '%s' "$E2E_DIR/seed/no-emulator-seed.mjs" ;;
     emulator-catalog) printf '%s' "$E2E_DIR/seed/emulator-catalog-seed.mjs" ;;
     cloud-saves) printf '%s' "$E2E_DIR/seed/cloud-saves-seed.mjs" ;;
     images) printf '%s' "$E2E_DIR/seed/images-seed.mjs" ;;

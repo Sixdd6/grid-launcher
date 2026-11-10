@@ -179,7 +179,7 @@ export function cancelWords(e: DownloadEntry): CancelWords {
     const label = e.drive_label.trim() || e.drive_name.trim() || 'the drive';
     return {
       title: `Cancel ${e.title}?`,
-      body: `The backup stops and what it wrote to ${label} is removed. You can backup it again later.`,
+      body: `The backup stops and what it wrote to ${label} is removed. It can be backed up again later.`,
       ok: 'Cancel backup',
     };
   }

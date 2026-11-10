@@ -2,13 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { MediaItem } from '../../details/media';
 import type { SystemRow } from '../../systems/rows';
 import { readStep } from '../focus/reveal';
+import { noEmulatorFor, noEmulatorSub, systemRowFor } from '../../details/noEmulator';
 import {
   achSummary,
   seekTarget,
   viewerHints,
-  noEmulatorFor,
-  noEmulatorSub,
-  systemRowFor,
   releaseFact,
   unlockedWhen,
   ADD_SAVE_FOLDER,
@@ -243,7 +241,7 @@ describe('action confirmations (items 284–287, 419, 434)', () => {
     expect(updateConfirm('Zelda')).toEqual({ title: 'Update Zelda?', body: 'Saves and configuration are kept.', ok: 'Update' });
     expect(uninstallConfirm('Zelda').body).toBe('Its files are deleted from this computer. Cloud saves stay on your server.');
     expect(removeRowConfirm('Zelda', '/g/Zelda').body).toBe('Only the library entry goes. Its folder stays on disk: /g/Zelda.');
-    expect(removeDriveConfirm('Zelda', 'Couch kit', false).body).toBe('Its files leave the drive. You can backup it again later.');
+    expect(removeDriveConfirm('Zelda', 'Couch kit', false).body).toBe('Its files leave the drive. It can be backed up again later.');
     expect(removeDriveConfirm('Zelda', 'Couch kit', true).body).toBe('Its files leave the drive. The copy installed on this computer stays.');
   });
 });

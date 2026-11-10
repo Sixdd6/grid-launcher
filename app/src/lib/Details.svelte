@@ -20,6 +20,9 @@
   import { type CloudMode } from './details/cloud';
   import { installLabel } from './details/actions';
   import { DetailsStore } from './details/detailsStore.svelte';
+  import { NoEmulatorCheck } from './details/noEmulatorCheck.svelte';
+  import { noEmulatorText } from './details/noEmulator';
+  import { SystemsStore } from './systems/systemsStore.svelte';
   import { lastPlayedText, verificationLabel } from './details/header';
   import {
     DETAILS_TAB_LABELS,
@@ -48,6 +51,11 @@
   // This file holds only the popup's own state: confirms, focus, the tab and
   // the media viewer. The aliases below keep the markup reading as before.
   const d = new DetailsStore(() => subject);
+  // A game whose system has no emulator: Install brings the system's
+  // recommended emulator too, as in TV mode (user decision 2026-11-10). The
+  // popup reads its own Systems store; nothing here needs its PS3 poll.
+  const noEmu = new NoEmulatorCheck(new SystemsStore(() => false), d, { queuedSub: false });
+  let noEmulator = $derived(noEmu.info);
 
   let detail = $derived(d.detail);
   let coverSmall = $derived(d.coverSmall);
@@ -210,7 +218,7 @@
 
   async function handleInstall() {
     // The queued card and a refusal's error card are games/run.ts's.
-    const outcome = await d.install();
+    const outcome = await noEmu.install();
     if (outcome?.kind === 'needs-library-folder') onLibraryPathUnset();
   }
 
@@ -477,9 +485,19 @@
                 {pendingAction === 'install' ? 'Installing…' : 'Install from drive'}
               </button>
             {:else}
-              <button data-testid="details-install" title={installBlocked} disabled={pending} onclick={handleInstall}>
+              <button
+                data-testid="details-install"
+                title={noEmulator ? undefined : installBlocked || undefined}
+                aria-describedby={noEmulator ? 'details-no-emulator' : undefined}
+                disabled={pending}
+                onclick={handleInstall}
+              >
                 {pendingAction === 'install' ? 'Installing…' : installLabel(platformSlug, subject.platformName)}
               </button>
+              {#if noEmulator}
+                <!-- In place of the hover-only reason: what Install brings. -->
+                <p id="details-no-emulator" class="meta-line offline-note" data-testid="details-no-emulator">{noEmulatorText(noEmulator)}</p>
+              {/if}
             {/if}
             {#if subject.drive !== undefined}
               <!-- Two clicks; the second names the pack. -->

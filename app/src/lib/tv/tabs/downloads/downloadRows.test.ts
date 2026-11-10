@@ -122,7 +122,7 @@ describe('downloadRows', () => {
     });
     expect(cancelWords(entry({ job: 'backup', kind: 'backup_game', title: 'Kite Season', drive_name: 'Couch kit', drive_label: 'SAMSUNG T7' }))).toEqual({
       title: 'Cancel Kite Season?',
-      body: 'The backup stops and what it wrote to SAMSUNG T7 is removed. You can backup it again later.',
+      body: 'The backup stops and what it wrote to SAMSUNG T7 is removed. It can be backed up again later.',
       ok: 'Cancel backup',
     });
     expect(cancelWords(entry({ job: 'library', kind: 'library_move' }))).toEqual({
