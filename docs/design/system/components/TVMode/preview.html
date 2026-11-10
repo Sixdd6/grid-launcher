@@ -569,10 +569,25 @@ function move(dir) {
     if (!t) return;
   }
   else {
-    if (cont && axis === 'grid') t = pick(all.filter(function (e) { return cont.contains(e); }));
+    if (cont && axis === 'grid') {
+      t = pick(all.filter(function (e) { return cont.contains(e); }));
+      /* Off a grid's edge, only to what sits straight past that edge (Server's
+         header chips above the grid; the rail beside it), never diagonally: Up from
+         the top row never jumps into the rail. Nothing there: stay put. */
+      if (!t) {
+        var gr = rc(cont), vert = dir === 'up' || dir === 'down';
+        t = pick(all.filter(function (e) { if (cont.contains(e)) return false; var b = rc(e); return vert ? b.right > gr.left && b.left < gr.right : b.bottom > gr.top && b.top < gr.bottom; }));
+        if (!t) return;
+      }
+    }
     if (!t) t = pick(all);
     if (t) { var tc = t.closest('[data-nav]'), live = tc && tc._last && tc.contains(tc._last) && tc._last.offsetParent;
-      if (tc && tc !== cont) { if (tc.dataset.enter === 'first') t = live ? tc._last : focusables(tc)[0]; else if (live && tc.dataset.nav !== 'grid') t = tc._last; } }
+      if (tc && tc !== cont) {
+        /* Into a rail: always its selected row, the platform or pane you're in. */
+        if (tc.dataset.enter === 'sel') t = tc.querySelector('.sel[data-f]') || (live ? tc._last : t);
+        else if (tc.dataset.enter === 'first') t = live ? tc._last : focusables(tc)[0];
+        else if (live && tc.dataset.nav !== 'grid') t = tc._last;
+      } }
   }
   if (t) setFocus(t);
 }
@@ -679,7 +694,7 @@ function libRailHTML() {
 TABS.library = {
   render: function () {
     var rail = libRailHTML();
-    return '<div class="split"><nav class="rail" data-nav="v">' + rail + '</nav><div class="main"><div class="vh" id="lib-h"></div><div class="scroll"><div class="grid" id="lib-grid" data-nav="grid" data-enter="first"></div></div></div></div>';
+    return '<div class="split"><nav class="rail" data-nav="v" data-enter="sel">' + rail + '</nav><div class="main"><div class="vh" id="lib-h"></div><div class="scroll"><div class="grid" id="lib-grid" data-nav="grid" data-enter="first"></div></div></div></div>';
   },
   after: function () { libPaint(); },
   hints: function () { return [['Y', 'Search'], ['LT', 'Sort']]; },
@@ -711,7 +726,7 @@ TABS.server = {
   render: function () {
     if (S.offline) return '<div class="list"><div class="list-in"><div class="panel empty"><h2>Can\'t reach your server</h2>' + esc(CFG.url) + ' isn\'t answering. Your installed games still play from the Library.<div class="btns" style="margin-top:1.4rem"><button class="btn pri" data-f data-a="retry">Try again</button><button class="btn" data-f data-a="gotab" data-tab="library">Open Library</button></div></div></div></div>';
     var plats = Object.keys(PLAT);
-    return '<div class="split"><nav class="rail" data-nav="v"><h3>PLATFORMS</h3>' + plats.map(function (p) { return railItem(p, PLAT[p], G.filter(function (g) { return g.p === p; }).length, S.srvRail === p, 'srv'); }).join('') + '</nav><div class="main"><div class="vh" id="srv-h"></div><div class="scroll"><div class="grid" id="srv-grid" data-nav="grid" data-enter="first"></div></div></div></div>';
+    return '<div class="split"><nav class="rail" data-nav="v" data-enter="sel"><h3>PLATFORMS</h3>' + plats.map(function (p) { return railItem(p, PLAT[p], G.filter(function (g) { return g.p === p; }).length, S.srvRail === p, 'srv'); }).join('') + '</nav><div class="main"><div class="vh" id="srv-h"></div><div class="scroll"><div class="grid" id="srv-grid" data-nav="grid" data-enter="first"></div></div></div></div>';
   },
   after: function () { if (!S.offline) srvPaint(); },
   hints: function () { return S.offline ? [] : [['Y', 'Search']]; },
@@ -755,7 +770,7 @@ TABS.downloads = {
 var PANES = [['appearance', 'Appearance'], ['cloud', 'Cloud saves'], ['connection', 'Connection'], ['library', 'Library'], ['ra', 'RetroAchievements'], ['systems', 'Systems'], ['tv', 'TV mode'], ['updates', 'Updates']];
 S.setPane = 'appearance';
 TABS.settings = {
-  render: function () { return '<div class="split"><nav class="rail" data-nav="v">' + PANES.map(function (p) { return railItem(p[0], p[1], null, S.setPane === p[0], 'set'); }).join('') + '</nav><div class="pane" id="pane" data-nav="v" data-enter="first"></div></div>'; },
+  render: function () { return '<div class="split"><nav class="rail" data-nav="v" data-enter="sel">' + PANES.map(function (p) { return railItem(p[0], p[1], null, S.setPane === p[0], 'set'); }).join('') + '</nav><div class="pane" id="pane" data-nav="v" data-enter="first"></div></div>'; },
   after: function () { setPaint(); },
   hints: function (el) { return el && el.dataset.adj ? [['DPAD', 'Adjust']] : []; }
 };
