@@ -15,6 +15,8 @@ Nothing here is built into the app: it is the reference the UI work on
   - `components/CurrentApp/` — a clickable prototype of the app as it is today.
   - `components/ProposedApp/` — the same shell with the changes under discussion;
     its `README.md` lists every difference.
+  - `components/TVMode/` — the controller-first, fullscreen TV mode, clickable and
+    playable with a controller; its `README.md` describes every screen.
   - `assets/Icons/` — the icons from `app/src/lib/icons.ts`. The app icon is
     `app/src-tauri/icons/icon.png`.
 - `prototype/` — the generator that writes the component previews and both app
@@ -38,6 +40,8 @@ python3 -I docs/design/prototype/applayout.py docs/design/system/components
 - `discover.js`, `discover.css` — Server › Discover: the New releases coverflow and
   the auto-advancing Recently added list.
 - `themetoggle.js`, `themetoggle.css` — the light / dark toggle.
+- `tvmode.py`, `tvmode.js`, `tvmode.css` — the TV mode card (its own shell and focus
+  engine): `python3 -I docs/design/prototype/tvmode.py docs/design/system/components`.
 - `icons.json` — icon paths: the app's (`app/src/lib/icons.ts`) plus proposed ones.
 
 To view a card locally, it needs the design system's `tokens.css`, which the
