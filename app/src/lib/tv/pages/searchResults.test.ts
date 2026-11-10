@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { summary } from '../fixtures.test-util';
-import { NO_RESULTS, resultsHeading, searchGames, searchPageTitle } from './searchResults';
+import { LOAD_FAILED_TITLE, loadFailedLine, NO_RESULTS, PARTIAL_NOTE, RETRY, resultsHeading, searchGames, searchingHeading, searchPageTitle } from './searchResults';
 
 describe('Search everything (items 353–355)', () => {
   it('the heading, the breadcrumb and the empty text', () => {
@@ -18,5 +18,13 @@ describe('Search everything (items 353–355)', () => {
     ];
     expect(searchGames(all, 'STAR').map((g) => g.game.id)).toEqual([3, 2]);
     expect(searchGames(all, '  ')).toEqual([]);
+  });
+
+  it('the loading, failed and partial states (consultant ruling)', () => {
+    expect(searchingHeading('star')).toBe('Searching for “star”…');
+    expect(LOAD_FAILED_TITLE).toBe("Can't reach your server");
+    expect(loadFailedLine('https://romm.lan')).toBe("https://romm.lan isn't answering, so nothing could be searched.");
+    expect(PARTIAL_NOTE).toBe("Some systems didn't answer, so their games aren't in these results.");
+    expect(RETRY).toBe('Try again');
   });
 });

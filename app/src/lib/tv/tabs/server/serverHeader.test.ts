@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { backupAllLabel, headerChips, matchesTitle, noMatch, searchTitle, srvCount } from './serverHeader';
+import { backupAllLabel, headerChips, matchesTitle, noMatch, searching, searchTitle, srvCount } from './serverHeader';
 
 describe('serverHeader (items 197–205)', () => {
   it('counts, and how many match while searching', () => {
@@ -37,5 +37,13 @@ describe('serverHeader (items 197–205)', () => {
     expect(matchesTitle('Neon Drift', 'neon')).toBe(true);
     expect(matchesTitle('Neon Drift', 'xyz')).toBe(false);
     expect(matchesTitle('Neon Drift', '')).toBe(true);
+  });
+
+  it('a blank search is no filter, as on the Library (consultant ruling)', () => {
+    expect(searching('')).toBe(false);
+    expect(searching('   ')).toBe(false);
+    expect(searching(' ne ')).toBe(true);
+    expect(matchesTitle('Neon Drift', '   ')).toBe(true);
+    expect(noMatch(' zz ')).toBe('No games match “zz”');
   });
 });

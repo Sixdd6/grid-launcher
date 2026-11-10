@@ -47,9 +47,15 @@ export function searchTitle(platformLabel: string): string {
   return `Search ${platformLabel}`;
 }
 
+/** Whether a query narrows the grid: a blank one is no filter (consultant
+ *  ruling, the same rule as the Library's). */
+export function searching(query: string): boolean {
+  return query.trim() !== '';
+}
+
 /** A search with no match (item 205). */
 export function noMatch(query: string): string {
-  return `No games match “${query}”`;
+  return `No games match “${query.trim()}”`;
 }
 
 /** Titles containing `query`, case-insensitively (tvmode.js `srvPaint`). */

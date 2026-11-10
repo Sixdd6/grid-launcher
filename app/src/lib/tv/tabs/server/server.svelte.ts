@@ -59,17 +59,22 @@ export async function goDiscover(): Promise<void> {
 /** A server game with the label its platform shows. */
 export type LabelledGame = { game: GameSummary; platform: string; slug: string };
 
-let allGames: { server: string; load: Promise<LabelledGame[]> } | null = null;
+/** Every game a load reached, and whether some platform failed. */
+export type AllGames = { games: LabelledGame[]; partial: boolean };
+
+let allGames: { server: string; load: Promise<AllGames> } | null = null;
 
 /**
  * Every game on the server, for Search everything: each platform's list,
  * fetched once per server and session. A platform that fails to load is
- * left out of this search and asked again by the next one.
+ * left out (`partial`); a failed or partial load is dropped from the cache,
+ * so the next load (Try again) asks again. Rejects when the platform list
+ * itself can't be read: nothing could be searched.
  */
-export function loadAllGames(): Promise<LabelledGame[]> {
+export function loadAllGames(): Promise<AllGames> {
   const server = session.serverUrl;
   if (allGames && allGames.server === server) return allGames.load;
-  const entry: { server: string; load: Promise<LabelledGame[]> } = { server, load: Promise.resolve([]) };
+  const entry: { server: string; load: Promise<AllGames> } = { server, load: Promise.resolve({ games: [], partial: false }) };
   entry.load = (async () => {
     const platforms = await api.listPlatforms();
     let failed = false;
@@ -85,7 +90,7 @@ export function loadAllGames(): Promise<LabelledGame[]> {
       ),
     );
     if (failed && allGames === entry) allGames = null;
-    return lists.flat();
+    return { games: lists.flat(), partial: failed };
   })();
   allGames = entry;
   entry.load.catch(() => {

@@ -19,7 +19,7 @@
   import TvGameCover from '../../ui/TvGameCover.svelte';
   import TvGrid from '../../ui/TvGrid.svelte';
   import { srv } from './server.svelte';
-  import { backupAllLabel, headerChips, matchesTitle, noMatch, srvCount } from './serverHeader';
+  import { backupAllLabel, headerChips, matchesTitle, noMatch, searching, srvCount } from './serverHeader';
 
   let { catalog }: { catalog: Catalog } = $props();
 
@@ -61,7 +61,7 @@
 
 <div class="vh" data-testid="tv-srv-header">
   <h1>{label}</h1>
-  {#if !loading}<span class="cnt" data-testid="tv-srv-count">{srvCount(all.length, shown.length, installedCount, srv.query !== '')}</span>{/if}
+  {#if !loading}<span class="cnt" data-testid="tv-srv-count">{srvCount(all.length, shown.length, installedCount, searching(srv.query))}</span>{/if}
   {#if chips}
     <TvChip k="ch-emu" warn={chips.emu.warn} al="Open in Systems" testId="tv-srv-emu" onA={() => openSystem(label)}>
       {#if chips.emu.name}Emulator: <b>{chips.emu.name}</b>{:else}{chips.emu.label}{/if}
@@ -72,7 +72,7 @@
       <TvChip testId="tv-srv-fw">{chips.fw.label}</TvChip>
     {/if}
   {/if}
-  {#if srv.query}<TvChip testId="tv-srv-search">Search: <b>{srv.query}</b></TvChip>{/if}
+  {#if searching(srv.query)}<TvChip testId="tv-srv-search">Search: <b>{srv.query.trim()}</b></TvChip>{/if}
   <span class="sp"></span>
   {#if shown.length}
     <TvButton k="bk-all" al="Backup" testId="tv-srv-backup-all" disabled={!session.connected} why={session.connected ? undefined : 'Backing up needs a server.'} onA={backupAll}>{backupAllLabel(all.length)}</TvButton>
@@ -84,7 +84,7 @@
   {#snippet cell(g)}
     <TvGameCover k={`sg${g.id}`} game={g} testId={`tv-cover-sg${g.id}`} />
   {/snippet}
-  {#if srv.query && shown.length === 0 && !loading}
+  {#if searching(srv.query) && shown.length === 0 && !loading}
     <div class="empty" data-testid="tv-srv-nomatch"><h2>{noMatch(srv.query)}</h2></div>
   {/if}
 </TvGrid>

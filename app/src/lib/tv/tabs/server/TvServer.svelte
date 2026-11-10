@@ -95,11 +95,14 @@
           openSearchAll();
           return;
         }
+        const before = srv.query;
         void openKeyboard({
           title: searchTitle(platformName()),
           value: srv.query,
           onInput: (v) => (srv.query = v),
           onDone: (v) => (srv.query = v),
+          // B: the field keeps the value it had (item 385).
+          onCancel: () => (srv.query = before),
         });
       };
     },
