@@ -14,6 +14,8 @@ import type { Hint } from './hints';
 import { handlersOf } from './focus/actions';
 import { restore, inPlace } from './focus/engine';
 import { entryOf, focusables, isDisabled, loadScroll, moveIn, readScroll, rememberLast, reveal, saveScroll } from './focus/dom';
+import { gridMove } from './focus/grid';
+import { materialize, windowOf, windowsIn } from './focus/windows';
 import type { Direction, TvButton } from './input/buttons';
 import { press, stepTab, type Command, type PressContext, type TvTab } from './input/press';
 
@@ -258,7 +260,7 @@ export async function closeLayer(): Promise<void> {
   const root = scope();
   let el: HTMLElement | null = null;
   if (prev.el && prev.el.isConnected && root?.contains(prev.el)) el = prev.el;
-  else if (prev.key && root) el = focusables(root).find((e) => e.getAttribute('data-k') === prev.key) ?? null;
+  else if (prev.key && root) el = byKey(root, prev.key);
   // The opener went while the overlay was up (a live search narrowed the
   // grid): the item now in its place in the same panel (item 115), else,
   // with the panel empty, the rail's selected row (as B would go), so
@@ -267,7 +269,8 @@ export async function closeLayer(): Promise<void> {
   if (box && root?.contains(box)) {
     const enabled = focusables(box).filter((e) => !isDisabled(e));
     const i = inPlace(enabled.map((_, n) => n), prev.index);
-    el = i === null ? (root.querySelector<HTMLElement>('[data-rail] .sel[data-f]') ?? null) : enabled[i];
+    const rail = root.querySelector('[data-rail]');
+    el = i === null ? (rail ? railSelected(rail) : null) : enabled[i];
   }
   if (el) setFocus(el, { scroll: false });
   else restoreFocus();
@@ -320,6 +323,12 @@ export function focused(): HTMLElement | null {
   return cur;
 }
 
+/** The item with `data-k` `k` in `root`, rendering it first when it is a
+ *  cover a windowed grid has left out. */
+function byKey(root: Element, k: string): HTMLElement | null {
+  return focusables(root).find((e) => e.getAttribute('data-k') === k) ?? materialize(root, k);
+}
+
 /** Re-reads the focused item's labels for the hint bar. */
 export function refreshFocus(): void {
   const el = cur;
@@ -351,6 +360,9 @@ export function setFocus(el: HTMLElement | null, opts: { scroll?: boolean; insta
   cur = el;
   el.classList.add('f');
   rememberLast(el);
+  // A windowed grid keeps the focused cover's row rendered (risk R8).
+  const w = windowOf(el);
+  if (w) w.handle.focusAt(w.index);
   if (opts.scroll !== false) reveal(el, !(opts.instant || instant));
   const k = el.getAttribute('data-k');
   if (k) mem().k = k;
@@ -364,6 +376,9 @@ export function setFocus(el: HTMLElement | null, opts: { scroll?: boolean; insta
  *  (item 78), without gliding. */
 export function restoreFocus(): void {
   const root = scope();
+  // The cover focus was on may be one a windowed grid has not rendered.
+  const k = mem().k;
+  if (k && root && !focusables(root).some((e) => e.getAttribute('data-k') === k)) materialize(root, k);
   const els = focusables(root);
   const i = restore(
     els.map((e) => ({ key: e.getAttribute('data-k'), disabled: isDisabled(e), autofocus: e.hasAttribute('data-autofocus') })),
@@ -385,6 +400,17 @@ export function moveFocus(dir: Direction): void {
     restoreFocus();
     return;
   }
+  // Inside a windowed grid, moves are by index, so covers that aren't
+  // rendered are reached too; only leaving it by an edge is spatial (R8).
+  const w = windowOf(cur);
+  if (w) {
+    const to = gridMove(w.index, dir, w.handle.columns(), w.handle.count());
+    if (to !== 'edge') {
+      const el = w.handle.ensure(to);
+      if (el) setFocus(el);
+      return;
+    }
+  }
   const { result, els } = moveIn(root, cur, dir);
   if (result.kind === 'focus') setFocus(els[result.item]);
   else if (result.kind === 'railOpen') railOpen();
@@ -403,11 +429,16 @@ export function railOpen(): void {
   if (el) setFocus(el);
 }
 
+/** A rail's selected row, or the closed folder header that hides it. */
+function railSelected(rail: Element): HTMLElement | null {
+  return rail.querySelector<HTMLElement>('.sel[data-f]') ?? rail.querySelector<HTMLElement>('[data-holds-sel][data-f]');
+}
+
 /** B from a grid or pane: the rail's selected row (item 95). */
 export function toRail(): void {
   const rail = scope()?.querySelector('[data-rail]');
   if (!rail) return;
-  const sel = rail.querySelector<HTMLElement>('.sel[data-f]') ?? focusables(rail)[0] ?? null;
+  const sel = railSelected(rail) ?? focusables(rail)[0] ?? null;
   setFocus(sel);
 }
 
@@ -424,7 +455,11 @@ export async function showScreen(): Promise<void> {
   // rows): only a redraw of the same screen re-finds focus by key.
   curPlace = null;
   await tick();
+  // Windowed grids measure first, so a saved scroll deep in a long list
+  // isn't cut short, then render what the restored scroll shows.
+  for (const w of windowsIn(stage)) w.sync();
   if (stage) loadScroll(stage, mem(screenKey()).scroll);
+  for (const w of windowsIn(stage)) w.sync();
   instant = true;
   try {
     if (!state.layers.length) restoreFocus();
@@ -510,7 +545,7 @@ export function stageChanged(): void {
     const place = curPlace;
     let el: HTMLElement | null = null;
     if (place?.key) {
-      el = focusables(root).find((e) => e.getAttribute('data-k') === place.key) ?? null;
+      el = byKey(root, place.key);
     }
     if (!el && place?.boxId) {
       const box = document.getElementById(place.boxId);

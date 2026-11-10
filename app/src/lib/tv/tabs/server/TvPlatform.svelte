@@ -80,10 +80,10 @@
   <TvChip glyph="RT">Select</TvChip>
   <TvChip glyph="Y">Search</TvChip>
 </div>
-<TvGrid id="srv-grid" scroll="srv-grid">
-  {#each games as g (g.id)}
+<TvGrid id="srv-grid" scroll="srv-grid" items={games} key={(g) => `sg${g.id}`} listKey={srv.rail}>
+  {#snippet cell(g)}
     <TvGameCover k={`sg${g.id}`} game={g} testId={`tv-cover-sg${g.id}`} />
-  {/each}
+  {/snippet}
   {#if srv.query && shown.length === 0 && !loading}
     <div class="empty" data-testid="tv-srv-nomatch"><h2>{noMatch(srv.query)}</h2></div>
   {/if}

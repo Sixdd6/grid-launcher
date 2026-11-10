@@ -97,7 +97,9 @@ export function snapshot(root: Element, current: Element | null): DomSnapshot {
       edge: c.hasAttribute('data-edge'),
       links: linksOf(c),
       last: lastIdx >= 0 && members.includes(lastIdx) ? lastIdx : null,
-      selected: members.find((i) => els[i].classList.contains('sel')) ?? null,
+      // A closed folder's header stands in for the selected row it hides
+      // (`data-holds-sel`), so entering the rail never selects another row.
+      selected: members.find((i) => els[i].classList.contains('sel')) ?? members.find((i) => els[i].hasAttribute('data-holds-sel')) ?? null,
       items: members,
     };
   });
@@ -165,6 +167,12 @@ export function reveal(el: HTMLElement, smooth: boolean): void {
   const b = el.getBoundingClientRect();
   const shelf = v.hasAttribute('data-shelves') ? el.closest<HTMLElement>('[data-shelf]') : null;
   const all = focusables(v);
+  // A windowed grid's first and last covers are by index: the rendered
+  // ones at either end of the window are not the list's (risk R8).
+  const cell = el.closest<HTMLElement>('[data-i]');
+  const wgrid = cell?.closest<HTMLElement>('[data-window]') ?? null;
+  const wi = wgrid && v.contains(wgrid) ? Number(cell!.getAttribute('data-i')) : null;
+  const wn = wgrid ? Number(wgrid.getAttribute('data-count')) : 0;
   const y = revealY({
     areaTop: vr.top,
     areaBottom: vr.bottom,
@@ -174,8 +182,8 @@ export function reveal(el: HTMLElement, smooth: boolean): void {
     scrollTop: v.scrollTop,
     scrollHeight: v.scrollHeight,
     clientHeight: v.clientHeight,
-    first: el === all[0],
-    last: el === all[all.length - 1],
+    first: wi !== null ? wi === 0 && el === all[0] : el === all[0],
+    last: wi !== null ? wi === wn - 1 && el === all[all.length - 1] : el === all[all.length - 1],
     ...(shelf ? { shelfTop: shelf.previousElementSibling ? shelf.getBoundingClientRect().top : null } : {}),
   });
   if (y !== null) v.scrollTo({ top: y, behavior: how });

@@ -147,6 +147,12 @@ html[data-ui='tv'] .tv .chip.warn { border-color: var(--warning-text); color: va
 html[data-ui='tv'] .tv .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0 -1.2rem; }
 html[data-ui='tv'] .tv .grid { display: grid; grid-template-columns: repeat(auto-fill, 10rem); justify-content: space-between; gap: 1.6rem 1.2rem; padding: 1.4rem 1.2rem 2.4rem; }
 html[data-ui='tv'] .tv .grid .cv { --cw: 10rem; }
+/* A windowed grid (risk R8): each cover's cell is not a box of its own, and
+   a spacer spanning every column stands in for the rows left out. */
+html[data-ui='tv'] .tv .grid .gcell { display: contents; }
+html[data-ui='tv'] .tv .grid .gspace { pointer-events: none; }
+/* Rows drawn in and out above must not make the browser shift the scroll. */
+html[data-ui='tv'] .tv .scroll.windowed { overflow-anchor: none; }
 html[data-ui='tv'] .tv .empty { color: var(--text-muted); font-size: 1.1rem; padding: 2rem .6rem; max-width: 40rem; }
 html[data-ui='tv'] .tv .empty h2 { color: var(--text-h); margin: 0 0 .4rem; font-size: 1.4rem; }
 

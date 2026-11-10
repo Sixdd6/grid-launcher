@@ -15,6 +15,7 @@
     count = null,
     sub = false,
     fold = null,
+    holdsSel = false,
     xl = undefined,
     testId = undefined,
     onSelect = undefined,
@@ -28,6 +29,9 @@
     sub?: boolean;
     /** A folder header: whether it is open. */
     fold?: boolean | null;
+    /** A closed folder header hiding the selected row: B and Left into the
+     *  rail land here instead of selecting another row. */
+    holdsSel?: boolean;
     xl?: string;
     testId?: string;
     /** The row took focus: select it. */
@@ -46,6 +50,7 @@
     data-al={fold ? 'Close' : 'Open'}
     data-testid={testId}
     aria-expanded={fold}
+    data-holds-sel={holdsSel ? '' : undefined}
     use:tvf={{ a: () => onToggle?.() }}
   >
     <span class="chev" class:open={fold}><TvIcon name="chevronRight" px={16} /></span>{@render children()}
