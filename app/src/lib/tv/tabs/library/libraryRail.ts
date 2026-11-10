@@ -5,7 +5,8 @@
 // count, or "No Backup drives connected"). Pure, over the desktop's rail
 // rules (`library/rail.ts`): the same counts, the same keys.
 import type { DriveInfo, InstalledGame } from '../../../api';
-import { railEntries, type RailEntry, type RailKey } from '../../../library/rail';
+import { visibleLibraryGames } from '../../../library';
+import { matchesRail, railEntries, type RailEntry, type RailKey } from '../../../library/rail';
 
 export type FolderId = 'plat' | 'drives';
 
@@ -73,6 +74,13 @@ export const FOLDER_LABELS: Record<FolderId, string> = { plat: 'Platforms', driv
 
 /** The Backup drives folder with no drive (item 420). */
 export const NO_DRIVES = 'No Backup drives connected';
+
+/** What "Backup all N…" on a Library platform row backs up (item 455): its
+ *  installed games the server knows (a rom id). N counts these, as the
+ *  Backup page does. */
+export function platformBackupIds(rows: InstalledGame[], key: RailKey, updateRomIds: ReadonlySet<number>, nowSeconds: number): number[] {
+  return visibleLibraryGames(rows).flatMap((r) => (matchesRail(r, key, updateRomIds, nowSeconds) && r.rom_id !== null ? [r.rom_id] : []));
+}
 
 /** X on a Library platform row: "Backup all N…", installed games only (item 455). */
 export function backupAllLabel(installed: number): string {

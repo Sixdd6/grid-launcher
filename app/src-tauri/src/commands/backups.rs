@@ -1257,6 +1257,18 @@ fn has_compat_tool(config: &Config) -> bool {
     .any(|tool| tool.kind != "wine")
 }
 
+/// "<pack> has no emulator for <system>" (checklist item 428): the system's
+/// display name, its slug when the drive recorded no name.
+fn no_emulator_notice(pack_name: &str, game: &PackGame) -> String {
+    let name = game.platform_name.trim();
+    let system = if name.is_empty() {
+        game.platform.as_str()
+    } else {
+        name
+    };
+    format!("{pack_name} has no emulator for {system}")
+}
+
 /// Installs `rom_id` (from `server`, else the first game with that id) from
 /// the drive. The game's art goes into the image cache first, so it shows
 /// offline. When its system has no emulator and the drive has one for this
@@ -1381,6 +1393,7 @@ pub async fn install_from_drive(
             && entry.platforms.contains(&game.platform)
     });
     let Some(emulator) = emulator.cloned() else {
+        outcome.notices.push(no_emulator_notice(&pack.name, &game));
         return Ok(outcome);
     };
     let retroarch = grid_core::launch::selection::is_retroarch_name(&emulator.name);
@@ -1534,6 +1547,20 @@ mod tests {
             source_server: source.into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn no_emulator_notice_names_the_system_by_its_display_name() {
+        let mut g = game(7, "https://romm.home.lan");
+        assert_eq!(
+            no_emulator_notice("Couch kit", &g),
+            "Couch kit has no emulator for Sony PlayStation"
+        );
+        g.platform_name = "  ".into();
+        assert_eq!(
+            no_emulator_notice("Couch kit", &g),
+            "Couch kit has no emulator for psx"
+        );
     }
 
     #[test]

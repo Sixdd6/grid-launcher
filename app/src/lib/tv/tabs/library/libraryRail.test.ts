@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { driveInfo, packSummary, row } from '../../fixtures.test-util';
-import { backupAllLabel, DEFAULT_FOLDS, folderHint, folderKey, folderOf, libraryRail, NO_DRIVES, railEntry, railKeys, railRowKey } from './libraryRail';
+import { backupAllLabel, DEFAULT_FOLDS, folderHint, folderKey, folderOf, libraryRail, NO_DRIVES, platformBackupIds, railEntry, railKeys, railRowKey } from './libraryRail';
 
 const NOW = 1_800_000_000;
 const DAY = 24 * 60 * 60;
@@ -54,5 +54,19 @@ describe('the TV Library rail (items 176–184, 420)', () => {
 
   it('X on a platform row backs up its installed games', () => {
     expect(backupAllLabel(3)).toBe('Backup all 3…');
+  });
+});
+
+describe('"Backup all N…" on a platform row (item 455)', () => {
+  it('counts the rows the Backup page backs up: those with a rom id', () => {
+    const rows = [
+      row({ rom_id: 1, title: 'A', platform: 'SNES' }),
+      row({ rom_id: null, title: 'Homebrew', platform: 'SNES' }),
+      row({ rom_id: 3, title: 'C', platform: 'PlayStation' }),
+    ];
+    const rail = libraryRail(rows, new Set(), NOW, []);
+    expect(rail.platforms.find((e) => e.key === 'platform:snes')?.count).toBe(2);
+    expect(platformBackupIds(rows, 'platform:snes', new Set(), NOW)).toEqual([1]);
+    expect(platformBackupIds(rows, 'platform:playstation', new Set(), NOW)).toEqual([3]);
   });
 });

@@ -34,7 +34,7 @@
   import TvRailRow from '../../ui/TvRailRow.svelte';
   import { driveGamesCache, lib, selectLibRail, toggleFold } from './library.svelte';
   import { driveChips, driveCountLine, driveEmptyState, driveGrid, emptyState, libraryGrid, countLine, searching, SEARCH_TITLE, SORT_TITLE, TV_SORTS, type EmptyState } from './libraryHeader';
-  import { backupAllLabel, FOLDER_LABELS, folderHint, folderKey, folderOf, libraryRail, NO_DRIVES, railEntry, railRowKey, type FolderId } from './libraryRail';
+  import { backupAllLabel, FOLDER_LABELS, platformBackupIds, folderHint, folderKey, folderOf, libraryRail, NO_DRIVES, railEntry, railRowKey, type FolderId } from './libraryRail';
 
   // "Now" once per rail recompute, as the desktop's Library reads it.
   let nowSeconds = $derived.by(() => {
@@ -126,12 +126,13 @@
   });
   let chips = $derived(drive ? driveChips(drive) : null);
 
+  // Each platform row's "Backup all N…" counts what its Backup page backs up.
+  let backupIds = $derived(new Map(rail.platforms.map((e) => [e.key, platformBackupIds(installed.list, e.key, updateIds, nowSeconds)])));
+
   /** X on a Library platform row: "Backup all N…", its installed games the
    *  server knows (item 455; offline it says why, 456). */
   function backupPlatform(key: RailKey, label: string) {
-    const ids = visibleLibraryGames(installed.list).flatMap((r) =>
-      matchesRail(r, key, updateIds, nowSeconds) && r.rom_id !== null ? [r.rom_id] : [],
-    );
+    const ids = backupIds.get(key) ?? platformBackupIds(installed.list, key, updateIds, nowSeconds);
     if (ids.length === 0 && session.connected) return;
     openBackupPage({ kind: 'platform', platform: label, count: ids.length }, ids);
   }
@@ -155,6 +156,7 @@
     if (driveKey === null || drive === null) return;
     const key = driveKey;
     const pack = drive.pack?.name ?? drive.label;
+    const label = drive.label;
     const picked = pickedGames(ids).flatMap((g) => (g.drive ? [{ game: g.drive.game, installed: g.installed }] : []));
     const n = picked.length;
     const word = (k: number) => `${k} game${k === 1 ? '' : 's'}`;
@@ -167,7 +169,7 @@
           onPick: () => {
             const todo = picked.filter((p) => !p.installed && liveInstall(downloads.entries, p.game.rom_id) === null).map((p) => p.game);
             selEnd();
-            void installAllFromDrive(key, todo);
+            void installAllFromDrive(key, todo, { label });
           },
         },
         {
@@ -257,7 +259,7 @@
           sub
           selected={selected.key === e.key}
           count={e.count}
-          xl={backupAllLabel(e.count)}
+          xl={backupAllLabel(backupIds.get(e.key)?.length ?? 0)}
           testId={tid(e.testId)}
           onSelect={() => selectLibRail(e.key)}
           onX={() => backupPlatform(e.key, e.label)}>{e.label}</TvRailRow

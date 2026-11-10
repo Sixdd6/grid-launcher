@@ -30,6 +30,7 @@ import {
   launchingNotice,
   noticesFor,
   queueRefusedNotice,
+  QuietQueued,
   type Hint,
   type Notice,
   type NoticeAction,
@@ -53,6 +54,22 @@ const coalescer = new Coalescer((text, level, card) =>
 /** Shows `notice`, merged with any of its group arriving at the same time. */
 export function notify(notice: Notice): void {
   coalescer.add(notice);
+}
+
+const quiet = new QuietQueued();
+
+/**
+ * Keeps the "<title> added to download queue" card of each of `romIds`' next
+ * queue entry off the stack: the caller shows one card for the batch
+ * (item 450). Call it before the installs are queued; `unquiet` an id whose
+ * install was refused.
+ */
+export function quietQueued(romIds: readonly number[]): void {
+  quiet.add(romIds, Date.now());
+}
+
+export function unquiet(romId: number): void {
+  quiet.drop(romId);
 }
 
 /** How long a registered hint waits for its queue entry to appear. */
@@ -161,7 +178,10 @@ export function initNotifications(): () => void {
     for (const t of transitions) {
       const sourceId = t.entry.source_id;
       const hint = sourceId === '' ? undefined : hintFor(sourceId);
-      for (const n of noticesFor(t, { setupActive: setupRun.active, hint })) notify(n);
+      for (const n of noticesFor(t, { setupActive: setupRun.active, hint })) {
+        if (t.from === null && quiet.takes(n, t.entry.rom_id, Date.now())) continue;
+        notify(n);
+      }
       if (sourceId !== '' && (t.entry.status === 'completed' || t.entry.status === 'failed' || t.entry.status === 'cancelled')) {
         dropHint(sourceId);
       }

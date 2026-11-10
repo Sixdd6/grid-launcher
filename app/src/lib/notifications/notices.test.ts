@@ -7,6 +7,7 @@ import {
   COALESCE_MAX_MS,
   COALESCE_WINDOW_MS,
   diffSnapshot,
+  driveOutcomeNotice,
   driveQueuedNotice,
   earlyExitNotice,
   emulatorInstalledNotice,
@@ -14,6 +15,7 @@ import {
   launchingNotice,
   noticesFor,
   queueRefusedNotice,
+  QuietQueued,
   summaryText,
   type Notice,
   type StatusBook,
@@ -437,5 +439,41 @@ describe('second lines (TV cards)', () => {
     ]);
     expect(cards).toHaveLength(1);
     expect(cards[0].sub).toBeUndefined();
+  });
+});
+
+describe('installs from a drive (items 428, 450)', () => {
+  const q = (t: string, sub?: string): Notice => ({ group: 'game-queued', text: t, level: 'success', action: 'downloads', ...(sub ? { sub } : {}) });
+
+  it('a summary keeps the second line every card shares', () => {
+    expect(coalesce([q('A', 'Copying from T7'), q('B', 'Copying from T7')])).toEqual([
+      { group: 'game-queued', text: '2 games added to download queue', level: 'success', action: 'downloads', sub: 'Copying from T7' },
+    ]);
+    expect(coalesce([q('A', 'Copying from T7'), q('B')])[0].sub).toBeUndefined();
+    expect(coalesce([q('A', 'Copying from T7'), q('B', 'Copying from X5')])[0].sub).toBeUndefined();
+  });
+
+  it('"<pack> has no emulator for <system>" is its own card, once per system', () => {
+    const note = driveOutcomeNotice('Couch kit has no emulator for Sony PlayStation 2');
+    expect(note).toEqual({ group: 'drive-note', text: 'Couch kit has no emulator for Sony PlayStation 2', level: 'success' });
+    expect(driveOutcomeNotice('DuckStation from Couch kit added to download queue')).toEqual(
+      driveQueuedNotice('DuckStation from Couch kit added to download queue'),
+    );
+    const queued = driveQueuedNotice('DuckStation from Couch kit added to download queue');
+    expect(coalesce([note, queued, note]).map((n) => n.text)).toEqual([note.text, queued.text]);
+    const other = driveOutcomeNotice('Couch kit has no emulator for Nintendo 64');
+    expect(coalesce([note, other])[0].text).toBe('A backup drive has no emulator for 2 systems');
+  });
+
+  it('a batch takes each game\'s queued card once, within its time', () => {
+    const quiet = new QuietQueued(1000);
+    quiet.add([1, 2], 0);
+    expect(quiet.takes(q('A'), 1, 10)).toBe(true);
+    expect(quiet.takes(q('A'), 1, 20)).toBe(false);
+    expect(quiet.takes({ ...q('B'), group: 'update-queued' }, 2, 20)).toBe(false);
+    expect(quiet.takes(q('B'), 2, 5000)).toBe(false);
+    quiet.add([3], 0);
+    quiet.drop(3);
+    expect(quiet.takes(q('C'), 3, 10)).toBe(false);
   });
 });

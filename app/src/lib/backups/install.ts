@@ -5,8 +5,8 @@
 // answers with (the emulator and firmware it set up from the drive), and
 // the refusal or removal cards.
 import { api } from '../api';
-import { notify } from '../notifications/notifier';
-import { driveQueuedNotice, queueRefusedNotice } from '../notifications/notices';
+import { notify, quietQueued, unquiet } from '../notifications/notifier';
+import { driveOutcomeNotice, queueRefusedNotice, summaryText, type Notice } from '../notifications/notices';
 import { refresh as refreshDrives } from '../stores/drives.svelte';
 import { removedFromDriveText } from '../library/drive';
 
@@ -14,11 +14,13 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+type DriveGame = { rom_id: number; name: string; server: string };
+
 /** Copies one game from the drive into the library. Answers whether it was queued. */
-export async function installFromDrive(key: string, game: { rom_id: number; name: string; server: string }): Promise<boolean> {
+export async function installFromDrive(key: string, game: DriveGame): Promise<boolean> {
   try {
     const outcome = await api.installFromDrive(key, game.rom_id, game.server);
-    for (const line of outcome.notices) notify(driveQueuedNotice(line));
+    for (const line of outcome.notices) notify(driveOutcomeNotice(line));
     return true;
   } catch (err) {
     notify(queueRefusedNotice(game.name, message(err)));
@@ -26,12 +28,34 @@ export async function installFromDrive(key: string, game: { rom_id: number; name
   }
 }
 
-/** Installs each game in turn, so the queue and the cards keep the picked order. */
-export async function installAllFromDrive(
-  key: string,
-  games: readonly { rom_id: number; name: string; server: string }[],
-): Promise<void> {
-  for (const game of games) await installFromDrive(key, game);
+/**
+ * The one card for a batch install from a drive (item 450): "<n> games added
+ * to download queue" ("<title> added…" for one), "Copying from <label>".
+ */
+export function batchQueuedNotice(titles: readonly string[], label: string): Notice {
+  const text = titles.length === 1 ? `${titles[0]} added to download queue` : summaryText('game-queued', titles.length);
+  return { group: 'game-queued', text, level: 'success', action: 'downloads', sub: `Copying from ${label}` };
+}
+
+/**
+ * Installs each game in turn, so the queue keeps the picked order. With
+ * `oneCard` (TV mode's select mode, item 450) the games' own queued cards
+ * are held back and one card stands for those that queued, with the drive's
+ * label, however slowly each call returns; without it each game's card
+ * comes from the queue as usual (merged when they arrive together).
+ */
+export async function installAllFromDrive(key: string, games: readonly DriveGame[], oneCard?: { label: string }): Promise<void> {
+  if (!oneCard) {
+    for (const game of games) await installFromDrive(key, game);
+    return;
+  }
+  quietQueued(games.map((g) => g.rom_id));
+  const queued: string[] = [];
+  for (const game of games) {
+    if (await installFromDrive(key, game)) queued.push(game.name);
+    else unquiet(game.rom_id);
+  }
+  if (queued.length > 0) notify(batchQueuedNotice(queued, oneCard.label));
 }
 
 /**

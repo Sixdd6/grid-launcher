@@ -34,6 +34,9 @@ export type NoticeGroup =
   | 'drive-queued'
   | 'drive-installed'
   | 'drive-failed'
+  // What a drive could not bring with a game ("Couch kit has no emulator
+  // for PlayStation", checklist item 428).
+  | 'drive-note'
   // One card per backup batch (backups/notices.ts).
   | 'backup-queued'
   | 'backup-done'
@@ -273,6 +276,15 @@ export function driveQueuedNotice(message: string): Notice {
   return { group: 'drive-queued', text: message, level: 'success', action: 'downloads' };
 }
 
+/**
+ * A line of `install_from_drive`'s answer as its card: what it queued
+ * (`driveQueuedNotice`), or what the drive could not bring ("<pack> has no
+ * emulator for <system>", item 428), which queued nothing and opens nothing.
+ */
+export function driveOutcomeNotice(line: string): Notice {
+  return / has no emulator for /.test(line) ? { group: 'drive-note', text: line, level: 'success' } : driveQueuedNotice(line);
+}
+
 /** A `backup-notice` event's card ("PlayStation firmware installed from Couch kit"); the backend words it. */
 export function backupNoticeCard(notice: BackupNotice): Notice {
   return notice.error
@@ -341,6 +353,8 @@ export function summaryText(group: NoticeGroup, n: number): string {
       return `${plural(n, 'item', 'items')} installed from a backup drive`;
     case 'drive-failed':
       return `${plural(n, 'item', 'items')} from a backup drive could not be installed`;
+    case 'drive-note':
+      return `A backup drive has no emulator for ${plural(n, 'system', 'systems')}`;
     case 'backup-queued':
       return `${plural(n, 'backup', 'backups')} added to the backup queue`;
     case 'backup-done':
@@ -413,7 +427,8 @@ export function coalesce(held: readonly Notice[]): Notice[] {
   const groups = new Map<NoticeGroup, Notice[]>();
   for (const n of held) {
     const list = groups.get(n.group) ?? [];
-    list.push(n);
+    // A drive's note for each game of one system is one card.
+    if (n.group !== 'drive-note' || !list.some((m) => m.text === n.text)) list.push(n);
     groups.set(n.group, list);
   }
   return [...groups.entries()].map(([group, list]) => {
@@ -423,6 +438,38 @@ export function coalesce(held: readonly Notice[]): Notice[] {
     // download queue" still opens Downloads).
     const action = list[0].action;
     if (action && list.every((n) => n.action === action)) card.action = action;
+    // And the second line they share ("Copying from SAMSUNG T7", item 450).
+    const sub = list[0].sub;
+    if (sub && list.every((n) => n.sub === sub)) card.sub = sub;
     return card;
   });
+}
+
+/**
+ * Game installs whose own "<title> added to download queue" card a batch
+ * stands in for (item 450: installing several games from a drive shows one
+ * card, however slowly each call returns). Each id is taken once; ids not
+ * taken within `ttlMs` lapse.
+ */
+export class QuietQueued {
+  private ids = new Map<number, number>();
+
+  constructor(private readonly ttlMs: number = 60_000) {}
+
+  add(romIds: readonly number[], now: number): void {
+    for (const id of romIds) this.ids.set(id, now);
+  }
+
+  drop(romId: number): void {
+    this.ids.delete(romId);
+  }
+
+  /** Whether `notice`, about `romId`'s queue entry, is one the batch stands in for. */
+  takes(notice: Notice, romId: number, now: number): boolean {
+    if (notice.group !== 'game-queued') return false;
+    const at = this.ids.get(romId);
+    if (at === undefined) return false;
+    this.ids.delete(romId);
+    return now - at <= this.ttlMs;
+  }
 }
