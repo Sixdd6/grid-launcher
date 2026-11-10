@@ -158,7 +158,9 @@ describe('tv-layout: every screen fits at 720p, 1080p and 4K', () => {
       await back('tv-folder-browser');
       await key('v');
     }
-    await key('m');
+    // Connect by its button: Start on Connect opens the startup Menu (user
+    // decision 2026-11-10).
+    await $(testId('tv-connect-go')).click();
   });
 
   it('Choose your systems (when this profile is offered it)', async () => {

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * Seeds the `content` stage group's temp data dir BEFORE the app starts:
- * a library path, an empty registry at the current schema version, and one
- * stub Xenia executable set as the "Xbox 360" default.
+ * a library path, an empty registry at the current schema version, one
+ * stub Xenia executable set as the "Xbox 360" default, and PlayStation 4
+ * set to None.
  *
  * Why the stub is named `xenia_edge`, in a directory named `xenia-edge`,
  * with a `portable.txt` beside it — all three matter:
@@ -43,6 +44,11 @@ if (!dataDir) {
 
 const EMULATOR_NAME = 'Xenia Edge';
 const XBOX_PLATFORM = 'Xbox 360';
+// Set to None on purpose: Details' Install brings a system's recommended
+// emulator when it has none (user decision 2026-11-10), which would queue
+// ShadPS4 ahead of the PS4 update row this group asserts. Applying PS4
+// content is a file copy and needs no emulator.
+const PS4_PLATFORM = 'PlayStation 4';
 
 const libraryPath = path.join(dataDir, 'library');
 const xeniaDir = path.join(dataDir, 'stubs', 'xenia-edge');
@@ -65,6 +71,7 @@ args = "%rom%"
 
 [default_emulators]
 ${tomlString(XBOX_PLATFORM)} = ${tomlString(EMULATOR_NAME)}
+${tomlString(PS4_PLATFORM)} = "<none>"
 `;
 writeFileSync(path.join(dataDir, 'config.toml'), configToml);
 
