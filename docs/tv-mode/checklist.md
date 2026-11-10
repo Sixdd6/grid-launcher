@@ -19,43 +19,43 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 3. No text is smaller than 0.85rem (17px at 1080p); body text is 1.05–1.1rem (src: README § The shell › Size). (P14: tv-layout assertMinText at 720p, 1080p and 4K)
 - [x] 4. The window itself never scrolls: only the designated areas (rows, grids, rails, panes, lists, pages, Details tab bodies, list overlays) scroll (src: tvmode.css `html, body`; tvmode.js `SCROLLERS`). (P14: tv-layout assertNoDocumentScroll)
 - [x] 5. The screen is three bands: top bar 4.6rem, the stage filling the rest, hint bar 3.6rem at the bottom (src: README § The shell; tvmode.css `.top`, `.stage`, `.hints`). (P14: tv-layout assertBands)
-- [ ] 6. The top bar, hint bar and every tab screen use a 2.4rem side gutter (src: tvmode.css `.top`, `.hints`, `.split`, `.list`, `.page`).
+- [x] 6. The top bar, hint bar and every tab screen use a 2.4rem side gutter (src: tvmode.css `.top`, `.hints`, `.split`, `.list`, `.page`). (final audit: verified in code)
 - [x] 7. Scrollbars are hidden on every scrolling area (src: tvmode.css `scrollbar-width: none`).
 - [ ] 8. Text sits only on `panel` or `overlay` surfaces, as on the desktop (src: README § The shell › Background art).
 - [x] 9. The background shows the focused game's art, blurred, behind the panels, reaching 6rem past the screen edges so the blur has no hard border (src: README § The shell › Background art; tvmode.css `.tv-art`). (Accepted deviation, consultant ruling F: drawn edge to edge, inset 0, as the backend blurs the art.)
-- [ ] 10. A layer of the `bg` colour at the opacity set by Settings › Appearance › Background fade covers the art, and Background blur sets the blur (src: README § Background art; tvmode.css `.tv-art::after`; tvmode.js `srowAdj`).
-- [ ] 11. The background art changes whenever a cover takes focus (any grid, row, Related row, Search result) and when Details or Playing opens, fading over 360 ms (src: tvmode.js `setFocus`, `hero`, `details().after`, `playing().after`; tvmode.css `.tv-art`).
-- [ ] 12. With Background art off, the art is hidden (src: tvmode.js `hero`, `srowAct`).
+- [x] 10. A layer of the `bg` colour at the opacity set by Settings › Appearance › Background fade covers the art, and Background blur sets the blur (src: README § Background art; tvmode.css `.tv-art::after`; tvmode.js `srowAdj`). (final audit: verified in code)
+- [x] 11. The background art changes whenever a cover takes focus (any grid, row, Related row, Search result) and when Details or Playing opens, fading over 360 ms (src: tvmode.js `setFocus`, `hero`, `details().after`, `playing().after`; tvmode.css `.tv-art`). (final audit: verified in code)
+- [x] 12. With Background art off, the art is hidden (src: tvmode.js `hero`, `srowAct`). (final audit: verified in code)
 - [x] 13. The theme is dark by default, and Settings › Appearance › Theme (Follow system, Dark, Light) still applies, at once when changed (src: README § The shell › Theme; tvmode.js `applyTheme`).
-- [ ] 14. A rail-and-content screen (Library, Server, Settings) has an 18rem rail, a 1.2rem gap and 1.2rem top padding; the rail and content panels have a 1.2rem bottom margin (src: tvmode.css `.split`, `.rail`, `.split .pane`).
-- [ ] 15. TV mode has one cover size: grid and row covers are 10rem wide, the Details cover is 17rem, all at 3:4 with a 0.7rem radius (src: README § Decided Implementation; tvmode.css `.cv`, `.grid .cv`, `.track .cv`, `.det-l .cv`).
-- [ ] 16. Grid covers show the title under the cover (0.9rem muted, one line, ellipsis; text-h and semibold when focused); covers in sideways rows and on Details show no label (src: tvmode.css `.cv-l`, `.track .cv-l`, `.det-l .cv-l`).
-- [ ] 17. Covers carry the desktop badges: installed dot (green, top right), UPDATE (warning, top left), MISSING (red, top left), platform tag (bottom left) in mixed lists, and a "Queued" or "<n>%" tag (bottom right) while installing (src: README § Tabs › Library; tvmode.js `cover`).
-- [ ] 18. MISSING replaces UPDATE when a game is both (src: tvmode.js `cover`).
-- [ ] 19. Focus is one 0.2rem ring in the `focus` colour at a 0.2rem offset, the same everywhere (src: README § The shell › Focus; tvmode.css `[data-f].f`).
-- [ ] 20. A focused cover grows to 107% with `shadow-lift` and a ring drawn as a 0.22rem `bg` gap and a `focus` band out to 0.42rem (src: README § The shell › Focus; tvmode.css `.cv.f .cv-art`).
-- [ ] 21. A focused row (list row, settings row, list option, Connect field) takes the `selected` fill instead of growing (src: README § The shell › Focus; tvmode.css `.lrow.f`, `.srow.f`, `.opt.f`, `.field.f`).
-- [ ] 22. A focused button grows to 104% (a primary one also takes `primary-hover`), a focused keyboard key to 106% and a focused media tile to 105% (src: tvmode.css `.btn.f`, `.btn.pri.f`, `.key.f`, `.mtile.f`).
-- [ ] 23. Focus changes animate transform, shadow and background over 150 ms (src: tvmode.css `[data-f]`).
-- [ ] 24. Disabled controls show at 45% opacity and stay focusable, so A on them can say why (src: tvmode.css `[data-f][disabled]`; tvmode.js `press`).
+- [x] 14. A rail-and-content screen (Library, Server, Settings) has an 18rem rail, a 1.2rem gap and 1.2rem top padding; the rail and content panels have a 1.2rem bottom margin (src: tvmode.css `.split`, `.rail`, `.split .pane`). (final audit: verified in code)
+- [x] 15. TV mode has one cover size: grid and row covers are 10rem wide, the Details cover is 17rem, all at 3:4 with a 0.7rem radius (src: README § Decided Implementation; tvmode.css `.cv`, `.grid .cv`, `.track .cv`, `.det-l .cv`). (final audit: verified in code)
+- [x] 16. Grid covers show the title under the cover (0.9rem muted, one line, ellipsis; text-h and semibold when focused); covers in sideways rows and on Details show no label (src: tvmode.css `.cv-l`, `.track .cv-l`, `.det-l .cv-l`). (final audit: verified in code)
+- [x] 17. Covers carry the desktop badges: installed dot (green, top right), UPDATE (warning, top left), MISSING (red, top left), platform tag (bottom left) in mixed lists, and a "Queued" or "<n>%" tag (bottom right) while installing (src: README § Tabs › Library; tvmode.js `cover`). (final audit: verified in code)
+- [x] 18. MISSING replaces UPDATE when a game is both (src: tvmode.js `cover`). (final audit: verified in code)
+- [x] 19. Focus is one 0.2rem ring in the `focus` colour at a 0.2rem offset, the same everywhere (src: README § The shell › Focus; tvmode.css `[data-f].f`). (final audit: verified in code)
+- [x] 20. A focused cover grows to 107% with `shadow-lift` and a ring drawn as a 0.22rem `bg` gap and a `focus` band out to 0.42rem (src: README § The shell › Focus; tvmode.css `.cv.f .cv-art`). (final audit: verified in code)
+- [x] 21. A focused row (list row, settings row, list option, Connect field) takes the `selected` fill instead of growing (src: README § The shell › Focus; tvmode.css `.lrow.f`, `.srow.f`, `.opt.f`, `.field.f`). (final audit: verified in code)
+- [x] 22. A focused button grows to 104% (a primary one also takes `primary-hover`), a focused keyboard key to 106% and a focused media tile to 105% (src: tvmode.css `.btn.f`, `.btn.pri.f`, `.key.f`, `.mtile.f`). (final audit: verified in code)
+- [x] 23. Focus changes animate transform, shadow and background over 150 ms (src: tvmode.css `[data-f]`). (final audit: verified in code)
+- [x] 24. Disabled controls show at 45% opacity and stay focusable, so A on them can say why (src: tvmode.css `[data-f][disabled]`; tvmode.js `press`). (final audit: verified in code)
 - [x] 25. With reduced motion, focus has no transitions or growth, the notification countdown bar does not animate, and scrolls jump (src: tvmode.css `@media (prefers-reduced-motion)`; README § Scrolling).
 - [x] 26. Rows, grids and Details tabs leave room around every cover for its 7% growth and ring (rows pad 1.4rem above and below; a grid's scroll area reaches 1.2rem past its header on both sides; a Details tab body has 1rem side padding pulled back by a negative margin), while covers still line up with the titles and headers beside them (src: README § Scrolling; tvmode.css `.track`, `.scroll`, `.tbody`). (P14: tv-layout assertNoClipping after every move)
-- [ ] 27. Grids lay out 10rem columns that fill the width (space-between), with 1.6rem row and 1.2rem column gaps and 1.4rem / 1.2rem / 2.4rem padding (top / sides / bottom) (src: tvmode.css `.grid`).
-- [ ] 28. Buttons are pills at least 3rem tall with 1.05rem semibold text, in default, primary (`primary` fill) and danger (`danger` text and border) styles (src: tvmode.css `.btn`).
-- [ ] 29. Switches are 3.4 x 1.9rem, sliders 12rem, radio dots 1.5rem; a switch that is on is `primary` filled (src: tvmode.css `.sw`, `.sl`, `.radio`).
+- [x] 27. Grids lay out 10rem columns that fill the width (space-between), with 1.6rem row and 1.2rem column gaps and 1.4rem / 1.2rem / 2.4rem padding (top / sides / bottom) (src: tvmode.css `.grid`). (final audit: verified in code)
+- [x] 28. Buttons are pills at least 3rem tall with 1.05rem semibold text, in default, primary (`primary` fill) and danger (`danger` text and border) styles (src: tvmode.css `.btn`). (final audit: verified in code)
+- [x] 29. Switches are 3.4 x 1.9rem, sliders 12rem, radio dots 1.5rem; a switch that is on is `primary` filled (src: tvmode.css `.sw`, `.sl`, `.radio`). (final audit: verified in code)
 
 ## 2. Input
 
 ### Controller reading
 
 - [x] 30. Controllers are read natively in Rust by a gilrs reader that runs for TV mode only and sends button events to the UI (src: README § Decided Implementation).
-- [ ] 31. No controller input is acted on while a game is running (src: README § Decided Implementation; README § Pages › Playing).
-- [ ] 32. No controller input is acted on while the GRID window isn't focused (src: README § Decided Implementation).
+- [x] 31. No controller input is acted on while a game is running (src: README § Decided Implementation; README § Pages › Playing). (final audit: verified in code)
+- [x] 32. No controller input is acted on while the GRID window isn't focused (src: README § Decided Implementation). (final audit: verified in code)
 - [ ] 33. When the game closes, GRID listens to the controller again and then shows the save upload notices (src: README § Pages › Playing).
-- [ ] 34. The logical inputs are A, B, X, Y, LB, RB, LT, RT, View, Menu, the D-pad, the left stick and the right stick (src: README § Try it; tvmode.js `PADB`).
+- [x] 34. The logical inputs are A, B, X, Y, LB, RB, LT, RT, View, Menu, the D-pad, the left stick and the right stick (src: README § Try it; tvmode.js `PADB`). (final audit: verified in code)
 - [x] 35. The left stick moves focus like the D-pad once it passes half of its travel (0.5) on an axis (src: README § Try it; tvmode.js `pollPads`).
 - [x] 36. The right stick's vertical axis scrolls what you're reading without moving focus, past a 0.25 dead zone, at a speed proportional to the tilt (src: README § Try it; tvmode.js `pollPads`, `stickScroll`).
-- [ ] 37. The right stick scrolls the Details tab body when Details is open, else the scrolling area holding the focused item, and does nothing while an overlay is open (src: tvmode.js `stickScroll`).
+- [x] 37. The right stick scrolls the Details tab body when Details is open, else the scrolling area holding the focused item, and does nothing while an overlay is open (src: tvmode.js `stickScroll`). (final audit: verified in code)
 - [x] 38. The controller's name is its device name with any parenthesised part removed, or "Controller" when that leaves nothing (src: tvmode.js `usePad`).
 - [x] 39. When the controller in use disconnects, the next connected controller becomes the one in use; with none left, the name clears (src: tvmode.js `pollPads`, `gamepaddisconnected`).
 
@@ -70,7 +70,7 @@ and "Conflicts" lists at the end are not part of the build.
 ### Multiple controllers
 
 - [x] 45. Each controller keeps its own held-button state, so one controller never cancels or re-fires another's held button (src: tvmode.js `pollPads`).
-- [ ] 46. Each controller reads its own presses with its own button assignment (src: README § Decided Button assignments).
+- [x] 46. Each controller reads its own presses with its own button assignment (src: README § Decided Button assignments). (final audit: verified in code)
 - [x] 47. The prompts, the hint bar's controller name and the Button assignments row follow the controller pressed last (a button or the right stick) (src: README § Decided Button assignments; tvmode.js `usePad`).
 - [x] 48. When the controller in use changes while Settings › TV mode is showing, the pane redraws to name the new controller (src: tvmode.js `usePad`).
 
@@ -87,16 +87,16 @@ and "Conflicts" lists at the end are not part of the build.
 
 ### Prompts & glyphs
 
-- [ ] 57. Prompts are Kenney's Input Prompts 1.5A glyphs (CC0 1.0), shipped with their `License.txt`, as listed in `docs/design/prototype/glyphs/map.json` (src: README § Decided Glyph art; glyphs/README.md).
-- [ ] 58. The Xbox set uses xbox_button_a/b/x/y, xbox_lb/rb/lt/rt, xbox_button_view, xbox_button_menu, xbox_stick_r_vertical (Scroll), xbox_ls and xbox_dpad (src: glyphs/map.json `xbox`).
-- [ ] 59. The PlayStation set uses cross/circle/square/triangle for A/B/X/Y, L1/R1/L2/R2 triggers, the DualSense Create (View) and Options (Menu) buttons, playstation_stick_r_vertical, playstation_button_l3 and playstation_dpad (src: glyphs/map.json `ps`; README § Decided Glyph art).
-- [ ] 60. The Nintendo set is Switch 2: A/B/X/Y, L/R, ZL/ZR, − (View) and + (Menu), switch_stick_r_vertical, switch_stick_l_press and switch_dpad (src: glyphs/map.json `nintendo`).
-- [ ] 61. The 8BitDo (Pro series) set uses the plain letter glyphs, L/R, the rounded L2/R2 (playstation_trigger_l2/r2_alternative) and −/+ (src: glyphs/map.json `8bitdo`; README § Decided Glyph art).
-- [ ] 62. Each set uses its own D-pad glyph for "Adjust" and "Read" and its own right-stick glyph for "Scroll" (src: README § Decided Glyph art).
-- [ ] 63. Glyphs are drawn as a mask filled with the theme's text colour (`text-h`), `on-primary` inside a primary button and white in the media viewer, so they read in light and dark (src: README § Decided Glyph art; tvmode.css `.gli`).
-- [ ] 64. Glyphs are 2.1rem by default, 1.8rem in chips, notifications and the selection bar, and 1.6rem on keyboard keys (src: tvmode.css `.gli`, `.chip .gli`, `.key .gli`).
-- [ ] 65. Each glyph carries its button's name as an accessible label (src: tvmode.js `gl`).
-- [ ] 66. No brand logo is used (the Kenney Xbox guide glyph is left out), and the Home / Guide button has no glyph (src: README § Decided Glyph art).
+- [x] 57. Prompts are Kenney's Input Prompts 1.5A glyphs (CC0 1.0), shipped with their `License.txt`, as listed in `docs/design/prototype/glyphs/map.json` (src: README § Decided Glyph art; glyphs/README.md). (final audit: verified in code)
+- [x] 58. The Xbox set uses xbox_button_a/b/x/y, xbox_lb/rb/lt/rt, xbox_button_view, xbox_button_menu, xbox_stick_r_vertical (Scroll), xbox_ls and xbox_dpad (src: glyphs/map.json `xbox`). (final audit: verified in code)
+- [x] 59. The PlayStation set uses cross/circle/square/triangle for A/B/X/Y, L1/R1/L2/R2 triggers, the DualSense Create (View) and Options (Menu) buttons, playstation_stick_r_vertical, playstation_button_l3 and playstation_dpad (src: glyphs/map.json `ps`; README § Decided Glyph art). (final audit: verified in code)
+- [x] 60. The Nintendo set is Switch 2: A/B/X/Y, L/R, ZL/ZR, − (View) and + (Menu), switch_stick_r_vertical, switch_stick_l_press and switch_dpad (src: glyphs/map.json `nintendo`). (final audit: verified in code)
+- [x] 61. The 8BitDo (Pro series) set uses the plain letter glyphs, L/R, the rounded L2/R2 (playstation_trigger_l2/r2_alternative) and −/+ (src: glyphs/map.json `8bitdo`; README § Decided Glyph art). (final audit: verified in code)
+- [x] 62. Each set uses its own D-pad glyph for "Adjust" and "Read" and its own right-stick glyph for "Scroll" (src: README § Decided Glyph art). (final audit: verified in code)
+- [x] 63. Glyphs are drawn as a mask filled with the theme's text colour (`text-h`), `on-primary` inside a primary button and white in the media viewer, so they read in light and dark (src: README § Decided Glyph art; tvmode.css `.gli`). (final audit: verified in code)
+- [x] 64. Glyphs are 2.1rem by default, 1.8rem in chips, notifications and the selection bar, and 1.6rem on keyboard keys (src: tvmode.css `.gli`, `.chip .gli`, `.key .gli`). (final audit: verified in code)
+- [x] 65. Each glyph carries its button's name as an accessible label (src: tvmode.js `gl`). (final audit: verified in code)
+- [x] 66. No brand logo is used (the Kenney Xbox guide glyph is left out), and the Home / Guide button has no glyph (src: README § Decided Glyph art). (final audit: verified in code)
 - [x] 67. With Button prompts on Match my controller, Xbox style shows the Xbox set, or the PlayStation set on a PlayStation pad (vendor id 054c, or a name containing PlayStation, DualSense or DualShock) (src: README § Decided Button prompts; tvmode.js `scheme`, `padBrand`).
 - [x] 68. With Match my controller, Nintendo style shows the Nintendo set, or the 8BitDo Pro set on an 8BitDo pad (src: README § Decided Button prompts; tvmode.js `scheme`).
 - [x] 69. Button prompts set by hand (Xbox, PlayStation, Nintendo, 8BitDo (Pro series)) override the match for every controller (src: README § Decided Button prompts; tvmode.js `scheme`).
@@ -105,13 +105,13 @@ and "Conflicts" lists at the end are not part of the build.
 ### Keyboard fallback
 
 - [x] 71. A physical keyboard drives TV mode as a controller: arrow keys move, Enter (or Space) is A, Esc or Backspace is B, X is X, Y is Y, Q is LB, E is RB, Z is LT, R is RT, M is Menu, V is View, Page Up / Page Down are the right stick (src: README § Try it; tvmode.js `KEYMAP`).
-- [ ] 72. A held arrow key repeats like the D-pad; other held keys repeat only where the held controller button would (the on-screen keyboard's typing buttons) (src: tvmode.js `keydown`).
-- [ ] 73. Page Up / Page Down scroll the reading area by 70% of its height without moving focus (src: tvmode.js `keydown`).
+- [x] 72. A held arrow key repeats like the D-pad; other held keys repeat only where the held controller button would (the on-screen keyboard's typing buttons) (src: tvmode.js `keydown`). (final audit: verified in code)
+- [x] 73. Page Up / Page Down scroll the reading area by 70% of its height without moving focus (src: tvmode.js `keydown`). (final audit: verified in code)
 - [x] 74. While the on-screen keyboard is open, a printable key types straight in, Backspace deletes before the caret (it does not cancel), and Enter is Done once something was typed on the physical keyboard (src: README § Overlays › On-screen keyboard; tvmode.js `keydown`).
 
 ### Mouse
 
-- [ ] 75. Pointing at a focusable item moves focus to it without scrolling, but only after the mouse has actually moved (src: README § Try it; tvmode.js `mouseover`).
+- [x] 75. Pointing at a focusable item moves focus to it without scrolling, but only after the mouse has actually moved (src: README § Try it; tvmode.js `mouseover`). (final audit: verified in code)
 - [x] 76. Clicking an item focuses it and does what A does; clicking a hint presses that button; clicking a top-bar tab or a Details tab switches to it; clicking outside a non-blocking overlay closes it (src: README § The shell › Hint bar; tvmode.js `click`, `openLayer`).
 
 ## 3. Focus & navigation rules
@@ -119,7 +119,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 77. Exactly one item has focus at all times, and every screen opens with something focused (src: README § The shell › Focus).
 - [x] 78. A screen opens on the item last focused there, else on its designated default (the checked option in a list, Cancel in a confirmation), else on its first item, skipping a disabled item when an enabled one exists (src: tvmode.js `restoreFocus`).
 - [x] 79. Each tab and page remembers its focused item, and coming back to it (B from a page, switching tabs and back) returns focus there (src: README § The shell › Focus; tvmode.js `setFocus`, `restoreFocus`).
-- [ ] 80. Closing an overlay returns focus to the item that had it, without scrolling; if that item was redrawn, to the item with the same identity (src: tvmode.js `closeLayer`).
+- [x] 80. Closing an overlay returns focus to the item that had it, without scrolling; if that item was redrawn, to the item with the same identity (src: tvmode.js `closeLayer`). (final audit: verified in code)
 - [x] 81. Movement is spatial: only items lying in the pressed direction qualify, and the winner has the lowest score of gap along the direction + 2.2 x offset across it (src: README § The shell › Movement; tvmode.js `move`).
 - [x] 82. Rails, rows and lists keep focus inside them along their axis, with no wrapping off the end (src: README § The shell › Movement).
 - [x] 83. At a list's end, focus carries on to the nearest item past that end that overlaps the list's column (vertical list) or line (horizontal list), taking its first item in reading order, never sideways into another panel (src: README § The shell › Movement; tvmode.js `move`).
@@ -145,28 +145,28 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 103. While an overlay is open, X, Y, LT, RT, LB, RB, Menu and View do nothing unless that overlay binds them (the on-screen keyboard, the media viewer) (src: tvmode.js `press`).
 - [x] 104. Arriving on the Server tab while Discover is selected focuses Discover's content (the cover last focused there, else the first), not the rail (src: README § Tabs › Server › Discover; tvmode.js `render`).
 - [x] 105. Moving through the Library, Server or Settings rail switches the grid or pane beside it at once, without A (src: README § Tabs › Library; tvmode.js `ONF`).
-- [ ] 106. A rail's selected row shows the `selected` fill and a 0.25rem `primary` bar on its left edge (src: tvmode.css `.ri.sel`).
-- [ ] 107. Scrolling follows fixed rules and never the browser's "just enough" scroll-into-view (src: README § The shell › Scrolling).
+- [x] 106. A rail's selected row shows the `selected` fill and a 0.25rem `primary` bar on its left edge (src: tvmode.css `.ri.sel`). (final audit: verified in code)
+- [x] 107. Scrolling follows fixed rules and never the browser's "just enough" scroll-into-view (src: README § The shell › Scrolling). (final audit: verified in code)
 - [x] 108. On Server › Discover, moving into a shelf scrolls its title to the top of the rows area, and the first shelf scrolls to the very top (src: README § Scrolling; tvmode.js `reveal`).
 - [x] 109. Discover's hero has a fixed height, so the rows area never changes size as focus moves (src: README § Scrolling; tvmode.css `.hero`).
 - [x] 110. A row that scrolls sideways keeps the focused cover a full row margin inside its left and right edges (src: README § Scrolling; tvmode.js `reveal`).
 - [x] 111. In grids, lists, panes and menus, the focused item stays 1.2rem inside the scrolling area; an item taller than the area lines up with its top (src: README § Scrolling; tvmode.js `reveal`).
 - [x] 112. Focusing an area's first item scrolls it to the very top and its last item to the very bottom, so a heading above or a note below ("No Backup drives connected") is never stranded (src: README § Scrolling; tvmode.js `reveal`).
-- [ ] 113. A redraw (an install starting, coming back from Details, switching tabs and back) keeps every scroll position of every rail, row, grid, list and pane on that screen (src: README § Scrolling; tvmode.js `renderStage`).
+- [x] 113. A redraw (an install starting, coming back from Details, switching tabs and back) keeps every scroll position of every rail, row, grid, list and pane on that screen (src: README § Scrolling; tvmode.js `renderStage`). (final audit: verified in code)
 - [x] 114. Scrolls glide; with reduced motion, and when a screen first appears or redraws, they jump (src: README § Scrolling; tvmode.js `glide`, `render`).
 - [x] 115. After a change of data, focus stays on the same item; if it is gone, focus moves to the enabled item now in its place in the same panel (src: README § The shell › Focus; tvmode.js `repaint`).
-- [ ] 116. A change never moves the player: in Settings only the pane redraws, never the rail (src: README § The shell › Focus; tvmode.js `repaint`).
+- [x] 116. A change never moves the player: in Settings only the pane redraws, never the rail (src: README § The shell › Focus; tvmode.js `repaint`). (final audit: verified in code)
 - [x] 117. A redraw caused by a finished install while an overlay is open happens in place; closing the overlay returns focus to its opener, or jumps to the item with the opener's key or the one now in its place (consultant ruling G; src: tvmode.js tick, `closeLayer`).
-- [ ] 118. While an install runs, only its percentage text changes (cover tags, hero line, top bar), so nothing else redraws (src: tvmode.js tick).
+- [x] 118. While an install runs, only its percentage text changes (cover tags, hero line, top bar), so nothing else redraws (src: tvmode.js tick). (final audit: verified in code)
 
 ## 4. Top bar & hint bar
 
 ### Top bar
 
-- [ ] 119. The top bar is 4.6rem tall on `panel` with a bottom `line` border (src: README § The shell › Top bar; tvmode.css `.top`).
-- [ ] 120. Its left end is the GRID icon in `primary`, the "GRID" wordmark and a "TV" pill tag (src: README § Top bar; tvmode.js `paintTop`).
-- [ ] 121. At a tab's top level the middle shows the LB glyph, the tabs Library, Server, Downloads, Settings and the RB glyph, centred, with the current tab a `primary` pill (src: README § Top bar; tvmode.js `paintTop`; tvmode.css `.tab.on`).
-- [ ] 122. On a pushed page the tabs give way to a breadcrumb: the B glyph, the tab name, "›" and the page title in bold, for example "(B) Library › Starfall Circuit" (src: README § Top bar; tvmode.js `paintTop`).
+- [x] 119. The top bar is 4.6rem tall on `panel` with a bottom `line` border (src: README § The shell › Top bar; tvmode.css `.top`). (final audit: verified in code)
+- [x] 120. Its left end is the GRID icon in `primary`, the "GRID" wordmark and a "TV" pill tag (src: README § Top bar; tvmode.js `paintTop`). (final audit: verified in code)
+- [x] 121. At a tab's top level the middle shows the LB glyph, the tabs Library, Server, Downloads, Settings and the RB glyph, centred, with the current tab a `primary` pill (src: README § Top bar; tvmode.js `paintTop`; tvmode.css `.tab.on`). (final audit: verified in code)
+- [x] 122. On a pushed page the tabs give way to a breadcrumb: the B glyph, the tab name, "›" and the page title in bold, for example "(B) Library › Starfall Circuit" (src: README § Top bar; tvmode.js `paintTop`). (final audit: verified in code)
 - [x] 123. On the startup screens the middle is empty and the right shows only the clock (src: tvmode.js `paintTop`).
 - [x] 124. The right shows the live download while one runs: a download icon, its title, a 4rem progress bar and its percent (src: README § Top bar; tvmode.js `paintTop`).
 - [x] 125. Then the connection: a green dot and the user name when connected; a red dot and "Offline" when the server can't be reached; a grey dot and "Offline · no server" when GRID is used without a server (src: README § Top bar; README § Game backups › Use without a server; tvmode.js `paintTop`).
@@ -174,30 +174,30 @@ and "Conflicts" lists at the end are not part of the build.
 
 ### Hint bar
 
-- [ ] 127. The hint bar is 3.6rem tall at the bottom on `panel` with a top `line` border, and overlays never cover it (src: README § The shell › Hint bar; tvmode.css `.hints`, `.layer`).
+- [x] 127. The hint bar is 3.6rem tall at the bottom on `panel` with a top `line` border, and overlays never cover it (src: README § The shell › Hint bar; tvmode.css `.hints`, `.layer`). (final audit: verified in code)
 - [x] 128. Its right side shows what each button does now for the focused item, as the controller's glyph and a label, in the order A, X, the screen's own hints, B "Back" (on pages), Menu "Menu" (src: README § Hint bar; tvmode.js `hintsNow`).
 - [x] 129. The A hint names the focused item's action ("Details" on a cover, "Open" on a rail row, "Switch", "Select" or "Edit" on a settings row, …), and is left out when the item is disabled (src: tvmode.js `hintsNow`, `srow`).
 - [x] 130. The X hint on a cover is its quick action: "Play" when installed, "Install from drive" on a drive's grid, "Install" otherwise; none while it is queued or installing, when it is Missing or unlinked, or for a game not installed while offline (src: README § Try it; tvmode.js `quickLabel`).
 - [x] 131. The X hint elsewhere is the item's own extra action ("Change emulator", "Install <emulator>", "Backup all N…") (src: tvmode.js `hintsNow`).
 - [x] 132. The Menu hint is left out on startup screens and where Start presses the page's main button (src: tvmode.js `hintsNow`).
 - [x] 133. On startup screens there is no Back hint (src: tvmode.js `hintsNow`).
-- [ ] 134. Every hint is clickable and does what pressing its button does (src: README § Hint bar; tvmode.js `click`).
+- [x] 134. Every hint is clickable and does what pressing its button does (src: README § Hint bar; tvmode.js `click`). (final audit: verified in code)
 - [x] 135. The left side shows the name of the controller in use (src: README § Hint bar; tvmode.js `paintHints`).
 - [x] 136. While the server can't be reached, the left side shows an "Offline" danger pill and "Your installed games still play. Server features return when GRID reconnects." (src: README § Hint bar; tvmode.js `paintHints`).
 - [x] 137. Without a server, the left side reads "No server. Your Library and Backup drives work without one." (src: README § Game backups › Use without a server; tvmode.js `paintHints`).
-- [ ] 138. The hints repaint on every focus change, every state change and when a notification leaves (src: tvmode.js `setFocus`, `toast`).
+- [x] 138. The hints repaint on every focus change, every state change and when a notification leaves (src: tvmode.js `setFocus`, `toast`). (final audit: verified in code)
 
 ## 5. Notifications & setup card
 
-- [ ] 139. Notifications are the desktop's events with the desktop's wording (src: README § The shell › Notifications).
+- [x] 139. Notifications are the desktop's events with the desktop's wording (src: README § The shell › Notifications). (final audit: verified in code)
 - [x] 140. They show as cards at the top right under the top bar (5.4rem from the top, 2.4rem from the right), 26rem wide, stacked with a 0.7rem gap (src: README § Notifications; tvmode.css `.toasts`).
 - [x] 141. At most three cards show; a fourth drops the oldest card that isn't pinned (src: README § Notifications; tvmode.js `toast`).
 - [x] 142. The newest card goes on top, under the pinned setup card when one shows (src: tvmode.js `toast`).
-- [ ] 143. Cards never take focus and don't react to pointing (src: README § Notifications; tvmode.css `.toasts`).
+- [x] 143. Cards never take focus and don't react to pointing (src: README § Notifications; tvmode.css `.toasts`). (final audit: verified in code)
 - [x] 144. A card shows its title (semibold), an optional second line, and, when it offers an action, the View glyph and the action name ("Open Downloads") (src: README § Notifications; tvmode.js `toast`).
 - [x] 145. An error card has a `danger` border and title and is announced as an alert; other cards are announced as status (src: tvmode.js `toast`; tvmode.css `.toast.err`).
 - [x] 146. A card closes on its own after 10 s, or 15 s for an error, with a countdown bar along its bottom (`primary`, `danger` on errors) (src: tvmode.js `toast`; tvmode.css `.toast .tbar`).
-- [ ] 147. A card slides in from 1rem to the right over 220 ms (src: tvmode.css `@keyframes tin`).
+- [x] 147. A card slides in from 1rem to the right over 220 ms (src: tvmode.css `@keyframes tin`). (final audit: verified in code)
 - [x] 148. View acts on the newest card that offers an action: the card closes and its action runs (src: README § Try it; tvmode.js `press`, `newestAction`).
 - [x] 149. "Open Downloads" closes any pages and shows the Downloads tab (src: tvmode.js `install`).
 - [x] 150. Every card also goes to Menu › Notifications with its time (src: README § Notifications; tvmode.js `toast`).
@@ -357,7 +357,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 286. Uninstall asks "Uninstall <title>?" / "Its files are deleted from this computer. Cloud saves stay on your server." with Uninstall (danger), then notifies "<title> uninstalled" (src: tvmode.js `ACT.uninstall`).
 - [x] 287. Remove from library asks "Remove <title> from the library?" / "Only the library entry goes. Its folder stays on disk: <path>." with Remove from library (danger), then notifies "<title> removed from the library" and goes back (src: tvmode.js `ACT.removeRow`).
 - [x] 288. Install adds the game to the queue and notifies "<title> added to download queue" (with "<emulator> installs with it" when the system has no emulator) and the action Open Downloads (src: tvmode.js `install`).
-- [ ] 289. Install while the server can't be reached notifies the error "Couldn't add <title> to the download queue: the server can't be reached" (src: tvmode.js `install`).
+- [x] 289. Install while the server can't be reached notifies the error "Couldn't add <title> to the download queue: the server can't be reached" (src: tvmode.js `install`). (final audit: verified in code)
 - [x] 290. Locate… opens the folder browser titled "Where is <title>?"; a good pick notifies "<title> found" / "Plays from <path>", a wrong one the error "Couldn't find <title> in <path>" / "Pick the folder that holds the game." (src: tvmode.js `ACT.locate`).
 - [x] 291. The tabs are Overview, Media, Saves, and Achievements when the server lists any, between LB and RB glyphs; the current tab is underlined in `primary` (src: README § Details; tvmode.js `details`; tvmode.css `.ttab.on`).
 - [x] 292. LB / RB switch Details tabs, wrapping at the ends (src: README § Details; tvmode.js `detTabStep`).
@@ -509,7 +509,7 @@ and "Conflicts" lists at the end are not part of the build.
 ### Startup screens
 
 - [x] 389. A startup box always fits between the top bar and the hint bar, so the screen never scrolls (src: README § Startup screens; tvmode.css `.start`).
-- [ ] 390. A list longer than the space scrolls inside the box, under its title and above its buttons, which never leave view (src: README § Startup screens; tvmode.css `.start-body`, `.start-foot`).
+- [x] 390. A list longer than the space scrolls inside the box, under its title and above its buttons, which never leave view (src: README § Startup screens; tvmode.css `.start-body`, `.start-foot`). (final audit: verified in code)
 - [x] 391. The box doesn't repeat the GRID wordmark (src: README § Startup screens).
 
 ### Connect
@@ -601,7 +601,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 450. Install <n> games queues every picked game not installed and notifies "<n> games added to download queue" / "Copying from <label>" (src: tvmode.js `selAct`).
 - [x] 451. Remove <n> from drive… asks "Remove <n> games from <pack>?" / "Their files leave the drive. Games installed on this computer stay." with Remove from drive (danger), then notifies "<n> games removed from <pack>" (src: tvmode.js `selAct`). (desktop wording, intro rule)
 - [x] 452. Acting on the picked games, or the drive going away, ends select mode (src: tvmode.js `selAct`, `startBackup`, `unplugCouch`). Also ends on a rail row change (consultant).
-- [ ] 453. There is no range pick; Select all covers that case (src: README § Select mode).
+- [x] 453. There is no range pick; Select all covers that case (src: README § Select mode). (final audit: verified in code)
 
 ### A whole platform
 
