@@ -12,22 +12,12 @@
   import { drives } from './stores/drives.svelte';
   import { driveRailKey } from './library/rail';
   import { librarySelection, selectRail } from './library/selection.svelte';
-  import { listen } from '@tauri-apps/api/event';
-  import { initEmulatorEvents } from './systems/events';
-  import { initNotifications } from './notifications/notifier';
-  import {
-    api,
-    CLOUD_RESTORE_NOTICE_EVENT,
-    CLOUD_UPLOAD_FINISHED_EVENT,
-    type CloudRestoreNotice,
-    type CloudUploadFinished,
-  } from './api';
+  import { api } from './api';
   import { session, retry, disconnect, connectToServer } from './stores/session.svelte';
   import { appUpdate } from './stores/appUpdate.svelte';
-  import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
-  import { seedLastViewed } from './stores/lastViewed.svelte';
   import { noteInput, notePointerAt } from './stores/inputMode.svelte';
-  import { pushToast } from './stores/toasts.svelte';
+  import { registerNavigation } from './stores/navigation.svelte';
+  import type { SettingsPage } from './settings/pages';
   import { toggleTheme, uiSettings } from './stores/uiSettings.svelte';
   import { chipLabel, hostOf, initialView, VIEWS, viewForDigit, viewLabel, type View } from './shell';
   // The same guard the grid views use for Ctrl+F: an accelerator must stay
@@ -71,6 +61,16 @@
   export function show(next: View) {
     view = next;
   }
+
+  /** A Settings page, with one system's row opened on Systems. */
+  function showSettings(page: SettingsPage, opts: { system?: string } = {}) {
+    view = 'settings';
+    settings?.show(page, opts);
+  }
+
+  // The navigation intents (toast actions, the setup card's Open Downloads)
+  // land here while the desktop shell is mounted.
+  $effect(() => registerNavigation({ go: show, goSettings: showSettings }));
 
   // Ctrl+1..4 (design §3). Alt/Shift are excluded so this never steals a
   // window-manager or text-editing chord; Meta is accepted alongside Ctrl so
@@ -116,59 +116,6 @@
       // stored). Nothing to report: the menu item is a convenience.
     });
   }
-
-  $effect(() => {
-    // Independent of the connection: Library shows installed games with
-    // cached covers offline, so the registry must load once on mount even
-    // when the shell comes up unreachable (Server.svelte's own refresh only
-    // runs inside its session.connected-gated effect).
-    // The `images-replenished` listener is NOT registered here: the replenish
-    // job is spawned during restore/connect, before this shell ever mounts.
-    // App.svelte owns it.
-    refreshInstalled();
-  });
-
-  // Startup fallback for the background art. Re-runs as the registry loads;
-  // `seedLastViewed` is idempotent and never overwrites a real view.
-  $effect(() => {
-    seedLastViewed(installed.list);
-  });
-
-  // The only report an auto upload has: it runs after the game has exited,
-  // with no command in flight and usually no popup open. Mounted here, not
-  // in Details.svelte, because the Shell is mounted exactly once and is
-  // never `hidden`. (`Toast.svelte` itself hosts in `App.svelte`, above the
-  // phase branch, so the startup import notice shows in Connect too; the
-  // setup card rides in the same stack.)
-  $effect(() => {
-    const unlisten = listen<CloudUploadFinished>(CLOUD_UPLOAD_FINISHED_EVENT, (e) => {
-      const { title, message, failed } = e.payload;
-      pushToast(title === '' ? message : `${title} — ${message}`, failed ? 'error' : 'success');
-    });
-    return () => {
-      void unlisten.then((off) => off());
-    };
-  });
-
-  // Emulator install/update notices, app-lifetime rather than tied to
-  // Settings › Systems being open, so each toasts once.
-  $effect(() => initEmulatorEvents());
-
-  // The download, install and launch cards (queued, installed, failed,
-  // cancelled, launching, early exits): app-lifetime for the same reason.
-  $effect(() => initNotifications());
-
-  // G1-Q: the pre-launch restore skipped save folders it could not match to
-  // the game. It runs inside `launch_game`, with no panel open to report in.
-  $effect(() => {
-    // The message already names the game ("Cloud save for <title> …").
-    const unlisten = listen<CloudRestoreNotice>(CLOUD_RESTORE_NOTICE_EVENT, (e) => {
-      pushToast(e.payload.message, e.payload.failed ? 'error' : 'success');
-    });
-    return () => {
-      void unlisten.then((off) => off());
-    };
-  });
 </script>
 
 <svelte:window
@@ -205,10 +152,7 @@
         data-testid="app-update-badge"
         class="update-badge"
         title={`GRID Launcher ${appUpdate.notice.tag} is available`}
-        onclick={() => {
-          view = 'settings';
-          settings?.show('updates');
-        }}
+        onclick={() => showSettings('updates')}
       >
         Update
       </button>
@@ -290,8 +234,7 @@
     onOpenSystems={(system) => {
       // The emulator and firmware chips open Settings › Systems on the
       // platform's row, opened (ProposedApp README).
-      view = 'settings';
-      settings?.show('systems', { system });
+      showSettings('systems', { system });
     }}
   />
 </div>
@@ -320,8 +263,7 @@
         // behind it.
         backupDialog.current?.onLeave?.();
         closeBackup();
-        view = 'settings';
-        settings?.show('backup-drives');
+        showSettings('backup-drives');
       }}
     />
   {/key}

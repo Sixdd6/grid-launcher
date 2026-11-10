@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import Connect from './lib/Connect.svelte';
   import { connectPrefill } from './lib/connectPrefill';
   import Shell from './lib/Shell.svelte';
@@ -21,8 +22,9 @@
   import { initReplenishListener } from './lib/stores/installed.svelte';
   import { initUiSettings, toggleTheme, uiSettings } from './lib/stores/uiSettings.svelte';
   import ThemeToggle from './lib/ThemeToggle.svelte';
+  import { startShellLifetime } from './lib/lifetime.svelte';
+  import { navigation } from './lib/stores/navigation.svelte';
 
-  let shell = $state<ReturnType<typeof Shell> | null>(null);
   let restored = false; // restore() must fire once on mount, not on every phase change
 
   // Declared before the restore effect below, and reading no reactive state,
@@ -118,6 +120,15 @@
       unDrives?.then((f) => f());
     };
   });
+
+  // The shell's lifetime listeners (notification cards, emulator notices,
+  // cloud notices, the registry load): up exactly while a shell is on
+  // screen — the phase is `shell` and the unreachable-library dialog is not
+  // blocking — whichever shell that is.
+  let shellUp = $derived(session.phase === 'shell' && !libraryUnreachable.blocking);
+  $effect(() => {
+    if (shellUp) return untrack(startShellLifetime);
+  });
 </script>
 
 <!-- 9b: GRID cannot run without a valid library. While the library folder
@@ -132,7 +143,7 @@
     }}
   />
 {:else if session.phase === 'shell'}
-  <Shell bind:this={shell} />
+  <Shell />
 {:else if session.phase === 'none'}
   <Connect prefill={connectPrefill(session)} />
 {/if}
@@ -152,7 +163,7 @@
 <!-- The first-run setup card leads the notification stack while the shell
      is up; its Open Downloads switches the shell's view. -->
 {#snippet setupCard()}
-  <SetupProgress onOpenDownloads={() => shell?.show('downloads')} />
+  <SetupProgress onOpenDownloads={() => navigation.go('downloads')} />
 {/snippet}
 
 <!-- Outside the phase branch: the startup Python-import notice is pushed

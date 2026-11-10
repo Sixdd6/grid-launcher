@@ -1,11 +1,3 @@
-<script lang="ts" module>
-  import type { DiscoverFeed as Feed } from '../api';
-
-  /** The last feed shown, so coming back to Discover (it unmounts while a
-   *  platform is selected) shows it at once while the fresh one loads. */
-  let lastFeed: { server: string; feed: Feed } | null = null;
-</script>
-
 <script lang="ts">
   // Server › Discover: the first Server rail row and the default view.
   // New releases (a coverflow of the newest games on the preferred
@@ -13,14 +5,7 @@
   // coverflow's games), with platform filter pills across its top. The lists
   // come filtered and sorted from Rust (`discover_feed`, and
   // `discover_recently_added` for one platform); this view only shows them.
-  import { listen } from '@tauri-apps/api/event';
-  import {
-    api,
-    EMULATOR_INSTALLED_EVENT,
-    SETUP_DEFAULTS_EVENT,
-    type DiscoverFeed,
-    type GameSummary,
-  } from '../api';
+  import type { DiscoverFeed, GameSummary } from '../api';
   import { downloads } from '../stores/downloads.svelte';
   import { isInstalled } from '../stores/installed.svelte';
   import { session } from '../stores/session.svelte';
@@ -28,6 +13,7 @@
   import RecentlyAdded from './RecentlyAdded.svelte';
   import { discoverAction, liveInstallStatus } from './feed';
   import { filterPills, keptFilter, listKey, nextFilter, shownList, type Filtered } from './filters';
+  import { cachedFeed, fetchFeed, PlatformLists, rememberFeed, watchFeedInputs } from './feedStore.svelte';
 
   let {
     active,
@@ -47,9 +33,9 @@
     onOpenSystems: () => void;
   } = $props();
 
-  let feed = $state.raw<DiscoverFeed | null>(
-    lastFeed && lastFeed.server === session.serverUrl ? lastFeed.feed : null,
-  );
+  // The last feed shown (feedStore), so coming back to Discover shows it at
+  // once while the fresh one loads.
+  let feed = $state.raw<DiscoverFeed | null>(cachedFeed(session.serverUrl));
   let failed = $state(false);
   let cfIndex = $state(0);
   let coverflow = $state<ReturnType<typeof Coverflow> | null>(null);
@@ -61,7 +47,7 @@
   let filtered = $state.raw<Filtered | null>(null);
   /** Each platform's list, fetched once per feed (a reload clears it: the
    *  coverflow it leaves out may have changed). */
-  let cache = new Map<number, GameSummary[]>();
+  const lists = new PlatformLists();
   /** The latest filter request; an older answer is only cached. */
   let request = 0;
 
@@ -76,17 +62,15 @@
       filtered = null;
       return;
     }
-    const hit = cache.get(id);
+    const hit = lists.cached(id);
     if (hit) {
       filtered = { id, games: hit };
       return;
     }
-    const forCache = cache;
     const exclude = feed.new_releases.map((g) => g.id);
-    api
-      .discoverRecentlyAdded(id, exclude)
+    lists
+      .load(id, exclude)
       .then((games) => {
-        forCache.set(id, games);
         if (token === request) filtered = { id, games };
       })
       .catch(() => {
@@ -106,15 +90,14 @@
     void reload;
     if (!active || !session.connected) return;
     let cancelled = false;
-    api
-      .discoverFeed()
+    fetchFeed()
       .then((next) => {
         if (cancelled) return;
         const centre = feed?.new_releases[cfIndex]?.id;
         feed = next;
-        lastFeed = { server: session.serverUrl, feed: next };
+        rememberFeed(session.serverUrl, next);
         failed = false;
-        cache = new Map();
+        lists.reset();
         selected = keptFilter(selected, next.recent_platforms);
         showFilter(selected);
         const kept = next.new_releases.findIndex((g) => g.id === centre);
@@ -128,15 +111,7 @@
     };
   });
 
-  $effect(() => {
-    const offs = [
-      listen(EMULATOR_INSTALLED_EVENT, () => (reload += 1)),
-      listen(SETUP_DEFAULTS_EVENT, () => (reload += 1)),
-    ];
-    return () => {
-      for (const off of offs) off.then((un) => un());
-    };
-  });
+  $effect(() => watchFeedInputs(() => (reload += 1)));
 
   function actionFor(game: GameSummary) {
     return discoverAction(isInstalled(game, labelFor(game)), liveInstallStatus(downloads.entries, game.id));

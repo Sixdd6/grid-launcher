@@ -2,8 +2,8 @@
   import { untrack } from 'svelte';
   import { api, type DriveGame, type InstalledGame } from './api';
   import UmuInstallOffer from './UmuInstallOffer.svelte';
-  import { isUmuMissing } from './launchError';
-  import { launchGame } from './notifications/notifier';
+  import { quickAction } from './games/quick';
+  import { installFromDrive, playInstalled, type RunOutcome } from './games/run';
   import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
   import { updates } from './stores/updates.svelte';
   import { installedKey, visibleLibraryGames } from './library';
@@ -24,7 +24,7 @@
   import { drives } from './stores/drives.svelte';
   import { session } from './stores/session.svelte';
   import { driveAssetUrl } from './backups/driveArt';
-  import { installAllFromDrive, installFromDrive, removeFromDrive } from './backups/install';
+  import { installAllFromDrive, removeFromDrive } from './backups/install';
   import SelectionBar from './backups/SelectionBar.svelte';
   import { openBackup } from './backups/dialogState.svelte';
   import { backupRequest, sizeText } from './backups/dialog';
@@ -265,16 +265,20 @@
     return coverPair(null, url);
   }
 
+  /** A failed launch's reason shows here only beside the umu-launcher
+   *  install it needs; every other refusal is a card (games/run.ts). */
+  function showLaunchOutcome(outcome: RunOutcome) {
+    if (outcome.kind === 'ok') return;
+    const missing = outcome.kind === 'needs-umu';
+    launchError = missing ? outcome.reason : null;
+    umuOfferFor = missing ? launchError : null;
+  }
+
   async function drivePrimary(game: DriveGame) {
-    if (game.installed) {
+    const quick = quickAction({ installed: game.installed, romId: game.rom_id, fromDrive: true });
+    if (quick.kind === 'play') {
       launchError = null;
-      try {
-        await launchGame(game.rom_id, game.name);
-      } catch (err) {
-        const missing = isUmuMissing(err);
-        launchError = missing ? (err instanceof Error ? err.message : String(err)) : null;
-        umuOfferFor = missing ? launchError : null;
-      }
+      showLaunchOutcome(await playInstalled(game.rom_id, game.name));
       return;
     }
     if (driveKey !== null) await installFromDrive(driveKey, game);
@@ -385,15 +389,15 @@
   async function play(row: InstalledGame) {
     if (row.rom_id === null) return;
     launchError = null;
-    try {
-      // "Launching <title>…" and a refusal are cards (notifier); the reason
-      // also shows here only beside the umu-launcher install it needs.
-      await launchGame(row.rom_id, row.title);
-    } catch (err) {
-      const missing = isUmuMissing(err);
-      launchError = missing ? (err instanceof Error ? err.message : String(err)) : null;
-      umuOfferFor = missing ? launchError : null;
-    }
+    // "Launching <title>…" and a refusal are cards (games/run.ts).
+    showLaunchOutcome(await playInstalled(row.rom_id, row.title));
+  }
+
+  /** An installed card's button: Play, or Locate… (Details) for missing files. */
+  function rowPrimary(row: InstalledGame) {
+    const quick = quickAction({ installed: true, romId: row.rom_id, missing: isMissing(row) });
+    if (quick.kind === 'locate') openDetails(row);
+    else void play(row);
   }
 
   // Design §3: a card becomes the background only after the pointer has
@@ -772,7 +776,7 @@
               focusIndex = i;
               openDetails(row);
             }}
-            onPrimary={() => (isMissing(row) ? openDetails(row) : play(row))}
+            onPrimary={() => rowPrimary(row)}
             onCloud={() => openDetails(row, 'save')}
             onHoverStart={() => hoverStart(row)}
             onHoverEnd={hover.end}

@@ -1,7 +1,10 @@
 // The app-lifetime wiring for the download, install and launch notification
-// cards. Registered once by Shell.svelte (mounted exactly once, never
-// hidden), so every event shows one card whichever view started it or is
-// open. The wording and batching live in `notices.ts`.
+// cards. Registered once per shell lifetime by `lifetime.svelte.ts`
+// (whichever shell is mounted), so every event shows one card whichever
+// view started it or is open. The wording and batching live in
+// `notices.ts`. Nothing here navigates: a card's action that leads
+// somewhere goes through `stores/navigation.svelte.ts`, so it works in
+// either shell.
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
   api,

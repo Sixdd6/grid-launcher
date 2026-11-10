@@ -1,7 +1,7 @@
 // App-lifetime notices about the defaults an emulator install applied
 // (Settings › Systems, a server package installed from Server). Registered
-// once by Shell.svelte, which is mounted exactly once and never hidden, so
-// each event toasts once however many views are mounted. The install's own
+// once per shell lifetime by `lifetime.svelte.ts`, so each event toasts once
+// however many views are mounted. The install's own
 // queued/installed cards are notifications/notifier.ts's.
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { SETUP_DEFAULTS_EVENT, type SetupOutcome } from '../api';

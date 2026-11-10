@@ -1,7 +1,8 @@
 <script lang="ts">
   import { downloads } from './stores/downloads.svelte';
   import { libraryMove } from './stores/libraryMove.svelte';
-  import { api, type DownloadEntry } from './api';
+  import type { DownloadEntry } from './api';
+  import { cancelEntry, dismissEntry, retryEntry, runRowAction } from './downloads/actions';
   import { actionFor, entryDetail, graphCaption, kindLabel, percent } from './downloads/format';
   import {
     groupBySegment,
@@ -19,43 +20,30 @@
   // exactly once at all times, which every install spec relies on.
   let groups = $derived(groupBySegment(downloads.entries));
 
-  function errorMessage(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
-  }
+  // Errors and pending flags are this view's; the actions themselves are
+  // shared (downloads/actions.ts), including a library move row's Cancel
+  // and Retry, which are the move's own commands (9b).
+  const track = {
+    clearError: (id: number) => {
+      const { [id]: _dropped, ...rest } = errors;
+      errors = rest;
+    },
+    setError: (id: number, message: string) => {
+      errors = { ...errors, [id]: message };
+    },
+    setPending: (id: number, on: boolean) => {
+      if (on) {
+        pending = { ...pending, [id]: true };
+      } else {
+        const { [id]: _cleared, ...remaining } = pending;
+        pending = remaining;
+      }
+    },
+  };
 
-  async function runAction(id: number, action: () => Promise<void>) {
-    const { [id]: _dropped, ...rest } = errors;
-    errors = rest;
-    pending = { ...pending, [id]: true };
-    try {
-      await action();
-    } catch (err) {
-      errors = { ...errors, [id]: errorMessage(err) };
-    } finally {
-      const { [id]: _cleared, ...remaining } = pending;
-      pending = remaining;
-    }
-  }
-
-  // The library move row's Cancel and Retry are the move's own commands
-  // (9b); a refusal comes back as an outcome and shows under the row.
-  // A failed row that was retried or undone makes way: the retry runs on a
-  // new row, and an undone move has nothing left to show.
-  async function cancelMove(e: DownloadEntry): Promise<void> {
-    const outcome = await api.libraryMoveCancel();
-    if (outcome.status === 'not_cancellable' || outcome.status === 'no_move') throw new Error(outcome.message);
-    if (outcome.status === 'cancelled' && e.status === 'failed') await api.dismissDownload(e.id);
-  }
-  async function resumeMove(e: DownloadEntry): Promise<void> {
-    const outcome = await api.libraryMoveResume();
-    if (outcome.status === 'refused') throw new Error(outcome.message);
-    if (e.status === 'failed') await api.dismissDownload(e.id);
-  }
-  const cancel = (e: DownloadEntry) =>
-    runAction(e.id, () => (e.kind === 'library_move' ? cancelMove(e) : api.cancelInstall(e.id)));
-  const retry = (e: DownloadEntry) =>
-    runAction(e.id, () => (e.kind === 'library_move' ? resumeMove(e) : api.retryInstall(e.id)));
-  const dismiss = (id: number) => runAction(id, () => api.dismissDownload(id));
+  const cancel = (e: DownloadEntry) => runRowAction(e.id, () => cancelEntry(e), track);
+  const retry = (e: DownloadEntry) => runRowAction(e.id, () => retryEntry(e), track);
+  const dismiss = (id: number) => runRowAction(id, () => dismissEntry(id), track);
 
   type Progress = { pct: number; indeterminate: boolean };
 

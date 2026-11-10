@@ -306,6 +306,30 @@ feature separately.
 Svelte 5 with runes. `main.ts` mounts `App.svelte`, which shows `Connect.svelte` until a
 session exists and `Shell.svelte` afterwards.
 
+- `lib/lifetime.svelte.ts` — `startShellLifetime()`: the listeners and loads that live as
+  long as a shell is on screen, whichever shell it is — the notification cards
+  (`notifications/notifier.ts`), the emulator notices (`systems/events.ts`), the
+  `cloud-upload-finished` / `cloud-restore-notice` cards, the installed-registry load and
+  the background-art seed. `App.svelte` starts it while the phase is `shell` and the
+  unreachable-library dialog is not blocking, so each event shows one card.
+- `lib/stores/navigation.svelte.ts` — mode-agnostic navigation intents: `navigation.go(view)`,
+  `goSettings(page, { system })`, `openDetails(subject)`. The mounted shell registers the
+  handler (`registerNavigation`); code that is not a view (the setup card's Open
+  Downloads, a card's action) navigates through it instead of holding the shell.
+- Shared game logic, called by the views and by any second UI:
+  `lib/games/quick.ts` (pure: the quick action and its label for a game in its context —
+  Play, Install, Install from drive, Locate…, Queued, Installing… or none — and which main
+  button group Details shows) and `lib/games/run.ts` (effectful: play, install from the
+  server or a drive, cancel, update, install content, uninstall, remove from library,
+  locate, link, stop; each sends its cards and refreshes the registry, and answers an
+  outcome — `ok`, `needs-umu`, `needs-library-folder` or `refused` — for the screen to
+  show its own prompt). `lib/server/catalog.svelte.ts` (`Catalog`, one per Server screen:
+  platforms, the selected platform's games, launch defaults, firmware status, the library
+  folder check, and the events that refresh them). `lib/discover/feedStore.svelte.ts` (the
+  last Discover feed per server, kept for the app's life, and the per-platform Recently
+  added lists). `lib/downloads/actions.ts` (a Downloads row's Cancel, Retry and Dismiss,
+  including a library move's own commands).
+
 - `lib/api.ts` — the single `invoke` boundary. Every command wrapper and every payload
   type lives here, and the type field names mirror the Rust structs' serde output
   exactly, with no cosmetic renames.
@@ -322,8 +346,8 @@ session exists and `Shell.svelte` afterwards.
   with `Coverflow`, `RecentlyAdded`, `Shot` and `GameLogo`; the pure halves are
   `feed.ts` — action label, dates, coverflow geometry, the picture and logo colours —
   `rotation.ts`, Recently added's pausable 10 s timer, and `filters.ts`, its platform
-  filter pills). Server still owns Details
-  and the install/launch flow; Discover calls back into it. `shell.ts` holds the view list (its order is the
+  filter pills; its data is `feedStore.svelte.ts`). Server still owns Details and the
+  install/launch prompts (through `games/run.ts`); Discover calls back into it. `shell.ts` holds the view list (its order is the
   `Ctrl+1`..`Ctrl+4` accelerators) and the session-phase mapping. Emulators live in
   Settings › Systems; `Shell.svelte` routes the Server header's chips there with
   `Settings.show('systems', { system })`.
@@ -359,14 +383,14 @@ session exists and `Shell.svelte` afterwards.
   firmware, notes, form, compat tools, the install signal) and `EmulatorForm.svelte` as
   its add/edit settings sheet. `stores/emulatorUpdates.svelte.ts` caches the
   once-per-session emulator update check. `systems/events.ts` holds the app-lifetime
-  notice for a RetroArch pick with no core; `Shell.svelte` registers it once.
+  notice for a RetroArch pick with no core; `lifetime.svelte.ts` registers it once.
 - Notifications — `lib/notifications/`: `notices.ts` (pure) diffs successive downloads
   snapshots into queued/installed/failed/cancelled events, words every download,
   install and launch card, and coalesces a burst into one summary card;
   `notifier.ts` wires it to the `downloads` and `sessions` stores (`onSnapshot`,
   `onSessionsSnapshot`), the `emulator-installed` event, and the launch and install
   calls (`launchGame`, `installGame`), and holds the per-entry wording hints
-  (`expectQueued`). `Shell.svelte` registers it once, so each event shows one card
+  (`expectQueued`). `lifetime.svelte.ts` registers it once, so each event shows one card
   whichever views are mounted.
 - `lib/icons.ts` — hand-authored 24×24 icon paths. The old app's `assets/svg/` files are
   deliberately not reused.

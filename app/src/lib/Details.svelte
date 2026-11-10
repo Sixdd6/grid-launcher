@@ -21,7 +21,6 @@
   import Image from './Image.svelte';
   import NativeSettings from './details/NativeSettings.svelte';
   import UmuInstallOffer from './UmuInstallOffer.svelte';
-  import { isUmuMissing } from './launchError';
   import OverviewTab from './details/OverviewTab.svelte';
   import MediaTab from './details/MediaTab.svelte';
   import MediaViewer from './details/MediaViewer.svelte';
@@ -32,11 +31,7 @@
   import { keptFolder, showsUnlinkedActions } from './details/unlinked';
   import { missingActions } from './library/missing';
   import { pickFolder } from './pickers';
-  import { pushToast } from './stores/toasts.svelte';
-  import { installGame, launchGame, notify } from './notifications/notifier';
-  import { needsLibraryFolder } from './library/installRefusal';
-  import { removedFromLibraryNotice, uninstalledNotice } from './notifications/notices';
-  import { SKIPPED_TOAST_MS, skippedRemovalText } from './uninstallSkips';
+  import * as run from './games/run';
   import { fullIndex, galleryItems, viewableIndex, viewableItems } from './details/media';
   import {
     detailApplies,
@@ -47,7 +42,7 @@
     versionSource,
     type DetailsSubject,
   } from './details/subject';
-  import { installFromDrive, removeFromDrive } from './backups/install';
+  import { removeFromDrive } from './backups/install';
   import { syntheticCloudGame, type CloudMode } from './details/cloud';
   import {
     backupAction,
@@ -335,13 +330,19 @@
   let showLinkPicker = $state(false);
   let showRemoveConfirm = $state(false);
 
+  /** Runs a game action whose refusal the caller shows from a thrown error
+   *  (the Link picker and the Remove confirm show it inside themselves). */
+  async function orThrow(outcome: Promise<run.RunOutcome>): Promise<void> {
+    const done = await outcome;
+    if (done.kind !== 'ok') throw new Error(done.reason);
+  }
+
   async function linkTo(rom: GameSummary) {
     if (unlinkedRow === null) return;
-    await api.linkInstalledRow(unlinkedRow.title, unlinkedRow.platform, rom.id);
-    showLinkPicker = false;
     // The opener sees the row gain its rom id in the refreshed list and
     // re-opens Details on it (Library.svelte).
-    await refreshInstalled();
+    await orThrow(run.linkGame(unlinkedRow.title, unlinkedRow.platform, rom.id));
+    showLinkPicker = false;
   }
 
   // 9c: the row's files are not on disk (the backend's reconcile pass sets
@@ -359,15 +360,10 @@
     if (installedRow === null || folder.trim() === '') return;
     locateError = null;
     locatePending = true;
-    try {
-      await api.locateInstalledRow(installedRow.title, installedRow.platform, folder.trim());
-      locatePath = '';
-      await refreshInstalled();
-    } catch (err) {
-      locateError = errorMessage(err);
-    } finally {
-      locatePending = false;
-    }
+    const outcome = await run.locateGame(installedRow.title, installedRow.platform, folder);
+    if (outcome.kind === 'ok') locatePath = '';
+    else locateError = outcome.reason;
+    locatePending = false;
   }
 
   async function locateWithPicker() {
@@ -377,10 +373,8 @@
 
   async function removeFromLibrary() {
     if (removeTarget === null) return;
-    await api.removeFromLibrary(removeTarget.title, removeTarget.platform);
-    notify(removedFromLibraryNotice(removeTarget.title));
+    await orThrow(run.removeFromLibrary(removeTarget.title, removeTarget.platform));
     showRemoveConfirm = false;
-    await refreshInstalled();
     onClose();
   }
   // `''` from `launchTargetLine` means "no launch target to state" — today
@@ -454,15 +448,10 @@
     if (subject.romId === null) return;
     error = null;
     pendingAction = 'install';
-    try {
-      // The queued card and a refusal's error card are the notifier's.
-      await installGame(subject.romId, subject.name);
-    } catch (err) {
-      const message = errorMessage(err);
-      if (needsLibraryFolder(message)) onLibraryPathUnset();
-    } finally {
-      pendingAction = null;
-    }
+    // The queued card and a refusal's error card are games/run.ts's.
+    const outcome = await run.installServerGame(subject.romId, subject.name);
+    if (outcome.kind === 'needs-library-folder') onLibraryPathUnset();
+    pendingAction = null;
   }
 
   async function handleUninstallClick() {
@@ -473,18 +462,15 @@
     }
     error = null;
     pendingAction = 'uninstall';
-    try {
-      const report = await api.uninstallGame(subject.romId);
-      notify(uninstalledNotice(subject.name));
-      pushToast(skippedRemovalText(report?.skipped), 'error', SKIPPED_TOAST_MS);
-      await refreshInstalled();
+    // The uninstalled card, the kept-folders card and the refresh are games/run.ts's.
+    const outcome = await run.uninstallGame(subject.romId, subject.name);
+    if (outcome.kind === 'ok') {
       onClose();
-    } catch (err) {
-      error = errorMessage(err);
+    } else {
+      error = outcome.reason;
       confirmingUninstall = false;
-    } finally {
-      pendingAction = null;
     }
+    pendingAction = null;
   }
 
   // Two-click confirm for native installs only (doc 10).
@@ -496,70 +482,52 @@
     }
     error = null;
     updatePending = true;
-    try {
-      await api.updateGame(subject.romId);
-    } catch (err) {
-      error = errorMessage(err);
-    } finally {
-      updatePending = false;
-      confirmingUpdate = false;
-    }
+    const outcome = await run.updateGame(subject.romId);
+    if (outcome.kind !== 'ok') error = outcome.reason;
+    updatePending = false;
+    confirmingUpdate = false;
   }
 
   async function handleCancel() {
     if (subject.romId === null) return;
     error = null;
     cancelPending = true;
-    try {
-      await api.cancelDownloadForRom(subject.romId);
-    } catch (err) {
-      error = errorMessage(err);
-    } finally {
-      cancelPending = false;
-    }
+    const outcome = await run.cancelInstall(subject.romId);
+    if (outcome.kind !== 'ok') error = outcome.reason;
+    cancelPending = false;
   }
 
   async function handleInstallContent(kind: ContentKind) {
     if (subject.romId === null) return;
     error = null;
     contentActionKind = kind;
-    try {
-      await api.installContent(subject.romId, kind);
-    } catch (err) {
-      error = errorMessage(err);
-    } finally {
-      contentActionKind = null;
-    }
+    const outcome = await run.installContent(subject.romId, kind);
+    if (outcome.kind !== 'ok') error = outcome.reason;
+    contentActionKind = null;
   }
 
   async function handlePlay() {
     if (subject.romId === null) return;
     error = null;
     pendingAction = 'play';
-    try {
-      // "Launching <title>…" and a refusal are cards (notifier). The reason
-      // also shows here only beside the umu-launcher install it needs.
-      await launchGame(subject.romId, subject.name);
-    } catch (err) {
-      const missing = isUmuMissing(err);
-      error = missing ? errorMessage(err) : null;
+    // "Launching <title>…" and a refusal are cards (games/run.ts). The
+    // reason also shows here only beside the umu-launcher install it needs.
+    const outcome = await run.playInstalled(subject.romId, subject.name);
+    if (outcome.kind !== 'ok') {
+      const missing = outcome.kind === 'needs-umu';
+      error = missing ? outcome.reason : null;
       umuOfferFor = missing ? error : null;
-    } finally {
-      pendingAction = null;
     }
+    pendingAction = null;
   }
 
   async function handleStop() {
     if (!liveSession) return;
     error = null;
     pendingAction = 'stop';
-    try {
-      await api.stopGame(liveSession.id);
-    } catch (err) {
-      error = errorMessage(err);
-    } finally {
-      pendingAction = null;
-    }
+    const outcome = await run.stopGame(liveSession.id);
+    if (outcome.kind !== 'ok') error = outcome.reason;
+    pendingAction = null;
   }
 
   function onKey(e: KeyboardEvent) {
@@ -600,7 +568,7 @@
     error = null;
     pendingAction = 'install';
     try {
-      await installFromDrive(from.key, { rom_id: subject.romId, name: subject.name, server: from.server });
+      await run.installFromDrive(from.key, { rom_id: subject.romId, name: subject.name, server: from.server });
     } finally {
       pendingAction = null;
     }

@@ -1,20 +1,11 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import {
-    api,
-    EMULATOR_INSTALLED_EVENT,
-    FIRMWARE_PASS_FINISHED_EVENT,
-    SETUP_DEFAULTS_EVENT,
-    type FirmwarePassFinished,
-    type GameSummary,
-    type Platform,
-  } from './api';
-  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import type { GameSummary } from './api';
   import Details from './Details.svelte';
   import UmuInstallOffer from './UmuInstallOffer.svelte';
-  import { isUmuMissing } from './launchError';
-  import { installGame, launchGame } from './notifications/notifier';
-  import { needsLibraryFolder } from './library/installRefusal';
+  import { quickAction } from './games/quick';
+  import { installServerGame, playInstalled } from './games/run';
+  import { Catalog } from './server/catalog.svelte';
   import GameCard from './GameCard.svelte';
   import Icon from './Icon.svelte';
   import { coverPair } from './cards/cover';
@@ -36,7 +27,6 @@
   import { attachScrollGate, createVisibleWarmer, scrollParent } from './visibleWarm';
   import { noteViewed } from './stores/lastViewed.svelte';
   import { inputMode, noteDirectional } from './stores/inputMode.svelte';
-  import { cloudPlatformSet } from './cards/badges';
   import { CARD_SIZES, cardSizeLabel, type CardSize } from './cards/size';
   import { setCardSize, uiSettings } from './stores/uiSettings.svelte';
   import { filterServerGames } from './server/search';
@@ -45,8 +35,6 @@
     firmwareChipLabel,
     firmwareChipLinks,
     platformCountsLine,
-    showsChips,
-    type FirmwareChipState,
   } from './server/header';
   import { platformLabel } from './server/platformLabel';
   import { savedDefaultFor } from './emulators/defaults';
@@ -77,12 +65,13 @@
     onOpenSystems?: (system: string) => void;
   } = $props();
 
-  let platforms = $state<Platform[]>([]);
-  // `$state.raw`: a platform can hold thousands of games and the list is only
-  // ever replaced whole, so a deep proxy over every game (and its screenshot
-  // and genre arrays) cost time on load and on every read for nothing.
-  let games = $state.raw<GameSummary[]>([]);
-  let activePlatform = $state<number | null>(null);
+  // The platforms, the selected platform's games, the launch defaults and
+  // the firmware status (server/catalog.svelte.ts). One per mount, so a
+  // reconnect that remounts this view starts on fresh data.
+  const catalog = new Catalog();
+  let platforms = $derived(catalog.platforms);
+  let games = $derived(catalog.games);
+  let activePlatform = $derived(catalog.activePlatform);
   // Server › Discover is the first rail row and the default view; a
   // platform row turns it off, the Discover row back on.
   let discover = $state(true);
@@ -101,27 +90,27 @@
   // The action error that offers the umu-launcher install (a Proton launch
   // with no umu-run); `null` for any other.
   let umuOfferFor = $state<string | null>(null);
-  let cloudPlatforms = $state<ReadonlySet<string>>(new Set<string>());
+  let cloudPlatforms = $derived(catalog.cloudPlatforms);
   // Platform name -> default emulator name, for the header's emulator chip.
-  let defaultEmulators = $state<Record<string, string>>({});
-  let firmware = $state<FirmwareChipState>(null);
+  let defaultEmulators = $derived(catalog.defaultEmulators);
+  let firmware = $derived(catalog.firmware);
   // The firmware chip is a link (to the platform's row in Settings ›
   // Systems, where firmware installs) only when the server has firmware.
   let firmwareLinks = $derived(firmwareChipLinks(firmware));
   // The game list belongs to the previous platform until `listGames`
   // answers. The counts line and the empty message would both state
   // something false about the new platform in that gap, so neither renders.
-  let gamesLoading = $state(false);
+  let gamesLoading = $derived(catalog.gamesLoading);
   // The header's own error line: a refused Install. Never a path or a token —
   // the backend's command errors carry neither, and nothing is appended.
 
   let libraryPathInput = $state('');
-  let showLibraryBanner = $state(false);
+  let showLibraryBanner = $derived(catalog.libraryPathUnset);
   let libraryPathSaving = $state(false);
   let libraryPathError = $state<string | null>(null);
 
-  let activePlatformRow = $derived(platforms.find((p) => p.id === activePlatform) ?? null);
-  let activePlatformName = $derived(activePlatformRow ? platformLabel(activePlatformRow) : '');
+  let activePlatformRow = $derived(catalog.activePlatformRow);
+  let activePlatformName = $derived(catalog.activePlatformName);
   let visible = $derived(filterServerGames(games, search));
   // Select mode (GameBackups README): Select in the toolbar turns it on, a
   // click on a cover picks it, and the selection bar backs the picks up.
@@ -138,7 +127,7 @@
   let defaultEmulator = $derived(savedDefaultFor(defaultEmulators, activePlatformName));
   // Native and Windows platforms, and the Emulators shelf, show neither the
   // emulator nor the firmware chip, and their firmware is never asked about.
-  let chipsShown = $derived(showsChips(activePlatformName, activePlatformRow?.slug ?? ''));
+  let chipsShown = $derived(catalog.chipsShown);
 
   // Design §5: the Server rail is the shared `RailPane`. The row keeps the
   // `platform-btn-<id>` id the specs already use and carries the §11
@@ -168,45 +157,24 @@
   /** The label a game's platform shows, which is also the name the
    *  installed registry and the defaults know it by. Discover lists games of
    *  every platform, so it cannot use the active one. */
-  function platformOf(game: GameSummary): Platform | null {
-    return platforms.find((p) => p.id === game.platform_id) ?? null;
-  }
-
-  function labelFor(game: GameSummary): string {
-    const row = platformOf(game);
-    return row ? platformLabel(row) : game.platform_display_name;
-  }
+  const platformOf = (game: GameSummary) => catalog.platformOf(game);
+  const labelFor = (game: GameSummary) => catalog.labelFor(game);
 
   $effect(() => {
     if (!session.connected) return; // re-runs on reconnect: session.connected is read above
     // No platform is selected for the user: Server opens on Discover.
-    api.listPlatforms().then((p) => {
-      platforms = p;
-    });
+    catalog.loadPlatforms();
     refreshInstalled();
-    checkLibraryPath();
-    loadLaunchDefaults();
+    catalog.checkLibraryPath();
+    catalog.loadLaunchDefaults();
   });
 
   // The emulator chip sends the user to Settings › Systems to change the very
   // mapping it displays, so re-read the defaults every time this view comes
   // back to the front. The cloud badges derive from the same call.
   $effect(() => {
-    if (active && session.connected) loadLaunchDefaults();
+    if (active && session.connected) catalog.loadLaunchDefaults();
   });
-
-  function loadLaunchDefaults() {
-    api
-      .getLaunchDefaults()
-      .then((defaults) => {
-        cloudPlatforms = cloudPlatformSet(defaults.default_emulators);
-        defaultEmulators = defaults.default_emulators;
-      })
-      .catch(() => {
-        // No defaults readable: no cloud badges and a "No default emulator"
-        // chip. Both are honest fallbacks, neither is worth an error line.
-      });
-  }
 
   $effect(() => {
     if (focusIndex > visible.length - 1) focusIndex = Math.max(0, visible.length - 1);
@@ -219,69 +187,19 @@
   $effect(() => {
     const id = activePlatform;
     const name = activePlatformName;
-    firmware = null;
+    catalog.firmware = null;
     if (discover || id === null || name === '' || !chipsShown) return;
     void session.connected; // re-runs on reconnect
-    refreshFirmwareStatus(id, name);
+    catalog.refreshFirmwareStatus(id, name);
   });
 
-  /** One status read, with the staleness guard both callers need. */
-  function refreshFirmwareStatus(id: number, name: string) {
-    api
-      .platformFirmwareStatus(id, name)
-      .then((status) => {
-        if (activePlatform === id) firmware = status;
-      })
-      .catch(() => {
-        // Unreachable or refused. Say so: "checking…" forever would claim a
-        // call is still in flight when none is, and reporting "no firmware"
-        // would claim an answer we never got.
-        if (activePlatform === id) firmware = 'unavailable';
-      });
-  }
-
-  // A firmware install started from Settings › Systems announces its end; the chip
-  // re-reads the platform on screen.
-  $effect(() => {
-    let unlisten: UnlistenFn | null = null;
-    let stopped = false;
-    listen<FirmwarePassFinished>(FIRMWARE_PASS_FINISHED_EVENT, (e) => {
-      if (e.payload.platform_id === activePlatform && activePlatformName !== '' && chipsShown) {
-        refreshFirmwareStatus(activePlatform, activePlatformName);
-      }
-    }).then((un) => {
-      if (stopped) un();
-      else unlisten = un;
-    });
-    return () => {
-      stopped = true;
-      unlisten?.();
-    };
-  });
-
-  // Defaults also change while this view is in front: an emulator install
-  // assigns them automatically, and first-run setup applies the ones the user
-  // chose just after (`setup-defaults`). Without these the header's emulator
-  // chip read "No default emulator" until the view was left and re-entered.
-  $effect(() => {
-    const offs = [
-      listen(EMULATOR_INSTALLED_EVENT, () => loadLaunchDefaults()),
-      listen(SETUP_DEFAULTS_EVENT, () => loadLaunchDefaults()),
-    ];
-    return () => {
-      for (const off of offs) off.then((un) => un());
-    };
-  });
-
-  async function checkLibraryPath() {
-    try {
-      const path = await api.getLibraryPath();
-      showLibraryBanner = path.trim() === '';
-    } catch {
-      // Unreadable config: leave the banner as-is rather than nag with a
-      // guess — install errors will surface the real problem if there is one.
-    }
-  }
+  // While this view is mounted: a firmware install started from Settings ›
+  // Systems announces its end and the chip re-reads the platform on screen;
+  // an emulator install or first-run setup's defaults (`setup-defaults`)
+  // change the defaults while this view is in front. Without the latter the
+  // header's emulator chip read "No default emulator" until the view was
+  // left and re-entered.
+  $effect(() => catalog.watch());
 
   function showDiscover() {
     discover = true;
@@ -330,25 +248,10 @@
   async function selectPlatform(id: number) {
     if (id !== activePlatform) leaveSelectMode();
     discover = false;
-    activePlatform = id;
     search = '';
     // The header renders the new platform's name at once; `games` still
-    // holds the old platform's rows until the call below answers.
-    gamesLoading = true;
-    let g: GameSummary[];
-    try {
-      g = await api.listGames(id);
-    } catch {
-      if (activePlatform === id) {
-        games = [];
-        gamesLoading = false;
-      }
-      return;
-    }
-    if (activePlatform !== id) return; // superseded by a newer selection
-    games = g;
-    gamesLoading = false;
-    focusIndex = 0;
+    // holds the old platform's rows until the catalog's call answers.
+    if (await catalog.selectPlatform(id)) focusIndex = 0;
   }
 
   function openDetails(game: GameSummary, mode: CloudMode = 'overview') {
@@ -366,18 +269,16 @@
    *  installed. Both report their failure inline rather than silently. */
   async function primary(game: GameSummary) {
     actionError = null;
-    try {
-      // Launching, queued and a refusal are all cards (notifier); the
-      // reason also shows inline only beside the umu-launcher install.
-      if (isInstalled(game, labelFor(game))) await launchGame(game.id, game.name);
-      else await installGame(game.id, game.name);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const missing = isUmuMissing(err);
-      actionError = missing ? message : null;
-      umuOfferFor = missing ? message : null;
-      if (needsLibraryFolder(message)) showLibraryBanner = true;
-    }
+    // Launching, queued and a refusal are all cards (games/run.ts); the
+    // reason also shows inline only beside the umu-launcher install.
+    const quick = quickAction({ installed: isInstalled(game, labelFor(game)), romId: game.id });
+    const outcome =
+      quick.kind === 'play' ? await playInstalled(game.id, game.name) : await installServerGame(game.id, game.name);
+    if (outcome.kind === 'ok') return;
+    const missing = outcome.kind === 'needs-umu';
+    actionError = missing ? outcome.reason : null;
+    umuOfferFor = missing ? outcome.reason : null;
+    if (outcome.kind === 'needs-library-folder') catalog.libraryPathUnset = true;
   }
 
   // Design §3: a card becomes the background only after the pointer has
@@ -574,8 +475,7 @@
     libraryPathError = null;
     libraryPathSaving = true;
     try {
-      await api.setLibraryPath(libraryPathInput.trim());
-      showLibraryBanner = false;
+      await catalog.saveLibraryPath(libraryPathInput);
     } catch (err) {
       libraryPathError = err instanceof Error ? err.message : String(err);
     } finally {
@@ -824,7 +724,7 @@
       subject={fromSummary(detailsGame, labelFor(detailsGame), platformOf(detailsGame)?.slug ?? '')}
       initialCloudMode={detailsCloudMode}
       onClose={closeDetails}
-      onLibraryPathUnset={() => { showLibraryBanner = true; }}
+      onLibraryPathUnset={() => { catalog.libraryPathUnset = true; }}
     />
   {/key}
 {/if}
