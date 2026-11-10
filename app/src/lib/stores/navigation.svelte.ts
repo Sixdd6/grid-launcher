@@ -16,6 +16,9 @@ export type NavigationHandler = {
   /** Opens Details for a game. Optional: the desktop shell has no
    *  shell-level Details (Server and Library each own theirs). */
   openDetails?: (subject: DetailsSubject) => void;
+  /** Opens a system's page (TV mode's "Set up <Platform>"). Optional: the
+   *  desktop's cards offer no action. */
+  openSystem?: (platform: string) => void;
 };
 
 let handler: NavigationHandler | null = null;
@@ -42,5 +45,8 @@ export const navigation = {
   },
   openDetails(subject: DetailsSubject): void {
     handler?.openDetails?.(subject);
+  },
+  openSystem(platform: string): void {
+    handler?.openSystem?.(platform);
   },
 };

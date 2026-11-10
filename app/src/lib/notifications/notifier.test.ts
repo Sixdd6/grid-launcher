@@ -199,4 +199,22 @@ describe('initNotifications', () => {
     expect(texts().at(-1)).toBe('Zelda — Process exited immediately (code 3).');
     stop();
   });
+
+  it("a launch with no emulator offers the system's page when the platform is known (TV item 318)", async () => {
+    const { notifier, stop } = await start();
+    const { onToastPushed } = await import('../stores/toasts.svelte');
+    const pushed: { text: string; action?: { label: string } }[] = [];
+    const off = onToastPushed((t) => pushed.push(t));
+    launch = async () => {
+      throw { code: '', message: 'No emulator is configured. Add one in Settings › Systems.' };
+    };
+    await expect(notifier.launchGame(1, 'Zelda', 'Nintendo 64')).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(pushed.at(-1)?.action?.label).toBe('Set up Nintendo 64');
+    await expect(notifier.launchGame(1, 'Zelda')).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(pushed.at(-1)?.action).toBeUndefined();
+    off();
+    stop();
+  });
 });

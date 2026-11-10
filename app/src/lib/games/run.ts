@@ -47,9 +47,11 @@ async function attempt(step: () => Promise<unknown>): Promise<RunOutcome> {
   }
 }
 
-/** Launches an installed game. "Launching <title>…" and a refusal are cards. */
-export function playInstalled(romId: number, title: string): Promise<RunOutcome> {
-  return attempt(() => launchGame(romId, title));
+/** Launches an installed game. "Launching <title>…" and a refusal are cards;
+ *  with `platform`, a refusal for want of an emulator offers that system's
+ *  page on the card (TV mode). */
+export function playInstalled(romId: number, title: string, platform?: string): Promise<RunOutcome> {
+  return attempt(() => launchGame(romId, title, platform));
 }
 
 /** Queues a server game's install. The queued card comes from the downloads

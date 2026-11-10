@@ -36,3 +36,18 @@ export function toLaunchFailure(err: unknown): LaunchFailure {
 export function isUmuMissing(err: unknown): boolean {
   return toLaunchFailure(err).code === UMU_MISSING;
 }
+
+/**
+ * Whether a launch refusal means the game's system has no usable emulator
+ * (grid-core `prepare_emulator_launch`: none configured, the default one
+ * gone, or one with no program), so TV mode's card can offer that system's
+ * page ("Set up <Platform>", checklist item 318).
+ */
+export function needsEmulatorSetup(message: string): boolean {
+  const m = message.trim();
+  return (
+    m.startsWith('No emulator is configured') ||
+    /^Default emulator '.*' was not found\.?$/s.test(m) ||
+    /^Emulator '.*' has no executable path configured\.?$/s.test(m)
+  );
+}

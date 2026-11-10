@@ -14,7 +14,7 @@ import {
   type PackOs,
 } from '../api';
 import { BackupBatches, osChangeHint } from '../backups/notices';
-import { toLaunchFailure } from '../launchError';
+import { needsEmulatorSetup, toLaunchFailure } from '../launchError';
 import { markCurrent } from '../stores/emulatorUpdates.svelte';
 import { downloads, hasSnapshot, onSnapshot } from '../stores/downloads.svelte';
 import { onSessionsSnapshot } from '../stores/sessions.svelte';
@@ -39,6 +39,10 @@ import {
 /** What a card's action does. Only TV mode's cards show it (View runs it). */
 function toastAction(action: NoticeAction | undefined): ToastAction | undefined {
   if (action === 'downloads') return { label: 'Open Downloads', run: () => navigation.go('downloads') };
+  if (action) {
+    const system = action.system;
+    return { label: `Set up ${system}`, run: () => navigation.openSystem(system) };
+  }
   return undefined;
 }
 
@@ -116,13 +120,14 @@ export function expectOsChangeBatch(outcome: OsChangeOutcome, added: readonly Pa
  * Rethrows the failure (as a `LaunchFailure`) so the caller can still offer
  * the umu-launcher install beside the button.
  */
-export async function launchGame(romId: number, title: string): Promise<void> {
+export async function launchGame(romId: number, title: string, platform?: string): Promise<void> {
   notify(launchingNotice(title));
   try {
     await api.launchGame(romId);
   } catch (err) {
     const failure = toLaunchFailure(err);
-    notify(launchFailedNotice(title, failure.message));
+    const setUp = platform && needsEmulatorSetup(failure.message) ? platform : undefined;
+    notify(launchFailedNotice(title, failure.message, setUp));
     throw failure;
   }
 }

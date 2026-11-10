@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isUmuMissing, LaunchFailure, toLaunchFailure, UMU_MISSING } from './launchError';
+import { isUmuMissing, LaunchFailure, needsEmulatorSetup, toLaunchFailure, UMU_MISSING } from './launchError';
 
 describe('toLaunchFailure', () => {
   it('reads the structured launch_game error', () => {
@@ -37,5 +37,19 @@ describe('isUmuMissing', () => {
     expect(isUmuMissing(new LaunchFailure('x'))).toBe(false);
     expect(isUmuMissing('umu_missing')).toBe(false);
     expect(isUmuMissing(new Error('umu_missing'))).toBe(false);
+  });
+});
+
+describe('needsEmulatorSetup (TV item 318)', () => {
+  it('is true for a system with no usable emulator', () => {
+    expect(needsEmulatorSetup('No emulator is configured. Add one in Settings › Systems.')).toBe(true);
+    expect(needsEmulatorSetup("Default emulator 'Snes9x' was not found.")).toBe(true);
+    expect(needsEmulatorSetup("Emulator 'Snes9x' has no executable path configured.")).toBe(true);
+  });
+
+  it('is false for any other refusal', () => {
+    expect(needsEmulatorSetup('Emulator executable not found:\n/x')).toBe(false);
+    expect(needsEmulatorSetup('This game is already running.')).toBe(false);
+    expect(needsEmulatorSetup('')).toBe(false);
   });
 });

@@ -44,7 +44,10 @@ export type NoticeGroup =
  * desktop's cards show no action; TV mode's View runs it (checklist items
  * 144, 148–149).
  */
-export type NoticeAction = 'downloads';
+export type NoticeAction =
+  | 'downloads'
+  /** "Set up <Platform>": that system's page (a launch with no emulator). */
+  | { system: string };
 
 export type Notice = { group: NoticeGroup; text: string; level: ToastLevel; action?: NoticeAction };
 
@@ -216,8 +219,12 @@ export function launchingNotice(title: string): Notice {
   return { group: 'launch', text: `Launching ${title}…`, level: 'success' };
 }
 
-export function launchFailedNotice(title: string, reason: string): Notice {
-  return { group: 'launch-failed', text: withReason(`Couldn't launch ${title}`, reason), level: 'error' };
+export function launchFailedNotice(title: string, reason: string, setUp?: string): Notice {
+  const n: Notice = { group: 'launch-failed', text: withReason(`Couldn't launch ${title}`, reason), level: 'error' };
+  // TV mode's card offers the system's page ("Set up <Platform>",
+  // checklist item 318); the desktop's card shows no action.
+  if (setUp) n.action = { system: setUp };
+  return n;
 }
 
 /** A refused Install: nothing was queued. */
