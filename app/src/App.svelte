@@ -24,8 +24,24 @@
   import ThemeToggle from './lib/ThemeToggle.svelte';
   import { startShellLifetime } from './lib/lifetime.svelte';
   import { navigation } from './lib/stores/navigation.svelte';
+  import { initUiMode, uiMode } from './lib/stores/uiMode.svelte';
+  import TvShell from './lib/tv/TvShell.svelte';
 
   let restored = false; // restore() must fire once on mount, not on every phase change
+
+  // Which interface is on screen (TV mode plan § 1.1): `--tv` has already
+  // put Rust in TV mode by now, so ask before mounting either shell.
+  $effect(() => {
+    initUiMode();
+  });
+
+  // TV mode's CSS is scoped to html[data-ui="tv"] (lib/tv/tv.css), set only
+  // while TvShell is mounted, so the desktop's layout is never touched.
+  $effect(() => {
+    const root = document.documentElement;
+    if (uiMode.mode === 'tv') root.dataset.ui = 'tv';
+    else delete root.dataset.ui;
+  });
 
   // Declared before the restore effect below, and reading no reactive state,
   // so it registers once and as early as possible: `restore_session` and
@@ -131,9 +147,17 @@
   });
 </script>
 
+<!-- One shell at a time (TV mode plan § 1.1): TV mode's TvShell (its own
+     startup screens included), or the desktop's screens below. Nothing
+     until `get_ui_mode` answers, so a `--tv` start never flashes the
+     desktop. -->
+{#if !uiMode.loaded}
+  <!-- waiting for get_ui_mode -->
+{:else if uiMode.mode === 'tv'}
+  <TvShell />
 <!-- 9b: GRID cannot run without a valid library. While the library folder
      cannot be reached, the blocking dialog replaces the whole app. -->
-{#if libraryUnreachable.blocking}
+{:else if libraryUnreachable.blocking}
   <LibraryUnreachableDialog />
 {:else if session.phase === 'setup'}
   <ChooseSystems
@@ -145,7 +169,7 @@
 {:else if session.phase === 'shell' && uiSettings.loaded}
   <!-- Waits for the stored settings: Open GRID on picks the shell's first
        view, once, when it mounts. -->
-  <Shell />
+  <Shell initialView={uiMode.desktopStart?.view} initialSettingsPage={uiMode.desktopStart?.settingsPage ?? undefined} />
 {:else if session.phase === 'none'}
   <Connect prefill={connectPrefill(session)} />
 {/if}
@@ -153,7 +177,7 @@
 <!-- The startup screens (Connect, first-run setup) carry the light / dark
      toggle in the window's top-right corner; the shell moves it into its
      top bar. -->
-{#if !libraryUnreachable.blocking && (session.phase === 'none' || session.phase === 'setup')}
+{#if uiMode.mode === 'desktop' && !libraryUnreachable.blocking && (session.phase === 'none' || session.phase === 'setup')}
   <ThemeToggle
     corner
     testId="theme-toggle-start"

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import Library from './Library.svelte';
   import Server from './Server.svelte';
   import Downloads from './Downloads.svelte';
@@ -25,6 +26,18 @@
   // Ctrl+<n> can be an editor chord) or a modal dialog owns the screen and
   // switching the view behind it would strand it.
   import { chordBlocked, chordContext } from './views/searchKeys';
+  import { enterTv, uiMode } from './stores/uiMode.svelte';
+
+  let {
+    initialView: forcedView = undefined,
+    initialSettingsPage = undefined,
+  }: {
+    /** The view to open on instead of the start rule: Switch to desktop
+     *  mode lands on the view TV mode was showing (TV mode item 523). */
+    initialView?: View;
+    /** With `initialView` 'settings': the page to show. */
+    initialSettingsPage?: SettingsPage;
+  } = $props();
 
   // Set once when the shell first mounts, by Settings › Appearance › Open
   // GRID on (TV mode README § Decided "Where GRID opens"; App.svelte mounts
@@ -33,7 +46,12 @@
   // offline mode opens Library on the first connected backup drive
   // (GameBackups README, "Use without a server"). Switching views afterward
   // is a user action — a pill, Ctrl+1..4, or `show()`.
-  const start = initialView(session.connected, session.offline, drives.firstLibraryDrive, uiSettings.openOn);
+  // Read once: the shell's first view is decided when it mounts.
+  const forced = untrack(() => forcedView);
+  const start =
+    forced !== undefined
+      ? { view: forced, drive: null }
+      : initialView(session.connected, session.offline, drives.firstLibraryDrive, uiSettings.openOn);
   let view = $state<View>(start.view);
   if (start.drive !== null) selectRail(driveRailKey(start.drive));
 
@@ -41,7 +59,7 @@
   // Offline, apply the drive half once it arrives, unless the user has moved
   // on (another view, or another Library row) by then.
   const startRail = librarySelection.key;
-  let driveStartSettled = start.drive !== null || !session.offline || session.connected;
+  let driveStartSettled = forced !== undefined || start.drive !== null || !session.offline || session.connected;
   $effect(() => {
     if (driveStartSettled || !drives.loaded) return;
     driveStartSettled = true;
@@ -56,6 +74,14 @@
   }
 
   let settings = $state<ReturnType<typeof Settings> | null>(null);
+
+  // Back from TV mode on Settings: the page its pane matches, once.
+  let settingsPageApplied = false;
+  $effect(() => {
+    if (settingsPageApplied || settings === null || initialSettingsPage === undefined) return;
+    settingsPageApplied = true;
+    settings.show(initialSettingsPage);
+  });
   let serverMenuOpen = $state(false);
   let sessionEl = $state<HTMLElement | null>(null);
 
@@ -159,6 +185,20 @@
         Update
       </button>
     {/if}
+    <!-- TV mode (TVMode README § Decided "Entering and leaving"): opens on
+         the tab matching this view. TODO(design): the button has no designed
+         look yet; it is a text button in the toggle's 28px box. -->
+    <button
+      type="button"
+      data-testid="tv-mode-button"
+      class="icon-btn tv-btn"
+      aria-label="TV mode"
+      title="TV mode"
+      disabled={uiMode.mode !== 'desktop'}
+      onclick={() => enterTv(view).catch(() => {})}
+    >
+      TV
+    </button>
     <!-- A failed save is not worth an error here: the theme is already
          applied, the same trade the Appearance select makes. -->
     <ThemeToggle resolved={uiSettings.resolved} onToggle={() => toggleTheme().catch(() => {})} />
@@ -388,6 +428,14 @@
 
   .chip:hover {
     border-color: var(--border);
+  }
+
+  .tv-btn {
+    color: var(--text-h);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
   }
 
   .update-badge {
