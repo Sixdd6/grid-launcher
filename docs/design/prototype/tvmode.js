@@ -721,6 +721,7 @@ function closeLayer() {
   var k = o.prev && o.prev.dataset.k, el = o.prev && document.body.contains(o.prev) ? o.prev : k && scope().querySelector('[data-k="' + k + '"]');
   if (el) setFocus(el, true); else restoreFocus(S.pages[S.pages.length - 1] || TABS[S.tab]);
   if (o.onClose) o.onClose();
+  if (S.dirty && !S.layers.length) { S.dirty = false; repaint(); }
 }
 function openSheet(o) {
   var items = o.items;
@@ -982,10 +983,16 @@ setInterval(function () {
   var a = DL.filter(function (d) { return d.st === 'active'; })[0]; if (!a) return;
   a.pct = Math.min(100, a.pct + 3 + Math.floor(Math.random() * 4));
   if (a.pct >= 100) { a.st = 'done'; a.line = a.kind === 'Update' ? 'Updated' : a.kind === 'Library' ? 'Moved' : 'Installed · 1.2 GB'; var g = byId(a.gid); if (g) { g.inst = 1; } toast(a.kind === 'Library' ? 'Library moved' : a.t + (a.kind === 'Update' ? ' updated' : ' installed')); advanceQueue(); }
-  if (S.layers.length) { paintTop(); return; }
-  if (S.tab === 'downloads' && !S.pages.length) repaint();
-  else if (S.pages.length && S.pages[S.pages.length - 1].id === a.gid) repaint();
-  else { paintTop(); document.querySelectorAll('.cv[data-id="' + a.gid + '"] .tag.q').forEach(function (t) { t.textContent = a.st === 'active' ? a.pct + '%' : ''; }); }
+  /* A finished install changes the game everywhere it shows (the progress tag goes,
+     the installed dot comes, the next queued game starts), so the screen redraws,
+     keeping focus and scroll; under an open overlay it redraws when that closes.
+     While it runs, only the percentage text changes. */
+  var finished = a.st === 'done';
+  if (S.layers.length) { paintTop(); if (finished) S.dirty = true; return; }
+  if (finished || (S.tab === 'downloads' && !S.pages.length) || (S.pages.length && S.pages[S.pages.length - 1].id === a.gid)) { repaint(); return; }
+  paintTop();
+  document.querySelectorAll('.cv[data-id="' + a.gid + '"] .tag.q').forEach(function (t) { t.textContent = a.pct + '%'; });
+  if (cur && +cur.dataset.hero === a.gid) hero(byId(a.gid));
 }, 900);
 setInterval(paintTop, 30000);
 
