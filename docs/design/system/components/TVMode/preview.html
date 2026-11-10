@@ -723,13 +723,13 @@ function srowAct(el) {
   else if (r.type === 'action') r.fn(el);
 }
 function srowAdj(el, d) { var r = rowOf(el); if (!r || r.type !== 'slider') return false; CFG[r.key] = Math.max(r.min, Math.min(r.max, CFG[r.key] + d * r.step)); if (r.key === 'fade') $('art').style.setProperty('--fade', CFG.fade / 100); repaintKeep(); return true; }
-function repaintKeep() { var k = cur && cur.dataset.k; if ($('pane') && S.tab === 'settings' && !S.pages.length) setPaint(); else if (S.pages.length) renderStage(); var el = k && scope().querySelector('[data-k="' + k + '"]'); if (el) setFocus(el, true); }
+function repaintKeep() { repaint(); }
 function applyTheme() { var t = CFG.theme === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : CFG.theme; document.documentElement.setAttribute('data-theme', t); }
 
 function systemsPane() {
-  var miss = SYS.filter(function (s) { return !s.emu; });
+  var miss = SYS.filter(function (s) { return !s.emu; }), todo = miss.filter(function (s) { return s.status !== 'Installing…'; });
   var sorted = miss.concat(SYS.filter(function (s) { return s.emu && !s.proton; })).concat(SYS.filter(function (s) { return s.proton; }));
-  return '<div class="pane-h"><h1>Systems</h1>' + (miss.length ? '<button class="btn pri" data-f data-k="sy-rec" data-a="installRec">Install recommended (' + miss.length + ')</button>' : '') + '<button class="btn" data-f data-k="sy-chk" data-a="checkUpd">Check for updates</button><button class="btn" data-f data-k="sy-add" data-a="addEmu">Add manually</button></div>' +
+  return '<div class="pane-h"><h1>Systems</h1>' + (todo.length ? '<button class="btn pri" data-f data-k="sy-rec" data-a="installRec">Install recommended (' + todo.length + ')</button>' : miss.length ? '<button class="btn pri" data-f data-k="sy-rec" disabled>Installing ' + miss.length + ' emulator' + (miss.length === 1 ? '' : 's') + '…</button>' : '') + '<button class="btn" data-f data-k="sy-chk" data-a="checkUpd">Check for updates</button><button class="btn" data-f data-k="sy-add" data-a="addEmu">Add manually</button></div>' +
     sorted.map(function (s) {
       var st = s.status === 'Ready' ? '<span class="st ok">Ready</span>' : '<span class="st warn">' + s.status + '</span>';
       var sub = s.emu ? s.emu + (s.core ? ' · ' + s.core : '') : 'Games for this system can\'t start yet. ' + s.rec + ' is recommended.';
@@ -1089,7 +1089,7 @@ var ACT = {
   },
   srow: srowAct,
   system: function (el) { push(systemPage(sysOf(el.dataset.id))); },
-  installRec: function () { SYS.filter(function (s) { return !s.emu; }).forEach(installEmu); },
+  installRec: function () { SYS.filter(function (s) { return !s.emu && s.status !== 'Installing…'; }).forEach(function (s) { installEmu(s); }); },
   installEmu: function (el) { installEmu(sysOf(el.dataset.id)); },
   pickEmu: function (el) { pickEmu(sysOf(el.dataset.id)); },
   checkUpd: function () { toast('Checking 5 emulators for updates…'); setTimeout(function () { toast('1 update available', { s: 'PCSX2 2.3.4' }); }, 1200); },
@@ -1176,7 +1176,19 @@ function render() {
   if (S.tab === 'home' && !S.pages.length && cur && !cur.dataset.hero) hero(byId(1));
   paintHints();
 }
-function repaint() { var k = cur && cur.dataset.k; renderStage(); var el = k && scope().querySelector('[data-k="' + k + '"]'); if (el) setFocus(el, true); else if (!S.layers.length) restoreFocus(); paintHints(); }
+/* Redraw after a change without moving the player. In Settings only the pane is
+   redrawn, never the rail. Focus stays on the same control; if that control is
+   gone (Install recommended once nothing is missing), it moves to the control now
+   at the same place in the same panel, never back to the rail or the top. */
+function repaint() {
+  if (S.layers.length) { if ($('pane') && S.tab === 'settings' && !S.pages.length) setPaint(); else renderStage(); paintHints(); return; }
+  var k = cur && document.body.contains(cur) && cur.dataset.k, box = cur && cur.closest('[id]'), bid = box && box.id, idx = box ? focusables(box).indexOf(cur) : -1;
+  if ($('pane') && S.tab === 'settings' && !S.pages.length) setPaint(); else renderStage();
+  var el = k && scope().querySelector('[data-k="' + k + '"]');
+  if (!el && bid && $(bid)) { var L = focusables($(bid)).filter(function (e) { return !e.disabled; }); el = L[Math.max(0, Math.min(idx, L.length - 1))]; }
+  if (el) setFocus(el, true); else restoreFocus();
+  paintHints();
+}
 function advanceQueue() { if (!DL.some(function (d) { return d.st === 'active'; })) { var q = DL.filter(function (d) { return d.st === 'queued'; })[0]; if (q) q.st = 'active'; } }
 setInterval(function () {
   var a = DL.filter(function (d) { return d.st === 'active'; })[0]; if (!a) return;
