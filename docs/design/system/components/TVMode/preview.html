@@ -464,7 +464,21 @@ function move(dir) {
     return best;
   }
   var t;
-  if (along) { t = pick(all.filter(function (e) { return cont.contains(e); })); if (!t) return; }
+  if (along) {
+    t = pick(all.filter(function (e) { return cont.contains(e); }));
+    /* At a list's end, carry on to what sits past it in the same column (the
+       buttons under a list), never sideways into a neighbouring panel. */
+    if (!t) {
+      var cr = rc(cont), fwd = dir === 'down' || dir === 'right';
+      var out = all.filter(function (e) { if (cont.contains(e)) return false; var b = rc(e);
+        if (axis === 'v') return b.right > cr.left && b.left < cr.right && (fwd ? b.top >= cr.bottom - 2 : b.bottom <= cr.top + 2);
+        return b.bottom > cr.top && b.top < cr.bottom && (fwd ? b.left >= cr.right - 2 : b.right <= cr.left + 2); });
+      /* The nearest line past the list, then its first item in reading order. */
+      out.sort(function (x, y) { var X = rc(x), Y = rc(y); var d = axis === 'v' ? (fwd ? X.top - Y.top : Y.bottom - X.bottom) : (fwd ? X.left - Y.left : Y.right - X.right); return Math.abs(d) > 8 ? d : (axis === 'v' ? X.left - Y.left : X.top - Y.top); });
+      t = out[0];
+    }
+    if (!t) return;
+  }
   else {
     if (cont && axis === 'grid') t = pick(all.filter(function (e) { return cont.contains(e); }));
     if (!t) t = pick(all);
