@@ -17,7 +17,7 @@
   import type { SystemRow } from '../../../systems/rows';
   import { tvf } from '../../focus/actions';
   import { pushPage } from '../../nav.svelte';
-  import { openEmulatorList, openProtonList, useTvSystems, windowsNow } from '../../systemsTv.svelte';
+  import { installAllRecommended, openEmulatorList, openProtonList, tvRec, useTvSystems, windowsNow } from '../../systemsTv.svelte';
   import TvButton from '../../ui/TvButton.svelte';
   import TvIcon from '../../ui/TvIcon.svelte';
   import { openEmulatorForm } from '../../pages/emulatorFormOpen.svelte';
@@ -45,7 +45,7 @@
     recButton({
       queueing: s.recommendedInstalling,
       todo: s.missing.length,
-      inFlight: installingCount(s.rows, (r) => s.installingRow(r) || s.busyRows[r.key] === true),
+      inFlight: installingCount(s.rows, tvRec.keys, (r) => s.installingRow(r) || s.busyRows[r.key] === true),
     }),
   );
 
@@ -91,11 +91,14 @@
   }
 </script>
 
+<!-- An area left by its edges (data-edge): Up from the header buttons stays
+     in the pane, never the rail, which would switch the pane. -->
+<div data-edge>
 <div class="pane-h">
   <h1 data-testid="tv-pane-title">Systems</h1>
   <div class="btns" id="sy-head" data-nav="h">
     {#if rec}
-      <TvButton k="sy-rec" primary disabled={rec.disabled} why={rec.disabled ? REC_RUNNING : undefined} testId="tv-sys-rec" onA={() => void s.installAllRecommended()}>
+      <TvButton k="sy-rec" primary disabled={rec.disabled} why={rec.disabled ? REC_RUNNING : undefined} testId="tv-sys-rec" onA={() => void installAllRecommended()}>
         {rec.label}
       </TvButton>
     {/if}
@@ -108,7 +111,7 @@
 {#if !s.loaded}
   <p class="note" data-testid="tv-sys-loading">Loading…</p>
 {:else}
-  <div id="sy-list" data-testid="tv-sys-list">
+  <div id="sy-list" data-nav="v" data-testid="tv-sys-list">
     {#each entries as e (e.item.k)}
       <div
         class="srow"
@@ -133,7 +136,7 @@
   {#if others.length === 0}
     <p class="note other-empty" data-testid="tv-sys-other-empty">{OTHER_EMPTY}</p>
   {:else}
-    <div id="sy-others" data-testid="tv-sys-others">
+    <div id="sy-others" data-nav="v" data-testid="tv-sys-others">
       {#each others as o (o.k)}
         <div
           class="srow"
@@ -152,6 +155,8 @@
     </div>
   {/if}
 {/if}
+
+</div>
 
 <style>
   .other-empty {

@@ -95,8 +95,11 @@ describe('Settings › Systems in TV mode', () => {
     expect(recButton({ queueing: 0, todo: 1, inFlight: 2 })).toEqual({ label: 'Install recommended (1)', disabled: false });
     expect(recButton({ queueing: 0, todo: 0, inFlight: 0 })).toBeNull();
     // Only no-emulator systems installing count; a system nothing installs never does.
-    expect(installingCount(rows, (r) => r.label !== 'PlayStation 2')).toBe(2);
-    expect(installingCount(rows, () => false)).toBe(0);
+    expect(installingCount(rows, [], (r) => r.label !== 'PlayStation 2')).toBe(2);
+    expect(installingCount(rows, [], () => true)).toBe(2);
+    // A system Install recommended was pressed for counts even with a fallback emulator shown.
+    expect(installingCount(rows, ['PlayStation 2'], () => true)).toBe(3);
+    expect(installingCount(rows, ['PlayStation 2'], () => false)).toBe(0);
   });
 
   it('Other emulators: each with what it could play, or the note (item 258)', () => {

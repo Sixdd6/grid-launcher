@@ -29,6 +29,17 @@ export const tvSystems = new SystemsStore(() => users > 0);
  *  Proton pick is being applied. */
 export const tvProton = $state<{ catalog: CatalogEntry[]; pending: boolean }>({ catalog: [], pending: false });
 
+/** The systems Install recommended was last pressed for: its button reads
+ *  "Installing N emulators…" while any of them still installs. */
+export const tvRec = $state<{ keys: string[] }>({ keys: [] });
+
+/** Install recommended (252–253): every missing system's recommendation. */
+export async function installAllRecommended(): Promise<void> {
+  if (tvSystems.recommendedInstalling > 0) return;
+  tvRec.keys = tvSystems.missing.map((c) => c.platform);
+  await tvSystems.installAllRecommended();
+}
+
 let listening = false;
 
 function listenOnce(): void {

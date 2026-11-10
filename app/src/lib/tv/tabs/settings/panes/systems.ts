@@ -142,10 +142,13 @@ export function updatesSub(found: readonly { name: string; version: string }[]):
   return found.map((f) => `${shortName(f.name)} ${f.version}`.trim()).join(', ');
 }
 
-/** How many no-emulator systems are installing their emulator now. */
-export function installingCount<T extends { emulator: string; recommended: SetupOption | null }>(
+/** How many systems are installing an emulator for Install recommended:
+ *  those it was pressed for (`pressed`, by key: a system can show a
+ *  fallback emulator while its own installs) and any with no emulator. */
+export function installingCount<T extends { key: string; emulator: string; recommended: SetupOption | null }>(
   rows: readonly T[],
+  pressed: readonly string[],
   installing: (row: T) => boolean,
 ): number {
-  return rows.filter((r) => r.emulator === '' && installing(r)).length;
+  return rows.filter((r) => (r.emulator === '' || pressed.includes(r.key)) && installing(r)).length;
 }
