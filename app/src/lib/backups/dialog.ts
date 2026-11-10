@@ -77,8 +77,15 @@ export function anyLocal(plan: BackupPlan | null): boolean {
 
 // ── Drives ───────────────────────────────────────────────────────────────
 
-/** One part of a drive row's usage bar. `adding` is this backup's (hatched) share. */
-export type DialogUsageSegment = { kind: 'other' | 'grid' | 'adding' | 'free'; pct: number; over: boolean };
+/**
+ * One part of a drive row's usage bar. `adding` is this backup's (hatched)
+ * share; `reserved` is what queued backups have set aside.
+ */
+export type DialogUsageSegment = {
+  kind: 'other' | 'grid' | 'reserved' | 'adding' | 'free';
+  pct: number;
+  over: boolean;
+};
 
 export type DriveRowModel = {
   key: string;
@@ -86,8 +93,13 @@ export type DriveRowModel = {
   name: string;
   /** "SAMSUNG T7 · exFAT". */
   sub: string;
-  /** "61.4 GB free", or "Needs 76 GB · 61.4 GB free" when the backup does not fit. */
+  /**
+   * "61.4 GB free", or "Needs 76 GB · 61.4 GB free" when the backup does not
+   * fit. Reads "available" instead of "free" while queued backups hold space.
+   */
   freeText: string;
+  /** "1.2 GB set aside for queued backups", or `''` when none is. */
+  reservedText: string;
   /** The backup does not fit: the free text takes the danger colour. */
   over: boolean;
   segments: DialogUsageSegment[];
@@ -95,32 +107,47 @@ export type DriveRowModel = {
   usageLabel: string;
 };
 
+/** "1.2 GB set aside for queued backups", or `''` for nothing. */
+export function reservedText(bytes: number): string {
+  return bytes > 0 ? `${sizeText(bytes)} set aside for queued backups` : '';
+}
+
 /**
  * One radio row of the Drive list. `plan` is that drive's plan, or `null`
- * while it is being made (the row then shows only the free space). Only the
+ * while it is being made (the row then shows only the free space). The
+ * plan's free figure is what is left after other queued backups' space
+ * (`reserved_bytes`), which the row notes and greys into its bar. Only the
  * chosen row hatches this backup's share into its usage bar.
  */
 export function driveRow(drive: DriveInfo, plan: BackupPlan | null, chosen: boolean): DriveRowModel {
-  const free = Math.max(0, drive.free_bytes);
+  const reserved = Math.max(0, plan?.reserved_bytes ?? 0);
+  const free = Math.max(0, plan !== null ? plan.free_bytes : drive.free_bytes);
+  const word = reserved > 0 ? 'available' : 'free';
   const over = plan !== null && !plan.fits;
   const base = usageSegments(drive.total_bytes, drive.free_bytes, drive.pack?.gridpack_bytes ?? 0);
   const total = Math.max(0, drive.total_bytes);
   const pct = (v: number) => (total > 0 ? (v / total) * 100 : 0);
   const freeSeg = base.find((s) => s.kind === 'free')!;
-  const adding = chosen && plan !== null ? Math.min(plan.bytes_to_write, freeSeg.bytes) : 0;
+  const held = Math.min(reserved, freeSeg.bytes);
+  const adding = chosen && plan !== null ? Math.min(plan.bytes_to_write, freeSeg.bytes - held) : 0;
   const segments: DialogUsageSegment[] = [
     ...base.filter((s) => s.kind !== 'free').map((s) => ({ kind: s.kind, pct: s.pct, over: false })),
+    { kind: 'reserved', pct: pct(held), over: false },
     { kind: 'adding', pct: pct(adding), over },
-    { kind: 'free', pct: pct(freeSeg.bytes - adding), over: false },
+    { kind: 'free', pct: pct(freeSeg.bytes - held - adding), over: false },
   ];
+  const note = reservedText(reserved);
   return {
     key: drive.key,
     name: drive.pack?.name ?? drive.label,
     sub: `${drive.label} · ${drive.fs}`,
-    freeText: over ? `Needs ${sizeText(plan!.bytes_to_write)} · ${sizeText(free)} free` : `${sizeText(free)} free`,
+    freeText: over
+      ? `Needs ${sizeText(plan!.bytes_to_write)} · ${sizeText(free)} ${word}`
+      : `${sizeText(free)} ${word}`,
+    reservedText: note,
     over,
     segments: segments.filter((s) => s.kind === 'free' || s.pct > 0),
-    usageLabel: `${sizeText(free)} free of ${sizeText(total)}`,
+    usageLabel: `${sizeText(free)} ${word} of ${sizeText(total)}${note ? `, ${note}` : ''}`,
   };
 }
 

@@ -14,6 +14,7 @@
   import UmuInstallOffer from './UmuInstallOffer.svelte';
   import { isUmuMissing } from './launchError';
   import { installGame, launchGame } from './notifications/notifier';
+  import { needsLibraryFolder } from './library/installRefusal';
   import GameCard from './GameCard.svelte';
   import Icon from './Icon.svelte';
   import { coverPair } from './cards/cover';
@@ -375,7 +376,7 @@
       const missing = isUmuMissing(err);
       actionError = missing ? message : null;
       umuOfferFor = missing ? message : null;
-      if (message.includes('library folder')) showLibraryBanner = true;
+      if (needsLibraryFolder(message)) showLibraryBanner = true;
     }
   }
 

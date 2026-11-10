@@ -34,6 +34,7 @@
   import { pickFolder } from './pickers';
   import { pushToast } from './stores/toasts.svelte';
   import { installGame, launchGame, notify } from './notifications/notifier';
+  import { needsLibraryFolder } from './library/installRefusal';
   import { removedFromLibraryNotice, uninstalledNotice } from './notifications/notices';
   import { SKIPPED_TOAST_MS, skippedRemovalText } from './uninstallSkips';
   import { fullIndex, galleryItems, viewableIndex, viewableItems } from './details/media';
@@ -458,7 +459,7 @@
       await installGame(subject.romId, subject.name);
     } catch (err) {
       const message = errorMessage(err);
-      if (message.includes('library folder')) onLibraryPathUnset();
+      if (needsLibraryFolder(message)) onLibraryPathUnset();
     } finally {
       pendingAction = null;
     }

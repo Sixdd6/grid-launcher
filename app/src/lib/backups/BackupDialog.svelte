@@ -267,7 +267,12 @@
       {:else}
         <div class="drives" role="radiogroup" aria-labelledby="backup-drive-heading">
           {#each rows as row (row.key)}
-            <label class="drive" class:on={row.key === chosen} data-testid="backup-drive">
+            <label
+              class="drive"
+              class:on={row.key === chosen}
+              class:has-reserved={row.reservedText !== ''}
+              data-testid="backup-drive"
+            >
               <input
                 type="radio"
                 name="backup-drive"
@@ -285,6 +290,9 @@
                   <b class={`u-${s.kind}`} class:over={s.over} style:width={`${s.pct.toFixed(2)}%`}></b>
                 {/each}
               </span>
+              {#if row.reservedText}
+                <span class="reserved note" data-testid="backup-drive-reserved">{row.reservedText}</span>
+              {/if}
             </label>
           {/each}
         </div>
@@ -548,6 +556,18 @@
     transition: border-color var(--m-fast) ease, background var(--m-fast) ease;
   }
 
+  .drive.has-reserved {
+    grid-template-areas:
+      'r m f'
+      'u u u'
+      'n n n';
+  }
+
+  .reserved {
+    grid-area: n;
+    font-size: 12px;
+  }
+
   .drive input {
     grid-area: r;
     margin: 0;
@@ -610,6 +630,11 @@
 
   .u-grid {
     background: var(--primary);
+  }
+
+  /* Space queued backups have set aside: taken, but not written yet. */
+  .u-reserved {
+    background: color-mix(in srgb, var(--graph-disk) 35%, var(--field));
   }
 
   .u-adding {

@@ -556,7 +556,10 @@ export type BackupPlan = {
   /** The "Make Windows games work offline" line: set when the pack is for Linux and Windows games are being written, ticked or not. */
   runtime: PlanRuntime | null;
   bytes_to_write: number;
+  /** The drive's free space less what other queued or running backups still hold on it. */
   free_bytes: number;
+  /** The drive's space other queued or running backups hold (0 when none). */
+  reserved_bytes: number;
   fits: boolean;
   /** Some requested game is installed on this computer (shows "Copy installed games from this computer"). */
   local_available: boolean;

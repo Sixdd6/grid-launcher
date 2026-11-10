@@ -15,6 +15,7 @@ import {
   noDrivesText,
   outdatedRows,
   planNotes,
+  reservedText,
   runtimeLine,
   sizeText,
   sourcePicks,
@@ -68,6 +69,7 @@ function plan(overrides: Partial<BackupPlan> = {}): BackupPlan {
     runtime: null,
     bytes_to_write: 11.1 * GB,
     free_bytes: 61.4 * GB,
+    reserved_bytes: 0,
     fits: true,
     local_available: false,
     use_local: true,
@@ -146,6 +148,32 @@ describe('driveRow', () => {
     expect(other.segments.some((s) => s.kind === 'adding')).toBe(false);
     const total = chosen.segments.reduce((s, x) => s + x.pct, 0);
     expect(total).toBeCloseTo(100, 5);
+  });
+
+  it('shows the space left after queued backups, and notes what they hold', () => {
+    const p = plan({ free_bytes: 60.2 * GB, reserved_bytes: 1.2 * GB });
+    const row = driveRow(drive(), p, true);
+    expect(row.freeText).toBe('60.2 GB available');
+    expect(row.reservedText).toBe('1.2 GB set aside for queued backups');
+    expect(row.usageLabel).toBe('60.2 GB available of 1000 GB, 1.2 GB set aside for queued backups');
+    const held = row.segments.find((s) => s.kind === 'reserved')!;
+    expect(held.pct).toBeCloseTo(0.12, 5);
+    const total = row.segments.reduce((s, x) => s + x.pct, 0);
+    expect(total).toBeCloseTo(100, 5);
+  });
+
+  it('reads "Needs … available" when queued backups leave too little', () => {
+    const p = plan({ bytes_to_write: 76 * GB, free_bytes: 40 * GB, reserved_bytes: 21.4 * GB, fits: false });
+    const row = driveRow(drive(), p, false);
+    expect(row.freeText).toBe('Needs 76 GB · 40 GB available');
+    expect(row.over).toBe(true);
+  });
+
+  it('notes nothing when no backup holds space on the drive', () => {
+    expect(driveRow(drive(), plan(), true).reservedText).toBe('');
+    expect(driveRow(drive(), null, true).reservedText).toBe('');
+    expect(reservedText(0)).toBe('');
+    expect(reservedText(512 * MB)).toBe('512 MB set aside for queued backups');
   });
 
   it('shows only the free space while the plan is being made', () => {
