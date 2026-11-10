@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { EmulatorEntry, LaunchDefaults, Platform, PlatformSetup, SetupOption } from '../../../../api';
 import { buildSystemRows } from '../../../../systems/rows';
 import {
+  CHECK_RUNNING,
   checkingText,
   installingCount,
   OTHER_EMPTY,
@@ -9,6 +10,7 @@ import {
   orderSystems,
   pillOf,
   recButton,
+  REC_RUNNING,
   systemItem,
   systemSub,
   systemX,
@@ -119,5 +121,12 @@ describe('Settings › Systems in TV mode', () => {
     expect(checkingText(1)).toBe('Checking 1 emulator for updates…');
     expect(updatesSub([{ name: 'PCSX2 (Playstation 2)', version: '2.3.4' }])).toBe('PCSX2 2.3.4');
     expect(updatesSub([])).toBe('');
+  });
+});
+
+describe('disabled reasons (consultant decisions)', () => {
+  it('words the running Install recommended and Check for updates', () => {
+    expect(REC_RUNNING).toBe('Still installing. Downloads shows the progress.');
+    expect(CHECK_RUNNING).toBe('Already checking for updates.');
   });
 });

@@ -40,9 +40,9 @@ export function recButton(o: { queueing: number; todo: number; inFlight: number 
   return null;
 }
 
-/** A on the disabled Installing button says this. TODO(design): not in the design. */
-export const REC_RUNNING = 'Those emulators are installing. Downloads shows how far they are.';
-/** A on Check for updates while a check runs. TODO(design): not in the design. */
+/** A on the disabled Installing button says this (consultant decision). */
+export const REC_RUNNING = 'Still installing. Downloads shows the progress.';
+/** A on Check for updates while a check runs (consultant decision). */
 export const CHECK_RUNNING = 'Already checking for updates.';
 
 /** One system row's look (256–257). */

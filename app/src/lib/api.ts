@@ -1071,6 +1071,8 @@ export type EmulatorInstalledEvent = {
   name: string;
   /** `false` when the write replaced an existing entry — i.e. an update. */
   fresh: boolean;
+  /** The platform labels whose default this install just applied ("Used for <system>"). */
+  used_for: string[];
 };
 
 /// The `cloud-upload-finished` payload (`app/src-tauri/src/cloud_service.rs`'s

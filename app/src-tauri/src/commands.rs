@@ -2084,6 +2084,26 @@ pub struct EmulatorInstalledEvent {
     /// `false` when this write replaced an existing entry — i.e. it was an
     /// update, not a first install.
     pub fresh: bool,
+    /// The platforms (by label) whose default this install just applied:
+    /// the pending defaults that waited on it (first-run setup, an install
+    /// from a backup drive). TV mode's card reads "Used for A and B"; empty
+    /// when no system switched to it.
+    pub used_for: Vec<String>,
+}
+
+/// The platforms an emulator install became the default for: the
+/// `Assigned` outcomes of the pending defaults it applied, in order, each
+/// once.
+pub fn used_for(outcomes: &[grid_core::launch::setup::PendingOutcome]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for o in outcomes {
+        if let grid_core::launch::setup::PendingOutcome::Assigned { platform, .. } = o {
+            if !out.contains(platform) {
+                out.push(platform.clone());
+            }
+        }
+    }
+    out
 }
 
 /// `No source download configured for this emulator.`
@@ -3769,5 +3789,48 @@ mod program_folder_tests {
         let temp = tempfile::tempdir().unwrap();
         assert_eq!(program_folder(&temp.path().join("gone/emu")), None);
         assert_eq!(program_folder(std::path::Path::new("")), None);
+    }
+}
+
+#[cfg(test)]
+mod used_for_tests {
+    use super::used_for;
+    use grid_core::launch::setup::PendingOutcome;
+
+    #[test]
+    fn names_each_assigned_platform_once_in_order() {
+        let outcomes = vec![
+            PendingOutcome::Assigned {
+                platform: "Sony PlayStation".into(),
+                emulator: "DuckStation".into(),
+                core: None,
+            },
+            PendingOutcome::KeptNone {
+                platform: "Sega Saturn".into(),
+            },
+            PendingOutcome::CoreMissing {
+                platform: "Atari Lynx".into(),
+                emulator: "RetroArch".into(),
+            },
+            PendingOutcome::Assigned {
+                platform: "Nintendo 64".into(),
+                emulator: "DuckStation".into(),
+                core: None,
+            },
+            PendingOutcome::Assigned {
+                platform: "Sony PlayStation".into(),
+                emulator: "DuckStation".into(),
+                core: None,
+            },
+        ];
+        assert_eq!(
+            used_for(&outcomes),
+            vec!["Sony PlayStation".to_string(), "Nintendo 64".to_string()]
+        );
+    }
+
+    #[test]
+    fn nothing_applied_is_used_for_nothing() {
+        assert!(used_for(&[]).is_empty());
     }
 }

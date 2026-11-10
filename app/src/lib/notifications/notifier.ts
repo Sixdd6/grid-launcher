@@ -47,7 +47,7 @@ function toastAction(action: NoticeAction | undefined): ToastAction | undefined 
 }
 
 const coalescer = new Coalescer((text, level, card) =>
-  pushToast(text, level, TOAST_DURATION_MS, { action: toastAction(card.action) }),
+  pushToast(text, level, TOAST_DURATION_MS, { sub: card.sub, action: toastAction(card.action) }),
 );
 
 /** Shows `notice`, merged with any of its group arriving at the same time. */
@@ -176,7 +176,7 @@ export function initNotifications(): () => void {
     // The completion card for an emulator install OR update, worded by the
     // backend's `fresh` flag. The setup card counts its own installs.
     listen<EmulatorInstalledEvent>(EMULATOR_INSTALLED_EVENT, (event) => {
-      if (!setupRun.active) notify(emulatorInstalledNotice(event.payload.name, event.payload.fresh));
+      if (!setupRun.active) notify(emulatorInstalledNotice(event.payload.name, event.payload.fresh, event.payload.used_for ?? []));
       // A fresh install or an update both put the newest build on disk.
       markCurrent(event.payload.name);
     }),

@@ -33,7 +33,7 @@ export const ADD_SUB = "For an emulator GRID doesn't install. It never becomes a
 export const EDIT_SUB = 'Program, launch options, cloud save folders';
 export const PROGRAM_BROWSER_TITLE = 'Choose the program';
 export const STRATEGY_LIST_TITLE = 'How does it store saves?';
-/** A on Save with no name. TODO(design): not in the design. */
+/** A on Save with no name (consultant decision). */
 export const NAME_NEEDED = 'Give the emulator a name first.';
 
 export function editTitle(name: string): string {

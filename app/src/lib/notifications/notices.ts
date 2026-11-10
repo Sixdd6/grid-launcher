@@ -49,7 +49,11 @@ export type NoticeAction =
   /** "Set up <Platform>": that system's page (a launch with no emulator). */
   | { system: string };
 
-export type Notice = { group: NoticeGroup; text: string; level: ToastLevel; action?: NoticeAction };
+/**
+ * `sub` is a card's second line. Only TV mode's cards show it ("Copying from
+ * SAMSUNG T7", "Used for PlayStation"); the desktop's card is the text alone.
+ */
+export type Notice = { group: NoticeGroup; text: string; level: ToastLevel; action?: NoticeAction; sub?: string };
 
 const TERMINAL: ReadonlySet<DownloadStatus> = new Set(['completed', 'failed', 'cancelled']);
 
@@ -153,8 +157,14 @@ function queuedNotice(entry: DownloadEntry, ctx: NoticeContext): Notice | null {
         return { group: 'update-queued', text: `Update for ${t} added to download queue`, level: 'success', action: 'downloads' };
       case 'content':
         return { group: 'content-queued', text: `Extra content for ${t} added to download queue`, level: 'success', action: 'downloads' };
-      default:
-        return { group: 'game-queued', text: `${t} added to download queue`, level: 'success', action: 'downloads' };
+      default: {
+        const n: Notice = { group: 'game-queued', text: `${t} added to download queue`, level: 'success', action: 'downloads' };
+        // An install from a Backup drive says where it copies from (TV
+        // checklist 426; the Game backups card's "Copying from <label>").
+        const label = entry.drive_label.trim();
+        if (label !== '') n.sub = `Copying from ${label}`;
+        return n;
+      }
     }
   }
   // An emulator or Proton an install from a drive brings is announced by
@@ -208,11 +218,24 @@ function outcomeNotice(entry: DownloadEntry, ctx: NoticeContext): Notice | null 
   }
 }
 
-/** The `emulator-installed` event's card: a fresh install or an update. */
-export function emulatorInstalledNotice(name: string, fresh: boolean): Notice {
-  return fresh
-    ? { group: 'tool-installed', text: `${name} installed`, level: 'success' }
-    : { group: 'tool-updated', text: `${name} updated`, level: 'success' };
+/** "A", "A and B", "A, B and C". */
+function joinNames(names: readonly string[]): string {
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/**
+ * The `emulator-installed` event's card: a fresh install or an update. A
+ * fresh install that systems switched to says so on its second line
+ * ("Used for PlayStation and Saturn"; TV only, the desktop card is the
+ * title alone).
+ */
+export function emulatorInstalledNotice(name: string, fresh: boolean, usedFor: readonly string[] = []): Notice {
+  if (!fresh) return { group: 'tool-updated', text: `${name} updated`, level: 'success' };
+  const n: Notice = { group: 'tool-installed', text: `${name} installed`, level: 'success' };
+  const systems = usedFor.map((s) => s.trim()).filter((s) => s !== '');
+  if (systems.length > 0) n.sub = `Used for ${joinNames(systems)}`;
+  return n;
 }
 
 export function launchingNotice(title: string): Notice {

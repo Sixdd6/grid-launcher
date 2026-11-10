@@ -577,21 +577,12 @@ pub fn run() {
                 let handle = app.handle().clone();
                 let drives_for_emulator = state.drives.clone();
                 install.set_emulator_installed_hook(Arc::new(move |installed| {
-                    // The completion toast, worded per `fresh` by the
-                    // frontend: this is the only signal an install/update
-                    // finished writing its entry.
-                    let _ = handle.emit(
-                        commands::EMULATOR_INSTALLED_EVENT,
-                        commands::EmulatorInstalledEvent {
-                            name: installed.name.clone(),
-                            fresh: installed.fresh,
-                        },
-                    );
                     // First-run setup: the defaults the user chose for this
                     // emulator's platforms, applied now that its entry exists.
                     // Off the hook's thread: it loads and saves the config.
                     let setup_handle = handle.clone();
                     let setup_name = installed.name.clone();
+                    let setup_fresh = installed.fresh;
                     let setup_source = installed.server_source.clone();
                     let setup_drives = drives_for_emulator.clone();
                     let setup_firmware = firmware.clone();
@@ -600,6 +591,19 @@ pub fn run() {
                             &Config::default_path(),
                             &setup_name,
                             setup_source.as_deref(),
+                        );
+                        // The completion toast, worded per `fresh` by the
+                        // frontend: this is the only signal an install/update
+                        // finished writing its entry. Sent once the defaults
+                        // are applied, so it can name the systems that now
+                        // use it ("Used for <system>").
+                        let _ = setup_handle.emit(
+                            commands::EMULATOR_INSTALLED_EVENT,
+                            commands::EmulatorInstalledEvent {
+                                name: setup_name.clone(),
+                                fresh: setup_fresh,
+                                used_for: commands::used_for(&outcomes),
+                            },
                         );
                         if !outcomes.is_empty() {
                             let _ =

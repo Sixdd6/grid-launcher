@@ -411,3 +411,31 @@ describe('Coalescer', () => {
     expect(shown).toEqual(['Launching A…']);
   });
 });
+
+describe('second lines (TV cards)', () => {
+  it('names the systems a fresh emulator install is now used for', () => {
+    expect(emulatorInstalledNotice('DuckStation', true, ['Sony PlayStation']).sub).toBe('Used for Sony PlayStation');
+    expect(emulatorInstalledNotice('RetroArch', true, ['SNES', 'Sega Genesis']).sub).toBe('Used for SNES and Sega Genesis');
+    expect(emulatorInstalledNotice('RetroArch', true, ['A', 'B', 'C']).sub).toBe('Used for A, B and C');
+    expect(emulatorInstalledNotice('PCSX2', true, []).sub).toBeUndefined();
+    expect(emulatorInstalledNotice('PCSX2', true).sub).toBeUndefined();
+    // An update switched nothing: no second line.
+    expect(emulatorInstalledNotice('PCSX2', false, ['PlayStation 2']).sub).toBeUndefined();
+  });
+
+  it('says where an install from a drive copies from', () => {
+    const [queued] = noticesFor({ entry: entry({ drive_label: 'SAMSUNG T7', drive_id: '/m/T7' }), from: null }, { setupActive: false });
+    expect(queued).toMatchObject({ text: 'Chrono Trigger added to download queue', sub: 'Copying from SAMSUNG T7', action: 'downloads' });
+    const [plain] = noticesFor({ entry: entry({}), from: null }, { setupActive: false });
+    expect(plain.sub).toBeUndefined();
+  });
+
+  it('drops the second line from a summary card', () => {
+    const cards = coalesce([
+      emulatorInstalledNotice('A', true, ['X']),
+      emulatorInstalledNotice('B', true, ['Y']),
+    ]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].sub).toBeUndefined();
+  });
+});

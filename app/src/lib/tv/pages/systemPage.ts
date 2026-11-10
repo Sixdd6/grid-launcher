@@ -87,8 +87,8 @@ export const SETTINGS_SUB = 'Program, launch options, cloud save folders';
 export const FIRMWARE_SUB = 'Each file is checked against the size and MD5 the server lists';
 export const PROTON_SUB = 'Runs Windows games on Linux';
 export const FIRST_WINDOWS_GAME = 'Downloads the Steam Linux Runtime (about 200 MB)';
-/** A on a row whose action is already running. TODO(design): not in the design. */
-export const BUSY_WHY = 'Wait for it to finish.';
+/** A on a row whose action is already running (consultant decision). */
+export const BUSY_WHY = 'Still in progress. Try again when it finishes.';
 
 /** The card Open shows (ruling 19). */
 export function openingNotice(name: string): string {

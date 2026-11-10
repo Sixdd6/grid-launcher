@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Row } from '../rows';
 import {
+  BUSY_WHY,
   emulatorListItems,
   openingNotice,
   pageSub,
@@ -201,5 +202,11 @@ describe('the System page', () => {
       pick,
     );
     expect(proton.map((i) => ('group' in i ? `[${i.group}]` : i.label))).toEqual(['[Installed]', 'Wine', '[Download]', 'GE-Proton (latest, recommended)']);
+  });
+});
+
+describe('busy rows (consultant decision)', () => {
+  it('says to try again when the action finishes', () => {
+    expect(BUSY_WHY).toBe('Still in progress. Try again when it finishes.');
   });
 });

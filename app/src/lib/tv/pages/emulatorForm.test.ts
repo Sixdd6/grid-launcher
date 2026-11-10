@@ -85,3 +85,9 @@ describe('the emulator form', () => {
     expect(typedArgs({ args: '-x', argsDefault: true })).toBe('-x');
   });
 });
+
+describe('Save with no name (consultant decision)', () => {
+  it('asks for a name first', () => {
+    expect(NAME_NEEDED).toBe('Give the emulator a name first.');
+  });
+});

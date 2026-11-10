@@ -384,7 +384,7 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
       expect(await focused()).toBe('sy-rec');
       // A again says why instead.
       await key('Enter');
-      await waitToast('Those emulators are installing. Downloads shows how far they are.');
+      await waitToast('Still installing. Downloads shows the progress.');
       await browser.waitUntil(async () => !(await $(testId('tv-sys-rec')).isExisting()), {
         timeout: INSTALL_WAIT * 2,
         timeoutMsg: 'Install recommended never went away',
