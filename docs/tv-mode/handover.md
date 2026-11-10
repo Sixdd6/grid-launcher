@@ -288,3 +288,42 @@
   list `#saves-locs` data-nav="v", keys `sl<raw>`), e2e in tv-details (library-folder confirm; add/remove a
   location through the browser with the "My Game on Windows" fixture). Remove the handover line saying TV
   Saves doesn't manage native save folders.
+
+## After P10: Downloads and the Settings panes
+- **Downloads** (`tabs/downloads/TvDownloads.svelte`, pure `downloadRows.ts`): panels `tv-dl-seg-<active|queued|completed>`
+  (counts `tv-dl-count-*`, empty lines "Nothing active." etc.), rows `dl-<entry id>` (`tv-dl-row-<id>`, line
+  `tv-dl-line-<id>`) inside `#dl-list`, so a row that leaves gives focus to the one in its place. `statusText` is the
+  prototype's dotted wording for installs ("Downloading · 45% · 5.0 MB/s · 11s left", "Queued · from <label>"), the
+  desktop's `entryDetail` for backup rows (GB card words) and the library move. `rowActions` follows the desktop's
+  `actionFor` (firmware and extracting rows can't be cancelled; a library move's Cancel / Retry are the move's own);
+  `rowA` gives "Cancel" / "Retry or dismiss" / "Dismiss" (cancelled reads "Dismiss", as on the prototype), "Retry or
+  cancel" for a failed move still in its copy, "Select" for a row that only opens its game, and disables a row with
+  nothing to offer (why: `CANCEL_EXTRACTING`). Cancel always asks (`cancelWords`: installs reuse Details'
+  `cancelConfirm`; backup and library-move wordings are mine, TODO(design)). Open <title> opens Details from the
+  installed row, else a minimal server subject. Y = `downloads/actions.ts` `dismissAll(completedIds)`. The sparkline
+  is drawn inline from `sparklinePaths` (stretched 12 × 2.6rem box) and shows only while active, as on the prototype.
+- **Settings** (`tabs/settings/TvSettings.svelte`): rows come from `panes/{appearance,cloud,connection,library,ra,tv,
+  updates}.ts` (pure, tested in `panes/panes.test.ts`); `panes/choice.ts` builds a choice row whose list is drawn by
+  TvSettings (`openChoice`, option test ids `tv-opt-<value>`). Row keys / test ids: `s-<key>` / `tv-row-<key>`
+  (`open-on theme art fade blur hw cards`, `restore upload skip-newer delay retain`, `server user credential reconnect
+  disconnect connect`, `lib-path lib-change`, `ra-user ra-token ra-save ra-clear`, `prompts assign tv-controller
+  tv-desktop tv-quit`, `version checked release debug`); the heading is `tv-pane-title`. `rows.ts`: `disabled` / `why`
+  now on every row kind (TvRows sets `aria-disabled` / `data-why`), `sliderPercent` clamps. Blur shows 0–100% in
+  steps of 10 over the stored 0–40 (`blurPercent` / `blurFromPercent`). Debug logging lives in Updates (prototype),
+  backed by `get/set_debug_prints`. Cloud saves save the whole `CloudSettings` on every change. RetroAchievements keeps
+  the typed username and token in the screen only (the token in a plain local, never in a row: the row shows a "•"
+  stand-in), forgets them when the pane changes; Save is disabled until both are set (why: TODO(design)); Clear acts
+  at once with the desktop's card. Button assignments is disabled with no controller (TODO(design)); TV mode pane's
+  first row is now `s-prompts` (tv-shell-a / -b updated).
+- **Library change**: the folder browser opens beside the current library (`browserStart`); the flow runs on
+  `LibraryChange` (check → `refusalNotice` → `askMove` → list "Move to <path>?" with `moveListSub` → `startMove` or
+  `startFresh` → `askDelete` for the size → list Leave / Delete → `confirmBox(deleteWords)`). Cards: "Moving the library
+  to <path>…", "Library is now <path>" (sub: the desktop's outcome words), "Can't use that folder". `settingsState.
+  svelte.ts` keeps the library path across remounts: popping a page remounts the tab, and a disabled row there sent
+  focus to the rail's first row (which then selected Appearance).
+- **e2e:** group `tv-settings` (`specs/tv-settings.spec.ts`, seed `tv-settings-seed.mjs`: library + empty
+  `library-new`; default fixtures with `--throttle-ms 100`). Connects on the desktop, installs 301 / 201 / 101 by
+  `install_game`, and covers Cancel (asked), Dismiss, Retry, Y with focus kept, the rail, a slider, Theme, prompts,
+  assignments per pad (config), the refused and the Start fresh › Leave change, Disconnect → Connect placeholder.
+- **Not done / for later:** Backup drives pane (P13) and Systems (P11) stay empty. RA's username + password login (the
+  desktop's second form) isn't in the TV design. Connection has no "edit connection" (not in the design).
