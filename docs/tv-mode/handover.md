@@ -95,18 +95,6 @@
   e2e builds don't register the window-state plugin (`#[cfg(not(feature = "e2e"))]` in lib.rs)
   and Xvfb has no window manager. Check by hand on the P14 .rpm.
 
-## Pending for the next phase (consultant, after P5)
-- Desktop TV button (app/src/lib/Shell.svelte, TODO(design)): make it a 28×28 `icon-btn` like the
-  theme toggle, new outline `tv` icon at size 18, colour `var(--text-h)`, shared `.icon-btn`
-  hover/focus states, no animation, kept just left of the light/dark toggle (after the update
-  badge); `aria-label` and `title` "Switch to TV mode"; keep `data-testid="tv-mode-button"`; drop
-  the `.tv-btn` text styles, add only `.tv-btn:disabled { color: var(--text-muted); cursor: default; }`.
-  Add to app/src/lib/icons.ts (outline, not in FILLED_ICONS) and mirror into
-  docs/design/prototype/icons.json:
-  `tv: 'M5 8h14a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5V9.5A1.5 1.5 0 0 1 5 8zM8 3.5l4 4.5 4-4.5'`
-- Space stays A (`' ': 'A'` in tv/input/buttons.ts); while the OSK is open the printable-key branch
-  runs first, so Space types a space and marks physical typing (Enter = Done).
-
 ## After P6: overlays and notifications
 - **Overlays** (`lib/tv/overlays/overlays.svelte.ts`; each is a layer on nav's stack, drawn by
   TvShell's `.layers` box through `TvLayer`, scrim to the hint bar):
@@ -157,3 +145,50 @@
   `session.offline && !session.connected` the reconnect row reads "Connect to a server…" (same key,
   same handler, which opens Connect) and `menuHead` reads "Offline · no server".
 - tv.css `.layer` stays inset 0 0 3.6rem (scrim covers the top bar); checklist 360 reworded.
+
+## After P7: the Server tab
+- **Done from the P5 pending list:** the desktop TV button is a 28×28 `icon-btn` with the new
+  outline `tv` icon (icons.ts + prototype icons.json); Space stays A with the OSK's typing branch
+  first (comment in input/buttons.ts; already tested). The P6 pending items (reconnect.ts, menu.ts,
+  the scrim) are untouched: they were held back from this phase.
+- **Server state** (`tabs/server/server.svelte.ts`): `srv.rail` ('discover' | platform id),
+  `srv.query`, `srv.discoverKey` (Discover cover last focused), `srv.pendingArrive`; outlive the
+  screen (TvStage remounts a tab on every switch). `serverCatalog()` = one `Catalog` per server URL
+  (a new server resets the rail). `selectRail(r)` clears the search. `goDiscover()` = Menu ›
+  Discover (selects Discover, `rememberFocus('tab:server','r-discover')`, `showTab('server',
+  {again: true})`, then `arrive` carries focus into Discover). `loadAllGames()` = every platform's
+  `listGames`, cached per server, for Search everything (no server-side search command exists; a
+  failed platform is asked again next time).
+- **Screens:** `TvServer` (rail, `arrive`, Y/RT hooks as getters, offline / no-server panels; back
+  online it runs `arrive` again), `TvDiscover` (hero + `#disc` rows: `data-edge data-shelves
+  data-rail-target data-scroll="disc"`, shelves `data-shelf`, tracks `disc-<id>`; cover keys
+  `<shelf><romId>` e.g. `n501`; hero summary = installed row's description, else `getRomDetail`
+  after a 250 ms rest, cached), `TvPlatform` (header + `TvGrid #srv-grid`, keys `sg<romId>`; its
+  platform row comes from `srv.rail`, not the catalog's active row, which lags a selection),
+  `pages/TvSearchAll` (keys `sr<romId>`; Y reopens the keyboard with live results; an emptied field
+  keeps the last results; the breadcrumb follows via `setPageTitle`).
+- **Shared TV game model** (`tv/games.ts`, for P8/P9 too): `TvGame` from a `GameSummary`
+  (`gameFromSummary`) or an installed row (`gameFromRow`), `liveInstall`/`queueTag`, `quickFor`
+  (Play / Install / nothing), `platformTag`. `ui/TvGameCover` = a cover wired to the stores (badges,
+  live tag, art, A → Details, X → `runQuick`). `gameActions.ts`: `openDetails(subject)`
+  (registered as `navigation.openDetails` in TvShell), `openGameDetails`, `runQuick`, `openSystem`.
+  **Stubs:** `pages/TvDetailsStub` (TODO(P9): TvDetails) and `pages/TvSystemStub` (TODO(P11)), each
+  a TvPage with Back; swap the component in `gameActions.ts`.
+- **Primitives:** `TvCover` gained `onFocus` and `testId`; `TvChip` gained `testId`.
+- **nav.svelte.ts:** `rememberFocus(screen, k)`, `showTab(tab, {again})`, `setPageTitle(id, t)`.
+  Two fixes that matter to every later phase: `useScreen` registers untracked (registering bumped
+  `hooksVersion`, which the effect also read: an `effect_update_depth_exceeded` loop that aborted
+  whole flushes and left stale DOM); `closeLayer` blocks `stageChanged` until it has put focus back
+  (else the observer restored the screen's focus first, and focusing a rail row selects it), and
+  when the opener is gone it takes the item in its place in the opener's panel, or the rail's
+  selected row when the panel is empty (a live search that matches nothing).
+- **Not done (TODO in code):** RT select mode on a platform and Backup all N… (P13: the hook and the
+  button exist, both do nothing); X's umu-launcher / library-folder prompts (only their refusal
+  cards show); Play doesn't push Playing yet (P9); `TvGrid` is not windowed, so a platform renders
+  every cover (TODO(P7/P8) in TvGrid; large platforms in P14's `tv-layout`).
+- **e2e:** group `tv-server` (`specs/tv-server.spec.ts`, fixtures-discover, seed
+  `seed/tv-server-seed.mjs`: library folder + SNES default emulator). The spec connects on the
+  desktop (`// e2e-app-args:`) and enters with the TV button. `helpers/tv.ts` gained
+  `assertNoClipping()` (focused item + ring / cover growth inside every clipping ancestor, waits for
+  glides), `toastTitles()`, `waitToast(text|re)`. The spec captures page errors from the start and
+  its last test asserts there were none: worth copying into later TV specs.
