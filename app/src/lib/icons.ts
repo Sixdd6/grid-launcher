@@ -82,6 +82,14 @@ export const ICONS = {
    */
   drive:
     'M3.5 14h17v4.5A1.5 1.5 0 0 1 19 20H5a1.5 1.5 0 0 1-1.5-1.5zM3.5 14l2.6-8.2A1.5 1.5 0 0 1 7.5 4.7h9a1.5 1.5 0 0 1 1.4 1.1L20.5 14M16.5 17h.01M13.5 17h.01',
+
+  /**
+   * Outline TV: a 17-wide screen from y=8 to y=19.5 with 1.5-radius corners
+   * and a V antenna from (8, 3.5) down to (12, 8) and up to (16, 3.5). The
+   * desktop top bar's Switch to TV mode button (TVMode README § Consultant
+   * decisions).
+   */
+  tv: 'M5 8h14a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5V9.5A1.5 1.5 0 0 1 5 8zM8 3.5l4 4.5 4-4.5',
 } as const;
 
 export type IconName = keyof typeof ICONS;

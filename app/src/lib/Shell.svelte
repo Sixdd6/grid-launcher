@@ -185,19 +185,19 @@
         Update
       </button>
     {/if}
-    <!-- TV mode (TVMode README § Decided "Entering and leaving"): opens on
-         the tab matching this view. TODO(design): the button has no designed
-         look yet; it is a text button in the toggle's 28px box. -->
+    <!-- TV mode (TVMode README § Decided "Entering and leaving"; the look
+         is § Consultant decisions): an icon button like the light / dark
+         toggle beside it, opening TV mode on the tab matching this view. -->
     <button
       type="button"
       data-testid="tv-mode-button"
       class="icon-btn tv-btn"
-      aria-label="TV mode"
-      title="TV mode"
+      aria-label="Switch to TV mode"
+      title="Switch to TV mode"
       disabled={uiMode.mode !== 'desktop'}
       onclick={() => enterTv(view).catch(() => {})}
     >
-      TV
+      <Icon name="tv" size={18} />
     </button>
     <!-- A failed save is not worth an error here: the theme is already
          applied, the same trade the Appearance select makes. -->
@@ -432,10 +432,11 @@
 
   .tv-btn {
     color: var(--text-h);
-    font: inherit;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
+  }
+
+  .tv-btn:disabled {
+    color: var(--text-muted);
+    cursor: default;
   }
 
   .update-badge {

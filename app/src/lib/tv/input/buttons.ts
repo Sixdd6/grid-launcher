@@ -23,6 +23,9 @@ export function directionOf(b: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT'): Direction {
  * Esc or Backspace is B, X, Y, Q = LB, E = RB, Z = LT, R = RT, M = Menu,
  * V = View. Page Up / Page Down are the right stick (the router handles
  * them). The prototype's G (Guide) is left out: Guide does nothing (ruling 5).
+ * Space stays A (README § Consultant decisions): while the on-screen keyboard
+ * is open, the router hands printable keys to its layer first, so Space
+ * types a space there and Enter is then Done (router.svelte.ts `onKeyDown`).
  */
 export const KEYMAP: Readonly<Record<string, TvButton>> = {
   ArrowUp: 'UP',
