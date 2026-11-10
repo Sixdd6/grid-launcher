@@ -135,6 +135,12 @@ STAGE_GROUPS=(
   # the desktop; (d, P6) --tv again: overlays, the on-screen keyboard, the
   # Menu and the notification cards.
   "tv-shell:specs/tv-shell-a.spec.ts specs/tv-shell-b.spec.ts specs/tv-shell-c.spec.ts specs/tv-shell-d.spec.ts"
+  # TV mode's Server tab (docs/tv-mode/plan.md P7) on the Discover fixtures,
+  # with SNES given a default emulator by the seed so New releases has games.
+  # The spec connects on the desktop and enters TV mode with the TV button:
+  # Discover, its rows and hero, platforms with their header and search,
+  # X to install, Search everything, the offline panel and Menu › Discover.
+  "tv-server:specs/tv-server.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -509,7 +515,7 @@ mock_args_for_group() {
     # The first-run-setup set plus a "Sony PlayStation 4", whose ShadPS4
     # installs with its Qt launcher companion from the mock forge.
     systems) printf -- '--fixtures-dir fixtures-systems' ;;
-    discover) printf -- '--fixtures-dir fixtures-discover' ;;
+    discover|tv-server) printf -- '--fixtures-dir fixtures-discover' ;;
     # An "Emulators" platform with one package (rom 801) that zips the mock
     # forge's PCSX2 AppImage stub, plus a PS2 platform for the defaults.
     server-emulator) printf -- '--fixtures-dir fixtures-server-emulator' ;;
@@ -581,6 +587,7 @@ seed_script_for_group() {
     library-move) printf '%s' "$E2E_DIR/seed/library-move-seed.mjs" ;;
     backups) printf '%s' "$E2E_DIR/seed/backups-seed.mjs" ;;
     tv-shell) printf '%s' "$E2E_DIR/seed/tv-shell-seed.mjs" ;;
+    tv-server) printf '%s' "$E2E_DIR/seed/tv-server-seed.mjs" ;;
     *) printf '' ;;
   esac
 }

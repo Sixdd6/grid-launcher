@@ -136,3 +136,65 @@ export async function waitTab(tab: string): Promise<void> {
     timeoutMsg: `TV mode never showed the ${tab} tab`,
   });
 }
+
+/**
+ * The focused item, its ring and a cover's growth, cut by no scrolling or
+ * clipping area around it (plan risk R7; the prototype's clipping checker).
+ * Waits for scrolls to settle; answers nothing, throws with what is cut.
+ */
+export async function assertNoClipping(): Promise<void> {
+  let last = '';
+  await browser
+    .waitUntil(
+      async () => {
+        last = (await browser.execute(() => {
+          const el = document.querySelector<HTMLElement>('[data-tv-root] .f');
+          if (!el) return 'nothing is focused';
+          const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+          // A cover's art grows to 107% with a .42rem ring; anything else has a
+          // .2rem outline at a .2rem offset.
+          const art = el.querySelector('.cv-art');
+          const r = (art ?? el).getBoundingClientRect();
+          const pad = art ? 0.42 * rem : 0.4 * rem;
+          const box = { left: r.left - pad, top: r.top - pad, right: r.right + pad, bottom: r.bottom + pad };
+          for (let p = el.parentElement; p && !p.hasAttribute('data-tv-root'); p = p.parentElement) {
+            const cs = getComputedStyle(p);
+            const clipX = cs.overflowX !== 'visible';
+            const clipY = cs.overflowY !== 'visible';
+            if (!clipX && !clipY) continue;
+            const pr = p.getBoundingClientRect();
+            const left = pr.left + p.clientLeft;
+            const top = pr.top + p.clientTop;
+            const right = left + p.clientWidth;
+            const bottom = top + p.clientHeight;
+            const cut =
+              (clipX && (box.left < left - 1 || box.right > right + 1)) || (clipY && (box.top < top - 1 || box.bottom > bottom + 1));
+            if (cut) {
+              const name = p.id || p.getAttribute('data-scroll') || p.className || p.tagName;
+              return `${el.getAttribute('data-k')} is cut by ${name}: item ${JSON.stringify(box)}, area ${JSON.stringify({ left, top, right, bottom })}`;
+            }
+          }
+          return '';
+        })) as string;
+        return last === '';
+      },
+      { timeout: 3000, interval: 150 },
+    )
+    .catch(() => {
+      throw new Error(`clipped: ${last}`);
+    });
+}
+
+/** The titles of the notice cards on screen, newest first. */
+export async function toastTitles(): Promise<string[]> {
+  return (await browser.execute(() =>
+    Array.from(document.querySelectorAll('[data-testid="tv-toast-title"]')).map((e) => (e.textContent ?? '').trim()),
+  )) as string[];
+}
+
+export async function waitToast(text: string | RegExp): Promise<void> {
+  await browser.waitUntil(
+    async () => (await toastTitles()).some((t) => (typeof text === 'string' ? t === text : text.test(t))),
+    { timeout: TRANSITION_TIMEOUT, timeoutMsg: `no notice "${String(text)}" (cards: ${JSON.stringify(await toastTitles())})` },
+  );
+}
