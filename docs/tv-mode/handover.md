@@ -327,3 +327,14 @@
   assignments per pad (config), the refused and the Start fresh › Leave change, Disconnect → Connect placeholder.
 - **Not done / for later:** Backup drives pane (P13) and Systems (P11) stay empty. RA's username + password login (the
   desktop's second form) isn't in the TV design. Connection has no "edit connection" (not in the design).
+
+## Pending for the next phase: Downloads Cancel wording (consultant ruling 8, exact text)
+P10 used its own wording for backup and library-move rows; replace it in
+app/src/lib/tv/tabs/downloads/downloadRows.ts (+ test) with the ruled text:
+- Game / update / emulator / firmware row: "Cancel <title>?" / "The download stops and its files are removed. You can
+  install it again later." (queued: "It leaves the queue. You can install it again later.") / "Cancel install".
+- Backup row: "Cancel <title>?" / "The backup stops and what it wrote to <label> is removed. You can back it up again
+  later." / "Cancel backup".
+- Library move: "Cancel the move?" / "The files copied so far are removed and the library stays where it is." /
+  "Cancel move".
+- Then the card "Cancelled <title>". Danger action button, Cancel focused. Remove the TODO(design) markers.
