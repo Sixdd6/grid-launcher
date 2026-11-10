@@ -52,7 +52,19 @@ export type UiSettings = {
   /** "Hardware acceleration": the webview renders on the GPU. Read at
    *  startup, so a change applies after a restart (`ui.hardware_acceleration`). */
   hardware_acceleration: boolean;
+  /** "Open GRID on", shared by desktop and TV mode (`ui.open_on`). */
+  open_on: OpenOn;
+  /** TV mode's "Button prompts" (`ui.tv_prompts`). */
+  tv_prompts: TvPrompts;
+  /** TV mode's "Button assignments": controller key → style
+   *  (`ui.tv_assignments`). A controller with no entry uses its layout's. */
+  tv_assignments: Record<string, TvAssignment>;
 };
+/** Where GRID opens: `automatic` (Server › Discover when connected, else the
+ *  Library), or forced to `discover` or `library`. */
+export type OpenOn = 'automatic' | 'discover' | 'library';
+export type TvPrompts = 'match' | 'xbox' | 'ps' | 'nintendo' | '8bitdo';
+export type TvAssignment = 'xbox' | 'nintendo';
 export type GameSummary = {
   id: number;
   name: string;

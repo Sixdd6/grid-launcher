@@ -140,6 +140,24 @@ pub struct UiSettings {
     /// overrides it (the app's `gpu_rendering`).
     #[serde(default = "default_hardware_acceleration")]
     pub hardware_acceleration: bool,
+    /// Where GRID opens, in desktop and TV mode alike (Settings › Appearance
+    /// › Open GRID on): `"automatic"` (Server › Discover when connected to a
+    /// RomM server, the Library when not), `"discover"` or `"library"`. A
+    /// plain string for the same reason as `theme`.
+    #[serde(default = "default_open_on")]
+    pub open_on: String,
+    /// TV mode's button prompts (Settings › TV mode › Button prompts):
+    /// `"match"` (follow the controller and its assignment), `"xbox"`,
+    /// `"ps"`, `"nintendo"` or `"8bitdo"`. A plain string, like `theme`.
+    #[serde(default = "default_tv_prompts")]
+    pub tv_prompts: String,
+    /// TV mode's button assignments, per controller: the controller's key
+    /// (its gilrs UUID as hex; two pads of one model share a key) →
+    /// `"xbox"` or `"nintendo"`. A controller with no entry starts on the
+    /// style of its own layout. Last in the struct and omitted while empty:
+    /// it is a TOML table, so it must follow every scalar `[ui]` key.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tv_assignments: BTreeMap<String, String>,
 }
 
 fn default_theme() -> String {
@@ -170,6 +188,14 @@ fn default_hardware_acceleration() -> bool {
     true
 }
 
+fn default_open_on() -> String {
+    "automatic".to_string()
+}
+
+fn default_tv_prompts() -> String {
+    "match".to_string()
+}
+
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
@@ -181,6 +207,9 @@ impl Default for UiSettings {
             card_labels: default_card_labels(),
             card_display: default_card_display(),
             hardware_acceleration: default_hardware_acceleration(),
+            open_on: default_open_on(),
+            tv_prompts: default_tv_prompts(),
+            tv_assignments: BTreeMap::new(),
         }
     }
 }
@@ -1444,6 +1473,7 @@ mod tests {
                 card_labels: "hover".to_string(),
                 card_display: "columns".to_string(),
                 hardware_acceleration: false,
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -1454,6 +1484,64 @@ mod tests {
         assert_eq!(loaded.ui.card_labels, "hover");
         assert_eq!(loaded.ui.card_display, "columns");
         assert!(!loaded.ui.hardware_acceleration);
+    }
+
+    /// The TV mode keys and Open GRID on round-trip, the assignment map as a
+    /// `[ui.tv_assignments]` table after the scalar `[ui]` keys.
+    #[test]
+    fn open_on_and_the_tv_keys_round_trip_through_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut assignments = BTreeMap::new();
+        assignments.insert(
+            "030000005e0400000b0b000000000000".to_string(),
+            "nintendo".to_string(),
+        );
+        assignments.insert(
+            "050000007e0500000920000001800000".to_string(),
+            "xbox".to_string(),
+        );
+        let cfg = Config {
+            ui: UiSettings {
+                open_on: "library".to_string(),
+                tv_prompts: "8bitdo".to_string(),
+                tv_assignments: assignments.clone(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("[ui.tv_assignments]"),
+            "written config:\n{written}"
+        );
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.ui.open_on, "library");
+        assert_eq!(loaded.ui.tv_prompts, "8bitdo");
+        assert_eq!(loaded.ui.tv_assignments, assignments);
+    }
+
+    /// A `[ui]` table written before Open GRID on and TV mode existed loads
+    /// the defaults, and an empty assignment map writes no table.
+    #[test]
+    fn a_ui_table_without_the_tv_keys_loads_their_defaults() {
+        let loaded = load_text("schema_version = 1\n\n[ui]\ntheme = \"dark\"\n");
+        assert_eq!(loaded.ui.open_on, "automatic");
+        assert_eq!(loaded.ui.tv_prompts, "match");
+        assert!(loaded.ui.tv_assignments.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        Config::default().save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !written.contains("tv_assignments"),
+            "written config:\n{written}"
+        );
+        assert!(
+            written.contains("open_on = \"automatic\""),
+            "written config:\n{written}"
+        );
     }
 
     fn load_text(text: &str) -> Config {

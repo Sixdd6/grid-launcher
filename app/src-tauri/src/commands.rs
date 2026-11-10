@@ -689,7 +689,42 @@ pub fn normalize_ui_settings(settings: UiSettings) -> UiSettings {
         card_labels: normalize_card_labels(&settings.card_labels),
         card_display: normalize_card_display(&settings.card_display),
         hardware_acceleration: settings.hardware_acceleration,
+        open_on: normalize_open_on(&settings.open_on),
+        tv_prompts: normalize_tv_prompts(&settings.tv_prompts),
+        tv_assignments: settings
+            .tv_assignments
+            .into_iter()
+            .filter_map(|(key, style)| {
+                let key = key.trim().to_string();
+                let style = style.trim();
+                (!key.is_empty() && (style == "xbox" || style == "nintendo"))
+                    .then(|| (key, style.to_string()))
+            })
+            .collect(),
     }
+}
+
+/// Open GRID on: `"discover"` or `"library"` force a place; anything else
+/// becomes `"automatic"`, the default.
+fn normalize_open_on(raw: &str) -> String {
+    match raw.trim() {
+        "discover" => "discover",
+        "library" => "library",
+        _ => "automatic",
+    }
+    .to_string()
+}
+
+/// TV mode's Button prompts: one of the four sets, else `"match"`.
+fn normalize_tv_prompts(raw: &str) -> String {
+    match raw.trim() {
+        "xbox" => "xbox",
+        "ps" => "ps",
+        "nintendo" => "nintendo",
+        "8bitdo" => "8bitdo",
+        _ => "match",
+    }
+    .to_string()
 }
 
 /// `"rows"` (Equal height) or `"columns"` (Equal width); anything else
@@ -3485,8 +3520,65 @@ mod ui_settings_tests {
                 card_labels: "always".to_string(),
                 card_display: "rows".to_string(),
                 hardware_acceleration: true,
+                open_on: "automatic".to_string(),
+                tv_prompts: "match".to_string(),
+                tv_assignments: BTreeMap::new(),
             }
         );
+    }
+
+    #[test]
+    fn open_on_is_automatic_unless_it_names_discover_or_library() {
+        for (raw, expected) in [
+            ("automatic", "automatic"),
+            ("discover", "discover"),
+            (" library ", "library"),
+            ("Library", "automatic"),
+            ("home", "automatic"),
+            ("", "automatic"),
+        ] {
+            let out = normalize_ui_settings(UiSettings {
+                open_on: raw.to_string(),
+                ..Default::default()
+            });
+            assert_eq!(out.open_on, expected, "open_on for {raw:?}");
+        }
+    }
+
+    #[test]
+    fn tv_prompts_keep_the_four_sets_and_fall_back_to_match() {
+        for (raw, expected) in [
+            ("match", "match"),
+            ("xbox", "xbox"),
+            ("ps", "ps"),
+            ("nintendo", "nintendo"),
+            (" 8bitdo ", "8bitdo"),
+            ("steam", "match"),
+            ("", "match"),
+        ] {
+            let out = normalize_ui_settings(UiSettings {
+                tv_prompts: raw.to_string(),
+                ..Default::default()
+            });
+            assert_eq!(out.tv_prompts, expected, "prompts for {raw:?}");
+        }
+    }
+
+    #[test]
+    fn tv_assignments_drop_unknown_styles_and_empty_keys() {
+        let mut map = BTreeMap::new();
+        map.insert("aa".to_string(), "xbox".to_string());
+        map.insert("bb".to_string(), " nintendo ".to_string());
+        map.insert("cc".to_string(), "sega".to_string());
+        map.insert("  ".to_string(), "xbox".to_string());
+        let out = normalize_ui_settings(UiSettings {
+            tv_assignments: map,
+            ..Default::default()
+        });
+        let mut expected = BTreeMap::new();
+        expected.insert("aa".to_string(), "xbox".to_string());
+        expected.insert("bb".to_string(), "nintendo".to_string());
+        assert_eq!(out.tv_assignments, expected);
     }
 
     #[test]

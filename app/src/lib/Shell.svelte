@@ -26,12 +26,14 @@
   // switching the view behind it would strand it.
   import { chordBlocked, chordContext } from './views/searchKeys';
 
-  // Set once when the shell first mounts (R2): Server when the restored/just
-  // -connected session is online, Library when it came up offline. Switching
-  // views afterward is a user action — a pill, Ctrl+1..4, or `show()`.
-  // Offline mode opens Library on the first connected backup drive
-  // (GameBackups README, "Use without a server").
-  const start = initialView(session.connected, session.offline, drives.firstLibraryDrive);
+  // Set once when the shell first mounts, by Settings › Appearance › Open
+  // GRID on (TV mode README § Decided "Where GRID opens"; App.svelte mounts
+  // the shell only once the setting is loaded). Automatic: Server › Discover
+  // when the restored/just-connected session is online, Library when not;
+  // offline mode opens Library on the first connected backup drive
+  // (GameBackups README, "Use without a server"). Switching views afterward
+  // is a user action — a pill, Ctrl+1..4, or `show()`.
+  const start = initialView(session.connected, session.offline, drives.firstLibraryDrive, uiSettings.openOn);
   let view = $state<View>(start.view);
   if (start.drive !== null) selectRail(driveRailKey(start.drive));
 

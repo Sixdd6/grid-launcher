@@ -1,4 +1,4 @@
-import type { AuthKind, RestoreOutcome, SessionUnauthorized } from './api';
+import type { AuthKind, OpenOn, RestoreOutcome, SessionUnauthorized } from './api';
 
 /** The four first-class views, in pill order (design §3; the Emulators view
  *  became Settings › Systems). The index in this array is also the
@@ -85,13 +85,25 @@ export function applyUnauthorizedEvent(phase: SessionPhase, info: SessionUnautho
 export type InitialView = { view: View; drive: string | null };
 
 /**
- * R2: Server first when connected (E2E specs wait for platform-btn-1 after
- * connecting), Library otherwise. In offline mode Library opens on
- * `firstDrive` (the key of the first ready drive) when there is one.
+ * Where GRID opens (TV mode README § Decided "Where GRID opens", the same
+ * rule in desktop and TV mode). `automatic`: Server (on Discover, its first
+ * rail row) when connected to a RomM server, the Library when not — an
+ * unreachable server, or GRID used without one, where the Library opens on
+ * `firstDrive` (the key of the first connected, set-up Backup drive) when
+ * there is one. `discover` and `library` force the place; forced Discover
+ * with no server lands on the Server tab's not-connected panel, and forced
+ * Library without a server still picks the first drive.
  */
-export function initialView(connected: boolean, offline = false, firstDrive: string | null = null): InitialView {
-  if (connected) return { view: 'server', drive: null };
-  return { view: 'library', drive: offline ? firstDrive : null };
+export function initialView(
+  connected: boolean,
+  offline = false,
+  firstDrive: string | null = null,
+  openOn: OpenOn = 'automatic',
+): InitialView {
+  const library: InitialView = { view: 'library', drive: !connected && offline ? firstDrive : null };
+  if (openOn === 'discover') return { view: 'server', drive: null };
+  if (openOn === 'library') return library;
+  return connected ? { view: 'server', drive: null } : library;
 }
 
 export function viewLabel(view: View): string {

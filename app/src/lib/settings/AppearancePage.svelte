@@ -14,6 +14,7 @@
     setBackgroundEnabled,
     setCardDisplay,
     setHardwareAcceleration,
+    setOpenOn,
     setCardLabels,
     setCardSize,
     setTheme,
@@ -24,6 +25,7 @@
   import { CARD_LABEL_MODES, cardLabelsLabel, normalizeCardLabels } from '../cards/labels';
   import { CARD_DISPLAYS, cardDisplayLabel, normalizeCardDisplay } from '../cards/layout';
   import { backgroundEnabled, CARD_SIZE_VIEWS } from './appearance';
+  import { normalizeOpenOn, OPEN_ON_CHOICES, OPEN_ON_HINT, openOnLabel } from './openOn';
   import SegmentedSwitch from '../SegmentedSwitch.svelte';
   import SettingRow from './SettingRow.svelte';
 
@@ -33,6 +35,10 @@
       // The attribute is already applied; a failed save is not worth a
       // blocking error in a settings pane.
     });
+  }
+
+  function onOpenOnChange(e: Event) {
+    setOpenOn(normalizeOpenOn((e.currentTarget as HTMLSelectElement).value)).catch(() => {});
   }
 
   function onToggle(e: Event) {
@@ -86,9 +92,25 @@
   }
 </script>
 
-<!-- The design prototype's order (attachments/proposed-ui/30): theme, the
-     background art, the cards, then the two switches that act on restart or
-     on logging. Each row is a `SettingRow`. -->
+<!-- The design prototype's order (attachments/proposed-ui/30), after Open
+     GRID on, which the TV mode design puts first (README § Consultant
+     decisions): theme, the background art, the cards, then the two switches
+     that act on restart or on logging. Each row is a `SettingRow`. -->
+<SettingRow label="Open GRID on" hint={OPEN_ON_HINT} forId="open-on-select">
+  <select
+    class="g-field"
+    data-testid="open-on-select"
+    id="open-on-select"
+    aria-describedby="open-on-select-hint"
+    value={uiSettings.openOn}
+    onchange={onOpenOnChange}
+  >
+    {#each OPEN_ON_CHOICES as choice (choice)}
+      <option value={choice}>{openOnLabel(choice)}</option>
+    {/each}
+  </select>
+</SettingRow>
+
 <SettingRow label="Theme" forId="theme-select">
   <select class="g-field" data-testid="theme-select" id="theme-select" value={uiSettings.theme} onchange={onThemeChange}>
     <option value="system">Follow system</option>

@@ -142,7 +142,9 @@
       finishSetup();
     }}
   />
-{:else if session.phase === 'shell'}
+{:else if session.phase === 'shell' && uiSettings.loaded}
+  <!-- Waits for the stored settings: Open GRID on picks the shell's first
+       view, once, when it mounts. -->
   <Shell />
 {:else if session.phase === 'none'}
   <Connect prefill={connectPrefill(session)} />

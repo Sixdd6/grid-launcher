@@ -11,6 +11,16 @@ in browser). `Ctrl+1`..`Ctrl+4` switch views from the keyboard (not while a text
 has focus or a dialog is open). Emulators are set up in Settings › Systems; there is
 no Emulators view.
 
+**Where GRID opens.** The view selected when the main window first appears (after a
+restore, a connect, or first-run setup) follows Settings › Appearance › **Open GRID on**,
+one setting shared with TV mode. **Automatic** (the default): Server › Discover when GRID
+is connected to a RomM server; the Library when it is not — the server can't be reached
+(the Library opens on All games), or GRID is used without a server (the Library opens on
+the first connected Backup drive, when one is set up). **Server › Discover** and
+**Library** force that place: forced Discover with no server opens on the Server view's
+not-connected panel, and forced Library without a server still opens on the first
+connected Backup drive.
+
 **Offline mode.** After "Use without a server" (First Run Setup), the connection dot is
 grey (a choice, not a fault, so not the danger red) and the chip reads "Offline · no
 server". Its menu has one item, **Connect to a server…**, which opens the Connect screen,
@@ -108,7 +118,8 @@ no per-emulator queued, installed or failed cards are shown.
 # Main Sections
 There are several main sections to the application with buttons across the top bar to navigate between them:
 - Library
-- Server (opens on Server › Discover)
+- Server (opens on Server › Discover; GRID itself opens there when connected, see Where GRID
+  opens under Top Bar)
 - Downloads
 - Settings (emulators are set up in its Systems pane)
 
@@ -192,7 +203,7 @@ There are several main sections to the application with buttons across the top b
   Native platforms (games native to this OS, and Windows games run through Proton) and
   the Emulators shelf show neither chip, and their firmware status is never fetched.
 - **Server › Discover** is the first Server rail row and the default view: a connected app, and
-  the app after first-run setup, opens on it. It has no folding header and no search;
+  the app after first-run setup, opens on it (unless Open GRID on says Library). It has no folding header and no search;
   Ctrl+F does nothing there. Its lists come from the server's `created_at` and
   `metadatum.first_release_date`, always filtered and sorted by GRID itself (RomM
   ignores an `order_by` it does not know, and lists upcoming games with future dates).
@@ -440,7 +451,11 @@ There are several main sections to the application with buttons across the top b
     emulator is never here; one whose emulator no system uses (or that is installed on
     its own) stays here and says what it belongs to ("Companion to ShadPS4 (Playstation
     4).") instead of "Not used by any system on your server."
-- **Appearance** (under Settings) chooses the theme — follow the OS, dark, or light;
+- **Appearance** (under Settings) starts with **Open GRID on**, a select with "Automatic:
+  Discover when connected, else Library", "Server › Discover" and "Library", and the help
+  text "Here and in TV mode" (see Where GRID opens under Top Bar). It applies the next time
+  GRID opens and is stored as `open_on` (`automatic`, `discover` or `library`) under `[ui]`.
+  It then chooses the theme — follow the OS, dark, or light;
   the light / dark toggle sets dark or light here too —
   turns the background art on or off, sets its fade from 0 to 100 percent with a live
   preview behind the pane (0 shows the art at full strength; each step fades it toward
@@ -452,7 +467,11 @@ There are several main sections to the application with buttons across the top b
   under `[ui]` in `config.toml` as `theme`, `background_fade` (100 is off; a config from before 2026-11-07 stored the art's
   opacity, 0–60 with 0 off, and is converted once on load),
   `card_size_library`, `card_size_server`, `card_labels` (`always` or `hover`) and
-  `card_display` (`rows` or `columns`). **Hardware acceleration** (on by default) renders
+  `card_display` (`rows` or `columns`); card size, game labels and card display are
+  desktop-only (TV mode has one cover size). `[ui]` also holds TV mode's `tv_prompts`
+  (`match`, `xbox`, `ps`, `nintendo` or `8bitdo`) and `tv_assignments` (a table of
+  controller key → `xbox` or `nintendo`; two controllers of one model share a key).
+  **Hardware acceleration** (on by default) renders
   the window on the graphics card; it applies after a restart and is stored as
   `hardware_acceleration`. Turning it off renders on the CPU, for a machine whose window
   comes up blank with it on; the environment variable `GRID_LAUNCHER_HW_ACCEL=never`

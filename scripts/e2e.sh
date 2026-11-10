@@ -71,6 +71,12 @@ STAGE_GROUPS=(
   # Server › Discover against its own fixture set, whose release and added
   # dates are relative to the day the run starts (mock-romm applyRelativeDates).
   "discover:specs/discover.spec.ts"
+  # Where GRID opens (Settings › Appearance › Open GRID on, shared with TV
+  # mode): (a) Automatic + connected → Server › Discover, and the setting's
+  # row; (b) relaunch, server unreachable → Library; (c) forced Discover,
+  # still unreachable → the not-connected panel; (d) forced Library while
+  # connected. Each spec relaunches against the same data directory.
+  "open-on:specs/open-on-a.spec.ts specs/open-on-b.spec.ts specs/open-on-c.spec.ts specs/open-on-d.spec.ts"
   # install-c: Settings › Library — change the folder, Start fresh › Leave (Q2).
   "install:specs/install-a.spec.ts specs/install-b.spec.ts specs/install-c.spec.ts"
   "downloads:specs/downloads.spec.ts"

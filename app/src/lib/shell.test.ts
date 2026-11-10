@@ -110,6 +110,29 @@ describe('initialView / viewLabel / viewForDigit / chipLabel / hostOf', () => {
     // Connected wins over a stale offline flag.
     expect(initialView(true, true, '/media/kit')).toEqual({ view: 'server', drive: null });
   });
+  it('follows Open GRID on: automatic, forced Discover, forced Library', () => {
+    const kit = '/media/kit';
+    // [connected, offline, firstDrive, openOn] → expected
+    const table: [boolean, boolean, string | null, 'automatic' | 'discover' | 'library', { view: string; drive: string | null }][] = [
+      // Automatic: connected → Discover; unreachable → Library; no server → first drive.
+      [true, false, kit, 'automatic', { view: 'server', drive: null }],
+      [false, false, kit, 'automatic', { view: 'library', drive: null }],
+      [false, true, kit, 'automatic', { view: 'library', drive: kit }],
+      [false, true, null, 'automatic', { view: 'library', drive: null }],
+      // Forced Discover: Server whatever the connection (its not-connected panel without one).
+      [true, false, kit, 'discover', { view: 'server', drive: null }],
+      [false, false, kit, 'discover', { view: 'server', drive: null }],
+      [false, true, kit, 'discover', { view: 'server', drive: null }],
+      // Forced Library: All games when connected; the first drive without a server.
+      [true, false, kit, 'library', { view: 'library', drive: null }],
+      [false, false, kit, 'library', { view: 'library', drive: null }],
+      [false, true, kit, 'library', { view: 'library', drive: kit }],
+      [false, true, null, 'library', { view: 'library', drive: null }],
+    ];
+    for (const [connected, offline, drive, openOn, expected] of table) {
+      expect(initialView(connected, offline, drive, openOn), `${connected} ${offline} ${drive} ${openOn}`).toEqual(expected);
+    }
+  });
   it('labels every pill', () => {
     expect(viewLabel('library')).toBe('Library');
     expect(viewLabel('server')).toBe('Server');

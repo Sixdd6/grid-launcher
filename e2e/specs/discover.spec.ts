@@ -118,6 +118,8 @@ describe('discover', () => {
 
   it('opens Server on Discover, the first rail row, with a divider under it', async () => {
     await $(testId('discover')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    // Open GRID on is Automatic and the server answers: GRID opens here.
+    await expect($(testId('nav-server'))).toHaveAttribute('aria-current', 'page');
     await expect($(testId('server-rail-discover'))).toHaveAttribute('aria-current', 'page');
     const rail = await browser.execute(() => {
       const nav = document.querySelector('[data-testid="server-rail"]')!;

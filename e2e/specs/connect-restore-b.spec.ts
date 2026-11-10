@@ -16,6 +16,9 @@ describe('connect-restore (b): relaunch', () => {
       timeout: APP_START_TIMEOUT,
       timeoutMsg: 'the library never appeared — the stored session was not restored',
     });
+    // Where GRID opens, Automatic and connected: Server › Discover.
+    await expect($(testId('nav-server'))).toHaveAttribute('aria-current', 'page');
+    await expect($(testId('server-rail-discover'))).toHaveAttribute('aria-current', 'page');
     await expect($(testId('connect-submit'))).not.toExist();
     await expect($(testId('connect-secret'))).not.toExist();
   });

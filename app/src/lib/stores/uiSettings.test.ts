@@ -340,6 +340,9 @@ describe('background blur', () => {
       card_labels: 'always',
       card_display: 'rows',
       hardware_acceleration: true,
+      open_on: 'automatic',
+      tv_prompts: 'match',
+      tv_assignments: {},
     });
   });
 
@@ -440,5 +443,69 @@ describe('hardware acceleration', () => {
     const { store, setUiSettings } = await loadStore(true);
     await store.setHardwareAcceleration(false);
     expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ hardware_acceleration: false }));
+  });
+});
+
+describe('Open GRID on and the TV keys', () => {
+  async function loadStore(stored: Record<string, unknown>, rejects = false) {
+    vi.resetModules();
+    vi.stubGlobal('localStorage', fakeStorage());
+    vi.stubGlobal('document', { documentElement: { dataset: {} } });
+    vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
+    const setUiSettings = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('../api', () => ({
+      api: {
+        getUiSettings: () =>
+          rejects
+            ? Promise.reject(new Error('no config'))
+            : Promise.resolve({
+                theme: 'system',
+                background_fade: 25,
+                background_blur: 2,
+                card_size_library: 'medium',
+                card_size_server: 'medium',
+                ...stored,
+              }),
+        setUiSettings,
+      },
+    }));
+    const store = await import('./uiSettings.svelte');
+    expect(store.uiSettings.loaded).toBe(false);
+    await store.initUiSettings();
+    return { store, setUiSettings };
+  }
+
+  it('loads the stored values, normalised, and marks the store loaded', async () => {
+    const { store } = await loadStore({
+      open_on: 'library',
+      tv_prompts: 'nintendo',
+      tv_assignments: { aa: 'nintendo', bb: 'sega' },
+    });
+    expect(store.uiSettings.loaded).toBe(true);
+    expect(store.uiSettings.openOn).toBe('library');
+    expect(store.uiSettings.tvPrompts).toBe('nintendo');
+    expect(store.uiSettings.tvAssignments).toEqual({ aa: 'nintendo' });
+  });
+
+  it('falls back to the defaults for a config written before these keys', async () => {
+    const { store } = await loadStore({});
+    expect(store.uiSettings.openOn).toBe('automatic');
+    expect(store.uiSettings.tvPrompts).toBe('match');
+    expect(store.uiSettings.tvAssignments).toEqual({});
+  });
+
+  it('is loaded even when the read fails', async () => {
+    const { store } = await loadStore({}, true);
+    expect(store.uiSettings.loaded).toBe(true);
+    expect(store.uiSettings.openOn).toBe('automatic');
+  });
+
+  it('saves Open GRID on with the rest of the settings, keeping the TV keys', async () => {
+    const { store, setUiSettings } = await loadStore({ tv_assignments: { aa: 'xbox' } });
+    await store.setOpenOn('discover');
+    expect(store.uiSettings.openOn).toBe('discover');
+    expect(setUiSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ open_on: 'discover', tv_prompts: 'match', tv_assignments: { aa: 'xbox' } }),
+    );
   });
 });

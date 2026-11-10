@@ -2,12 +2,13 @@
 // scoped, like `appUpdate.svelte.ts`, so the resolved theme survives Shell
 // remounts and every view reads one source.
 import { api } from '../api';
-import type { UiSettings } from '../api';
+import type { OpenOn, TvAssignment, TvPrompts, UiSettings } from '../api';
 import { clearVariantMemo } from '../backgroundPrefetch';
 import { normalizeCardLabels, type CardLabels } from '../cards/labels';
 import { normalizeCardDisplay, type CardDisplay } from '../cards/layout';
 import { normalizeCardSize, type CardSize } from '../cards/size';
 import { fadeForToggle, rememberFade } from '../settings/appearance';
+import { normalizeOpenOn, normalizeTvAssignments, normalizeTvPrompts } from '../settings/openOn';
 import {
   BLUR_DEFAULT,
   clampBlur,
@@ -35,6 +36,13 @@ const state = $state<{
   cardLabels: CardLabels;
   cardDisplay: CardDisplay;
   hardwareAcceleration: boolean;
+  openOn: OpenOn;
+  tvPrompts: TvPrompts;
+  tvAssignments: Record<string, TvAssignment>;
+  /** The stored settings have been read (or the read failed and the
+   *  defaults stand). The shell waits for it: Open GRID on decides the view
+   *  it opens on. */
+  loaded: boolean;
 }>({
   theme: 'system',
   backgroundFade: FADE_DEFAULT,
@@ -45,6 +53,10 @@ const state = $state<{
   cardLabels: 'always',
   cardDisplay: 'rows',
   hardwareAcceleration: true,
+  openOn: 'automatic',
+  tvPrompts: 'match',
+  tvAssignments: {},
+  loaded: false,
 });
 
 // What "background art on" restores (design §10): the last fade short of off
@@ -65,6 +77,9 @@ function payload(): UiSettings {
     card_labels: state.cardLabels,
     card_display: state.cardDisplay,
     hardware_acceleration: state.hardwareAcceleration,
+    open_on: state.openOn,
+    tv_prompts: state.tvPrompts,
+    tv_assignments: { ...state.tvAssignments },
   };
 }
 
@@ -95,6 +110,18 @@ export const uiSettings = {
   },
   get hardwareAcceleration(): boolean {
     return state.hardwareAcceleration;
+  },
+  get openOn(): OpenOn {
+    return state.openOn;
+  },
+  get tvPrompts(): TvPrompts {
+    return state.tvPrompts;
+  },
+  get tvAssignments(): Readonly<Record<string, TvAssignment>> {
+    return state.tvAssignments;
+  },
+  get loaded(): boolean {
+    return state.loaded;
   },
 };
 
@@ -169,9 +196,13 @@ export async function initUiSettings(): Promise<() => void> {
     state.cardLabels = normalizeCardLabels(stored.card_labels ?? '');
     state.cardDisplay = normalizeCardDisplay(stored.card_display ?? '');
     state.hardwareAcceleration = stored.hardware_acceleration ?? true;
+    state.openOn = normalizeOpenOn(stored.open_on ?? '');
+    state.tvPrompts = normalizeTvPrompts(stored.tv_prompts ?? '');
+    state.tvAssignments = normalizeTvAssignments(stored.tv_assignments);
   } catch {
     // Defaults/mirror already in `state`.
   }
+  state.loaded = true;
   if (state.theme !== hint) {
     applyTheme(state.theme);
     mirrorTheme(state.theme);
@@ -264,6 +295,13 @@ export async function setCardSize(view: 'library' | 'server', size: CardSize): P
  *  once at startup, so it applies after a restart. */
 export async function setHardwareAcceleration(on: boolean): Promise<void> {
   state.hardwareAcceleration = on;
+  await api.setUiSettings(payload());
+}
+
+/** Open GRID on (Settings › Appearance, shared with TV mode). Takes effect
+ *  the next time GRID opens; persisted only. */
+export async function setOpenOn(choice: OpenOn): Promise<void> {
+  state.openOn = choice;
   await api.setUiSettings(payload());
 }
 

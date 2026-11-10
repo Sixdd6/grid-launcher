@@ -387,7 +387,10 @@ session exists and `Shell.svelte` afterwards.
   `drive_asset` copies into the image cache). Library's drive rows are `lib/library/rail.ts`
   and `lib/library/drive.ts`; Details' drive actions are in `lib/details/actions.ts` and
   `subject.ts`. Offline mode is `session.offline` (`stores/session.svelte.ts`) and the
-  `initialView`/`chipLabel` rules in `shell.ts`.
+  `initialView`/`chipLabel` rules in `shell.ts`. `initialView` also applies Open GRID on
+  (`[ui] open_on`, labels and normalisation in `lib/settings/openOn.ts`), the start rule
+  shared by the desktop and TV mode; `App.svelte` mounts the shell only once
+  `uiSettings.loaded`.
 - Feature folders — `lib/backups/`, `lib/discover/`, `lib/details/`, `lib/downloads/`, `lib/emulators/`, `lib/settings/`,
   `lib/systems/`, `lib/library/`, `lib/server/`, `lib/cards/`, `lib/focus/`. Each pairs a `.svelte`
   component with a pure `.ts` module holding the logic, and a `.test.ts` beside it. Put
