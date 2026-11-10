@@ -114,9 +114,8 @@ describe('Connect enablement (item 397) and Use without a server (item 515)', ()
 describe('Edit connection… (ruling E3)', () => {
   const st = { url: 'https://romm.lan', how: 'token' as const, user: '', secretTyped: false, lib: '' };
 
-  it('starts from the session: a password session has a username', () => {
-    expect(editPrefill({ serverUrl: 'https://romm.lan', username: '' })).toEqual({ serverUrl: 'https://romm.lan', username: '', useToken: true, reason: null });
-    expect(editPrefill({ serverUrl: 'https://romm.lan', username: 'sam' }).useToken).toBe(false);
+  it('starts from the session, signing in with a token as the desktop edit form does', () => {
+    expect(editPrefill({ serverUrl: 'https://romm.lan', username: 'sam' })).toEqual({ serverUrl: 'https://romm.lan', username: 'sam', useToken: true, reason: null });
   });
 
   it("shows Connect's rows without the library folder; Connect needs no folder", () => {

@@ -140,9 +140,11 @@ export function parentOf(path: string): string {
 export const EDIT_CONNECTION_LABEL = 'Edit connection…';
 export const EDIT_CONNECTION_SUB = 'Change the server or sign in again. Your library and settings stay.';
 
-/** The edit form's start: a session signed in with a password has a username. */
+/** The edit form's start: the session's server and username, signing in
+ *  with a token as the desktop's edit form does (the session doesn't say
+ *  which kind it used; a token session has a username too). */
 export function editPrefill(s: { serverUrl: string; username: string }): { serverUrl: string; username: string; useToken: boolean; reason: null } {
-  return { serverUrl: s.serverUrl, username: s.username, useToken: s.username.trim() === '', reason: null };
+  return { serverUrl: s.serverUrl, username: s.username, useToken: true, reason: null };
 }
 
 /** The edit form's rows: Connect's without the library folder. */
