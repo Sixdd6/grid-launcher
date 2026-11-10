@@ -277,3 +277,14 @@
   `openLibraryDetails(title)`, `detButtons`/`waitButtons`, `bodyScroll`, `captureErrors`/`pageErrors`.
   The tv-server, tv-library and tv-large-platform specs now wait for `tv-details`.
 
+
+## Pending for the next phase (consultant, after P9): prompts and native save locations
+- Checklist 529–531 (README § Consultant decisions). Files: app/src/lib/tv/gameActions.ts (`offerUmu(title)`,
+  `promptLibraryFolder(title)`, `promptFor(outcome, title)`, the "Library folder set" card), app/src/lib/tv/pages/details.ts
+  + test (`umuConfirm(title)`, `libraryFolderConfirm(title)`, `LIBRARY_FOLDER_SET`, `LIBRARY_FOLDER_BROWSER_TITLE`,
+  save-location words `removeLocationConfirm(raw)`, `SAVE_FOLDER_ADDED`, `saveFolderBrowserTitle(title)`),
+  app/src/lib/tv/pages/TvDetails.svelte (pass the title), app/src/lib/tv/pages/details/TvSavesPanel.svelte (the
+  "Save locations" section on CloudStore.nativePaths/nativePhase/nativePathCount/addManualPath/removeSavePath,
+  list `#saves-locs` data-nav="v", keys `sl<raw>`), e2e in tv-details (library-folder confirm; add/remove a
+  location through the browser with the "My Game on Windows" fixture). Remove the handover line saying TV
+  Saves doesn't manage native save folders.

@@ -754,3 +754,9 @@ Places where the prototype disagrees with the README, or where the sources leave
 ## Rulings on the Conflicts (2026-11-10)
 
 The Fable consultant ruled on every conflict above; the rulings are recorded in docs/design/system/components/TVMode/README.md § Consultant decisions and override any checklist item they touch (conflict n → ruling n, in order).
+
+## Added after P9 (consultant)
+
+- [ ] 529. Install or Play refused for umu-run opens a confirm "Install umu-launcher?" / "<title> runs through Proton, which needs umu-run. umu-launcher downloads as a Downloads row; launch <title> again when it finishes." / "Install umu-launcher" (primary), Cancel focused; while a umu row is live the card "umu-launcher is installing (see Downloads). Launch the game again when it finishes." with Open Downloads. (src: README § Consultant decisions)
+- [ ] 530. Install refused for no library folder opens "Set a library folder" / "GRID installs games into a library folder, and none is set. Choose one, then press Install again." / "Choose a folder…" → folder browser "Library folder" at home, Y saves; success card "Library folder set" with the path; refusal = error card with the reason; Install is pressed again by the user. (src: README § Consultant decisions)
+- [ ] 531. Details › Saves (kind Saves) on a native game shows "Save locations" with the desktop's status line, rows (raw path over expanded path; PCGamingWiki rows first), A on a row confirms "Remove this save location?" (danger "Remove"), focus to the row in its place; "Add a save folder…" opens "Save folder for <title>", Y adds ("Save folder added"); Upload latest keeps "Add a save location to enable uploads." until a row exists. (src: README § Consultant decisions)
