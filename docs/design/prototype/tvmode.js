@@ -73,7 +73,7 @@ var driveOf = function (id) { return DRIVES.filter(function (d) { return d.id ==
 var readyDrives = function () { return DRIVES.filter(function (d) { return d.connected && d.status === 'ready'; }); };
 var onDrive = function (g) { return readyDrives().filter(function (d) { return d.games.indexOf(g.id) >= 0; })[0]; };
 var CFG = { theme: 'dark', art: true, fade: 45, blur: 40, hw: true, restore: true, upload: true, skipNewer: true, delay: 10, retain: 10,
-  raUser: 'sam_plays', raToken: '', prompts: 'auto', assign: {}, bkFirmware: true, url: 'https://romm.home.lan', user: 'sam', lib: '/home/sam/Games/GRID', exitBtn: 'menu' };
+  raUser: 'sam_plays', raToken: '', prompts: 'auto', assign: {}, startOn: 'auto', bkFirmware: true, url: 'https://romm.home.lan', user: 'sam', lib: '/home/sam/Games/GRID', exitBtn: 'menu' };
 
 var S = { tab: 'server', pages: [], layers: [], offline: false, libRail: 'all', srvRail: 'discover', libQ: '', srvQ: '', libSort: 'Recently played', detTab: 'Overview', saveKind: 'Saves', notes: [], scheme: 'xbox', padName: '' };
 
@@ -507,6 +507,7 @@ TABS.settings = {
 function paneRows(id) {
   var on = function (b) { return b; };
   if (id === 'appearance') return [
+    { type: 'choice', key: 'startOn', label: 'Open GRID on', sub: 'Here and in desktop mode', opts: [['auto', 'Automatic: Discover when connected, else Library'], ['discover', 'Server › Discover'], ['library', 'Library']] },
     { type: 'choice', key: 'theme', label: 'Theme', opts: [['system', 'Follow system'], ['dark', 'Dark'], ['light', 'Light']] },
     { type: 'toggle', key: 'art', label: 'Background art', sub: 'The focused game\'s art, blurred, behind everything' },
     { type: 'slider', key: 'fade', label: 'Background fade', min: 0, max: 100, step: 5, fmt: function (v) { return v === 100 ? '100% · off' : v + '%'; } },
@@ -894,6 +895,7 @@ function guideMenu() {
     ['Show: token rejected', function () { startConnect('The server rejected your token. Enter a new one.'); }],
     [S.offline ? 'Show: back online' : 'Show: server unreachable', function () { S.offline = !S.offline; if (!S.offline) toast('Connected to ' + CFG.url); else toast('Can\'t reach ' + CFG.url, { err: 1, s: 'Showing your library. GRID keeps trying.' }); render(); }],
     ['Show: unreachable library', unreachable],
+    ['Show: restart GRID (opens where the setting says)', function () { openStart(); toast('GRID started', { s: (S.offline || S.noServer ? 'Not connected' : 'Connected') + ' · opened on ' + (S.tab === 'library' ? 'Library' : 'Server › Discover') }); }],
     [driveOf('couch').connected ? 'Show: unplug Couch kit' : 'Show: plug in Couch kit', unplugCouch],
     ['Show: a failed install', function () { toast('Couldn\'t install Kite Season: the server returned 503', { err: 1, act: ['Open Downloads', function () { S.pages = []; S.tab = 'downloads'; render(); }] }); }]
   ];
@@ -981,7 +983,7 @@ var ACT = {
   removeFromDrive: function (el) { var g = byId(el.dataset.id), d = driveOf(el.dataset.drive); confirmBox({ title: 'Remove ' + g.t + ' from ' + d.name + '?', body: 'Its files leave the drive. ' + (g.inst ? 'The copy installed on this computer stays.' : 'You can back it up again later.'), ok: 'Remove from drive', danger: 1, fn: function () { d.games.splice(d.games.indexOf(g.id), 1); toast(g.t + ' removed from ' + d.name); pop(); } }); },
   drivePage: function (el) { drivePage(driveOf(el.dataset.id)); },
   bkFwDefault: function () { CFG.bkFirmware = !CFG.bkFirmware; repaint(); },
-  noServer: function () { var F = S.pages[S.pages.length - 1].F; CFG.lib = F.lib; S.noServer = true; S.offline = true; S.startup = false; S.pages = []; var d = readyDrives()[0]; if (d) showDrive(d.id); else { S.tab = 'library'; render(); } toast('Using GRID without a server', { s: 'Your Library and Backup drives work offline' }); },
+  noServer: function () { var F = S.pages[S.pages.length - 1].F; CFG.lib = F.lib; S.noServer = true; S.offline = true; S.startup = false; S.pages = []; var d = readyDrives()[0]; if (CFG.startOn !== 'discover' && d) showDrive(d.id); else openStart(); toast('Using GRID without a server', { s: 'Your Library and Backup drives work offline' }); },
   toConnect: function () { startConnect(); },
   fold: function (el) { S.folds[el.dataset.fold] = !S.folds[el.dataset.fold]; repaint(); },
   /* A on a rail entry does what Right does: into the page beside it (the place you
@@ -1012,9 +1014,9 @@ var ACT = {
   chGo: function () {
     var P = S.pages[S.pages.length - 1], names = [];
     Object.keys(P.pick).forEach(function (k) { var e = P.pick[k].emu; if (P.pick[k].on && e && names.indexOf(e) < 0) names.push(e); });
-    S.startup = false; S.pages = []; S.tab = 'server'; S.srvRail = 'discover'; render(); setupCard(names);
+    S.startup = false; openStart(); setupCard(names);
   },
-  chSkip: function () { S.startup = false; S.pages = []; S.tab = 'server'; S.srvRail = 'discover'; render(); }
+  chSkip: function () { S.startup = false; openStart(); }
 };
 function emuItems(id, curE, fn) {
   var items = [], groups = ['Installed', 'Download'];
@@ -1239,6 +1241,16 @@ function installFromDrive(g, dv, quiet) {
 }
 /* Open the Library on a drive: the drive's rail row is focused, so the grid shows
    its games (the rail filters as focus lands). */
+/* Where GRID opens, in desktop and TV mode alike: Server › Discover when it is
+   connected to a RomM server, the Library when it isn't (unreachable, or used
+   without a server). Settings › Appearance › Open GRID on can force either. */
+function openStart() {
+  S.pages = []; S.layers.forEach(function (l) { l.el.remove(); }); S.layers = []; S.selMode = false;
+  var where = CFG.startOn === 'auto' ? (S.offline || S.noServer ? 'library' : 'discover') : CFG.startOn;
+  if (where === 'library') { S.tab = 'library'; TABS.library._k = null; }
+  else { S.tab = 'server'; S.srvRail = 'discover'; TABS.server._k = 'r-discover'; }
+  render();
+}
 function showDrive(id) { S.pages = []; S.tab = 'library'; S.libRail = 'drv:' + id; S.folds.drives = true; TABS.library._k = 'r-drv:' + id; render(); }
 function unplugCouch() {
   var dv = driveOf('couch');
@@ -1551,7 +1563,7 @@ addEventListener('gamepaddisconnected', function () { S.padName = ''; S.padId = 
 
 /* ------------------------------------------------------------------ start */
 document.documentElement.setAttribute('data-theme', 'dark');
-render();
+openStart();
 hero(byId(1));
 setTimeout(function () { toast('Welcome to TV mode', { s: 'Press ' + GL[scheme()].MENU + ' for the menu. Desktop mode is one press away there.' }); }, 600);
 })();
