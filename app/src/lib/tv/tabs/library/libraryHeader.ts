@@ -116,3 +116,12 @@ export function driveChips(drive: Pick<DriveInfo, 'pack'>): { emulators: string;
   const systems = new Set((drive.pack?.firmware ?? []).map((f) => f.trim()).filter((f) => f !== '')).size;
   return { emulators: names.length ? names.join(', ') : 'none', firmware: plural(systems, 'system') };
 }
+
+/** Remove <n> from drive… in select mode on a drive (item 451). */
+export function removedFromDriveConfirm(n: number, pack: string): { title: string; body: string; ok: string } {
+  return {
+    title: `Remove ${countLine(n)} from ${pack}?`,
+    body: 'Their files leave the drive. Games installed on this computer stay.',
+    ok: 'Remove from drive',
+  };
+}

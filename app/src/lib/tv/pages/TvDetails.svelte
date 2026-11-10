@@ -7,6 +7,7 @@
   // right stick scrolls the tab body (`data-read-area`) without moving
   // focus; Up into the buttons scrolls it back to its top
   // (`data-read-reset`). Every fact and action is the shared DetailsStore's.
+  import { openBackupPage } from '../backupActions';
   import { tick } from 'svelte';
   import Image from '../../Image.svelte';
   import { DetailsStore } from '../../details/detailsStore.svelte';
@@ -239,7 +240,8 @@
         );
         return;
       case 'backup':
-        // TODO(P13): the Backup page titled "Backup <title>" (item 435).
+        // The Backup page titled "Backup <title>" (item 435).
+        if (subject.romId !== null) openBackupPage({ kind: 'game', name: title }, [subject.romId]);
         return;
     }
   }

@@ -5,20 +5,27 @@
   // folders, items 176–184, 420) beside the header and a windowed grid of
   // large covers (185–195; drives 421–424). Moving through the rail filters
   // at once and clears the search; A or Right goes into the grid. Y searches
-  // live, LT sorts, RT is select mode (P13).
+  // live, LT sorts, RT is select mode (items 439–453): on a drive Y installs
+  // or removes the picked games, elsewhere it backs them up.
   import { api, type DriveGame, type InstalledGame } from '../../../api';
   import { visibleLibraryGames } from '../../../library';
-  import { driveKeyOf, matchesRail } from '../../../library/rail';
+  import { driveKeyOf, matchesRail, type RailKey } from '../../../library/rail';
   import { librarySelection, selectRail } from '../../../library/selection.svelte';
   import { sortLabel } from '../../../library/sort';
   import { drives } from '../../../stores/drives.svelte';
   import { installed, refresh as refreshInstalled } from '../../../stores/installed.svelte';
   import { session } from '../../../stores/session.svelte';
-  import { pushToast } from '../../../stores/toasts.svelte';
+  import { installAllFromDrive, removeFromDrive } from '../../../backups/install';
+  import { removedFromDriveConfirm } from './libraryHeader';
   import { updates } from '../../../stores/updates.svelte';
   import Glyph from '../../glyphs/Glyph.svelte';
-  import { gameFromDrive, gameFromRow, type TvGame } from '../../games';
-  import { openKeyboard, openList } from '../../overlays/overlays.svelte';
+  import { gameFromDrive, gameFromRow, liveInstall, type TvGame } from '../../games';
+  import { downloads } from '../../../stores/downloads.svelte';
+  import { openBackupPage } from '../../backupActions';
+  import { confirmBox, openKeyboard, openList } from '../../overlays/overlays.svelte';
+  import { pushToast } from '../../../stores/toasts.svelte';
+  import { registerSelectGrid, select, selEnd, selKeep, selToggle, type SelGame } from '../../select.svelte';
+  import TvSelBar from '../../ui/TvSelBar.svelte';
   import { useScreen } from '../../screen.svelte';
   import TvChip from '../../ui/TvChip.svelte';
   import TvGameCover from '../../ui/TvGameCover.svelte';
@@ -43,6 +50,8 @@
   // uninstalled) falls back to All games, written back to the store.
   $effect(() => {
     if (selected.key !== librarySelection.key) {
+      // The drive went away (item 452): select mode ends with it.
+      selEnd();
       selectRail(selected.key);
       lib.query = '';
     }
@@ -113,15 +122,84 @@
   });
   let chips = $derived(drive ? driveChips(drive) : null);
 
-  function backupPlatform(installedCount: number) {
-    if (!session.connected) {
-      pushToast('Backing up needs a server.', 'error');
-      return;
-    }
-    // TODO(P13): the Backup page for the platform's installed games
-    // ("Backup <Platform> · N games", items 455, 481–485).
-    void installedCount;
+  /** X on a Library platform row: "Backup all N…", its installed games the
+   *  server knows (item 455; offline it says why, 456). */
+  function backupPlatform(key: RailKey, label: string) {
+    const ids = visibleLibraryGames(installed.list).flatMap((r) =>
+      matchesRail(r, key, updateIds, nowSeconds) && r.rom_id !== null ? [r.rom_id] : [],
+    );
+    if (ids.length === 0 && session.connected) return;
+    openBackupPage({ kind: 'platform', platform: label, count: ids.length }, ids);
   }
+
+  // ---- Select mode (items 439–453).
+  let selGames = $derived<SelGame[]>(
+    games.map((g) => ({ id: g.id, size: g.drive ? g.drive.game.size : (g.row?.filesize_bytes ?? 0) })),
+  );
+  // A search that narrows the grid drops the picks it hides.
+  $effect(() => {
+    if (select.on) selKeep(selGames.map((g) => g.id));
+  });
+
+  function pickedGames(ids: readonly string[]): TvGame[] {
+    return games.filter((g) => ids.includes(g.id));
+  }
+
+  /** Y on a drive: "<n> games on <pack>" with Install and Remove (items 449–451). */
+  function driveAct(ids: string[]) {
+    if (driveKey === null || drive === null) return;
+    const key = driveKey;
+    const pack = drive.pack?.name ?? drive.label;
+    const picked = pickedGames(ids).flatMap((g) => (g.drive ? [{ game: g.drive.game, installed: g.installed }] : []));
+    const n = picked.length;
+    const word = (k: number) => `${k} game${k === 1 ? '' : 's'}`;
+    void openList({
+      title: `${word(n)} on ${pack}`,
+      items: [
+        {
+          label: `Install ${word(n)}`,
+          testId: 'tv-drive-install-all',
+          onPick: () => {
+            const todo = picked.filter((p) => !p.installed && liveInstall(downloads.entries, p.game.rom_id) === null).map((p) => p.game);
+            selEnd();
+            void installAllFromDrive(key, todo);
+          },
+        },
+        {
+          label: `Remove ${n} from drive…`,
+          danger: true,
+          testId: 'tv-drive-remove-all',
+          onPick: () => {
+            void confirmBox({
+              ...removedFromDriveConfirm(n, pack),
+              danger: true,
+              onOk: () => {
+                selEnd();
+                removeFromDrive(key, pack, picked.map((p) => p.game)).catch((err: unknown) =>
+                  pushToast(err instanceof Error ? err.message : String(err), 'error'),
+                );
+              },
+            });
+          },
+        },
+      ],
+    });
+  }
+
+  /** Y elsewhere: the Backup page for the picked games (item 443). */
+  function backupAct(ids: string[]) {
+    const romIds = pickedGames(ids).flatMap((g) => (g.romId !== null ? [g.romId] : []));
+    openBackupPage({ kind: 'games', count: romIds.length }, romIds);
+  }
+
+  $effect(() =>
+    registerSelectGrid({
+      games: () => selGames,
+      drive: () => driveKey !== null,
+      connected: () => session.connected,
+      act: (ids) => (driveKey !== null ? driveAct(ids) : backupAct(ids)),
+    }),
+  );
 
   function search() {
     const before = lib.query;
@@ -150,8 +228,7 @@
     ],
     y: search,
     lt: sortList,
-    // TODO(P13): select mode on the Library grids (items 439–446).
-    rt: () => {},
+    rt: selToggle,
   });
 
   const tid = (testId: string) => testId.replace(/^library-rail-/, 'tv-lib-rail-');
@@ -177,7 +254,7 @@
           xl={backupAllLabel(e.count)}
           testId={tid(e.testId)}
           onSelect={() => selectLibRail(e.key)}
-          onX={() => backupPlatform(e.count)}>{e.label}</TvRailRow
+          onX={() => backupPlatform(e.key, e.label)}>{e.label}</TvRailRow
         >
       {/each}
     {/if}
@@ -215,7 +292,7 @@
     {/if}
     <TvGrid id="lib-grid" scroll="lib-grid" items={games} key={coverKey} listKey={selected.key} testId="tv-lib-grid">
       {#snippet cell(g)}
-        <TvGameCover k={coverKey(g)} game={g} plat={mixed || driveKey !== null} testId={`tv-cover-${coverKey(g)}`} />
+        <TvGameCover k={coverKey(g)} game={g} plat={mixed || driveKey !== null} selectable testId={`tv-cover-${coverKey(g)}`} />
       {/snippet}
       {#if empty}
         <div class="empty" data-testid="tv-lib-empty">
@@ -224,5 +301,6 @@
         </div>
       {/if}
     </TvGrid>
+    <TvSelBar games={selGames} drive={driveKey !== null} />
   </div>
 </div>

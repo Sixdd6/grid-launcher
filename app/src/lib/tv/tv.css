@@ -222,6 +222,29 @@ html[data-ui='tv'] .tv .radio { flex: 0 0 auto; width: 1.5rem; height: 1.5rem; b
 html[data-ui='tv'] .tv .radio.on { border-color: var(--primary); }
 html[data-ui='tv'] .tv .radio.on::after { content: ''; position: absolute; inset: .25rem; border-radius: 50%; background: var(--primary); }
 
+/* ---- Game backups (P13; tvmode.css "Game backups"). The selection bar pins
+   to the bottom of the grid panel. */
+html[data-ui='tv'] .tv .selbar { flex: 0 0 auto; display: flex; align-items: center; gap: 1.4rem; margin: 0 0 1.2rem; padding: .8rem 1.2rem; background: var(--overlay); border: 1px solid var(--line-strong); border-radius: 1rem; box-shadow: var(--shadow-overlay); color: var(--text-h); }
+html[data-ui='tv'] .tv .selbar .sp { flex: 1; }
+html[data-ui='tv'] .tv .selbar .hint { display: inline-flex; align-items: center; gap: .5rem; font-weight: 600; cursor: pointer; }
+/* A drive's space: other files, what queued backups hold, this backup's
+   hatched share (or GRID's files on a drive page), free. */
+html[data-ui='tv'] .tv .ubar { display: flex; height: .4rem; width: 16rem; max-width: 100%; border-radius: .2rem; background: var(--field); overflow: hidden; margin: .5rem 0 .2rem; }
+html[data-ui='tv'] .tv .ubar.wide { width: 28rem; }
+html[data-ui='tv'] .tv .ubar b { display: block; height: 100%; background: var(--text-muted); opacity: .5; }
+html[data-ui='tv'] .tv .ubar b.res { background: var(--graph-disk); opacity: .4; }
+html[data-ui='tv'] .tv .ubar i { display: block; height: 100%; background: repeating-linear-gradient(45deg, var(--graph-disk) 0 .3rem, transparent .3rem .5rem); }
+html[data-ui='tv'] .tv .ubar i.over { background: repeating-linear-gradient(45deg, var(--danger) 0 .3rem, transparent .3rem .5rem); }
+html[data-ui='tv'] .tv .ubar i.grid { background: var(--primary); }
+html[data-ui='tv'] .tv .warning-text { color: var(--warning-text); font-weight: 600; }
+/* Ruling 2: no text under 0.85rem (the prototype's tag is 0.8rem). */
+html[data-ui='tv'] .tv .srctag { font-size: .85rem; font-weight: 600; padding: .15rem .6rem; border-radius: 100px; border: 1px solid var(--line-strong); color: var(--text-muted); white-space: nowrap; }
+html[data-ui='tv'] .tv .bk-foot { display: flex; align-items: center; justify-content: flex-end; gap: 1.4rem; margin-top: 1.4rem; padding-top: 1.2rem; border-top: 1px solid var(--line); }
+html[data-ui='tv'] .tv .page-in > .note { margin: .2rem 1.2rem .8rem; }
+html[data-ui='tv'] .tv .srow .fixed { display: inline-flex; color: var(--primary); }
+html[data-ui='tv'] .tv .srow .bar-after { display: block; }
+html[data-ui='tv'] .tv .srow .lab .t .muted { color: var(--text-muted); font-weight: 400; }
+
 /* ---- Pages (item 320): a centred panel up to 62rem, scrolling as one list. */
 html[data-ui='tv'] .tv .page { position: absolute; inset: 0; overflow-y: auto; padding: 1.6rem 2.4rem 2rem; }
 html[data-ui='tv'] .tv .page-in { max-width: 62rem; margin: 0 auto; background: var(--panel); border: 1px solid var(--line); border-radius: 1rem; padding: 1.6rem 1.8rem; }

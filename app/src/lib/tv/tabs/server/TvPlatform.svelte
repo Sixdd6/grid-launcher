@@ -12,7 +12,10 @@
   import { installed, isInstalled, matchesInstalled } from '../../../stores/installed.svelte';
   import { session } from '../../../stores/session.svelte';
   import { updates } from '../../../stores/updates.svelte';
+  import { openBackupPage } from '../../backupActions';
   import { openSystem } from '../../gameActions';
+  import { registerSelectGrid, select, selKeep, type SelGame } from '../../select.svelte';
+  import TvSelBar from '../../ui/TvSelBar.svelte';
   import { gameFromSummary, type TvGame } from '../../games';
   import TvButton from '../../ui/TvButton.svelte';
   import TvChip from '../../ui/TvChip.svelte';
@@ -53,10 +56,28 @@
     void catalog.refreshFirmwareStatus(id, name);
   });
 
+  /** Backup all N…: every game of the platform (item 454). */
   function backupAll() {
-    // TODO(P13): the Backup page for the platform's games ("Backup
-    // <Platform> · N games", items 481–485).
+    if (row === null || all.length === 0) return;
+    openBackupPage({ kind: 'platform', platform: label, count: all.length }, all.map((g) => g.id), [row.id]);
   }
+
+  // ---- Select mode (items 439–453): Y backs the picked games up.
+  let selGames = $derived<SelGame[]>(shown.map((g) => ({ id: String(g.id), size: g.fs_size_bytes })));
+  $effect(() => {
+    if (select.on) selKeep(selGames.map((g) => g.id));
+  });
+  $effect(() =>
+    registerSelectGrid({
+      games: () => selGames,
+      drive: () => false,
+      connected: () => session.connected,
+      act: (ids) => {
+        const romIds = ids.map(Number).filter((n) => Number.isFinite(n));
+        openBackupPage({ kind: 'games', count: romIds.length }, romIds, row ? [row.id] : []);
+      },
+    }),
+  );
 </script>
 
 <div class="vh" data-testid="tv-srv-header">
@@ -82,9 +103,10 @@
 </div>
 <TvGrid id="srv-grid" scroll="srv-grid" items={games} key={(g) => `sg${g.id}`} listKey={srv.rail}>
   {#snippet cell(g)}
-    <TvGameCover k={`sg${g.id}`} game={g} testId={`tv-cover-sg${g.id}`} />
+    <TvGameCover k={`sg${g.id}`} game={g} selectable testId={`tv-cover-sg${g.id}`} />
   {/snippet}
   {#if searching(srv.query) && shown.length === 0 && !loading}
     <div class="empty" data-testid="tv-srv-nomatch"><h2>{noMatch(srv.query)}</h2></div>
   {/if}
 </TvGrid>
+<TvSelBar games={selGames} />
