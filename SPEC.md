@@ -685,6 +685,23 @@ flags and the version, then up to four tabs:
   The viewer shows each item as large as the window allows at its own shape, but never
   more than twice its own resolution; the arrows sit just outside the media's edges and
   stop at the window's edge when the media is wide.
+  The trailer plays inside GRID, in YouTube's own player (with its own controls), framed
+  by a page on GRID's loopback media server, because YouTube refuses an embed straight
+  from the app's page on Linux and macOS. "Watch on YouTube" sits under the player at all
+  times and opens the trailer in the browser. Nothing overlaps the player (YouTube's
+  rules): it keeps clear of the notification cards' column, the arrows sit beside it, and
+  it is at least 480×270. When YouTube refuses the trailer (errors 2, 5, 100, 101, 150,
+  153), its player script doesn't load, or it isn't ready within about 10 s, the poster
+  comes back with "Watch on YouTube" and "This trailer can't play in GRID.". Keyboard
+  focus stays with the viewer: a click in the player hands it back, so Esc and the arrows
+  keep working.
+  Every video player (the trailer and a server video, here and in TV mode) has its own
+  volume, separate from the system volume: it opens at the stored level
+  (`[ui] video_volume`, 0–100, default 50), and a change made with the player's own
+  controls is stored, about 500 ms after the last change, for every later video. TV mode's viewer
+  (TVMode README § Decided, 2026-11-10) plays videos too: A plays and pauses, LB / RB seek
+  10 s, LT / RT step the volume by 10 with a "Volume N%" readout beside the player, Left /
+  Right page and B closes.
 - **Saves** — the game's cloud saves or states, described below.
 - **Achievements** — shown only when the server lists RetroAchievements achievements for
   the game. The data comes from the server only: the game's achievement list and the

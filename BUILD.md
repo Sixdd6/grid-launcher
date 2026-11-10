@@ -181,6 +181,11 @@ gnome-keyring, `XDG_DATA_HOME` and `XDG_RUNTIME_DIR`. No `tauri-driver` is neede
 app embeds its own WebDriver server behind the `e2e` cargo feature. `e2e/node_modules`
 installs itself on the first run.
 
+No run reaches YouTube: the trailer's relay page loads YouTube's player script from a
+dead loopback port (`GRID_LAUNCHER_E2E_YOUTUBE_API`, set by `wdio.conf.ts` and read by
+e2e builds only), so a trailer always takes the fallback path (its poster and "Watch on
+YouTube").
+
 Stage groups are defined in `scripts/e2e.sh` (`STAGE_GROUPS`); their specs live in
 `e2e/specs/`, fixtures in `e2e/fixtures*/`, seeds in `e2e/seed/`, and the mock servers in
 `e2e/mock-romm/`.
@@ -276,6 +281,17 @@ WebKitGTK 2.52.6 (Ubuntu 24.04's) can abort the web process in a JavaScriptCore
 garbage-collector thread (`JSC::MarkedBlock::aboutToMarkSlow`) soon after a large
 platform opens, which leaves an empty window. The app sets `JSC_useDFGJIT=0` at startup
 on Linux, which stops it; export the variable yourself to override it.
+
+Trailers play in YouTube's player, which WebKitGTK decodes through GStreamer: YouTube
+serves VP9 video and Opus audio, so a Linux system needs GStreamer's VP9 and Opus
+decoders (`gst-plugins-good` for VP9 through libvpx, `gst-plugins-base` for Opus; on
+Fedora `gstreamer1-plugins-good` and `gstreamer1-plugins-base`, on Debian and Ubuntu
+`gstreamer1.0-plugins-good` and `gstreamer1.0-plugins-base`). The .deb and .rpm use the
+system's GStreamer. The AppImage bundles WebKitGTK but not GStreamer's media framework
+unless `bundleMediaFramework` is set in the AppImage bundle config, which it isn't
+today, so the AppImage plays trailers only where the host's GStreamer plugins match
+what the bundled WebKitGTK can load. Without the decoders a trailer shows its poster and
+"Watch on YouTube" after the 10 s ready timeout.
 
 ## Release
 
