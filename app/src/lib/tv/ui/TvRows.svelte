@@ -44,8 +44,8 @@
       data-k={`s-${r.key}`}
       data-al={rowA(r)}
       data-adj={r.type === 'slider' ? '' : undefined}
-      data-why={r.type === 'action' ? r.why : undefined}
-      aria-disabled={r.type === 'action' && r.disabled ? 'true' : undefined}
+      data-why={r.disabled ? r.why : undefined}
+      aria-disabled={r.disabled ? 'true' : undefined}
       data-testid={`tv-row-${r.key}`}
       use:tvf={handlers(r)}
     >

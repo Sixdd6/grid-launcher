@@ -34,6 +34,12 @@ export function dismissEntry(id: number): Promise<void> {
   return api.dismissDownload(id);
 }
 
+/** Downloads' Clear completed (TV mode's Y): dismisses each finished row,
+ *  in order. The first refusal stops it and is thrown. */
+export async function dismissAll(ids: readonly number[]): Promise<void> {
+  for (const id of ids) await api.dismissDownload(id);
+}
+
 /**
  * Runs one row's action while tracking its pending flag and its error: the
  * error is cleared when the action starts and set from its refusal. The

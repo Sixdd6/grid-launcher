@@ -178,6 +178,16 @@ html[data-ui='tv'] .tv .lrow.f { background: var(--selected); }
 html[data-ui='tv'] .tv .note { color: var(--text-muted); font-size: .95rem; margin: 0 0 1rem; max-width: 46rem; }
 html[data-ui='tv'] .tv .note.warn { color: var(--warning-text); }
 html[data-ui='tv'] .tv .err { color: var(--danger); }
+html[data-ui='tv'] .tv .lrow.dl { display: grid; grid-template-columns: 1fr 12rem auto; gap: 1.4rem; align-items: center; }
+html[data-ui='tv'] .tv .lrow.dl > .s { min-width: 6rem; text-align: right; }
+html[data-ui='tv'] .tv .kind { font-size: .85rem; font-weight: 700; letter-spacing: .05em; padding: .1rem .45rem; border-radius: .3rem; border: 1px solid var(--line-strong); color: var(--text-muted); margin-left: .5rem; vertical-align: .1rem; }
+html[data-ui='tv'] .tv .pbar { height: .35rem; border-radius: .2rem; background: var(--field); overflow: hidden; margin-top: .5rem; }
+html[data-ui='tv'] .tv .pbar b { display: block; height: 100%; background: var(--primary); transition: width 500ms linear; }
+html[data-ui='tv'] .tv .spark { height: 2.6rem; border-radius: .5rem; background: var(--field); position: relative; overflow: hidden; }
+html[data-ui='tv'] .tv .spark svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+html[data-ui='tv'] .tv .spark path { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
+html[data-ui='tv'] .tv .spark .net { stroke: var(--primary); stroke-width: 2; }
+html[data-ui='tv'] .tv .spark .disk { stroke: var(--graph-disk); stroke-width: 1.5; }
 
 /* ---- Settings-style rows (items 21, 29) */
 html[data-ui='tv'] .tv .srow { display: flex; align-items: center; gap: 1.2rem; min-height: 4rem; padding: .7rem 1.2rem; border-radius: .7rem; margin-bottom: .4rem; }

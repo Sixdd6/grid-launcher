@@ -9,6 +9,9 @@ type Base = {
   label: string;
   sub?: string;
   danger?: boolean;
+  /** Can't be used right now: A says `why` as a notice instead. */
+  disabled?: boolean;
+  why?: string;
 };
 
 export type SwitchRow = Base & { type: 'switch'; on: boolean; set: (on: boolean) => void };
@@ -29,7 +32,7 @@ export type SliderRow = Base & {
   set: (v: number) => void;
 };
 export type TextRow = Base & { type: 'text'; value: string; mask?: boolean; edit: () => void };
-export type ActionRow = Base & { type: 'action'; value?: string; run: () => void; disabled?: boolean; why?: string };
+export type ActionRow = Base & { type: 'action'; value?: string; run: () => void };
 export type InfoRow = Base & { type: 'info'; value: string };
 
 export type Row = SwitchRow | ChoiceRow | SliderRow | TextRow | ActionRow | InfoRow;
@@ -50,7 +53,7 @@ export function rowA(row: Row): string | null {
 
 export function sliderPercent(row: Pick<SliderRow, 'value' | 'min' | 'max'>): number {
   if (row.max <= row.min) return 0;
-  return ((row.value - row.min) / (row.max - row.min)) * 100;
+  return Math.max(0, Math.min(100, ((row.value - row.min) / (row.max - row.min)) * 100));
 }
 
 /** One Left (-1) or Right (+1) step on a slider, clamped to its range. */
