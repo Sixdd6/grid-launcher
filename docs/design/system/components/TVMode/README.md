@@ -184,6 +184,26 @@ Open questions for the user (not blocking): the order and wording of RetroAchiev
   (Cancel focused); turning one on asks nothing.
 - The running backup in the top bar (ruling 21) and the backing-up refusal (438) are asserted end to end in
   `tv-backups-b` and the new `tv-backups-e`; "Installed from <label>" (425) in `tv-backups-c`.
+- Details for a game whose system has no emulator reads "No emulator for <system>. Install installs <rec> too." and
+  Install also installs the recommended emulator (the Systems pane's own per-system install); the queued card adds
+  "<rec> installs with it". With no recommendation: "No emulator for <system>. Add one in Settings › Systems." The
+  desktop keeps its hover reason until the user decides.
+- The Overview facts panel shows the desktop's ten facts (developer, companies, release, genres, game modes,
+  players, franchises, size, version, content); Release reads "d Mon yyyy".
+- The Play card is the desktop's "Launching <title>…" alone; "Restored the latest cloud save" is not shown because
+  the backend reports no restore.
+- "You can backup it again later." (Remove from drive, Cancel backup) — one word, per the UI rule.
+- Settings › Connection adds Edit connection… (the Connect screen as a page, session kept), Open RomM in browser and
+  Open config folder (both switch to desktop mode, like Open folder and Open release).
+- A companion emulator's rows are version, Update, Open, "<Companion> settings" and "Remove <Companion>" (confirmed
+  "Games and saves stay.").
+- On a Backup drive, LT sorts by Title, Platform, Recently backed up or Largest first, remembered apart from the
+  Library sort.
+- In the media viewer a server video answers A (Pause / Play), LT (Back 10 s) and RT (Forward 10 s).
+- The background art is drawn edge to edge: the backend blurs it, so the prototype's 6rem overscan has nothing to
+  hide.
+- Redraws under an overlay happen in place; closing the overlay returns focus to the opener, or jumps to the item
+  with its key or the one now in its place.
 
 ## Notes
 

@@ -22,7 +22,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [ ] 6. The top bar, hint bar and every tab screen use a 2.4rem side gutter (src: tvmode.css `.top`, `.hints`, `.split`, `.list`, `.page`).
 - [x] 7. Scrollbars are hidden on every scrolling area (src: tvmode.css `scrollbar-width: none`).
 - [ ] 8. Text sits only on `panel` or `overlay` surfaces, as on the desktop (src: README § The shell › Background art).
-- [ ] 9. The background shows the focused game's art, blurred, behind the panels, reaching 6rem past the screen edges so the blur has no hard border (src: README § The shell › Background art; tvmode.css `.tv-art`).
+- [x] 9. The background shows the focused game's art, blurred, behind the panels, reaching 6rem past the screen edges so the blur has no hard border (src: README § The shell › Background art; tvmode.css `.tv-art`). (Accepted deviation, consultant ruling F: drawn edge to edge, inset 0, as the backend blurs the art.)
 - [ ] 10. A layer of the `bg` colour at the opacity set by Settings › Appearance › Background fade covers the art, and Background blur sets the blur (src: README § Background art; tvmode.css `.tv-art::after`; tvmode.js `srowAdj`).
 - [ ] 11. The background art changes whenever a cover takes focus (any grid, row, Related row, Search result) and when Details or Playing opens, fading over 360 ms (src: tvmode.js `setFocus`, `hero`, `details().after`, `playing().after`; tvmode.css `.tv-art`).
 - [ ] 12. With Background art off, the art is hidden (src: tvmode.js `hero`, `srowAct`).
@@ -156,7 +156,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 114. Scrolls glide; with reduced motion, and when a screen first appears or redraws, they jump (src: README § Scrolling; tvmode.js `glide`, `render`).
 - [x] 115. After a change of data, focus stays on the same item; if it is gone, focus moves to the enabled item now in its place in the same panel (src: README § The shell › Focus; tvmode.js `repaint`).
 - [ ] 116. A change never moves the player: in Settings only the pane redraws, never the rail (src: README § The shell › Focus; tvmode.js `repaint`).
-- [ ] 117. A redraw caused by a finished install while an overlay is open waits until the overlay closes (src: tvmode.js tick, `closeLayer`).
+- [x] 117. A redraw caused by a finished install while an overlay is open happens in place; closing the overlay returns focus to its opener, or jumps to the item with the opener's key or the one now in its place (consultant ruling G; src: tvmode.js tick, `closeLayer`).
 - [ ] 118. While an install runs, only its percentage text changes (cover tags, hero line, top bar), so nothing else redraws (src: tvmode.js tick).
 
 ## 4. Top bar & hint bar
@@ -356,14 +356,14 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 285. Update asks "Update <title>?" / "Saves and configuration are kept." with Update, then notifies "Update for <title> added to download queue" (src: tvmode.js `ACT.update`).
 - [x] 286. Uninstall asks "Uninstall <title>?" / "Its files are deleted from this computer. Cloud saves stay on your server." with Uninstall (danger), then notifies "<title> uninstalled" (src: tvmode.js `ACT.uninstall`).
 - [x] 287. Remove from library asks "Remove <title> from the library?" / "Only the library entry goes. Its folder stays on disk: <path>." with Remove from library (danger), then notifies "<title> removed from the library" and goes back (src: tvmode.js `ACT.removeRow`).
-- [ ] 288. Install adds the game to the queue and notifies "<title> added to download queue" (with "<emulator> installs with it" when the system has no emulator) and the action Open Downloads (src: tvmode.js `install`).
+- [x] 288. Install adds the game to the queue and notifies "<title> added to download queue" (with "<emulator> installs with it" when the system has no emulator) and the action Open Downloads (src: tvmode.js `install`).
 - [ ] 289. Install while the server can't be reached notifies the error "Couldn't add <title> to the download queue: the server can't be reached" (src: tvmode.js `install`).
 - [x] 290. Locate… opens the folder browser titled "Where is <title>?"; a good pick notifies "<title> found" / "Plays from <path>", a wrong one the error "Couldn't find <title> in <path>" / "Pick the folder that holds the game." (src: tvmode.js `ACT.locate`).
 - [x] 291. The tabs are Overview, Media, Saves, and Achievements when the server lists any, between LB and RB glyphs; the current tab is underlined in `primary` (src: README § Details; tvmode.js `details`; tvmode.css `.ttab.on`).
 - [x] 292. LB / RB switch Details tabs, wrapping at the ends (src: README § Details; tvmode.js `detTabStep`).
 - [x] 293. Switching tabs focuses the new tab's first item, with the tab scrolled to its top; a tab with nothing to focus puts focus on the first button (src: README § Details; tvmode.js `detShowTab`).
 - [x] 294. The Details hints are RS "Scroll", or D-pad "Read" while the summary is focused (src: tvmode.js `details().hints`).
-- [ ] 295. Overview shows the summary, a "Related" row with its count (up to six games from the same platform), and a facts panel (Developer, Release, Genres, Players, Size) (src: README § Details; tvmode.js `detBody`).
+- [x] 295. Overview shows the summary, a "Related" row with its count (up to six games from the same platform), and a facts panel (Developer, Release, Genres, Players, Size) (src: README § Details; tvmode.js `detBody`).
 - [x] 296. Down from the buttons focuses the summary (hint A "Read") (src: README § Details).
 - [x] 297. While the summary is focused, Down scrolls the tab by up to 6rem while more of the summary is below the view, and Up while more is above; only then does focus move on (Related below, the buttons above) (src: README § Details; tvmode.js `press`).
 - [x] 298. Up from the Related row always returns to the summary (src: README § Details).
@@ -555,7 +555,7 @@ and "Conflicts" lists at the end are not part of the build.
 ### General
 
 - [ ] 418. TV mode uses the Game backups design's drives, words, rules, states and notifications; only the controls change for a controller, and anything not listed here matches the GB card (src: README § Game backups).
-- [ ] 419. Backup is written as one word in all copy, even as a verb (src: README § Game backups; project memory "UI word Backup").
+- [x] 419. Backup is written as one word in all copy, even as a verb (src: README § Game backups; project memory "UI word Backup").
 
 ### Library › Backup drives
 

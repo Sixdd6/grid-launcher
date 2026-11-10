@@ -576,3 +576,21 @@ From the consultant's Phase 13 rulings (README § Consultant decisions, last six
 - **Test build:** `scripts/ctr.sh packages 0.9.0-dev.tv` → `ctr-out/grid-launcher-0.9.0+dev.tv-1.x86_64.rpm` (and the
   .deb); unpacked in `ctr-out/rpm-tv/`, binary `ctr-out/rpm-tv/usr/bin/grid-launcher`. "dev" in the version keeps
   the app's own update check off.
+
+## After the final audit
+- **Audit fixes:** every scroller hides its scrollbar (7); Page Up / Down jump under reduced motion (25, 114);
+  Details "Last played <when>" and Achievements "Unlocked <when>" are relative, the summary always ends
+  "· <h> hardcore" (272, 315); Release reads "d Mon yyyy" (295); no X while a game's update downloads (192);
+  install from a drive without an emulator for the system says "<pack> has no emulator for <system>" (428,
+  `no_emulator_notice` in commands/backups.rs, card group `drive-note`); a select-mode install from a drive is one
+  card "<n> games added to download queue" / "Copying from <label>" (450: `installAllFromDrive(…, { label })` holds
+  the games' own queued cards back through `quietQueued`, so slow calls still give one card; the desktop is
+  unchanged); a Library platform row's "Backup all N…" counts rows with a rom id (455).
+- **Consultant rulings A–G** (README § Consultant decisions): A — Details installs the recommended emulator with
+  the game (`noEmulatorFor` / `noEmulatorSub`, the queued card's sub through `expectQueuedSub`); B — the ten facts;
+  C — no change; D — "You can backup it again later."; E — Edit connection… (TvConnect `edit`, token sign-in
+  prefilled as on the desktop, since the session doesn't record which kind it used), Open RomM in browser, Open
+  config folder, companion settings / Remove, drive sorts (`lib.driveSort`), video A / LT / RT; F — edge-to-edge
+  art accepted; G — `afterOverlays` deleted, `closeRefocus` jumps to a refound item.
+- **e2e added:** tv-settings (Edit connection round trip), tv-systems (companion rows and Remove), tv-backups-c
+  (drive sorts).
