@@ -89,12 +89,21 @@ function toast(t, o) {
   o = o || {};
   var n = { t: t, s: o.s || '', err: !!o.err, act: o.act, ms: o.ms || (o.err ? 15000 : 10000), segs: o.segs, id: Math.random() };
   S.notes.unshift({ t: t, s: n.s, err: n.err, at: new Date() }); if (S.notes.length > 20) S.notes.pop();
-  var box = $('toasts'); while (box.children.length >= 3) box.lastChild.remove();
+  /* At most three cards. The setup card is pinned to the top and is never the one dropped. */
+  var box = $('toasts');
+  while (box.children.length >= 3) { var drop = Array.prototype.filter.call(box.children, function (c) { return !c._pinned; }).pop(); if (!drop) break; drop.remove(); }
   var el = document.createElement('div'); el.className = 'toast' + (n.err ? ' err' : ''); el.setAttribute('role', n.err ? 'alert' : 'status');
   el.innerHTML = '<div class="tt">' + esc(t) + '</div>' + (n.s ? '<div class="ts">' + esc(n.s) + '</div>' : '') + (n.segs ? '<div class="segs">' + n.segs + '</div>' : '') +
-    (n.act ? '<div class="ta">' + gl('VIEW') + ' ' + esc(n.act[0]) + '</div>' : '') + '<i class="tbar" style="animation-duration:' + n.ms + 'ms"></i>';
-  el._act = n.act; box.insertBefore(el, box.firstChild);
-  setTimeout(function () { el.remove(); paintHints(); }, n.ms);
+    (n.act ? '<div class="ta">' + gl('VIEW') + ' ' + esc(n.act[0]) + '</div>' : '');
+  el._act = n.act; el._pinned = !!o.pinned;
+  var after = Array.prototype.filter.call(box.children, function (c) { return c._pinned; }).pop();
+  box.insertBefore(el, after ? after.nextSibling : box.firstChild);
+  /* The countdown bar and the timer start now, or, for a held card, when it is released. */
+  el.release = function (ms) {
+    el.insertAdjacentHTML('beforeend', '<i class="tbar" style="animation-duration:' + (ms || n.ms) + 'ms"></i>');
+    setTimeout(function () { el.remove(); paintHints(); }, ms || n.ms);
+  };
+  if (!o.hold) el.release();
   paintHints();
   return el;
 }
@@ -783,9 +792,27 @@ function installEmu(s, name) {
   name = name || s.rec; s.status = 'Installing…'; repaint(); toast('Installing ' + name + '…');
   setTimeout(function () { s.emu = name; s.ver = '0.4.1'; s.status = 'Ready'; toast(name + ' installed', { s: 'Used for ' + s.name }); repaint(); }, 2200);
 }
+/* The first-run setup card: one segment per install, filled as each install runs
+   (the prototype installs them one after another). It holds still, with no
+   countdown, until every install is done; then it counts down 10 seconds. */
 function setupCard(n) {
-  var done = 0, el = toast('Setting up ' + n + ' installs · 0 done', { ms: 9000 + n * 1200, segs: Array(n + 1).join('<i></i>') });
-  var t = setInterval(function () { done++; var segs = el.querySelectorAll('.segs i'); for (var i = 0; i < segs.length; i++) segs[i].className = i < done ? 'done' : i === done ? 'run' : ''; el.querySelector('.tt').textContent = done >= n ? n + ' installs done' : 'Setting up ' + n + ' installs · ' + done + ' done'; if (done >= n) { clearInterval(t); el.querySelector('.tt').insertAdjacentHTML('afterend', '<div class="ts">' + n + ' systems are ready to play.</div>'); } }, 1200);
+  var segs = ''; for (var i = 0; i < n; i++) segs += '<i><b></b></i>';
+  var el = toast('Setting up ' + n + ' install' + (n === 1 ? '' : 's') + ' · 0 done', { segs: segs, hold: true, pinned: true });
+  var dur = [], k; for (k = 0; k < n; k++) dur.push(1800 + Math.random() * 1600);
+  var idx = 0, t0 = performance.now();
+  var t = setInterval(function () {
+    var bars = el.querySelectorAll('.segs b'), now = performance.now();
+    if (idx < n) {
+      var p = Math.min(1, (now - t0) / dur[idx]);
+      bars[idx].style.width = (p * 100) + '%'; bars[idx].parentNode.className = 'run';
+      if (p >= 1) { bars[idx].parentNode.className = 'done'; idx++; t0 = now; el.querySelector('.tt').textContent = idx >= n ? n + ' install' + (n === 1 ? '' : 's') + ' done' : 'Setting up ' + n + ' installs · ' + idx + ' done'; }
+    }
+    if (idx >= n) {
+      clearInterval(t);
+      el.querySelector('.tt').insertAdjacentHTML('afterend', '<div class="ts">' + n + ' system' + (n === 1 ? ' is' : 's are') + ' ready to play.</div>');
+      el._pinned = false; el.release(10000);
+    }
+  }, 50);
 }
 function viewer(i) {
   var g = byId(S.pages[S.pages.length - 1].id), n = 6, ratios = [16 / 9, 4 / 3, 16 / 9, 8 / 7, 16 / 9, 16 / 9];
