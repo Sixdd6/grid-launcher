@@ -286,6 +286,11 @@ garbage-collector thread (`JSC::MarkedBlock::aboutToMarkSlow`) soon after a larg
 platform opens, which leaves an empty window. The app sets `JSC_useDFGJIT=0` at startup
 on Linux, which stops it; export the variable yourself to override it.
 
+With GPU rendering on, the app also sets `WEBKIT_USE_SKIA_FOR_COMPOSITION=0`, which puts
+WebKitGTK 2.54 back on the GPU compositor 2.52 used. 2.54's new Skia compositor left parts
+of a frame stale with DMABUF on NVIDIA (TV mode's hints flipped back to an earlier cover's
+while the background crossfaded). Export the variable yourself to override it.
+
 Trailers play in YouTube's player, which WebKitGTK decodes through GStreamer: YouTube
 serves VP9 video and Opus audio, so a Linux system needs GStreamer's VP9 and Opus
 decoders (`gst-plugins-good` for VP9 through libvpx, `gst-plugins-base` for Opus; on

@@ -53,10 +53,23 @@ use tauri::{Emitter, Manager};
 ///   2000-game platform scrolled at 4-8 frames a second on a 4K window.
 ///   GPU rendering is now the default, with Settings › Appearance › Hardware
 ///   acceleration and `GRID_LAUNCHER_HW_ACCEL=never` as the way back.
+/// - `WEBKIT_USE_SKIA_FOR_COMPOSITION=0`, only when GPU rendering is on: the
+///   compositor WebKitGTK 2.52 used (TextureMapper, still on the GPU) instead
+///   of 2.54's new Skia compositor. On WebKitGTK 2.54.2 with DMABUF on NVIDIA
+///   the Skia compositor left part of a frame stale: TV mode's hint bar
+///   flipped between the current hints and those of a cover focused earlier
+///   whenever the background crossfaded, with nothing changing in GRID's
+///   state. GPU rendering off, `WEBKIT_SHOW_DAMAGE=1` (which repaints whole
+///   frames) and this variable each stopped it; turning the damage features
+///   off through WebKitSettings did not, as WebKit reads them only when it
+///   builds the compositor (user tests 2026-11-11). Older WebKitGTK versions
+///   ignore it.
 #[cfg(any(target_os = "linux", test))]
 fn webkit_env_overrides(gpu: bool) -> Vec<(&'static str, &'static str)> {
     let mut overrides = vec![("JSC_useDFGJIT", "0")];
-    if !gpu {
+    if gpu {
+        overrides.push(("WEBKIT_USE_SKIA_FOR_COMPOSITION", "0"));
+    } else {
         overrides.push(("WEBKIT_DISABLE_DMABUF_RENDERER", "1"));
     }
     overrides
@@ -896,8 +909,14 @@ mod tests {
     }
 
     #[test]
-    fn the_dfg_jit_is_always_off_and_dmabuf_only_without_the_gpu() {
-        assert_eq!(webkit_env_overrides(true), vec![("JSC_useDFGJIT", "0")]);
+    fn the_dfg_jit_is_always_off_skia_only_with_the_gpu_and_dmabuf_only_without() {
+        assert_eq!(
+            webkit_env_overrides(true),
+            vec![
+                ("JSC_useDFGJIT", "0"),
+                ("WEBKIT_USE_SKIA_FOR_COMPOSITION", "0")
+            ]
+        );
         assert_eq!(
             webkit_env_overrides(false),
             vec![
