@@ -6,10 +6,10 @@
   // ticks it). Then Install N emulators (each emulator once) or Skip for
   // now; Start skips from anywhere (ruling 6). Install hands the run to the
   // setup card (TvSetupCard) and GRID opens where it opens. The data and
-  // the calls are the desktop's (`setup/chooseSystems.svelte.ts`).
+  // the calls are the desktop's (`setup/chooseSystemsState.svelte.ts`).
   import { isWindowsHost } from '../../emulators/compatTools';
   import { canStart, primaryLabel } from '../../setup/choices';
-  import { ChooseSystems } from '../../setup/chooseSystems.svelte';
+  import { ChooseSystems } from '../../setup/chooseSystemsState.svelte';
   import { finishSetup } from '../../stores/session.svelte';
   import { startSetupRun } from '../../stores/setupRun.svelte';
   import { tvf } from '../focus/actions';

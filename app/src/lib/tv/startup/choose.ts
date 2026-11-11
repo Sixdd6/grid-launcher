@@ -2,7 +2,7 @@
 // screens › Choose your systems; tvmode.js `choosePage`, `ACT.chEmu`,
 // `emuItems`). Pure: each row's words, the X list, and the intro. The
 // selection model and the calls are the desktop's (`setup/choices.ts`,
-// `setup/chooseSystems.svelte.ts`).
+// `setup/chooseSystemsState.svelte.ts`).
 import type { PlatformSetup } from '../../api';
 import { choosePicker, optionLabel, rowState, type Selection } from '../../setup/choices';
 import type { PickerOption } from '../../systems/rows';

@@ -5,7 +5,7 @@
   import { gamesText, testKeyOf } from '../systems/rows';
   import { isWindowsHost } from '../emulators/compatTools';
   import { canStart, choosePicker, primaryLabel, rowState } from './choices';
-  import { ChooseSystems } from './chooseSystems.svelte';
+  import { ChooseSystems } from './chooseSystemsState.svelte';
 
   // First-run setup, after Connect: Choose your systems (ProposedApp README,
   // "Fresh start"). The same rows as Settings › Systems (SystemRow in tick
@@ -14,7 +14,7 @@
   // pre-selected. `onDone` hands the app on to the shell, with what was
   // started and the name shown for each install, or `null` when skipped.
   // Later changes happen in Settings › Systems. The data and the calls are
-  // `chooseSystems.svelte.ts`; the aliases keep the markup reading as before.
+  // `chooseSystemsState.svelte.ts`; the aliases keep the markup reading as before.
   let {
     onDone,
   }: { onDone: (started: SetupStarted | null, names: Record<string, string>) => void } = $props();

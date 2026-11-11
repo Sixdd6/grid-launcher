@@ -49,7 +49,7 @@ describe('ChooseSystems', () => {
   });
 
   async function chooser(windowsHost = false) {
-    const { ChooseSystems } = await import('./chooseSystems.svelte');
+    const { ChooseSystems } = await import('./chooseSystemsState.svelte');
     return new ChooseSystems(windowsHost);
   }
 
