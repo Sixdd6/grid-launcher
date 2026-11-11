@@ -74,7 +74,7 @@ describe('Connect enablement (item 397) and Use without a server (item 515)', ()
   });
 
   it('disables both buttons while a connect runs, Connect reading "Connecting…" (consultant, after P12)', () => {
-    const why = 'Still connecting. Wait for it to finish.';
+    const why = 'Still connecting…';
     expect(connectButtons(filled, true)).toEqual({
       go: { label: 'Connecting…', disabled: true, why },
       offline: { label: 'Use without a server', disabled: true, why },
@@ -86,16 +86,16 @@ describe('Connect enablement (item 397) and Use without a server (item 515)', ()
   });
 
   it('says why View pasted nothing (consultant, after P12)', () => {
-    expect(pasteRefusal(null, 'x')).toBe('Focus a field to paste into it.');
-    expect(pasteRefusal('how', 'x')).toBe('Focus a field to paste into it.');
-    expect(pasteRefusal('url', '  ')).toBe('Nothing to paste: the clipboard has no text.');
+    expect(pasteRefusal(null, 'x')).toBe('Choose a field first');
+    expect(pasteRefusal('how', 'x')).toBe('Choose a field first');
+    expect(pasteRefusal('url', '  ')).toBe('Nothing to paste');
     expect(pasteRefusal('token', 'abc')).toBeNull();
   });
 
   it('needs only the library folder without a server', () => {
     expect(offlineReady({ lib: '' })).toBe(false);
     expect(offlineReady({ lib: '/games' })).toBe(true);
-    expect(NO_SERVER_NOTE).toBe('Without a server, GRID needs only the library folder. Your Library and Backup drives work offline.');
+    expect(NO_SERVER_NOTE).toBe('No server? Choose a library folder to play offline.');
   });
 
   it('notifies "Connected to <URL>" (item 399)', () => {

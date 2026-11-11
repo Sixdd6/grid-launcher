@@ -28,8 +28,9 @@ export const THEME_OPTIONS = [
   ['light', 'Light'],
 ] as const;
 
-/** The line under Theme: TV mode shows Follow system as dark (ruling 22). */
-export const THEME_LINE = 'Follow system shows dark here';
+/** The line under Theme while it is Follow system: TV mode shows that as
+ *  dark (ruling 22). Dark and Light apply as chosen, so they have no line. */
+export const THEME_LINE = 'Dark in TV mode';
 
 export function fadeText(v: number): string {
   return v === 100 ? '100% · off' : `${v}%`;
@@ -54,7 +55,7 @@ export function appearanceRows(s: AppearanceState, a: AppearanceActions): Row[] 
       (v) => a.setOpenOn(v as OpenOn),
       a.open,
     ),
-    choiceRow({ key: 'theme', label: 'Theme', sub: THEME_LINE }, THEME_OPTIONS, s.theme, (v) => a.setTheme(v as ThemeChoice), a.open),
+    choiceRow({ key: 'theme', label: 'Theme', sub: s.theme === 'system' ? THEME_LINE : undefined }, THEME_OPTIONS, s.theme, (v) => a.setTheme(v as ThemeChoice), a.open),
     {
       type: 'switch',
       key: 'art',
@@ -79,10 +80,10 @@ export function appearanceRows(s: AppearanceState, a: AppearanceActions): Row[] 
       type: 'switch',
       key: 'hw',
       label: 'Hardware acceleration',
-      sub: 'Renders on the graphics card. Applies after a restart.',
+      sub: 'Uses the graphics card. Restart to apply.',
       on: s.hardwareAcceleration,
       set: a.setHardwareAcceleration,
     },
-    { type: 'info', key: 'cards', label: 'Card size, game labels and card display', value: 'Desktop grids only' },
+    { type: 'info', key: 'cards', label: 'More grid options', value: 'In desktop mode' },
   ];
 }

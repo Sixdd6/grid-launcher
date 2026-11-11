@@ -6,8 +6,8 @@ import { testId } from '../helpers/tvDetails.js';
 
 /**
  * Stage `tv-startup`, spec e (TV mode plan P12; ruling 18): the
- * unreachable library again (`library-move-c`'s seed). Close without
- * changing anything sends the quit at once, with no second question, and
+ * unreachable library again (`library-move-c`'s seed). Quit GRID
+ * sends the quit at once, with no second question, and
  * the stored library is untouched.
  *
  * The backend's exit would end the WebDriver session mid-spec (the runner
@@ -15,7 +15,7 @@ import { testId } from '../helpers/tvDetails.js';
  * counts the quit instead of sending it; the exit itself is
  * `library_unreachable_close`'s, which the desktop dialog shares.
  */
-describe('tv-startup (e): Close without changing anything quits at once', () => {
+describe('tv-startup (e): Quit GRID quits at once', () => {
   it('sends the quit with no question and changes nothing', async () => {
     await $(testId('tv-unreachable')).waitForDisplayed({ timeout: APP_START_TIMEOUT, timeoutMsg: 'the unreachable-library dialog never appeared in TV mode' });
     await connectPad(XBOX_PAD);
@@ -31,7 +31,7 @@ describe('tv-startup (e): Close without changing anything quits at once', () => 
     await key('Enter');
     await browser.waitUntil(async () => ((await browser.execute(() => (window as unknown as { __tvE2EQuits?: number }).__tvE2EQuits ?? 0)) as number) === 1, {
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'Close without changing anything never asked the backend to quit',
+      timeoutMsg: 'Quit GRID never asked the backend to quit',
     });
     expect(await $(testId('tv-confirm')).isExisting()).toBe(false);
     expect(readFileSync(configPath(), 'utf-8')).toBe(before);

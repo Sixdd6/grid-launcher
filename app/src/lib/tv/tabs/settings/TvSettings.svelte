@@ -163,7 +163,7 @@
       title: moveListTitle(check.path),
       sub: moveListSub(lc.movePreview, moveRefusal),
       items: [
-        { label: 'Move existing files', sub: 'Runs in Downloads', testId: 'tv-lib-move', onPick: () => void moveLibrary(lc, moveRefusal) },
+        { label: 'Move existing files', sub: 'Shows progress in Downloads', testId: 'tv-lib-move', onPick: () => void moveLibrary(lc, moveRefusal) },
         { label: 'Start fresh', sub: 'Leave or delete the old files', testId: 'tv-lib-fresh', onPick: () => void startFresh(lc, current) },
       ],
     });
@@ -317,14 +317,14 @@
       sub: rel.url,
       items: [
         {
-          label: 'Open release in desktop mode',
+          label: 'View release notes',
           onPick: () =>
             void leaveTv('settings', 'updates').then(() => api.openReleasePage(rel.url).catch(() => {})),
         },
         ...(appUpdate.notice
           ? [
               {
-                label: 'Dismiss this notice',
+                label: 'Dismiss',
                 onPick: () => {
                   dismissUpdate();
                   pushToast(UPDATE_DISMISSED);

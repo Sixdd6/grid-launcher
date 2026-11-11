@@ -3,7 +3,7 @@
 // presence (never the credential: the session store has none), then
 // Reconnect, Open RomM in browser, Edit connection… (the Connect screen as a
 // page), Disconnect, which asks first and returns to Connect, and Open
-// config folder (ruling E1–3). Used without a server, as on the desktop, the
+// settings folder (ruling E1–3). Used without a server, as on the desktop, the
 // way on is "Connect to a server…".
 import { serverLine } from '../../../../settings/connection';
 import { OPEN_FOLDER_SUB } from '../../../pages/drivePages';
@@ -28,8 +28,8 @@ export type ConnectionActions = {
 
 export const OPEN_SERVER_SUB = "Opens your server's site in desktop mode";
 
-export const CREDENTIAL_VERIFIED = 'Stored in the system keyring · verified';
-export const CREDENTIAL_NOT_VERIFIED = 'Stored in the system keyring · not verified';
+export const CREDENTIAL_VERIFIED = 'Saved · verified';
+export const CREDENTIAL_NOT_VERIFIED = 'Saved · not verified';
 
 /** The credential line: present and accepted, or present while offline. */
 export function credentialLine(s: Pick<ConnectionState, 'connected' | 'offline'>): string {
@@ -40,7 +40,7 @@ export function credentialLine(s: Pick<ConnectionState, 'connected' | 'offline'>
 export function disconnectWords(serverUrl: string): ConfirmWords {
   return {
     title: `Disconnect from ${serverUrl}?`,
-    body: 'GRID returns to Connect. Installed games, saves and settings stay on this computer.',
+    body: "You'll need to sign in again. Installed games, saves and settings stay.",
     ok: 'Disconnect',
   };
 }
@@ -49,9 +49,9 @@ export function connectionRows(s: ConnectionState, a: ConnectionActions): Row[] 
   const head: Row[] = [
     { type: 'info', key: 'server', label: 'Server', value: serverLine(s.serverUrl) },
     { type: 'info', key: 'user', label: 'User', value: s.username.trim() === '' ? 'Not set' : s.username },
-    { type: 'info', key: 'credential', label: 'Credential', value: credentialLine(s) },
+    { type: 'info', key: 'credential', label: 'Sign-in', value: credentialLine(s) },
   ];
-  const configFolder: Row = { type: 'action', key: 'config-folder', label: 'Open config folder', sub: OPEN_FOLDER_SUB, run: a.openConfigFolder };
+  const configFolder: Row = { type: 'action', key: 'config-folder', label: 'Open settings folder', sub: OPEN_FOLDER_SUB, run: a.openConfigFolder };
   const serverPage: Row[] =
     s.serverUrl.trim() === '' ? [] : [{ type: 'action', key: 'server-page', label: 'Open RomM in browser', sub: OPEN_SERVER_SUB, run: a.openServerPage }];
   if (s.offline && !s.connected) {
@@ -66,7 +66,7 @@ export function connectionRows(s: ConnectionState, a: ConnectionActions): Row[] 
       type: 'action',
       key: 'disconnect',
       label: 'Disconnect',
-      sub: 'Returns to Connect. Your library and settings stay.',
+      sub: 'Sign out of this server',
       danger: true,
       run: () => a.disconnect(disconnectWords(s.serverUrl)),
     },

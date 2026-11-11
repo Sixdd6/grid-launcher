@@ -143,8 +143,8 @@ export function rowA(e: DownloadEntry, movePhase: MovePhase | null): string | nu
   return acts.length ? 'Select' : null;
 }
 
-export const FIRMWARE_WHY = 'Installing firmware — this step cannot be cancelled';
-export const MOVE_WHY = 'Updating paths — this step cannot be cancelled';
+export const FIRMWARE_WHY = "Installing firmware · can't be cancelled";
+export const MOVE_WHY = "Finishing the move · can't be cancelled";
 
 /** Why a row with no actions can't be pressed (shown as a notice on A;
  *  checklist 534): by kind. */

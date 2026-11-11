@@ -325,7 +325,7 @@ export function systemFirmwareRequests(rows: readonly SystemRow[]): FirmwareRequ
 /** The no-emulator row's body: why games can't start and what fixes it. */
 export function missingText(row: Pick<SystemRow, 'recommended'>): string {
   if (row.recommended === null) {
-    return 'No emulator GRID installs plays this system. If you have one, use Add an emulator manually.';
+    return 'GRID has no emulator for this system. You can add your own.';
   }
   return `Games for this system can't start yet. ${shortName(row.recommended.name)} is recommended.`;
 }

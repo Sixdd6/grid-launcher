@@ -142,7 +142,7 @@ describe('tv-library: the Library tab', () => {
     await waitCovers(['lg101']);
     await key('ArrowDown');
     await waitFocused('r-updates');
-    await waitText('tv-lib-empty', /^Everything is up to date\s*Games with a newer copy on your server show here\.$/);
+    await waitText('tv-lib-empty', /^Everything is up to date\s*Game updates show here\.$/);
     await key('ArrowDown');
     await waitFocused('fold-plat');
     // The header still names the filter: a folder header selects nothing.
@@ -159,7 +159,7 @@ describe('tv-library: the Library tab', () => {
 
   it('X on a platform row says backing up needs a server (item 455)', async () => {
     await key('x');
-    await waitToast('Backing up needs a server.');
+    await waitToast('Connect to a server to backup games.');
   });
 
   it('A or Right goes into the grid; Up from the top row stays put; Left and B go to the selected row (items 89, 179)', async () => {
@@ -341,7 +341,7 @@ describe('tv-library: the Library tab', () => {
 
   it('an unplugged drive leaves the rail, which falls back to All games (items 420, 493)', async () => {
     unplug('TESTDRIVE');
-    await waitText('tv-lib-no-drives', 'No Backup drives connected');
+    await waitText('tv-lib-no-drives', 'No backup drives connected');
     await waitText('tv-lib-name', 'All games');
     await key('Escape');
     await waitFocused('r-all');

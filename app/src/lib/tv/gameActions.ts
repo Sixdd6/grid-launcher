@@ -90,7 +90,7 @@ export function promptFor(outcome: RunOutcome, title: string): void {
 }
 
 /** The desktop offer's note once the install is queued (UmuInstallOffer). */
-export const UMU_INSTALLING = 'umu-launcher is installing (see Downloads). Launch the game again when it finishes.';
+export const UMU_INSTALLING = "Installing umu-launcher · Play again when it's done";
 
 /**
  * A Proton launch (or install) found no umu-run: offer the umu-launcher

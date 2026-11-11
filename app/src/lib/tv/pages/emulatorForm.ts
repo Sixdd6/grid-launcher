@@ -1,4 +1,4 @@
-// Add an emulator manually / <emulator> settings in TV mode (checklist
+// Add an emulator / <emulator> settings in TV mode (checklist
 // items 337–341; tvmode.js `emuForm`; README § Pages): the desktop's
 // settings sheet (emulators/form.ts, formSave.ts) as rows. Pure: the form's
 // fields and its rows; TvEmulatorForm opens the lists, the keyboard and the
@@ -26,10 +26,10 @@ export type EmuFormState = {
 };
 
 export const DEFAULT_ARGS = '%rom%';
-export const ADD_TITLE = 'Add an emulator manually';
+export const ADD_TITLE = 'Add an emulator';
 /** The breadcrumb's words for the add page. */
 export const ADD_CRUMB = 'Add an emulator';
-export const ADD_SUB = "For an emulator GRID doesn't install. It never becomes a system's default by itself.";
+export const ADD_SUB = "For an emulator GRID doesn't install";
 export const EDIT_SUB = 'Program, launch options, cloud save folders';
 export const PROGRAM_BROWSER_TITLE = 'Choose the program';
 export const STRATEGY_LIST_TITLE = 'How does it store saves?';
@@ -99,7 +99,7 @@ export const CLOUD_FIELDS = [
 ] as const;
 
 /** The form's rows (338–341): which emulator (add only), Name, Program,
- *  Launch options, Cloud saves (advanced) and its fields, then Save or Add
+ *  Launch options, Cloud save options and its fields, then Save or Add
  *  emulator. */
 export function emulatorFormRows(mode: 'add' | 'edit', f: EmuFormState, a: EmuFormActions, busy = false): Row[] {
   const rows: Row[] = [];
@@ -117,7 +117,7 @@ export function emulatorFormRows(mode: 'add' | 'edit', f: EmuFormState, a: EmuFo
   rows.push({
     type: 'action',
     key: 'strategy',
-    label: 'Cloud saves (advanced)',
+    label: 'Cloud save options',
     value: `Save strategy: ${STRATEGY_WORDS[f.saveStrategy]}`,
     sub: 'Save and state folders, files not to upload',
     run: a.strategy,

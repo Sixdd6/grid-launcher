@@ -30,8 +30,8 @@ export type DrivePageActions = {
   removeFiles: () => void;
 };
 
-export const OPEN_FOLDER_SUB = 'Opens the file manager in desktop mode';
-export const REMOVE_FILES_SUB = 'Deletes only the gridpack folder; games installed on this computer stay';
+export const OPEN_FOLDER_SUB = 'Switches to desktop mode';
+export const REMOVE_FILES_SUB = "Removes GRID's games from this drive";
 
 /** The drive page's rows (item 500). A read-only drive can't be changed. */
 export function drivePageRows(d: DriveInfo, act: DrivePageActions): PageRow[] {
@@ -80,7 +80,7 @@ export function removeFilesWords(pack: string, label: string, bytes: number) {
   return {
     first: {
       title: `Remove GRID files from ${pack}?`,
-      body: `The gridpack folder (${size}) is deleted from ${label}. Nothing else on the drive is touched, and the games installed on this computer stay.`,
+      body: `GRID's files (${size}) are removed from ${label}. Other files and installed games stay.`,
       ok: 'Continue',
     },
     second: { title: `Delete ${size} from ${label}?`, body: 'This can’t be undone.', ok: 'Remove GRID files' },
@@ -94,7 +94,7 @@ export const renamedText = (name: string) => `Renamed to ${name}`;
 // ── Computers this pack is for (items 502–504; ruling 9)
 
 export const OS_PAGE_TITLE = 'Computers this pack is for';
-export const OS_PAGE_SUB = 'Emulators go on the drive built for each one. At least one stays ticked.';
+export const OS_PAGE_SUB = 'Emulators are added for each computer you tick.';
 
 /** The OS list after flipping `os`, or the refusal when it would leave none. */
 export function flipOs(current: readonly PackOs[], os: PackOs): { next: PackOs[] } | { refused: string } {
@@ -124,8 +124,8 @@ export type SetupForm = { name: string; os: PackOs[] };
 
 export const setupTitle = (label: string) => `Set up ${label} for GRID`;
 export const setupSub = (d: DriveInfo) => `${d.fs} · ${formatBytes(d.total_bytes)} · Not set up`;
-export const FAT32_NOTE = 'This drive is FAT32: files over 4 GB can’t go on it. exFAT avoids that. GRID never formats a drive.';
-export const GRIDPACK_NOTE = 'GRID makes a gridpack folder at the drive’s root and never touches anything outside it.';
+export const FAT32_NOTE = 'FAT32 drives can’t hold files over 4 GB.';
+export const GRIDPACK_NOTE = 'GRID only uses its own folder on this drive.';
 export const COMPUTERS_HEADING = 'Computers this pack is for';
 
 /** The form's start: the volume label, and this computer's OS ticked (ruling 14). */

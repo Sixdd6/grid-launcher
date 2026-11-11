@@ -158,7 +158,7 @@ async function browseTo(target: string): Promise<void> {
  * mock forge serves; SNES, which only RetroArch serves and the forge
  * cannot; Zeebo, which nothing installable serves) with the mock forge.
  * Connects on the desktop, enters TV mode, and works through the pane, a
- * System page, a Download pick, the update check, Remove, Add manually
+ * System page, a Download pick, the update check, Remove, Add emulator
  * through the file-mode browser and Install recommended (N).
  */
 describe('tv-systems: Settings › Systems, the System page and the emulator form', () => {
@@ -192,11 +192,11 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
       await waitText(`tv-sys-status-${k}`, 'No emulator');
     }
     await waitText('tv-sys-sub-dc', "Games for this system can't start yet. Redream is recommended.");
-    await waitText('tv-sys-sub-zeebo', 'No emulator GRID installs plays this system. If you have one, use Add an emulator manually.');
+    await waitText('tv-sys-sub-zeebo', 'GRID has no emulator for this system. You can add your own.');
     await waitText('tv-sys-rec', 'Install recommended (4)');
     await waitText('tv-sys-check', 'Check for updates');
-    await waitText('tv-sys-add', 'Add manually');
-    await waitText('tv-sys-other-empty', 'Every installed emulator is used by a system.');
+    await waitText('tv-sys-add', 'Add emulator');
+    await waitText('tv-sys-other-empty', 'No other emulators');
   });
 
   it('A opens a system, X installs its recommended emulator or changes it (item 257)', async () => {
@@ -257,7 +257,7 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
     await waitRow('tv-row-emu', `Emulator ${PCSX2}`);
     expect(await text('tv-system-page')).toContain(`${PCSX2} · Ready`);
     expect(await pageRows()).toEqual(expect.arrayContaining(['emu', 'ver', 'open', 'settings', 'remove']));
-    expect(await rowText('tv-row-open')).toBe(`Open ${PCSX2} Opens the emulator on its own to change its settings. Its window needs a mouse.`);
+    expect(await rowText('tv-row-open')).toBe(`Open ${PCSX2} Change the emulator's own settings`);
     expect(await rowText('tv-row-settings')).toBe('Emulator settings Program, launch options, cloud save folders');
     // The emulator list now has it under Installed, checked.
     await seek('s-emu');
@@ -317,19 +317,19 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
     await $(testId('tv-settings')).waitForExist({ timeout: TRANSITION_TIMEOUT });
   });
 
-  it('Add manually: the form, Program through the file-mode browser, Add emulator goes back (items 337–341)', async () => {
+  it('Add emulator: the form, Program through the file-mode browser, Add emulator goes back (items 337–341)', async () => {
     const program = path.join(dataDir(), 'stub-emu');
     writeFileSync(program, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     await seek('sy-add');
     await key('Enter');
     await $(testId('tv-emu-form')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    expect(await text('tv-emu-form')).toContain('Add an emulator manually');
-    expect(await text('tv-emu-form')).toContain("For an emulator GRID doesn't install. It never becomes a system's default by itself.");
+    expect(await text('tv-emu-form')).toContain('Add an emulator');
+    expect(await text('tv-emu-form')).toContain("For an emulator GRID doesn't install");
     await waitRow('tv-row-which', 'Which emulator is it? Something else');
     await waitRow('tv-row-name', 'Name Not set');
     await waitRow('tv-row-prog', "Program Browse for the emulator's program Not set");
     await waitRow('tv-row-args', 'Launch options %rom% is replaced by the game file %rom%');
-    await waitRow('tv-row-strategy', 'Cloud saves (advanced) Save and state folders, files not to upload Save strategy: Automatic');
+    await waitRow('tv-row-strategy', 'Cloud save options Save and state folders, files not to upload Save strategy: Automatic');
     // "Which emulator is it?" lists the known emulators and Something else.
     await waitFocused('s-which');
     await key('Enter');
@@ -386,7 +386,7 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
       expect(await focused()).toBe('sy-rec');
       // A again says why instead.
       await key('Enter');
-      await waitToast('Still installing. Downloads shows the progress.');
+      await waitToast('Installing… see Downloads');
       await browser.waitUntil(async () => !(await $(testId('tv-sys-rec')).isExisting()), {
         timeout: INSTALL_WAIT * 2,
         timeoutMsg: 'Install recommended never went away',

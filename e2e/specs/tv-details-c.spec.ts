@@ -148,7 +148,7 @@ describe('tv-details (c): search rules, Search everything failure, Set up <Platf
       await $(testId('tv-confirm')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'no library-folder prompt' });
       expect((await $(`${testId('tv-confirm')} h2`).getText()).trim()).toBe('Set a library folder');
       expect((await $(`${testId('tv-confirm')} p`).getText()).trim()).toBe(
-        'GRID installs games into a library folder, and none is set. Choose one, then press Install again.',
+        'Choose where games install, then install again.',
       );
       expect((await $(testId('tv-confirm-ok')).getText()).trim()).toBe('Choose a folder…');
       await waitFocused('dlg-cancel');

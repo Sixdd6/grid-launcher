@@ -32,7 +32,7 @@ describe('the TV Library rail (items 176–184, 420)', () => {
     const rail = libraryRail(rows, new Set(), NOW, drives);
     expect(rail.drives.map((e) => [e.key, e.label, e.count])).toEqual([['drive:/m/t7', 'Couch kit', 8]]);
     expect(railKeys(rail)).toEqual(['all', 'recent', 'updates', 'platform:playstation', 'platform:snes', 'drive:/m/t7']);
-    expect(NO_DRIVES).toBe('No Backup drives connected');
+    expect(NO_DRIVES).toBe('No backup drives connected');
   });
 
   it('falls back to All games for a row that went away', () => {

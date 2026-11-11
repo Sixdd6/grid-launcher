@@ -98,8 +98,8 @@ describe('downloadRows', () => {
     expect(kinds(entry({ job: 'emulator', kind: 'emulator', rom_id: 0, status: 'downloading' }))).toEqual(['Cancel']);
     const firmware = entry({ job: 'firmware', kind: 'firmware', rom_id: 0, status: 'downloading' });
     expect(rowA(firmware, null)).toBeNull();
-    expect(rowWhy(firmware)).toBe('Installing firmware — this step cannot be cancelled');
-    expect(rowWhy(entry({ job: 'library', kind: 'library_move', rom_id: 0, status: 'downloading' }))).toBe('Updating paths — this step cannot be cancelled');
+    expect(rowWhy(firmware)).toBe("Installing firmware · can't be cancelled");
+    expect(rowWhy(entry({ job: 'library', kind: 'library_move', rom_id: 0, status: 'downloading' }))).toBe("Finishing the move · can't be cancelled");
     expect(rowWhy(extracting)).toBe(CANCEL_EXTRACTING);
     // The library move's own commands: Retry and Cancel while its copy waits.
     const move = entry({ job: 'library', kind: 'library_move', rom_id: 0, status: 'failed' });

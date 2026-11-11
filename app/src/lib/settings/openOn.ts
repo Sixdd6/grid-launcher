@@ -6,7 +6,7 @@ import type { OpenOn, TvAssignment, TvPrompts } from '../api';
 export const OPEN_ON_CHOICES = ['automatic', 'discover', 'library'] as const satisfies readonly OpenOn[];
 
 const LABELS: Record<OpenOn, string> = {
-  automatic: 'Automatic: Discover when connected, else Library',
+  automatic: 'Automatic',
   discover: 'Server › Discover',
   library: 'Library',
 };

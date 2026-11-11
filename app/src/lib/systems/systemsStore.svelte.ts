@@ -285,8 +285,8 @@ export class SystemsStore {
     }
     pushToast(
       ok
-        ? 'PS3 firmware installation started — follow the RPCS3 dialog to complete.'
-        : 'Could not launch RPCS3 to install firmware. Check the emulator path.',
+        ? 'PS3 firmware is installing in RPCS3'
+        : 'Couldn’t open RPCS3 to install firmware.',
       ok ? 'success' : 'error',
     );
     if (!ok) return;

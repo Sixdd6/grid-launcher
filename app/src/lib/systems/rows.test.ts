@@ -277,7 +277,7 @@ describe('companions', () => {
 describe('texts', () => {
   it('explains a system with no emulator', () => {
     const [noOption] = buildSystemRows([zeebo], platforms, defaults({}), {});
-    expect(missingText(noOption)).toMatch(/^No emulator GRID installs plays this system\. .*Add an emulator manually\.$/);
+    expect(missingText(noOption)).toBe('GRID has no emulator for this system. You can add your own.');
     const [installable] = buildSystemRows([ps2], platforms, defaults({}), {});
     expect(missingText(installable)).toBe("Games for this system can't start yet. PCSX2 is recommended.");
   });

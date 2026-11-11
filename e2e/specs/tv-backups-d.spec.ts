@@ -44,7 +44,7 @@ describe('tv-backups-d: drive settings', () => {
     await tapK('dp-os');
     await $(testId('tv-drive-os-page')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await waitText('tv-rows-title', 'Computers this pack is for');
-    await waitText('tv-rows-sub', 'Emulators go on the drive built for each one. At least one stays ticked.');
+    await waitText('tv-rows-sub', 'Emulators are added for each computer you tick.');
     expect((await pageRow('os-linux')).on).toBe(true);
     expect((await pageRow('os-windows')).on).toBe(false);
     await tapK('os-linux');
@@ -62,7 +62,7 @@ describe('tv-backups-d: drive settings', () => {
     await waitDriveStatus(SPARE, 'Not set up');
     await tap(driveRow(SPARE));
     await $(testId('tv-drive-setup-page')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await waitText('tv-pr-su-fat32', 'This drive is FAT32: files over 4 GB can’t go on it. exFAT avoids that. GRID never formats a drive.');
+    await waitText('tv-pr-su-fat32', 'FAT32 drives can’t hold files over 4 GB.');
     await key('m');
     await waitNotice(new RegExp(`^${SPARE} is ready for backups \\| ${SPARE} · FAT32$`), 10_000);
     await waitGone('tv-drive-setup-page');
@@ -89,7 +89,7 @@ describe('tv-backups-d: drive settings', () => {
     await tapK('dp-remove');
     const first = await confirmDialog();
     expect(first.title).toBe(`Remove GRID files from ${PACK}?`);
-    expect(first.body).toMatch(new RegExp(`^The gridpack folder \\(.+\\) is deleted from ${DRIVE}\\. Nothing else on the drive is touched, and the games installed on this computer stay\\.$`));
+    expect(first.body).toMatch(new RegExp(`^GRID's files \\(.+\\) are removed from ${DRIVE}\\. Other files and installed games stay\\.$`));
     expect(first).toMatchObject({ ok: 'Continue', danger: true });
     const second = await confirmDialog();
     expect(second.title).toMatch(new RegExp(`^Delete .+ from ${DRIVE}\\?$`));

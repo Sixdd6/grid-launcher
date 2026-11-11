@@ -131,5 +131,5 @@ export function timeOf(d: Date): string {
  *  up (ruling 15; tvmode.js start). */
 export const WELCOME: NoticeInput = {
   title: 'Welcome to TV mode',
-  sub: ['Press ', { glyph: 'MENU' }, ' for the menu. Desktop mode is one press away there.'],
+  sub: ['Press ', { glyph: 'MENU' }, ' for the menu and desktop mode.'],
 };

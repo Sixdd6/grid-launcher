@@ -69,7 +69,7 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
   it('shows Connect in a box that fits, with the startup top bar and hints (items 123, 132, 133, 389, 391–393)', async () => {
     await waitText('tv-connect', /^Connect to your RomM server/);
     expect(await $(`${testId('tv-connect')} h1`).getText()).toBe('Connect to your RomM server');
-    expect(await $(`${testId('tv-connect')} .sub`).getText()).toBe('Everything here works with a controller. A keyboard works too.');
+    expect(await $(`${testId('tv-connect')} .sub`).getText()).toBe('Enter your server address and sign in.');
     expect(await rowKeys('#cf-rows')).toEqual(['cf-url', 'cf-how', 'cf-token', 'cf-lib']);
     expect(await fieldText('url')).toBe('Server https://…');
     expect(await fieldText('how')).toBe('Sign in with API token');
@@ -122,7 +122,7 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
   it('View pastes the clipboard into the focused field (item 396), and says so when there is nothing to paste', async () => {
     await invoke('e2e_clipboard_write', { text: '' });
     await press('select');
-    await waitToast('Nothing to paste: the clipboard has no text.');
+    await waitToast('Nothing to paste');
     expect(await text('tv-cf-url-value')).toBe('https://…');
     await invoke('e2e_clipboard_write', { text: mockUrl() });
     await press('select');
@@ -196,7 +196,7 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     expect(await $(`${testId('tv-connect')} .or`).getText()).toBe('or');
     expect(await text('tv-connect-offline')).toBe('Use without a server');
     expect(await $(`${testId('tv-connect')} .note`).getText()).toBe(
-      'Without a server, GRID needs only the library folder. Your Library and Backup drives work offline.',
+      'No server? Choose a library folder to play offline.',
     );
     await tap(testId('tv-connect-go'));
     await $(testId('tv-connect-reason')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'the rejected token gave no reason' });
@@ -222,12 +222,12 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     expect(await $(`${testId('tv-choose')} h1`).getText()).toBe('Choose your systems');
     await waitText(
       'tv-choose-intro',
-      'Tick the systems you want to play. GRID installs the recommended emulator for each. changes the emulator; skips this step. You can change this later in Settings › Systems.',
+      'Pick the systems you play. GRID installs an emulator for each. You can change this later in Settings › Systems.',
     );
     const glyphs = (await browser.execute(() =>
       Array.from(document.querySelectorAll('[data-testid="tv-choose-intro"] [data-glyph]')).map((g) => g.getAttribute('data-glyph')),
     )) as string[];
-    expect(glyphs).toEqual(['X', 'MENU']);
+    expect(glyphs).toEqual([]);
     await $(testId('tv-ch-row-ps2')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the systems never loaded' });
     await browser.waitUntil(async () => (await rowKeys('#ch-rows')).includes('ch-windows'), { timeout: TRANSITION_TIMEOUT });
     expect(await rowKeys('#ch-rows')).toEqual(['ch-dc', 'ch-ps2', 'ch-snes', 'ch-zeebo', 'ch-windows']);
@@ -272,7 +272,7 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     expect(await text('tv-ch-val-zeebo')).toBe('No emulator available');
     expect(await hints()).not.toContain('X Change emulator');
     await key('Enter');
-    await waitToast('No emulator GRID installs plays Zeebo. If you have one, add it in Settings › Systems after setup.');
+    await waitToast('GRID has no emulator for Zeebo. Add your own later in Settings › Systems.');
   });
 
   it('Down from the last system reaches the buttons, which remember the one left (item 405)', async () => {

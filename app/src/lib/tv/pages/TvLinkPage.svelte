@@ -1,6 +1,6 @@
 <script lang="ts">
   // Link to server game (items 346–348; tvmode.js `linkPage`, `ACT.doLink`):
-  // "Link <title>", "Pick the <Platform> game on your server that this is."
+  // "Link <title>", "Choose the matching <Platform> game"
   // (plus "Search: <text>" while searching), over the platform's server
   // games that no installed row holds. A links one and goes back; Y opens
   // the keyboard and the list narrows as you type (B there keeps the search

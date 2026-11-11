@@ -1,7 +1,7 @@
 <script lang="ts">
   // Game settings for a native game (items 342–345; tvmode.js
   // `gameSettings`): the title with "Game settings" under it, then Launch
-  // file (a list of the game's launch files; "Set by game.json" when it came
+  // file (a list of the game's launch files; "Set by the game" when it came
   // from there, else "Your choice"), Launch parameters (the keyboard),
   // the compatibility tool where one applies (the desktop dialog's), Reload
   // launch info from server, and Save, which goes back. Loading, saving and
@@ -82,7 +82,7 @@
     const s = settings;
     const out: Row[] = [];
     if (s.candidates.length === 0) {
-      out.push({ key: 'exe', type: 'info', label: 'Launch file', value: '', sub: "No launchable executables were found in this game's install directory." });
+      out.push({ key: 'exe', type: 'info', label: 'Launch file', value: '', sub: "No game file to launch was found." });
     } else {
       out.push({
         key: 'exe',
@@ -102,7 +102,7 @@
       key: 'params',
       type: 'action',
       label: 'Launch parameters',
-      sub: 'Quotes group words',
+      sub: 'Optional',
       value: params || 'None',
       run: () => void openKeyboard({ title: 'Launch parameters', value: params, onDone: (v) => (params = v) }),
     });
@@ -122,13 +122,13 @@
           }),
       });
     }
-    out.push({ key: 'reload', type: 'action', label: 'Reload launch info from server', run: () => void reload() });
+    out.push({ key: 'reload', type: 'action', label: 'Refresh from server', run: () => void reload() });
     out.push({
       key: 'save',
       type: 'action',
       label: 'Save',
       run: () => void save(),
-      ...(s.candidates.length === 0 ? { disabled: true, why: "No launchable executables were found in this game's install directory." } : {}),
+      ...(s.candidates.length === 0 ? { disabled: true, why: "No game file to launch was found." } : {}),
     });
     return out;
   });

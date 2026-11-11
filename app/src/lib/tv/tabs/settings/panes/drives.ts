@@ -32,7 +32,7 @@ export const REMEMBERED_HEADING = 'Not connected';
 export const DEFAULTS_HEADING = 'Every backup also copies';
 export const NO_DRIVES = 'No drives connected. Plug in a USB drive or SSD.';
 export const FIRMWARE_LABEL = 'Firmware';
-export const FIRMWARE_SUB = 'The server’s firmware for the systems backed up. The Backup page starts with this.';
+export const FIRMWARE_SUB = 'Firmware for the systems you backup';
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 

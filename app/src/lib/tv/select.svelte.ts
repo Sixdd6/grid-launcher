@@ -102,7 +102,7 @@ export function selActOutcome(picked: number, drive: boolean, connected: boolean
   return 'backup';
 }
 
-export const PICK_FIRST = { title: 'Pick games first', sub: 'A picks the focused game; X picks them all.' } as const;
+export const PICK_FIRST = { title: 'Pick games first' } as const;
 export { BACKUP_NEEDS_SERVER };
 
 /** Y in select mode. */
@@ -111,7 +111,7 @@ export function selAct(g: SelectGrid | null = grid): void {
   const ids = [...state.sel.ids];
   switch (selActOutcome(ids.length, g.drive(), g.connected())) {
     case 'pick-first':
-      pushToast(PICK_FIRST.title, 'success', undefined, { sub: PICK_FIRST.sub });
+      pushToast(PICK_FIRST.title, 'success');
       return;
     case 'offline':
       pushToast(BACKUP_NEEDS_SERVER, 'error');

@@ -4,12 +4,12 @@
 import type { LibraryRelocateOutcome } from '../../api';
 
 export const UNREACHABLE_TITLE = "Your library can't be reached";
-export const RELOCATE_LABEL = 'Relocate the library…';
-export const CLOSE_LABEL = 'Close without changing anything';
-export const RELOCATE_BROWSER_TITLE = 'Relocate the library';
+export const RELOCATE_LABEL = 'Locate library…';
+export const CLOSE_LABEL = 'Quit GRID';
+export const RELOCATE_BROWSER_TITLE = 'Locate library';
 
 export function unreachableBody(root: string): string {
-  return `${root} isn't there: its drive may not be connected. GRID can't run without it.`;
+  return `Can't find ${root}. Connect its drive or locate the library.`;
 }
 
 /** The card after a relocate (item 412): "Library relocated to <path>" /
@@ -21,6 +21,6 @@ export function relocatedNotice(outcome: Extract<LibraryRelocateOutcome, { statu
   error: boolean;
 } {
   const n = outcome.report.length;
-  const failed = n === 0 ? '' : ` · ${n} ${n === 1 ? 'path' : 'paths'} could not be updated; see the log.`;
+  const failed = n === 0 ? '' : ` · ${n} ${n === 1 ? "path wasn't" : "paths weren't"} updated`;
   return { title: `Library relocated to ${outcome.library_path}`, sub: `No files were moved${failed}`, error: n > 0 };
 }

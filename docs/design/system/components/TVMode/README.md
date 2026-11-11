@@ -56,10 +56,10 @@ The Menu has a **Prototype only** section for states that need a trigger: first 
 - **Details** — the cover and the last-played / emulator line on the left. On the right: title, header line, chips, then one row of buttons (Play / Install / Cancel install, Update, Game settings, Uninstall; Locate… and Remove from library for a missing game; Link to server game and Remove from library for an unlinked one), then the tabs, switched with LB / RB (switching focuses the new tab's first item, at the top of the tab; a tab with nothing to focus puts focus on the first button): **Overview** (summary, Related row, facts panel: Down from the buttons focuses the summary, and Down / Up read through a long one before moving on; Up from Related always returns to the summary; Up into the buttons scrolls the tab back to its top; the right stick scrolls the summary, Related row and facts panel together, as one page, from anywhere in Details, without moving focus), **Media** (Screenshots and Videos rows; A opens the fullscreen viewer, where LB / RB step through screenshots and Left / Right step through everything; a video plays in place, see Decided), **Saves** (Saves | States switch, Upload latest, a list where A opens Restore / Delete, each confirmed; a deleted entry leaves the list and focus moves to the one now in its place, the newest left is marked Latest, an upload appears at the top as Latest, and an empty list says how saves get there) and **Achievements** (when the server lists any).
 - **Playing** — after Play, "Now playing" with the session time, Back to the game, and Stop game (confirmed). While a game runs, the game owns the controller while its window has focus; while GRID's window has focus the controller drives this page (Decided, 2026-11-10). When the game closes GRID comes back to the front, then shows the save upload notices.
 - **System** (from Settings › Systems or a Server chip) — Emulator (a list with Installed and Download groups; picking a Download one installs it), version, Update to …, RetroArch core, firmware Install, Open the emulator, Emulator settings, Remove, setup tips. **Windows** has the Proton version, the umu-run line and Reinstall.
-- **Add an emulator manually / Emulator settings** — the desktop's settings sheet as rows: which emulator, name, program (folder browser), launch options, cloud-save strategy.
-- **Game settings** (native games) — launch file (a list; "Set by game.json" when it came from there), launch parameters, Reload launch info from server.
+- **Add an emulator / Emulator settings** — the desktop's settings sheet as rows: which emulator, name, program (folder browser), launch options, cloud-save strategy.
+- **Game settings** (native games) — launch file (a list; "Set by the game" when it came from there), launch parameters, Refresh from server.
 - **Link to server game** — the platform's server games as a list, Y to search.
-- **Folder browser** — one page for every path: Locate…, Change library folder, Relocate the library, Program, Connect's library folder. A opens a folder; Y uses the folder shown; Up one folder is the first row.
+- **Folder browser** — one page for every path: Locate…, Change library folder, Locate library, Program, Connect's library folder. A opens a folder; Y uses the folder shown; Up one folder is the first row.
 - **Search everything** (Y on Discover) — the keyboard, then a results grid.
 - **Notifications** (from the Menu) — the session's notices, newest first.
 
@@ -76,7 +76,7 @@ The box always fits between the top bar and the hint bar, so the screen itself n
 
 - **Connect** — Server, Sign in with (API token / Username and password), the token or password, Library folder (folder browser), Connect. View pastes from the clipboard. Menu (Start) opens the short Menu (Switch to desktop mode, Quit GRID). A rejected token returns here with the reason, as on the desktop.
 - **Choose your systems** — the desktop rows as switches; A ticks, X changes the emulator, then Install N emulators or Skip for now. Down from the last system reaches the buttons; Menu (Start) skips from anywhere on the page, so a long list never has to be scrolled to skip. The setup card follows the installs, pinned to the top of the notification stack: one segment per install (each emulator once), empty while waiting; its first half fills while the emulator downloads and its second half while it installs, full when done (red if it failed). A line under the bar names the step: "DuckStation · downloading 62%", then "DuckStation · installing…". It has no countdown while anything is still installing; once the last install is done it says how many systems are ready and closes after 10 seconds.
-- **Unreachable library** — the blocking dialog with Relocate the library… (folder browser) and Close without changing anything; B does nothing; Menu (Start) opens the short Menu over it.
+- **Unreachable library** — the blocking dialog with Locate library… (folder browser) and Quit GRID; B does nothing; Menu (Start) opens the short Menu over it.
 
 ## Game backups
 
@@ -84,14 +84,14 @@ TV mode carries the whole Game backups design (the Game backups card, built on `
 
 - **Library › Backup drives:** one row per connected, set-up drive, with its game count. Its grid is the drive's games with platform tags (search and sort as usual); the header reads "Couch kit", "8 games · 13.3 GB · on SAMSUNG T7", with the emulators and firmware chips. X on a cover is Play when the game is installed, else **Install from drive**, which copies it from the drive with no network ("Copying from SAMSUNG T7" in Downloads). When the game's system has no emulator, it also brings one from the drive, but only an emulator that plays that platform (the app's `platform-emulators.json` and emulator profiles decide); with none on the drive, the notice says the drive has no emulator for that system.
 - **Details from a drive:** "From Couch kit" leads the header line; the buttons are Install from drive (or Play) and **Remove from drive…** (confirmed); the left column says where the copy is.
-- **Details › Backup to drive…** sits after Uninstall; the left column adds "On Couch kit" when a connected drive already has the game. Offline it is disabled, and A on it says "Backing up needs a server."
+- **Details › Backup to drive…** sits after Uninstall; the left column adds "On Couch kit" when a connected drive already has the game. Offline it is disabled, and A on it says "Connect to a server to backup games."
 - **Select mode (RT)** on the Library and Server grids, the desktop's Select / Done. A picks a cover instead of opening Details (a filled check top left, a primary ring, slightly smaller), X selects all or clears, Y acts, RT or B leaves. A bar pinned under the grid reads "3 selected · 4.2 GB" with those buttons. Y is **Backup to drive…**; on a drive it opens a list with Install N games and Remove N from drive…. The desktop's Shift-click range has no controller equivalent: Select all covers it.
 - **A whole platform:** **Backup all N…** in a Server platform header; on a Library platform row, X is "Backup all N…" (installed games only).
 - **The Backup page** is the desktop's backup dialog as a page (it is long, and a page scrolls like every list here). Title ("Backup 3 games", "Backup Cinder Peaks", "Backup PlayStation · 3 games"), the lede, then **Drive** (one radio row per connected, set-up drive with the space left after this backup and a bar where this backup's share is hatched; "Needs 76 GB · 61.4 GB free" in the danger colour; with none connected it says so, names a connected drive that isn't set up, and offers Set up a drive…), **Source** (Copy installed games from this computer with its count note; a warning-edged row per out-of-date game whose choice opens a list, Use this computer's copy or Download v1.2; the bulk rows Use this computer's copies and Download all; Show each game with each game's tag: From this computer, Download or Choose below), **Also copy** (Emulators, always, with what goes or "Already on the drive"; Firmware, from the default; Make Windows games work offline when it applies), the skipped-games note, and the footer: "4.2 GB to write · 1.4 GB to download" and the main button. It opens on its first row with the title in view. **Start presses the main button** from anywhere on the page; the button reads Backup N games, or, disabled, Choose for N games, Not enough space or Nothing to backup, and Start (or A) on it then says why.
 - **Downloads:** every game, emulator and firmware row of a backup carries the **Backup** badge and reads "Downloading from server 45%" or "Copying from this computer to SAMSUNG T7 45%", then "Writing to SAMSUNG T7 70%", "Waiting · to Couch kit" while queued, and "Copied from this computer · Written to Couch kit" when done. One card per backup: "3 games added to the backup queue for Couch kit", then "3 games and 1 emulator backed up to Couch kit".
 - **A drive removed mid-backup:** the row being written fails ("Failed — SAMSUNG T7 was removed"), the drive's remaining queue becomes one Completed row ("5 more items · Cancelled — SAMSUNG T7 was removed · backup again to finish"), one error card says how many items were written, and the drive leaves the Library rail.
 - **Settings › Backup drives** (second in the rail): Connected (set up or not), Not connected (remembered), then **Every backup also copies › Firmware**. A drive opens its page: For Linux and Windows (Change… opens the two switches, at least one stays on, with the notices the desktop gives), the space bar (other files, GRID, free), games, emulators, firmware, last backup, folder, Show in Library, Open folder (in desktop mode), Rename… (keyboard) and **Remove GRID files…**, which asks twice. A drive that isn't set up opens **Set up for GRID**: pack name, the two computers, the FAT32 warning and the note that only a gridpack folder is made; Start sets it up. A remembered drive offers Forget.
-- **Use without a server:** on Connect, after "or", beside Connect. It needs only the library folder, and opens the Library on the first connected Backup drive. The top bar reads "Offline · no server" (grey dot), the hint bar says the Library and Backup drives work without one, and Server shows "Not connected to a server" with **Connect to a server…**.
+- **Use without a server:** on Connect, after "or", beside Connect. It needs only the library folder, and opens the Library on the first connected Backup drive. The top bar reads "Offline · no server" (grey dot), the hint bar reads "No server · Library and backup drives only", and Server shows "Not connected to a server" with **Connect to a server…**.
 
 ## Decided
 
@@ -106,7 +106,7 @@ TV mode carries the whole Game backups design (the Game backups card, built on `
 - **Entering and leaving:** a TV button in the desktop top bar opens TV mode, and so does starting GRID with `--tv`. Menu › Switch to desktop mode (also in Settings › TV mode) leaves. No other way in or out (2026-11-10).
 - **RT is select mode** on the Library and Server grids (2026-11-10).
 - **Start presses a page's main button** where a page has one: Skip for now on Choose your systems, Backup N games on the Backup page, Set up for GRID; while the button is disabled, Start says why (2026-11-10). Elsewhere Start opens the Menu.
-- **Desktop Install brings the recommended emulator, as TV mode does (2026-11-10).** When a game isn't installed and its system has no emulator, isn't set to None on purpose, and has a recommendation, the desktop's Details reads "No emulator for <system>. Install installs <rec> too." under Install, in place of the hover-only reason, and Install queues the game and also runs the Systems store's per-system install of the recommendation. With no recommendation it reads "No emulator for <system>. Add one in Settings › Systems."; while the recommendation installs, "<rec> is installing.". Both Details share the logic (`lib/details/noEmulator.ts`, `noEmulatorCheck.svelte.ts`). The queued card's "<rec> installs with it" stays TV-only: the desktop's cards show no second line.
+- **Desktop Install brings the recommended emulator, as TV mode does (2026-11-10).** When a game isn't installed and its system has no emulator, isn't set to None on purpose, and has a recommendation, the desktop's Details reads "No emulator for <system>. Install adds <rec> too." under Install, in place of the hover-only reason, and Install queues the game and also runs the Systems store's per-system install of the recommendation. With no recommendation it reads "No emulator for <system>. Add one in Settings › Systems."; while the recommendation installs, "<rec> is installing.". Both Details share the logic (`lib/details/noEmulator.ts`, `noEmulatorCheck.svelte.ts`). The queued card's "<rec> installs with it" stays TV-only: the desktop's cards show no second line.
 - **"It can be backed up again later." (2026-11-10)** is the user's wording for Remove from drive and Cancel backup, replacing "You can backup it again later.".
 - **Leaving TV mode from the startup screens (2026-11-10).** On Connect, Menu (Start) opens a short Menu in the Menu panel's style: "Switch to desktop mode" and "Quit GRID", under the clock; the hint bar shows Menu "Menu". The unreachable-library dialog has the same (Start opens it over the dialog; B comes back). Choose your systems keeps Start as Skip for now (its main button, above), which reaches the main screen and its Menu.
 - **The controller drives Playing while GRID is focused (2026-11-10):** see Implementation above.
@@ -137,13 +137,13 @@ prototype, SPEC.md and the Game backups card. The user can overturn any of them.
 - ~~The "Welcome to TV mode" card shows each time TV mode opens.~~ Overturned by the user (Decided, 2026-11-10): the first time only, and Menu › Controls shows it again.
 - Menu › Notifications keeps the whole session's notices; there is no visible cap.
 - Search everything shows its results on Done; Y on the results page reopens the keyboard and from then on the results follow every key.
-- Close without changing anything on the Unreachable library dialog quits GRID at once, with no second question.
+- Quit GRID on the Unreachable library dialog quits GRID at once, with no second question.
 - Open <emulator> opens the emulator's window over TV mode without switching to desktop mode; its window needs a mouse.
 - The on-screen keyboard stops at the hint bar, which keeps showing the keyboard's hints.
 - A running backup shows in the top bar like any download: its title, bar and percent.
 - Theme is the one shared setting; in TV mode "Follow system" shows dark, and Dark or Light apply as chosen in both modes.
 - The desktop's Settings › Appearance shows "Open GRID on" too, first in the pane, as the same shared setting (`[ui] open_on` = automatic | discover | library).
-- With no controller connected the hint bar reads "No controller · the keyboard works too".
+- With no controller connected the hint bar reads "No controller connected".
 - The desktop top bar's TV button is a 28×28 icon button just left of the light / dark toggle (after the update badge): a new outline `tv` icon (a screen with a V antenna, drawn at 18 like the toggle), labelled and tooltipped "Switch to TV mode", with the toggle's hover and focus states and no animation.
 - A physical keyboard's Space is A in TV mode, with Enter; while the on-screen keyboard is open Space types a space like any printable key (and Enter is then Done).
 - Menu › Reconnect that fails shows an error card "Can't reach <URL>" with the backend's reason as its second line (what the desktop chip shows as a tooltip) and no action; a rejected credential opens Connect with no card; Reconnect does nothing while a probe is already running.
@@ -152,22 +152,22 @@ prototype, SPEC.md and the Game backups card. The user can overturn any of them.
 - While Search everything loads, the results page's heading reads "Searching for “<text>”…" over an empty grid, with no spinner and no partial results; the grid fills once every system has answered.
 - When nothing could be searched (the server didn't answer or refused its platform list), the results page shows the offline panel's words — "Can't reach your server", "<URL> isn't answering, so nothing could be searched." — with a Try again button; when only some systems failed, the results that arrived show under a warning line, "Some systems didn't answer, so their games aren't in these results.", with the same Try again. Failures are inline, not notification cards.
 - On the Library and Server platform grids, an emptied live search is no filter: the full list, no Search chip, the plain count and the row's own empty text. On the Search everything results page an emptied field is "nothing typed": the results, heading and breadcrumb keep the last text, and Done just closes the keyboard.
-- The umu-launcher and library-folder refusals open TV confirms whose bodies say what will happen ("<title> runs through Proton, which needs umu-run. umu-launcher downloads as a Downloads row; launch <title> again when it finishes." / "GRID installs games into a library folder, and none is set. Choose one, then press Install again."), with Install umu-launcher / Choose a folder…; the library folder browser is titled "Library folder", a saved folder shows "Library folder set · <path>", and Install is pressed again afterwards, as on the desktop.
+- The umu-launcher and library-folder refusals open TV confirms whose bodies say what will happen ("<title> needs umu-launcher. Play it again once it's installed." / "Choose where games install, then install again."), with Install umu-launcher / Choose a folder…; the library folder browser is titled "Library folder", a saved folder shows "Library folder set · <path>", and Install is pressed again afterwards, as on the desktop.
 - Details › Saves on a native game lists its save locations under the cloud saves (heading "Save locations", the desktop's status line, raw path over expanded path); A on a row asks "Remove this save location?" (Remove, danger); "Add a save folder…" opens the folder browser "Save folder for <title>", Y adds it ("Save folder added").
-- Button assignments with no controller is disabled, reads "For the controller in use · Xbox style", and A says "Connect a controller to choose its buttons. Each controller keeps its own choice."
+- Button assignments with no controller is disabled, reads "For the controller in use · Xbox style", and A says "Connect a controller first."
 - RetroAchievements in TV mode also has the desktop's Log In: Password (masked, write-only) and Log In rows; Save and Log In are disabled until their fields are filled and A names the missing field ("Enter a token first."). The order is the user's (Decided, 2026-11-10): Username, Password, Log In, Token, Save, Clear.
-- A live firmware row is disabled and A says "Installing firmware — this step cannot be cancelled"; an extracting install's A hint reads "Details" and its list offers only "Open <title>".
+- A live firmware row is disabled and A says "Installing firmware · can't be cancelled"; an extracting install's A hint reads "Details" and its list offers only "Open <title>".
 - The emulator-installed card's second line "Used for <system>" comes from the backend (`used_for` on the `emulator-installed` event: the platforms whose default the install applied), so it shows only when a system really switched to that emulator; several read "Used for A and B"; the desktop card stays "<Name> installed".
-- Disabled-control reasons in Settings › Systems and the System page: "Still installing. Downloads shows the progress." (the Installing N emulators… button), "Already checking for updates." (Check for updates), "Still in progress. Try again when it finishes." (a row whose action runs), "Give the emulator a name first." (Save with no name).
+- Disabled-control reasons in Settings › Systems and the System page: "Installing… see Downloads" (the Installing N emulators… button), "Already checking for updates." (Check for updates), "Still in progress. Try again when it finishes." (a row whose action runs), "Give the emulator a name first." (Save with no name).
 - The TV System page has no Show program folder; the desktop ⋯ menu keeps it, and Emulator settings › Program shows the path.
 
 - On Choose your systems a system nothing installable plays is a dimmed, unticked row reading "No emulator
-  available", with no X; A says "No emulator GRID installs plays <System>. If you have one, add it in Settings ›
-  Systems after setup."
+  available", with no X; A says "GRID has no emulator for <System>. Add your own later in Settings ›
+  Systems."
 - While a connect runs, Connect reads "Connecting…" and both Connect buttons are disabled; A or Start then says
-  "Still connecting. Wait for it to finish."
-- View on Connect always answers: "Pasted from the clipboard", "Nothing to paste: the clipboard has no text." or
-  "Focus a field to paste into it." (plain notices, not errors).
+  "Still connecting…"
+- View on Connect always answers: "Pasted from the clipboard", "Nothing to paste" or
+  "Choose a field first" (plain notices, not errors).
 - The setup card stays pinned through its 10 s countdown, so later cards go under it and never push it out; it
   leaves only when it closes itself.
 
@@ -178,9 +178,7 @@ prototype, SPEC.md and the Game backups card. The user can overturn any of them.
 - Where the checklist quotes tvmode.js for a notification or a Backup-page line the desktop already words, TV uses
   the desktop's words (README § The shell; checklist intro): "Removed <title> from <pack>", "Removed <n> games from
   <pack>", "<label> was removed. <n> of <m> items were written to <pack>.", "Removed the <OS> builds of <n>
-  emulators from <pack>", the lede "GRID downloads each game from <host> and writes it, with its art and details,
-  to the drive's gridpack folder.", and "Adds the <runtime> (<size>) that umu-run otherwise downloads on its first
-  launch".
+  emulators from <pack>", the lede "Downloads each game from <host>, with its art, to this drive.", and "Lets Windows games start offline".
 - A game installed from a drive keeps the desktop's two cards: "<title> added to download queue" with "Copying from
   <label>", then "<title> installed"; the emulator and firmware have their own cards.
 - The Backup page's Firmware switch shows the backend's reason when it is off ("Your server has no firmware for
@@ -192,7 +190,7 @@ prototype, SPEC.md and the Game backups card. The user can overturn any of them.
   (Cancel focused); turning one on asks nothing.
 - The running backup in the top bar (ruling 21) and the backing-up refusal (438) are asserted end to end in
   `tv-backups-b` and the new `tv-backups-e`; "Installed from <label>" (425) in `tv-backups-c`.
-- Details for a game whose system has no emulator reads "No emulator for <system>. Install installs <rec> too." and
+- Details for a game whose system has no emulator reads "No emulator for <system>. Install adds <rec> too." and
   Install also installs the recommended emulator (the Systems pane's own per-system install); the queued card adds
   "<rec> installs with it". With no recommendation: "No emulator for <system>. Add one in Settings › Systems." The
   desktop does the same since the user's decision (Decided, 2026-11-10).
@@ -203,7 +201,7 @@ prototype, SPEC.md and the Game backups card. The user can overturn any of them.
 - "It can be backed up again later." (Remove from drive, Cancel backup) — the user chose this wording (Decided,
   2026-11-10), replacing the consultant's "You can backup it again later.".
 - Settings › Connection adds Edit connection… (the Connect screen as a page, session kept), Open RomM in browser and
-  Open config folder (both switch to desktop mode, like Open folder and Open release).
+  Open settings folder (both switch to desktop mode, like Open folder and View release notes).
 - A companion emulator's rows are version, Update, Open, "<Companion> settings" and "Remove <Companion>" (confirmed
   "Games and saves stay.").
 - On a Backup drive, LT sorts by Title, Platform, Recently backed up or Largest first, remembered apart from the

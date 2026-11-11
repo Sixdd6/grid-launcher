@@ -1,8 +1,8 @@
 <script lang="ts">
   // The unreachable-library dialog's box (items 409–411; tvmode.js
   // `unreachable`): a blocking layer (B and a click outside do nothing; the
-  // hints show only A "Select"), with Relocate the library… (primary,
-  // focused) and Close without changing anything.
+  // hints show only A "Select"), with Locate library… (primary,
+  // focused) and Quit GRID.
   import TvButton from '../ui/TvButton.svelte';
   import { CLOSE_LABEL, RELOCATE_LABEL, UNREACHABLE_TITLE, unreachableBody } from './unreachable';
 

@@ -93,7 +93,7 @@ describe('history (items 150, 356–357; ruling 16)', () => {
   });
 
   it('words a line with prompts by their names', () => {
-    expect(lineText(WELCOME.sub ?? null, (b) => (b === 'MENU' ? 'Menu' : b))).toBe('Press Menu for the menu. Desktop mode is one press away there.');
+    expect(lineText(WELCOME.sub ?? null, (b) => (b === 'MENU' ? 'Menu' : b))).toBe('Press Menu for the menu and desktop mode.');
     expect(lineText(null, () => '')).toBe('');
   });
 

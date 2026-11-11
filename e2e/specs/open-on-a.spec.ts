@@ -46,7 +46,7 @@ describe('open-on (a): Automatic and connected opens Server › Discover', () =>
       hint: 'Here and in TV mode',
       value: 'automatic',
       options: [
-        ['automatic', 'Automatic: Discover when connected, else Library'],
+        ['automatic', 'Automatic'],
         ['discover', 'Server › Discover'],
         ['library', 'Library'],
       ],

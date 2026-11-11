@@ -63,7 +63,7 @@ describe('tv-shell (a): --tv', () => {
 
   it('shows the no-server bars (item 517)', async () => {
     await expect($(testId('tv-connection'))).toHaveText('Offline · no server');
-    await waitHintLeft('No server. Your Library and Backup drives work without one.');
+    await waitHintLeft('No server · Library and backup drives only');
   });
 
   it('opens on the Library rail, and moving through the rail filters at once (items 77, 105)', async () => {
@@ -175,7 +175,7 @@ describe('tv-shell (a): --tv', () => {
   });
 
   it('the hint bar names the controller pressed last, and the prompts follow it (items 47, 67–68)', async () => {
-    await waitHintLeft('No server. Your Library and Backup drives work without one.');
+    await waitHintLeft('No server · Library and backup drives only');
     // A key was pressed last: the keyboard's keys (README § Keyboard prompts).
     await waitPromptSet('keyboard');
     await press('dpad_down', XBOX_PAD);
@@ -224,7 +224,7 @@ describe('tv-shell (a): --tv', () => {
     await waitTab('library');
     await press('left_bumper', NINTENDO_PAD);
     await waitTab('settings');
-    await waitHintLeft('No server. Your Library and Backup drives work without one.');
+    await waitHintLeft('No server · Library and backup drives only');
     // Xbox style on the Nintendo pad: bottom now selects. The prompts keep the
     // pad's own Nintendo set, with Select drawn on its bottom button (B).
     await waitFocused('r-appearance');
@@ -248,7 +248,7 @@ describe('tv-shell (a): --tv', () => {
     // TV mode pane's Controller row instead.
     await focusOn(testId('tv-set-rail-tv'));
     await waitFocused('r-tv');
-    await expect($(testId('tv-row-tv-controller'))).toHaveText(expect.stringContaining('None found · the keyboard works too'));
+    await expect($(testId('tv-row-tv-controller'))).toHaveText(expect.stringContaining('None connected'));
     await connectPad(XBOX_PAD);
     await expect($(testId('tv-row-tv-controller'))).toHaveText(expect.stringContaining('Xbox Wireless Controller'));
   });

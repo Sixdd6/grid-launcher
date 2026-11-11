@@ -127,7 +127,7 @@ describe('select mode', () => {
     const g = grid();
     selToggle();
     selAct(g);
-    expect(toasts.calls).toEqual([['Pick games first', 'success', undefined, { sub: 'A picks the focused game; X picks them all.' }]]);
+    expect(toasts.calls).toEqual([['Pick games first', 'success']]);
     expect(g.acted).toEqual([]);
   });
 
@@ -136,7 +136,7 @@ describe('select mode', () => {
     selToggle();
     selPick('a');
     selAct(g);
-    expect(toasts.calls).toEqual([['Backing up needs a server.', 'error']]);
+    expect(toasts.calls).toEqual([['Connect to a server to backup games.', 'error']]);
     expect(g.acted).toEqual([]);
   });
 

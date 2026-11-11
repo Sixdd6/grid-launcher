@@ -118,7 +118,7 @@ describe('tv-details (a): Details, Saves and Playing', () => {
   });
 
   it('Saves lists the server saves, newest first and marked LATEST (items 306–307)', async () => {
-    await waitText('tv-saves-heading', 'Cloud Saves');
+    await waitText('tv-saves-heading', 'Cloud saves');
     await $(testId('tv-save-9001')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the saves never listed' });
     const rows = await browser.execute(() => Array.from(document.querySelectorAll('#saves-list [data-k]')).map((r) => r.getAttribute('data-k')));
     expect(rows).toEqual(['sv9001', 'sv9002', 'sv9003', 'sv9004']);

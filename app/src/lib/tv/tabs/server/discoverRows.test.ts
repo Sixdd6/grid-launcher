@@ -12,7 +12,7 @@ describe('discoverShelves (items 164–169)', () => {
     const shelves = discoverShelves({ library: lib, newReleases: [srvGame(10)], recentlyAdded: [srvGame(11)] });
     expect(shelves.map((s) => [s.id, s.name, s.extra])).toEqual([
       ['c', 'Continue playing', null],
-      ['n', 'New releases', 'the last six months, on your systems'],
+      ['n', 'New releases', 'last six months'],
       ['r', 'Recently added', 'to your server'],
       ['u', 'Updates', '1 game'],
       ['l', 'Your library', '3 games'],

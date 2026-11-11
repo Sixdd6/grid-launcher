@@ -1,4 +1,4 @@
-// Opens Add an emulator manually / <emulator> settings (checklist item
+// Opens Add an emulator / <emulator> settings (checklist item
 // 337). The form's fields live in a `$state` object handed to the page as a
 // prop: the folder browser (Program) is a page over the form, and coming
 // back remounts it with the page's props.

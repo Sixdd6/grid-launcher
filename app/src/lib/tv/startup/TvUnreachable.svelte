@@ -8,11 +8,11 @@
   // The unreachable library (items 409–412; README § Startup screens ›
   // Unreachable library; tvmode.js `unreachable`): GRID can't run without
   // its library, so this startup screen is only the blocking dialog over an
-  // empty stage. Relocate the library… opens the folder browser ("Relocate
+  // empty stage. Locate library… opens the folder browser ("Relocate
   // the library"); B there comes back to the dialog, and a picked folder is
   // relocated to (stored paths are rewritten, no file moves), after which
-  // GRID carries on to Connect or where it opens. Close without changing
-  // anything quits GRID at once, with no second question (ruling 18).
+  // GRID carries on to Connect or where it opens. Quit GRID quits at
+  // once, with no second question (ruling 18).
   import { closeWithoutChanges, libraryUnreachable, relocateTo } from '../../stores/libraryUnreachable.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import { openFolderBrowser } from '../gameActions';

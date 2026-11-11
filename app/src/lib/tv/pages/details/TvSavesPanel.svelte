@@ -1,6 +1,6 @@
 <script lang="ts">
   // One kind's cloud panel in Details › Saves (items 306–313): the Saves |
-  // States switch, "Cloud Saves" / "Cloud States" and Upload latest, then
+  // States switch, "Cloud saves" / "Cloud states" and Upload latest, then
   // the records. A on a record opens Restore to this computer / Delete from
   // the server, each confirmed; a deleted record leaves the list and focus
   // moves to the record now in its place (`#saves-list`, item 311); an

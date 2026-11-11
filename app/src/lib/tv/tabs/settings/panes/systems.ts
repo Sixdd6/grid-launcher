@@ -1,7 +1,7 @@
 // Settings › Systems in TV mode (checklist items 252–260; tvmode.js
 // `systemsPane`, `ACT.installRec`, `ACT.checkUpd`): the heading with
 // Install recommended (N) / "Installing N emulators…", Check for updates
-// and Add manually; one row per system, those with no emulator first, then
+// and Add emulator; one row per system, those with no emulator first, then
 // the rest, then Windows (Proton); then Other emulators. Pure: the words,
 // the order and what each row shows; TvSystemsPane reads the shared
 // SystemsStore and runs the actions.
@@ -41,7 +41,7 @@ export function recButton(o: { queueing: number; todo: number; inFlight: number 
 }
 
 /** A on the disabled Installing button says this (consultant decision). */
-export const REC_RUNNING = 'Still installing. Downloads shows the progress.';
+export const REC_RUNNING = 'Installing… see Downloads';
 /** A on Check for updates while a check runs (consultant decision). */
 export const CHECK_RUNNING = 'Already checking for updates.';
 
@@ -130,7 +130,7 @@ export function otherItems(others: readonly EmulatorEntry[], rows: readonly Syst
 }
 
 export const OTHER_HEADING = 'Other emulators';
-export const OTHER_EMPTY = 'Every installed emulator is used by a system.';
+export const OTHER_EMPTY = 'No other emulators';
 
 /** "Checking 5 emulators for updates…" (259). */
 export function checkingText(count: number): string {

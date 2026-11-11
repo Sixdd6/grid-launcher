@@ -99,7 +99,7 @@ describe('tv-server: the Server tab', () => {
     );
     expect(shelves).toEqual([
       { title: 'Continue playing', extra: null, covers: [], empty: 'Nothing here yet.' },
-      { title: 'New releases', extra: 'the last six months, on your systems', covers: ['n501', 'n502', 'n505'], empty: null },
+      { title: 'New releases', extra: 'last six months', covers: ['n501', 'n502', 'n505'], empty: null },
       { title: 'Recently added', extra: 'to your server', covers: ['r503', 'r504', 'r601', 'r602'], empty: null },
       { title: 'Your library', extra: '0 games', covers: [], empty: 'Nothing here yet.' },
     ]);

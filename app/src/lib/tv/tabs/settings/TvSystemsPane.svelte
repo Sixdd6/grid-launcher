@@ -103,7 +103,7 @@
       </TvButton>
     {/if}
     <TvButton k="sy-chk" disabled={s.checking} why={s.checking ? CHECK_RUNNING : undefined} testId="tv-sys-check" onA={() => void checkUpdates()}>Check for updates</TvButton>
-    <TvButton k="sy-add" testId="tv-sys-add" onA={() => openEmulatorForm('add')}>Add manually</TvButton>
+    <TvButton k="sy-add" testId="tv-sys-add" onA={() => openEmulatorForm('add')}>Add emulator</TvButton>
   </div>
 </div>
 

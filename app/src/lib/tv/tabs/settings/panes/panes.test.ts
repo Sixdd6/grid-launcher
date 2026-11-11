@@ -40,15 +40,15 @@ describe('Appearance pane (items 234–240, 527)', () => {
       ['switch', 'Background art', "The focused game's art, blurred, behind everything", true],
       ['slider', 'Background fade', '', '50%'],
       ['slider', 'Background blur', '', '20%'],
-      ['switch', 'Hardware acceleration', 'Renders on the graphics card. Applies after a restart.', true],
-      ['info', 'Card size, game labels and card display', '', 'Desktop grids only'],
+      ['switch', 'Hardware acceleration', 'Uses the graphics card. Restart to apply.', true],
+      ['info', 'More grid options', '', 'In desktop mode'],
     ]);
-    expect(THEME_LINE).toBe('Follow system shows dark here');
+    expect(THEME_LINE).toBe('Dark in TV mode');
   });
 
   it('offers the Open GRID on and Theme options, with a check on the current value', () => {
     const open = byKey<ChoiceRow>(rows, 'open-on');
-    expect(open.options.map((o) => o[1])).toEqual(['Automatic: Discover when connected, else Library', 'Server › Discover', 'Library']);
+    expect(open.options.map((o) => o[1])).toEqual(['Automatic', 'Server › Discover', 'Library']);
     expect(byKey<ChoiceRow>(rows, 'theme').options.map((o) => o[1])).toEqual(['Follow system', 'Dark', 'Light']);
     byKey<ChoiceRow>(rows, 'theme').choose();
     const spec = acts.open.mock.calls[0][0] as ChoiceSpec;
@@ -72,6 +72,8 @@ describe('Appearance pane (items 234–240, 527)', () => {
     // Background art is off at a full fade (item 12).
     const off = appearanceRows({ openOn: 'library', theme: 'dark', fade: 100, blur: 0, hardwareAcceleration: false }, acts);
     expect(byKey<SwitchRow>(off, 'art').on).toBe(false);
+    // "Dark in TV mode" describes Follow system only.
+    expect(byKey<ChoiceRow>(off, 'theme').sub).toBeUndefined();
   });
 });
 
@@ -109,17 +111,17 @@ describe('Cloud saves pane (items 241–242)', () => {
 describe('Connection pane (items 243–244)', () => {
   const acts = { reconnect: vi.fn(), connectToServer: vi.fn(), disconnect: vi.fn(), editConnection: vi.fn(), openServerPage: vi.fn(), openConfigFolder: vi.fn() };
 
-  it('shows the server, user and credential line, then Reconnect, Open RomM in browser, Edit connection…, Disconnect and Open config folder (ruling E1–3)', () => {
+  it('shows the server, user and credential line, then Reconnect, Open RomM in browser, Edit connection…, Disconnect and Open settings folder (ruling E1–3)', () => {
     const rows = connectionRows({ connected: true, offline: false, serverUrl: 'http://romm.local', username: 'sam' }, acts);
     expect(summary(rows)).toEqual([
       ['info', 'Server', '', 'http://romm.local'],
       ['info', 'User', '', 'sam'],
-      ['info', 'Credential', '', 'Stored in the system keyring · verified'],
+      ['info', 'Sign-in', '', 'Saved · verified'],
       ['action', 'Reconnect', '', ''],
       ['action', 'Open RomM in browser', "Opens your server's site in desktop mode", ''],
-      ['action', 'Edit connection…', 'Change the server or sign in again. Your library and settings stay.', ''],
-      ['action', 'Disconnect', 'Returns to Connect. Your library and settings stay.', ''],
-      ['action', 'Open config folder', 'Opens the file manager in desktop mode', ''],
+      ['action', 'Edit connection…', 'Change server or sign in again', ''],
+      ['action', 'Disconnect', 'Sign out of this server', ''],
+      ['action', 'Open settings folder', 'Switches to desktop mode', ''],
     ]);
     (byKey(rows, 'edit') as { run: () => void }).run();
     expect(acts.editConnection).toHaveBeenCalled();
@@ -132,20 +134,20 @@ describe('Connection pane (items 243–244)', () => {
     expect(acts.disconnect).toHaveBeenCalledWith(disconnectWords('http://romm.local'));
     expect(disconnectWords('http://romm.local')).toEqual({
       title: 'Disconnect from http://romm.local?',
-      body: 'GRID returns to Connect. Installed games, saves and settings stay on this computer.',
+      body: "You'll need to sign in again. Installed games, saves and settings stay.",
       ok: 'Disconnect',
     });
   });
 
   it('says not verified while offline, and offers only Connect to a server… without one', () => {
-    expect(credentialLine({ connected: false, offline: false })).toBe('Stored in the system keyring · not verified');
+    expect(credentialLine({ connected: false, offline: false })).toBe('Saved · not verified');
     const rows = connectionRows({ connected: false, offline: true, serverUrl: '', username: '' }, acts);
     expect(summary(rows)).toEqual([
       ['info', 'Server', '', 'Not set'],
       ['info', 'User', '', 'Not set'],
-      ['info', 'Credential', '', 'Not used offline'],
+      ['info', 'Sign-in', '', 'Not used offline'],
       ['action', 'Connect to a server…', '', ''],
-      ['action', 'Open config folder', 'Opens the file manager in desktop mode', ''],
+      ['action', 'Open settings folder', 'Switches to desktop mode', ''],
     ]);
   });
 });
@@ -200,7 +202,7 @@ describe('Library pane (items 245–249)', () => {
       body: "games/ in /home/sam/GRID is removed. Emulators and saves stay. This can't be undone.",
       ok: 'Delete',
     });
-    expect(moveStartedNotice('/mnt/storage')).toEqual({ title: 'Moving the library to /mnt/storage…', sub: 'Installs and launches wait until it finishes' });
+    expect(moveStartedNotice('/mnt/storage')).toEqual({ title: 'Moving the library to /mnt/storage…', sub: "Games can't install or start until it's done" });
   });
 
   it('says where the library is now after Start fresh, or why it did not change', () => {
@@ -226,9 +228,9 @@ describe('RetroAchievements pane (items 250–251)', () => {
     const rows = raRows(base, acts);
     expect(summary(rows)).toEqual([
       ['text', 'Username', '', 'sam'],
-      ['text', 'Password', 'Write-only: used once to log in, never kept', ''],
-      ['action', 'Log In', 'Signs in with your password and saves the token it gets', ''],
-      ['text', 'Token', 'Write-only: GRID never shows it again', ''],
+      ['text', 'Password', 'Used once to log in. Never saved.', ''],
+      ['action', 'Log In', 'Sign in with your password', ''],
+      ['text', 'Token', 'Hidden once saved', ''],
       ['action', 'Save', 'Sets the login in every emulator that supports it', ''],
       ['action', 'Clear', '', ''],
     ]);
@@ -275,10 +277,10 @@ describe('TV mode pane (items 261–267)', () => {
   it('names the controller in Button assignments and Controller', () => {
     const rows = tvRows({ prompts: 'match', padName: 'Xbox Wireless Controller', assignment: 'xbox' }, acts);
     expect(summary(rows)).toEqual([
-      ['choice', 'Button prompts', 'Which controller the on-screen buttons look like', 'match'],
+      ['choice', 'Button prompts', 'The button icons on screen', 'match'],
       ['choice', 'Button assignments', 'For Xbox Wireless Controller', 'xbox'],
       ['info', 'Controller', '', 'Xbox Wireless Controller'],
-      ['action', 'Switch to desktop mode', 'Also in the Menu. To come back: the TV button in the desktop top bar, or start GRID with --tv', ''],
+      ['action', 'Switch to desktop mode', 'Come back with the TV button in the top bar', ''],
       ['action', 'Quit GRID', '', ''],
     ]);
     expect(byKey<ChoiceRow>(rows, 'prompts').options.map((o) => o[1])).toEqual([
@@ -306,14 +308,14 @@ describe('TV mode pane (items 261–267)', () => {
     expect(assignLine(null)).toBe('For the controller in use');
     const rows = tvRows({ prompts: 'match', padName: null, assignment: 'xbox' }, acts);
     expect(byKey<Row & { value: string }>(rows, 'tv-controller').value).toBe(NO_CONTROLLER);
-    expect(NO_CONTROLLER).toBe('None found · the keyboard works too');
+    expect(NO_CONTROLLER).toBe('None connected');
   });
 
   it('disables Button assignments with no controller: "For the controller in use · Xbox style" (532)', () => {
     const rows = tvRows({ prompts: 'match', padName: null, assignment: 'nintendo' }, acts);
     const assign = byKey<ChoiceRow>(rows, 'assign');
     expect(assign).toMatchObject({ disabled: true, why: ASSIGN_NEEDS_PAD, sub: 'For the controller in use', value: 'xbox' });
-    expect(ASSIGN_NEEDS_PAD).toBe('Connect a controller to choose its buttons. Each controller keeps its own choice.');
+    expect(ASSIGN_NEEDS_PAD).toBe('Connect a controller first.');
     const withPad = byKey<ChoiceRow>(tvRows({ prompts: 'match', padName: 'Pro Controller', assignment: 'nintendo' }, acts), 'assign');
     expect(withPad.disabled).toBeUndefined();
     expect(withPad.value).toBe('nintendo');
@@ -331,7 +333,7 @@ describe('Updates pane (items 268–269)', () => {
     expect(summary(rows)).toEqual([
       ['info', 'Version', '', 'GRID 0.9.12'],
       ['info', 'Last checked', '', 'Today at 09:14'],
-      ['action', 'GRID 0.9.13 is out', 'GRID only checks. Update it the way you installed it.', ''],
+      ['action', 'GRID 0.9.13 is out', 'Update with the installer you used', ''],
       ['switch', 'Debug logging', '', true],
     ]);
     const none = updatesRows({ version: '', checkedAt: null, now, release: null, debug: null }, { openRelease: noop, setDebug: noop });

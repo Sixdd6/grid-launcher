@@ -62,8 +62,8 @@ export function backupRequest(subject: BackupSubject, romIds: readonly number[],
 export function dialogLede(host: string, anyLocal = false): string {
   const from = hostName(host);
   return anyLocal
-    ? `GRID copies games installed on this computer and downloads the rest from ${from}, then writes each one, with its art and details, to the drive’s gridpack folder.`
-    : `GRID downloads each game from ${from} and writes it, with its art and details, to the drive’s gridpack folder.`;
+    ? `Copies the games installed on this computer and downloads the rest from ${from}, with their art, to this drive.`
+    : `Downloads each game from ${from}, with its art, to this drive.`;
 }
 
 function hostName(host: string): string {
@@ -327,7 +327,7 @@ export function chooseAll(plan: BackupPlan, choices: SourceChoices, source: Sour
 export function wineNote(plan: BackupPlan, lookup?: LocalGameLookup): string {
   if (!plan.use_local || lookup === undefined) return '';
   const windows = plan.sources.some((s) => s.source === 'local' && lookup(s.rom_id)?.windows === true);
-  return windows ? 'Windows games are copied without their Wine prefix. The save folders GRID knows about are copied from it.' : '';
+  return windows ? 'Windows games are copied with their saves.' : '';
 }
 
 // ── Also copy ────────────────────────────────────────────────────────────
@@ -397,7 +397,7 @@ export function runtimeLine(plan: BackupPlan): { label: string; text: string; di
   const size = rt.bytes === null ? '' : ` (${sizeText(rt.bytes)})`;
   return {
     label,
-    text: `Adds the ${rt.name}${size} that umu-run otherwise downloads on its first launch`,
+    text: 'Lets Windows games start offline',
     disabled: false,
   };
 }

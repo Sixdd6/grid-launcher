@@ -83,7 +83,7 @@ export function deleteWords(preview: StartFreshPreview, oldRoot: string): { titl
 /** Move existing files started (item 248). "Library moved" follows from the
  *  move's own event (stores/libraryMove.svelte.ts). */
 export function moveStartedNotice(newRoot: string): { title: string; sub: string } {
-  return { title: `Moving the library to ${newRoot}…`, sub: 'Installs and launches wait until it finishes' };
+  return { title: `Moving the library to ${newRoot}…`, sub: "Games can't install or start until it's done" };
 }
 
 /** Start fresh finished: "Library is now <path>", with what happened to the

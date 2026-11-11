@@ -67,7 +67,7 @@ describe('tv-backups-b: the drive is removed mid-backup', () => {
       timeoutMsg: 'the rail never fell back to All games',
     });
     await waitText('tv-lib-name', 'All games');
-    await waitText('tv-lib-no-drives', 'No Backup drives connected');
+    await waitText('tv-lib-no-drives', 'No backup drives connected');
 
     const removed = `${DRIVE} was removed`;
     await tap(testId('tv-tab-downloads'));

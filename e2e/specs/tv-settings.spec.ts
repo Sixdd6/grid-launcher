@@ -219,7 +219,7 @@ describe('tv-settings: Downloads and Settings', () => {
     await waitText('tv-row-version', /^Version\s*GRID /);
     await moveTo('r-appearance', 'ArrowUp', 10);
     await waitText('tv-pane-title', 'Appearance');
-    await waitText('tv-row-cards', /Desktop grids only/);
+    await waitText('tv-row-cards', /In desktop mode/);
   });
 
   it('a slider adjusts with Left / Right while focused, with the D-pad hint (item 230)', async () => {
@@ -240,9 +240,9 @@ describe('tv-settings: Downloads and Settings', () => {
     });
   });
 
-  it('Theme applies at once; Follow system shows dark here (items 13, 229, 235, ruling 22)', async () => {
+  it('Theme applies at once; Dark in TV mode (items 13, 229, 235, ruling 22)', async () => {
     await moveTo('s-theme', 'ArrowUp');
-    await waitText('tv-row-theme', /Follow system shows dark here/);
+    await waitText('tv-row-theme', /Dark in TV mode/);
     expect(await browser.execute(() => document.documentElement.dataset.theme)).toBe('dark');
     await key('Enter');
     await waitList('Theme');
@@ -349,7 +349,7 @@ describe('tv-settings: Downloads and Settings', () => {
     await waitText('tv-fs-path', /\/library-new$/);
     await key('y');
     await waitList(`Move to ${newRoot()}?`);
-    expect((await list()).options).toEqual(['Move existing files Runs in Downloads', 'Start fresh Leave or delete the old files']);
+    expect((await list()).options).toEqual(['Move existing files Shows progress in Downloads', 'Start fresh Leave or delete the old files']);
     await moveTo('o1', 'ArrowDown');
     await key('Enter');
     await waitList('Delete the old game files, or leave them on disk?');
@@ -370,7 +370,7 @@ describe('tv-settings: Downloads and Settings', () => {
   it('Edit connection… opens Connect as a page: B keeps the session, Connect reconnects and comes back (ruling E1–3)', async () => {
     await key('Escape');
     await moveTo('r-connection', 'ArrowUp');
-    await waitText('tv-row-credential', /Stored in the system keyring · verified/);
+    await waitText('tv-row-credential', /Saved · verified/);
     await key('ArrowRight');
     await waitFocused('s-reconnect');
     await seek('s-server-page');
@@ -386,7 +386,7 @@ describe('tv-settings: Downloads and Settings', () => {
     await key('Escape');
     await waitGone('tv-edit-connection');
     await waitFocused('s-edit');
-    await waitText('tv-row-credential', /Stored in the system keyring · verified/);
+    await waitText('tv-row-credential', /Saved · verified/);
     // Again, with the token typed: Connect reconnects and comes back.
     await key('Enter');
     await $(testId('tv-edit-connection')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
@@ -399,7 +399,7 @@ describe('tv-settings: Downloads and Settings', () => {
     await key('Enter');
     await waitToast(/^Connected to http/);
     await waitGone('tv-edit-connection');
-    await waitText('tv-row-credential', /Stored in the system keyring · verified/);
+    await waitText('tv-row-credential', /Saved · verified/);
   });
 
   it('Disconnect asks first, then returns to Connect (items 243–244)', async () => {

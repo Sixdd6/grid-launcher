@@ -71,7 +71,7 @@ export const SET_UP_A_DRIVE = 'Set up a drive…';
 export function noDrivesNote(connected: readonly DriveInfo[]): string {
   const raw = connected.find((d) => d.status === 'not_set_up' && !d.read_only);
   const name = raw ? raw.label || raw.mount : '';
-  return `No Backup drive is connected.${name ? ` ${name} is connected but not set up for GRID.` : ''}`;
+  return `No backup drive is connected.${name ? ` ${name} is connected but not set up for GRID.` : ''}`;
 }
 
 /** The lede (item 458), the desktop's words. */

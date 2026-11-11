@@ -111,15 +111,15 @@ describe('titles and requests', () => {
   });
 
   it('names the server in the lede', () => {
-    expect(dialogLede('romm.home.lan')).toContain('from romm.home.lan and writes it');
+    expect(dialogLede('romm.home.lan')).toContain('from romm.home.lan, with its art, to this drive');
     expect(dialogLede('')).toContain('from the server');
   });
 
   it('says it copies installed games when some game comes from this computer', () => {
     expect(dialogLede('romm.home.lan', true)).toBe(
-      'GRID copies games installed on this computer and downloads the rest from romm.home.lan, then writes each one, with its art and details, to the drive’s gridpack folder.',
+      'Copies the games installed on this computer and downloads the rest from romm.home.lan, with their art, to this drive.',
     );
-    expect(dialogLede('romm.home.lan', false)).toContain('GRID downloads each game from romm.home.lan');
+    expect(dialogLede('romm.home.lan', false)).toContain('Downloads each game from romm.home.lan');
   });
 });
 
@@ -278,7 +278,7 @@ describe('runtimeLine', () => {
       plan({ runtime: { name: 'Steam Linux Runtime', bytes: 300 * MB, already: false, included: false } }),
     )!;
     expect(line.label).toBe('Make Windows games work offline');
-    expect(line.text).toBe('Adds the Steam Linux Runtime (300 MB) that umu-run otherwise downloads on its first launch');
+    expect(line.text).toBe('Lets Windows games start offline');
     expect(line.disabled).toBe(false);
   });
 
@@ -472,7 +472,7 @@ describe('sourcePicks', () => {
 describe('wineNote', () => {
   it('appears when a Windows game is copied from this computer', () => {
     expect(wineNote(plan(LOCAL_PLAN), lookup)).toBe(
-      'Windows games are copied without their Wine prefix. The save folders GRID knows about are copied from it.',
+      'Windows games are copied with their saves.',
     );
     const downloads = plan({ ...LOCAL_PLAN, sources: LOCAL_PLAN.sources!.filter((s) => s.rom_id !== 2) });
     expect(wineNote(downloads, lookup)).toBe('');

@@ -30,7 +30,7 @@ describe('tv-backups-a: set up a drive and backup two games', () => {
   it('Settings › Backup drives lists a plugged-in drive as Not set up (items 495–498, 494)', async () => {
     await openDrivesPane();
     await waitText('tv-drives-none', 'No drives connected. Plug in a USB drive or SSD.');
-    expect(await text('tv-drives-firmware')).toContain('The server’s firmware for the systems backed up. The Backup page starts with this.');
+    expect(await text('tv-drives-firmware')).toContain('Firmware for the systems you backup');
     plugIn(DRIVE, { fs: 'exfat' });
     await $(driveRow(DRIVE)).waitForExist({ timeout: 10_000, timeoutMsg: `${DRIVE} never appeared in the pane` });
     await waitDriveStatus(DRIVE, 'Not set up');
@@ -48,7 +48,7 @@ describe('tv-backups-a: set up a drive and backup two games', () => {
     expect((await pageRow('su-linux')).on).toBe(true);
     expect((await pageRow('su-windows')).on).toBe(false);
     expect(await $(testId('tv-pr-su-fat32')).isExisting()).toBe(false);
-    await waitText('tv-pr-su-note', 'GRID makes a gridpack folder at the drive’s root and never touches anything outside it.');
+    await waitText('tv-pr-su-note', 'GRID only uses its own folder on this drive.');
     expect(await hints()).toContain('MENU Set up');
     // Turning off the only computer is refused.
     await tapK('su-linux');
@@ -77,8 +77,8 @@ describe('tv-backups-a: set up a drive and backup two games', () => {
     expect(await pageRow('dp-emus')).toMatchObject({ value: 'None' });
     expect(await pageRow('dp-fw')).toMatchObject({ value: '0 systems' });
     expect((await pageRow('dp-folder')).value).toBe(`${mountOf(DRIVE)}/gridpack`);
-    expect(await pageRow('dp-open')).toMatchObject({ label: 'Open folder', sub: 'Opens the file manager in desktop mode' });
-    expect((await pageRow('dp-remove')).sub).toBe('Deletes only the gridpack folder; games installed on this computer stay');
+    expect(await pageRow('dp-open')).toMatchObject({ label: 'Open folder', sub: 'Switches to desktop mode' });
+    expect((await pageRow('dp-remove')).sub).toBe("Removes GRID's games from this drive");
     await key('Escape');
     await waitGone('tv-drive-page');
   });
@@ -98,7 +98,7 @@ describe('tv-backups-a: set up a drive and backup two games', () => {
     await waitText('tv-selbar-rt', 'Done');
     expect(await hints()).toEqual(['A Pick', 'X Select all', 'Y Backup to drive…', 'RT Done']);
     await key('y');
-    await waitNotice('Pick games first | A picks the focused game; X picks them all.');
+    await waitNotice('Pick games first');
   });
 
   it('A picks covers, X selects all or clears, and nothing opens Details (items 440–442)', async () => {
@@ -124,7 +124,7 @@ describe('tv-backups-a: set up a drive and backup two games', () => {
     await $(testId('tv-backup-page')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await waitText('tv-rows-title', 'Backup 2 games');
     expect(await text('tv-crumb')).toContain('Backup 2 games');
-    await waitText('tv-rows-sub', /^GRID downloads each game from .+, with its art and details, to the drive’s gridpack folder\.$/);
+    await waitText('tv-rows-sub', /^Downloads each game from .+, with its art, to this drive\.$/);
     await browser.waitUntil(async () => /to write$/.test(await text('tv-rows-summary')), { timeout: 15_000, timeoutMsg: 'the page never showed what it writes' });
     const drive = await pageRow(`bk-drive-${mountOf(DRIVE)}`);
     expect(drive.radio).toBe(true);

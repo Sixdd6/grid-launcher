@@ -108,7 +108,9 @@
     <div class="lbl">NOW PLAYING</div>
     <div class="logo" data-testid="tv-playing-title">{game.title}</div>
     <div class="muted" data-testid="tv-playing-line">{line}</div>
-    <p class="note pl-note">{playingNote(uploadOnExit)}</p>
+    {#if playingNote(uploadOnExit)}
+      <p class="note pl-note">{playingNote(uploadOnExit)}</p>
+    {/if}
     <div class="btns" data-nav="h">
       <TvButton k="pl-resume" autofocus testId="tv-playing-resume" onA={resume}>Back to the game</TvButton>
       <TvButton k="pl-stop" danger testId="tv-playing-stop" onA={stop}>Stop game</TvButton>

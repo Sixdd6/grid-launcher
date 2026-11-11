@@ -107,7 +107,7 @@ describe('Details buttons per state (items 276–283, 431, 435, 437)', () => {
 
   it('offline: Install and Backup to drive… are disabled, each saying why', () => {
     const [install, backup] = detButtons({ ...base, connected: false });
-    expect(install).toMatchObject({ disabled: true, why: "Couldn't add Chrono Trigger to the download queue: the server can't be reached" });
+    expect(install).toMatchObject({ disabled: true, why: "Can't install while offline" });
     expect(backup).toMatchObject({ disabled: true, why: BACKUP_NEEDS_SERVER });
   });
 
@@ -118,8 +118,8 @@ describe('Details buttons per state (items 276–283, 431, 435, 437)', () => {
   });
 
   it('missing: Locate…, Remove from library, Backup to drive…; unlinked: Link, Remove, no Backup', () => {
-    expect(labels({ installed: true, missing: true })).toEqual(['Locate…', 'Remove from library (keeps files)', 'Backup to drive…']);
-    expect(labels({ installed: true, unlinked: true })).toEqual(['Link to server game', 'Remove from library (keeps files)']);
+    expect(labels({ installed: true, missing: true })).toEqual(['Locate…', 'Remove from library', 'Backup to drive…']);
+    expect(labels({ installed: true, unlinked: true })).toEqual(['Link to server game', 'Remove from library']);
     expect(detButtons({ ...base, installed: true, unlinked: true })[1].danger).toBe(true);
   });
 
@@ -155,10 +155,10 @@ describe('the left column (items 272–273, 281–282, 432–433, 436)', () => {
 
   it('missing and unlinked', () => {
     expect(text(leftLines({ ...left, installed: true, missing: true }))).toEqual([
-      '<b>Files not found.</b> Play and Uninstall are unavailable until the files are found.',
+      '<b>Files not found.</b> Locate the files to play.',
     ]);
     expect(text(leftLines({ ...left, installed: true, unlinked: true }))).toEqual([
-      '<b>Not linked to a server game.</b> Play, cloud saves and updates need the link.',
+      '<b>Not linked to a server game.</b> Link it to your server to play.',
     ]);
   });
 
@@ -167,7 +167,7 @@ describe('the left column (items 272–273, 281–282, 432–433, 436)', () => {
     expect(text(leftLines({ ...left, drive: 'Couch kit', size: '1.7 GB', installed: true, driveCopy: ['A copy of an installed game · v1.1'] }))).toEqual([
       'Installed on this computer.',
       'From <b>Couch kit</b> · 1.7 GB',
-      'Installing copies it from the drive, no network needed.',
+      'Installs from the drive. No internet needed.',
       'A copy of an installed game · v1.1',
     ]);
   });
@@ -217,18 +217,18 @@ describe('media (items 301–305)', () => {
 describe('saves (items 306–314)', () => {
   const rec = { relative_time: '2 hours ago', size_text: '128 KB', slot: null };
   it('the notes, headings, rows and empty text', () => {
-    expect(savesNote({ unlinked: true, noId: false, installed: true, lastPlayedAt: 0 })).toBe('Cloud saves need the link to a server game.');
+    expect(savesNote({ unlinked: true, noId: false, installed: true, lastPlayedAt: 0 })).toBe('Link this game to use cloud saves.');
     expect(savesNote({ unlinked: false, noId: false, installed: false, lastPlayedAt: 0 })).toBe('No cloud saves yet. They appear after you play.');
     expect(savesNote({ unlinked: false, noId: false, installed: true, lastPlayedAt: 0 })).toBeNull();
-    expect(savesHeading('save', 'per_game')).toBe('Cloud Saves');
-    expect(savesHeading('state', 'per_game')).toBe('Cloud States');
+    expect(savesHeading('save', 'per_game')).toBe('Cloud saves');
+    expect(savesHeading('state', 'per_game')).toBe('Cloud states');
     expect(uploadLabel('save', 'per_game')).toBe('Upload latest save');
     expect(uploadLabel('state', 'per_game')).toBe('Upload latest state');
     expect(saveLine(rec)).toBe('2 hours ago · 128 KB');
     expect(saveLine({ ...rec, slot: '2' })).toBe('2 hours ago · 128 KB · slot 2');
     expect(saveListTitle('state', rec)).toBe('State from 2 hours ago');
-    expect(savesEmpty('save')).toBe('No cloud saves for this game. Upload the latest one, or play and GRID uploads it when the game closes.');
-    expect(savesEmpty('state')).toBe('No cloud states for this game. Upload the latest one, or play and GRID uploads it when the game closes.');
+    expect(savesEmpty('save')).toBe('No cloud saves yet. They upload when you stop playing.');
+    expect(savesEmpty('state')).toBe('No cloud states yet. They upload when you stop playing.');
   });
 
   it('the confirmations', () => {
@@ -244,9 +244,9 @@ describe('saves (items 306–314)', () => {
 describe('action confirmations (items 284–287, 419, 434)', () => {
   it('words', () => {
     expect(cancelConfirm('Zelda').ok).toBe('Cancel install');
-    expect(updateConfirm('Zelda')).toEqual({ title: 'Update Zelda?', body: 'Saves and configuration are kept.', ok: 'Update' });
+    expect(updateConfirm('Zelda')).toEqual({ title: 'Update Zelda?', body: 'Saves and settings stay.', ok: 'Update' });
     expect(uninstallConfirm('Zelda').body).toBe('Its files are deleted from this computer. Cloud saves stay on your server.');
-    expect(removeRowConfirm('Zelda', '/g/Zelda').body).toBe('Only the library entry goes. Its folder stays on disk: /g/Zelda.');
+    expect(removeRowConfirm('Zelda', '/g/Zelda').body).toBe('Its files stay in /g/Zelda.');
     expect(removeDriveConfirm('Zelda', 'Couch kit', false).body).toBe('Its files leave the drive. It can be backed up again later.');
     expect(removeDriveConfirm('Zelda', 'Couch kit', true).body).toBe('Its files leave the drive. The copy installed on this computer stays.');
   });
@@ -258,16 +258,14 @@ describe('Playing, Link, Game settings', () => {
     expect(sessionTime(0)).toBe('0:00');
     expect(playingLine('SNES', 'Snes9x', '0:07')).toBe('SNES · Snes9x · 0:07');
     expect(playingLine('Windows', '', '0:07')).toBe('Windows · 0:07');
-    expect(playingNote(true)).toBe(
-      "The game has the controller while it's in front. GRID listens again when you switch back or the game closes, and uploads your save when it closes.",
-    );
-    expect(playingNote(false)).toBe("The game has the controller while it's in front. GRID listens again when you switch back or the game closes.");
+    expect(playingNote(true)).toBe('Your save uploads when the game closes.');
+    expect(playingNote(false)).toBeNull();
   });
 
   it('a link row and the launch file line', () => {
     expect(linkLine('SNES', 795_571_200)).toBe('SNES · 1995');
     expect(linkLine('SNES', null)).toBe('SNES');
-    expect(launchFileSub('sidecar', 'a.exe', 'a.exe')).toBe('Set by game.json');
+    expect(launchFileSub('sidecar', 'a.exe', 'a.exe')).toBe('Set by the game');
     expect(launchFileSub('sidecar', 'b.exe', 'a.exe')).toBe('Your choice');
     expect(launchFileSub('user', 'a.exe', 'a.exe')).toBe('Your choice');
   });
@@ -277,12 +275,12 @@ describe('refusal prompts and save locations (checklist 529–531)', () => {
   it('the umu-launcher and library-folder confirms', () => {
     expect(umuConfirm('Static Bloom')).toEqual({
       title: 'Install umu-launcher?',
-      body: 'Static Bloom runs through Proton, which needs umu-run. umu-launcher downloads as a Downloads row; launch Static Bloom again when it finishes.',
+      body: "Static Bloom needs umu-launcher. Play it again once it's installed.",
       ok: 'Install umu-launcher',
     });
     expect(libraryFolderConfirm()).toEqual({
       title: 'Set a library folder',
-      body: 'GRID installs games into a library folder, and none is set. Choose one, then press Install again.',
+      body: 'Choose where games install, then install again.',
       ok: 'Choose a folder…',
     });
     expect(LIBRARY_FOLDER_BROWSER_TITLE).toBe('Library folder');
@@ -357,7 +355,7 @@ describe('a system with no emulator (ruling A, items 273, 288)', () => {
 
   it('reads "No emulator for <system>." and what Install brings', () => {
     const rec = noEmulatorFor(sys({}), false);
-    expect(text(leftLines({ ...left, size: '1.2 GB', noEmulator: rec }))).toEqual(['<b>No emulator for PlayStation 2.</b> Install installs PCSX2 too.']);
+    expect(text(leftLines({ ...left, size: '1.2 GB', noEmulator: rec }))).toEqual(['<b>No emulator for PlayStation 2.</b> Install adds PCSX2 too.']);
     expect(noEmulatorSub(rec)).toBe('PCSX2 installs with it');
     const busy = noEmulatorFor(sys({}), true);
     expect(text(leftLines({ ...left, noEmulator: busy }))).toEqual(['<b>No emulator for PlayStation 2.</b> PCSX2 is installing.']);

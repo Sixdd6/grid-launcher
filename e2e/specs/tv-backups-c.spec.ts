@@ -103,7 +103,7 @@ describe('tv-backups-c: Backup drives without a server', () => {
     await waitText('tv-det-header', new RegExp(`^From ${PACK}`));
     await waitButtons(['Install from drive', 'Remove from drive…']);
     expect(await text('tv-det-left')).toContain(`From ${PACK}`);
-    expect(await text('tv-det-left')).toContain('Installing copies it from the drive, no network needed.');
+    expect(await text('tv-det-left')).toContain('Installs from the drive. No internet needed.');
     await key('Escape');
     await waitGone('tv-details');
   });
@@ -161,7 +161,7 @@ describe('tv-backups-c: Backup drives without a server', () => {
     await waitFocused(plat);
     expect(await hints()).toContain('X Backup all 1…');
     await key('x');
-    await waitNotice('Backing up needs a server.');
+    await waitNotice('Connect to a server to backup games.');
   });
 
   it('Remove from drive… asks, removes the game and goes back (item 434)', async () => {

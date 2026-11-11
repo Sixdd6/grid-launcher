@@ -10,13 +10,9 @@ import { gamesText } from '../../systems/rows';
 import type { NoticePart } from '../notices';
 
 export const CHOOSE_TITLE = 'Choose your systems';
-/** The intro line, with the X and Menu prompts drawn inline (item 400). */
+/** The intro line (item 400). The hint bar shows X and Menu. */
 export const CHOOSE_INTRO: readonly NoticePart[] = [
-  'Tick the systems you want to play. GRID installs the recommended emulator for each. ',
-  { glyph: 'X' },
-  ' changes the emulator; ',
-  { glyph: 'MENU' },
-  ' skips this step. You can change this later in Settings › Systems.',
+  'Pick the systems you play. GRID installs an emulator for each. You can change this later in Settings › Systems.',
 ];
 export const SKIP_LABEL = 'Skip for now';
 export const CHANGE_EMULATOR = 'Change emulator';
@@ -26,7 +22,7 @@ export const WINDOWS_SUB = 'Proton for Windows games';
 export const NO_EMULATOR = 'No emulator available';
 /** What A on an unavailable system says (consultant, after P12). */
 export function noEmulatorWhy(label: string): string {
-  return `No emulator GRID installs plays ${label}. If you have one, add it in Settings › Systems after setup.`;
+  return `GRID has no emulator for ${label}. Add your own later in Settings › Systems.`;
 }
 export const NO_PROTON = 'No Proton version available';
 export const LOADING = 'Loading your systems…';

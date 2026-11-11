@@ -40,7 +40,7 @@ export function discoverShelves(input: { library: readonly TvGame[]; newReleases
   const up = lib.filter((g) => g.update);
   const shelves: Shelf[] = [
     { id: 'c', name: 'Continue playing', extra: null, games: cont },
-    { id: 'n', name: 'New releases', extra: 'the last six months, on your systems', games: nr },
+    { id: 'n', name: 'New releases', extra: 'last six months', games: nr },
     { id: 'r', name: 'Recently added', extra: 'to your server', games: ra },
   ];
   if (up.length) shelves.push({ id: 'u', name: 'Updates', extra: gamesWord(up.length), games: up });

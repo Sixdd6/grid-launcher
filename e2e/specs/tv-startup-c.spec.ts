@@ -40,7 +40,7 @@ describe('tv-startup (c): Use without a server opens the Library on the first dr
     await waitFocused(`r-drive:${drive}`, `the first drive's row never took focus (focused: ${await focused()})`);
     expect(await $(testId('tv-lib-fold-drives')).isExisting()).toBe(true);
     await waitText('tv-connection', 'Offline · no server');
-    expect(await hintLeft()).toBe('No server. Your Library and Backup drives work without one.');
+    expect(await hintLeft()).toBe('No server · Library and backup drives only');
     await browser.waitUntil(async () => (await text('tv-lib-name')).length > 0, { timeout: TRANSITION_TIMEOUT });
     expect(await text('tv-lib-name')).toBe('Couch kit');
   });

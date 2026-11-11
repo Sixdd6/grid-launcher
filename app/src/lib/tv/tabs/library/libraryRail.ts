@@ -2,7 +2,7 @@
 // `folder`, `railItem`): All games, Recent and Updates with their counts, a
 // divider, then two folders, Platforms (each installed platform with its
 // count) and Backup drives (one row per connected, set-up drive with its game
-// count, or "No Backup drives connected"). Pure, over the desktop's rail
+// count, or "No backup drives connected"). Pure, over the desktop's rail
 // rules (`library/rail.ts`): the same counts, the same keys.
 import type { DriveInfo, InstalledGame } from '../../../api';
 import { visibleLibraryGames } from '../../../library';
@@ -73,7 +73,7 @@ export function folderHint(open: boolean): string {
 export const FOLDER_LABELS: Record<FolderId, string> = { plat: 'Platforms', drives: 'Backup drives' };
 
 /** The Backup drives folder with no drive (item 420). */
-export const NO_DRIVES = 'No Backup drives connected';
+export const NO_DRIVES = 'No backup drives connected';
 
 /** What "Backup all N…" on a Library platform row backs up (item 455): its
  *  installed games the server knows (a rom id). N counts these, as the

@@ -27,11 +27,11 @@ export function noEmulatorHead(n: NoEmulator): string {
   return `No emulator for ${n.system}.`;
 }
 
-/** What Install does about it: "Install installs <rec> too.", "<rec> is
+/** What Install does about it: "Install adds <rec> too.", "<rec> is
  *  installing." or "Add one in Settings › Systems." */
 export function noEmulatorTail(n: NoEmulator): string {
   if (n.rec === null) return 'Add one in Settings › Systems.';
-  return n.installing ? `${n.rec} is installing.` : `Install installs ${n.rec} too.`;
+  return n.installing ? `${n.rec} is installing.` : `Install adds ${n.rec} too.`;
 }
 
 /** The whole line, as one string. */

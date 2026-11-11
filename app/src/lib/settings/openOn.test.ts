@@ -11,7 +11,7 @@ import {
 describe('Open GRID on', () => {
   it('offers Automatic, Server › Discover and Library, in that order', () => {
     expect(OPEN_ON_CHOICES.map(openOnLabel)).toEqual([
-      'Automatic: Discover when connected, else Library',
+      'Automatic',
       'Server › Discover',
       'Library',
     ]);

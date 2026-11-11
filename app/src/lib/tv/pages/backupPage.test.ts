@@ -123,8 +123,8 @@ const localPlan = (n: number, extra: Partial<BackupPlan> = {}) =>
 
 describe('the lede (item 458)', () => {
   it('names the host, and copying from this computer when a game is', () => {
-    expect(backupLede('romm.home.lan', localPlan(2))).toMatch(/^GRID copies games installed on this computer and downloads the rest from romm\.home\.lan/);
-    expect(backupLede('romm.home.lan', plan())).toMatch(/^GRID downloads each game from romm\.home\.lan/);
+    expect(backupLede('romm.home.lan', localPlan(2))).toMatch(/^Copies the games installed on this computer and downloads the rest from romm\.home\.lan/);
+    expect(backupLede('romm.home.lan', plan())).toMatch(/^Downloads each game from romm\.home\.lan/);
   });
 });
 
@@ -154,8 +154,8 @@ describe('Drive (items 460–464)', () => {
     const raw = drive({ key: '/m/USB', mount: '/m/USB', label: 'USB-1TB', status: 'not_set_up', pack: null });
     const rows = backupPageRows(model(null, { ready: [], connected: [raw], chosen: null }), acts());
     expect(keys(rows)).toEqual(['bk-h-drive', 'bk-no-drives', 'bk-setup']);
-    expect(find(rows, 'bk-no-drives')).toMatchObject({ text: 'No Backup drive is connected. USB-1TB is connected but not set up for GRID.' });
-    expect(noDrivesNote([])).toBe('No Backup drive is connected.');
+    expect(find(rows, 'bk-no-drives')).toMatchObject({ text: 'No backup drive is connected. USB-1TB is connected but not set up for GRID.' });
+    expect(noDrivesNote([])).toBe('No backup drive is connected.');
     expect(backupMain(model(null, { ready: [], chosen: null }), vi.fn())).toBeNull();
   });
 });
@@ -237,7 +237,7 @@ describe('Source (items 465–472, 476; ruling 11)', () => {
   it('notes the Wine prefix when a Windows game is copied (476)', () => {
     const rows = backupPageRows(model(localPlan(1), { lookup: () => ({ platform: 'Windows', windows: true }) }), acts());
     expect(find(rows, 'bk-wine')).toMatchObject({
-      text: 'Windows games are copied without their Wine prefix. The save folders GRID knows about are copied from it.',
+      text: 'Windows games are copied with their saves.',
     });
   });
 });

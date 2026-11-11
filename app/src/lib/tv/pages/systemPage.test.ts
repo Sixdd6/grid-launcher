@@ -60,7 +60,7 @@ describe('the System page', () => {
       'remove Remove PCSX2',
       'tips Setup tips',
     ]);
-    expect(rows.find((r) => r.key === 'open')?.sub).toBe('Opens the emulator on its own to change its settings. Its window needs a mouse.');
+    expect(rows.find((r) => r.key === 'open')?.sub).toBe("Change the emulator's own settings");
     expect(rows.find((r) => r.key === 'settings')?.sub).toBe('Program, launch options, cloud save folders');
     expect(rows.find((r) => r.key === 'remove')?.danger).toBe(true);
     expect(rows.find((r) => r.key === 'tips')).toMatchObject({ type: 'info', sub: 'Map your controller once in PCSX2.' });
@@ -90,7 +90,7 @@ describe('the System page', () => {
       systemPageRows(emulator({ firmware: { label: 'PlayStation 2 firmware · 2 files', platformName: 'PlayStation 2', action } }), actions()).find((r) => r.key === 'fw');
     expect(fw('install')).toMatchObject({
       label: 'PlayStation 2 firmware · 2 files · from your server',
-      sub: 'Each file is checked against the size and MD5 the server lists',
+      sub: "Checked against your server's copy",
       value: 'Install',
     });
     expect(fw('requested')).toMatchObject({ value: 'Installing…', disabled: true });
@@ -102,7 +102,7 @@ describe('the System page', () => {
     const installed = systemPageRows(emulator({ emu: line('RPCS3'), ps3: { kind: 'installed', text: 'PS3 firmware 4.93 installed' } }), actions());
     expect(installed.find((r) => r.key === 'ps3fw')).toMatchObject({ type: 'info', label: 'PS3 firmware 4.93 installed' });
     const a = actions();
-    const install = systemPageRows(emulator({ emu: line('RPCS3'), ps3: { kind: 'install', text: 'PS3 firmware downloaded — click Install to activate it.' } }), a).find((r) => r.key === 'ps3fw');
+    const install = systemPageRows(emulator({ emu: line('RPCS3'), ps3: { kind: 'install', text: 'PS3 firmware downloaded. Install it to use it.' } }), a).find((r) => r.key === 'ps3fw');
     expect(install).toMatchObject({ value: 'Install' });
     if (install?.type === 'action') install.run();
     expect(a.installPs3Firmware).toHaveBeenCalledWith('RPCS3');
@@ -168,7 +168,7 @@ describe('the System page', () => {
       kind: 'windows',
       status: 'Ready',
       tool: 'GE-Proton9-20 (downloaded by GRID)',
-      umu: 'GRID-managed · 1.2.6',
+      umu: 'Installed by GRID · 1.2.6',
       umuAction: 'Reinstall',
       umuBusy: false,
       pickerBusy: false,
@@ -176,13 +176,13 @@ describe('the System page', () => {
     const rows = systemPageRows(m, actions());
     expect(shape(rows)).toEqual([
       'proton Default Proton version = GE-Proton9-20 (downloaded by GRID)',
-      'umu Proton launcher (umu-run) = GRID-managed · 1.2.6',
+      'umu Proton launcher = Installed by GRID · 1.2.6',
       'umu-install Reinstall umu-launcher',
       'first First Windows game = Downloads the Steam Linux Runtime (about 200 MB)',
     ]);
     expect(rows[0].sub).toBe('Runs Windows games on Linux');
     expect(pageSub(m)).toBe('GE-Proton9-20 (downloaded by GRID) · Ready');
-    expect(umuValue({ source: 'managed', release_tag: '1.2.6' })).toBe('GRID-managed · 1.2.6');
+    expect(umuValue({ source: 'managed', release_tag: '1.2.6' })).toBe('Installed by GRID · 1.2.6');
     expect(umuValue({ source: 'system', path: '/usr/bin/umu-run' })).toBe('System · /usr/bin/umu-run');
     expect(umuValue({ source: 'missing' })).toBe('Not installed');
   });

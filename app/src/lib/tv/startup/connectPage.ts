@@ -7,18 +7,18 @@
 export type SignIn = 'token' | 'password';
 
 export const CONNECT_TITLE = 'Connect to your RomM server';
-export const CONNECT_SUB = 'Everything here works with a controller. A keyboard works too.';
-export const NO_SERVER_NOTE = 'Without a server, GRID needs only the library folder. Your Library and Backup drives work offline.';
+export const CONNECT_SUB = 'Enter your server address and sign in.';
+export const NO_SERVER_NOTE = 'No server? Choose a library folder to play offline.';
 export const SIGN_IN_LABELS: Record<SignIn, string> = { token: 'API token', password: 'Username and password' };
 export const PASTED = 'Pasted from the clipboard';
 /** View with an empty clipboard on a field, and View off a field (consultant, after P12). */
-export const NOTHING_TO_PASTE = 'Nothing to paste: the clipboard has no text.';
-export const PASTE_NEEDS_FIELD = 'Focus a field to paste into it.';
+export const NOTHING_TO_PASTE = 'Nothing to paste';
+export const PASTE_NEEDS_FIELD = 'Choose a field first';
 /** Connect's label and both buttons' reason while a connect runs (consultant, after P12). */
 export const CONNECTING = 'Connecting…';
-export const CONNECTING_WHY = 'Still connecting. Wait for it to finish.';
+export const CONNECTING_WHY = 'Still connecting…';
 export const NO_SERVER_TITLE = 'Using GRID without a server';
-export const NO_SERVER_SUB = 'Your Library and Backup drives work offline';
+export const NO_SERVER_SUB = 'Your Library and backup drives work offline';
 export const LIBRARY_BROWSER_TITLE = 'Library folder';
 
 export type FieldKey = 'url' | 'how' | 'token' | 'user' | 'password' | 'lib';
@@ -138,7 +138,7 @@ export function parentOf(path: string): string {
 // library folder (the library stays) and no Use without a server.
 
 export const EDIT_CONNECTION_LABEL = 'Edit connection…';
-export const EDIT_CONNECTION_SUB = 'Change the server or sign in again. Your library and settings stay.';
+export const EDIT_CONNECTION_SUB = 'Change server or sign in again';
 
 /** The edit form's start: the session's server and username, signing in
  *  with a token as the desktop's edit form does (the session doesn't say

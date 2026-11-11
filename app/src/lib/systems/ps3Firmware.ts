@@ -24,7 +24,7 @@ export function ps3FirmwareView(status: Rpcs3FirmwareStatus | undefined): Ps3Fir
     const version = status.version?.trim();
     return { kind: 'installed', text: version ? `PS3 firmware ${version} installed` : 'PS3 firmware installed' };
   }
-  if (status.pup_path) return { kind: 'install', text: 'PS3 firmware downloaded — click Install to activate it.' };
+  if (status.pup_path) return { kind: 'install', text: 'PS3 firmware downloaded. Install it to use it.' };
   return null;
 }
 

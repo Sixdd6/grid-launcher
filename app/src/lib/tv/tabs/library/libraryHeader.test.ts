@@ -28,8 +28,8 @@ describe('the TV Library header (items 185, 187–191)', () => {
 
   it('says why the grid is empty', () => {
     expect(emptyState('all', 'zz')).toEqual({ title: 'No games match “zz”', body: 'Press (Y) to change the search.' });
-    expect(emptyState('updates', '')).toEqual({ title: 'Everything is up to date', body: 'Games with a newer copy on your server show here.' });
-    expect(emptyState('updates', ' ')).toEqual({ title: 'Everything is up to date', body: 'Games with a newer copy on your server show here.' });
+    expect(emptyState('updates', '')).toEqual({ title: 'Everything is up to date', body: 'Game updates show here.' });
+    expect(emptyState('updates', ' ')).toEqual({ title: 'Everything is up to date', body: 'Game updates show here.' });
     expect(emptyState('recent', '')).toEqual({ title: 'No games here yet', body: 'Install games from the Server tab.' });
     expect(emptyState('platform:snes', '')).toEqual({ title: 'No games here yet', body: 'Install games from the Server tab.' });
   });

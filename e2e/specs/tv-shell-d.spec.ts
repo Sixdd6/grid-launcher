@@ -114,7 +114,7 @@ describe('tv-shell (d): overlays and notifications', () => {
       const root = parseFloat(getComputedStyle(document.documentElement).fontSize);
       return { sub: el.querySelector('.ts')?.textContent ?? '', glyph: el.querySelector('.ts .gli')?.getAttribute('data-glyph'), top: r.top / root, right: (innerWidth - r.right) / root, width: r.width / root, role: el.getAttribute('role'), pe: getComputedStyle(el.parentElement!).pointerEvents };
     });
-    expect(card.sub).toBe('Press  for the menu. Desktop mode is one press away there.');
+    expect(card.sub).toBe('Press  for the menu and desktop mode.');
     expect(card.glyph).toBe('MENU');
     expect(card.role).toBe('status');
     expect(card.pe).toBe('none');
@@ -345,7 +345,7 @@ describe('tv-shell (d): overlays and notifications', () => {
     expect(await hints()).toContain('Y Clear all');
     await press('north');
     await $(testId('tv-notifications-empty')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    expect(await $(testId('tv-notifications-empty')).getText()).toBe('Nothing yet. Every notice GRID shows lands here too.');
+    expect(await $(testId('tv-notifications-empty')).getText()).toBe('No notifications yet');
     expect(await $(testId('tv-notifications-count')).getText()).toBe('0');
     await press('east');
     await waitTab('downloads');

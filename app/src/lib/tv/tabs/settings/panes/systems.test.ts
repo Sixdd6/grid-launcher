@@ -61,7 +61,7 @@ describe('Settings › Systems in TV mode', () => {
     expect(systemSub(ps2, null)).toBe('PCSX2 (Playstation 2)');
     expect(systemSub({ emulator: 'RetroArch', recommended: null }, 'snes9x')).toBe('RetroArch · snes9x');
     expect(systemSub(saturn, null)).toBe("Games for this system can't start yet. Ymir is recommended.");
-    expect(systemSub(zeebo, null)).toBe('No emulator GRID installs plays this system. If you have one, use Add an emulator manually.');
+    expect(systemSub(zeebo, null)).toBe('GRID has no emulator for this system. You can add your own.');
   });
 
   it('the status pill: Ready with the green dot, else the status in the warning style (item 256)', () => {
@@ -105,7 +105,7 @@ describe('Settings › Systems in TV mode', () => {
   });
 
   it('Other emulators: each with what it could play, or the note (item 258)', () => {
-    expect(OTHER_EMPTY).toBe('Every installed emulator is used by a system.');
+    expect(OTHER_EMPTY).toBe('No other emulators');
     expect(otherItems([entry('Mednafen')], rows, [])).toEqual([
       { k: 'sy-other-mednafen', testKey: 'mednafen', name: 'Mednafen', note: 'Not used by any system on your server.' },
     ]);
@@ -126,7 +126,7 @@ describe('Settings › Systems in TV mode', () => {
 
 describe('disabled reasons (consultant decisions)', () => {
   it('words the running Install recommended and Check for updates', () => {
-    expect(REC_RUNNING).toBe('Still installing. Downloads shows the progress.');
+    expect(REC_RUNNING).toBe('Installing… see Downloads');
     expect(CHECK_RUNNING).toBe('Already checking for updates.');
   });
 });

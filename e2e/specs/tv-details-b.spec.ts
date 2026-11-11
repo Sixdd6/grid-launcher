@@ -33,11 +33,11 @@ describe('tv-details (b): Link, Locate…, Game settings', () => {
 
   it('an unlinked game offers Link to server game and Remove; its Saves tab says why (items 282, 314)', async () => {
     await openLibraryDetails('Mystery Cart');
-    await waitButtons(['Link to server game', 'Remove from library (keeps files)']);
-    expect(await text('tv-det-left')).toBe('Not linked to a server game. Play, cloud saves and updates need the link.');
+    await waitButtons(['Link to server game', 'Remove from library']);
+    expect(await text('tv-det-left')).toBe('Not linked to a server game. Link it to your server to play.');
     await press('right_bumper');
     await press('right_bumper');
-    await waitText('tv-saves-note', 'Cloud saves need the link to a server game.');
+    await waitText('tv-saves-note', 'Link this game to use cloud saves.');
     // Nothing to focus in the tab: the first button.
     await waitFocused('db-link');
   });
@@ -46,7 +46,7 @@ describe('tv-details (b): Link, Locate…, Game settings', () => {
     await key('Enter');
     await $(testId('tv-link-page')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Link to server game never opened' });
     await waitText('tv-crumb', /Link to server game/);
-    await waitText('tv-link-sub', 'Pick the Super Nintendo Entertainment System game on your server that this is.');
+    await waitText('tv-link-sub', 'Choose the matching Super Nintendo Entertainment System game');
     await $(testId('tv-link-604')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the server games never listed' });
     const listed = await browser.execute(() => Array.from(document.querySelectorAll('#link-list [data-k]')).map((r) => r.getAttribute('data-k')));
     // 601–603 and 605 are held by installed rows.
@@ -74,7 +74,7 @@ describe('tv-details (b): Link, Locate…, Game settings', () => {
 
   it('a missing game offers Locate…; the folder browser picks the folder holding it (items 281, 290, 349–352)', async () => {
     await openLibraryDetails('Lost Cart');
-    await waitButtons(['Locate…', 'Remove from library (keeps files)', 'Backup to drive…']);
+    await waitButtons(['Locate…', 'Remove from library', 'Backup to drive…']);
     await waitFocused('db-locate');
     await key('Enter');
     await $(testId('tv-folder-browser')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the folder browser never opened' });
@@ -111,7 +111,7 @@ describe('tv-details (b): Link, Locate…, Game settings', () => {
     await $(testId('tv-row-exe')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     expect(await text('tv-game-settings')).toContain('Game settings');
     await waitText('tv-row-exe', /^Launch file\s*Your choice\s*mygame\.exe/);
-    expect(await text('tv-row-params')).toMatch(/^Launch parameters\s*Quotes group words\s*None/);
+    expect(await text('tv-row-params')).toMatch(/^Launch parameters\s*Optional\s*None/);
     await waitFocused('s-exe');
     await key('Enter');
     await $(testId('tv-list')).waitForExist({ timeout: TRANSITION_TIMEOUT });

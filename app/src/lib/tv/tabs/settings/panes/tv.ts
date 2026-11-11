@@ -41,10 +41,10 @@ export const ASSIGN_SUBS: Record<TvAssignment, string> = {
   nintendo: 'Right selects, bottom goes back',
 };
 
-export const NO_CONTROLLER = 'None found · the keyboard works too';
+export const NO_CONTROLLER = 'None connected';
 /** A on Button assignments with no controller connected (consultant decision;
  *  checklist 532): the row is disabled and reads "Xbox style". */
-export const ASSIGN_NEEDS_PAD = 'Connect a controller to choose its buttons. Each controller keeps its own choice.';
+export const ASSIGN_NEEDS_PAD = 'Connect a controller first.';
 
 /** "For <controller>", or "For the controller in use" with none (item 262). */
 export function assignLine(padName: string | null): string {
@@ -54,7 +54,7 @@ export function assignLine(padName: string | null): string {
 export function tvRows(s: TvPaneState, a: TvPaneActions): Row[] {
   return [
     choiceRow(
-      { key: 'prompts', label: 'Button prompts', sub: 'Which controller the on-screen buttons look like' },
+      { key: 'prompts', label: 'Button prompts', sub: 'The button icons on screen' },
       PROMPT_OPTIONS,
       s.prompts,
       (v) => a.setPrompts(v as TvPrompts),
@@ -79,7 +79,7 @@ export function tvRows(s: TvPaneState, a: TvPaneActions): Row[] {
       type: 'action',
       key: 'tv-desktop',
       label: 'Switch to desktop mode',
-      sub: 'Also in the Menu. To come back: the TV button in the desktop top bar, or start GRID with --tv',
+      sub: 'Come back with the TV button in the top bar',
       run: a.toDesktop,
     },
     { type: 'action', key: 'tv-quit', label: 'Quit GRID', run: a.quit },

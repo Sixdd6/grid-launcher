@@ -121,7 +121,7 @@
     <div class="list-in">
       <div class="panel empty" id="srv-panel">
         <h2>Not connected to a server</h2>
-        Your Library and Backup drives work without one.
+        Your Library and backup drives work without one.
         <div class="btns" data-nav="h" style="margin-top:1.4rem">
           <TvButton k="srv-connect" primary testId="tv-srv-connect" onA={connectToServer}>Connect to a server…</TvButton>
           <TvButton k="srv-library" testId="tv-srv-library" onA={() => void showTab('library')}>Open Library</TvButton>

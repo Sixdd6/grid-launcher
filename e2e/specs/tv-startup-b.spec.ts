@@ -25,9 +25,9 @@ describe('tv-startup (b): the unreachable library', () => {
 
   it('blocks with the dialog: its words, Relocate focused, A "Select" and Menu (items 409–411)', async () => {
     expect(await $(`${testId('tv-unreachable')} h2`).getText()).toBe("Your library can't be reached");
-    await waitText('tv-unreachable-body', `${missingRoot()} isn't there: its drive may not be connected. GRID can't run without it.`);
-    expect(await text('tv-unreachable-relocate')).toBe('Relocate the library…');
-    expect(await text('tv-unreachable-close')).toBe('Close without changing anything');
+    await waitText('tv-unreachable-body', `Can't find ${missingRoot()}. Connect its drive or locate the library.`);
+    expect(await text('tv-unreachable-relocate')).toBe('Locate library…');
+    expect(await text('tv-unreachable-close')).toBe('Quit GRID');
     await waitFocused('ur-relocate');
     expect(await hints()).toEqual(['A Select', 'MENU Menu']);
     expect(await $(testId('tv-tabs')).isExisting()).toBe(false);
@@ -60,10 +60,10 @@ describe('tv-startup (b): the unreachable library', () => {
     await waitFocused('ur-relocate');
   });
 
-  it('Relocate the library… opens the folder browser; B there comes back to the dialog (items 97, 412)', async () => {
+  it('Locate library… opens the folder browser; B there comes back to the dialog (items 97, 412)', async () => {
     await key('Enter');
     await $(testId('tv-folder-browser')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the folder browser never opened' });
-    expect(await $(`${testId('tv-folder-browser')} h1`).getText()).toBe('Relocate the library');
+    expect(await $(`${testId('tv-folder-browser')} h1`).getText()).toBe('Locate library');
     expect(await $(testId('tv-unreachable')).isExisting()).toBe(false);
     await key('Escape');
     await $(testId('tv-unreachable')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'B on the browser never brought the dialog back' });

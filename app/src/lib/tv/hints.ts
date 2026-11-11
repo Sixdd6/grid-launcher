@@ -49,11 +49,11 @@ export type HintLeft =
   | { kind: 'offline'; pill: string; text: string }
   | { kind: 'pad'; text: string };
 
-export const NO_SERVER_LINE = 'No server. Your Library and Backup drives work without one.';
+export const NO_SERVER_LINE = 'No server · Library and backup drives only';
 export const OFFLINE_PILL = 'Offline';
-export const OFFLINE_LINE = 'Your installed games still play. Server features return when GRID reconnects.';
+export const OFFLINE_LINE = 'Installed games still play';
 /** Ruling 24: the left side with no controller connected. */
-export const NO_CONTROLLER_LINE = 'No controller · the keyboard works too';
+export const NO_CONTROLLER_LINE = 'No controller connected';
 
 /**
  * The left side: GRID used without a server, or the server unreachable (not

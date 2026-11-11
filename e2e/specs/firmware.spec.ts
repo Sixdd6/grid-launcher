@@ -220,10 +220,10 @@ describe('firmware', () => {
       { timeout: FIRMWARE_TIMEOUT, timeoutMsg: 'RPCS3 never showed the downloaded-firmware note' },
     );
     const note = button.replace('sys-ps3-firmware-install-', 'sys-ps3-firmware-');
-    await expect($(testId(note))).toHaveText(expect.stringContaining('PS3 firmware downloaded — click Install to activate it.'));
+    await expect($(testId(note))).toHaveText(expect.stringContaining('PS3 firmware downloaded. Install it to use it.'));
     await $(testId(button)).click();
 
-    await waitForToast('PS3 firmware installation started — follow the RPCS3 dialog to complete.', {
+    await waitForToast('PS3 firmware is installing in RPCS3', {
       timeoutMsg: 'clicking Install never said the PS3 firmware installation started',
     });
 

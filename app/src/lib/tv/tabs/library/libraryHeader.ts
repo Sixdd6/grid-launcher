@@ -59,7 +59,7 @@ export function noMatch(query: string): EmptyState {
 /** An empty filter (items 189–191; tvmode.js `libPaint`). */
 export function emptyState(key: RailKey, query: string): EmptyState {
   if (searching(query)) return noMatch(query);
-  if (key === 'updates') return { title: 'Everything is up to date', body: 'Games with a newer copy on your server show here.' };
+  if (key === 'updates') return { title: 'Everything is up to date', body: 'Game updates show here.' };
   return { title: 'No games here yet', body: 'Install games from the Server tab.' };
 }
 

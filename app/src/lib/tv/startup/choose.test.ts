@@ -14,10 +14,10 @@ const ps2: PlatformSetup = {
 const zeebo: PlatformSetup = { label: 'Zeebo', name: 'Zeebo', slug: 'zeebo', rom_count: 1, options: [], recommended: null, core: null };
 
 describe('Choose your systems rows (items 400–403)', () => {
-  it('reads the intro with the X and Menu prompts', () => {
+  it('reads the intro', () => {
     const text = CHOOSE_INTRO.map((p) => (typeof p === 'string' ? p : `(${p.glyph})`)).join('');
     expect(text).toBe(
-      'Tick the systems you want to play. GRID installs the recommended emulator for each. (X) changes the emulator; (MENU) skips this step. You can change this later in Settings › Systems.',
+      'Pick the systems you play. GRID installs an emulator for each. You can change this later in Settings › Systems.',
     );
   });
 
@@ -34,7 +34,7 @@ describe('Choose your systems rows (items 400–403)', () => {
 
   it("says why an unavailable system can't be ticked (consultant, after P12)", () => {
     expect(noEmulatorWhy('Zeebo')).toBe(
-      'No emulator GRID installs plays Zeebo. If you have one, add it in Settings › Systems after setup.',
+      'GRID has no emulator for Zeebo. Add your own later in Settings › Systems.',
     );
   });
 
@@ -62,7 +62,7 @@ describe('Unreachable library (items 409, 412)', () => {
   it('says the library is missing and GRID cannot run without it', () => {
     expect(UNREACHABLE_TITLE).toBe("Your library can't be reached");
     expect(unreachableBody('/run/media/USB-1TB/GRID')).toBe(
-      "/run/media/USB-1TB/GRID isn't there: its drive may not be connected. GRID can't run without it.",
+      "Can't find /run/media/USB-1TB/GRID. Connect its drive or locate the library.",
     );
   });
 
@@ -74,7 +74,7 @@ describe('Unreachable library (items 409, 412)', () => {
     });
     expect(relocatedNotice({ status: 'relocated', library_path: '/mnt/GRID', report: ['a', 'b'] })).toEqual({
       title: 'Library relocated to /mnt/GRID',
-      sub: 'No files were moved · 2 paths could not be updated; see the log.',
+      sub: "No files were moved · 2 paths weren't updated",
       error: true,
     });
   });

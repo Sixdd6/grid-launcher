@@ -82,9 +82,9 @@ export type SystemPageActions = {
 };
 
 /** Ruling 19: Open <emulator> opens its window over TV mode. */
-export const OPEN_SUB = 'Opens the emulator on its own to change its settings. Its window needs a mouse.';
+export const OPEN_SUB = "Change the emulator's own settings";
 export const SETTINGS_SUB = 'Program, launch options, cloud save folders';
-export const FIRMWARE_SUB = 'Each file is checked against the size and MD5 the server lists';
+export const FIRMWARE_SUB = "Checked against your server's copy";
 export const PROTON_SUB = 'Runs Windows games on Linux';
 export const FIRST_WINDOWS_GAME = 'Downloads the Steam Linux Runtime (about 200 MB)';
 /** A on a row whose action is already running (consultant decision). */
@@ -167,7 +167,7 @@ export function systemPageRows(m: SystemPageModel, a: SystemPageActions): Row[] 
       const rows: Row[] = [
         { type: 'action', key: 'proton', label: 'Default Proton version', sub: PROTON_SUB, value: m.tool ?? 'Not set', ...busy(m.pickerBusy), run: a.pickProton },
       ];
-      if (m.umu !== null) rows.push({ type: 'info', key: 'umu', label: 'Proton launcher (umu-run)', value: m.umu });
+      if (m.umu !== null) rows.push({ type: 'info', key: 'umu', label: 'Proton launcher', value: m.umu });
       if (m.umuAction) {
         rows.push({
           type: 'action',
@@ -299,6 +299,6 @@ export function protonListItems(picker: Groups, pick: (value: string) => void): 
 /** The Proton launcher line's value (336): which umu-run a launch uses. */
 export function umuValue(status: { source: string; path?: string | null; release_tag?: string | null }): string {
   if (status.source === 'system') return status.path ? `System · ${status.path}` : 'System';
-  if (status.source === 'managed') return status.release_tag ? `GRID-managed · ${status.release_tag}` : 'GRID-managed';
+  if (status.source === 'managed') return status.release_tag ? `Installed by GRID · ${status.release_tag}` : 'Installed by GRID';
   return 'Not installed';
 }

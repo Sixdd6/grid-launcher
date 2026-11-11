@@ -31,7 +31,7 @@
             </div>
           </div>
         {:else}
-          <p class="note" data-testid="tv-notifications-empty">Nothing yet. Every notice GRID shows lands here too.</p>
+          <p class="note" data-testid="tv-notifications-empty">No notifications yet</p>
         {/each}
       </div>
     </div>

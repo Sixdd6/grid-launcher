@@ -100,7 +100,7 @@
   {#if searching(srv.query)}<TvChip testId="tv-srv-search">Search: <b>{srv.query.trim()}</b></TvChip>{/if}
   <span class="sp"></span>
   {#if shown.length}
-    <TvButton k="bk-all" al="Backup" testId="tv-srv-backup-all" disabled={!session.connected} why={session.connected ? undefined : 'Backing up needs a server.'} onA={backupAll}>{backupAllLabel(all.length)}</TvButton>
+    <TvButton k="bk-all" al="Backup" testId="tv-srv-backup-all" disabled={!session.connected} why={session.connected ? undefined : 'Connect to a server to backup games.'} onA={backupAll}>{backupAllLabel(all.length)}</TvButton>
   {/if}
   <TvChip glyph="RT">Select</TvChip>
   <TvChip glyph="Y">Search</TvChip>

@@ -35,14 +35,14 @@ const shape = (rows: Row[]) => rows.map((r) => `${r.label}${'value' in r ? ` = $
 
 describe('the emulator form', () => {
   it('adding: which emulator, Name, Program, Launch options "%rom%", Cloud saves, Add emulator (items 337–341)', () => {
-    expect(ADD_SUB).toBe("For an emulator GRID doesn't install. It never becomes a system's default by itself.");
+    expect(ADD_SUB).toBe("For an emulator GRID doesn't install");
     const rows = emulatorFormRows('add', form(), acts());
     expect(shape(rows)).toEqual([
       'Which emulator is it? = Something else',
       'Name = Not set',
       "Program = Not set (Browse for the emulator's program)",
       'Launch options = %rom% (%rom% is replaced by the game file)',
-      'Cloud saves (advanced) = Save strategy: Automatic (Save and state folders, files not to upload)',
+      'Cloud save options = Save strategy: Automatic (Save and state folders, files not to upload)',
       'Save folders =  (Separate folders with ;)',
       'Save state folders = ',
       "Don't upload these files = ",
@@ -59,7 +59,7 @@ describe('the emulator form', () => {
       'Name = PCSX2',
       'Program = pcsx2.AppImage (/home/sam/Emu/pcsx2.AppImage)',
       'Launch options = -batch %rom% (%rom% is replaced by the game file)',
-      'Cloud saves (advanced) = Save strategy: A folder per game (Save and state folders, files not to upload)',
+      'Cloud save options = Save strategy: A folder per game (Save and state folders, files not to upload)',
     ]);
     expect(rows[rows.length - 1]).toMatchObject({ label: 'Save' });
     expect(rows[rows.length - 1].disabled).toBeUndefined();

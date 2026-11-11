@@ -56,7 +56,7 @@ export function updatesRows(s: UpdatesState, a: UpdatesActions): Row[] {
       type: 'action',
       key: 'release',
       label: `${releaseName(s.release.tag)} is out`,
-      sub: 'GRID only checks. Update it the way you installed it.',
+      sub: 'Update with the installer you used',
       run: a.openRelease,
     });
   }

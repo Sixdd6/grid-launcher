@@ -21,7 +21,7 @@ const sys = (over: Partial<SystemRow>): SystemRow => ({
 describe('the no-emulator line both Details show (user decision 2026-11-10)', () => {
   it('names the recommendation Install brings', () => {
     const n = noEmulatorFor(sys({}), false)!;
-    expect(noEmulatorText(n)).toBe('No emulator for PlayStation 2. Install installs PCSX2 too.');
+    expect(noEmulatorText(n)).toBe('No emulator for PlayStation 2. Install adds PCSX2 too.');
     expect(installsRecommended(n)).toBe(true);
     expect(noEmulatorSub(n)).toBe('PCSX2 installs with it');
   });

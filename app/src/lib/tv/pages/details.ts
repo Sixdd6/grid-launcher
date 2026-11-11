@@ -73,15 +73,15 @@ export type DetButton = {
 };
 
 /** Why Backup to drive… is disabled offline (item 437). */
-export const BACKUP_NEEDS_SERVER = 'Backing up needs a server.';
+export const BACKUP_NEEDS_SERVER = 'Connect to a server to backup games.';
 
 /** A on Install offline (items 279, 289). */
 export function installOfflineWhy(title: string): string {
-  return `Couldn't add ${title} to the download queue: the server can't be reached`;
+  return "Can't install while offline";
 }
 
 /** The desktop's reason Cancel can't stop an install that is extracting. */
-export const CANCEL_EXTRACTING = 'Installing — this step cannot be cancelled';
+export const CANCEL_EXTRACTING = "Installing · can't be cancelled";
 
 function cancelButton(live: DetLive): DetButton {
   return {
@@ -106,10 +106,10 @@ export function detButtons(s: DetState): DetButton[] {
     out.push({ kind: 'remove-drive', label: 'Remove from drive…', danger: true });
   } else if (s.unlinked) {
     out.push({ kind: 'link', label: 'Link to server game', primary: true });
-    out.push({ kind: 'remove-row', label: 'Remove from library (keeps files)', danger: true });
+    out.push({ kind: 'remove-row', label: 'Remove from library', danger: true });
   } else if (s.missing) {
     out.push({ kind: 'locate', label: 'Locate…', primary: true });
-    out.push({ kind: 'remove-row', label: 'Remove from library (keeps files)', danger: true });
+    out.push({ kind: 'remove-row', label: 'Remove from library', danger: true });
   } else if (s.noId) {
     // Nothing to act on: the left column says why.
   } else if (s.live) out.push(cancelButton(s.live));
@@ -178,14 +178,14 @@ export function leftLines(i: LeftInput): Line[] {
     const lines: Line[] = [];
     if (i.installed) lines.push([{ text: 'Installed on this computer.' }]);
     lines.push([{ text: 'From ' }, { text: i.drive, b: true }, ...(i.size ? [{ text: ` · ${i.size}` }] : [])]);
-    lines.push([{ text: 'Installing copies it from the drive, no network needed.' }]);
+    lines.push([{ text: 'Installs from the drive. No internet needed.' }]);
     for (const l of i.driveCopy) lines.push([{ text: l }]);
     return lines;
   }
   const lines: Line[] = [];
-  if (i.missing) lines.push([{ text: 'Files not found.', b: true }, { text: ' Play and Uninstall are unavailable until the files are found.' }]);
-  else if (i.unlinked) lines.push([{ text: 'Not linked to a server game.', b: true }, { text: ' Play, cloud saves and updates need the link.' }]);
-  else if (i.noId) lines.push([{ text: 'This entry has no server id' }]);
+  if (i.missing) lines.push([{ text: 'Files not found.', b: true }, { text: ' Locate the files to play.' }]);
+  else if (i.unlinked) lines.push([{ text: 'Not linked to a server game.', b: true }, { text: ' Link it to your server to play.' }]);
+  else if (i.noId) lines.push([{ text: 'Not on your server' }]);
   else if (i.installed) {
     lines.push([{ text: 'Last played ' }, { text: lastPlayedWhen(i.lastPlayedAt, i.nowSeconds), b: true }]);
     if (i.launchTarget !== '') {
@@ -345,7 +345,7 @@ export function viewerStep(index: number, count: number, d: -1 | 1): number {
 
 /** What Saves says instead of a list (item 314), or null for the list. */
 export function savesNote(o: { unlinked: boolean; noId: boolean; installed: boolean; lastPlayedAt: number }): string | null {
-  if (o.unlinked || o.noId) return 'Cloud saves need the link to a server game.';
+  if (o.unlinked || o.noId) return 'Link this game to use cloud saves.';
   if (!o.installed && o.lastPlayedAt <= 0) return 'No cloud saves yet. They appear after you play.';
   return null;
 }
@@ -364,11 +364,11 @@ export const SAVE_KINDS: readonly (readonly [SaveType, string])[] = [
   ['state', 'States'],
 ];
 
-/** "Cloud Saves" / "Cloud States" ("Emulator Saves" for shared media, the
+/** "Cloud saves" / "Cloud states" ("Emulator saves" for shared media, the
  *  desktop's title) (item 306). */
 export function savesHeading(kind: SaveType, scope: SaveScope): string {
-  if (kind === 'state') return 'Cloud States';
-  return scope === 'per_game' ? 'Cloud Saves' : 'Emulator Saves';
+  if (kind === 'state') return 'Cloud states';
+  return scope === 'per_game' ? 'Cloud saves' : 'Emulator saves';
 }
 
 /** "Upload latest save" / "Upload latest state" (item 306). */
@@ -390,7 +390,7 @@ export function saveName(r: Pick<CloudRecord, 'emulator'>): string {
 
 /** An empty list (item 313). */
 export function savesEmpty(kind: SaveType): string {
-  return `No cloud ${word(kind)}s for this game. Upload the latest one, or play and GRID uploads it when the game closes.`;
+  return `No cloud ${word(kind)}s yet. They upload when you stop playing.`;
 }
 
 /** The list A on a save row opens (item 308). */
@@ -440,7 +440,7 @@ export function cancelConfirm(title: string): ConfirmWords {
 }
 
 export function updateConfirm(title: string): ConfirmWords {
-  return { title: `Update ${title}?`, body: 'Saves and configuration are kept.', ok: 'Update' };
+  return { title: `Update ${title}?`, body: 'Saves and settings stay.', ok: 'Update' };
 }
 
 export function uninstallConfirm(title: string): ConfirmWords {
@@ -450,7 +450,7 @@ export function uninstallConfirm(title: string): ConfirmWords {
 export function removeRowConfirm(title: string, folder: string): ConfirmWords {
   return {
     title: `Remove ${title} from the library?`,
-    body: folder ? `Only the library entry goes. Its folder stays on disk: ${folder}.` : 'Only the library entry goes. No files are deleted.',
+    body: folder ? `Its files stay in ${folder}.` : 'No files are deleted.',
     ok: 'Remove from library',
   };
 }
@@ -494,10 +494,9 @@ export function playingLine(platform: string, emulator: string, time: string): s
   return [platform, emulator, time].filter((p) => p.trim() !== '').join(' · ');
 }
 
-/** The note under it (item 322). The controller drives Playing whenever
- *  GRID's window is focused (user decision 2026-11-10), so it says so. */
-export function playingNote(uploadOnExit: boolean): string {
-  return `The game has the controller while it's in front. GRID listens again when you switch back or the game closes${uploadOnExit ? ', and uploads your save when it closes' : ''}.`;
+/** The note under it (item 322): only when Upload after exit is on. */
+export function playingNote(uploadOnExit: boolean): string | null {
+  return uploadOnExit ? 'Your save uploads when the game closes.' : null;
 }
 
 /** After the game closes with Upload after exit on (item 325). */
@@ -508,7 +507,7 @@ export function uploadingSaveNotice(title: string): string {
 // ---- Link to server game (items 346–348)
 
 export function linkSub(platform: string): string {
-  return `Pick the ${platform} game on your server that this is.`;
+  return `Choose the matching ${platform} game`;
 }
 
 export function linkedNotice(title: string, server: string): string {
@@ -526,10 +525,10 @@ export const LINK_NO_MATCH = 'No games match.';
 
 // ---- Game settings (items 342–345)
 
-/** The launch file's line: "Set by game.json" while game.json chose it,
+/** The launch file's line: "Set by the game" while game.json chose it,
  *  else "Your choice". */
 export function launchFileSub(launchSource: string, selected: string, saved: string): string {
-  return launchSource === 'sidecar' && selected === saved ? 'Set by game.json' : 'Your choice';
+  return launchSource === 'sidecar' && selected === saved ? 'Set by the game' : 'Your choice';
 }
 
 export const GAME_SETTINGS_SAVED = 'Game settings saved';
@@ -541,7 +540,7 @@ export const LAUNCH_INFO_RELOADED = 'Launch info reloaded';
 export function umuConfirm(title: string): ConfirmWords {
   return {
     title: 'Install umu-launcher?',
-    body: `${title} runs through Proton, which needs umu-run. umu-launcher downloads as a Downloads row; launch ${title} again when it finishes.`,
+    body: `${title} needs umu-launcher. Play it again once it's installed.`,
     ok: 'Install umu-launcher',
   };
 }
@@ -550,7 +549,7 @@ export function umuConfirm(title: string): ConfirmWords {
 export function libraryFolderConfirm(): ConfirmWords {
   return {
     title: 'Set a library folder',
-    body: 'GRID installs games into a library folder, and none is set. Choose one, then press Install again.',
+    body: 'Choose where games install, then install again.',
     ok: 'Choose a folder…',
   };
 }

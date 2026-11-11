@@ -1,10 +1,10 @@
 <script lang="ts">
-  // Add an emulator manually / <emulator> settings (checklist items 337–341;
+  // Add an emulator / <emulator> settings (checklist items 337–341;
   // tvmode.js `emuForm`): "Which emulator is it?" (add only: the emulators
   // GRID knows, or Something else), Name (keyboard), Program (the folder
   // browser in file mode; a known program fills in the name and launch
   // options while both are still blank), Launch options (keyboard, "%rom%"
-  // to start), Cloud saves (advanced) with the save strategy list and the
+  // to start), Cloud save options with the save strategy list and the
   // desktop sheet's save and state folders and files not to upload, then
   // Save / Add emulator, which goes back. The save is the desktop's
   // (formSave.ts): an edit keeps the fields the form doesn't show, and a
