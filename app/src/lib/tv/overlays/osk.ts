@@ -29,7 +29,8 @@ export const DONE = 'DONE';
 export const CARET_LEFT = 'L';
 export const CARET_RIGHT = 'R';
 /** R3 or Ctrl+V: the clipboard's text goes in at the caret (user decision
- *  2026-11-11: no on-screen key, no hint). The caller reads the clipboard. */
+ *  2026-11-11: no on-screen key; the hint bar shows R3 Paste). The caller
+ *  reads the clipboard. */
 export const PASTE = 'PASTE';
 
 export type Osk = {
