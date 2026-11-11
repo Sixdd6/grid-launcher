@@ -194,10 +194,18 @@ describe('tv-shell (a): --tv', () => {
     await press('left_bumper', NINTENDO_PAD);
     await waitTab('settings');
     await waitHintLeft('No server. Your Library and Backup drives work without one.');
-    // Xbox style on the Nintendo pad: bottom now selects, and match shows Xbox prompts.
+    // Xbox style on the Nintendo pad: bottom now selects. The prompts keep the
+    // pad's own Nintendo set, with Select drawn on its bottom button (B).
     await waitFocused('r-appearance');
     await press('south', NINTENDO_PAD);
-    await waitPromptSet('xbox');
+    await waitPromptSet('nintendo');
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(
+          () => document.querySelector('[data-testid="tv-hints"] [data-glyph="A"]')?.getAttribute('data-face') ?? null,
+        )) === 'B',
+      { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Select was never drawn on B' },
+    );
     expect(await currentTab()).toBe('settings');
   });
 

@@ -294,6 +294,12 @@ describe('tv-settings: Downloads and Settings', () => {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: "the Xbox pad's assignment never reached config.toml",
     });
+    // The assignment changes what the buttons do, not how they look: the
+    // Xbox set stays, and Select is now drawn on the right button (B).
+    expect(await promptSet()).toBe('xbox');
+    expect(
+      await browser.execute(() => document.querySelector('[data-testid="tv-hints"] [data-glyph="A"]')?.getAttribute('data-face') ?? null),
+    ).toBe('B');
     // Another controller takes over: the row renames and shows its own style.
     await connectPad(NINTENDO_PAD);
     await axis('right_stick_y', 0.9, NINTENDO_PAD);

@@ -97,20 +97,25 @@ var GL = {
    Nintendo style gets Nintendo bindings. */
 function guessAssign(id) { var name = id.replace(/\(.*?\)/g, ''); return /057e|nintendo|joy-con|switch/i.test(id) || /2dc8|8bitdo/i.test(id) && /\b(pro|sn30|lite|zero|micro)\b/i.test(name) ? 'nintendo' : 'xbox'; }
 function assignNow() { return S.padId ? (CFG.assign[S.padId] || guessAssign(S.padId)) : 'xbox'; }
-/* Matched prompts follow the bindings: Xbox style shows the Xbox set (the
-   PlayStation set on a PlayStation pad); Nintendo style shows the Nintendo set
-   (the 8BitDo Pro set on an 8BitDo pad). */
+/* The prompt set follows the controller as it is built, never its button
+   assignment; the assignment only moves which physical button does each job,
+   so face() turns a job (A selects, B goes back) into the button to draw. */
 function scheme() {
   if (CFG.prompts !== 'auto') return CFG.prompts;
-  if (assignNow() === 'nintendo') return S.scheme === '8bitdo' ? '8bitdo' : 'nintendo';
+  if (S.padId && guessAssign(S.padId) === 'nintendo') return S.scheme === '8bitdo' ? '8bitdo' : 'nintendo';
   return S.scheme === 'ps' ? 'ps' : 'xbox';
 }
-function glyphText(b) { return GL[scheme()][b]; }
+function face(b) {
+  var sc = scheme(), lay = (sc === 'nintendo' || sc === '8bitdo') ? 'nintendo' : 'xbox';
+  if (lay === assignNow()) return b;
+  return { A: 'B', B: 'A', X: 'Y', Y: 'X' }[b] || b;
+}
+function glyphText(b) { return GL[scheme()][face(b)]; }
 /* A prompt is the Kenney glyph for this controller and button, drawn as a mask in
    the theme's text colour; the text form stays as its label, and as the fallback
    for a button with no glyph (the Home / Guide button). */
 function gl(b) {
-  var sc = scheme(), k = b, src = window.TV_GLYPHS && TV_GLYPHS[sc] && TV_GLYPHS[sc][k];
+  var sc = scheme(), k = face(b), src = window.TV_GLYPHS && TV_GLYPHS[sc] && TV_GLYPHS[sc][k];
   if (src) return '<span class="gli" role="img" aria-label="' + esc(GL[sc][k]) + '" style="--g:url(&quot;' + src + '&quot;)"></span>';
   return glText(b);
 }

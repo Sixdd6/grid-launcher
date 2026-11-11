@@ -11,7 +11,7 @@ import { focusables, reducedMotion, remPx, vScroller } from '../focus/dom';
 import { focused, handlePress, nav, scope, setFocus, showTab, topLayer } from '../nav.svelte';
 import type { TvTab } from './press';
 import { buttonForKey, isDirection, type TvButton } from './buttons';
-import { assignmentFor, logicalButton, padBrand, padDisplayName } from './controllers';
+import { assignmentFor, guessAssign, logicalButton, padBrand, padDisplayName } from './controllers';
 import { promptSet } from './prompts';
 import { Causes, Repeater, type RepeatKind } from './repeat';
 import { leftStickDirections, pageScroll, rightStickActive, rightStickScroll } from './sticks';
@@ -41,10 +41,11 @@ export const controllers = {
     const p = currentPad();
     return p ? assignmentFor(p, uiSettings.tvAssignments) : 'xbox';
   },
-  /** The prompt set every glyph draws from (items 67–69). */
+  /** The prompt set every glyph draws from (items 67–69): the controller's
+   *  own layout, whatever its button assignment. */
   get promptSet(): PromptSet {
     const p = currentPad();
-    return promptSet(uiSettings.tvPrompts, this.assignment, p ? padBrand(p) : 'xbox');
+    return promptSet(uiSettings.tvPrompts, p ? guessAssign(p) : 'xbox', p ? padBrand(p) : 'xbox');
   },
 };
 

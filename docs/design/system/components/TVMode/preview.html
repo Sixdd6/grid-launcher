@@ -376,7 +376,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 </div>
 <script>
 (function(){
-var I={"close": "M6 6l12 12M18 6L6 18", "chevronLeft": "M15.5 5L8.5 12l7 7", "check": "M5 12.5l5 5L19 7", "chevronRight": "M8.5 5l7 7-7 7", "arrowLeft": "M19.5 12H4.5M11 5.5L4.5 12l6.5 6.5", "cloud": "M6.2 17h10a4 4 0 0 0 0-8h-.6A5.2 5.2 0 0 0 6.4 10.6 3.3 3.3 0 0 0 6.2 17z", "star": "M12 4.4L13.88 9.81L19.61 9.93L15.04 13.39L16.7 18.87L12 15.6L7.3 18.87L8.96 13.39L4.39 9.93L10.12 9.81Z", "download": "M12 3.5V14M7.5 9.5L12 14L16.5 9.5M4.5 17v2a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-2", "play": "M7.5 4.5L19 12L7.5 19.5Z", "more": "M7.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0zM13.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0zM19.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0z", "grid": "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z", "sun": "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM12 2.75v2M12 19.25v2M2.75 12h2M19.25 12h2M5.46 5.46l1.41 1.41M17.13 17.13l1.41 1.41M5.46 18.54l1.41-1.41M17.13 6.87l1.41-1.41", "moon": "M19.5 14.6A7.6 7.6 0 0 1 9.4 4.5a7.6 7.6 0 1 0 10.1 10.1z"}, F=['star','play','more'];
+var I={"close": "M6 6l12 12M18 6L6 18", "chevronLeft": "M15.5 5L8.5 12l7 7", "check": "M5 12.5l5 5L19 7", "chevronRight": "M8.5 5l7 7-7 7", "arrowLeft": "M19.5 12H4.5M11 5.5L4.5 12l6.5 6.5", "cloud": "M6.2 17h10a4 4 0 0 0 0-8h-.6A5.2 5.2 0 0 0 6.4 10.6 3.3 3.3 0 0 0 6.2 17z", "star": "M12 4.4L13.88 9.81L19.61 9.93L15.04 13.39L16.7 18.87L12 15.6L7.3 18.87L8.96 13.39L4.39 9.93L10.12 9.81Z", "download": "M12 3.5V14M7.5 9.5L12 14L16.5 9.5M4.5 17v2a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-2", "play": "M7.5 4.5L19 12L7.5 19.5Z", "more": "M7.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0zM13.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0zM19.6 12a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 1 1 3.2 0z", "grid": "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z", "sun": "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM12 2.75v2M12 19.25v2M2.75 12h2M19.25 12h2M5.46 5.46l1.41 1.41M17.13 17.13l1.41 1.41M5.46 18.54l1.41-1.41M17.13 6.87l1.41-1.41", "moon": "M19.5 14.6A7.6 7.6 0 0 1 9.4 4.5a7.6 7.6 0 1 0 10.1 10.1z", "drive": "M3.5 14h17v4.5A1.5 1.5 0 0 1 19 20H5a1.5 1.5 0 0 1-1.5-1.5zM3.5 14l2.6-8.2A1.5 1.5 0 0 1 7.5 4.7h9a1.5 1.5 0 0 1 1.4 1.1L20.5 14M16.5 17h.01M13.5 17h.01", "tv": "M5 8h14a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5V9.5A1.5 1.5 0 0 1 5 8zM8 3.5l4 4.5 4-4.5"}, F=['star','play','more'];
 window.gIcon=function(n,s){s=s||14;var f=F.indexOf(n)>=0;
 return '<svg class="g-icon" viewBox="0 0 24 24" width="'+s+'" height="'+s+'" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'+I[n]+'" fill="'+(f?'currentColor':'none')+'" stroke="'+(f?'none':'currentColor')+'"/></svg>';};
 window.gIcons=function(root){(root||document).querySelectorAll('[data-icon]').forEach(function(el){el.innerHTML=gIcon(el.getAttribute('data-icon'),+el.getAttribute('data-size')||14);});};
@@ -484,20 +484,25 @@ var GL = {
    Nintendo style gets Nintendo bindings. */
 function guessAssign(id) { var name = id.replace(/\(.*?\)/g, ''); return /057e|nintendo|joy-con|switch/i.test(id) || /2dc8|8bitdo/i.test(id) && /\b(pro|sn30|lite|zero|micro)\b/i.test(name) ? 'nintendo' : 'xbox'; }
 function assignNow() { return S.padId ? (CFG.assign[S.padId] || guessAssign(S.padId)) : 'xbox'; }
-/* Matched prompts follow the bindings: Xbox style shows the Xbox set (the
-   PlayStation set on a PlayStation pad); Nintendo style shows the Nintendo set
-   (the 8BitDo Pro set on an 8BitDo pad). */
+/* The prompt set follows the controller as it is built, never its button
+   assignment; the assignment only moves which physical button does each job,
+   so face() turns a job (A selects, B goes back) into the button to draw. */
 function scheme() {
   if (CFG.prompts !== 'auto') return CFG.prompts;
-  if (assignNow() === 'nintendo') return S.scheme === '8bitdo' ? '8bitdo' : 'nintendo';
+  if (S.padId && guessAssign(S.padId) === 'nintendo') return S.scheme === '8bitdo' ? '8bitdo' : 'nintendo';
   return S.scheme === 'ps' ? 'ps' : 'xbox';
 }
-function glyphText(b) { return GL[scheme()][b]; }
+function face(b) {
+  var sc = scheme(), lay = (sc === 'nintendo' || sc === '8bitdo') ? 'nintendo' : 'xbox';
+  if (lay === assignNow()) return b;
+  return { A: 'B', B: 'A', X: 'Y', Y: 'X' }[b] || b;
+}
+function glyphText(b) { return GL[scheme()][face(b)]; }
 /* A prompt is the Kenney glyph for this controller and button, drawn as a mask in
    the theme's text colour; the text form stays as its label, and as the fallback
    for a button with no glyph (the Home / Guide button). */
 function gl(b) {
-  var sc = scheme(), k = b, src = window.TV_GLYPHS && TV_GLYPHS[sc] && TV_GLYPHS[sc][k];
+  var sc = scheme(), k = face(b), src = window.TV_GLYPHS && TV_GLYPHS[sc] && TV_GLYPHS[sc][k];
   if (src) return '<span class="gli" role="img" aria-label="' + esc(GL[sc][k]) + '" style="--g:url(&quot;' + src + '&quot;)"></span>';
   return glText(b);
 }
