@@ -20,6 +20,13 @@ export const READY_TIMEOUT_MS = 10_000;
  *  2026-11-11). */
 export const STALL_MS = 8_000;
 
+/** Whether a trailer asked to play STALL_MS ago is stuck, from YouTube's
+ *  player state: playing (1) isn't, and neither is one the user paused (2)
+ *  or one that ended (0); unstarted (-1), buffering (3) and cued (5) are. */
+export function stalledAfterAsk(player: number): boolean {
+  return !(player === 1 || player === 2 || player === 0);
+}
+
 /** YouTube's player errors (2 bad id, 5 HTML5 player, 100 removed or
  *  private, 101 / 150 embedding disallowed, 153 no referrer). Every one of
  *  them falls back, as does any code YouTube adds later. */

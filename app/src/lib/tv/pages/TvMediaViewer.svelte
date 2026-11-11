@@ -21,7 +21,7 @@
   import { trailerPoster, videoLoadMessage } from '../../details/media';
   import { fromElementVolume, toElementVolume, volumeLabel } from '../../details/videoVolume';
   import YoutubeEmbed from '../../details/YoutubeEmbed.svelte';
-  import { initialEmbed, STALL_MS } from '../../details/youtubeRelay';
+  import { initialEmbed, STALL_MS, stalledAfterAsk } from '../../details/youtubeRelay';
   import { api } from '../../api';
   import { setVideoVolume, uiSettings } from '../../stores/uiSettings.svelte';
   import { tvf } from '../focus/actions';
@@ -74,13 +74,16 @@
 
   // A trailer asked to play (its player ready, which autoplays, or A on a
   // paused one) must report playing within STALL_MS, or "Watch on YouTube"
-  // shows; it hides again once it plays.
+  // shows; it hides again once it plays. Only those two restart the check
+  // (`ready` is a boolean, so a pause or any other player state doesn't),
+  // and a trailer the user paused, or one that ended, isn't stalled.
+  let ready = $derived(model.embed?.phase === 'ready');
   $effect(() => {
     void itemKey;
     void model.playAsk;
-    if (model.embed?.phase !== 'ready') return;
+    if (!ready) return;
     const t = setTimeout(() => {
-      if (untrack(() => model.embed?.player) !== 1) model.stalled = true;
+      if (stalledAfterAsk(untrack(() => model.embed?.player) ?? -1)) model.stalled = true;
     }, STALL_MS);
     return () => clearTimeout(t);
   });

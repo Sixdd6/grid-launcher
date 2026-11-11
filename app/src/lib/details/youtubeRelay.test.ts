@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  stalledAfterAsk,
   acceptRelayMessage,
   embedPaused,
   embedShowing,
@@ -137,5 +138,19 @@ describe('embedStep', () => {
 
   it('ignores a ready that comes before the URL', () => {
     expect(run({ type: 'ready' }).phase).toBe('resolving');
+  });
+});
+
+describe('stalledAfterAsk', () => {
+  it('a trailer playing, paused by the user or ended is not stuck', () => {
+    expect(stalledAfterAsk(1)).toBe(false);
+    expect(stalledAfterAsk(2)).toBe(false);
+    expect(stalledAfterAsk(0)).toBe(false);
+  });
+
+  it('unstarted, buffering or cued after the wait is stuck', () => {
+    expect(stalledAfterAsk(-1)).toBe(true);
+    expect(stalledAfterAsk(3)).toBe(true);
+    expect(stalledAfterAsk(5)).toBe(true);
   });
 });
