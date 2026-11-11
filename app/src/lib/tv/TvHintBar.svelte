@@ -1,10 +1,11 @@
 <script lang="ts">
   // The hint bar (items 127–138; tvmode.js `paintHints`): on the left the
-  // controller in use, or the offline / no-server notice; on the right what
-  // each button does now, in the controller's glyphs. Each hint is a button:
-  // clicking it presses that button (item 134; the router handles
-  // `data-btn`). It repaints with every focus change, screen change and
-  // state change, since everything it reads is reactive.
+  // controller in use ("Keyboard" while the keyboard leads), or the offline /
+  // no-server notice; on the right what each button does now, in the glyphs
+  // of what was pressed last. TV mode ignores the mouse, so a hint is only a
+  // label (`data-btn` names its button for the tests). It repaints with every
+  // focus change, screen change and state change, since everything it reads
+  // is reactive.
   import { session } from '../stores/session.svelte';
   import Glyph from './glyphs/Glyph.svelte';
   import { buildHints, hintLeft } from './hints';
@@ -51,7 +52,7 @@
       noServer: session.offline && !session.connected,
       offline: !session.offline && !session.connected,
       startup: nav.startup,
-      padName: controllers.name,
+      padName: controllers.hintName,
     }),
   );
 </script>

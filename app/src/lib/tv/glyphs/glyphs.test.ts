@@ -15,11 +15,15 @@ describe('glyphs', () => {
   it.each(PROMPT_SETS)('%s has all 13 buttons, each a bundled file with a label', (set) => {
     expect(Object.keys(GLYPH_FILES[set]).sort()).toEqual([...GLYPH_BUTTONS].sort());
     for (const b of GLYPH_BUTTONS) {
-      const file = GLYPH_FILES[set][b];
-      expect(readdirSync(here)).toContain(file);
-      expect(bundledFiles()).toContain(file);
+      const f = GLYPH_FILES[set][b];
+      const files: readonly string[] = typeof f === 'string' ? [f] : f;
+      for (const file of files) {
+        expect(readdirSync(here)).toContain(file);
+        expect(bundledFiles()).toContain(file);
+      }
       const g = glyph(set, b);
-      expect(g.url).not.toBe('');
+      expect(g.urls).toHaveLength(files.length);
+      for (const u of g.urls) expect(u).not.toBe('');
       expect(g.label.trim()).not.toBe('');
       expect(GLYPH_LABELS[set][b]).toBe(g.label);
     }
@@ -38,5 +42,13 @@ describe('glyphs', () => {
 
   it('names the PlayStation face buttons', () => {
     expect(['A', 'B', 'X', 'Y'].map((b) => glyph('ps', b as 'A').label)).toEqual(['Cross', 'Circle', 'Square', 'Triangle']);
+  });
+
+  it('draws the keyboard keys GRID binds, with Page Up and Page Down for the right stick', () => {
+    expect(glyph('keyboard', 'A').label).toBe('Enter');
+    expect(glyph('keyboard', 'B').label).toBe('Esc');
+    expect(['LB', 'RB', 'LT', 'RT', 'VIEW', 'MENU'].map((b) => glyph('keyboard', b as 'A').label)).toEqual(['Q', 'E', 'Z', 'R', 'V', 'M']);
+    expect(GLYPH_FILES.keyboard.RS).toEqual(['keyboard_page_up.svg', 'keyboard_page_down.svg']);
+    expect(glyph('keyboard', 'RS').urls).toHaveLength(2);
   });
 });

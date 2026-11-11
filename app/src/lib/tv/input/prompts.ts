@@ -34,5 +34,7 @@ const SWAP: Partial<Record<GlyphButton, GlyphButton>> = { A: 'B', B: 'A', X: 'Y'
  * which the Nintendo set prints as B. Only the four face buttons move.
  */
 export function faceGlyph(button: GlyphButton, assign: TvAssignment, set: PromptSet): GlyphButton {
+  // Keys map straight to roles (Enter selects): no assignment applies.
+  if (set === 'keyboard') return button;
   return setLayout(set) === assign ? button : (SWAP[button] ?? button);
 }

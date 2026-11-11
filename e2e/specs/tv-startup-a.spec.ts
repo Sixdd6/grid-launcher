@@ -2,6 +2,7 @@ import path from 'node:path';
 import { APP_START_TIMEOUT, dataDir, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT, WRONG_TOKEN } from '../helpers/env.js';
 import { assertLayoutAtSizes, connectPad, focused, hints, invoke, key, press, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, moveTo, pageErrors, testId, text, typeKeys, waitOskClosed, waitText } from '../helpers/tvDetails.js';
+import { tap } from '../helpers/tvBackups.js';
 
 const MASK = '••••••••••••';
 
@@ -145,7 +146,7 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     expect(await hints()).toEqual(['A Change', 'VIEW Paste', 'MENU Menu']);
     await key('Enter');
     expect(await listTitle()).toBe('Sign in with');
-    await $(testId('tv-opt-password')).click();
+    await tap(testId('tv-opt-password'));
     await waitText('tv-cf-how-value', 'Username and password');
     expect(await rowKeys('#cf-rows')).toEqual(['cf-url', 'cf-how', 'cf-user', 'cf-password', 'cf-lib']);
     expect(await fieldText('user')).toBe('Username Your RomM user');
@@ -154,7 +155,7 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     await waitFocused('cf-how');
     await key('Enter');
     await listTitle();
-    await $(testId('tv-opt-token')).click();
+    await tap(testId('tv-opt-token'));
     await waitText('tv-cf-how-value', 'API token');
   });
 
@@ -197,7 +198,7 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     expect(await $(`${testId('tv-connect')} .note`).getText()).toBe(
       'Without a server, GRID needs only the library folder. Your Library and Backup drives work offline.',
     );
-    await $(testId('tv-connect-go')).click();
+    await tap(testId('tv-connect-go'));
     await $(testId('tv-connect-reason')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'the rejected token gave no reason' });
     expect((await text('tv-connect-reason')).length).toBeGreaterThan(0);
     expect(await text('tv-connect-reason')).not.toContain(WRONG_TOKEN);
@@ -212,7 +213,7 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     await typeKeys(FIXTURE_TOKEN);
     await key('Enter');
     await waitOskClosed();
-    await $(testId('tv-connect-go')).click();
+    await tap(testId('tv-connect-go'));
     await waitToast(/^Connected to http/);
     await $(testId('tv-choose')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'Choose your systems never opened' });
   });

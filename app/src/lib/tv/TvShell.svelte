@@ -28,6 +28,7 @@
     resetStartup,
     restoreFocus,
     revealFocus,
+    setFocus,
     setPane,
     setStartup,
     showScreen,
@@ -64,6 +65,11 @@
       // Every notice of the session, oldest first, as "title" or "title | sub":
       // a card lasts ten seconds, so specs read this log instead (P13).
       memory: () => focusMemory(),
+      // Focuses an item as a controller would reach it: TV mode ignores the
+      // mouse, so specs that jump to an item use this, then press A.
+      focus: (el: HTMLElement | null) => setFocus(el),
+      // Switches to a top-bar tab as LB / RB would.
+      tab: (t: string) => void showTab(t as Parameters<typeof showTab>[0]),
       notices: () =>
         [...tvNotices.history]
           .reverse()
@@ -71,7 +77,6 @@
     };
   }
 
-  let rootEl = $state<HTMLElement | null>(null);
   let stageEl = $state<HTMLElement | null>(null);
   let layersEl = $state<HTMLElement | null>(null);
 
@@ -223,15 +228,6 @@
     return () => mo.disconnect();
   });
 
-  // Focus is a class here, never the browser's: a click must not move the
-  // browser's focus (and scroll) to the button pressed.
-  $effect(() => {
-    const el = rootEl;
-    if (!el) return;
-    const keep = (e: MouseEvent) => e.preventDefault();
-    el.addEventListener('mousedown', keep);
-    return () => el.removeEventListener('mousedown', keep);
-  });
 
   // A new window size (TV mode going fullscreen after it is drawn, a
   // resized window) changes 1rem: the scroll rules run again for the
@@ -250,7 +246,7 @@
 
 <svelte:window onkeydown={onKeydown} onresize={onResize} />
 
-<div class="tv" data-tv-root data-testid="tv-shell" bind:this={rootEl}>
+<div class="tv" data-tv-root data-testid="tv-shell">
   <TvBackground />
   <TvTopBar />
   <main class="stage" bind:this={stageEl} data-testid="tv-stage">

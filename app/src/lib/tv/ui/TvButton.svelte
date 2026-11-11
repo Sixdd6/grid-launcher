@@ -2,8 +2,7 @@
   // A TV button (items 22, 24, 28): a pill at least 3rem tall, default,
   // primary or danger. Disabled buttons stay focusable at 45% so A on them
   // can say why (`why`, shown as an error notice). `aria-disabled`, not
-  // `disabled`: a disabled <button> gets no click, and a click must say why
-  // too. `glyph` puts a prompt in
+  // `disabled`, so it stays an item focus can reach. `glyph` puts a prompt in
   // front of the label (a page's main button shows Menu).
   import type { Snippet } from 'svelte';
   import { tvf } from '../focus/actions';

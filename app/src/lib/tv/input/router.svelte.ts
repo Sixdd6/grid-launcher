@@ -1,22 +1,24 @@
 // Every input TV mode reads, turned into presses of logical buttons
-// (checklist items 34–47, 71–76): the native `gamepad` event (P4), the
-// keyboard and the mouse. Also the controllers' state the prompts, the hint
-// bar's name and the Button assignments row follow: the controller pressed
-// last (item 47). Started by TvShell on mount, stopped on unmount.
+// (checklist items 34–47, 71–74): the native `gamepad` event (P4) and the
+// keyboard. TV mode is keyboard and controller only (README § Decided,
+// 2026-11-11): the mouse presses, points at and scrolls nothing, and its
+// cursor shows over the window only while it moves. Also the state the
+// prompts, the hint bar's name and the Button assignments row follow: the
+// controller pressed last (item 47), and whether a key was pressed after it.
+// Started by TvShell on mount, stopped on unmount.
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { api, GAMEPAD_EVENT, type PadEvent, type PadInfo } from '../../api';
 import { uiSettings } from '../../stores/uiSettings.svelte';
 import type { PromptSet } from '../glyphs/glyphs';
-import { focusables, reducedMotion, remPx, vScroller } from '../focus/dom';
-import { focused, handlePress, nav, scope, setFocus, showTab, topLayer } from '../nav.svelte';
-import type { TvTab } from './press';
+import { reducedMotion, remPx, vScroller } from '../focus/dom';
+import { focused, handlePress, nav, scope, topLayer } from '../nav.svelte';
 import { buttonForKey, isDirection, type TvButton } from './buttons';
 import { assignmentFor, guessAssign, logicalButton, padBrand, padDisplayName } from './controllers';
 import { promptSet } from './prompts';
 import { Causes, Repeater, type RepeatKind } from './repeat';
 import { leftStickDirections, pageScroll, rightStickActive, rightStickScroll } from './sticks';
 
-const state = $state<{ pads: PadInfo[]; currentId: number | null }>({ pads: [], currentId: null });
+const state = $state<{ pads: PadInfo[]; currentId: number | null; keyboard: boolean }>({ pads: [], currentId: null, keyboard: false });
 
 function currentPad(): PadInfo | null {
   return state.pads.find((p) => p.id === state.currentId) ?? null;
@@ -31,10 +33,21 @@ export const controllers = {
   get current(): PadInfo | null {
     return currentPad();
   },
-  /** Its name for the hint bar, or null with none (item 38). */
+  /** Its name (the TV mode pane's rows), or null with none (item 38). */
   get name(): string | null {
     const p = currentPad();
     return p ? padDisplayName(p.name) : null;
+  },
+  /** Whether a key was pressed after the last controller press. */
+  get keyboard(): boolean {
+    return state.keyboard;
+  },
+  /** The hint bar's left side: "Keyboard" while the keyboard leads, else the
+   *  controller's name, or null with none (item 38). */
+  get hintName(): string | null {
+    const p = currentPad();
+    if (!p) return null;
+    return state.keyboard ? KEYBOARD_NAME : padDisplayName(p.name);
   },
   /** Its button assignment; Xbox style with none (item 56). */
   get assignment() {
@@ -45,9 +58,22 @@ export const controllers = {
    *  own layout, whatever its button assignment. */
   get promptSet(): PromptSet {
     const p = currentPad();
-    return promptSet(uiSettings.tvPrompts, p ? guessAssign(p) : 'xbox', p ? padBrand(p) : 'xbox');
+    // The keyboard's keys while it leads, or with no controller, whatever
+    // Button prompts says (that setting is for controllers).
+    if (!p || state.keyboard) return 'keyboard';
+    return promptSet(uiSettings.tvPrompts, guessAssign(p), padBrand(p));
   },
 };
+
+/** The hint bar's left side while the keyboard leads. */
+export const KEYBOARD_NAME = 'Keyboard';
+
+/** A key was pressed (`true`) or a controller (`false`): it leads the
+ *  prompts, and either hides the cursor. */
+function lead(keyboard: boolean): void {
+  if (state.keyboard !== keyboard) state.keyboard = keyboard;
+  hideCursor();
+}
 
 /** The keyboard's source id in the repeater (controllers use their ids). */
 const KEYBOARD = -1;
@@ -81,6 +107,7 @@ function causesOf(id: number): Causes {
 /** The controller pressed last drives prompts and names (item 47). */
 function usePad(id: number): void {
   if (state.currentId !== id && state.pads.some((p) => p.id === id)) state.currentId = id;
+  lead(false);
 }
 
 function addPad(pad: PadInfo): void {
@@ -101,9 +128,6 @@ function dropPad(id: number): void {
 }
 
 function down(id: number, b: TvButton, cause: string): void {
-  // A button or key press hands focus back from the pointer: until the
-  // mouse moves again, pointing at an item no longer focuses it.
-  mouseMoved = false;
   if (causesOf(id).add(b, cause)) repeater.down(id, b);
 }
 
@@ -210,6 +234,7 @@ function startScrollLoop(): void {
 function onKeyDown(e: KeyboardEvent): void {
   if (e.key === 'PageDown' || e.key === 'PageUp') {
     e.preventDefault();
+    lead(true);
     const v = readingArea();
     v?.scrollBy(pageScroll(e.key === 'PageDown', v.clientHeight, reducedMotion()));
     return;
@@ -220,11 +245,13 @@ function onKeyDown(e: KeyboardEvent): void {
   const layer = topLayer();
   if (layer?.keydown?.(e)) {
     e.preventDefault();
+    lead(true);
     return;
   }
   const b = buttonForKey(e.key, { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey });
   if (!b) return;
   e.preventDefault();
+  lead(true);
   // The repeater times a held key like a held button (item 72); the
   // system's own key repeat is ignored.
   if (e.repeat) return;
@@ -244,69 +271,43 @@ function onBlur(): void {
   causes.delete(KEYBOARD);
 }
 
-// ---- Mouse (items 75–76).
+// ---- The mouse: keyboard and controller only (README § Decided, 2026-11-11).
 
-// Only a real move counts (item 75): WebKit sends a synthetic mousemove at
-// the unchanged position after a scroll, which must not make the item that
-// scrolled under a resting pointer take focus.
-// The same goes for a page that moves under a resting pointer (a resize,
-// TV mode going fullscreen, a redraw): only an over event close behind a
-// real move counts.
-const OVER_AFTER_MOVE_MS = 120;
-let mouseMoved = false;
-let lastMoveAt = 0;
-let lastPointer: { x: number; y: number } | null = null;
+/** The class on <html> that hides the cursor over the window (tv.css). */
+export const NO_CURSOR = 'tv-nocursor';
+/** How long the cursor stays after the mouse stops. */
+export const CURSOR_IDLE_MS = 1500;
+let cursorTimer: ReturnType<typeof setTimeout> | null = null;
+let lastPointer: { sx: number; sy: number; cx: number; cy: number } | null = null;
 
+function hideCursor(): void {
+  if (cursorTimer !== null) clearTimeout(cursorTimer);
+  cursorTimer = null;
+  document.documentElement.classList.add(NO_CURSOR);
+}
+
+// Only a move shows the cursor: WebKit sends a synthetic mousemove at the
+// unchanged position after a scroll or a redraw. Either coordinate pair
+// counts (WebDriver's pointer moves the window's, not the screen's); a
+// window moving under a resting pointer shows it for 1.5 s, which is
+// harmless.
 function onMouseMove(e: MouseEvent): void {
-  // Screen coordinates: a window that moves under a resting pointer changes
-  // the client position, not this one. A window that grows under a resting
-  // pointer (going fullscreen) gets a move as the pointer enters it: just
-  // after a resize, a move only records where the pointer is.
-  const settling = performance.now() - lastResizeAt < SETTLE_AFTER_RESIZE_MS;
-  const moved = !settling && (lastPointer === null || lastPointer.x !== e.screenX || lastPointer.y !== e.screenY);
-  lastPointer = { x: e.screenX, y: e.screenY };
+  const p = lastPointer;
+  const moved = p !== null && (p.sx !== e.screenX || p.sy !== e.screenY || p.cx !== e.clientX || p.cy !== e.clientY);
+  lastPointer = { sx: e.screenX, sy: e.screenY, cx: e.clientX, cy: e.clientY };
   if (!moved) return;
-  mouseMoved = true;
-  lastMoveAt = performance.now();
-  // The over event may come before the move that arms it.
-  onMouseOver(e);
+  document.documentElement.classList.remove(NO_CURSOR);
+  if (cursorTimer !== null) clearTimeout(cursorTimer);
+  cursorTimer = setTimeout(hideCursor, CURSOR_IDLE_MS);
 }
 
-// A new window size: the pointer has to move again before it focuses.
-const SETTLE_AFTER_RESIZE_MS = 500;
-let lastResizeAt = -Infinity;
-function onResize(): void {
-  mouseMoved = false;
-  lastResizeAt = performance.now();
+// TV mode's content takes no pointer events (tv.css), so nothing under the
+// pointer reacts; these stop what would still reach the page itself.
+function swallow(e: Event): void {
+  e.preventDefault();
+  e.stopPropagation();
 }
-
-function onMouseOver(e: MouseEvent): void {
-  if (!mouseMoved || performance.now() - lastMoveAt > OVER_AFTER_MOVE_MS) return;
-  const f = (e.target as Element | null)?.closest<HTMLElement>('[data-f]');
-  const root = scope();
-  if (f && root?.contains(f) && f !== focused() && focusables(root).includes(f)) setFocus(f, { scroll: false });
-}
-
-function onClick(e: MouseEvent): void {
-  const t = e.target as Element | null;
-  if (!t?.closest('[data-tv-root]')) return;
-  const hint = t.closest<HTMLElement>('[data-btn]');
-  if (hint) {
-    handlePress(hint.dataset.btn as TvButton);
-    return;
-  }
-  const tab = t.closest<HTMLElement>('[data-tab]');
-  if (tab && nav.pages.length === 0) {
-    void showTab(tab.dataset.tab as TvTab);
-    return;
-  }
-  const f = t.closest<HTMLElement>('[data-f]');
-  const root = scope();
-  if (f && root?.contains(f)) {
-    setFocus(f, { scroll: false });
-    handlePress('A');
-  }
-}
+const SWALLOWED = ['click', 'dblclick', 'auxclick', 'contextmenu', 'wheel'] as const;
 
 /** Starts every input; answers the function that stops them. */
 export function startRouter(): () => void {
@@ -326,28 +327,28 @@ export function startRouter(): () => void {
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', onBlur);
-  window.addEventListener('resize', onResize);
   document.addEventListener('mousemove', onMouseMove);
-  document.addEventListener('mouseover', onMouseOver);
-  document.addEventListener('click', onClick);
+  for (const t of SWALLOWED) document.addEventListener(t, swallow, { capture: true, passive: false });
+  hideCursor();
   return () => {
     stopped = true;
     un?.();
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
     window.removeEventListener('blur', onBlur);
-    window.removeEventListener('resize', onResize);
     document.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mouseover', onMouseOver);
-    document.removeEventListener('click', onClick);
+    for (const t of SWALLOWED) document.removeEventListener(t, swallow, { capture: true });
+    if (cursorTimer !== null) clearTimeout(cursorTimer);
+    cursorTimer = null;
+    document.documentElement.classList.remove(NO_CURSOR);
     if (raf !== null) cancelAnimationFrame(raf);
     raf = null;
     repeater.releaseAll();
     causes.clear();
     rightY.clear();
-    mouseMoved = false;
     lastPointer = null;
     state.pads = [];
     state.currentId = null;
+    state.keyboard = false;
   };
 }

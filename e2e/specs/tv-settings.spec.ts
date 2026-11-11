@@ -5,6 +5,13 @@ import { APP_START_TIMEOUT, configPath, dataDir, FIXTURE_TOKEN, INSTALL_TIMEOUT,
 import { axis, connectPad, focused, hints, invoke, key, NINTENDO_PAD, promptSet, waitFocused, waitPromptSet, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, moveTo, pageErrors, testId, text, typeKeys, waitGone, waitOskClosed, waitText } from '../helpers/tvDetails.js';
 
+/** A controller input that moves nothing (a right-stick flick scrolls only):
+ *  the controller leads the prompts again after keys. */
+async function nudgePad(): Promise<void> {
+  await axis('right_stick_y', 0.6);
+  await axis('right_stick_y', 0);
+}
+
 const SNES = 'Super Nintendo Entertainment System';
 const oldRoot = () => path.join(dataDir(), 'library');
 const newRoot = () => path.join(dataDir(), 'library-new');
@@ -265,17 +272,23 @@ describe('tv-settings: Downloads and Settings', () => {
     await moveTo('r-tv', 'ArrowDown');
     await key('ArrowRight');
     await waitFocused('s-prompts');
+    // Keys lead: the keyboard's prompts, whatever Button prompts says.
+    await waitPromptSet('keyboard');
+    await nudgePad();
     await waitPromptSet('xbox');
     await key('Enter');
     await waitList('Button prompts');
     expect((await list()).options).toEqual(['Match my controller', 'Xbox', 'PlayStation', 'Nintendo', '8BitDo (Pro series)']);
     await moveTo('o2', 'ArrowDown');
     await key('Enter');
-    await waitPromptSet('ps');
     await waitText('tv-row-prompts', /PlayStation/);
+    await waitPromptSet('keyboard');
+    await nudgePad();
+    await waitPromptSet('ps');
     await key('Enter');
     await moveTo('o0', 'ArrowUp');
     await key('Enter');
+    await nudgePad();
     await waitPromptSet('xbox');
   });
 
@@ -296,7 +309,8 @@ describe('tv-settings: Downloads and Settings', () => {
     });
     // The assignment changes what the buttons do, not how they look: the
     // Xbox set stays, and Select is now drawn on the right button (B).
-    expect(await promptSet()).toBe('xbox');
+    await nudgePad();
+    await waitPromptSet('xbox');
     expect(
       await browser.execute(() => document.querySelector('[data-testid="tv-hints"] [data-glyph="A"]')?.getAttribute('data-face') ?? null),
     ).toBe('B');

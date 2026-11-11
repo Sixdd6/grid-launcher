@@ -58,5 +58,23 @@
   "RS": "switch_stick_r_vertical.svg",
   "LS": "switch_stick_l_press.svg",
   "DPAD": "switch_dpad.svg"
+ },
+ "keyboard": {
+  "A": "keyboard_enter.svg",
+  "B": "keyboard_escape.svg",
+  "X": "keyboard_x.svg",
+  "Y": "keyboard_y.svg",
+  "LB": "keyboard_q.svg",
+  "RB": "keyboard_e.svg",
+  "LT": "keyboard_z.svg",
+  "RT": "keyboard_r.svg",
+  "VIEW": "keyboard_v.svg",
+  "MENU": "keyboard_m.svg",
+  "RS": [
+   "keyboard_page_up.svg",
+   "keyboard_page_down.svg"
+  ],
+  "LS": "keyboard_arrows_all.svg",
+  "DPAD": "keyboard_arrows_all.svg"
  }
 }

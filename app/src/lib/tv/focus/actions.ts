@@ -1,11 +1,11 @@
 // Svelte actions for TV markup. `use:tvf` makes an element focusable
 // (`data-f`) and gives the shell what pressing a button on it does. Every
-// press reaches an item through here, whatever the input: a controller, the
-// keyboard, or a click (which focuses the item and presses A), so a TV item
-// never has its own `onclick`.
+// press reaches an item through here, whatever the input: a controller or
+// the keyboard (TV mode ignores the mouse), so a TV item never has its own
+// `onclick`.
 
 export type ItemHandlers = {
-  /** A (and a click). */
+  /** A. */
   a?: () => void;
   /** X: the item's quick or extra action (its `data-xl` names it). */
   x?: () => void;

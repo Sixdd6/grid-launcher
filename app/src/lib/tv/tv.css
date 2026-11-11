@@ -427,3 +427,11 @@ html[data-ui='tv'] .tv .toast .segs i.fail b { width: 100% !important; backgroun
   html[data-ui='tv'] .tv .key.f,
   html[data-ui='tv'] .tv .mtile.f { transform: none; }
 }
+
+/* ---- Keyboard and controller only (README § Decided, 2026-11-11). Nothing in
+   TV mode takes pointer events, so the mouse points at, presses and hovers
+   nothing (the trailer player included); the router swallows what still
+   reaches the page. The cursor hides over the window while the mouse is still
+   (router `NO_CURSOR`). */
+html[data-ui='tv'] [data-tv-root] { pointer-events: none; }
+html[data-ui='tv'].tv-nocursor, html[data-ui='tv'].tv-nocursor * { cursor: none !important; }

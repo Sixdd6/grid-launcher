@@ -48,6 +48,13 @@ describe('faceGlyph', () => {
     expect(faceGlyph('X', 'nintendo', 'xbox')).toBe('Y');
   });
 
+  it('the keyboard draws each role as its own key: no assignment applies', () => {
+    for (const b of ['A', 'B', 'X', 'Y'] as const) {
+      expect(faceGlyph(b, 'xbox', 'keyboard')).toBe(b);
+      expect(faceGlyph(b, 'nintendo', 'keyboard')).toBe(b);
+    }
+  });
+
   it('only the four face buttons move', () => {
     for (const b of ['LB', 'RB', 'LT', 'RT', 'VIEW', 'MENU', 'RS', 'LS', 'DPAD'] as const) {
       expect(faceGlyph(b, 'xbox', 'nintendo')).toBe(b);

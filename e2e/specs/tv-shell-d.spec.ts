@@ -156,7 +156,7 @@ describe('tv-shell (d): overlays and notifications', () => {
     expect(await focused()).toBe('gm0');
   });
 
-  it('closes on a click outside it (item 76)', async () => {
+  it('a click outside it does nothing; B closes it (item 76, keyboard and controller only)', async () => {
     await press('start');
     await waitFocused('gm0');
     await browser.execute(() => {
@@ -164,6 +164,10 @@ describe('tv-shell (d): overlays and notifications', () => {
       const r = layer.getBoundingClientRect();
       layer.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: r.left + 20, clientY: r.top + r.height / 2 }));
     });
+    await browser.pause(300);
+    await waitLayers(1);
+    await waitFocused('gm0');
+    await press('east');
     await waitLayers(0);
   });
 

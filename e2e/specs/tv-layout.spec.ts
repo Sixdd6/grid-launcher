@@ -160,7 +160,7 @@ describe('tv-layout: every screen fits at 720p, 1080p and 4K', () => {
     }
     // Connect by its button: Start on Connect opens the startup Menu (user
     // decision 2026-11-10).
-    await $(testId('tv-connect-go')).click();
+    await tap(testId('tv-connect-go'));
   });
 
   it('Choose your systems (when this profile is offered it)', async () => {
@@ -220,6 +220,11 @@ describe('tv-layout: every screen fits at 720p, 1080p and 4K', () => {
     await sweep('platform-search-keyboard');
     await key('Escape');
     await waitOskClosed();
+    // The sweeps' reversed moves can leave the grid for the rail, and Right
+    // from the rail comes back to the cover left (item 85), so later sizes
+    // take another path and may end on another platform: back to platform 1.
+    await tapK('r-1');
+    await $(byK('sg901')).waitForExist({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: "platform 1's grid never came back" });
     // Select mode: its bar pinned under the grid.
     await tapK('sg901');
     if (await $(testId('tv-details')).isExisting()) await back('tv-details');

@@ -6,8 +6,10 @@
 // is used and the Home / Guide button has no glyph (ruling 5: it does
 // nothing). Pure: Glyph.svelte draws one as a CSS mask in the text colour.
 
-/** A prompt set (Settings › TV mode › Button prompts, minus "Match"). */
-export type PromptSet = 'xbox' | 'ps' | 'nintendo' | '8bitdo';
+/** A prompt set: one of Settings › TV mode › Button prompts' (minus
+ *  "Match"), or the keyboard's keys while it leads (README § Decided,
+ *  Keyboard prompts). */
+export type PromptSet = 'xbox' | 'ps' | 'nintendo' | '8bitdo' | 'keyboard';
 
 /** Every button a prompt can show. RS is the right stick (Scroll), DPAD the
  *  D-pad (Adjust, Read), LS the left stick press. */
@@ -17,9 +19,13 @@ export const GLYPH_BUTTONS: readonly GlyphButton[] = [
   'A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'VIEW', 'MENU', 'RS', 'LS', 'DPAD',
 ];
 
-export const PROMPT_SETS: readonly PromptSet[] = ['xbox', 'ps', 'nintendo', '8bitdo'];
+export const PROMPT_SETS: readonly PromptSet[] = ['xbox', 'ps', 'nintendo', '8bitdo', 'keyboard'];
 
-export const GLYPH_FILES: Record<PromptSet, Record<GlyphButton, string>> = {
+/** A glyph's file, or several drawn side by side (the keyboard's Page Up and
+ *  Page Down for the right stick). */
+export type GlyphFile = string | readonly string[];
+
+export const GLYPH_FILES: Record<PromptSet, Record<GlyphButton, GlyphFile>> = {
   xbox: {
     A: 'xbox_button_a.svg',
     B: 'xbox_button_b.svg',
@@ -80,6 +86,21 @@ export const GLYPH_FILES: Record<PromptSet, Record<GlyphButton, string>> = {
     LS: 'switch_stick_l_press.svg',
     DPAD: 'switch_dpad.svg',
   },
+  keyboard: {
+    A: 'keyboard_enter.svg',
+    B: 'keyboard_escape.svg',
+    X: 'keyboard_x.svg',
+    Y: 'keyboard_y.svg',
+    LB: 'keyboard_q.svg',
+    RB: 'keyboard_e.svg',
+    LT: 'keyboard_z.svg',
+    RT: 'keyboard_r.svg',
+    VIEW: 'keyboard_v.svg',
+    MENU: 'keyboard_m.svg',
+    RS: ['keyboard_page_up.svg', 'keyboard_page_down.svg'],
+    LS: 'keyboard_arrows_all.svg',
+    DPAD: 'keyboard_arrows_all.svg',
+  },
 };
 
 /** Each glyph's accessible name: the button as that controller prints it.
@@ -101,6 +122,10 @@ export const GLYPH_LABELS: Record<PromptSet, Record<GlyphButton, string>> = {
     A: 'A', B: 'B', X: 'X', Y: 'Y', LB: 'L', RB: 'R', LT: 'L2', RT: 'R2',
     VIEW: 'Minus', MENU: 'Plus', RS: 'Right stick', LS: 'Left stick', DPAD: 'D-pad',
   },
+  keyboard: {
+    A: 'Enter', B: 'Esc', X: 'X', Y: 'Y', LB: 'Q', RB: 'E', LT: 'Z', RT: 'R',
+    VIEW: 'V', MENU: 'M', RS: 'Page Up / Page Down', LS: 'Arrow keys', DPAD: 'Arrow keys',
+  },
 };
 
 // The bundled URL of every SVG in this folder, keyed by file name. Emitted
@@ -113,9 +138,11 @@ const URLS: Record<string, string> = Object.fromEntries(
   ).map(([path, url]) => [path.replace(/^\.\//, ''), url]),
 );
 
-/** The glyph's URL, and its accessible name. */
-export function glyph(set: PromptSet, button: GlyphButton): { url: string; label: string } {
-  return { url: URLS[GLYPH_FILES[set][button]] ?? '', label: GLYPH_LABELS[set][button] };
+/** The glyph's URLs (usually one), and its accessible name. */
+export function glyph(set: PromptSet, button: GlyphButton): { urls: string[]; label: string } {
+  const f = GLYPH_FILES[set][button];
+  const files: readonly string[] = typeof f === 'string' ? [f] : f;
+  return { urls: files.map((x) => URLS[x] ?? ''), label: GLYPH_LABELS[set][button] };
 }
 
 /** The file names this module can serve (for the test). */

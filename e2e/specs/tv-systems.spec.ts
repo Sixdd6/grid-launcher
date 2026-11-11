@@ -4,6 +4,7 @@ import path from 'node:path';
 import { APP_START_TIMEOUT, configPath, dataDir, FIXTURE_TOKEN, forgeUrl, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { assertNoClipping, connectPad, focused, hints, invoke, key, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, moveTo, pageErrors, testId, text, typeKeys, waitGone, waitOskClosed, waitText } from '../helpers/tvDetails.js';
+import { tap } from '../helpers/tvBackups.js';
 
 /** One catalog install from the mock forge (slowed for the Installing label). */
 const INSTALL_WAIT = 90_000;
@@ -137,7 +138,7 @@ async function browseTo(target: string): Promise<void> {
   for (let i = 0; i < 30; i++) {
     const at = await text('tv-fs-path');
     if (target === at || target.startsWith(at.endsWith('/') ? at : `${at}/`)) break;
-    await $('#fs-list [data-k="up"]').click();
+    await tap('#fs-list [data-k="up"]');
     await browser.waitUntil(async () => (await text('tv-fs-path')) !== at, { timeout: TRANSITION_TIMEOUT });
   }
   for (let i = 0; i < 30; i++) {
@@ -145,7 +146,7 @@ async function browseTo(target: string): Promise<void> {
     if (at === target) return;
     const rest = target.slice(at.length).replace(/^\/+/, '');
     const seg = rest.split('/')[0];
-    await $(`#fs-list [data-k="fs-${seg}"]`).click();
+    await tap(`#fs-list [data-k="fs-${seg}"]`);
     await browser.waitUntil(async () => (await text('tv-fs-path')) !== at, { timeout: TRANSITION_TIMEOUT });
   }
   await waitText('tv-fs-path', target);
@@ -441,7 +442,7 @@ describe('tv-systems: Settings › Systems, the System page and the emulator for
       timeoutMsg: 'Up never reached the header',
     });
     expect(await $(testId('tv-srv-emu')).getAttribute('data-al')).toBe('Open in Systems');
-    await $(testId('tv-srv-emu')).click();
+    await tap(testId('tv-srv-emu'));
     await $(testId('tv-system-page')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the chip never opened the system page' });
     await browser.waitUntil(async () => (await pageRows()).includes('emu'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the page never showed PS2’s emulator' });
     await waitRow('tv-row-emu', `Emulator ${PCSX2}`);

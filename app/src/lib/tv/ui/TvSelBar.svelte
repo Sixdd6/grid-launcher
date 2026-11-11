@@ -2,8 +2,8 @@
   // The bar pinned under a grid in select mode (item 445; tvmode.js
   // `selPaint`, tvmode.css `.selbar`): "<n> selected · <size>", then X
   // "Select all <n>" (or "All <n> selected · Clear"), Y "Backup to drive…"
-  // (on a drive "Install or remove") and RT "Done". Each hint can be clicked
-  // like the hint bar's (`data-btn`).
+  // (on a drive "Install or remove") and RT "Done", labelled like the hint
+  // bar's (`data-btn`).
   import Glyph from '../glyphs/Glyph.svelte';
   import { select, selBar, type SelGame } from '../select.svelte';
 

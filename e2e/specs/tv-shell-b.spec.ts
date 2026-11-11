@@ -1,6 +1,7 @@
 // e2e-app-args:
 import { APP_START_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { invoke, key, waitFocused, waitTab } from '../helpers/tv.js';
+import { tap } from '../helpers/tvBackups.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -41,7 +42,7 @@ describe('tv-shell (b): entering and leaving TV mode', () => {
   it('Switch to desktop mode lands on the same view (item 523)', async () => {
     await key('e');
     await waitTab('settings');
-    await $(testId('tv-set-rail-tv')).click();
+    await tap(testId('tv-set-rail-tv'));
     await waitFocused('s-prompts');
     // Button prompts, Button assignments, then Switch to desktop mode.
     await key('ArrowDown');

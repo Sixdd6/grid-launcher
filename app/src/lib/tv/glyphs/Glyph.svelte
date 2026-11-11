@@ -18,4 +18,10 @@
   let g = $derived(glyph(set, face));
 </script>
 
-<span class="gli" role="img" aria-label={g.label} data-glyph={button} data-face={face} data-set={set} style={`--g:url("${g.url}")`}></span>
+{#each g.urls as url, i (i)}
+  {#if i === 0}
+    <span class="gli" role="img" aria-label={g.label} data-glyph={button} data-face={face} data-set={set} style={`--g:url("${url}")`}></span>
+  {:else}
+    <span class="gli" aria-hidden="true" style={`--g:url("${url}")`}></span>
+  {/if}
+{/each}

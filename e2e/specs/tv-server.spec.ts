@@ -1,6 +1,7 @@
 // e2e-app-args:
 import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { assertNoClipping, connectPad, focused, hints, key, press, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
+import { tap } from '../helpers/tvBackups.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 const SNES = 'Super Nintendo Entertainment System';
@@ -283,7 +284,7 @@ describe('tv-server: the Server tab', () => {
     await setOffline(true);
     await key('m');
     await $(testId('tv-menu-reconnect')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('tv-menu-reconnect')).click();
+    await tap(testId('tv-menu-reconnect'));
     await $(testId('tv-server-offline')).waitForExist({ timeout: 30_000, timeoutMsg: 'the offline panel never showed' });
     expect(await text('tv-server-offline')).toContain("Can't reach your server");
     expect(await text('tv-server-offline')).toContain(`${mockUrl()} isn't answering. Your installed games still play from the Library.`);
@@ -300,13 +301,13 @@ describe('tv-server: the Server tab', () => {
   it('Open Library on the offline panel shows the Library', async () => {
     await setOffline(true);
     await key('m');
-    await $(testId('tv-menu-reconnect')).click();
+    await tap(testId('tv-menu-reconnect'));
     await $(testId('tv-server-offline')).waitForExist({ timeout: 30_000 });
-    await $(testId('tv-srv-library')).click();
+    await tap(testId('tv-srv-library'));
     await waitTab('library');
     await setOffline(false);
     await key('m');
-    await $(testId('tv-menu-reconnect')).click();
+    await tap(testId('tv-menu-reconnect'));
     await browser.waitUntil(async () => browser.execute(() => !document.querySelector('[data-testid="tv-connection"] .dot.offline')), {
       timeout: 30_000,
       timeoutMsg: 'GRID never reconnected',
@@ -325,7 +326,7 @@ describe('tv-server: the Server tab', () => {
     await key('ArrowDown');
     await waitFocused('r-2');
     await key('m');
-    await $(testId('tv-menu-discover')).click();
+    await tap(testId('tv-menu-discover'));
     await waitDiscoverFocus();
     await expect($(testId('tv-srv-rail-discover'))).toHaveAttribute('aria-current', 'true');
     await assertNoClipping();

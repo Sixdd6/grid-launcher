@@ -7,15 +7,43 @@ import { testId, text } from './tvDetails.js';
 /** The TV item with `data-k` `k`. */
 export const byK = (k: string) => `[data-tv-root] [data-k="${k}"]`;
 
-/** Clicks the TV item: it takes focus and A is pressed (router `onClick`). */
+/** Focuses the TV item and presses A (Enter). TV mode ignores the mouse, so
+ *  the jump goes through the e2e hook (`__tvE2E.focus`), as if a controller
+ *  had moved there. */
 export async function tap(selector: string): Promise<void> {
-  const el = $(selector);
-  await el.waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: `${selector} never appeared` });
-  await el.scrollIntoView({ block: 'center' }).catch(() => {});
-  await el.click();
+  // A top-bar tab isn't an item: switch to it as LB / RB would.
+  const tab = (await browser.execute((sel: string) => {
+    const el = document.querySelector(sel);
+    return el && !el.hasAttribute('data-f') ? el.getAttribute('data-tab') : null;
+  }, selector)) as string | null;
+  if (tab) {
+    await browser.execute((t: string) => (window as unknown as { __tvE2E: { tab: (t: string) => void } }).__tvE2E.tab(t), tab);
+    await browser.waitUntil(
+      async () => (await browser.execute((t: string) => document.querySelector(`[data-tab="${t}"]`)?.classList.contains('on') ?? false, tab)) as boolean,
+      { timeout: TRANSITION_TIMEOUT, timeoutMsg: `the ${tab} tab never showed` },
+    );
+    return;
+  }
+  await focusOn(selector);
+  await key('Enter');
 }
 
-/** Focuses the TV item `k` with a click on it and presses A. */
+/** Focuses the TV item through the e2e hook, as a controller moving there
+ *  would, without pressing anything. */
+export async function focusOn(selector: string): Promise<void> {
+  const el = $(selector);
+  await el.waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: `${selector} never appeared` });
+  await browser.execute((sel: string) => {
+    const w = window as unknown as { __tvE2E: { focus: (el: Element | null) => void } };
+    w.__tvE2E.focus(document.querySelector(sel));
+  }, selector);
+  await browser.waitUntil(
+    async () => (await browser.execute((sel: string) => document.querySelector(sel)?.classList.contains('f') ?? false, selector)) as boolean,
+    { timeout: TRANSITION_TIMEOUT, timeoutMsg: `${selector} never took focus` },
+  );
+}
+
+/** Focuses the TV item `k` and presses A. */
 export async function tapK(k: string): Promise<void> {
   await tap(byK(k));
 }

@@ -19,13 +19,14 @@ import {
   waitTab,
   XBOX_PAD,
 } from '../helpers/tv.js';
+import { focusOn } from '../helpers/tvBackups.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
 /**
  * Stage `tv-shell`, part A: GRID started with --tv on a profile used without
  * a server. The shell's bands and sizing (items 2, 4, 5), tabs (98), the
- * rail and pane rules (85, 95, 105), mouse and hint clicks (75–76, 134),
+ * rail and pane rules (85, 95, 105), the mouse doing nothing (README § Keyboard and controller only),
  * prompts and the hint bar's name following the last pad (47, 67–68),
  * Nintendo style swapping the face buttons (50, 54), an assignment kept per
  * controller (53), held-direction repeat (40) and the left stick (35).
@@ -129,9 +130,7 @@ describe('tv-shell (a): --tv', () => {
   });
 
   it('Right from a rail row goes into the pane; B goes back to the selected row (items 85, 95)', async () => {
-    // To TV mode's pane with the mouse: pointing focuses, a click is A.
-    const tv = await $(testId('tv-set-rail-tv'));
-    await tv.moveTo();
+    await focusOn(testId('tv-set-rail-tv'));
     await waitFocused('r-tv');
     await expect($(`${testId('tv-pane')} .pane-h h1`)).toHaveText('TV mode');
     await key('ArrowRight');
@@ -139,31 +138,63 @@ describe('tv-shell (a): --tv', () => {
     expect(await hints()).toEqual(['A Select', 'MENU Menu']);
     await key('Escape');
     await waitFocused('r-tv');
-    // A hint is a button: clicking A presses A (item 134).
-    await $(testId('tv-hint-A')).click();
+    await press('south');
     await waitFocused('s-prompts');
     await press('east');
     await waitFocused('r-tv');
   });
 
-  it('clicking a top-bar tab switches to it (item 76)', async () => {
-    await $(testId('tv-tab-downloads')).click();
-    await waitTab('downloads');
-    await $(testId('tv-tab-settings')).click();
-    await waitTab('settings');
+  it('the mouse does nothing, and its cursor shows only while it moves (README § Keyboard and controller only)', async () => {
+    const cursorHidden = async () => (await browser.execute(() => document.documentElement.classList.contains('tv-nocursor'))) as boolean;
+    const centre = async (id: string) =>
+      (await browser.execute((sel: string) => {
+        const r = document.querySelector(sel)!.getBoundingClientRect();
+        return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+      }, testId(id))) as { x: number; y: number };
+    // A key press hid it.
+    expect(await cursorHidden()).toBe(true);
+    // Clicking the A hint, the Downloads tab and a rail row presses nothing,
+    // and pointing focuses nothing.
+    for (const id of ['tv-hint-A', 'tv-tab-downloads', 'tv-set-rail-appearance']) {
+      const c = await centre(id);
+      await browser.action('pointer').move({ x: c.x, y: c.y, origin: 'viewport' }).down().up().perform();
+    }
+    await browser.pause(300);
+    expect(await currentTab()).toBe('settings');
+    await waitFocused('r-tv');
+    // The moves showed the cursor; it hides 1.5 s after the mouse stops.
+    expect(await cursorHidden()).toBe(false);
+    await browser.waitUntil(cursorHidden, { timeout: 4000, timeoutMsg: 'the cursor never hid after the mouse stopped' });
+    // A key hides it at once.
+    await browser.action('pointer').move({ x: 40, y: 40, origin: 'viewport' }).perform();
+    expect(await cursorHidden()).toBe(false);
+    await key('ArrowDown');
+    expect(await cursorHidden()).toBe(true);
+    await key('ArrowUp');
     await waitFocused('r-tv');
   });
 
   it('the hint bar names the controller pressed last, and the prompts follow it (items 47, 67–68)', async () => {
     await waitHintLeft('No server. Your Library and Backup drives work without one.');
+    // A key was pressed last: the keyboard's keys (README § Keyboard prompts).
+    await waitPromptSet('keyboard');
+    await press('dpad_down', XBOX_PAD);
     await waitPromptSet('xbox');
     await connectPad(NINTENDO_PAD);
     // Connecting is not pressing.
     await waitPromptSet('xbox');
-    await press('dpad_down', NINTENDO_PAD);
+    await press('dpad_up', NINTENDO_PAD);
     await waitPromptSet('nintendo');
-    await press('dpad_up', XBOX_PAD);
+    await press('dpad_down', XBOX_PAD);
     await waitPromptSet('xbox');
+    // A key brings the keyboard's keys back, Enter for A and Esc for B; the
+    // next controller press its own.
+    await key('ArrowUp');
+    await waitPromptSet('keyboard');
+    expect(await browser.execute(() => document.querySelector('[data-testid="tv-hints"] [data-glyph="A"]')?.getAttribute('aria-label') ?? null)).toBe('Enter');
+    await press('dpad_down', XBOX_PAD);
+    await waitPromptSet('xbox');
+    await key('ArrowUp');
   });
 
   it('a Nintendo pad gets Nintendo style: right selects, bottom goes back (items 50, 54)', async () => {
@@ -215,7 +246,7 @@ describe('tv-shell (a): --tv', () => {
     await disconnectPad(XBOX_PAD);
     // Not offline would show the name; no-server keeps its line, so check the
     // TV mode pane's Controller row instead.
-    await $(testId('tv-set-rail-tv')).moveTo();
+    await focusOn(testId('tv-set-rail-tv'));
     await waitFocused('r-tv');
     await expect($(testId('tv-row-tv-controller'))).toHaveText(expect.stringContaining('None found · the keyboard works too'));
     await connectPad(XBOX_PAD);
