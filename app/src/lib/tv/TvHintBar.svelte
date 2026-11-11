@@ -6,6 +6,7 @@
   // label (`data-btn` names its button for the tests). It repaints with every
   // focus change, screen change and state change, since everything it reads
   // is reactive.
+  import { untrack } from 'svelte';
   import { session } from '../stores/session.svelte';
   import Glyph from './glyphs/Glyph.svelte';
   import { buildHints, hintLeft } from './hints';
@@ -47,6 +48,20 @@
     });
   });
 
+  // Flipped on every change of hints, so the bar runs one of two identical
+  // refresh animations (`tv.css`); swapping the animation's name restarts it.
+  // On WebKitGTK 2.54's Skia compositor with the GPU on, a change to the bar
+  // while the background art crossfaded reached only some of the frame
+  // buffers, so the bar flipped between the new hints and an earlier
+  // cover's (2026-11-11). Its own layer did not help. The animation makes
+  // the compositor redraw the bar every frame for a while, which repaints it
+  // into every buffer, as `WEBKIT_SHOW_DAMAGE=1` did.
+  let refresh = $state(false);
+  $effect(() => {
+    void keyed;
+    refresh = !untrack(() => refresh);
+  });
+
   let left = $derived(
     hintLeft({
       noServer: session.offline && !session.connected,
@@ -57,7 +72,7 @@
   );
 </script>
 
-<footer class="hints" data-testid="tv-hints">
+<footer class="hints" class:refresh-a={refresh} class:refresh-b={!refresh} data-testid="tv-hints">
   <div class="left" data-testid="tv-hints-left">
     {#if left.kind === 'offline'}
       <span class="offline-pill">{left.pill}</span><span>{left.text}</span>

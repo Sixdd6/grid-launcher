@@ -67,6 +67,13 @@ html[data-ui='tv'] .tv .btn.pri .gli { background: var(--on-primary); }
 /* ---- Stage and hint bar */
 html[data-ui='tv'] .tv .stage { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
 html[data-ui='tv'] .tv .hints { position: relative; z-index: 35; flex: 0 0 3.6rem; display: flex; align-items: center; gap: 1.8rem; padding: 0 2.4rem; background: var(--panel); border-top: 1px solid var(--line); font-size: 1rem; }
+/* The hint bar's refresh after each change (`TvHintBar.svelte` has why): an
+   invisible opacity change that keeps the compositor redrawing the bar
+   through the background's 360 ms crossfade and the art load before it. */
+html[data-ui='tv'] .tv .hints.refresh-a { animation: tv-hints-refresh-a 1.2s linear; }
+html[data-ui='tv'] .tv .hints.refresh-b { animation: tv-hints-refresh-b 1.2s linear; }
+@keyframes tv-hints-refresh-a { from { opacity: .999; } to { opacity: 1; } }
+@keyframes tv-hints-refresh-b { from { opacity: .999; } to { opacity: 1; } }
 html[data-ui='tv'] .tv .hints .left { flex: 1; min-width: 0; color: var(--text-muted); display: flex; gap: 1rem; align-items: center; }
 html[data-ui='tv'] .tv .hint { display: inline-flex; align-items: center; gap: .55rem; color: var(--text-h); font-weight: 600; white-space: nowrap; }
 html[data-ui='tv'] .tv .hint.off { opacity: .45; }
