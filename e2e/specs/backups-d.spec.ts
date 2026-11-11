@@ -105,7 +105,7 @@ describe('backups-d: backup installed games from this computer and restore one',
       timeoutMsg: 'the Backup dialog never showed its Source section',
     });
     expect(await $(testId('backup-use-local')).isSelected()).toBe(true);
-    await expect($(testId('backup-lede'))).toHaveText(expect.stringContaining('copies games installed on this computer'));
+    await expect($(testId('backup-lede'))).toHaveText(expect.stringContaining('Copies the games installed on this computer'));
 
     let rows: string[] = [];
     await browser

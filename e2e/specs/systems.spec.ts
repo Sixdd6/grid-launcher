@@ -117,8 +117,8 @@ describe('Settings › Systems', () => {
     // The Emulators shelf holds emulators, not games: never a row.
     expect(await rowOrder()).toEqual(['dc', 'ps2', 'ps4', 'snes', 'zeebo', 'windows']);
     for (const key of ['dc', 'ps2', 'ps4', 'snes', 'zeebo']) expect(await statusOf(key)).toBe('none');
-    // Open, with the reason; Zeebo points to Add an emulator manually.
-    await expect($(testId('sys-missing-zeebo'))).toHaveText(expect.stringContaining('Add an emulator manually'));
+    // Open, with the reason; Zeebo says the user can add their own emulator.
+    await expect($(testId('sys-missing-zeebo'))).toHaveText('GRID has no emulator for this system. You can add your own.');
     await expect($(testId('sys-install-zeebo'))).not.toExist();
     await expect($(testId('sys-install-ps2'))).toHaveText('Install PCSX2');
     await expect($(testId('systems-install-recommended'))).toHaveText('Install recommended (4)');
