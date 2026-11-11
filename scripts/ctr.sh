@@ -6,6 +6,8 @@
 #   scripts/ctr.sh run <cmd...>       run a command in a throwaway container, cwd = repo
 #   scripts/ctr.sh shell              interactive shell in the same setup
 #   scripts/ctr.sh gate               run the gate (CLAUDE.md / BUILD.md), in its order
+#   scripts/ctr.sh wincheck           run the check-windows job's two clippy commands for
+#                                     --target x86_64-pc-windows-gnu (lint only, no link)
 #   scripts/ctr.sh e2e [groups...]    run scripts/e2e.sh (env E2E_* is passed through)
 #   scripts/ctr.sh appimage [ver]     build the AppImage exactly as the release job does
 #                                     (default version 0.0.0-dev) into ctr-out/
@@ -124,6 +126,22 @@ step cargo test;     cargo test --workspace
 step npm test;       (cd app && npm test)
 printf "\n== gate: PASS\n"'
 
+# The check-windows job's clippy step (build.yml), cross-checked for the GNU Windows
+# target. clippy type-checks and lints every cfg(windows) path but never links, so
+# unrar_sys's C++ goes to the image's stub compiler (see the Containerfile); aws-lc-sys
+# builds with the real MinGW gcc. app/dist is a tmpfs with a placeholder index.html: the
+# Tauri context macro only needs the frontend folder to exist, and the host's dist/ is
+# never touched.
+WINCHECK='set -euo pipefail
+export CXX_x86_64_pc_windows_gnu=/opt/wincheck/cxx-stub
+export AR_x86_64_pc_windows_gnu=/opt/wincheck/ar-stub
+export CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc
+echo "<!doctype html><title>wincheck</title>" > app/dist/index.html
+step() { printf "\n== wincheck: %s\n" "$*"; }
+step clippy;     cargo clippy --target x86_64-pc-windows-gnu --workspace --all-targets -- -D warnings
+step clippy e2e; cargo clippy --target x86_64-pc-windows-gnu -p app --all-targets --features e2e -- -D warnings
+printf "\n== wincheck: PASS\n"'
+
 case "${1:-}" in
   build) locked build ;;
   run)
@@ -133,6 +151,18 @@ case "${1:-}" in
     ensure_image; podman_args
     locked podman run -it "${args[@]}" "$IMAGE" nice -n 19 bash ;;
   gate) in_ctr bash -c "$GATE" ;;
+  wincheck)
+    # Images built before wincheck existed lack MinGW and the stubs; rebuild them first.
+    if podman image exists "$IMAGE" \
+        && [ "$(podman image inspect --format '{{index .Labels "org.grid-launcher.wincheck"}}' "$IMAGE")" != 1 ]; then
+      echo "ctr.sh: $IMAGE predates wincheck; rebuilding the images (scripts/ctr.sh build)" >&2
+      locked build
+    fi
+    # Its own target volume: Windows artifacts never mix with the Linux gate's.
+    TARGET_VOLUME=$VOL_PREFIX-win-target
+    mkdir -p app/dist
+    EXTRA_ARGS=(--mount type=tmpfs,destination=/work/app/dist,tmpfs-mode=1777)
+    in_ctr bash -c "$WINCHECK" ;;
   e2e)
     shift
     # e2e.sh installs dependencies only when a node_modules folder is missing, but here
@@ -216,10 +246,10 @@ case "${1:-}" in
       cp "target/release/bundle/rpm/GRID Launcher-${rpm_version}-1.x86_64.rpm" "ctr-out/grid-launcher-${rpm_version}-1.x86_64.rpm"
       ls -l ctr-out/grid-launcher_*.deb ctr-out/grid-launcher-*.rpm' _ "$version" ;;
   clean)
-    for v in target release-target app-node_modules e2e-node_modules; do podman volume rm -f "$VOL_PREFIX-$v" >/dev/null; done
+    for v in target release-target win-target app-node_modules e2e-node_modules; do podman volume rm -f "$VOL_PREFIX-$v" >/dev/null; done
     if [ "${2:-}" = "--all" ]; then
       for v in cargo-registry cargo-git npm xdg-cache; do podman volume rm -f "$CACHE_PREFIX-$v" >/dev/null; done
     fi
     echo "volumes removed" ;;
-  *) echo "usage: $0 {build|run <cmd...>|shell|gate|e2e [groups...]|appimage [version]|packages [version]|clean [--all]}" >&2; exit 2 ;;
+  *) echo "usage: $0 {build|run <cmd...>|shell|gate|wincheck|e2e [groups...]|appimage [version]|packages [version]|clean [--all]}" >&2; exit 2 ;;
 esac

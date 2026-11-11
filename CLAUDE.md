@@ -44,6 +44,11 @@ order. All must pass before work counts as done. On Windows, run them in Git Bas
     cargo test --workspace
     cd app && npm test
 
+A change that touches `cfg(windows)` or `cfg(unix)` code, or adds a platform-gated item,
+also runs `scripts/ctr.sh wincheck`: the `check-windows` job's two clippy commands for the
+Windows target. That job runs only at release time, so this is the only early warning of
+a Windows-only lint failure. `BUILD.md` documents it.
+
 Run the end-to-end suite (`scripts/e2e.sh`, or a named stage group) when a change touches
 a user-visible flow. It is slow, so scope it: `E2E_SKIP_BUILD=1 scripts/e2e.sh <group>` is
 the inner loop, and it is safe only when nothing under `app/src` or the Rust crates has

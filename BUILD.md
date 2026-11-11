@@ -68,6 +68,7 @@ starts on Ubuntu 22.04/24.04, distributions built on them, or Debian 12.
 
     scripts/ctr.sh build             # rebuild both images (newer base, no cache, apt upgrade)
     scripts/ctr.sh gate              # the gate below, in its order
+    scripts/ctr.sh wincheck          # check-windows' two clippy commands, Windows target
     scripts/ctr.sh e2e [groups...]   # scripts/e2e.sh; E2E_* variables pass through
     scripts/ctr.sh appimage 0.9.7    # the release job's AppImage and .zsync, in ctr-out/
     scripts/ctr.sh run <cmd...>      # any command, cwd = the repo
@@ -140,7 +141,25 @@ root. `scripts/check_secret_hygiene.sh` calls `cargo tree`, so Rust must be on t
 Bash `PATH`.
 
 A second job, `check-windows`, runs the frontend build, both clippy commands and
-`cargo test --workspace` on `windows-latest`.
+`cargo test --workspace --no-fail-fast` on `windows-latest`.
+
+### Windows clippy (`wincheck`)
+
+`check-windows` runs only at release time, so a Windows-only lint failure (a helper
+only `cfg(unix)` code calls, now dead on Windows; a pattern constant named for a Win32
+API) used to surface only then. `scripts/ctr.sh wincheck` runs that job's two clippy
+commands locally, with `--target x86_64-pc-windows-gnu`:
+
+    cargo clippy --target x86_64-pc-windows-gnu --workspace --all-targets -- -D warnings
+    cargo clippy --target x86_64-pc-windows-gnu -p app --all-targets --features e2e -- -D warnings
+
+Run it, after the gate, for any change that touches `cfg(windows)` or `cfg(unix)` code or
+adds a platform-gated item. It uses the check image (MinGW and the Windows Rust target are
+installed there; an older image is rebuilt on first use), its own `target/` volume, and the
+same CPU, memory and lock limits as the gate. It only lints: clippy never links, so the
+vendored unrar C++ (which MinGW cannot compile) goes to a stub compiler, and `app/dist` is a
+placeholder inside the container. It does not run the Windows tests; `cargo test` on
+Windows still needs the CI job or a Windows machine.
 
 CI runs only when a release is published or when the workflow is started by hand
 (`workflow_dispatch`). Pushes and pull requests trigger nothing, so run the gate locally

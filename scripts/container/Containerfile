@@ -1,4 +1,4 @@
-# Linux build/test image for GRID Launcher. `scripts/ctr.sh build` builds it twice:
+# Linux build/test image for GRID Launcher (and the Windows-target clippy check, `ctr.sh wincheck`). `scripts/ctr.sh build` builds it twice:
 # Ubuntu 24.04 like the check and e2e jobs, and Debian 13 like the AppImage job
 # (.github/workflows/build.yml), so the apt package names are the ones in BUILD.md and
 # build.yml, and a local AppImage bundles the released WebKitGTK. The build context is
@@ -18,13 +18,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
     APPIMAGE_EXTRACT_AND_RUN=1
 
 # Base tools, the Tauri 2 Linux libraries (BUILD.md "Prerequisites"), the end-to-end
-# harness (xvfb … sqlite3) and the AppImage bundle tools (file, patchelf, zsync,
-# xdg-utils: the bundler copies xdg-open into the AppImage).
+# harness (xvfb … sqlite3), the AppImage bundle tools (file, patchelf, zsync,
+# xdg-utils: the bundler copies xdg-open into the AppImage) and MinGW for `ctr.sh
+# wincheck` (aws-lc-sys's C build script and Tauri's resource compiler need it).
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
       ca-certificates curl git xz-utils zip unzip file patchelf zsync procps xdg-utils \
       pkg-config build-essential cmake libssl-dev \
       libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libudev-dev \
       xvfb xauth gnome-keyring libsecret-tools dbus-x11 at-spi2-core sqlite3 \
+      gcc-mingw-w64-x86-64 \
     && rm -rf /var/lib/apt/lists/*
 
 # Node (official tarball from nodejs.org, checksum verified).
@@ -42,7 +44,24 @@ RUN set -eux; \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path; \
     rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal -c rustfmt -c clippy; \
     rustup default "${RUST_TOOLCHAIN}"; \
+    rustup target add x86_64-pc-windows-gnu; \
     mkdir -p /opt/cargo/registry /opt/cargo/git; chmod -R a+rwX /opt/rustup /opt/cargo
+
+# `ctr.sh wincheck` lints for x86_64-pc-windows-gnu without linking. The vendored unrar
+# C++ (unrar_sys) does not compile with MinGW (it wants PowrProf.h and other MSVC SDK
+# headers), so its C++ compiler and archiver are stubs: the compiler only creates each
+# -o output as an empty file, the archiver does nothing. clippy never links, so the
+# empty objects are never read. The label tells ctr.sh the image has all of this.
+RUN set -eux; mkdir -p /opt/wincheck; \
+    printf '%s\n' '#!/bin/sh' \
+      '# Stub C++ compiler for clippy on x86_64-pc-windows-gnu: create each -o output, compile nothing.' \
+      'while [ $# -gt 0 ]; do' \
+      '  case "$1" in -o) shift; [ $# -gt 0 ] && : > "$1" ;; -o?*) : > "${1#-o}" ;; esac' \
+      '  shift' \
+      'done' > /opt/wincheck/cxx-stub; \
+    printf '%s\n' '#!/bin/sh' '# Stub archiver for clippy on x86_64-pc-windows-gnu.' 'exit 0' > /opt/wincheck/ar-stub; \
+    chmod 755 /opt/wincheck/cxx-stub /opt/wincheck/ar-stub
+LABEL org.grid-launcher.wincheck=1
 
 ENV HOME=/home/ctr
 RUN mkdir -p /home/ctr && chmod 1777 /home/ctr

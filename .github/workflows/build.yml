@@ -84,7 +84,9 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
           cargo clippy -p app --all-targets --features e2e -- -D warnings
       - name: Cargo test
-        run: cargo test --workspace
+        # --no-fail-fast: report every failing test binary in one run, not
+        # only the first (Windows-only failures surface at release time).
+        run: cargo test --workspace --no-fail-fast
 
   e2e:
     name: End-to-end
