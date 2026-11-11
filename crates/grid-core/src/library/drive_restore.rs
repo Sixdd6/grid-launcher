@@ -843,7 +843,8 @@ mod tests {
     #[test]
     fn restored_record_fills_the_columns_of_each_layout() {
         let dest = library().join("games").join("X").join("Game");
-        let at = |rel: &str| text(&dest.join(rel));
+        // A pack path's `/` parts, joined as this OS writes a path.
+        let at = |rel: &str| text(&rel.split('/').fold(dest.clone(), |p, part| p.join(part)));
 
         // extracted (PS4)
         let mut copy = installed(InstalledLayout::Extracted, "Game", "CUSA00001/eboot.bin");

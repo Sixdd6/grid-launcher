@@ -663,7 +663,13 @@ mod tests {
         let folders = strings(&["%APPDATA%\\A", "%APPDATA%\\B", "%APPDATA%\\C", "%NOPE%\\D"]);
         let docs = Path::new("C:\\Users\\sam\\Documents");
         let _lock = lock();
-        let _env = EnvGuard::set(&[("APPDATA", Some("/win/AppData/Roaming")), ("NOPE", None)]);
+        // An absolute root on this OS: only absolute targets are restored.
+        let appdata = if cfg!(windows) {
+            "C:/win/AppData/Roaming"
+        } else {
+            "/win/AppData/Roaming"
+        };
+        let _env = EnvGuard::set(&[("APPDATA", Some(appdata)), ("NOPE", None)]);
         // Off Windows the expanded path keeps its backslash, so match the
         // text's last character, not a file name.
         let targets = restore_targets(&folders, &[0, 1, 2, 3], None, Some(docs), |path| {
@@ -681,15 +687,15 @@ mod tests {
             vec![
                 SaveTarget::Restore {
                     index: 0,
-                    path: PathBuf::from("/win/AppData/Roaming\\A")
+                    path: PathBuf::from(format!("{appdata}\\A"))
                 },
                 SaveTarget::Restore {
                     index: 1,
-                    path: PathBuf::from("/win/AppData/Roaming\\B")
+                    path: PathBuf::from(format!("{appdata}\\B"))
                 },
                 SaveTarget::Occupied {
                     index: 2,
-                    path: PathBuf::from("/win/AppData/Roaming\\C")
+                    path: PathBuf::from(format!("{appdata}\\C"))
                 },
                 SaveTarget::Unresolved { index: 3 },
             ]
@@ -702,7 +708,12 @@ mod tests {
     fn a_prefix_target_is_inside_the_new_prefix() {
         let _lock = lock();
         let _env = EnvGuard::set(&[("LOGNAME", Some("newuser"))]);
-        let prefix = Path::new("/lib/games/windows/Foo/prefix");
+        // An absolute root on this OS: only absolute targets are restored.
+        let prefix = Path::new(if cfg!(windows) {
+            "C:/lib/games/windows/Foo/prefix"
+        } else {
+            "/lib/games/windows/Foo/prefix"
+        });
         let targets = restore_targets(
             &strings(&["%APPDATA%\\Foo", "%NOPE%\\Bar"]),
             &[0, 1],
