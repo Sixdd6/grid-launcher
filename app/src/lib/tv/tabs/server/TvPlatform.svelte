@@ -1,7 +1,8 @@
 <script lang="ts">
   // A Server platform (items 196–206; tvmode.js `srvPaint`): the header with
-  // the name, the counts, the emulator and firmware chips (each opens the
-  // system's page), the search, Backup all N… and the RT / Y chips, over the
+  // the name and the counts on its first row, and on its second the emulator
+  // and firmware chips (each opens the system's page), the search, Backup
+  // all N… and the RT / Y chips, over the
   // grid of the platform's covers (no platform tags). Y narrows the grid as
   // you type; a new platform clears the search.
   import { savedDefaultFor } from '../../../emulators/defaults';
@@ -84,26 +85,36 @@
   );
 </script>
 
-<div class="vh" data-testid="tv-srv-header">
-  <h1>{label}</h1>
-  {#if !loading}<span class="cnt" data-testid="tv-srv-count">{srvCount(all.length, shown.length, installedCount, searching(srv.query))}</span>{/if}
-  {#if chips}
-    <TvChip k="ch-emu" warn={chips.emu.warn} al="Open in Systems" testId="tv-srv-emu" onA={() => openSystem(label)}>
-      {#if chips.emu.name}Emulator: <b>{chips.emu.name}</b>{:else}{chips.emu.label}{/if}
-    </TvChip>
-    {#if chips.fw.focusable}
-      <TvChip k="ch-fw" al="Open in Systems" testId="tv-srv-fw" onA={() => openSystem(label)}>{chips.fw.label}</TvChip>
-    {:else}
-      <TvChip testId="tv-srv-fw">{chips.fw.label}</TvChip>
+<!-- Two rows (user decision 2026-11-11): the name and its counts, then
+     everything that acts on the platform, so every platform reads the same
+     whether or not it has emulator and firmware chips. -->
+<div class="vh two" data-testid="tv-srv-header">
+  <div class="vh-top">
+    <h1>{label}</h1>
+    {#if !loading}<span class="cnt" data-testid="tv-srv-count">{srvCount(all.length, shown.length, installedCount, searching(srv.query))}</span>{/if}
+  </div>
+  <!-- A row for navigation: Left and Right stay on it whatever chips it
+       holds (with no firmware chip, Backup all is far across the screen and
+       a cover below scored nearer). -->
+  <div class="vh-row" id="srv-hrow" data-nav="h">
+    {#if chips}
+      <TvChip k="ch-emu" warn={chips.emu.warn} al="Open in Systems" testId="tv-srv-emu" onA={() => openSystem(label)}>
+        {#if chips.emu.name}Emulator: <b>{chips.emu.name}</b>{:else}{chips.emu.label}{/if}
+      </TvChip>
+      {#if chips.fw.focusable}
+        <TvChip k="ch-fw" al="Open in Systems" testId="tv-srv-fw" onA={() => openSystem(label)}>{chips.fw.label}</TvChip>
+      {:else}
+        <TvChip testId="tv-srv-fw">{chips.fw.label}</TvChip>
+      {/if}
     {/if}
-  {/if}
-  {#if searching(srv.query)}<TvChip testId="tv-srv-search">Search: <b>{srv.query.trim()}</b></TvChip>{/if}
-  <span class="sp"></span>
-  {#if shown.length}
-    <TvButton k="bk-all" al="Backup" testId="tv-srv-backup-all" disabled={!session.connected} why={session.connected ? undefined : 'Connect to a server to backup games.'} onA={backupAll}>{backupAllLabel(all.length)}</TvButton>
-  {/if}
-  <TvChip glyph="RT">Select</TvChip>
-  <TvChip glyph="Y">Search</TvChip>
+    {#if searching(srv.query)}<TvChip testId="tv-srv-search">Search: <b>{srv.query.trim()}</b></TvChip>{/if}
+    <span class="sp"></span>
+    {#if shown.length}
+      <TvButton k="bk-all" al="Backup" testId="tv-srv-backup-all" disabled={!session.connected} why={session.connected ? undefined : 'Connect to a server to backup games.'} onA={backupAll}>{backupAllLabel(all.length)}</TvButton>
+    {/if}
+    <TvChip glyph="RT">Select</TvChip>
+    <TvChip glyph="Y">Search</TvChip>
+  </div>
 </div>
 <TvGrid id="srv-grid" scroll="srv-grid" items={games} key={(g) => `sg${g.id}`} cover={(g) => g.cover} listKey={srv.rail}>
   {#snippet cell(g)}

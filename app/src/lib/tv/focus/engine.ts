@@ -218,7 +218,13 @@ export function move(snap: Snapshot, dir: Direction): MoveResult {
             const it = snap.items[i];
             if (inside(it, contIdx)) return false;
             const b = it.rect;
-            return vert ? b.right > gr.left && b.left < gr.right : b.bottom > gr.top && b.top < gr.bottom;
+            if (vert) return b.right > gr.left && b.left < gr.right;
+            // A rail row counts as spanning its whole rail: Left from a grid
+            // scrolled deep reaches the rail even when its rows end above
+            // the part of the grid on screen (then its selected row).
+            const own = navOf(snap, it);
+            const span = own !== null && snap.containers[own].enter === 'sel' ? snap.containers[own].rect : b;
+            return Math.max(b.bottom, span.bottom) > gr.top && Math.min(b.top, span.top) < gr.bottom;
           }),
         );
         if (t === null) return { kind: 'none' };

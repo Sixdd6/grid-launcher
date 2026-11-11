@@ -197,6 +197,26 @@ describe('tv-server: the Server tab', () => {
     await waitText('tv-crumb', new RegExp(SNES));
     await key('Escape');
     await waitFocused('ch-emu');
+    // Left and Right stay on the header's second row, firmware chip or not:
+    // Right runs to Backup all and stops there, Left runs back.
+    const row = async () => (await browser.execute(() => !!document.querySelector('[data-testid="tv-srv-header"] .vh-row .f'))) as boolean;
+    for (let i = 0; i < 3 && (await focused()) !== 'bk-all'; i++) {
+      const was = await focused();
+      await key('ArrowRight');
+      await browser.waitUntil(async () => (await focused()) !== was, { timeout: TRANSITION_TIMEOUT, timeoutMsg: `Right from ${was} did not move` });
+      expect(await row()).toBe(true);
+    }
+    await waitFocused('bk-all');
+    await key('ArrowRight');
+    await browser.pause(300);
+    expect(await focused()).toBe('bk-all');
+    for (let i = 0; i < 3 && (await focused()) !== 'ch-emu'; i++) {
+      const was = await focused();
+      await key('ArrowLeft');
+      await browser.waitUntil(async () => (await focused()) !== was, { timeout: TRANSITION_TIMEOUT, timeoutMsg: `Left from ${was} did not move` });
+      expect(await row()).toBe(true);
+    }
+    await waitFocused('ch-emu');
     await key('ArrowDown');
     await waitFocused('sg501');
 

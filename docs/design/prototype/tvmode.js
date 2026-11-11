@@ -475,7 +475,7 @@ function srvCount(p, shown) {
 function srvPaint() {
   var m = $('srv-main'); if (!m) return;
   if (S.srvRail === 'discover') { m.innerHTML = discoverHTML(); var f = m.querySelector('.cv'); if (f) hero(byId(f.dataset.id)); return; }
-  if (!$('srv-h')) m.innerHTML = '<div class="vh" id="srv-h"></div><div class="scroll"><div class="grid" id="srv-grid" data-nav="grid" data-enter="first"></div></div><div class="selbar" id="selbar" hidden></div>';
+  if (!$('srv-h')) m.innerHTML = '<div class="vh two" id="srv-h"></div><div class="scroll"><div class="grid" id="srv-grid" data-nav="grid" data-enter="first"></div></div><div class="selbar" id="selbar" hidden></div>';
   var p = S.srvRail, L = G.filter(function (g) { return g.p === p && (!S.srvQ || g.t.toLowerCase().indexOf(S.srvQ.toLowerCase()) >= 0); }), s = sysOf(p), nat = p === 'WIN' || p === 'LINUX';
   var chips = '';
   if (!nat && s) {
@@ -483,7 +483,8 @@ function srvPaint() {
     chips = '<button class="chip' + (s.emu ? '' : ' warn') + '" data-f data-k="ch-emu" data-a="system" data-id="' + p + '" data-al="Open in Systems">' + (s.emu ? 'Emulator: <b>' + s.emu + '</b>' : 'No default emulator') + '</button>' +
       (s.fw === 'none' ? '<span class="chip">' + fw + '</span>' : '<button class="chip" data-f data-k="ch-fw" data-a="system" data-id="' + p + '" data-al="Open in Systems">' + fw + '</button>');
   }
-  $('srv-h').innerHTML = '<h1>' + PLAT[p] + '</h1><span class="cnt">' + srvCount(p, L) + '</span>' + chips + (S.srvQ ? '<span class="chip">Search: <b>' + esc(S.srvQ) + '</b></span>' : '') + '<span class="sp"></span>' + (L.length ? '<button class="btn" data-f data-k="bk-all" data-a="backupPlat" data-id="' + p + '" data-al="Backup"' + (S.offline ? ' disabled data-why="Connect to a server to backup games."' : '') + '>Backup all ' + G.filter(function (g) { return g.p === p; }).length + '…</button>' : '') + '<span class="chip">' + gl('RT') + ' Select</span><span class="chip">' + gl('Y') + ' Search</span>';
+  // Two rows (user decision 2026-11-11): the name and its counts, then the chips and actions.
+  $('srv-h').innerHTML = '<div class="vh-top"><h1>' + PLAT[p] + '</h1><span class="cnt">' + srvCount(p, L) + '</span></div><div class="vh-row" data-nav="h">' + chips + (S.srvQ ? '<span class="chip">Search: <b>' + esc(S.srvQ) + '</b></span>' : '') + '<span class="sp"></span>' + (L.length ? '<button class="btn" data-f data-k="bk-all" data-a="backupPlat" data-id="' + p + '" data-al="Backup"' + (S.offline ? ' disabled data-why="Connect to a server to backup games."' : '') + '>Backup all ' + G.filter(function (g) { return g.p === p; }).length + '…</button>' : '') + '<span class="chip">' + gl('RT') + ' Select</span><span class="chip">' + gl('Y') + ' Search</span></div>';
   $('srv-grid').innerHTML = L.length ? L.map(function (g) { return cover(g, { k: 'sg' }); }).join('') : '<div class="empty"><h2>No games match “' + esc(S.srvQ) + '”</h2></div>';
   selPaint(L);
 }

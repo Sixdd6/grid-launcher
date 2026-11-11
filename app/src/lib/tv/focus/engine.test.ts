@@ -171,6 +171,62 @@ describe('move', () => {
     expect(move(snap2, 'down')).toEqual({ kind: 'none' });
   });
 
+  it('Left off a grid scrolled below the rail rows still reaches the selected row', () => {
+    // The grid's visible part starts under a tall header, below every rail row.
+    const snap = build(
+      [
+        { name: 'rail', rect: R(0, 0, 100, 600), nav: 'v', enter: 'sel' },
+        { name: 'grid', rect: R(120, 200, 300, 400), nav: 'grid' },
+      ],
+      [
+        { key: 'r0', rect: R(0, 0, 100, 40), in: ['rail'], rail: true },
+        { key: 'r1', rect: R(0, 50, 100, 40), in: ['rail'], rail: true, sel: true },
+        { key: 'chip', rect: R(380, 120, 40, 30) },
+        { key: 'g0', rect: R(130, 210, 80, 100), in: ['grid'] },
+      ],
+      'g0',
+    );
+    expect(keyOf(snap, move(snap, 'left'))).toBe('r1');
+    // A header button above the visible grid is not beside it.
+    expect(move(snap, 'right')).toEqual({ kind: 'none' });
+  });
+
+  it('a header row keeps Left and Right on it, with or without a firmware chip', () => {
+    // Emulator chip, optional firmware chip, then Backup all far across; a
+    // cover sits just below, nearer by score than Backup all.
+    const header = (fw: boolean) =>
+      build(
+        [
+          { name: 'row', rect: R(120, 20, 800, 30), nav: 'h' },
+          { name: 'grid', rect: R(120, 80, 800, 400), nav: 'grid' },
+        ],
+        [
+          { key: 'emu', rect: R(120, 20, 120, 30), in: ['row'] },
+          ...(fw ? [{ key: 'fw', rect: R(250, 20, 120, 30), in: ['row'] }] : []),
+          { key: 'bk', rect: R(800, 20, 120, 30), in: ['row'] },
+          { key: 'g0', rect: R(260, 90, 80, 100), in: ['grid'] },
+        ],
+        'emu',
+      );
+    for (const fw of [false, true]) {
+      const snap = header(fw);
+      const path = fw ? ['fw', 'bk'] : ['bk'];
+      let at = snap.k('emu');
+      for (const want of path) {
+        const r = move({ ...snap, current: at }, 'right');
+        expect(keyOf(snap, r)).toBe(want);
+        at = snap.k(want);
+      }
+      expect(move({ ...snap, current: at }, 'right')).toEqual({ kind: 'none' });
+      for (const want of [...path.slice(0, -1).reverse(), 'emu']) {
+        const r = move({ ...snap, current: at }, 'left');
+        expect(keyOf(snap, r)).toBe(want);
+        at = snap.k(want);
+      }
+      expect(keyOf(snap, move({ ...snap, current: snap.k('emu') }, 'down'))).toBe('g0');
+    }
+  });
+
   it('Up from a grid reaches header chips straight above it (item 89)', () => {
     const snap = build(
       [{ name: 'grid', rect: R(120, 100, 300, 300), nav: 'grid' }],

@@ -112,6 +112,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .vh h1 { margin: 0; font-size: 1.6rem; font-weight: 600; color: var(--text-h); }
 .vh .cnt { color: var(--text-muted); }
 .vh .sp { flex: 1; }
+.vh.two { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: .7rem; }
+.vh.two .vh-top { display: flex; align-items: baseline; gap: 1rem; min-width: 0; }
+.vh.two .vh-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .chip { display: inline-flex; align-items: center; gap: .4rem; padding: .35rem .9rem; border-radius: 100px; border: 1px solid var(--line-strong); font-size: .9rem; color: var(--text-muted); }
 .chip b { color: var(--text-h); font-weight: 600; }
 .chip.warn { border-color: var(--warning-text); color: var(--warning-text); }

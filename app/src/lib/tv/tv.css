@@ -152,6 +152,11 @@ html[data-ui='tv'] .tv .vh { flex: 0 0 auto; display: flex; align-items: center;
 html[data-ui='tv'] .tv .vh h1 { margin: 0; font-size: 1.6rem; font-weight: 600; color: var(--text-h); }
 html[data-ui='tv'] .tv .vh .cnt { color: var(--text-muted); }
 html[data-ui='tv'] .tv .vh .sp { flex: 1; }
+/* A two-row header (a Server platform): the name and its counts, then the
+   chips and actions on a row of their own. */
+html[data-ui='tv'] .tv .vh.two { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: .7rem; }
+html[data-ui='tv'] .tv .vh.two .vh-top { display: flex; align-items: baseline; gap: 1rem; min-width: 0; }
+html[data-ui='tv'] .tv .vh.two .vh-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 html[data-ui='tv'] .tv .chip { display: inline-flex; align-items: center; gap: .4rem; padding: .35rem .9rem; border-radius: 100px; border: 1px solid var(--line-strong); font-size: .9rem; color: var(--text-muted); }
 html[data-ui='tv'] .tv .chip b { color: var(--text-h); font-weight: 600; }
 html[data-ui='tv'] .tv .chip.warn { border-color: var(--warning-text); color: var(--warning-text); }
