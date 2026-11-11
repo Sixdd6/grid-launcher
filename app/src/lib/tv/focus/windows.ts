@@ -1,15 +1,17 @@
 // Windowed TV grids (risk R8; TV mode plan § 1.2 "Windowed grids"). A grid
 // that renders only the covers near the view (`ui/TvGrid.svelte`) registers
 // a handle here, on its `[data-window]` element, so the focus code can move
-// by index inside it (`grid.ts` `gridMove`), bring an unrendered cover into
+// inside it on the layout (`grid.ts` `layoutMove`), bring an unrendered cover into
 // the DOM before focusing it, and find a remembered cover by its key.
 // Each cover sits in a `[data-i]` cell (its index in the whole list).
+import type { Direction } from '../input/buttons';
 
 export type WindowHandle = {
   /** Covers in the whole list. */
   count(): number;
-  /** Columns as laid out now. */
-  columns(): number;
+  /** Where a move from cover `i` lands, on the layout as it is now, or
+   *  `edge` when it leaves the grid. */
+  move(i: number, dir: Direction): number | 'edge';
   /** The index of the cover with `data-k` `k`, or -1. */
   indexOfKey(k: string): number;
   /** Renders cover `i` (synchronously) and answers its focusable. */

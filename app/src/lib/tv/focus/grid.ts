@@ -1,105 +1,64 @@
-// Index moves inside a TV grid (TV mode plan § 1.2 "Windowed grids"). Pure.
+// Moves inside a TV grid (TV mode plan § 1.2 "Windowed grids"). Pure.
 // A windowed grid (P7, P8: a 2500-game platform) renders only the covers near
-// the view, so the spatial engine can't see the rest: inside the grid, moves
-// are index arithmetic, and only leaving it by an edge goes back to the
-// spatial engine (`edge`).
+// the view, so the spatial engine can't see the rest. Every cover's rectangle
+// is known from the layout (`cards/layout.ts`, the desktop's: covers sized by
+// their art, in Equal height rows or Equal width columns), so moves inside
+// the grid are worked out on those rectangles, and only leaving it by an
+// edge goes back to the spatial engine (`edge`).
+import type { Rect } from '../../cards/layout';
 import type { Direction } from '../input/buttons';
 
 /**
- * How many columns `repeat(auto-fill, cell)` with a minimum `gap` lays out in
- * `width` (the grid's content box), at least one.
+ * The index a move from `index` lands on, or `edge` when it leaves the grid.
+ *
+ * - Left and Right go to the nearest cover beside this one that shares some
+ *   of its height: the next one in the row (Equal height), or in the next
+ *   column (Equal width). With none, the move leaves the grid.
+ * - Up and Down go to the nearest cover above or below that shares some of
+ *   its width, the most shared first; when none does (Down into a shorter
+ *   last row), to the nearest one by distance. With none, it leaves.
  */
-export function gridColumns(width: number, cell: number, gap: number): number {
-  if (!(width > 0) || !(cell > 0)) return 1;
-  return Math.max(1, Math.floor((width + gap) / (cell + gap)));
-}
-
-/**
- * The index a move lands on, or `edge` when it leaves the grid (Up from the
- * top row, Left from the first column, Right from the last, Down from the
- * last row). Down into a shorter last row lands on its last cover, as the
- * spatial rule picks the nearest one below.
- */
-export function gridMove(index: number, dir: Direction, columns: number, count: number): number | 'edge' {
-  if (count <= 0) return 'edge';
-  const cols = Math.max(1, columns);
-  const row = Math.floor(index / cols);
-  const col = index % cols;
-  const lastRow = Math.floor((count - 1) / cols);
-  switch (dir) {
-    case 'left':
-      return col > 0 ? index - 1 : 'edge';
-    case 'right':
-      return col < cols - 1 && index + 1 < count ? index + 1 : 'edge';
-    case 'up':
-      return row > 0 ? index - cols : 'edge';
-    case 'down':
-      if (row >= lastRow) return 'edge';
-      return Math.min(index + cols, count - 1);
-  }
+export function layoutMove(rects: readonly Rect[], index: number, dir: Direction): number | 'edge' {
+  const cur = rects[index];
+  if (!cur) return 'edge';
+  const sideways = dir === 'left' || dir === 'right';
+  const cx = cur.x + cur.w / 2;
+  const cy = cur.y + cur.h / 2;
+  let best = -1;
+  let bestKey: [number, number] = [Infinity, Infinity];
+  rects.forEach((r, k) => {
+    if (k === index || !r) return;
+    const rx = r.x + r.w / 2;
+    const ry = r.y + r.h / 2;
+    const d = dir === 'left' ? cx - rx : dir === 'right' ? rx - cx : dir === 'up' ? cy - ry : ry - cy;
+    if (d <= 1) return;
+    const overlap = sideways
+      ? Math.min(r.y + r.h, cur.y + cur.h) - Math.max(r.y, cur.y)
+      : Math.min(r.x + r.w, cur.x + cur.w) - Math.max(r.x, cur.x);
+    if (overlap <= 0 && sideways) return;
+    const key: [number, number] = overlap > 0 ? [d, -overlap] : [d + 1e6, Math.abs(rx - cx)];
+    if (key[0] < bestKey[0] || (key[0] === bestKey[0] && key[1] < bestKey[1])) {
+      best = k;
+      bestKey = key;
+    }
+  });
+  return best === -1 ? 'edge' : best;
 }
 
 /** Covers a grid renders before it has been measured (its first paint). */
 export const INITIAL_WINDOW = 48;
 
-/** Rows rendered past the visible ones on each side, so a held direction
- *  finds the next row already there. */
-export const WINDOW_BUFFER_ROWS = 2;
-
-export type WindowInput = {
-  count: number;
-  columns: number;
-  /** One row's height plus the gap under it, in px; 0 before measuring. */
-  pitch: number;
-  /** The visible band, in px from the top of the grid's first row. */
-  top: number;
-  bottom: number;
-  /** The index the grid holds focus on (kept rendered), or null. */
-  focus: number | null;
-  buffer?: number;
-};
-
-export type GridWindow = {
-  /** The first index rendered and one past the last. */
-  start: number;
-  end: number;
-  /** Rows left out above and below the rendered ones. */
-  rowsBefore: number;
-  rowsAfter: number;
-};
-
 /**
- * Which covers a windowed grid renders (risk R8): the rows meeting the
- * visible band, `buffer` rows either side, and the focused cover's row with
- * one row either side of it. When focus sits far from the band (the right
- * stick scrolled away), the rows around focus win: the reveal that follows
- * scrolls them into view. Before measuring, the first `INITIAL_WINDOW`.
+ * The indexes a windowed grid renders: the contiguous run whose rectangles
+ * meet the visible band (`range`, from `visibleRange`), plus the focused
+ * cover when it sits outside it (the right stick scrolled away), so focus
+ * never points at a cover that is not in the DOM. Ascending.
  */
-export function gridWindow(o: WindowInput): GridWindow {
-  const count = Math.max(0, o.count);
-  if (count === 0) return { start: 0, end: 0, rowsBefore: 0, rowsAfter: 0 };
-  const cols = Math.max(1, o.columns);
-  const rows = Math.ceil(count / cols);
-  if (!(o.pitch > 0)) {
-    const end = Math.min(count, Math.max(INITIAL_WINDOW, o.focus !== null ? (Math.floor(o.focus / cols) + 2) * cols : 0));
-    return { start: 0, end, rowsBefore: 0, rowsAfter: rows - Math.ceil(end / cols) };
-  }
-  const buffer = o.buffer ?? WINDOW_BUFFER_ROWS;
-  const last = rows - 1;
-  const clamp = (r: number) => Math.max(0, Math.min(last, r));
-  let first = clamp(Math.floor(o.top / o.pitch) - buffer);
-  let end = clamp(Math.floor(Math.max(o.top, o.bottom) / o.pitch) + buffer);
-  if (o.focus !== null && o.focus >= 0 && o.focus < count) {
-    const f = Math.floor(o.focus / cols);
-    if (f >= first - buffer && f <= end + buffer) {
-      first = Math.min(first, clamp(f - 1));
-      end = Math.max(end, clamp(f + 1));
-    } else {
-      const span = end - first;
-      first = clamp(f - buffer);
-      end = clamp(first + span);
-      if (end < f + 1) end = clamp(f + 1);
-    }
-  }
-  return { start: first * cols, end: Math.min(count, (end + 1) * cols), rowsBefore: first, rowsAfter: last - end };
+export function windowIndexes(range: { start: number; end: number }, focus: number | null, count: number): number[] {
+  const out: number[] = [];
+  const end = Math.min(range.end, count);
+  if (focus !== null && focus >= 0 && focus < count && focus < range.start) out.push(focus);
+  for (let i = Math.max(0, range.start); i < end; i++) out.push(i);
+  if (focus !== null && focus >= 0 && focus < count && focus >= end) out.push(focus);
+  return out;
 }

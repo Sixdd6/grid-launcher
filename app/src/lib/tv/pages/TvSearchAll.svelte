@@ -17,6 +17,7 @@
   import { loadAllGames, type AllGames } from '../tabs/server/server.svelte';
   import TvButton from '../ui/TvButton.svelte';
   import TvGameCover from '../ui/TvGameCover.svelte';
+  import TvGrid from '../ui/TvGrid.svelte';
   import {
     LOAD_FAILED_TITLE,
     loadFailedLine,
@@ -94,13 +95,12 @@
             <TvButton k="sr-retry" testId="tv-search-retry" onA={load}>{RETRY}</TvButton>
           </div>
         {/if}
-        <div class="grid" data-nav="grid">
-          {#each results as g (g.id)}
+        <TvGrid id="sr-grid" items={results} key={(g) => `sr${g.id}`} cover={(g) => g.cover} listKey={q}>
+          {#snippet cell(g)}
             <TvGameCover k={`sr${g.id}`} game={g} plat testId={`tv-cover-sr${g.id}`} />
-          {:else}
-            {#if phase !== 'loading'}<p class="note" data-testid="tv-search-none">{NO_RESULTS}</p>{/if}
-          {/each}
-        </div>
+          {/snippet}
+          {#if results.length === 0 && phase !== 'loading'}<p class="note" data-testid="tv-search-none">{NO_RESULTS}</p>{/if}
+        </TvGrid>
       {/if}
     </div>
   </div>

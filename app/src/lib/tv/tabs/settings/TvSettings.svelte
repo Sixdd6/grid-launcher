@@ -17,6 +17,7 @@
     commitBackgroundBlur,
     commitBackgroundFade,
     setBackgroundEnabled,
+    setCardDisplay,
     setHardwareAcceleration,
     setOpenOn,
     setTheme,
@@ -351,6 +352,7 @@
           {
             openOn: uiSettings.openOn,
             theme: uiSettings.theme,
+            cardDisplay: uiSettings.cardDisplay,
             fade: uiSettings.backgroundFade,
             blur: uiSettings.backgroundBlur,
             hardwareAcceleration: uiSettings.hardwareAcceleration,
@@ -359,6 +361,7 @@
             open: openChoice,
             setOpenOn: (v) => void setOpenOn(v).catch(fail),
             setTheme: (v) => void setTheme(v).catch(() => {}),
+            setCardDisplay: (v) => void setCardDisplay(v).catch(fail),
             setArt: (on) => void setBackgroundEnabled(on).catch(fail),
             setFade: (v) => void commitBackgroundFade(v).catch(fail),
             setBlur: (v) => void commitBackgroundBlur(v).catch(fail),

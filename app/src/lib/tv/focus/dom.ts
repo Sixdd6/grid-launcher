@@ -41,6 +41,20 @@ function rectOf(el: Element): Rect {
   return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
 }
 
+/**
+ * A grid's rect, cut to the part its scroll area shows. A long grid runs far
+ * above and below the screen, and leaving it sideways goes only to what sits
+ * straight past its edge (`engine.ts`): measured on the whole grid, the
+ * header above the scroll area counted as beside it.
+ */
+function visibleRectOf(el: Element): Rect {
+  const r = rectOf(el);
+  const s = vScroller(el);
+  if (!s) return r;
+  const v = s.getBoundingClientRect();
+  return { left: r.left, right: r.right, top: Math.max(r.top, v.top), bottom: Math.max(Math.max(r.top, v.top), Math.min(r.bottom, v.bottom)) };
+}
+
 const DIRS: Direction[] = ['up', 'down', 'left', 'right'];
 
 function linksOf(el: Element): Partial<Record<Direction, string>> {
@@ -59,8 +73,11 @@ function isContainer(el: Element): boolean {
 export type DomSnapshot = { els: HTMLElement[]; snap: { items: Item[]; containers: Container[]; current: number | null } };
 
 /** A snapshot of `root` around `current`. */
-export function snapshot(root: Element, current: Element | null): DomSnapshot {
-  const els = focusables(root);
+export function snapshot(root: Element, current: Element | null, leaving: Element | null = null): DomSnapshot {
+  // Leaving an area (a windowed grid said the move goes past its edge):
+  // nothing else in it is a target. Covers of different widths would
+  // otherwise catch a sideways move into another row.
+  const els = focusables(root).filter((el) => !leaving || el === current || !leaving.contains(el));
   const containerEls: Element[] = [];
   const index = new Map<Element, number>();
   const items: Item[] = els.map((el) => {
@@ -96,7 +113,7 @@ export function snapshot(root: Element, current: Element | null): DomSnapshot {
     const nav = c.getAttribute('data-nav');
     const enter = c.getAttribute('data-enter');
     return {
-      rect: rectOf(c),
+      rect: nav === 'grid' ? visibleRectOf(c) : rectOf(c),
       nav: nav === 'h' || nav === 'v' || nav === 'grid' ? nav : null,
       enter: enter === 'sel' || enter === 'first' ? enter : null,
       edge: c.hasAttribute('data-edge'),
@@ -113,8 +130,8 @@ export function snapshot(root: Element, current: Element | null): DomSnapshot {
 }
 
 /** Runs the engine for a move in `root`. */
-export function moveIn(root: Element, current: Element | null, dir: Direction): { result: MoveResult; els: HTMLElement[] } {
-  const { els, snap } = snapshot(root, current);
+export function moveIn(root: Element, current: Element | null, dir: Direction, leaving: Element | null = null): { result: MoveResult; els: HTMLElement[] } {
+  const { els, snap } = snapshot(root, current, leaving);
   return { result: move(snap, dir), els };
 }
 

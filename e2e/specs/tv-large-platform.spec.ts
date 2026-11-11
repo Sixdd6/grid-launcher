@@ -18,6 +18,40 @@ async function focusedIndex(): Promise<number> {
   return (await browser.execute(() => Number(document.querySelector('[data-tv-root] .f')?.closest('[data-i]')?.getAttribute('data-i') ?? -1))) as number;
 }
 
+/** Covers in the fullest rendered row: the most cells sharing one top.
+ *  Rows differ in length (covers are the shape of their art: the fixtures'
+ *  square covers next to portrait ones not loaded yet). */
+async function perRow(grid: string): Promise<number> {
+  return (await browser.execute((g: string) => {
+    const tops = new Map<number, number>();
+    for (const c of Array.from(document.querySelectorAll<HTMLElement>(`#${g} [data-i]`))) tops.set(c.offsetTop, (tops.get(c.offsetTop) ?? 0) + 1);
+    return Math.max(1, ...tops.values());
+  }, grid)) as number;
+}
+
+/** The focused cover's cell: its index, its top, and the first index in its row. */
+async function focusedCell(): Promise<{ index: number; top: number; rowStart: number }> {
+  return (await browser.execute(() => {
+    const cell = document.querySelector('[data-tv-root] .f')?.closest<HTMLElement>('[data-i]');
+    if (!cell) return { index: -1, top: -1, rowStart: -1 };
+    const row = Array.from(cell.parentElement!.querySelectorAll<HTMLElement>('[data-i]')).filter((c) => c.offsetTop === cell.offsetTop);
+    return { index: Number(cell.dataset.i), top: cell.offsetTop, rowStart: Math.min(...row.map((c) => Number(c.dataset.i))) };
+  })) as { index: number; top: number; rowStart: number };
+}
+
+/** Up once, confirmed: focus lands on an earlier cover in a row above. */
+async function upOneRow(): Promise<void> {
+  const was = await focusedCell();
+  await key('ArrowUp');
+  await browser.waitUntil(
+    async () => {
+      const now = await focusedCell();
+      return now.index >= 0 && now.index < was.index && now.top < was.top;
+    },
+    { timeout: TRANSITION_TIMEOUT, timeoutMsg: `Up did not move a row up from cover ${was.index}` },
+  );
+}
+
 async function rendered(grid: string): Promise<number> {
   return (await browser.execute((g: string) => document.querySelectorAll(`#${g} [data-cover]`).length, grid)) as number;
 }
@@ -98,8 +132,8 @@ async function settle(grid: string): Promise<void> {
 /**
  * Stage `tv-large-platform` (docs/tv-mode/plan.md risk R8): the
  * large-platform fixtures (one 2500-game Arcade platform, covers 40 ms each)
- * and 600 seeded installed games. TV grids render only the rows near the
- * view and move by index inside, so a long grid stays fast, focus moves
+ * and 600 seeded installed games. TV grids render only the covers near the
+ * view and move on their layout inside, so a long grid stays fast, focus moves
  * through it without a gap, and covers load as they scroll in.
  */
 describe('tv-large-platform: windowed grids', () => {
@@ -137,13 +171,14 @@ describe('tv-large-platform: windowed grids', () => {
     console.log(`${count} of 2500 covers rendered at the top`);
     expect(count).toBeLessThanOrEqual(MAX_RENDERED);
     expect(await $(testId(`tv-cover-sg${LAST_ID}`)).isExisting()).toBe(false);
-    // The spacers make the scroll area as tall as every row.
-    const tall = await browser.execute(() => {
+    // The layout's box makes the scroll area as tall as every row. Rows
+    // differ in length, but none holds twice the fullest one rendered.
+    const cols = await perRow('srv-grid');
+    const tall = await browser.execute((c: number) => {
       const s = document.getElementById('srv-grid')!.closest('[data-scroll]') as HTMLElement;
       const cell = document.querySelector('#srv-grid [data-cover]') as HTMLElement;
-      const cols = getComputedStyle(document.getElementById('srv-grid')!).gridTemplateColumns.split(' ').length;
-      return s.scrollHeight >= Math.ceil(2500 / cols) * cell.offsetHeight;
-    });
+      return s.scrollHeight >= Math.ceil(2500 / (2 * c)) * cell.offsetHeight;
+    }, cols);
     expect(tall).toBe(true);
     await key('ArrowRight');
     await waitFocused(`sg${FIRST_ID}`);
@@ -165,12 +200,9 @@ describe('tv-large-platform: windowed grids', () => {
     expect(await $(testId(`tv-cover-sg${FIRST_ID}`)).isExisting()).toBe(false);
   });
 
-  it('moves by index across rows; Left from the first column goes to the selected rail row', async () => {
-    const at = await focusedIndex();
-    const cols = (await browser.execute(() => getComputedStyle(document.getElementById('srv-grid')!).gridTemplateColumns.split(' ').length)) as number;
-    await key('ArrowUp');
-    await browser.waitUntil(async () => (await focusedIndex()) === at - cols, { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Up did not move one row' });
-    await stepLeftTo(at - cols - ((at - cols) % cols));
+  it('moves across rows on the layout; Left from the first column goes to the selected rail row', async () => {
+    await upOneRow();
+    await stepLeftTo((await focusedCell()).rowStart);
     const k = await focused();
     await key('ArrowLeft');
     await waitFocused('r-1');
@@ -208,12 +240,7 @@ describe('tv-large-platform: windowed grids', () => {
     await browser.waitUntil(async () => (await focusedIndex()) < 12, { timeout: 30_000, timeoutMsg: 'holding Up never reached the top rows' });
     await release('dpad_up');
     await settle('lib-grid');
-    const libCols = (await browser.execute(() => getComputedStyle(document.getElementById('lib-grid')!).gridTemplateColumns.split(' ').length)) as number;
-    for (let i = 0; i < 4 && (await focusedIndex()) >= libCols; i++) {
-      const was = await focusedIndex();
-      await key('ArrowUp');
-      await browser.waitUntil(async () => (await focusedIndex()) === was - libCols, { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Up did not move one row' });
-    }
+    for (let i = 0; i < 4 && (await focusedCell()).top > 0; i++) await upOneRow();
     await stepLeftTo(0);
     await browser.waitUntil(
       async () => (await browser.execute(() => (document.getElementById('lib-grid')!.closest('[data-scroll]') as HTMLElement).scrollTop)) === 0,

@@ -307,7 +307,7 @@
         <TvChip glyph="Y">Search</TvChip>
       </div>
     {/if}
-    <TvGrid id="lib-grid" scroll="lib-grid" items={games} key={coverKey} listKey={selected.key} testId="tv-lib-grid">
+    <TvGrid id="lib-grid" scroll="lib-grid" items={games} key={coverKey} cover={(g) => g.cover} listKey={selected.key} testId="tv-lib-grid">
       {#snippet cell(g)}
         <TvGameCover k={coverKey(g)} game={g} plat={mixed || driveKey !== null} selectable testId={`tv-cover-${coverKey(g)}`} />
       {/snippet}

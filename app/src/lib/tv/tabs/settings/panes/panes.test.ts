@@ -30,13 +30,14 @@ const byKey = <T extends Row>(rows: Row[], key: string) => rows.find((r) => r.ke
 const noop = () => {};
 
 describe('Appearance pane (items 234–240, 527)', () => {
-  const acts = { open: vi.fn(), setOpenOn: vi.fn(), setTheme: vi.fn(), setArt: vi.fn(), setFade: vi.fn(), setBlur: vi.fn(), setHardwareAcceleration: vi.fn() };
-  const rows = appearanceRows({ openOn: 'automatic', theme: 'system', fade: 50, blur: 8, hardwareAcceleration: true }, acts);
+  const acts = { open: vi.fn(), setOpenOn: vi.fn(), setTheme: vi.fn(), setCardDisplay: vi.fn(), setArt: vi.fn(), setFade: vi.fn(), setBlur: vi.fn(), setHardwareAcceleration: vi.fn() };
+  const rows = appearanceRows({ openOn: 'automatic', theme: 'system', cardDisplay: 'rows', fade: 50, blur: 8, hardwareAcceleration: true }, acts);
 
   it('lists the rows in order with their lines, ending with the desktop-only info row', () => {
     expect(summary(rows)).toEqual([
       ['choice', 'Open GRID on', 'Here and in desktop mode', 'automatic'],
       ['choice', 'Theme', THEME_LINE, 'system'],
+      ['choice', 'Game card display', 'Here and in desktop mode', 'rows'],
       ['switch', 'Background art', "The focused game's art, blurred, behind everything", true],
       ['slider', 'Background fade', '', '50%'],
       ['slider', 'Background blur', '', '20%'],
@@ -58,6 +59,16 @@ describe('Appearance pane (items 234–240, 527)', () => {
     expect(acts.setTheme).toHaveBeenCalledWith('light');
   });
 
+  it('offers Game card display, shared with the desktop', () => {
+    const display = byKey<ChoiceRow>(rows, 'card-display');
+    expect(display.options.map((o) => o[1])).toEqual(['Equal height', 'Equal width']);
+    display.choose();
+    const spec = acts.open.mock.calls.at(-1)?.[0] as ChoiceSpec;
+    expect(spec.title).toBe('Game card display');
+    spec.pick('columns');
+    expect(acts.setCardDisplay).toHaveBeenCalledWith('columns');
+  });
+
   it('formats the sliders and maps blur to the stored 0–40 (items 237–238)', () => {
     const fade = byKey<SliderRow>(rows, 'fade');
     expect([fade.min, fade.max, fade.step]).toEqual([0, 100, 5]);
@@ -70,7 +81,7 @@ describe('Appearance pane (items 234–240, 527)', () => {
     blur.set(30);
     expect(acts.setBlur).toHaveBeenCalledWith(12);
     // Background art is off at a full fade (item 12).
-    const off = appearanceRows({ openOn: 'library', theme: 'dark', fade: 100, blur: 0, hardwareAcceleration: false }, acts);
+    const off = appearanceRows({ openOn: 'library', theme: 'dark', cardDisplay: 'columns', fade: 100, blur: 0, hardwareAcceleration: false }, acts);
     expect(byKey<SwitchRow>(off, 'art').on).toBe(false);
     // "Dark in TV mode" describes Follow system only.
     expect(byKey<ChoiceRow>(off, 'theme').sub).toBeUndefined();

@@ -1,11 +1,15 @@
 <script lang="ts">
-  // A cover (items 15–18, 20, 130): 3:4 at 10rem (17rem on Details), the
-  // title under it in grids, and the desktop badges: installed dot, UPDATE,
+  // A cover (items 15–18, 20, 130): the shape of its art, as on the desktop
+  // (portrait 3:4 until the art has loaded once; `stores/coverShapes`). A
+  // grid sizes it by its layout, a row by one height, Details by 17rem of
+  // width (tv.css). The title under it in grids, and the desktop badges: installed dot, UPDATE,
   // MISSING (which replaces UPDATE), a platform tag in mixed lists, and
   // "Queued" / "<n>%" while installing. Focused, it grows to 107% with a lift
   // and a ring, and the background art follows it (item 11). A opens
   // Details; X is its quick action, which `quick` names (none: no X hint).
   import Image from '../../Image.svelte';
+  import { clampShape } from '../../cards/layout';
+  import { recordShape, shapeOf } from '../../stores/coverShapes.svelte';
   import { noteViewed } from '../../stores/lastViewed.svelte';
   import type { BackgroundSubject } from '../../background';
   import { tvf } from '../focus/actions';
@@ -59,6 +63,9 @@
     /** It took focus (Discover's hero follows it). */
     onFocus?: () => void;
   } = $props();
+
+  let shape = $derived(clampShape(shapeOf(cover)));
+  let style = $derived(`--shape: ${shape}${width ? `; --cw: ${width}` : ''}`);
 </script>
 
 <button
@@ -70,14 +77,14 @@
   data-cover
   data-sel={sel}
   data-testid={testId}
-  style={width ? `--cw:${width}` : undefined}
+  {style}
   use:tvf={{ a: onA, x: quick ? onX : undefined, focus: () => {
       if (art) noteViewed(art);
       onFocus?.();
     } }}
 >
   <span class="cv-art">
-    <span class="cv-img"><Image url={cover} alt={title} placeholder={title} /></span>
+    <span class="cv-img"><Image url={cover} alt={title} placeholder={title} onmeasure={(w, h) => recordShape(cover, w, h)} /></span>
     {#if missing}<span class="tag miss">MISSING</span>{:else if update}<span class="tag upd">UPDATE</span>{/if}
     {#if installed}<i class="idot" aria-label="Installed"></i>{/if}
     {#if platform}<span class="tag plat">{platform}</span>{/if}

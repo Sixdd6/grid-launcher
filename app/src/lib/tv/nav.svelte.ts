@@ -14,7 +14,6 @@ import type { Hint } from './hints';
 import { handlersOf } from './focus/actions';
 import { closeRefocus, restore, inPlace } from './focus/engine';
 import { entryOf, focusables, isDisabled, loadScroll, moveIn, readScroll, reducedMotion, rememberLast, reveal, saveScroll } from './focus/dom';
-import { gridMove } from './focus/grid';
 import { materialize, windowOf, windowsIn } from './focus/windows';
 import type { Direction, TvButton } from './input/buttons';
 import { press, stepTab, type Command, type PressContext, type TvTab } from './input/press';
@@ -442,18 +441,18 @@ export function moveFocus(dir: Direction): void {
     restoreFocus();
     return;
   }
-  // Inside a windowed grid, moves are by index, so covers that aren't
+  // Inside a windowed grid, moves are on its layout, so covers that aren't
   // rendered are reached too; only leaving it by an edge is spatial (R8).
   const w = windowOf(cur);
   if (w) {
-    const to = gridMove(w.index, dir, w.handle.columns(), w.handle.count());
+    const to = w.handle.move(w.index, dir);
     if (to !== 'edge') {
       const el = w.handle.ensure(to);
       if (el) setFocus(el);
       return;
     }
   }
-  const { result, els } = moveIn(root, cur, dir);
+  const { result, els } = moveIn(root, cur, dir, w ? cur.closest('[data-window]') : null);
   if (result.kind === 'focus') setFocus(els[result.item]);
   else if (result.kind === 'railOpen') railOpen();
   else if (result.kind === 'restore') restoreFocus();

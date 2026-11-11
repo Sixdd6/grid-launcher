@@ -105,7 +105,7 @@
   <TvChip glyph="RT">Select</TvChip>
   <TvChip glyph="Y">Search</TvChip>
 </div>
-<TvGrid id="srv-grid" scroll="srv-grid" items={games} key={(g) => `sg${g.id}`} listKey={srv.rail}>
+<TvGrid id="srv-grid" scroll="srv-grid" items={games} key={(g) => `sg${g.id}`} cover={(g) => g.cover} listKey={srv.rail}>
   {#snippet cell(g)}
     <TvGameCover k={`sg${g.id}`} game={g} selectable testId={`tv-cover-sg${g.id}`} />
   {/snippet}

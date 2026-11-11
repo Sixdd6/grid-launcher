@@ -1,20 +1,30 @@
 // Settings › Appearance in TV mode (checklist items 10, 12, 13, 234–240,
 // 527; tvmode.js `paneRows('appearance')`). Open GRID on first (README §
-// Consultant decisions); Theme is the one setting shared with the desktop,
-// and here "Follow system" shows dark (ruling 22); card size, game labels
-// and card display stay desktop-only, which an information row says.
+// Consultant decisions). Theme and Game card display are shared with the
+// desktop; here "Follow system" shows dark (ruling 22). Card size and game
+// labels stay desktop-only, which an information row says (TV covers have
+// one size; user decision 2026-11-11 brought card display to TV mode).
 import type { OpenOn } from '../../../../api';
+import { CARD_DISPLAYS, cardDisplayLabel, type CardDisplay } from '../../../../cards/layout';
 import { OPEN_ON_CHOICES, openOnLabel } from '../../../../settings/openOn';
 import { artVisible, BLUR_MAX, type ThemeChoice } from '../../../../theme';
 import type { Row } from '../../../rows';
 import { choiceRow, type OpenChoice } from './choice';
 
-export type AppearanceState = { openOn: OpenOn; theme: ThemeChoice; fade: number; blur: number; hardwareAcceleration: boolean };
+export type AppearanceState = {
+  openOn: OpenOn;
+  theme: ThemeChoice;
+  cardDisplay: CardDisplay;
+  fade: number;
+  blur: number;
+  hardwareAcceleration: boolean;
+};
 
 export type AppearanceActions = {
   open: OpenChoice;
   setOpenOn: (v: OpenOn) => void;
   setTheme: (v: ThemeChoice) => void;
+  setCardDisplay: (v: CardDisplay) => void;
   setArt: (on: boolean) => void;
   setFade: (v: number) => void;
   /** The stored blur (0–BLUR_MAX), not the percentage the row shows. */
@@ -56,6 +66,13 @@ export function appearanceRows(s: AppearanceState, a: AppearanceActions): Row[] 
       a.open,
     ),
     choiceRow({ key: 'theme', label: 'Theme', sub: s.theme === 'system' ? THEME_LINE : undefined }, THEME_OPTIONS, s.theme, (v) => a.setTheme(v as ThemeChoice), a.open),
+    choiceRow(
+      { key: 'card-display', label: 'Game card display', sub: 'Here and in desktop mode' },
+      CARD_DISPLAYS.map((d) => [d, cardDisplayLabel(d)] as const),
+      s.cardDisplay,
+      (v) => a.setCardDisplay(v as CardDisplay),
+      a.open,
+    ),
     {
       type: 'switch',
       key: 'art',
