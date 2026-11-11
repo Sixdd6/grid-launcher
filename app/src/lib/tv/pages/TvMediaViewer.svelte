@@ -6,10 +6,12 @@
   // A video — a server video, or a trailer in the YouTube player (the
   // loopback relay, youtube_relay.rs) — plays in place (user decision
   // 2026-11-10): A plays and pauses, LB / RB seek 10 s, LT / RT step its own
-  // volume, Left / Right page. It sits in the left of the screen, clear of
-  // the notification column on the right, so nothing ever covers it
-  // (YouTube's rules); the "Volume N%" readout shows in that column, beside
-  // it. "(X) Watch on YouTube" stays under a trailer's player. When the
+  // volume, Left / Right page. It is centred and as large as the screen
+  // allows at 16:9, its width or its height filling the space (user
+  // decision 2026-11-11). Nothing may be drawn over YouTube's player, so
+  // notification cards wait while a video shows (`holdNotices`), and the
+  // "Volume N%" readout sits under it, in the caption line. "(X) Watch on
+  // YouTube" stays under a trailer's player. When the
   // player can't play the trailer (an error, or no ready signal in 10 s) the
   // poster comes back and A opens the trailer in the browser.
   import { untrack } from 'svelte';
@@ -21,6 +23,7 @@
   import { api } from '../../api';
   import { setVideoVolume, uiSettings } from '../../stores/uiSettings.svelte';
   import { tvf } from '../focus/actions';
+  import { holdNotices } from '../notices.svelte';
   import Glyph from '../glyphs/Glyph.svelte';
   import TvIcon from '../ui/TvIcon.svelte';
   import { viewerCaption } from './details';
@@ -85,10 +88,19 @@
     if (item?.kind === 'video' || item?.kind === 'youtube') toggleVideo(model);
   }
 
+  // Cards wait while a video shows: nothing may cover the player.
+  // `untrack`: holdNotices reads the held flag it writes, and tracked, that
+  // read made this effect re-run itself without end.
+  $effect(() => {
+    if (show !== 'video') return;
+    untrack(() => holdNotices(true));
+    return () => untrack(() => holdNotices(false));
+  });
+
   let aLabel = $derived(show === 'video' ? (pausedOf(model) ? 'Play' : 'Pause') : show === 'poster' ? 'Watch on YouTube' : 'Select');
 </script>
 
-<div class="viewer" class:vid={show === 'video'} data-testid="tv-viewer" data-show={show}>
+<div class="viewer" class:vid={show === 'video'} class:yt={item?.kind === 'youtube'} data-testid="tv-viewer" data-show={show}>
   {#if item}
     <div class="col">
       {#if item.kind === 'screenshot'}
@@ -164,15 +176,12 @@
       {/if}
       <div class="cap">
         {#if show === 'video'}<Glyph button="DPAD" />{:else}<Glyph button="LB" />{/if}<span data-testid="tv-viewer-caption">{caption}</span>{#if show !== 'video'}<Glyph button="RB" />{/if}
+        {#if show === 'video'}
+          <!-- Under the player, never over it. -->
+          <span class="vol" class:on={model.readout} aria-live="polite" data-testid={model.readout ? 'tv-viewer-volume' : undefined}>{model.readout ? volumeLabel(uiSettings.videoVolume) : ''}</span>
+        {/if}
       </div>
     </div>
-    {#if show === 'video'}
-      <!-- The notification column: the volume readout sits here, beside
-           the player, and the notification cards stack above it. -->
-      <div class="side" aria-live="polite">
-        {#if model.readout}<span class="vol" data-testid="tv-viewer-volume">{volumeLabel(uiSettings.videoVolume)}</span>{/if}
-      </div>
-    {/if}
   {/if}
   <!-- The one focusable item, so focus stays inside the viewer. -->
   <button class="sr" data-k="viewer" data-al={aLabel} bind:this={srEl} use:tvf={{ a: activate }}>media</button>

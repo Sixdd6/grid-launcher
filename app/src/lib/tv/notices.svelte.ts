@@ -21,7 +21,7 @@ import {
   type NoticeSeg,
 } from './notices';
 
-const state = $state<{ cards: Card[]; history: HistoryEntry[] }>({ cards: [], history: [] });
+const state = $state<{ cards: Card[]; history: HistoryEntry[]; held: boolean }>({ cards: [], history: [], held: false });
 const timers = new Map<number, ReturnType<typeof setTimeout>>();
 let attached = false;
 let nextId = 1;
@@ -35,6 +35,10 @@ export const tvNotices = {
   get history(): readonly HistoryEntry[] {
     return state.history;
   },
+  /** Cards wait, hidden, while a video plays (`holdNotices`). */
+  get held(): boolean {
+    return state.held;
+  },
 };
 
 function stop(id: number): void {
@@ -44,7 +48,7 @@ function stop(id: number): void {
 }
 
 function arm(card: Card): void {
-  if (card.countdown === null) return;
+  if (card.countdown === null || state.held) return;
   stop(card.id);
   timers.set(
     card.id,
@@ -93,6 +97,7 @@ export function closeNotice(id: number): void {
 /** View: the newest card with an action closes and its action runs
  *  (item 148). Answers whether there was one. */
 export function viewNewest(): boolean {
+  if (state.held) return false;
   const c = newestAction(state.cards);
   if (!c?.action) return false;
   closeNotice(c.id);
@@ -105,12 +110,29 @@ export function clearHistory(): void {
   state.history = [];
 }
 
+/**
+ * While a video plays, cards wait (user decision 2026-11-11): nothing may be
+ * drawn over YouTube's player, and the player fills the screen. Cards keep
+ * arriving and go to the history as usual, but none shows and no countdown
+ * runs; when the hold ends every waiting card shows with its full life.
+ */
+export function holdNotices(on: boolean): void {
+  if (state.held === on) return;
+  state.held = on;
+  if (on) {
+    for (const id of [...timers.keys()]) stop(id);
+    return;
+  }
+  for (const c of state.cards) arm(c);
+}
+
 /** A TV shell shows the cards while attached; detaching clears them. */
 export function attachNotices(on: boolean): void {
   attached = on;
   if (!on) {
     for (const id of [...timers.keys()]) stop(id);
     state.cards = [];
+    state.held = false;
   }
 }
 

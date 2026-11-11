@@ -314,15 +314,18 @@ html[data-ui='tv'] .tv .viewer .cap { font-size: 1.1rem; display: flex; gap: 1.5
 html[data-ui='tv'] .tv .viewer .muted { color: rgba(255, 255, 255, .7); }
 html[data-ui='tv'] .tv .viewer .col { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; min-width: 0; }
 html[data-ui='tv'] .tv .viewer .watch { display: inline-flex; align-items: center; gap: .55rem; font: inherit; font-size: 1.1rem; font-weight: 600; color: #fff; background: rgba(255, 255, 255, .12); border: 0; border-radius: 100px; padding: .45rem 1.1rem; cursor: pointer; }
-/* A video plays left of the notification column (26rem at the right, the
-   cards' own column), so no card, hint or readout ever covers it (YouTube's
-   rules); at least 480×270. The readout sits in that column, beside it. */
-html[data-ui='tv'] .tv .viewer.vid { flex-direction: row; justify-content: flex-start; align-items: stretch; gap: 2.4rem; padding: 0 2.4rem; }
-html[data-ui='tv'] .tv .viewer.vid .col { flex: 1 1 auto; }
-html[data-ui='tv'] .tv .viewer.vid .shot.player { height: auto; width: min(100%, calc((100vh - 3.6rem - 10rem) * 16 / 9)); max-width: none; aspect-ratio: 16 / 9; min-width: 480px; min-height: 270px; flex: 0 0 auto; }
+/* A playing video: centred, as large as the viewer allows at 16:9 (its
+   width or its height fills the space; nothing is stretched), with the rows
+   under it (Watch on YouTube, the caption and volume) kept in view. The
+   viewer is the size container, so cqw / cqh are its box (down to the hint
+   bar). YouTube's minimum player size still holds. */
+html[data-ui='tv'] .tv .viewer.vid { container-type: size; --vrows: 7.6rem; }
+html[data-ui='tv'] .tv .viewer.vid.yt { --vrows: 10.6rem; }
+html[data-ui='tv'] .tv .viewer.vid .col { width: 100%; }
+html[data-ui='tv'] .tv .viewer.vid .shot.player { height: auto; aspect-ratio: 16 / 9; width: min(100cqw - 4.8rem, (100cqh - var(--vrows)) * 16 / 9); max-width: none; min-width: 480px; min-height: 270px; flex: 0 0 auto; }
 html[data-ui='tv'] .tv .viewer .shot.player > iframe { width: 100%; height: 100%; display: block; border: 0; }
-html[data-ui='tv'] .tv .viewer .side { flex: 0 0 26rem; display: flex; align-items: center; justify-content: center; }
-html[data-ui='tv'] .tv .viewer .vol { font-size: 1.2rem; font-weight: 600; background: rgba(255, 255, 255, .12); border-radius: 100px; padding: .55rem 1.3rem; }
+html[data-ui='tv'] .tv .viewer .vol { font-size: 1.1rem; font-weight: 600; background: rgba(255, 255, 255, .12); border-radius: 100px; padding: .3rem 1rem; visibility: hidden; }
+html[data-ui='tv'] .tv .viewer .vol.on { visibility: visible; }
 
 /* ---- Playing (items 321–323). */
 html[data-ui='tv'] .tv .playing { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }

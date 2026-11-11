@@ -99,7 +99,7 @@ describe('tv-details (d): the media viewer plays videos', () => {
     expect(start).toBe(50);
     expect(await browser.execute(() => (document.querySelector('[data-testid="tv-viewer-videoel"]') as HTMLVideoElement).volume)).toBeCloseTo(0.5);
 
-    // RT: one step, the readout beside the player, and it is stored.
+    // RT: one step, the readout under the player, and it is stored.
     await press('right_trigger');
     await waitText('tv-viewer-volume', 'Volume 60%');
     expect(await browser.execute(() => (document.querySelector('[data-testid="tv-viewer-videoel"]') as HTMLVideoElement).volume)).toBeCloseTo(0.6);
@@ -113,17 +113,25 @@ describe('tv-details (d): the media viewer plays videos', () => {
     expect(held).toBeLessThanOrEqual(30);
     await browser.waitUntil(async () => (await storedVolume()) === held, { timeout: 3_000, timeoutMsg: 'the held volume was never stored' });
 
-    // Nothing covers the player: the readout is beside it, the
-    // notification column and the hint bar clear of it.
+    // Centred and as large as the viewer allows at 16:9 (user decision
+    // 2026-11-11). Nothing covers it: the readout is under it, the hint bar
+    // below, and no notification card shows while it plays.
     const player = (await rect('tv-viewer-video'))!;
+    const viewer = (await rect('tv-viewer'))!;
     const vol = (await rect('tv-viewer-volume'))!;
-    const toasts = (await rect('tv-toasts'))!;
     const bar = (await rect('tv-hints'))!;
     expect(player.width).toBeGreaterThanOrEqual(480);
     expect(player.height).toBeGreaterThanOrEqual(270);
-    expect(vol.left).toBeGreaterThanOrEqual(player.right);
-    expect(toasts.left).toBeGreaterThanOrEqual(player.right);
+    expect(Math.abs(player.width / player.height - 16 / 9)).toBeLessThan(0.02);
+    expect(Math.abs(player.left - viewer.left - (viewer.right - player.right))).toBeLessThanOrEqual(2);
+    const rem = (await browser.execute(() => parseFloat(getComputedStyle(document.documentElement).fontSize))) as number;
+    // Width-bound (the side gutters) or height-bound (the rows under it).
+    const widthBound = Math.abs(viewer.width - 4.8 * rem - player.width) <= 2;
+    const heightBound = Math.abs(viewer.height - 7.6 * rem - player.height) <= 2;
+    expect(widthBound || heightBound).toBe(true);
+    expect(vol.top).toBeGreaterThanOrEqual(player.bottom);
     expect(bar.top).toBeGreaterThanOrEqual(player.bottom);
+    expect(await $$(testId('tv-toast')).length).toBe(0);
 
     // LB / RB seek inside the video rather than paging.
     await press('left_bumper');

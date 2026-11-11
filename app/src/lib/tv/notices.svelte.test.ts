@@ -59,6 +59,25 @@ describe('tvNotices', () => {
     expect(n.tvNotices.history).toHaveLength(0);
   });
 
+  it('while a video plays cards wait with no countdown, then show with their full life', async () => {
+    const n = await import('./notices.svelte');
+    n.attachNotices(true);
+    n.showNotice({ title: 'before' });
+    vi.advanceTimersByTime(4_000);
+    n.holdNotices(true);
+    expect(n.tvNotices.held).toBe(true);
+    n.showNotice({ title: 'during' });
+    expect(n.viewNewest()).toBe(false);
+    vi.advanceTimersByTime(60_000);
+    expect(n.tvNotices.cards.map((c) => c.title)).toEqual(['during', 'before']);
+    expect(n.tvNotices.history.map((h) => h.title)).toEqual(['during', 'before']);
+    n.holdNotices(false);
+    vi.advanceTimersByTime(9_000);
+    expect(n.tvNotices.cards).toHaveLength(2);
+    vi.advanceTimersByTime(1_000);
+    expect(n.tvNotices.cards).toHaveLength(0);
+  });
+
   it('detaching clears the cards but keeps the history', async () => {
     const n = await import('./notices.svelte');
     n.attachNotices(true);

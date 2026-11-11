@@ -3,13 +3,14 @@
   // right under the top bar, 26rem wide, at most three, the newest on top
   // under the pinned setup card. They never take focus or react to
   // pointing. A card with an action shows the View prompt and the action's
-  // name; View runs the newest one (notices.svelte.ts `viewNewest`).
+  // name; View runs the newest one (notices.svelte.ts `viewNewest`). While
+  // a video plays they wait, hidden (`holdNotices`).
   import Glyph from './glyphs/Glyph.svelte';
   import { tvNotices } from './notices.svelte';
 </script>
 
 <div class="toasts" data-testid="tv-toasts" aria-live="polite">
-  {#each tvNotices.cards as c (c.id)}
+  {#each tvNotices.held ? [] : tvNotices.cards as c (c.id)}
     <div class="toast" class:err={c.error} role={c.error ? 'alert' : 'status'} data-testid="tv-toast" data-pinned={c.pinned ? '' : undefined}>
       <div class="tt" data-testid="tv-toast-title">{c.title}</div>
       {#if c.sub !== null}
