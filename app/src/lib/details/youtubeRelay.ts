@@ -15,6 +15,10 @@ export const RELAY_SOURCE = 'grid-yt';
 
 /** No ready signal by then: fall back to the poster and "Watch on YouTube". */
 export const READY_TIMEOUT_MS = 10_000;
+/** How long a trailer asked to play (on ready, or A) may take to report
+ *  playing before TV mode offers "Watch on YouTube" (user decision
+ *  2026-11-11). */
+export const STALL_MS = 8_000;
 
 /** YouTube's player errors (2 bad id, 5 HTML5 player, 100 removed or
  *  private, 101 / 150 embedding disallowed, 153 no referrer). Every one of

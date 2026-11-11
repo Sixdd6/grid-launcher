@@ -271,16 +271,17 @@ export function viewerShow(kind: MediaItem['kind'] | null, embedShowing: boolean
 /** What a viewer button does (user decision 2026-11-10, replacing ruling
  *  E6): while a video shows, LB / RB seek 10 s, LT / RT step its volume and
  *  Left / Right page; otherwise LB / RB and Left / Right page. X opens a
- *  trailer on YouTube, playing or not. */
+ *  trailer on YouTube only while "Watch on YouTube" is offered
+ *  (`watchOffered`; user decision 2026-11-11). */
 export type ViewerAct = 'prev' | 'next' | 'back' | 'forward' | 'volDown' | 'volUp' | 'watch' | null;
 
 export const VIEWER_BUTTONS = ['LB', 'RB', 'LEFT', 'RIGHT', 'LT', 'RT', 'X'] as const;
 export type ViewerButton = (typeof VIEWER_BUTTONS)[number];
 
-export function viewerAction(b: ViewerButton, show: ViewerShow, youtube: boolean): ViewerAct {
+export function viewerAction(b: ViewerButton, show: ViewerShow, youtube: boolean, watch = show === 'poster'): ViewerAct {
   if (b === 'LEFT') return 'prev';
   if (b === 'RIGHT') return 'next';
-  if (b === 'X') return youtube ? 'watch' : null;
+  if (b === 'X') return youtube && watch ? 'watch' : null;
   if (show === 'video') {
     if (b === 'LB') return 'back';
     if (b === 'RB') return 'forward';
@@ -290,6 +291,15 @@ export function viewerAction(b: ViewerButton, show: ViewerShow, youtube: boolean
   if (b === 'LB') return 'prev';
   if (b === 'RB') return 'next';
   return null;
+}
+
+/** Whether a trailer offers "(X) Watch on YouTube" (user decision
+ *  2026-11-11): only when it isn't playing properly. That is the poster
+ *  (YouTube refused it, or no ready signal), or a player that was asked to
+ *  play and hasn't started within `STALL_MS` (`stalled`). A trailer playing
+ *  as it should shows no link. */
+export function watchOffered(show: ViewerShow, stalled: boolean): boolean {
+  return show === 'poster' || (show === 'video' && stalled);
 }
 
 /** Held LT / RT repeat like a direction while a video shows. */

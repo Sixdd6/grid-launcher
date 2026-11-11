@@ -320,6 +320,7 @@ html[data-ui='tv'] .tv .viewer .watch { display: inline-flex; align-items: cente
    viewer is the size container, so cqw / cqh are its box (down to the hint
    bar). YouTube's minimum player size still holds. */
 html[data-ui='tv'] .tv .viewer.vid { container-type: size; --vrows: 7.6rem; }
+/* Room for the Watch on YouTube row while it shows. */
 html[data-ui='tv'] .tv .viewer.vid.yt { --vrows: 10.6rem; }
 html[data-ui='tv'] .tv .viewer.vid .col { width: 100%; }
 html[data-ui='tv'] .tv .viewer.vid .shot.player { height: auto; aspect-ratio: 16 / 9; width: min(100cqw - 4.8rem, (100cqh - var(--vrows)) * 16 / 9); max-width: none; min-width: 480px; min-height: 270px; flex: 0 0 auto; }

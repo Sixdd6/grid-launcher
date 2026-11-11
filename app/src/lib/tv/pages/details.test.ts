@@ -8,6 +8,7 @@ import {
   seekTarget,
   viewerHints,
   viewerAction,
+  watchOffered,
   viewerRepeats,
   viewerShow,
   VIEWER_BUTTONS,
@@ -398,11 +399,20 @@ describe('the media viewer controls (user decision 2026-11-10)', () => {
   });
 
   it('maps every button while a video shows', () => {
-    const map = (show: ViewerShow, youtube: boolean) => VIEWER_BUTTONS.map((b) => `${b}:${viewerAction(b, show, youtube)}`);
-    expect(map('video', true)).toEqual(['LB:back', 'RB:forward', 'LEFT:prev', 'RIGHT:next', 'LT:volDown', 'RT:volUp', 'X:watch']);
+    const map = (show: ViewerShow, youtube: boolean, watch?: boolean) => VIEWER_BUTTONS.map((b) => `${b}:${viewerAction(b, show, youtube, watch)}`);
+    // A trailer playing properly offers no link; a stalled one does.
+    expect(map('video', true)).toEqual(['LB:back', 'RB:forward', 'LEFT:prev', 'RIGHT:next', 'LT:volDown', 'RT:volUp', 'X:null']);
+    expect(map('video', true, true)).toEqual(['LB:back', 'RB:forward', 'LEFT:prev', 'RIGHT:next', 'LT:volDown', 'RT:volUp', 'X:watch']);
     expect(map('video', false)).toEqual(['LB:back', 'RB:forward', 'LEFT:prev', 'RIGHT:next', 'LT:volDown', 'RT:volUp', 'X:null']);
     expect(map('screenshot', false)).toEqual(['LB:prev', 'RB:next', 'LEFT:prev', 'RIGHT:next', 'LT:null', 'RT:null', 'X:null']);
     expect(map('poster', true)).toEqual(['LB:prev', 'RB:next', 'LEFT:prev', 'RIGHT:next', 'LT:null', 'RT:null', 'X:watch']);
+  });
+
+  it('offers Watch on YouTube only when a trailer is not playing properly', () => {
+    expect(watchOffered('poster', false)).toBe(true);
+    expect(watchOffered('video', false)).toBe(false);
+    expect(watchOffered('video', true)).toBe(true);
+    expect(watchOffered('screenshot', true)).toBe(false);
   });
 
   it('held LT / RT repeat only while a video shows', () => {

@@ -11,7 +11,9 @@
   // decision 2026-11-11). Nothing may be drawn over YouTube's player, so
   // notification cards wait while a video shows (`holdNotices`), and the
   // "Volume N%" readout sits under it, in the caption line. "(X) Watch on
-  // YouTube" stays under a trailer's player. When the
+  // YouTube" shows under a trailer only while it isn't playing properly:
+  // the poster, or a player asked to play that hasn't started within 8 s
+  // (user decision 2026-11-11). When the
   // player can't play the trailer (an error, or no ready signal in 10 s) the
   // poster comes back and A opens the trailer in the browser.
   import { untrack } from 'svelte';
@@ -19,7 +21,7 @@
   import { trailerPoster, videoLoadMessage } from '../../details/media';
   import { fromElementVolume, toElementVolume, volumeLabel } from '../../details/videoVolume';
   import YoutubeEmbed from '../../details/YoutubeEmbed.svelte';
-  import { initialEmbed } from '../../details/youtubeRelay';
+  import { initialEmbed, STALL_MS } from '../../details/youtubeRelay';
   import { api } from '../../api';
   import { setVideoVolume, uiSettings } from '../../stores/uiSettings.svelte';
   import { tvf } from '../focus/actions';
@@ -27,7 +29,7 @@
   import Glyph from '../glyphs/Glyph.svelte';
   import TvIcon from '../ui/TvIcon.svelte';
   import { viewerCaption } from './details';
-  import { pausedOf, showOf, toggleVideo, type ViewerModel } from './mediaViewer.svelte';
+  import { pausedOf, showOf, toggleVideo, watchShown, type ViewerModel } from './mediaViewer.svelte';
 
   let { model }: { model: ViewerModel } = $props();
 
@@ -67,6 +69,23 @@
   $effect(() => {
     void itemKey;
     model.embed = initialEmbed();
+    model.stalled = false;
+  });
+
+  // A trailer asked to play (its player ready, which autoplays, or A on a
+  // paused one) must report playing within STALL_MS, or "Watch on YouTube"
+  // shows; it hides again once it plays.
+  $effect(() => {
+    void itemKey;
+    void model.playAsk;
+    if (model.embed?.phase !== 'ready') return;
+    const t = setTimeout(() => {
+      if (untrack(() => model.embed?.player) !== 1) model.stalled = true;
+    }, STALL_MS);
+    return () => clearTimeout(t);
+  });
+  $effect(() => {
+    if (model.embed?.player === 1 && untrack(() => model.stalled)) model.stalled = false;
   });
 
   // A server video opens at the stored level.
@@ -100,7 +119,7 @@
   let aLabel = $derived(show === 'video' ? (pausedOf(model) ? 'Play' : 'Pause') : show === 'poster' ? 'Watch on YouTube' : 'Select');
 </script>
 
-<div class="viewer" class:vid={show === 'video'} class:yt={item?.kind === 'youtube'} data-testid="tv-viewer" data-show={show}>
+<div class="viewer" class:vid={show === 'video'} class:yt={watchShown(model)} data-testid="tv-viewer" data-show={show}>
   {#if item}
     <div class="col">
       {#if item.kind === 'screenshot'}
@@ -152,8 +171,11 @@
           </div>
           <div class="muted" data-testid="tv-viewer-trailer-note">This trailer can't play in GRID.</div>
         {/if}
-        <!-- Always under the player or the poster, never over it. -->
-        <button class="watch" data-btn="X" data-testid="tv-viewer-watch" tabindex="-1"><Glyph button="X" />Watch on YouTube</button>
+        <!-- Under the player or the poster, never over it; only while the
+             trailer isn't playing properly. -->
+        {#if watchShown(model)}
+          <button class="watch" data-btn="X" data-testid="tv-viewer-watch" tabindex="-1"><Glyph button="X" />Watch on YouTube</button>
+        {/if}
       {:else}
         <div class="shot player" data-testid="tv-viewer-video">
           {#if videoSrc}

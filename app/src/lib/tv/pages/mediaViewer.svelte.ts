@@ -21,6 +21,7 @@ import {
   viewerRepeats,
   viewerShow,
   viewerStep,
+  watchOffered,
   type ViewerShow,
 } from './details';
 import TvMediaViewer from './TvMediaViewer.svelte';
@@ -39,6 +40,11 @@ export type ViewerModel = {
   embed?: EmbedState;
   /** The "Volume N%" readout is showing. */
   readout?: boolean;
+  /** A trailer asked to play hasn't started within STALL_MS. */
+  stalled?: boolean;
+  /** Counts A's requests to play a paused trailer (each restarts the
+   *  stall check). */
+  playAsk?: number;
 };
 
 /** The viewer's hints with nothing on show (item 305). */
@@ -61,12 +67,19 @@ export function pausedOf(model: ViewerModel): boolean {
   return model.paused === true;
 }
 
+/** Whether the trailer on show offers "(X) Watch on YouTube" now. */
+export function watchShown(model: ViewerModel): boolean {
+  return current(model)?.kind === 'youtube' && watchOffered(showOf(model), model.stalled === true);
+}
+
 /** A on a video: play or pause it. On a trailer's poster: open YouTube. */
 export function toggleVideo(model: ViewerModel): void {
   const item = current(model);
   if (item?.kind === 'youtube') {
-    if (showOf(model) === 'video') model.yt?.send({ cmd: 'toggle' });
-    else watchOnYoutube(item.videoId);
+    if (showOf(model) === 'video') {
+      if (pausedOf(model)) model.playAsk = (model.playAsk ?? 0) + 1;
+      model.yt?.send({ cmd: 'toggle' });
+    } else watchOnYoutube(item.videoId);
     return;
   }
   const v = model.video;
@@ -119,7 +132,7 @@ export function applyVolume(model: ViewerModel, value: number): void {
 
 function act(model: ViewerModel, b: TvButton): void {
   const item = current(model);
-  const a = viewerAction(b as (typeof VIEWER_BUTTONS)[number], showOf(model), item?.kind === 'youtube');
+  const a = viewerAction(b as (typeof VIEWER_BUTTONS)[number], showOf(model), item?.kind === 'youtube', watchShown(model));
   switch (a) {
     case 'prev':
       model.index = viewerStep(model.index, model.items.length, -1);
