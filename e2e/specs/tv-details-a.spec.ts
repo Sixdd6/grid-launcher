@@ -125,6 +125,17 @@ describe('tv-details (a): Details, Saves and Playing', () => {
     expect(await lines('[data-testid="tv-save-9001"] .t')).toEqual(['TestEmu LATEST']);
     expect((await lines('[data-testid="tv-save-9001"] .s'))[0]).toMatch(/^.+ · .+$/);
     expect(await text('tv-saves-upload')).toBe('Upload latest save');
+    // The toggle and Upload are one row: Left from Upload goes back to the
+    // toggle, not down into the list just below it.
+    await waitFocused('sk-save');
+    await key('ArrowRight');
+    await waitFocused('sk-state');
+    await key('ArrowRight');
+    await waitFocused('up');
+    await key('ArrowLeft');
+    await waitFocused('sk-state', 'Left from Upload left the toggle row');
+    await key('ArrowLeft');
+    await waitFocused('sk-save');
   });
 
   it('Delete asks with Cancel focused; the entry leaves and focus moves to the one in its place (items 308, 310–311)', async () => {

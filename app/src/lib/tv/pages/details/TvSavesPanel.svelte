@@ -167,7 +167,9 @@
   }
 </script>
 
-<div class="bar-h">
+<!-- A row: Left from Upload goes back to the Saves / States toggle, not
+     down into the list just below it. -->
+<div class="bar-h" data-nav="h">
   <div class="seg" data-nav="h">
     {#each SAVE_KINDS as [k, label] (k)}
       <button class:on={kind === k} data-k={`sk-${k}`} data-testid={`tv-saves-kind-${k}`} use:tvf={{ a: () => (det.saveKind = k) }}>{label}</button>
