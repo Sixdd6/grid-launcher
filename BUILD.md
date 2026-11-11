@@ -327,6 +327,17 @@ Version numbers come from the tag, not from the tree. `app/src-tauri/tauri.conf.
 keeps `0.9.0-dev`; each build job passes the real version with
 `npx tauri build --config '{"version":"<VERSION>"}'`.
 
+Before you tag or draft a release, run the CI check jobs locally on the commit you will
+tag, and fix every failure first:
+
+    scripts/ctr.sh gate       # the check job
+    scripts/ctr.sh wincheck   # the check-windows job's clippy
+    scripts/ctr.sh e2e        # the e2e job
+
+CI runs these jobs only after the release is published. A failure found there means a
+fix commit and a re-tag. `wincheck` does not run the Windows tests, so read new
+`cfg(windows)` test code for Unix-only assumptions, such as `/`-rooted absolute paths.
+
 1. Tag `vX.Y.Z` (or `vX.Y.Z-pre`, any semver pre-release) and publish a GitHub release
    for it. `build.yml` triggers on `release: [published]` only, which covers both a
    direct publish and a draft published later.
