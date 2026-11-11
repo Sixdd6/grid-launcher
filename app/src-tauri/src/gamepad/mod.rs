@@ -18,7 +18,7 @@ pub mod mapping;
 
 use gate::{Gate, Transition};
 use identity::PadInfo;
-use mapping::{Mapper, PadAxis, PadButton, PadEvent, RawEvent};
+use mapping::{Mapper, PadAxis, PadButton, PadEvent, RawEvent, Side, ZTriggers};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -224,15 +224,34 @@ impl GamepadService {
             .collect();
         tracing::info!(controllers = present.len(), "gamepad: reader started");
         self.apply(present);
+        let mut z_triggers = ZTriggers::default();
         loop {
             let mut inputs = Vec::new();
             while let Some(event) = gilrs.next_event() {
                 let id = pad_id(event.id);
                 match event.event {
-                    gilrs::EventType::Connected => inputs.push(GamepadInput::Connect {
-                        pad: pad_info(event.id, &gilrs.gamepad(event.id)),
-                    }),
-                    gilrs::EventType::Disconnected => inputs.push(GamepadInput::Disconnect { id }),
+                    gilrs::EventType::Connected => {
+                        z_triggers.forget(id);
+                        inputs.push(GamepadInput::Connect {
+                            pad: pad_info(event.id, &gilrs.gamepad(event.id)),
+                        })
+                    }
+                    gilrs::EventType::Disconnected => {
+                        z_triggers.forget(id);
+                        inputs.push(GamepadInput::Disconnect { id })
+                    }
+                    gilrs::EventType::AxisChanged(axis, value, _)
+                        if matches!(axis, gilrs::Axis::LeftZ | gilrs::Axis::RightZ) =>
+                    {
+                        let side = if axis == gilrs::Axis::LeftZ {
+                            Side::Left
+                        } else {
+                            Side::Right
+                        };
+                        if let Some(event) = z_triggers.event(id, side, value) {
+                            inputs.push(GamepadInput::Input { id, event });
+                        }
+                    }
                     other => {
                         if let Some(event) = from_gilrs(other) {
                             inputs.push(GamepadInput::Input { id, event });
@@ -281,7 +300,8 @@ fn pad_name(pad: &gilrs::Gamepad<'_>) -> String {
 }
 
 /// gilrs' event → the raw event TV mode reads, or `None` for everything it
-/// does not (repeats, force feedback, unknown buttons and axes, the Z axes).
+/// does not (repeats, force feedback, unknown buttons and axes). The Z axes
+/// go through [`ZTriggers`] in the poll loop.
 fn from_gilrs(event: gilrs::EventType) -> Option<RawEvent> {
     use gilrs::EventType as E;
     Some(match event {

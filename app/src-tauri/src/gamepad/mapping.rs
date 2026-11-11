@@ -281,9 +281,80 @@ fn set_trigger(pad: &mut PadState, id: u32, side: Side, value: f32, out: &mut Ve
     set_button(pad, id, button, value >= TRIGGER_THRESHOLD, out);
 }
 
+/// Analog triggers that arrive as the Z axes. A pad gilrs has no SDL mapping
+/// for (the 8BitDo Pro 3 receiver, 2dc8:310b) gets gilrs' default mapping,
+/// which reports xpad's `ABS_Z` / `ABS_RZ` triggers as `LeftZ` / `RightZ`,
+/// -1 at rest to 1 fully pulled, instead of as trigger buttons. Some
+/// DirectInput pads put the right stick on those axes instead, centred at 0,
+/// so each axis is judged once per connection by its first value: a trigger
+/// starts from rest near -1, a stick moves away from 0.
+#[derive(Debug, Default)]
+pub struct ZTriggers {
+    is_trigger: BTreeMap<(u32, Side), bool>,
+}
+
+/// A Z axis whose first value is below this is a trigger.
+const Z_TRIGGER_START: f32 = -0.5;
+
+impl ZTriggers {
+    /// A Z axis value as the trigger's analog value (0…1), or `None` when
+    /// this axis is not a trigger.
+    pub fn event(&mut self, pad: u32, side: Side, value: f32) -> Option<RawEvent> {
+        let is_trigger = *self
+            .is_trigger
+            .entry((pad, side))
+            .or_insert(value < Z_TRIGGER_START);
+        is_trigger.then(|| RawEvent::Changed {
+            button: match side {
+                Side::Left => PadButton::LeftTrigger,
+                Side::Right => PadButton::RightTrigger,
+            },
+            value: ((value + 1.0) / 2.0).clamp(0.0, 1.0),
+        })
+    }
+
+    /// Forgets a disconnected pad (gilrs reuses its ids).
+    pub fn forget(&mut self, pad: u32) {
+        self.is_trigger.retain(|&(p, _), _| p != pad);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn z_axes_resting_low_are_analog_triggers() {
+        let mut z = ZTriggers::default();
+        let changed = |button, value| Some(RawEvent::Changed { button, value });
+        assert_eq!(
+            z.event(0, Side::Left, -0.75),
+            changed(PadButton::LeftTrigger, 0.125)
+        );
+        assert_eq!(
+            z.event(0, Side::Left, 1.0),
+            changed(PadButton::LeftTrigger, 1.0)
+        );
+        assert_eq!(
+            z.event(0, Side::Left, -1.0),
+            changed(PadButton::LeftTrigger, 0.0)
+        );
+        assert_eq!(
+            z.event(0, Side::Right, -0.875),
+            changed(PadButton::RightTrigger, 0.0625)
+        );
+    }
+
+    #[test]
+    fn z_axes_centred_at_zero_are_not_triggers_until_reconnected() {
+        let mut z = ZTriggers::default();
+        assert_eq!(z.event(1, Side::Right, 0.1), None);
+        assert_eq!(z.event(1, Side::Right, -1.0), None);
+        // Another pad is judged on its own.
+        assert!(z.event(2, Side::Right, -1.0).is_some());
+        z.forget(1);
+        assert!(z.event(1, Side::Right, -0.95).is_some());
+    }
 
     fn press(button: PadButton) -> RawEvent {
         RawEvent::Pressed { button }
