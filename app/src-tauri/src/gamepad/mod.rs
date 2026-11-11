@@ -18,7 +18,7 @@ pub mod mapping;
 
 use gate::{Gate, Transition};
 use identity::PadInfo;
-use mapping::{Mapper, PadAxis, PadButton, PadEvent, RawEvent, Side, ZTriggers};
+use mapping::{Mapper, PadAxis, PadButton, PadEvent, RawEvent, Side, XpadFaces, ZTriggers};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -218,10 +218,13 @@ impl GamepadService {
             }
         };
         let mut z_triggers = ZTriggers::default();
+        let mut faces = XpadFaces::default();
         let present: Vec<GamepadInput> = gilrs
             .gamepads()
             .map(|(id, pad)| {
-                z_triggers.connect(pad_id(id), is_xpad(&pad));
+                let xpad = is_xpad(&pad);
+                z_triggers.connect(pad_id(id), xpad);
+                faces.connect(pad_id(id), xpad && !has_sdl_mapping(&pad));
                 GamepadInput::Connect {
                     pad: pad_info(id, &pad),
                 }
@@ -236,13 +239,16 @@ impl GamepadService {
                 match event.event {
                     gilrs::EventType::Connected => {
                         let pad = gilrs.gamepad(event.id);
-                        z_triggers.connect(id, is_xpad(&pad));
+                        let xpad = is_xpad(&pad);
+                        z_triggers.connect(id, xpad);
+                        faces.connect(id, xpad && !has_sdl_mapping(&pad));
                         inputs.push(GamepadInput::Connect {
                             pad: pad_info(event.id, &pad),
                         })
                     }
                     gilrs::EventType::Disconnected => {
                         z_triggers.forget(id);
+                        faces.forget(id);
                         inputs.push(GamepadInput::Disconnect { id })
                     }
                     gilrs::EventType::AxisChanged(axis, value, _)
@@ -267,6 +273,7 @@ impl GamepadService {
                     }
                     other => {
                         if let Some(event) = from_gilrs(other) {
+                            let event = faces.event(id, event);
                             inputs.push(GamepadInput::Input { id, event });
                         }
                     }
@@ -310,11 +317,18 @@ fn is_xpad(pad: &gilrs::Gamepad<'_>) -> bool {
     false
 }
 
+/// Whether gilrs reads this pad through an SDL mapping, which names each
+/// button by index; without one it uses its default evdev mapping
+/// ([`XpadFaces`]).
+fn has_sdl_mapping(pad: &gilrs::Gamepad<'_>) -> bool {
+    pad.mapping_source() == gilrs::MappingSource::SdlMappings
+}
+
 /// An SDL mapping's name when gilrs has one (curated per model); otherwise,
 /// on Linux, the name the USB device reports about itself, which browsers
 /// show too; otherwise the driver's name.
 fn pad_name(pad: &gilrs::Gamepad<'_>) -> String {
-    if pad.mapping_source() != gilrs::MappingSource::SdlMappings {
+    if !has_sdl_mapping(pad) {
         #[cfg(target_os = "linux")]
         if let (Some(vendor), Some(product)) = (pad.vendor_id(), pad.product_id()) {
             if let Some(name) = identity::usb_product_name(

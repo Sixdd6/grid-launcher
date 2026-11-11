@@ -334,6 +334,58 @@ impl ZTriggers {
     }
 }
 
+/// Face buttons on a pad driven by `xpad` that gilrs has no SDL mapping for
+/// (the 8BitDo Pro 3 receiver, 2dc8:310b). xpad reports the left button as
+/// `BTN_X` and the top one as `BTN_Y`, but evdev gives those codes to
+/// `BTN_NORTH` and `BTN_WEST`, so gilrs' default mapping has the two swapped:
+/// the top button arrived as West, and Y did X's job. An SDL mapping names the
+/// buttons by index and needs no fix.
+#[derive(Debug, Default)]
+pub struct XpadFaces {
+    swapped: BTreeSet<u32>,
+}
+
+impl XpadFaces {
+    /// A pad connected; `swap` when it runs on xpad without an SDL mapping.
+    pub fn connect(&mut self, pad: u32, swap: bool) {
+        if swap {
+            self.swapped.insert(pad);
+        } else {
+            self.swapped.remove(&pad);
+        }
+    }
+
+    /// `event` with North and West put back where they are on the pad.
+    pub fn event(&self, pad: u32, event: RawEvent) -> RawEvent {
+        if !self.swapped.contains(&pad) {
+            return event;
+        }
+        let fix = |button| match button {
+            PadButton::North => PadButton::West,
+            PadButton::West => PadButton::North,
+            other => other,
+        };
+        match event {
+            RawEvent::Pressed { button } => RawEvent::Pressed {
+                button: fix(button),
+            },
+            RawEvent::Released { button } => RawEvent::Released {
+                button: fix(button),
+            },
+            RawEvent::Changed { button, value } => RawEvent::Changed {
+                button: fix(button),
+                value,
+            },
+            axis @ RawEvent::Axis { .. } => axis,
+        }
+    }
+
+    /// Forgets a disconnected pad (gilrs reuses its ids).
+    pub fn forget(&mut self, pad: u32) {
+        self.swapped.remove(&pad);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -599,5 +651,63 @@ mod tests {
         );
         let ev = serde_json::to_value(PadEvent::ReleasedAll).unwrap();
         assert_eq!(ev, serde_json::json!({"kind": "released_all"}));
+    }
+
+    #[test]
+    fn an_xpad_pad_without_a_mapping_gets_north_and_west_back() {
+        let mut faces = XpadFaces::default();
+        faces.connect(1, true);
+        faces.connect(2, false);
+        let press = |button| RawEvent::Pressed { button };
+        // The Pro 3's top button arrives as West: it is North.
+        assert_eq!(
+            faces.event(1, press(PadButton::West)),
+            press(PadButton::North)
+        );
+        assert_eq!(
+            faces.event(1, press(PadButton::North)),
+            press(PadButton::West)
+        );
+        assert_eq!(
+            faces.event(
+                1,
+                RawEvent::Released {
+                    button: PadButton::West
+                }
+            ),
+            RawEvent::Released {
+                button: PadButton::North
+            }
+        );
+        // Only North and West move, and only on that pad.
+        assert_eq!(
+            faces.event(1, press(PadButton::South)),
+            press(PadButton::South)
+        );
+        assert_eq!(
+            faces.event(1, press(PadButton::East)),
+            press(PadButton::East)
+        );
+        assert_eq!(
+            faces.event(2, press(PadButton::West)),
+            press(PadButton::West)
+        );
+        let axis = RawEvent::Axis {
+            axis: PadAxis::LeftStickX,
+            value: 0.5,
+        };
+        assert_eq!(faces.event(1, axis), axis);
+        // A reconnect without the fix, or a forgotten pad, passes through.
+        faces.connect(1, false);
+        assert_eq!(
+            faces.event(1, press(PadButton::West)),
+            press(PadButton::West)
+        );
+        faces.connect(3, true);
+        faces.forget(3);
+        assert_eq!(
+            faces.event(3, press(PadButton::West)),
+            press(PadButton::West)
+        );
     }
 }
