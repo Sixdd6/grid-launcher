@@ -255,10 +255,29 @@ fn pad_info(id: gilrs::GamepadId, pad: &gilrs::Gamepad<'_>) -> PadInfo {
     PadInfo::new(
         pad_id(id),
         pad.uuid(),
-        pad.name(),
+        &pad_name(pad),
         pad.vendor_id(),
         pad.product_id(),
     )
+}
+
+/// An SDL mapping's name when gilrs has one (curated per model); otherwise,
+/// on Linux, the name the USB device reports about itself, which browsers
+/// show too; otherwise the driver's name.
+fn pad_name(pad: &gilrs::Gamepad<'_>) -> String {
+    if pad.mapping_source() != gilrs::MappingSource::SdlMappings {
+        #[cfg(target_os = "linux")]
+        if let (Some(vendor), Some(product)) = (pad.vendor_id(), pad.product_id()) {
+            if let Some(name) = identity::usb_product_name(
+                std::path::Path::new(identity::USB_DEVICES),
+                vendor,
+                product,
+            ) {
+                return name;
+            }
+        }
+    }
+    pad.name().to_string()
 }
 
 /// gilrs' event → the raw event TV mode reads, or `None` for everything it

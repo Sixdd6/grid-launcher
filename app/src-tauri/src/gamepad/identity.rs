@@ -1,5 +1,7 @@
 //! Who a controller is. Pure: the poll thread reads the fields from gilrs.
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 
 /// One connected controller, as the UI sees it.
@@ -48,9 +50,79 @@ pub fn pad_key(uuid: [u8; 16]) -> String {
     uuid.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Where Linux lists USB devices, each with `idVendor`, `idProduct` and
+/// `product` files.
+pub const USB_DEVICES: &str = "/sys/bus/usb/devices";
+
+/// The product name a USB device with these ids reports about itself, read
+/// from `root` (normally [`USB_DEVICES`]). Linux input drivers name some pads
+/// from a table keyed on the USB ids, and 8BitDo reuses ids across models:
+/// xpad calls the Pro 3 receiver (2dc8:310b) "8BitDo Ultimate 2 Wireless
+/// Controller", while the receiver itself says "8BitDo Pro 3 Receiver".
+/// `None` when no device matches or it has no name (Bluetooth pads have no
+/// USB device at all).
+pub fn usb_product_name(root: &Path, vendor: u16, product: u16) -> Option<String> {
+    let read = |dir: &Path, file: &str| {
+        std::fs::read_to_string(dir.join(file))
+            .ok()
+            .map(|s| s.trim().to_string())
+    };
+    let mut dirs: Vec<_> = std::fs::read_dir(root)
+        .ok()?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect();
+    dirs.sort();
+    dirs.into_iter().find_map(|dir| {
+        let id = |file| read(&dir, file).and_then(|s| u16::from_str_radix(&s, 16).ok());
+        if id("idVendor")? != vendor || id("idProduct")? != product {
+            return None;
+        }
+        read(&dir, "product").filter(|name| !name.is_empty())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn usb_device(root: &Path, dir: &str, vendor: &str, product: &str, name: Option<&str>) {
+        let dir = root.join(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("idVendor"), format!("{vendor}\n")).unwrap();
+        std::fs::write(dir.join("idProduct"), format!("{product}\n")).unwrap();
+        if let Some(name) = name {
+            std::fs::write(dir.join("product"), format!("{name}\n")).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_usb_name_is_found_by_vendor_and_product() {
+        let root = tempfile::tempdir().unwrap();
+        usb_device(root.path(), "1-1", "2dc8", "3109", Some("IDLE"));
+        usb_device(
+            root.path(),
+            "5-3.3",
+            "2dc8",
+            "310b",
+            Some("8BitDo Pro 3 Receiver"),
+        );
+        usb_device(root.path(), "usb1", "1d6b", "0002", None);
+        assert_eq!(
+            usb_product_name(root.path(), 0x2dc8, 0x310b).as_deref(),
+            Some("8BitDo Pro 3 Receiver")
+        );
+    }
+
+    #[test]
+    fn no_usb_name_without_a_match_or_a_name() {
+        let root = tempfile::tempdir().unwrap();
+        usb_device(root.path(), "1-1", "2dc8", "310b", Some("  "));
+        usb_device(root.path(), "1-2", "045e", "0b13", None);
+        assert_eq!(usb_product_name(root.path(), 0x2dc8, 0x310b), None);
+        assert_eq!(usb_product_name(root.path(), 0x045e, 0x0b13), None);
+        assert_eq!(usb_product_name(root.path(), 0x057e, 0x2009), None);
+        assert_eq!(usb_product_name(&root.path().join("missing"), 1, 2), None);
+    }
 
     #[test]
     fn the_key_is_the_uuid_in_hex() {
