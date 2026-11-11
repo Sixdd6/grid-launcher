@@ -3,7 +3,7 @@
 
 /** What a press means, after the controller's button assignment. */
 export type TvButton =
-  | 'A' | 'B' | 'X' | 'Y' | 'LB' | 'RB' | 'LT' | 'RT' | 'VIEW' | 'MENU'
+  | 'A' | 'B' | 'X' | 'Y' | 'LB' | 'RB' | 'LT' | 'RT' | 'VIEW' | 'MENU' | 'R3'
   | 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
 
 export type Direction = 'up' | 'down' | 'left' | 'right';

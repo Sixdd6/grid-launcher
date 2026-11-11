@@ -5,7 +5,7 @@
 import { api } from '../../api';
 import type { Hint } from '../hints';
 import { closeLayer, openLayer } from '../nav.svelte';
-import { DONE, OSK_BINDS, oskOpen, oskRepeats, oskType, physicalKey, SYMBOLS, SYMBOLS_KEY, type Osk } from './osk';
+import { DONE, keyboardHints, OSK_BINDS, oskOpen, oskPaste, oskRepeats, oskType, PASTE, physicalKey, SYMBOLS, SYMBOLS_KEY, type Osk } from './osk';
 import TvConfirm from './TvConfirm.svelte';
 import TvKeyboard from './TvKeyboard.svelte';
 import TvList from './TvList.svelte';
@@ -83,34 +83,40 @@ export type KeyboardSpec = {
   onCancel?: () => void;
 };
 
-/** The keyboard's hints (item 384). */
-export const KEYBOARD_HINTS: Hint[] = [
-  { button: 'A', label: 'Type' },
-  { button: 'X', label: 'Delete' },
-  { button: 'Y', label: 'Space' },
-  { button: 'LB', label: '◀' },
-  { button: 'RB', label: '▶' },
-  { button: 'MENU', label: 'Done' },
-  { button: 'B', label: 'Cancel' },
-];
-
 /** The keyboard's state, shared by its layer's bindings and TvKeyboard. */
-export type KeyboardModel = { osk: Osk; mask: boolean; title: string; type: (key: string) => void };
+export type KeyboardModel = {
+  osk: Osk;
+  mask: boolean;
+  title: string;
+  /** The clipboard holds text to paste (R3 Paste is greyed out otherwise). */
+  canPaste: boolean;
+  type: (key: string) => void;
+};
 
 /**
  * The on-screen keyboard (items 377–388): slides up from the bottom, over
  * the stage and up to the hint bar, which shows its hints (ruling 20).
  * X deletes, Y adds a space, LB / RB move the caret, LT is Shift, Menu is
  * Done, B cancels; held typing buttons repeat (items 42–43); a physical
- * keyboard types straight in (item 74).
+ * keyboard types straight in (item 74). R3 or Ctrl+V pastes the clipboard
+ * at the caret, and the hint bar's R3 Paste greys out while there is
+ * nothing to paste (user decision 2026-11-11); the text is never logged or
+ * shown anywhere but the field, which shows dots when masked.
  */
 export function openKeyboard(spec: KeyboardSpec): Promise<number> {
   const mask = !!spec.mask;
   let done = false;
+  let closed = false;
+  const setValue = (next: Osk) => {
+    const before = model.osk.value;
+    model.osk = next;
+    if (model.osk.value !== before) spec.onInput?.(model.osk.value);
+  };
   const model: KeyboardModel = $state({
     osk: oskOpen(spec.value ?? '', mask),
     mask,
     title: spec.title,
+    canPaste: false,
     type: (key: string) => {
       if (key === DONE) {
         done = true;
@@ -122,28 +128,53 @@ export function openKeyboard(spec: KeyboardSpec): Promise<number> {
         void openList({ title: 'Symbols', items: SYMBOLS.map((c) => ({ label: c, onPick: () => model.type(c) })) });
         return;
       }
-      const before = model.osk.value;
-      model.osk = oskType(model.osk, key);
-      if (model.osk.value !== before) spec.onInput?.(model.osk.value);
+      if (key === PASTE) {
+        void api
+          .readClipboardText()
+          .catch(() => '')
+          .then((text) => {
+            // The keyboard may have closed while the clipboard was read.
+            if (!closed) setValue(oskPaste(model.osk, text));
+          });
+        refreshPaste();
+        return;
+      }
+      setValue(oskType(model.osk, key));
     },
   });
+  // Whether R3 Paste has anything to paste: checked on open, after a paste,
+  // and when GRID's window comes back (a copy happens in another window).
+  const refreshPaste = () => {
+    void api
+      .clipboardHasText()
+      .catch(() => false)
+      .then((has) => {
+        if (!closed) model.canPaste = has;
+      });
+  };
+  refreshPaste();
+  window.addEventListener('focus', refreshPaste);
   const binds: Record<string, () => void> = {};
   for (const [b, key] of Object.entries(OSK_BINDS)) binds[b] = () => model.type(key as string);
   return openLayer({
     component: TvKeyboard,
     props: { model },
     cls: 'kb',
-    hints: KEYBOARD_HINTS,
+    hints: () => keyboardHints(model.canPaste),
     binds,
     typingRepeat: (b, el) => oskRepeats(b, el?.getAttribute('data-key') ?? null),
     keydown: (e) => {
       const hit = physicalKey(model.osk, { key: e.key, ctrl: e.ctrlKey, meta: e.metaKey });
       if (!hit) return false;
+      // A held Ctrl+V pastes once, not with the system's key repeat.
+      if (hit.type === PASTE && e.repeat) return true;
       if (e.key.length === 1) model.osk = { ...model.osk, phys: true };
       model.type(hit.type);
       return true;
     },
     onClose: () => {
+      closed = true;
+      window.removeEventListener('focus', refreshPaste);
       if (!done) spec.onCancel?.();
     },
   });

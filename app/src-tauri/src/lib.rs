@@ -745,6 +745,7 @@ pub fn run() {
             commands::tv::quit_app,
             commands::tv::list_folder,
             commands::tv::read_clipboard_text,
+            commands::tv::clipboard_has_text,
             #[cfg(feature = "e2e")]
             commands::tv::e2e_gamepad_inject,
             #[cfg(feature = "e2e")]

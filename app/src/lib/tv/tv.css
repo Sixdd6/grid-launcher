@@ -69,6 +69,7 @@ html[data-ui='tv'] .tv .stage { flex: 1 1 auto; min-height: 0; position: relativ
 html[data-ui='tv'] .tv .hints { position: relative; z-index: 35; flex: 0 0 3.6rem; display: flex; align-items: center; gap: 1.8rem; padding: 0 2.4rem; background: var(--panel); border-top: 1px solid var(--line); font-size: 1rem; }
 html[data-ui='tv'] .tv .hints .left { flex: 1; min-width: 0; color: var(--text-muted); display: flex; gap: 1rem; align-items: center; }
 html[data-ui='tv'] .tv .hint { display: inline-flex; align-items: center; gap: .55rem; color: var(--text-h); font-weight: 600; white-space: nowrap; }
+html[data-ui='tv'] .tv .hint.off { opacity: .45; }
 html[data-ui='tv'] .tv .offline-pill { color: var(--on-danger); background: var(--danger); border-radius: 100px; padding: .1rem .7rem; font-weight: 600; font-size: .85rem; }
 
 /* ---- Background art (items 9–12): the focused game's art behind the

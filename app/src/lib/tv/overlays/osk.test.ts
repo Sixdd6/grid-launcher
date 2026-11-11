@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BACK, CARET_LEFT, CARET_RIGHT, DONE, KEY_ROWS, keyFace, OSK_BINDS, oskOpen, oskRepeats, oskShown, oskType, physicalKey, SHIFT, SPACE, SYMBOLS, SYMBOLS_KEY, type Osk } from './osk';
+import { BACK, CARET_LEFT, CARET_RIGHT, DONE, KEY_ROWS, keyboardHints, keyFace, OSK_BINDS, oskOpen, oskPaste, oskRepeats, oskShown, oskType, PASTE, pasteText, physicalKey, SHIFT, SPACE, SYMBOLS, SYMBOLS_KEY, type Osk } from './osk';
 
 const typeAll = (k: Osk, keys: string[]) => keys.reduce(oskType, k);
 
@@ -72,8 +72,11 @@ describe('repeat (items 42–43)', () => {
 });
 
 describe('shortcuts (item 383)', () => {
-  it('X deletes, Y spaces, LB / RB move, LT shifts, Menu is Done', () => {
-    expect(OSK_BINDS).toEqual({ X: BACK, Y: SPACE, LB: CARET_LEFT, RB: CARET_RIGHT, LT: SHIFT, MENU: DONE });
+  it('X deletes, Y spaces, LB / RB move, LT shifts, Menu is Done, R3 pastes', () => {
+    expect(OSK_BINDS).toEqual({ X: BACK, Y: SPACE, LB: CARET_LEFT, RB: CARET_RIGHT, LT: SHIFT, MENU: DONE, R3: PASTE });
+  });
+  it('a held R3 pastes once', () => {
+    expect(oskRepeats('R3', 'a')).toBe(false);
   });
 });
 
@@ -88,10 +91,59 @@ describe('a physical keyboard (item 74)', () => {
     expect(physicalKey(oskOpen('', false), { key: 'Enter' })).toBeNull();
     expect(physicalKey({ ...oskOpen('', false), phys: true }, { key: 'Enter' })).toEqual({ type: DONE });
   });
-  it('leaves arrows, Escape and shortcuts to the controller stand-in', () => {
+  it('pastes on Ctrl+V or Cmd+V, Shift held or not', () => {
+    const k = oskOpen('', false);
+    expect(physicalKey(k, { key: 'v', ctrl: true })).toEqual({ type: PASTE });
+    expect(physicalKey(k, { key: 'V', ctrl: true })).toEqual({ type: PASTE });
+    expect(physicalKey(k, { key: 'v', meta: true })).toEqual({ type: PASTE });
+  });
+  it('leaves arrows, Escape and other shortcuts to the controller stand-in', () => {
     const k = oskOpen('', false);
     expect(physicalKey(k, { key: 'ArrowLeft' })).toBeNull();
     expect(physicalKey(k, { key: 'Escape' })).toBeNull();
-    expect(physicalKey(k, { key: 'v', ctrl: true })).toBeNull();
+    expect(physicalKey(k, { key: 'c', ctrl: true })).toBeNull();
+    expect(physicalKey(k, { key: 'a', meta: true })).toBeNull();
+  });
+});
+
+describe('hints (item 384)', () => {
+  it('shows R3 Paste before Done, greyed out when there is nothing to paste', () => {
+    const labels = (canPaste: boolean) => keyboardHints(canPaste).map((h) => `${h.button} ${h.label}${h.off ? ' (off)' : ''}`);
+    expect(labels(true)).toEqual(['A Type', 'X Delete', 'Y Space', 'LB ◀', 'RB ▶', 'R3 Paste', 'MENU Done', 'B Cancel']);
+    expect(labels(false)).toContain('R3 Paste (off)');
+    expect(keyboardHints(false).filter((h) => h.off)).toHaveLength(1);
+  });
+});
+
+describe('paste', () => {
+  it('drops line breaks and control characters, and turns tabs into spaces', () => {
+    expect(pasteText('https://romm.local\n')).toBe('https://romm.local');
+    expect(pasteText('ab\r\ncd\ref\u2028gh\u2029')).toBe('abcdefgh');
+    expect(pasteText('a\tb')).toBe('a b');
+    expect(pasteText('a\u0000b\u001bc\u007f')).toBe('abc');
+    expect(pasteText('Zelda: Ocarina — é ✓')).toBe('Zelda: Ocarina — é ✓');
+  });
+  it('inserts at the caret and moves the caret after the text', () => {
+    const k: Osk = { ...oskOpen('hello', false), caret: 2 };
+    expect(oskPaste(k, 'XY\n')).toEqual({ ...k, value: 'heXYllo', caret: 4 });
+    expect(oskPaste(oskOpen('', false), 'abc')).toEqual({ ...oskOpen('', false), value: 'abc', caret: 3 });
+  });
+  it('leaves Shift as it was', () => {
+    const k: Osk = { ...oskOpen('', false), shift: true };
+    expect(oskPaste(k, 'abc').shift).toBe(true);
+  });
+  it('changes nothing when there is nothing to paste', () => {
+    const k = oskOpen('hello', false);
+    expect(oskPaste(k, '')).toBe(k);
+    expect(oskPaste(k, '\r\n')).toBe(k);
+  });
+  it('fills a masked field, which still shows only dots', () => {
+    const k = oskPaste(oskOpen('old', true), 'secret');
+    expect(k.value).toBe('secret');
+    expect(oskShown(k, true)).toEqual({ before: '••••••', after: '' });
+  });
+  it('is a no-op for oskType (the caller reads the clipboard)', () => {
+    const k = oskOpen('hello', false);
+    expect(oskType(k, PASTE)).toBe(k);
   });
 });

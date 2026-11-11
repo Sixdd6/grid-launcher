@@ -12,17 +12,18 @@
 export type PromptSet = 'xbox' | 'ps' | 'nintendo' | '8bitdo' | 'keyboard';
 
 /** Every button a prompt can show. RS is the right stick (Scroll), DPAD the
- *  D-pad (Adjust, Read), LS the left stick press. */
-export type GlyphButton = 'A' | 'B' | 'X' | 'Y' | 'LB' | 'RB' | 'LT' | 'RT' | 'VIEW' | 'MENU' | 'RS' | 'LS' | 'DPAD';
+ *  D-pad (Adjust, Read), LS the left stick press, R3 the right stick press
+ *  (the on-screen keyboard's Paste; Ctrl+V on the keyboard). */
+export type GlyphButton = 'A' | 'B' | 'X' | 'Y' | 'LB' | 'RB' | 'LT' | 'RT' | 'VIEW' | 'MENU' | 'RS' | 'LS' | 'R3' | 'DPAD';
 
 export const GLYPH_BUTTONS: readonly GlyphButton[] = [
-  'A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'VIEW', 'MENU', 'RS', 'LS', 'DPAD',
+  'A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'VIEW', 'MENU', 'RS', 'LS', 'R3', 'DPAD',
 ];
 
 export const PROMPT_SETS: readonly PromptSet[] = ['xbox', 'ps', 'nintendo', '8bitdo', 'keyboard'];
 
 /** A glyph's file, or several drawn side by side (the keyboard's Page Up and
- *  Page Down for the right stick). */
+ *  Page Down for the right stick, Ctrl and V for R3). */
 export type GlyphFile = string | readonly string[];
 
 export const GLYPH_FILES: Record<PromptSet, Record<GlyphButton, GlyphFile>> = {
@@ -39,6 +40,7 @@ export const GLYPH_FILES: Record<PromptSet, Record<GlyphButton, GlyphFile>> = {
     MENU: 'xbox_button_menu.svg',
     RS: 'xbox_stick_r_vertical.svg',
     LS: 'xbox_ls.svg',
+    R3: 'xbox_rs.svg',
     DPAD: 'xbox_dpad.svg',
   },
   ps: {
@@ -54,6 +56,7 @@ export const GLYPH_FILES: Record<PromptSet, Record<GlyphButton, GlyphFile>> = {
     MENU: 'playstation5_button_options.svg',
     RS: 'playstation_stick_r_vertical.svg',
     LS: 'playstation_button_l3.svg',
+    R3: 'playstation_button_r3.svg',
     DPAD: 'playstation_dpad.svg',
   },
   nintendo: {
@@ -69,6 +72,7 @@ export const GLYPH_FILES: Record<PromptSet, Record<GlyphButton, GlyphFile>> = {
     MENU: 'switch_button_plus.svg',
     RS: 'switch_stick_r_vertical.svg',
     LS: 'switch_stick_l_press.svg',
+    R3: 'switch_stick_r_press.svg',
     DPAD: 'switch_dpad.svg',
   },
   '8bitdo': {
@@ -84,6 +88,7 @@ export const GLYPH_FILES: Record<PromptSet, Record<GlyphButton, GlyphFile>> = {
     MENU: 'switch_button_plus.svg',
     RS: 'switch_stick_r_vertical.svg',
     LS: 'switch_stick_l_press.svg',
+    R3: 'switch_stick_r_press.svg',
     DPAD: 'switch_dpad.svg',
   },
   keyboard: {
@@ -99,6 +104,7 @@ export const GLYPH_FILES: Record<PromptSet, Record<GlyphButton, GlyphFile>> = {
     MENU: 'keyboard_m.svg',
     RS: ['keyboard_page_up.svg', 'keyboard_page_down.svg'],
     LS: 'keyboard_arrows_all.svg',
+    R3: ['keyboard_ctrl.svg', 'keyboard_v.svg'],
     DPAD: 'keyboard_arrows_all.svg',
   },
 };
@@ -108,23 +114,23 @@ export const GLYPH_FILES: Record<PromptSet, Record<GlyphButton, GlyphFile>> = {
 export const GLYPH_LABELS: Record<PromptSet, Record<GlyphButton, string>> = {
   xbox: {
     A: 'A', B: 'B', X: 'X', Y: 'Y', LB: 'LB', RB: 'RB', LT: 'LT', RT: 'RT',
-    VIEW: 'View', MENU: 'Menu', RS: 'Right stick', LS: 'Left stick', DPAD: 'D-pad',
+    VIEW: 'View', MENU: 'Menu', RS: 'Right stick', LS: 'Left stick', R3: 'RS', DPAD: 'D-pad',
   },
   ps: {
     A: 'Cross', B: 'Circle', X: 'Square', Y: 'Triangle', LB: 'L1', RB: 'R1', LT: 'L2', RT: 'R2',
-    VIEW: 'Create', MENU: 'Options', RS: 'Right stick', LS: 'L3', DPAD: 'D-pad',
+    VIEW: 'Create', MENU: 'Options', RS: 'Right stick', LS: 'L3', R3: 'R3', DPAD: 'D-pad',
   },
   nintendo: {
     A: 'A', B: 'B', X: 'X', Y: 'Y', LB: 'L', RB: 'R', LT: 'ZL', RT: 'ZR',
-    VIEW: 'Minus', MENU: 'Plus', RS: 'Right stick', LS: 'Left stick', DPAD: 'D-pad',
+    VIEW: 'Minus', MENU: 'Plus', RS: 'Right stick', LS: 'Left stick', R3: 'Right stick press', DPAD: 'D-pad',
   },
   '8bitdo': {
     A: 'A', B: 'B', X: 'X', Y: 'Y', LB: 'L', RB: 'R', LT: 'L2', RT: 'R2',
-    VIEW: 'Minus', MENU: 'Plus', RS: 'Right stick', LS: 'Left stick', DPAD: 'D-pad',
+    VIEW: 'Minus', MENU: 'Plus', RS: 'Right stick', LS: 'Left stick', R3: 'Right stick press', DPAD: 'D-pad',
   },
   keyboard: {
     A: 'Enter', B: 'Esc', X: 'X', Y: 'Y', LB: 'Q', RB: 'E', LT: 'Z', RT: 'R',
-    VIEW: 'V', MENU: 'M', RS: 'Page Up / Page Down', LS: 'Arrow keys', DPAD: 'Arrow keys',
+    VIEW: 'V', MENU: 'M', RS: 'Page Up / Page Down', LS: 'Arrow keys', R3: 'Ctrl+V', DPAD: 'Arrow keys',
   },
 };
 

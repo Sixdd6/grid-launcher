@@ -177,6 +177,22 @@ pub fn read_clipboard_text(app: AppHandle) -> String {
     app.clipboard().read_text().unwrap_or_default()
 }
 
+/// Whether the clipboard holds text the on-screen keyboard can paste, so its
+/// R3 Paste hint can grey out when there is none. Only a yes or no crosses
+/// IPC: the text itself (maybe a token) stays here until a paste asks for it.
+#[tauri::command]
+pub fn clipboard_has_text(app: AppHandle) -> bool {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    app.clipboard().read_text().is_ok_and(|t| pasteable(&t))
+}
+
+/// Text a paste would put in a one-line field: anything but line breaks and
+/// other control characters (the keyboard drops those; `osk.ts` `pasteText`).
+fn pasteable(text: &str) -> bool {
+    text.chars()
+        .any(|c| !c.is_control() && c != '\u{2028}' && c != '\u{2029}')
+}
+
 /// e2e only: puts text on the clipboard, so a spec can check View-to-paste
 /// on Connect (the specs seed a non-secret server address).
 #[cfg(feature = "e2e")]
@@ -192,4 +208,18 @@ pub fn e2e_clipboard_write(app: AppHandle, text: String) -> Result<(), String> {
 #[tauri::command]
 pub fn e2e_gamepad_inject(state: State<'_, AppState>, events: Vec<crate::gamepad::GamepadInput>) {
     state.gamepad.apply(events);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pasteable;
+
+    #[test]
+    fn pasteable_text_is_anything_but_line_breaks_and_controls() {
+        assert!(pasteable("https://romm.local\n"));
+        assert!(pasteable(" "));
+        assert!(!pasteable(""));
+        assert!(!pasteable("\r\n\t"));
+        assert!(!pasteable("\u{2028}\u{2029}\u{7f}"));
+    }
 }

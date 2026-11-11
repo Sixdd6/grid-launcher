@@ -66,6 +66,6 @@
     {/if}
   </div>
   {#each keyed as h (h.key)}
-    <button class="hint" data-btn={h.button} data-testid={`tv-hint-${h.button}`}><Glyph button={h.button} />{h.label}</button>
+    <button class="hint" class:off={h.off} data-btn={h.button} data-testid={`tv-hint-${h.button}`} aria-disabled={h.off ? 'true' : undefined}><Glyph button={h.button} />{h.label}</button>
   {/each}
 </footer>

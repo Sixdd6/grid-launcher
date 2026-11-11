@@ -12,7 +12,7 @@ describe('glyphs', () => {
     expect(GLYPH_FILES).toEqual(map);
   });
 
-  it.each(PROMPT_SETS)('%s has all 13 buttons, each a bundled file with a label', (set) => {
+  it.each(PROMPT_SETS)('%s has all 14 buttons, each a bundled file with a label', (set) => {
     expect(Object.keys(GLYPH_FILES[set]).sort()).toEqual([...GLYPH_BUTTONS].sort());
     for (const b of GLYPH_BUTTONS) {
       const f = GLYPH_FILES[set][b];

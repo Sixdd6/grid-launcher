@@ -1244,6 +1244,9 @@ export const api = {
   listFolder: (path: string, files: boolean) => invoke<FolderListing>('list_folder', { path, files }),
   /** The clipboard's text (Connect's View-to-paste). Never log it. */
   readClipboardText: () => invoke<string>('read_clipboard_text'),
+  /** Whether the clipboard holds pasteable text (the on-screen keyboard's
+   *  R3 Paste hint); only the yes or no crosses IPC. */
+  clipboardHasText: () => invoke<boolean>('clipboard_has_text'),
   /** e2e builds only: synthetic controller input. */
   e2eGamepadInject: (events: GamepadInput[]) => invoke<void>('e2e_gamepad_inject', { events }),
   getUiSettings: () => invoke<UiSettings>('get_ui_settings'),

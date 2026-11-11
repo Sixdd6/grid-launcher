@@ -59,6 +59,8 @@ const FIXED: Partial<Record<PadButton, TvButton>> = {
   right_trigger: 'RT',
   select: 'VIEW',
   start: 'MENU',
+  // R3 pastes on the on-screen keyboard (user decision 2026-11-11).
+  right_stick: 'R3',
   dpad_up: 'UP',
   dpad_down: 'DOWN',
   dpad_left: 'LEFT',
@@ -74,8 +76,8 @@ const FACES: Record<TvAssignment, Partial<Record<PadButton, TvButton>>> = {
 
 /**
  * What a physical button means under an assignment. Only the four face
- * buttons move (item 55). Guide and the stick presses are bound to nothing
- * (ruling 5; the design gives L3 / R3 no role).
+ * buttons move (item 55). Guide and L3 are bound to nothing (ruling 5);
+ * R3 is the on-screen keyboard's paste (user decision 2026-11-11).
  */
 export function logicalButton(button: PadButton, assign: TvAssignment): TvButton | null {
   return FACES[assign][button] ?? FIXED[button] ?? null;

@@ -12,6 +12,7 @@
   "MENU": "xbox_button_menu.svg",
   "RS": "xbox_stick_r_vertical.svg",
   "LS": "xbox_ls.svg",
+  "R3": "xbox_rs.svg",
   "DPAD": "xbox_dpad.svg"
  },
  "ps": {
@@ -27,6 +28,7 @@
   "MENU": "playstation5_button_options.svg",
   "RS": "playstation_stick_r_vertical.svg",
   "LS": "playstation_button_l3.svg",
+  "R3": "playstation_button_r3.svg",
   "DPAD": "playstation_dpad.svg"
  },
  "nintendo": {
@@ -42,6 +44,7 @@
   "MENU": "switch_button_plus.svg",
   "RS": "switch_stick_r_vertical.svg",
   "LS": "switch_stick_l_press.svg",
+  "R3": "switch_stick_r_press.svg",
   "DPAD": "switch_dpad.svg"
  },
  "8bitdo": {
@@ -57,6 +60,7 @@
   "MENU": "switch_button_plus.svg",
   "RS": "switch_stick_r_vertical.svg",
   "LS": "switch_stick_l_press.svg",
+  "R3": "switch_stick_r_press.svg",
   "DPAD": "switch_dpad.svg"
  },
  "keyboard": {
@@ -75,6 +79,10 @@
    "keyboard_page_down.svg"
   ],
   "LS": "keyboard_arrows_all.svg",
+  "R3": [
+   "keyboard_ctrl.svg",
+   "keyboard_v.svg"
+  ],
   "DPAD": "keyboard_arrows_all.svg"
  }
 }

@@ -77,6 +77,7 @@ describe('logicalButton', () => {
       ['left_trigger', 'LT'],
       ['right_trigger', 'RT'],
       ['select', 'VIEW'],
+      ['right_stick', 'R3'],
       ['start', 'MENU'],
       ['dpad_up', 'UP'],
       ['dpad_down', 'DOWN'],
@@ -88,8 +89,8 @@ describe('logicalButton', () => {
       expect(logicalButton(b, 'nintendo')).toBe(l);
     }
   });
-  it('Guide and the stick presses do nothing (ruling 5)', () => {
-    for (const b of ['guide', 'left_stick', 'right_stick'] as PadButton[]) {
+  it('Guide and L3 do nothing (ruling 5)', () => {
+    for (const b of ['guide', 'left_stick'] as PadButton[]) {
       expect(logicalButton(b, 'xbox')).toBeNull();
       expect(logicalButton(b, 'nintendo')).toBeNull();
     }

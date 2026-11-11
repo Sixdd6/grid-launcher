@@ -2,7 +2,9 @@
 // `paintHints`). Pure: what each button does right now, and the left side.
 import type { GlyphButton } from './glyphs/glyphs';
 
-export type Hint = { button: GlyphButton; label: string };
+/** A hint; `off` greys it out (the button does nothing right now, as the
+ *  on-screen keyboard's R3 Paste with nothing on the clipboard). */
+export type Hint = { button: GlyphButton; label: string; off?: boolean };
 
 export type HintInput = {
   /** The top overlay: its own hints, or the default Select / Back. */

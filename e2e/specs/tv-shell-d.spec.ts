@@ -1,5 +1,5 @@
 import { APP_START_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
-import { connectPad, currentTab, focused, hints, hold, key, press, release, waitFocused, waitTab, XBOX_PAD } from '../helpers/tv.js';
+import { connectPad, currentTab, focused, hints, hold, invoke, key, press, release, waitFocused, waitTab, XBOX_PAD } from '../helpers/tv.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -71,7 +71,8 @@ async function menuLabels(): Promise<string[]> {
  * click outside (76); Quit's confirmation with Cancel focused (373–376); a
  * list on its checked option, headings skipped (368–372); the on-screen
  * keyboard: pad shortcuts, held-X repeat, physical typing and Enter, masked
- * fields, its hints and the hint bar (42–43, 74, 377–388; ruling 20); the
+ * fields, its hints and the hint bar (42–43, 74, 377–388; ruling 20), and
+ * paste with R3 or Ctrl+V (user decision 2026-11-11); the
  * card stack's limit and View on the newest card with an action (140–149);
  * the Notifications page (356–359).
  */
@@ -216,10 +217,13 @@ describe('tv-shell (d): overlays and notifications', () => {
 
   it('types on the on-screen keyboard with the pad, held X repeats, and Done keeps the value (items 42, 377–385, 388; ruling 20)', async () => {
     await clearLog();
+    await invoke('e2e_clipboard_write', { text: '' });
     await hook('openKeyboard', { title: 'Search', value: '' });
     await $(testId('tv-osk')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await waitFocused('k1');
-    expect(await hints()).toEqual(['A Type', 'X Delete', 'Y Space', 'LB ◀', 'RB ▶', 'MENU Done', 'B Cancel']);
+    expect(await hints()).toEqual(['A Type', 'X Delete', 'Y Space', 'LB ◀', 'RB ▶', 'R3 Paste', 'MENU Done', 'B Cancel']);
+    // Nothing on the clipboard: R3 Paste is greyed out (user decision 2026-11-11).
+    expect(await $(testId('tv-hint-R3')).getAttribute('aria-disabled')).toBe('true');
     // It stops at the hint bar, which stays in view (ruling 20).
     // (Measured once its slide-in has ended.)
     const gap = async () =>
@@ -290,6 +294,40 @@ describe('tv-shell (d): overlays and notifications', () => {
     await waitLayers(0);
     const log = await tvLog();
     expect(log[log.length - 1]).toBe('done:zelda ');
+  });
+
+  it('pastes the clipboard at the caret with R3 or Ctrl+V, line breaks dropped (user decision 2026-11-11)', async () => {
+    await clearLog();
+    await invoke('e2e_clipboard_write', { text: 'zel\nda\r\n' });
+    await hook('openKeyboard', { title: 'Search', value: 'ab' });
+    await waitFocused('k1');
+    // Something to paste: R3 Paste is not greyed out.
+    await browser.waitUntil(async () => (await $(testId('tv-hint-R3')).getAttribute('aria-disabled')) === null, {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'R3 Paste stayed greyed out with text on the clipboard',
+    });
+    await press('left_bumper');
+    await press('right_stick');
+    await browser.waitUntil(async () => (await oskValue()) === 'azeldab', { timeout: TRANSITION_TIMEOUT, timeoutMsg: `value was "${await oskValue()}"` });
+    // Ctrl+V pastes at the caret too, which sits after the pasted text.
+    await browser.keys(['Control', 'v']);
+    await browser.waitUntil(async () => (await oskValue()) === 'azeldazeldab', { timeout: TRANSITION_TIMEOUT, timeoutMsg: `value was "${await oskValue()}"` });
+    await press('start');
+    await waitLayers(0);
+    const log = await tvLog();
+    expect(log[log.length - 1]).toBe('done:azeldazeldab');
+  });
+
+  it('pastes into a masked field as dots only', async () => {
+    await clearLog();
+    await invoke('e2e_clipboard_write', { text: 'pasted-into-a-mask' });
+    await hook('openKeyboard', { title: 'API token', value: '', mask: true });
+    await waitFocused('k1');
+    await press('right_stick');
+    await browser.waitUntil(async () => (await oskValue()) === '•'.repeat(18), { timeout: TRANSITION_TIMEOUT, timeoutMsg: `value was "${await oskValue()}"` });
+    await key('Escape');
+    await waitLayers(0);
+    await invoke('e2e_clipboard_write', { text: '' });
   });
 
   it('shows dots in a masked field, which opens empty (item 386)', async () => {

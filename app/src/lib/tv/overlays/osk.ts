@@ -5,6 +5,7 @@
 // A masked field (a token, a password) shows dots and opens empty; the value
 // lives only in the keyboard's state and goes straight to the caller's
 // `onDone` (plan § rules: secrets never reach config, logs or IPC).
+import type { Hint } from '../hints';
 import type { TvButton } from '../input/buttons';
 
 /** The four rows of keys (item 378). */
@@ -27,6 +28,9 @@ export const DONE = 'DONE';
 /** LB / RB: the caret moves. */
 export const CARET_LEFT = 'L';
 export const CARET_RIGHT = 'R';
+/** R3 or Ctrl+V: the clipboard's text goes in at the caret (user decision
+ *  2026-11-11: no on-screen key, no hint). The caller reads the clipboard. */
+export const PASTE = 'PASTE';
 
 export type Osk = {
   value: string;
@@ -62,6 +66,7 @@ export function oskType(k: Osk, key: string): Osk {
       return { ...k, caret: Math.min(k.value.length, k.caret + 1) };
     case DONE:
     case SYMBOLS_KEY:
+    case PASTE:
       return k;
     default: {
       // The letter keys already show (and send) capitals while Shift is on.
@@ -69,6 +74,26 @@ export function oskType(k: Osk, key: string): Osk {
       return { ...k, value, caret: k.caret + key.length, shift: k.shift && key.length === 1 ? false : k.shift };
     }
   }
+}
+
+/**
+ * Clipboard text made fit for a one-line field: line breaks (a copied line
+ * often ends in one) and other control characters go, tabs become spaces.
+ */
+export function pasteText(raw: string): string {
+  return raw
+    .replace(/\t/g, ' ')
+    .replace(/[\r\n\u2028\u2029]/g, '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, '');
+}
+
+/** The keyboard after a paste: the cleaned text at the caret, the caret
+ *  after it. Shift is left as it was. Nothing to paste changes nothing. */
+export function oskPaste(k: Osk, raw: string): Osk {
+  const text = pasteText(raw);
+  if (text === '') return k;
+  return { ...k, value: k.value.slice(0, k.caret) + text + k.value.slice(k.caret), caret: k.caret + text.length };
 }
 
 /** A key's face and what it sends: a capital while Shift is on. */
@@ -95,7 +120,7 @@ export function oskRepeats(b: TvButton, focusedKey: string | null): boolean {
 }
 
 /** The buttons the keyboard binds itself (item 383): X deletes, Y adds a
- *  space, LB / RB move the caret, LT is Shift, Menu is Done. */
+ *  space, LB / RB move the caret, LT is Shift, Menu is Done, R3 pastes. */
 export const OSK_BINDS: Readonly<Partial<Record<TvButton, string>>> = {
   X: BACK,
   Y: SPACE,
@@ -103,16 +128,33 @@ export const OSK_BINDS: Readonly<Partial<Record<TvButton, string>>> = {
   RB: CARET_RIGHT,
   LT: SHIFT,
   MENU: DONE,
+  R3: PASTE,
 };
+
+/** The keyboard's hints (item 384), with R3 Paste greyed out while the
+ *  clipboard holds nothing to paste (user decision 2026-11-11). */
+export function keyboardHints(canPaste: boolean): Hint[] {
+  return [
+    { button: 'A', label: 'Type' },
+    { button: 'X', label: 'Delete' },
+    { button: 'Y', label: 'Space' },
+    { button: 'LB', label: '◀' },
+    { button: 'RB', label: '▶' },
+    { button: 'R3', label: 'Paste', off: !canPaste },
+    { button: 'MENU', label: 'Done' },
+    { button: 'B', label: 'Cancel' },
+  ];
+}
 
 /**
  * What a physical key does while the keyboard is open (item 74): a
  * printable key types itself (Space included), Backspace deletes, Enter is
- * Done once something was typed on the physical keyboard. Anything else
- * (arrows, Escape, Enter before typing) is the controller stand-in's.
+ * Done once something was typed on the physical keyboard, and Ctrl+V (Cmd+V
+ * on macOS) pastes. Anything else (arrows, Escape, Enter before typing,
+ * other shortcuts) is the controller stand-in's.
  */
 export function physicalKey(k: Osk, e: { key: string; ctrl?: boolean; meta?: boolean }): { type: string } | null {
-  if (e.ctrl || e.meta) return null;
+  if (e.ctrl || e.meta) return e.key.toLowerCase() === 'v' ? { type: PASTE } : null;
   if (e.key.length === 1) return { type: e.key };
   if (e.key === 'Backspace') return { type: BACK };
   if (e.key === 'Enter' && k.phys) return { type: DONE };
