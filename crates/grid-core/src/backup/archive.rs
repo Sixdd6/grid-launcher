@@ -1054,17 +1054,10 @@ mod tests {
         dir
     }
 
+    #[cfg(unix)]
     fn mode_of(meta: &fs::Metadata) -> u32 {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            meta.permissions().mode() & 0o777
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = meta;
-            0
-        }
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o777
     }
 
     /// The tree at `root` as the backup scans it.

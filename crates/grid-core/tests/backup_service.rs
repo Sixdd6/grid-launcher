@@ -1343,6 +1343,7 @@ async fn a_running_game_is_not_copied_from_this_computer() {
 /// Installs "Moss & Marrow" (rom 2, Windows) here with a Wine prefix that
 /// holds a save under `%PROGRAMDATA%\Moss` (a path with no user name in
 /// it), and gives cloud saves that folder plus one that doesn't exist.
+#[cfg(not(windows))]
 fn install_windows_game_with_saves(h: &Harness) -> PathBuf {
     let game_dir = h
         .library
@@ -1376,6 +1377,7 @@ fn install_windows_game_with_saves(h: &Harness) -> PathBuf {
     prefix
 }
 
+#[cfg(not(windows))]
 async fn mount_moss(h: &Harness) {
     let archive = zip_bytes(&[("Moss.exe", b"MZ fake")]);
     h.mount_game(

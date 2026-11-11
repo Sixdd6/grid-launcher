@@ -1,5 +1,6 @@
 //! Who a controller is. Pure: the poll thread reads the fields from gilrs.
 
+#[cfg(any(target_os = "linux", test))]
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -52,6 +53,7 @@ pub fn pad_key(uuid: [u8; 16]) -> String {
 
 /// Where Linux lists USB devices, each with `idVendor`, `idProduct` and
 /// `product` files.
+#[cfg(target_os = "linux")]
 pub const USB_DEVICES: &str = "/sys/bus/usb/devices";
 
 /// The product name a USB device with these ids reports about itself, read
@@ -61,6 +63,7 @@ pub const USB_DEVICES: &str = "/sys/bus/usb/devices";
 /// Controller", while the receiver itself says "8BitDo Pro 3 Receiver".
 /// `None` when no device matches or it has no name (Bluetooth pads have no
 /// USB device at all).
+#[cfg(any(target_os = "linux", test))]
 pub fn usb_product_name(root: &Path, vendor: u16, product: u16) -> Option<String> {
     usb_devices(root, vendor, product)
         .into_iter()
@@ -71,6 +74,7 @@ pub fn usb_product_name(root: &Path, vendor: u16, product: u16) -> Option<String
 /// (its `<device>:<config>.<interface>` entries in `root`, normally
 /// [`USB_DEVICES`]). The 8BitDo Pro 3 receiver's pad interface is bound to
 /// `xpad`, which always reports the triggers as `ABS_Z` / `ABS_RZ`.
+#[cfg(any(target_os = "linux", all(test, unix)))]
 pub fn usb_uses_driver(root: &Path, vendor: u16, product: u16, driver: &str) -> bool {
     let Ok(entries) = std::fs::read_dir(root) else {
         return false;
@@ -95,6 +99,7 @@ pub fn usb_uses_driver(root: &Path, vendor: u16, product: u16, driver: &str) -> 
 }
 
 /// The USB device folders in `root` with these ids, sorted.
+#[cfg(any(target_os = "linux", test))]
 fn usb_devices(root: &Path, vendor: u16, product: u16) -> Vec<std::path::PathBuf> {
     let Ok(entries) = std::fs::read_dir(root) else {
         return Vec::new();
@@ -112,6 +117,7 @@ fn usb_devices(root: &Path, vendor: u16, product: u16) -> Vec<std::path::PathBuf
     dirs
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn read_trimmed(path: &Path) -> Option<String> {
     std::fs::read_to_string(path)
         .ok()

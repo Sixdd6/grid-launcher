@@ -6,9 +6,11 @@
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 
+// The bus types are matched as patterns, so they take constant-style names.
 use windows_sys::Win32::Storage::FileSystem::{
-    BusType1394, BusTypeMmc, BusTypeSd, BusTypeUsb, GetDriveTypeW, GetLogicalDrives,
-    GetVolumeInformationW, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    BusType1394 as BUS_TYPE_1394, BusTypeMmc as BUS_TYPE_MMC, BusTypeSd as BUS_TYPE_SD,
+    BusTypeUsb as BUS_TYPE_USB, GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW,
+    FILE_SHARE_READ, FILE_SHARE_WRITE,
 };
 use windows_sys::Win32::System::Ioctl::{
     PropertyStandardQuery, StorageDeviceProperty, IOCTL_STORAGE_QUERY_PROPERTY,
@@ -93,7 +95,7 @@ fn on_external_bus(letter: char) -> bool {
         unsafe { std::ptr::read_unaligned(buffer.as_ptr().cast()) };
     matches!(
         descriptor.BusType,
-        BusTypeUsb | BusTypeSd | BusTypeMmc | BusType1394
+        BUS_TYPE_USB | BUS_TYPE_SD | BUS_TYPE_MMC | BUS_TYPE_1394
     )
 }
 

@@ -12,7 +12,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use grid_core::backup::drives::drive_key;
-use grid_core::backup::pack::{self, PackEmulator, PackGame, PackOs};
+#[cfg(target_os = "linux")]
+use grid_core::backup::pack::PackEmulator;
+use grid_core::backup::pack::{self, PackGame, PackOs};
+#[cfg(not(windows))]
 use grid_core::config::Config;
 use grid_core::launch::profiles::EmulatorProfile;
 use grid_core::library::backup_job::DriveTarget;
@@ -61,6 +64,8 @@ struct Harness {
     _tmp: tempfile::TempDir,
     library: PathBuf,
     mount: PathBuf,
+    // Read only by the tests that run off Windows.
+    #[cfg_attr(windows, allow(dead_code))]
     config_path: PathBuf,
     registry: Arc<Registry>,
     service: Arc<InstallService>,
@@ -145,6 +150,7 @@ impl Harness {
         }
     }
 
+    #[cfg(not(windows))]
     fn config(&self) -> Config {
         Config::load(&self.config_path).unwrap()
     }
@@ -326,6 +332,7 @@ async fn a_native_game_installs_through_the_native_finalize() {
 
 /// The saves of "My Game" on the drive: `%PROGRAMDATA%\My Game` (no user
 /// name in its path) copied, `%APPDATA%\My Game` only recorded.
+#[cfg(not(windows))]
 fn put_saves(h: &Harness) -> serde_json::Value {
     let parts = put_tar(
         h,
@@ -348,6 +355,7 @@ fn put_saves(h: &Harness) -> serde_json::Value {
 
 /// The saves `put_saves` wrote, as a restore off Windows puts them back in
 /// the game's new prefix, and the folders given to cloud saves.
+#[cfg(not(windows))]
 fn assert_saves_restored(h: &Harness, game_dir: &Path) {
     let config = h.config();
     assert_eq!(
