@@ -34,6 +34,18 @@
     });
   });
 
+  // Keyed by button, so a hint that comes or goes (X Install on Discover's
+  // covers) leaves the others' nodes alone: keyed by position, every hint
+  // after it swapped its glyph mask, and the masks flickered as focus moved.
+  let keyed = $derived.by(() => {
+    const seen = new Map<string, number>();
+    return hints.map((h) => {
+      const n = seen.get(h.button) ?? 0;
+      seen.set(h.button, n + 1);
+      return { ...h, key: `${h.button}#${n}` };
+    });
+  });
+
   let left = $derived(
     hintLeft({
       noServer: session.offline && !session.connected,
@@ -52,7 +64,7 @@
       <span>{left.text}</span>
     {/if}
   </div>
-  {#each hints as h, i (i)}
+  {#each keyed as h (h.key)}
     <button class="hint" data-btn={h.button} data-testid={`tv-hint-${h.button}`}><Glyph button={h.button} />{h.label}</button>
   {/each}
 </footer>
