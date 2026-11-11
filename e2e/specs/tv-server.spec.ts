@@ -158,10 +158,9 @@ describe('tv-server: the Server tab', () => {
     await waitFocused('r503');
     await key('ArrowLeft');
     await waitFocused('r-discover');
+    // Right comes back to the cover left, in its own row, not the first row.
     await key('ArrowRight');
-    await waitDiscoverFocus();
-    await key('ArrowDown');
-    await waitFocused('r503');
+    await waitFocused('r503', 'Right from the rail did not come back to the cover left');
     await key('e');
     await waitTab('downloads');
     await key('q');

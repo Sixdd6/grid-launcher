@@ -14,6 +14,11 @@ const lastIn = new WeakMap<Element, Element>();
 export function rememberLast(el: Element): void {
   const area = el.closest('[data-nav]');
   if (area) lastIn.set(area, el);
+  // The area beside a rail too: Discover's shelves are each their own row,
+  // so Right from the rail would otherwise find nothing remembered for the
+  // shelves as a whole and start at the first one (item 85).
+  const target = el.closest('[data-rail-target]');
+  if (target && target !== area) lastIn.set(target, el);
 }
 
 /** Shown (not inside a `display: none` subtree). */
