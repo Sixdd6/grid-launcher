@@ -136,6 +136,7 @@ impl GamepadService {
     fn emit(&self, events: Vec<PadEvent>) {
         if let Some(emit) = self.emitter.get() {
             for event in &events {
+                tracing::trace!(?event, "gamepad: send");
                 emit(event);
             }
         }
@@ -216,24 +217,28 @@ impl GamepadService {
                 return;
             }
         };
+        let mut z_triggers = ZTriggers::default();
         let present: Vec<GamepadInput> = gilrs
             .gamepads()
-            .map(|(id, pad)| GamepadInput::Connect {
-                pad: pad_info(id, &pad),
+            .map(|(id, pad)| {
+                z_triggers.connect(pad_id(id), is_xpad(&pad));
+                GamepadInput::Connect {
+                    pad: pad_info(id, &pad),
+                }
             })
             .collect();
         tracing::info!(controllers = present.len(), "gamepad: reader started");
         self.apply(present);
-        let mut z_triggers = ZTriggers::default();
         loop {
             let mut inputs = Vec::new();
             while let Some(event) = gilrs.next_event() {
                 let id = pad_id(event.id);
                 match event.event {
                     gilrs::EventType::Connected => {
-                        z_triggers.forget(id);
+                        let pad = gilrs.gamepad(event.id);
+                        z_triggers.connect(id, is_xpad(&pad));
                         inputs.push(GamepadInput::Connect {
-                            pad: pad_info(event.id, &gilrs.gamepad(event.id)),
+                            pad: pad_info(event.id, &pad),
                         })
                     }
                     gilrs::EventType::Disconnected => {
@@ -248,7 +253,15 @@ impl GamepadService {
                         } else {
                             Side::Right
                         };
-                        if let Some(event) = z_triggers.event(id, side, value) {
+                        let event = z_triggers.event(id, side, value);
+                        tracing::trace!(
+                            id,
+                            ?side,
+                            value,
+                            trigger = event.is_some(),
+                            "gamepad: z axis"
+                        );
+                        if let Some(event) = event {
                             inputs.push(GamepadInput::Input { id, event });
                         }
                     }
@@ -278,6 +291,23 @@ fn pad_info(id: gilrs::GamepadId, pad: &gilrs::Gamepad<'_>) -> PadInfo {
         pad.vendor_id(),
         pad.product_id(),
     )
+}
+
+/// Whether the kernel's xpad driver runs this pad, so its Z axes are the
+/// triggers ([`ZTriggers`]). Linux only; USB pads only.
+fn is_xpad(pad: &gilrs::Gamepad<'_>) -> bool {
+    #[cfg(target_os = "linux")]
+    if let (Some(vendor), Some(product)) = (pad.vendor_id(), pad.product_id()) {
+        return identity::usb_uses_driver(
+            std::path::Path::new(identity::USB_DEVICES),
+            vendor,
+            product,
+            "xpad",
+        );
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = pad;
+    false
 }
 
 /// An SDL mapping's name when gilrs has one (curated per model); otherwise,

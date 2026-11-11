@@ -62,23 +62,60 @@ pub const USB_DEVICES: &str = "/sys/bus/usb/devices";
 /// `None` when no device matches or it has no name (Bluetooth pads have no
 /// USB device at all).
 pub fn usb_product_name(root: &Path, vendor: u16, product: u16) -> Option<String> {
-    let read = |dir: &Path, file: &str| {
-        std::fs::read_to_string(dir.join(file))
-            .ok()
-            .map(|s| s.trim().to_string())
+    usb_devices(root, vendor, product)
+        .into_iter()
+        .find_map(|dir| read_trimmed(&dir.join("product")).filter(|name| !name.is_empty()))
+}
+
+/// Whether a USB device with these ids has an interface bound to `driver`
+/// (its `<device>:<config>.<interface>` entries in `root`, normally
+/// [`USB_DEVICES`]). The 8BitDo Pro 3 receiver's pad interface is bound to
+/// `xpad`, which always reports the triggers as `ABS_Z` / `ABS_RZ`.
+pub fn usb_uses_driver(root: &Path, vendor: u16, product: u16, driver: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return false;
     };
-    let mut dirs: Vec<_> = std::fs::read_dir(root)
-        .ok()?
+    let interfaces: Vec<_> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
+    usb_devices(root, vendor, product).iter().any(|dev| {
+        let Some(name) = dev.file_name().and_then(|n| n.to_str()) else {
+            return false;
+        };
+        let prefix = format!("{name}:");
+        interfaces.iter().any(|iface| {
+            iface
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(&prefix))
+                && std::fs::read_link(iface.join("driver"))
+                    .ok()
+                    .and_then(|l| l.file_name().map(|n| n == driver))
+                    .unwrap_or(false)
+        })
+    })
+}
+
+/// The USB device folders in `root` with these ids, sorted.
+fn usb_devices(root: &Path, vendor: u16, product: u16) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut dirs: Vec<_> = entries
         .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|dir| {
+            let id = |file: &str| {
+                read_trimmed(&dir.join(file)).and_then(|s| u16::from_str_radix(&s, 16).ok())
+            };
+            id("idVendor") == Some(vendor) && id("idProduct") == Some(product)
+        })
         .collect();
     dirs.sort();
-    dirs.into_iter().find_map(|dir| {
-        let id = |file| read(&dir, file).and_then(|s| u16::from_str_radix(&s, 16).ok());
-        if id("idVendor")? != vendor || id("idProduct")? != product {
-            return None;
-        }
-        read(&dir, "product").filter(|name| !name.is_empty())
-    })
+    dirs
+}
+
+fn read_trimmed(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 #[cfg(test)]
@@ -93,6 +130,38 @@ mod tests {
         if let Some(name) = name {
             std::fs::write(dir.join("product"), format!("{name}\n")).unwrap();
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pad_bound_to_xpad_is_found_by_its_interfaces() {
+        let root = tempfile::tempdir().unwrap();
+        let drivers = root.path().join("drivers");
+        std::fs::create_dir_all(drivers.join("xpad")).unwrap();
+        std::fs::create_dir_all(drivers.join("usbhid")).unwrap();
+        usb_device(
+            root.path(),
+            "5-3.3",
+            "2dc8",
+            "310b",
+            Some("8BitDo Pro 3 Receiver"),
+        );
+        usb_device(root.path(), "5-3", "05e3", "0610", None);
+        let iface = |name: &str, driver: Option<&str>| {
+            let dir = root.path().join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            if let Some(d) = driver {
+                std::os::unix::fs::symlink(drivers.join(d), dir.join("driver")).unwrap();
+            }
+        };
+        iface("5-3.3:1.0", Some("xpad"));
+        iface("5-3.3:1.1", Some("usbhid"));
+        iface("5-3:1.0", Some("usbhid"));
+        iface("1-1:1.0", Some("xpad"));
+        assert!(usb_uses_driver(root.path(), 0x2dc8, 0x310b, "xpad"));
+        assert!(!usb_uses_driver(root.path(), 0x05e3, 0x0610, "xpad"));
+        assert!(!usb_uses_driver(root.path(), 0x057e, 0x2009, "xpad"));
+        assert!(!usb_uses_driver(&root.path().join("missing"), 1, 2, "xpad"));
     }
 
     #[test]

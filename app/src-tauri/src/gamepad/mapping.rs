@@ -283,13 +283,18 @@ fn set_trigger(pad: &mut PadState, id: u32, side: Side, value: f32, out: &mut Ve
 
 /// Analog triggers that arrive as the Z axes. A pad gilrs has no SDL mapping
 /// for (the 8BitDo Pro 3 receiver, 2dc8:310b) gets gilrs' default mapping,
-/// which reports xpad's `ABS_Z` / `ABS_RZ` triggers as `LeftZ` / `RightZ`,
-/// -1 at rest to 1 fully pulled, instead of as trigger buttons. Some
-/// DirectInput pads put the right stick on those axes instead, centred at 0,
-/// so each axis is judged once per connection by its first value: a trigger
-/// starts from rest near -1, a stick moves away from 0.
+/// which reports the kernel's `ABS_Z` / `ABS_RZ` as `LeftZ` / `RightZ`, -1 at
+/// rest to 1 fully pulled, instead of as trigger buttons.
+///
+/// On a pad driven by `xpad` those axes are always the triggers. Elsewhere
+/// some DirectInput pads put the right stick on them, centred at 0, so each
+/// axis is judged once per connection by its first value: a trigger starts
+/// from rest near -1. That guess can miss: GRID reads in ticks, and a quick
+/// pull may first arrive fully pulled (seen on the Pro 3 before the xpad
+/// check), so it is only the fallback.
 #[derive(Debug, Default)]
 pub struct ZTriggers {
+    xpad: BTreeSet<u32>,
     is_trigger: BTreeMap<(u32, Side), bool>,
 }
 
@@ -297,13 +302,22 @@ pub struct ZTriggers {
 const Z_TRIGGER_START: f32 = -0.5;
 
 impl ZTriggers {
+    /// A pad connected; `xpad` when its driver is xpad.
+    pub fn connect(&mut self, pad: u32, xpad: bool) {
+        self.forget(pad);
+        if xpad {
+            self.xpad.insert(pad);
+        }
+    }
+
     /// A Z axis value as the trigger's analog value (0…1), or `None` when
     /// this axis is not a trigger.
     pub fn event(&mut self, pad: u32, side: Side, value: f32) -> Option<RawEvent> {
+        let xpad = self.xpad.contains(&pad);
         let is_trigger = *self
             .is_trigger
             .entry((pad, side))
-            .or_insert(value < Z_TRIGGER_START);
+            .or_insert(xpad || value < Z_TRIGGER_START);
         is_trigger.then(|| RawEvent::Changed {
             button: match side {
                 Side::Left => PadButton::LeftTrigger,
@@ -315,6 +329,7 @@ impl ZTriggers {
 
     /// Forgets a disconnected pad (gilrs reuses its ids).
     pub fn forget(&mut self, pad: u32) {
+        self.xpad.remove(&pad);
         self.is_trigger.retain(|&(p, _), _| p != pad);
     }
 }
@@ -322,6 +337,24 @@ impl ZTriggers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn on_an_xpad_pad_the_z_axes_are_triggers_even_when_first_seen_pulled() {
+        let mut z = ZTriggers::default();
+        z.connect(0, true);
+        assert_eq!(
+            z.event(0, Side::Left, 1.0),
+            Some(RawEvent::Changed {
+                button: PadButton::LeftTrigger,
+                value: 1.0
+            })
+        );
+        z.connect(1, false);
+        assert_eq!(z.event(1, Side::Left, 1.0), None);
+        // A reconnect as a non-xpad pad drops the xpad mark.
+        z.connect(0, false);
+        assert_eq!(z.event(0, Side::Right, 0.0), None);
+    }
 
     #[test]
     fn z_axes_resting_low_are_analog_triggers() {
