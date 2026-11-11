@@ -1,25 +1,33 @@
 name: Build
 
-# One pipeline for the Rust app. It runs only when a release is published
-# or when started by hand (workflow_dispatch), never on a push or pull
-# request: local checks gate day-to-day work. A release runs the gates and
-# the end-to-end suite, then builds the artifacts. A workflow_dispatch run
-# does everything as a dry run — it builds version 0.0.0-dev, uploads to
-# the run, and attaches nothing.
+# One pipeline for the Rust app. It runs only when a `v*` tag is pushed or
+# when started by hand (workflow_dispatch), never on a branch push or pull
+# request: local checks gate day-to-day work. A tag push runs the gates and
+# the end-to-end suite, builds the artifacts, and attaches them to the tag's
+# DRAFT release (creating the draft if there is none). It never publishes:
+# the maintainer publishes the draft once all five files are on it, so users
+# (and the app's update check, which reads releases/latest) never see a
+# release without its files. A workflow_dispatch run does everything as a
+# dry run — it builds version 0.0.0-dev, uploads to the run, and attaches
+# nothing.
 #
-# `types: [published]` only. It fires both for a release published directly
-# and for a draft that is later published, which is the flow that writes the
-# notes first; `created` misses the draft flow, and listing both would build
-# a direct publish twice.
+# GitHub starts no workflow for a draft release's events, which is why the
+# trigger is the tag push and not the draft. Publishing starts nothing.
 on:
-  release:
-    types: [published]
+  push:
+    tags: ['v*']
   workflow_dispatch:
+
+# A moved tag (a fix after a failed run) or a second dispatch replaces the
+# run still going for the same ref.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
     name: Check (Linux)
-    # Runs on release events too: both build jobs `needs` it, so a tag can
+    # Runs on tag pushes too: every build job `needs` it, so a tag can
     # never ship artifacts from a tree CI has not tested.
     # A fixed image, not ubuntu-latest: that label moves to Ubuntu 26 from
     # 2026-10-19, and the apt package names below are the 24.04 ones (the
@@ -60,7 +68,7 @@ jobs:
     name: Check (Windows)
     # Lints and tests the Windows code paths, so a Windows-only failure is
     # caught on the pull request that introduces it rather than on the
-    # release tag. Runs on release events too — it gates `build-windows`.
+    # release tag. Runs on tag pushes too — it gates `build-windows`.
     runs-on: windows-latest
     defaults:
       run:
@@ -90,8 +98,8 @@ jobs:
 
   e2e:
     name: End-to-end
-    # Runs on every trigger (release, workflow_dispatch); both build jobs
-    # `need` it.
+    # Runs on every trigger (tag push, workflow_dispatch); every build job
+    # `needs` it.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -119,7 +127,7 @@ jobs:
     name: Version
     # One job so the semver rules live in exactly one place; both build jobs
     # read `needs.version.outputs.version`. Seconds on a plain runner.
-    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -129,7 +137,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
             if [ "$VERSION" = "${GITHUB_REF_NAME}" ]; then
               echo "release tag must start with v (got ${GITHUB_REF_NAME})" >&2
@@ -149,7 +157,7 @@ jobs:
 
   build-linux:
     name: AppImage
-    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: [version, check, check-windows, e2e]
     runs-on: ubuntu-24.04
     # Built inside Debian 13, so the AppImage bundles its WebKitGTK 2.54: the
@@ -163,8 +171,6 @@ jobs:
       # No FUSE in a container: the bundler's linuxdeploy (an AppImage itself)
       # extracts itself and runs instead of mounting.
       APPIMAGE_EXTRACT_AND_RUN: "1"
-    permissions:
-      contents: write
     steps:
       # Before checkout: git for actions/checkout, curl for the Rust
       # toolchain, wget for appimagetool. Root in the container, so no sudo.
@@ -263,17 +269,9 @@ jobs:
             dist/grid-launcher-*-x86_64.AppImage
             dist/grid-launcher-*-x86_64.AppImage.zsync
 
-      - name: Attach to release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          files: |
-            dist/grid-launcher-*-x86_64.AppImage
-            dist/grid-launcher-*-x86_64.AppImage.zsync
-
   build-linux-packages:
     name: Linux packages (.deb, .rpm)
-    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: [version, check, check-windows, e2e]
     # Ubuntu 24.04 (glibc 2.39): the packages use the system's WebKitGTK and
     # declare it as a dependency instead of bundling one, so each distribution
@@ -281,8 +279,6 @@ jobs:
     # renders on the GPU with NVIDIA on Wayland; the AppImage's bundled 2.54.0
     # (Debian 13) blinks on fades there (2026-10-30).
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -334,21 +330,11 @@ jobs:
             dist/grid-launcher_*_amd64.deb
             dist/grid-launcher-*.x86_64.rpm
 
-      - name: Attach to release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          files: |
-            dist/grid-launcher_*_amd64.deb
-            dist/grid-launcher-*.x86_64.rpm
-
   build-windows:
     name: Windows installer
-    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: [version, check, check-windows, e2e]
     runs-on: windows-latest
-    permissions:
-      contents: write
     defaults:
       run:
         shell: bash
@@ -416,8 +402,48 @@ jobs:
           if-no-files-found: error
           path: dist/grid-launcher-*-windows-x86_64-setup.exe
 
-      - name: Attach to release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+  attach:
+    name: Attach to draft release
+    # The only job that writes releases, and only after every build: the
+    # draft gets all five files or none. It never publishes the release.
+    if: github.event_name == 'push'
+    needs: [version, build-linux, build-linux-packages, build-windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          files: dist/grid-launcher-*-windows-x86_64-setup.exe
+          path: dist
+          merge-multiple: true
+      - name: Attach to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          files=(
+            "dist/grid-launcher-${VERSION}-x86_64.AppImage"
+            "dist/grid-launcher-${VERSION}-x86_64.AppImage.zsync"
+            "dist/grid-launcher_${VERSION}_amd64.deb"
+            "dist/grid-launcher-${VERSION//-/+}-1.x86_64.rpm"
+            "dist/grid-launcher-${VERSION}-windows-x86_64-setup.exe"
+          )
+          ls -l dist
+          for f in "${files[@]}"; do
+            [ -f "$f" ] || { echo "missing build output: $f" >&2; exit 1; }
+          done
+          # gh finds a draft by its tag name. The usual flow drafts the notes
+          # first; a draft is created here only when there is none yet.
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$draft" != true ]; then
+              echo "::warning::$TAG is already published; its files are being replaced"
+            fi
+          else
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" \
+              --notes "Release notes to come."
+          fi
+          gh release upload "$TAG" "${files[@]}" --clobber
+          echo "::notice::Attached ${#files[@]} files to the $TAG release. Publish it when ready."

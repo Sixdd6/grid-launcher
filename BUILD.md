@@ -161,9 +161,9 @@ vendored unrar C++ (which MinGW cannot compile) goes to a stub compiler, and `ap
 placeholder inside the container. It does not run the Windows tests; `cargo test` on
 Windows still needs the CI job or a Windows machine.
 
-CI runs only when a release is published or when the workflow is started by hand
-(`workflow_dispatch`). Pushes and pull requests trigger nothing, so run the gate locally
-before every push. The Windows runner's `TEMP` is a short 8.3 path (`RUNNER~1`); run
+CI runs only when a `v*` tag is pushed or when the workflow is started by hand
+(`workflow_dispatch`). Branch pushes and pull requests trigger nothing, so run the gate
+locally before every push. The Windows runner's `TEMP` is a short 8.3 path (`RUNNER~1`); run
 Windows tests with a short `TEMP` too, or path comparisons that pass locally fail there.
 
 ## End-to-end tests
@@ -334,34 +334,55 @@ tag, and fix every failure first:
     scripts/ctr.sh wincheck   # the check-windows job's clippy
     scripts/ctr.sh e2e        # the e2e job
 
-CI runs these jobs only after the release is published. A failure found there means a
-fix commit and a re-tag. `wincheck` does not run the Windows tests, so read new
-`cfg(windows)` test code for Unix-only assumptions, such as `/`-rooted absolute paths.
+CI runs these jobs when the tag is pushed. A failure found there means a fix commit and
+a moved tag, but users see none of it: the release stays a draft until you publish it.
+`wincheck` does not run the Windows tests, so read new `cfg(windows)` test code for
+Unix-only assumptions, such as `/`-rooted absolute paths.
 
-1. Tag `vX.Y.Z` (or `vX.Y.Z-pre`, any semver pre-release) and publish a GitHub release
-   for it. `build.yml` triggers on `release: [published]` only, which covers both a
-   direct publish and a draft published later.
+1. Draft the release with its notes, then push the tag (`vX.Y.Z`, or `vX.Y.Z-pre` for any
+   semver pre-release):
+
+       gh release create vX.Y.Z --draft --title vX.Y.Z --notes-file notes.md
+       git tag vX.Y.Z && git push origin vX.Y.Z
+
+   `build.yml` triggers on the tag push. GitHub starts no workflow for a draft's events,
+   and publishing starts nothing. If you push the tag before drafting, the `attach` job
+   creates a placeholder draft for you to edit.
 2. The `version` job strips the leading `v` and rejects a tag that is not semver.
 3. `check`, `check-windows` and `e2e` must pass; every build job `needs` them, so a tag can
    never ship artifacts from an untested tree.
 4. `build-linux` builds the AppImage, extracts its AppDir, and repacks it with
    `appimagetool -u "gh-releases-zsync|Sixdd6|grid-launcher|latest|grid-launcher-*-x86_64.AppImage.zsync"`,
-   because Tauri's bundler embeds no update information. It attaches
+   because Tauri's bundler embeds no update information. It builds
    `grid-launcher-<version>-x86_64.AppImage` and its `.zsync`. It runs in a Debian 13
    container (see "Build container").
-5. `build-linux-packages` builds the `.deb` and `.rpm` on Ubuntu 24.04 and attaches
+5. `build-linux-packages` builds the `.deb` and `.rpm` on Ubuntu 24.04:
    `grid-launcher_<version>_amd64.deb` and `grid-launcher-<version>-1.x86_64.rpm`. They
    depend on the system's WebKitGTK instead of bundling one, so each distribution renders
    with its own and patches it with its own updates. They install `/usr/bin/grid-launcher`
    (`mainBinaryName`, passed at build time so local and e2e builds keep `target/*/app`).
    An RPM version cannot contain `-`, so a pre-release's separator becomes `+` there.
    `scripts/ctr.sh packages [version]` builds the same two files into `ctr-out/`.
-6. `build-windows` builds the NSIS installer and attaches
+6. `build-windows` builds the NSIS installer,
    `grid-launcher-<version>-windows-x86_64-setup.exe`.
+7. `attach` runs after all three build jobs. It is the only job that can write releases.
+   It checks that all five files exist and uploads them to the tag's draft release
+   (`--clobber`, so a re-run replaces them). It never publishes.
+8. Check the draft has its five files, then publish it:
 
-A `workflow_dispatch` run is a dry run: it builds version `0.0.0-dev`, uploads the
-artifacts to the run, and attaches nothing to any release. A version containing `dev`
-also suppresses the app's own update check.
+       gh release edit vX.Y.Z --draft=false --verify-tag
+
+   Publishing is the moment users see the release, and the app's update check (which reads
+   `releases/latest`) starts offering it.
+
+To fix a failed run, commit the fix, then move the tag. The new push cancels any run still
+going for the old tag:
+
+    git tag -f vX.Y.Z <fix> && git push -f origin refs/tags/vX.Y.Z
+
+A `workflow_dispatch` run (`gh workflow run build.yml --ref main`) is a dry run: it
+builds version `0.0.0-dev`, uploads the artifacts to the run, and attaches nothing to any
+release. A version containing `dev` also suppresses the app's own update check.
 
 ## Secret handling
 
