@@ -9,6 +9,7 @@ glyph is the Xbox logo and is left out); the Home / Guide button has no glyph.
 - `xbox` — Xbox Series. `ps` — PlayStation (DualSense; L1/R1/L2/R2, Create, Options).
 - `nintendo` — Switch 2 (L/R, ZL/ZR, −/+).
 - `8bitdo` — 8BitDo Pro series: the plain letter glyphs, L/R, rounded L2/R2, −/+.
+- `keyboard` — Keyboard & Mouse keys, shown whenever a key was pressed last: Enter, Esc, X, Y, Q, E, Z, R, V, M, the arrow keys, and Page Up + Page Down drawn side by side for the right stick (a list in `map.json`).
 
 The card draws each glyph as a CSS mask filled with the theme's text colour, so
 the white artwork works in light and dark.

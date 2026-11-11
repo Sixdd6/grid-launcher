@@ -82,7 +82,8 @@ var GL = {
   xbox: { A: 'A', B: 'B', X: 'X', Y: 'Y', LB: 'LB', RB: 'RB', LT: 'LT', RT: 'RT', VIEW: '⧉', MENU: '≡', GUIDE: '⌂', LS: 'L3', RS: 'RS', DPAD: '✚' },
   ps: { A: '✕', B: '○', X: '□', Y: '△', LB: 'L1', RB: 'R1', LT: 'L2', RT: 'R2', VIEW: '⧉', MENU: '≡', GUIDE: '⌂', LS: 'L3', RS: 'RS', DPAD: '✚' },
   nintendo: { A: 'A', B: 'B', X: 'X', Y: 'Y', LB: 'L', RB: 'R', LT: 'ZL', RT: 'ZR', VIEW: '−', MENU: '+', GUIDE: '⌂', LS: 'L3', RS: 'RS', DPAD: '✚' },
-  '8bitdo': { A: 'A', B: 'B', X: 'X', Y: 'Y', LB: 'L', RB: 'R', LT: 'L2', RT: 'R2', VIEW: 'Select', MENU: 'Start', GUIDE: '⌂', LS: 'L3', RS: 'RS', DPAD: '✚' }
+  '8bitdo': { A: 'A', B: 'B', X: 'X', Y: 'Y', LB: 'L', RB: 'R', LT: 'L2', RT: 'R2', VIEW: 'Select', MENU: 'Start', GUIDE: '⌂', LS: 'L3', RS: 'RS', DPAD: '✚' },
+  keyboard: { A: 'Enter', B: 'Esc', X: 'X', Y: 'Y', LB: 'Q', RB: 'E', LT: 'Z', RT: 'R', VIEW: 'V', MENU: 'M', GUIDE: '⌂', LS: 'Arrow keys', RS: 'Page Up / Page Down', DPAD: 'Arrow keys' }
 };
 /* Roles: A selects, B goes back, X and Y are the screen's extra actions; which
    physical button carries each letter is the controller's button assignment. */
@@ -100,12 +101,16 @@ function assignNow() { return S.padId ? (CFG.assign[S.padId] || guessAssign(S.pa
 /* The prompt set follows the controller as it is built, never its button
    assignment; the assignment only moves which physical button does each job,
    so face() turns a job (A selects, B goes back) into the button to draw. */
+/* The keyboard's keys whenever a key was pressed last, or no controller is in use,
+   whatever Button prompts says (that setting is for controllers). */
 function scheme() {
+  if (S.kbd || !S.padId) return 'keyboard';
   if (CFG.prompts !== 'auto') return CFG.prompts;
   if (S.padId && guessAssign(S.padId) === 'nintendo') return S.scheme === '8bitdo' ? '8bitdo' : 'nintendo';
   return S.scheme === 'ps' ? 'ps' : 'xbox';
 }
 function face(b) {
+  if (scheme() === 'keyboard') return b;
   var sc = scheme(), lay = (sc === 'nintendo' || sc === '8bitdo') ? 'nintendo' : 'xbox';
   if (lay === assignNow()) return b;
   return { A: 'B', B: 'A', X: 'Y', Y: 'X' }[b] || b;
@@ -116,7 +121,7 @@ function glyphText(b) { return GL[scheme()][face(b)]; }
    for a button with no glyph (the Home / Guide button). */
 function gl(b) {
   var sc = scheme(), k = face(b), src = window.TV_GLYPHS && TV_GLYPHS[sc] && TV_GLYPHS[sc][k];
-  if (src) return '<span class="gli" role="img" aria-label="' + esc(GL[sc][k]) + '" style="--g:url(&quot;' + src + '&quot;)"></span>';
+  if (src) return (Array.isArray(src) ? src : [src]).map(function (u, i) { return '<span class="gli"' + (i ? ' aria-hidden="true"' : ' role="img" aria-label="' + esc(GL[sc][k]) + '"') + ' style="--g:url(&quot;' + u + '&quot;)"></span>'; }).join('');
   return glText(b);
 }
 function glText(b) { var t = glyphText(b); var round = t.length === 1; return '<span class="gl' + (round ? ' round' : '') + (scheme() === 'ps' && 'ABXY'.indexOf(b) >= 0 && b.length === 1 ? ' sh' : '') + '">' + t + '</span>'; }
@@ -165,7 +170,7 @@ function toast(t, o) {
 function newestAction() { var c = $('toasts').children; for (var i = 0; i < c.length; i++) if (c[i]._act) return c[i]; return null; }
 
 /* ------------------------------------------------------------------ focus engine */
-var cur = null, mouseMoved = false;
+var cur = null;
 function scope() { return S.layers.length ? S.layers[S.layers.length - 1].el : $('stage'); }
 function focusables(root) { return Array.prototype.filter.call((root || scope()).querySelectorAll('[data-f]'), function (e) { return e.offsetParent !== null || e.getClientRects().length; }); }
 function setFocus(el, noScroll) {
@@ -334,7 +339,7 @@ function paintHints() {
   var h = hintsNow(), left = '';
   if (S.noServer && !S.startup) left = '<span>No server. Your Library and Backup drives work without one.</span>';
   else if (S.offline && !S.startup) left = '<span class="offline-pill">Offline</span><span>Your installed games still play. Server features return when GRID reconnects.</span>';
-  else if (S.padName) left = '<span>' + esc(S.padName) + '</span>';
+  else if (S.padName) left = '<span>' + (S.kbd ? 'Keyboard' : esc(S.padName)) + '</span>';
   else if (S.padState === 'blocked') left = '<span>This page isn\'t allowed to read controllers. Open the card on its own page, or use the keyboard.</span>';
   else left = '<span>Controller: press any button on it</span>';
   $('hints').innerHTML = '<div class="left">' + left + '</div>' + h.map(function (x) { return '<button class="hint" data-btn="' + x[0] + '">' + gl(x[0]) + esc(x[1]) + '</button>'; }).join('');
@@ -823,7 +828,6 @@ function choosePage() {
 function openLayer(o) {
   var el = document.createElement('div'); el.className = 'layer' + (o.cls ? ' ' + o.cls : ''); el.innerHTML = o.html;
   o.el = o.el || el; o.prev = cur; $('layers').appendChild(el); o.el = el; S.layers.push(o);
-  el.addEventListener('click', function (e) { if (e.target === el && !o.blocking) closeLayer(); });
   restoreFocus(o);
   return o;
 }
@@ -1478,19 +1482,29 @@ document.addEventListener('keydown', function (e) {
   if (top && top.osk && e.key === 'Backspace') { e.preventDefault(); top.type('BACK'); return; }
   var b = KEYMAP[e.key] || KEYMAP[e.key.toLowerCase()]; if (!b) return;
   e.preventDefault();
+  lead(true);
   /* A held keyboard key repeats only where a held controller button would. */
   if (e.repeat && !oskRepeats(b) && !/UP|DOWN|LEFT|RIGHT/.test(b)) return;
   press(b);
 });
-document.addEventListener('mousemove', function () { mouseMoved = true; });
-document.addEventListener('mouseover', function (e) { if (!mouseMoved) return; var f = e.target.closest('[data-f]'); if (f && scope().contains(f) && f !== cur) setFocus(f, true); });
-document.addEventListener('click', function (e) {
-  var h = e.target.closest('[data-btn]'); if (h) return press(h.dataset.btn);
-  var t = e.target.closest('[data-tab]'); if (t && !S.pages.length && t.classList.contains('tab')) { S.tab = t.dataset.tab; return render(); }
-  var dt = e.target.closest('[data-dtab]'); if (dt) return detShowTab(dt.dataset.dtab);
-  if (S.desk) return press('A');
-  var f = e.target.closest('[data-f]'); if (f && scope().contains(f)) { setFocus(f, true); press('A'); }
+/* Keyboard and controller only: the mouse presses, points at and scrolls nothing.
+   Over the card the cursor hides while the mouse is still; it shows while the mouse
+   really moves (so it can leave), then hides 1.5 s after it stops or at the next
+   key or controller press. */
+var cursorTimer = 0, lastXY = '';
+function hideCursor() { clearTimeout(cursorTimer); document.documentElement.classList.add('tv-nocursor'); }
+document.addEventListener('mousemove', function (e) {
+  var xy = e.screenX + ',' + e.screenY; if (xy === lastXY) return; lastXY = xy;
+  document.documentElement.classList.remove('tv-nocursor');
+  clearTimeout(cursorTimer); cursorTimer = setTimeout(hideCursor, 1500);
 });
+['click', 'dblclick', 'auxclick', 'contextmenu', 'wheel'].forEach(function (t) {
+  document.addEventListener(t, function (e) { e.preventDefault(); e.stopPropagation(); }, { capture: true, passive: false });
+});
+hideCursor();
+/* What was pressed last leads the prompts: a key brings the keyboard's, a
+   controller press its own. */
+function lead(kbd) { hideCursor(); if (S.kbd === kbd) return; S.kbd = kbd; paintHints(); paintTop(); }
 
 /* Real controllers through the Gamepad API (standard mapping). Held directions
    repeat after 400 ms, every 90 ms; the left stick works like the d-pad. On the
@@ -1552,11 +1566,11 @@ function pollPads() {
     var held = heldBy[p.index] || (heldBy[p.index] = {});
     for (var b in st) {
       var typing = oskRepeats(b);
-      if (!held[b]) { usePad(p); held[b] = now + (typing ? 500 : 400); press(b); }
+      if (!held[b]) { usePad(p); lead(false); held[b] = now + (typing ? 500 : 400); press(b); }
       else if (now > held[b] && (typing || /UP|DOWN|LEFT|RIGHT/.test(b))) { held[b] = now + (typing ? 50 : 90); press(b); }
     }
     for (var h in held) if (!st[h]) delete held[h];
-    var ry = p.axes[3] || 0; if (Math.abs(ry) > .25) { usePad(p); stickScroll(ry * 22); }
+    var ry = p.axes[3] || 0; if (Math.abs(ry) > .25) { usePad(p); lead(false); stickScroll(ry * 22); }
   }
   for (var hi in heldBy) if (!seen.some(function (q) { return String(q.index) === hi; })) delete heldBy[hi];
   if (!seen.some(function (q) { return q.id === S.padId; })) { if (seen.length) usePad(seen[0]); else if (S.padId) { S.padName = ''; S.padId = ''; paintHints(); } }

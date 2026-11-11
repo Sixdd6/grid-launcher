@@ -357,3 +357,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #srv-main .shelf h2 { margin: 0 1.2rem; }
 #srv-main .track { padding-left: 1.2rem; padding-right: 1.2rem; }
 #srv-main .shelf .empty { margin: 0 1.2rem; }
+
+/* Keyboard and controller only: over the card the cursor hides while the mouse is
+   still (tvmode.js `hideCursor`). */
+html.tv-nocursor, html.tv-nocursor * { cursor: none !important; }

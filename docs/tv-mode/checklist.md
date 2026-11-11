@@ -83,7 +83,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 53. A choice made in Settings › TV mode › Button assignments is stored for that controller only and kept (src: README § Decided Button assignments; tvmode.js `paneRows('tv')`).
 - [x] 54. A Nintendo-layout pad set to Xbox style has all four face buttons rebound to the Xbox positions, and an Xbox-layout pad set to Nintendo style gets the Nintendo bindings (src: README § Decided Button assignments).
 - [x] 55. An assignment rebinds only the four face buttons; shoulders, triggers, View, Menu, the D-pad and the sticks keep their places (src: tvmode.js `pollPads`).
-- [x] 56. With no controller, the keyboard and the prompts behave as Xbox style (src: tvmode.js `assignNow`).
+- [x] 56. With no controller, the prompts show the keyboard's keys (user 2026-11-11, replacing "behave as Xbox style"); the keyboard itself maps keys straight to roles (src: README § Decided Keyboard prompts). (verified: router `promptSet`; tv-shell-a)
 
 ### Prompts & glyphs
 
@@ -111,8 +111,8 @@ and "Conflicts" lists at the end are not part of the build.
 
 ### Mouse
 
-- [x] 75. Pointing at a focusable item moves focus to it without scrolling, but only after the mouse has actually moved (src: README § Try it; tvmode.js `mouseover`). (final audit: verified in code)
-- [x] 76. Clicking an item focuses it and does what A does; clicking a hint presses that button; clicking a top-bar tab or a Details tab switches to it; clicking outside a non-blocking overlay closes it (src: README § The shell › Hint bar; tvmode.js `click`, `openLayer`).
+- [x] 75. The mouse focuses nothing: pointing at an item does nothing (user 2026-11-11, replacing hover focus; src: README § Decided Keyboard and controller only). (verified: tv.css pointer-events; tv-shell-a)
+- [x] 76. Clicks do nothing in TV mode: not on items, hints, top-bar or Details tabs, an overlay's scrim, or the trailer player; the wheel scrolls nothing (user 2026-11-11; src: README § Decided Keyboard and controller only). (verified: router `swallow`, tv.css; tv-shell-a)
 
 ## 3. Focus & navigation rules
 
@@ -181,7 +181,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 131. The X hint elsewhere is the item's own extra action ("Change emulator", "Install <emulator>", "Backup all N…") (src: tvmode.js `hintsNow`).
 - [x] 132. The Menu hint is left out where Start presses the page's main button; on Connect and the unreachable library it reads Menu "Menu" (src: tvmode.js `hintsNow`; user decision 2026-11-10). (verified 2026-11-10: hints.test; tv-startup-a, tv-startup-b)
 - [x] 133. On startup screens there is no Back hint (src: tvmode.js `hintsNow`).
-- [x] 134. Every hint is clickable and does what pressing its button does (src: README § Hint bar; tvmode.js `click`). (final audit: verified in code)
+- [x] 134. A hint is a label only: clicking it does nothing (user 2026-11-11; src: README § Decided Keyboard and controller only). (verified: tv-shell-a)
 - [x] 135. The left side shows the name of the controller in use (src: README § Hint bar; tvmode.js `paintHints`).
 - [x] 136. While the server can't be reached, the left side shows an "Offline" danger pill and "Your installed games still play. Server features return when GRID reconnects." (src: README § Hint bar; tvmode.js `paintHints`).
 - [x] 137. Without a server, the left side reads "No server. Your Library and Backup drives work without one." (src: README § Game backups › Use without a server; tvmode.js `paintHints`).
@@ -776,5 +776,8 @@ The user's decisions are recorded in docs/design/system/components/TVMode/README
 - [x] 540. Held LT / RT repeat like a direction while a video plays, and each step shows "Volume N%" beside the player for a moment (src: README § Decided, 2026-11-10) (verified 2026-11-10: details.test viewerRepeats; tv-details-d)
 - [x] 541. The video volume is the player's own, 0–100 in steps of 10, separate from the system volume; every player opens at `[ui] video_volume` (default 50), and a change is stored about 500 ms after the last one, from LT / RT in TV mode and from the player's own controls on the desktop (src: README § Decided, 2026-11-10) (verified 2026-11-10: videoVolume.test, uiSettings.test, config and normalize_ui_settings tests; tv-details-d)
 - [x] 542. Nothing covers a playing video: in TV mode it sits left of the notification column with the hint bar below it, at least 480×270; on the desktop a trailer keeps the notification column and the arrows clear (src: README § Decided, 2026-11-10) (verified 2026-11-10: tv-details-d geometry; desktop by images-a's "Watch on YouTube" position)
-- [ ] 543. Keyboard focus stays with GRID while a trailer plays: a click in YouTube's player hands it back, so Esc, the arrows and TV mode's keys keep working; controllers work whatever has focus (src: README § Decided, 2026-11-10) (manual: needs a real player to click)
+- [x] 543. Keyboard focus stays with GRID while a trailer plays: a click in YouTube's player hands it back, so Esc, the arrows and TV mode's keys keep working; controllers work whatever has focus (src: README § Decided, 2026-11-10) (manual: needs a real player to click) (resolved 2026-11-11: TV mode ignores the mouse, so no click reaches the player)
 - [x] 544. The button assignment changes only what each button does, never the glyphs: each prompt draws the physical button bound to its job, in the controller's own set (a Nintendo pad in Xbox style shows Select on B) (src: user 2026-11-11). (verified: prompts.test `faceGlyph`; tv-settings)
+- [x] 545. A key press brings the keyboard's prompts (Kenney Keyboard & Mouse: Enter, Esc, X, Y, Q, E, Z, R, V, M, the arrow keys for the D-pad, Page Up + Page Down for the right stick) whatever Button prompts says; the next controller press brings that controller's back (src: user 2026-11-11; README § Decided Keyboard prompts). (verified: glyphs.test, prompts.test; tv-shell-a)
+- [x] 546. With a controller connected and the keyboard leading, the hint bar's left side reads "Keyboard" (src: README § Decided Keyboard prompts). (verified: router `hintName`)
+- [x] 547. Over GRID's window the cursor is hidden while the mouse is still; a real move shows it, and it hides 1.5 s after the mouse stops or at the next key or controller press (src: user 2026-11-11; README § Decided Keyboard and controller only). (verified: router `NO_CURSOR`; tv-shell-a)
