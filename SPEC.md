@@ -792,8 +792,10 @@ library; any other game downloads from the server. Any computer with GRID can th
 them from that drive, with or without a network. The design is
 `docs/design/system/components/GameBackups/README.md`.
 
-Store games (GOG, Epic, Amazon, Steam; see "Game stores") are not backed up. The Backup
-dialog shows them as ineligible with the reason "Store games are not backed up".
+Epic, Amazon and Steam games (see "Game stores") are not backed up. The Backup dialog
+shows them as ineligible with the reason "Store games are not backed up". GOG games are
+backed up: the pack holds the installer files when GRID still finds the installer it
+installed from (restoring runs it again), otherwise the installed copy and its saves.
 
 ## Drives
 - **Detection.** GRID scans for removable drives every 2 seconds. On Linux these are the
@@ -1226,7 +1228,9 @@ testable statement.
 
 # Game stores
 Status: planned (2026-11-13). Phase 0, the shared model, is in place; no store screen
-exists yet. The plan is `docs/external-stores-plan.md`.
+exists yet. The plan is `docs/external-stores-plan.md`. The approved design is
+`docs/design/system/components/GameStores/README.md` and
+`docs/design/system/components/TVStores/README.md`.
 
 GRID installs and launches games from external stores beside RomM games.
 
@@ -1261,7 +1265,15 @@ User decisions (2026-11-13):
   silently under Wine/Proton (natively on a Windows host), falling back to the wizard.
   The game is identified from `goggame-*.info`; a DLC installer attaches to its base game
   by `rootGameId`. A macOS `.pkg` is refused with a reason. An offline install is the
-  same GOG product as an online one.
+  same GOG product as an online one. TV mode runs Windows installers silently only: when
+  the silent install fails, the installer is kept and the error says to install it in
+  desktop mode.
+- **Installers on the RomM server.** The user zips GOG offline installers and uploads
+  them to RomM; GRID never uploads them. When a downloaded RomM archive holds an
+  installer instead of loose game files, GRID runs the offline-installer flow. The game
+  stays a RomM game, with every RomM feature.
+- **GOG backups.** GOG games that did not come from RomM can be backed up (see "Game
+  backups"). Epic, Amazon and Steam games cannot.
 
 Identity: a store game is keyed by its store and the store's product id (`gog:1207664643`);
 a RomM game keeps its rom id (`romm:123`). Store rows carry the platform names "GOG",
@@ -1274,7 +1286,7 @@ What store games get:
 | Play activity | Off |
 | RomM cloud saves | Off |
 | Store cloud saves | On, for GOG and Epic |
-| Drive backups | Off ("Store games are not backed up") |
+| Drive backups | GOG on; Epic, Amazon, Steam off ("Store games are not backed up") |
 | Relink and server update checks | Off |
 | Each store's own update check | On |
 | Last played, rail, sort, search | On |
