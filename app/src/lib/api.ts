@@ -916,6 +916,8 @@ export type InstalledGame = {
   source: GameSource;
   /** The store's product id; '' for a RomM game. */
   store_id: string;
+  /** A RomM game whose archive held a GOG installer that GRID ran (registry v12). */
+  installed_by_installer?: boolean;
   /**
    * The server platform's slug (registry v8); nativeness reads it first
    * (`isNativePlatform`). '' for a row the connect-time backfill has not

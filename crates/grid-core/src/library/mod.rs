@@ -3736,6 +3736,10 @@ impl InstallService {
                     }
                     JobPayload::Store(job) => {
                         let runner = job.runner.clone();
+                        let phase = runner.download_phase();
+                        if phase != JobPhase::None {
+                            owner.on_install_phase(id, phase);
+                        }
                         let cancel = cancel.clone();
                         tokio::task::spawn_blocking(move || {
                             runner.download(&cancel, &mut on_progress)
@@ -4630,6 +4634,7 @@ impl InstallService {
         record.native_wineprefix = installed.wineprefix;
         record.native_compat_tool = installed.compat_tool;
         record.native_launch_source = specials::native::LAUNCH_SOURCE_SIDECAR.to_string();
+        record.installed_by_installer = true;
         Ok(Some(archive))
     }
 

@@ -1139,6 +1139,13 @@ impl StoreRestore {
 }
 
 impl StoreJobRunner for StoreRestore {
+    fn download_phase(&self) -> JobPhase {
+        match self.game.layout {
+            StoreLayout::Installer => JobPhase::CopyingInstaller,
+            StoreLayout::Installed => JobPhase::CopyingFromDrive,
+        }
+    }
+
     fn download(
         &self,
         cancel: &AtomicBool,

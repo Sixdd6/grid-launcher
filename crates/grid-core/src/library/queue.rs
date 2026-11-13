@@ -198,6 +198,12 @@ pub trait StoreJobRunner: Send + Sync {
         progress: &mut dyn FnMut(u64, u64, f64),
     ) -> Result<(), LibraryError>;
 
+    /// The Downloads row's phase while [`Self::download`] runs (a restore
+    /// copying off a drive); [`JobPhase::None`] keeps the plain download line.
+    fn download_phase(&self) -> JobPhase {
+        JobPhase::None
+    }
+
     /// The install half (registry write included): progress and phase go
     /// to `sink`. Returns a warning for the finished entry, `""` for none.
     /// Not cancellable, like a RomM finalize.

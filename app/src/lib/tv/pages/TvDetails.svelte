@@ -119,6 +119,7 @@
   let lines = $derived(
     leftLines({
       installed,
+      byGogInstaller: installed && row?.installed_by_installer === true,
       missing,
       unlinked,
       noId,

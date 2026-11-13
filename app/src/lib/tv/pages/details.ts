@@ -138,6 +138,8 @@ export function detButtons(s: DetState): DetButton[] {
 
 export type LeftInput = {
   installed: boolean;
+  /** An installed RomM game whose archive's GOG installer GRID ran. */
+  byGogInstaller?: boolean;
   missing: boolean;
   unlinked: boolean;
   noId: boolean;
@@ -187,6 +189,7 @@ export function leftLines(i: LeftInput): Line[] {
   else if (i.unlinked) lines.push([{ text: 'Not linked to a server game.', b: true }, { text: ' Link it to your server to play.' }]);
   else if (i.noId) lines.push([{ text: 'Not on your server' }]);
   else if (i.installed) {
+    if (i.byGogInstaller) lines.push([{ text: 'Installed by running its ' }, { text: 'GOG installer', b: true }]);
     lines.push([{ text: 'Last played ' }, { text: lastPlayedWhen(i.lastPlayedAt, i.nowSeconds), b: true }]);
     if (i.launchTarget !== '') {
       const emu = i.launchTarget === 'No default emulator' ? 'no emulator' : i.launchTarget;

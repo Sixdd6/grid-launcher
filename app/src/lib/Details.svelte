@@ -527,6 +527,9 @@
               {/if}
             {/if}
           </div>
+          {#if installedNow && installedRow?.installed_by_installer}
+            <p class="meta-line" data-testid="details-gog-installer">Installed by running its GOG installer</p>
+          {/if}
           {#if onDrives !== '' && subject.drive === undefined}
             <p class="meta-line on-drives" data-testid="details-on-drives"><Icon name="drive" size={12} />{onDrives}</p>
           {/if}

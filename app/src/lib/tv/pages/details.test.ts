@@ -138,6 +138,10 @@ describe('Details buttons per state (items 276–283, 431, 435, 437)', () => {
 describe('the left column (items 272–273, 281–282, 432–433, 436)', () => {
   it('installed: last played and the emulator', () => {
     expect(text(leftLines({ ...left, installed: true }))).toEqual(['Last played <b>never</b>', 'Launches with <b>Snes9x</b>']);
+    expect(text(leftLines({ ...left, installed: true, byGogInstaller: true, launchTarget: '' }))).toEqual([
+      'Installed by running its <b>GOG installer</b>',
+      'Last played <b>never</b>',
+    ]);
     expect(text(leftLines({ ...left, installed: true, lastPlayedAt: 1_762_560_000, launchTarget: 'No default emulator' }))).toEqual([
       'Last played <b>2 days ago</b>',
       'Launches with <b>no emulator</b>',
