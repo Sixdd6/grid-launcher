@@ -6,6 +6,8 @@
   // which tv.css is scoped to.
   import { tick, untrack } from 'svelte';
   import './tv.css';
+  import './stores/tvstores.css';
+  import { startStoreEvents } from './stores/storeEvents';
   import { connectPrefill } from '../connectPrefill';
   import { librarySelection } from '../library/selection.svelte';
   import { drives } from '../stores/drives.svelte';
@@ -199,6 +201,8 @@
   });
 
   $effect(() => startClock());
+  // Game stores: notices as cards, the login's end, installer failures.
+  $effect(() => startStoreEvents());
   $effect(() => startRouter());
 
   // Toasts' actions and the setup card's Open Downloads land here while TV

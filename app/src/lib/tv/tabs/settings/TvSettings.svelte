@@ -63,6 +63,7 @@
   import { RA_SAVED, raCanLogin, raCanSave, raRows } from './panes/ra';
   import { tvRows } from './panes/tv';
   import TvDrivesPane from './TvDrivesPane.svelte';
+  import TvStoresPane from '../../stores/TvStoresPane.svelte';
   import { releaseName, UPDATE_DISMISSED, updatesRows } from './panes/updates';
 
   const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -437,7 +438,8 @@
       case 'updates':
         return updatesRows({ version, checkedAt: appUpdate.checkedAt, now, release: appUpdate.stored, debug }, { openRelease, setDebug });
       default:
-        // Systems and Backup drives draw themselves (TvSystemsPane, TvDrivesPane).
+        // Systems, Backup drives and Stores draw themselves (TvSystemsPane,
+        // TvDrivesPane, TvStoresPane).
         return [];
     }
   }
@@ -460,6 +462,8 @@
       <TvSystemsPane />
     {:else if nav.pane === 'backup-drives'}
       <TvDrivesPane />
+    {:else if nav.pane === 'stores'}
+      <TvStoresPane />
     {:else}
       <div class="pane-h"><h1 data-testid="tv-pane-title">{TV_PANE_LABELS[nav.pane]}</h1></div>
       <TvRows {rows} />

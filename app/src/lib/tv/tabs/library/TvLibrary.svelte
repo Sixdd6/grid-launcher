@@ -33,7 +33,19 @@
   import TvGrid from '../../ui/TvGrid.svelte';
   import TvRail from '../../ui/TvRail.svelte';
   import TvRailRow from '../../ui/TvRailRow.svelte';
-  import { driveGamesCache, lib, selectLibRail, toggleFold } from './library.svelte';
+  import { driveGamesCache, lib, selectLibRail, selectLibStore, toggleFold } from './library.svelte';
+  import type { DriveStoreGame, StoreGame } from '../../../api';
+  import { isStoreRow } from '../../../gameKey';
+  import { liveJobFor } from '../../../gamestores/jobs';
+  import { storeGameMatches } from '../../../gamestores/view';
+  import { gameStores } from '../../../stores/gameStores.svelte';
+  import TvStoreCover from '../../stores/TvStoreCover.svelte';
+  import TvStoreRail from '../../stores/TvStoreRail.svelte';
+  import TvStoreView from '../../stores/TvStoreView.svelte';
+  import { openStoreGame, playStore, quickStore, restoreFromDrive } from '../../stores/storeActions';
+  import { driveStoreCache, tvStores } from '../../stores/storeState.svelte';
+  import { mixedStoreGames, storeGameFromDrive } from '../../stores/libraryStores';
+  import { tvDriveQuick, tvQuick } from '../../stores/storeWords';
   import { driveChips, driveCountLine, driveEmptyState, driveSortItems, emptyState, libraryGrid, countLine, searching, SEARCH_TITLE, SORT_TITLE, TV_SORTS, type EmptyState } from './libraryHeader';
   import { backupAllLabel, FOLDER_LABELS, platformBackupIds, folderHint, folderKey, folderOf, libraryRail, NO_DRIVES, railEntry, railRowKey, type FolderId } from './libraryRail';
 
@@ -46,6 +58,8 @@
   let updateIds = $derived(new Set(updates.rows.map((r) => r.rom_id)));
   let rail = $derived(libraryRail(installed.list, updateIds, nowSeconds, drives.withPack));
   let selected = $derived(railEntry(rail, librarySelection.key));
+  /** A store's Installed or Available on show (game stores), else null. */
+  let storeView = $derived(tvStores.view);
 
   // A row that went away (an unplugged drive, a platform's last game
   // uninstalled) falls back to All games, written back to the store.
@@ -113,15 +127,69 @@
       const list = driveGamesFor === driveKey && driveGames ? driveGames : [];
       return driveGrid(list, query, lib.driveSort).map((g) => gameFromDrive(driveKey!, g, rowFor(g), updateIds));
     }
-    const rows = visibleLibraryGames(installed.list).filter((r) => matchesRail(r, selected.key, updateIds, nowSeconds));
+    // Store games have their own covers (game stores): the RomM grid leaves their rows out.
+    const rows = visibleLibraryGames(installed.list).filter((r) => !isStoreRow(r) && matchesRail(r, selected.key, updateIds, nowSeconds));
     return libraryGrid(rows, query, lib.sort).map((r) => gameFromRow(r, updateIds));
   }
   let games = $derived(gridFor(lib.query));
   /** The row's whole list, for select mode: picks a search hides are kept. */
   let allGames = $derived(lib.query.trim() === '' ? games : gridFor(''));
   let driveLoading = $derived(driveKey !== null && drive !== null && (driveGamesFor !== driveKey || driveGames === null));
+
+  // ---- Game stores in the Library's own rows (TVStores README § Library):
+  // All games, Recent and Updates hold the installed store games too, with
+  // the store's tag; a drive's grid holds its GOG games after its RomM ones.
+  let storeExtra = $derived.by((): StoreGame[] => {
+    if (storeView || driveKey !== null) return [];
+    if (selected.key !== 'all' && selected.key !== 'recent' && selected.key !== 'updates') return [];
+    return mixedStoreGames(gameStores.installedGames, installed.list, selected.key, nowSeconds).filter((g) => storeGameMatches(g, lib.query));
+  });
+  // Each drive's GOG games, read again when its pack changes or a restore
+  // or a backup ends.
+  let driveStore = $state<Record<string, DriveStoreGame[]>>({});
+  $effect(() => {
+    void tvStores.driveVersion;
+    void installed.list;
+    const keys = drives.withPack.map((d) => `${d.key}\u0000${d.pack?.updated ?? ''}`);
+    let cancelled = false;
+    for (const k of keys) {
+      const key = k.split('\u0000')[0];
+      const cached = driveStoreCache.get(key);
+      if (cached) driveStore[key] = cached;
+      api
+        .driveStoreGames(key)
+        .then((list) => {
+          if (cancelled) return;
+          driveStoreCache.set(key, list);
+          driveStore[key] = list;
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  });
+  let driveGog = $derived(
+    driveKey === null ? [] : (driveStore[driveKey] ?? []).filter((g) => lib.query.trim() === '' || g.name.toLowerCase().includes(lib.query.trim().toLowerCase())),
+  );
+  type Item = { kind: 'romm'; g: TvGame } | { kind: 'store'; g: StoreGame } | { kind: 'drive'; g: DriveStoreGame };
+  let items = $derived<Item[]>([
+    ...games.map((g) => ({ kind: 'romm' as const, g })),
+    ...storeExtra.map((g) => ({ kind: 'store' as const, g })),
+    ...driveGog.map((g) => ({ kind: 'drive' as const, g })),
+  ]);
+  const itemKey = (it: Item) => (it.kind === 'romm' ? coverKey(it.g) : it.kind === 'store' ? `ls${it.g.key}` : `dsg${it.g.key}`);
+  const itemCover = (it: Item) => (it.kind === 'romm' ? it.g.cover : it.g.cover || null);
+  /** A drive's GOG game as a store game: the owned library's, else the drive's record. */
+  const driveStoreGame = (dg: DriveStoreGame): StoreGame => gameStores.game(dg.key) ?? storeGameFromDrive(dg);
+  /** A drive row's count includes its GOG games. */
+  const rowCount = (key: RailKey, n: number) => {
+    const d = driveKeyOf(key);
+    return d === null ? n : n + (driveStore[d]?.length ?? 0);
+  };
+
   let empty = $derived.by((): EmptyState | null => {
-    if (games.length > 0 || driveLoading) return null;
+    if (items.length > 0 || driveLoading) return null;
     if (driveKey !== null) return driveEmptyState(selected.label, drive !== null, lib.query);
     return emptyState(selected.key, lib.query);
   });
@@ -145,7 +213,8 @@
   // A pick the row no longer lists goes; a search that hides one keeps it
   // (the bar counts and sizes it, Y acts on it).
   $effect(() => {
-    if (select.on) selKeep(selAllGames.map((g) => g.id));
+    // A store view keeps its own picks (TvStoreView).
+    if (select.on && !storeView) selKeep(selAllGames.map((g) => g.id));
   });
 
   function pickedGames(ids: readonly string[]): TvGame[] {
@@ -200,15 +269,17 @@
     openBackupPage({ kind: 'games', count: romIds.length }, romIds);
   }
 
-  $effect(() =>
-    registerSelectGrid({
+  $effect(() => {
+    // A store view registers its own (GOG › Installed).
+    if (storeView) return;
+    return registerSelectGrid({
       games: () => selGames,
       all: () => selAllGames,
       drive: () => driveKey !== null,
       connected: () => session.connected,
       act: (ids) => (driveKey !== null ? driveAct(ids) : backupAct(ids)),
-    }),
-  );
+    });
+  });
 
   function search() {
     const before = lib.query;
@@ -236,19 +307,31 @@
     });
   }
 
+  /** GOG › Installed: the one store view with select mode (user decision 2026-11-13). */
+  const gogInstalled = () => tvStores.view?.source === 'gog' && tvStores.view.part === 'installed';
+
   useScreen({
-    hints: () => [
-      { button: 'Y', label: 'Search' },
-      { button: 'LT', label: 'Sort' },
-      { button: 'RT', label: 'Select' },
-    ],
+    // A store view has Y Search, and RT Select in GOG › Installed
+    // (tvstores.js `TABS.library.hints`); no sort.
+    hints: () => {
+      if (tvStores.view) return gogInstalled() ? [{ button: 'Y', label: 'Search' }, { button: 'RT', label: 'Select' }] : [{ button: 'Y', label: 'Search' }];
+      return [
+        { button: 'Y', label: 'Search' },
+        { button: 'LT', label: 'Sort' },
+        { button: 'RT', label: 'Select' },
+      ];
+    },
     y: search,
-    lt: sortList,
-    rt: selToggle,
+    get lt() {
+      return tvStores.view ? undefined : sortList;
+    },
+    get rt() {
+      return tvStores.view && !gogInstalled() ? undefined : selToggle;
+    },
   });
 
   const tid = (testId: string) => testId.replace(/^library-rail-/, 'tv-lib-rail-');
-  const holds = (id: FolderId) => !lib.folds[id] && folderOf(selected.key) === id;
+  const holds = (id: FolderId) => !storeView && !lib.folds[id] && folderOf(selected.key) === id;
   const coverKey = (g: TvGame) => `${driveKey !== null ? 'dg' : 'lg'}${g.id}`;
   const emptyParts = (body: string) => body.split('(Y)');
 </script>
@@ -256,7 +339,7 @@
 <div class="split" data-testid="tv-library">
   <TvRail label="Library" scroll="lib-rail">
     {#each rail.filters as e (e.key)}
-      <TvRailRow k={railRowKey(e.key)} selected={selected.key === e.key} count={e.count} testId={tid(e.testId)} onSelect={() => selectLibRail(e.key)}>{e.label}</TvRailRow>
+      <TvRailRow k={railRowKey(e.key)} selected={!storeView && selected.key === e.key} count={e.count} testId={tid(e.testId)} onSelect={() => selectLibRail(e.key)}>{e.label}</TvRailRow>
     {/each}
     <hr />
     <TvRailRow k={folderKey('plat')} fold={lib.folds.plat} holdsSel={holds('plat')} testId="tv-lib-fold-plat" onToggle={() => toggleFold('plat')}>{FOLDER_LABELS.plat}</TvRailRow>
@@ -265,7 +348,7 @@
         <TvRailRow
           k={railRowKey(e.key)}
           sub
-          selected={selected.key === e.key}
+          selected={!storeView && selected.key === e.key}
           count={e.count}
           xl={backupAllLabel(backupIds.get(e.key)?.length ?? 0)}
           testId={tid(e.testId)}
@@ -277,20 +360,30 @@
     <TvRailRow k={folderKey('drives')} fold={lib.folds.drives} holdsSel={holds('drives')} testId="tv-lib-fold-drives" onToggle={() => toggleFold('drives')}>{FOLDER_LABELS.drives}</TvRailRow>
     {#if lib.folds.drives}
       {#each rail.drives as e (e.key)}
-        <TvRailRow k={railRowKey(e.key)} sub selected={selected.key === e.key} count={e.count} testId={tid(e.testId)} onSelect={() => selectLibRail(e.key)}>{e.label}</TvRailRow>
+        <TvRailRow k={railRowKey(e.key)} sub selected={!storeView && selected.key === e.key} count={rowCount(e.key, e.count)} testId={tid(e.testId)} onSelect={() => selectLibRail(e.key)}>{e.label}</TvRailRow>
       {:else}
         <div class="ri-empty" data-testid="tv-lib-no-drives">{NO_DRIVES}</div>
       {/each}
     {/if}
+    <TvStoreRail onSelect={selectLibStore} />
   </TvRail>
   <div class="main">
+    {#if storeView}
+      {#key `${storeView.source}:${storeView.part}`}
+        <TvStoreView source={storeView.source} part={storeView.part} query={lib.query} />
+      {/key}
+    {:else}
     {#if driveKey !== null}
       <div class="vh" id="lib-h" data-testid="tv-lib-header">
         <h1 data-testid="tv-lib-name">{selected.label}</h1>
-        {#if drive}<span class="cnt" data-testid="tv-lib-count">{driveCountLine(drive, games.map((g) => g.drive!.game))}</span>{/if}
+        {#if drive}<span class="cnt" data-testid="tv-lib-count">{driveCountLine(drive, [...games.map((g) => g.drive!.game), ...driveGog])}</span>{/if}
         {#if chips}
           <TvChip testId="tv-lib-emus">Emulators: <b>{chips.emulators}</b></TvChip>
           <TvChip testId="tv-lib-fw">Firmware: <b>{chips.firmware}</b></TvChip>
+        {/if}
+        {#if (driveStore[driveKey] ?? []).length > 0}
+          {@const n = (driveStore[driveKey] ?? []).length}
+          <TvChip testId="tv-lib-gog">GOG: <b>{n} game{n === 1 ? '' : 's'}</b></TvChip>
         {/if}
         <span class="sp"></span>
         <TvChip glyph="RT">Select</TvChip>
@@ -299,7 +392,7 @@
     {:else}
       <div class="vh" id="lib-h" data-testid="tv-lib-header">
         <h1 data-testid="tv-lib-name">{selected.label}</h1>
-        <span class="cnt" data-testid="tv-lib-count">{countLine(games.length)}</span>
+        <span class="cnt" data-testid="tv-lib-count">{countLine(items.length)}</span>
         {#if searching(lib.query)}<TvChip testId="tv-lib-search">Search: <b>{lib.query}</b></TvChip>{/if}
         <span class="sp"></span>
         <TvChip glyph="RT">Select</TvChip>
@@ -307,9 +400,35 @@
         <TvChip glyph="Y">Search</TvChip>
       </div>
     {/if}
-    <TvGrid id="lib-grid" scroll="lib-grid" items={games} key={coverKey} cover={(g) => g.cover} listKey={selected.key} testId="tv-lib-grid">
-      {#snippet cell(g)}
-        <TvGameCover k={coverKey(g)} game={g} plat={mixed || driveKey !== null} selectable testId={`tv-cover-${coverKey(g)}`} />
+    <TvGrid id="lib-grid" scroll="lib-grid" {items} key={itemKey} cover={itemCover} listKey={selected.key} testId="tv-lib-grid">
+      {#snippet cell(it)}
+        {#if it.kind === 'romm'}
+          <TvGameCover k={coverKey(it.g)} game={it.g} plat={mixed || driveKey !== null} selectable testId={`tv-cover-${coverKey(it.g)}`} />
+        {:else if it.kind === 'store'}
+          {@const sg = it.g}
+          {@const j = liveJobFor(downloads.entries, sg.key)}
+          {@const q = tvQuick(sg, gameStores.status(sg.source), j)}
+          <TvStoreCover k={itemKey(it)} game={sg} job={j} quick={q} mixed testId={`tv-cover-ls-${sg.store_id}`} onA={() => openStoreGame(sg.key, sg.title)} onX={() => quickStore(sg, q)} />
+        {:else}
+          {@const dg = it.g}
+          {@const sg = driveStoreGame(dg)}
+          {@const j = liveJobFor(downloads.entries, dg.key)}
+          {@const here = gameStores.game(dg.key)?.installed ?? false}
+          {@const q = tvDriveQuick(here, j)}
+          <TvStoreCover
+            k={itemKey(it)}
+            game={{ ...sg, installed: here }}
+            job={j}
+            quick={q}
+            mixed
+            testId={`tv-cover-dsg-${sg.store_id}`}
+            onA={() => drive && openStoreGame(dg.key, dg.name, { key: drive.key, name: drive.pack?.name ?? drive.label })}
+            onX={() => {
+              if (q === 'Play') void playStore(sg);
+              else if (q && drive) void restoreFromDrive(drive.key, dg.key);
+            }}
+          />
+        {/if}
       {/snippet}
       {#if empty}
         <div class="empty" data-testid="tv-lib-empty">
@@ -319,5 +438,6 @@
       {/if}
     </TvGrid>
     <TvSelBar games={selGames} all={selAllGames} drive={driveKey !== null} />
+    {/if}
   </div>
 </div>
