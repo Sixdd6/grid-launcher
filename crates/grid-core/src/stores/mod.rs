@@ -11,10 +11,12 @@
 //!   for a store product — with a stable string form (`romm:123`,
 //!   `gog:1207664643`) that is also its serde form.
 //!
-//! Later phases add, under this folder: `tools` (the pinned legendary,
-//! heroic-gogdl and nile downloads), `progress` (tool progress parsing),
-//! `paths` (`<data_dir>/stores/<tool>/`, 0700/0600), `art`, and one folder
-//! per source: `gog`, `offline`, `epic`, `amazon`, `steam`.
+//! Phase 1 adds, under this folder: `tools` (the pinned heroic-gogdl
+//! download; legendary and nile later), `runner` (the only place a tool
+//! process is spawned), `progress` (tool progress parsing), `paths`
+//! (`<data_dir>/stores/<tool>/`, 0700/0600), `art`, and one folder per
+//! source: `gog`, `offline` (GOG offline installers); `epic`, `amazon` and
+//! `steam` later. [`StoreError`] is every store operation's error.
 //!
 //! Secrets: the tools' own token files live under `<data_dir>/stores/` (the
 //! narrow, documented exception in AGENTS.md). Nothing in this module tree
@@ -23,6 +25,47 @@
 
 use std::fmt;
 use std::str::FromStr;
+
+use crate::library::LibraryError;
+
+pub mod art;
+pub mod gog;
+pub mod offline;
+pub mod paths;
+pub mod progress;
+pub mod runner;
+pub mod tools;
+
+/// Why a store operation failed. The Display text is GRID's own words,
+/// never a store tool's output line (AGENTS.md "Secrets").
+#[derive(Debug, thiserror::Error)]
+pub enum StoreError {
+    #[error("not signed in")]
+    NotSignedIn,
+    #[error("login expired")]
+    LoginExpired,
+    #[error("{0} isn't installed")]
+    ToolMissing(&'static str),
+    #[error("{tool} stopped: {reason}")]
+    ToolFailed { tool: &'static str, reason: String },
+    #[error("couldn't reach {0}")]
+    Network(String),
+    #[error("{0}")]
+    Refused(String),
+    #[error(transparent)]
+    Library(#[from] LibraryError),
+}
+
+/// The text every Step 0 stub fails with until its work package fills it
+/// in (`docs/stores-phase1-plan.md`).
+pub const NOT_IMPLEMENTED: &str = "not implemented";
+
+impl StoreError {
+    /// The error a Step 0 stub returns.
+    pub fn not_implemented() -> StoreError {
+        StoreError::Refused(NOT_IMPLEMENTED.to_string())
+    }
+}
 
 /// One external store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

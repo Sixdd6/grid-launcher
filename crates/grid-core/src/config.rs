@@ -327,6 +327,51 @@ pub struct RememberedDrive {
     pub last_seen: String,
 }
 
+/// External game stores (`[stores]`). Never a token: the store tools keep
+/// their own token files under `<data_dir>/stores/` (AGENTS.md).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoresConfig {
+    #[serde(default)]
+    pub gog: GogConfig,
+}
+
+impl StoresConfig {
+    /// Whether nothing differs from the defaults (then `[stores]` is not
+    /// written, so an older config round-trips unchanged).
+    pub fn is_default(&self) -> bool {
+        self == &StoresConfig::default()
+    }
+}
+
+/// GOG (`[stores.gog]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GogConfig {
+    /// The user connected GOG (gogdl's token file decides whether the
+    /// login is still good).
+    #[serde(default)]
+    pub connected: bool,
+    /// The GOG account name, for Settings. Not a secret.
+    #[serde(default)]
+    pub username: String,
+    /// Where GOG games install; `""` = `<library>/GOG`.
+    #[serde(default)]
+    pub install_dir: String,
+    /// Whether GOG cloud saves sync before launch and after exit.
+    #[serde(default = "default_true")]
+    pub cloud_saves: bool,
+}
+
+impl Default for GogConfig {
+    fn default() -> Self {
+        Self {
+            connected: false,
+            username: String::new(),
+            install_dir: String::new(),
+            cloud_saves: true,
+        }
+    }
+}
+
 /// App configuration. Secrets are NEVER part of this struct — they live in
 /// the OS keyring only (see secrets.rs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -483,6 +528,10 @@ pub struct Config {
     /// has set up. A TOML table, so it stays after every scalar key too.
     #[serde(default)]
     pub backup: BackupSettings,
+    /// External game stores (`[stores]`). A TOML table, so it stays after
+    /// every scalar key too; not written while it holds only defaults.
+    #[serde(default, skip_serializing_if = "StoresConfig::is_default")]
+    pub stores: StoresConfig,
     /// Unknown keys survive load/save round trips for forward compatibility.
     #[serde(flatten)]
     pub extra: BTreeMap<String, toml::Value>,
@@ -533,6 +582,7 @@ impl Default for Config {
             ui: UiSettings::default(),
             setup: SetupState::default(),
             backup: BackupSettings::default(),
+            stores: StoresConfig::default(),
             extra: BTreeMap::new(),
         }
     }
@@ -777,6 +827,56 @@ mod tests {
         assert!(written.contains("offline = true"), "written:\n{written}");
         assert!(written.contains("[backup]"), "written:\n{written}");
         assert!(written.contains("[[backup.drives]]"), "written:\n{written}");
+        assert_eq!(Config::load(&path).unwrap(), cfg);
+    }
+
+    #[test]
+    fn stores_default_and_are_not_written_while_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "schema_version = 1\n").unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.stores, StoresConfig::default());
+        assert!(!loaded.stores.gog.connected);
+        assert!(loaded.stores.gog.cloud_saves, "cloud saves default on");
+        assert_eq!(loaded.stores.gog.install_dir, "");
+        loaded.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("stores"), "written:\n{written}");
+
+        // A `[stores.gog]` table without `cloud_saves` still defaults it on.
+        std::fs::write(
+            &path,
+            "schema_version = 1\n[stores.gog]\nconnected = true\n",
+        )
+        .unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert!(loaded.stores.gog.connected);
+        assert!(loaded.stores.gog.cloud_saves);
+    }
+
+    #[test]
+    fn stores_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            stores: StoresConfig {
+                gog: GogConfig {
+                    connected: true,
+                    username: "geralt".into(),
+                    install_dir: "/games/GOG".into(),
+                    cloud_saves: false,
+                },
+            },
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("[stores.gog]"), "written:\n{written}");
+        assert!(
+            !written.to_lowercase().contains("token"),
+            "written:\n{written}"
+        );
         assert_eq!(Config::load(&path).unwrap(), cfg);
     }
 

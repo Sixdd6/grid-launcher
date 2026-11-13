@@ -388,3 +388,49 @@ Decisions taken from them (lead):
   `build_id`. Linux installers: compare `api.gog.com/products/{id}?expand=downloads`
   `installers[os=linux].version` with the version in `gameinfo`. An offline install with no build
   id never shows an update.
+
+## Contract deviations (Step 0)
+
+Where the skeleton differs from, or adds to, the Step 0 block above:
+
+- `StoreTool` is `Gogdl` only (spike results). `PinnedAsset` gains `launcher: AssetLauncher`
+  (`Direct` | `Python3`: Linux gogdl runs as `python3 <zipapp>`). `StoreTool::name()` gives
+  the folder/serde name. The pins hold no assets yet; package A fills them.
+- `StoreError::not_implemented()` and `stores::NOT_IMPLEMENTED` exist for the stubs only.
+- `GogEndpoints::e2e(base: Url)` points all five hosts at one mock server.
+- `gog_row` needs `GogProduct`, so `stores/gog/mod.rs` defines it (`id, title, cover,
+  screenshots, description, developer, publisher, genres, release_date, platforms, dlc:
+  Vec<GogProductDlc>`), plus `GogInstallOptions { versions: Vec<GogVersionOption>, languages,
+  default_language, dlc: Vec<GogDlcOption> }`, `GogInstallRequest { store_id, title, platform,
+  language, dlc_ids, install_dir: PathBuf, compat_tool }` and `GogUpdate { store_id, version,
+  build_id }`. Package A may add fields; it must not rename these.
+- `gog_row`: `store_id` is `info.game_id`; the title is the product's, else the info name;
+  `native_executable_path` is absolute (`install_dir` + the primary task path, both separators);
+  a task path that is absolute, has a drive letter or climbs out (`..`) is not used (left blank).
+  `native_working_dir` is relative with `/`. `native_launch_source` is `user` when
+  `meta.exe_user_pinned`, else `sidecar` (the caller carries a pinned executable over).
+  `extracted_dir` and `native_game_dir` are both the install folder. `installed_at` is now;
+  `filesize_bytes` stays 0 for the caller. Companies are developer then publisher, deduped.
+- `GogMeta::from_json` / `to_json` and `GogPlatform::slug()` (`linux` | `win`) added.
+- `goggame::parse_info` keeps only `FileTask`s with a path (a task without `type` counts);
+  ids may be JSON numbers; a UTF-8 BOM is allowed. `primary_task` falls back to the first
+  `game` task. `find_info_files` is top-level only and skips files over 1 MiB.
+- Queue: `JobFailure { code: FailureCode, base_title, base_gog_id, kept }` with
+  `JobFailure::from_error(&LibraryError)`; the queue sets `failure` on any `Failed`
+  transition. `InstallerRefused` and other errors give `failure: null`. `QueueState::set_phase`
+  added; `phase` is never reset by the queue.
+- `InstallService::enqueue_store_job(job)` drops its `title` argument (the job carries
+  `title`; `drive` fills the row's drive fields). `InstallService::wizard_allowed()` returns the
+  installed check (default: yes).
+- `InstallerNeedsWizard` Display: "This installer needs its setup window. Install it in desktop
+  mode." plus " The download was kept." when `kept`. The UI words the offline-installer variant
+  ("The installer was kept.") from `failure`.
+- A `BackupItemKey::Store` row has `rom_id` 0 and its game key in `source_id`.
+- `Pack::paths()` includes store games, so a bad store path makes a pack unreadable like any
+  other. `backup::pack::store_game_dir_rel(source, name, id)` gives `stores/<source>/<name>-<id>`.
+  `PackStoreGame::key()` and `paths()` added; `meta` defaults to `null`.
+- `GogConfig::cloud_saves` defaults to `true`; `[stores]` is not written while default.
+- `app/src-tauri/src/commands/stores.rs` mirrors every `api.ts` store type in Rust (enum-like
+  strings are `String` where the TS union is wide). `#![allow(dead_code)]` until package D
+  builds them. Event constants live there.
+- `api.ts` adds `StorePlatform`, `JobPhase`, `JobFailure` and `StoreLoginEvent` aliases.

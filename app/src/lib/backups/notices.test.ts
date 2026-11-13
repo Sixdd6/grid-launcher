@@ -23,6 +23,8 @@ function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
     drive_name: 'Couch kit',
     drive_label: 'SAMSUNG T7',
     batch: 3,
+    phase: 'none',
+    failure: null,
     ...overrides,
   };
 }

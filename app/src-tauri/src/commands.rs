@@ -7,6 +7,7 @@ pub mod logging;
 pub mod relink;
 pub mod setup;
 pub mod specials;
+pub mod stores;
 pub mod tv;
 pub mod updates;
 

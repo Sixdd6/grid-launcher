@@ -59,6 +59,13 @@ pub enum JobKey {
 pub enum StoreOp {
     Install,
     Update,
+    Repair,
+    /// Install one DLC of an installed game.
+    Dlc,
+    /// Install from an offline installer file.
+    Installer,
+    /// Install a store game from a backup drive.
+    Restore,
 }
 
 impl StoreOp {
@@ -67,8 +74,94 @@ impl StoreOp {
         match self {
             StoreOp::Install => "store_install",
             StoreOp::Update => "store_update",
+            StoreOp::Repair => "store_repair",
+            StoreOp::Dlc => "store_dlc",
+            StoreOp::Installer => "store_installer",
+            StoreOp::Restore => "store_restore",
         }
     }
+}
+
+/// What a running job is doing right now, finer than its status: the
+/// Downloads line words it ("Verifying files", "Running the installer
+/// silently"...). `None` for every job that does not report one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobPhase {
+    #[default]
+    None,
+    Downloading,
+    Installing,
+    Verifying,
+    Unpacking,
+    InstallerSilent,
+    InstallerWizard,
+    CopyingInstaller,
+    RunningInstaller,
+    CopyingFromDrive,
+    Checksum,
+}
+
+/// Why a job failed, when the Downloads row words it from parts rather than
+/// from the error text alone (the installer failures).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureCode {
+    InstallerUnrecognised,
+    InstallerDlcBaseMissing,
+    InstallerExit,
+    InstallerNeedsWizard,
+}
+
+/// A failed entry's [`FailureCode`] and its parts; blank where a code has
+/// none.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct JobFailure {
+    pub code: FailureCode,
+    pub base_title: String,
+    pub base_gog_id: String,
+    /// The download (or installer) was kept for a retry.
+    pub kept: bool,
+}
+
+impl JobFailure {
+    /// The failure `error` carries, `None` for an error the row words from
+    /// its text alone.
+    pub fn from_error(error: &LibraryError) -> Option<JobFailure> {
+        let failure = |code| JobFailure {
+            code,
+            base_title: String::new(),
+            base_gog_id: String::new(),
+            kept: false,
+        };
+        match error {
+            LibraryError::InstallerUnrecognised { .. } => {
+                Some(failure(FailureCode::InstallerUnrecognised))
+            }
+            LibraryError::InstallerDlcBaseMissing {
+                base_title,
+                base_gog_id,
+            } => Some(JobFailure {
+                base_title: base_title.clone(),
+                base_gog_id: base_gog_id.clone(),
+                ..failure(FailureCode::InstallerDlcBaseMissing)
+            }),
+            LibraryError::InstallerExit(_) => Some(failure(FailureCode::InstallerExit)),
+            LibraryError::InstallerNeedsWizard { kept } => Some(JobFailure {
+                kept: *kept,
+                ..failure(FailureCode::InstallerNeedsWizard)
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// Where a store job's finalize reports its progress and phase.
+pub trait StoreProgressSink {
+    /// `progress(processed, total)` of the install half.
+    fn progress(&mut self, done: u64, total: u64);
+    /// The job moved to `phase`.
+    fn phase(&mut self, phase: JobPhase);
 }
 
 /// The work behind a store job, supplied by each store's phase (legendary,
@@ -87,10 +180,21 @@ pub trait StoreJobRunner: Send + Sync {
         progress: &mut dyn FnMut(u64, u64, f64),
     ) -> Result<(), LibraryError>;
 
-    /// The install half (registry write included): `progress(processed,
-    /// total)`. Returns a warning for the finished entry, `""` for none.
+    /// The install half (registry write included): progress and phase go
+    /// to `sink`. Returns a warning for the finished entry, `""` for none.
     /// Not cancellable, like a RomM finalize.
-    fn finalize(&self, progress: &mut dyn FnMut(u64, u64)) -> Result<String, LibraryError>;
+    fn finalize(&self, sink: &mut dyn StoreProgressSink) -> Result<String, LibraryError>;
+}
+
+/// The backup drive a store job copies from (a restore).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DriveRef {
+    /// The drive key: the mount path, or the drive letter on Windows.
+    pub key: String,
+    /// The pack name.
+    pub name: String,
+    /// The volume label.
+    pub label: String,
 }
 
 /// One store job for [`super::InstallService::enqueue_store_job`].
@@ -99,6 +203,10 @@ pub struct StoreJob {
     pub source: StoreKind,
     pub store_id: String,
     pub op: StoreOp,
+    /// The Downloads row's title.
+    pub title: String,
+    /// The drive a restore copies from; its row shows it.
+    pub drive: Option<DriveRef>,
     pub runner: Arc<dyn StoreJobRunner>,
 }
 
@@ -124,6 +232,8 @@ impl std::fmt::Debug for StoreJob {
             .field("source", &self.source)
             .field("store_id", &self.store_id)
             .field("op", &self.op)
+            .field("title", &self.title)
+            .field("drive", &self.drive)
             .finish_non_exhaustive()
     }
 }
@@ -133,6 +243,8 @@ impl std::fmt::Debug for StoreJob {
 pub enum BackupItemKey {
     /// A game, by its RomM rom id.
     Game(i64),
+    /// A store game (GOG), by its key.
+    Store(GameKey),
     /// One emulator release for one OS, by its profile name.
     Emulator { name: String, os: PackOs },
     /// The firmware of one platform, by its slug.
@@ -213,6 +325,12 @@ pub struct DownloadEntry {
     pub drive_label: String,
     /// The backup batch this entry belongs to; `0` for none.
     pub batch: u64,
+    /// What the job is doing right now; [`JobPhase::None`] for a job that
+    /// does not say.
+    pub phase: JobPhase,
+    /// Why a failed entry failed, when its row words it from parts (the
+    /// installer failures); `None` otherwise.
+    pub failure: Option<JobFailure>,
     /// The admission key this entry was created from. Kept for dedupe and
     /// `retryable`; the public `job`/`rom_id`/`source_id` fields above are
     /// derived from it once, at insertion.
@@ -358,9 +476,16 @@ impl QueueState {
             JobKey::Backup { item, .. } => {
                 let rom_id = match item {
                     BackupItemKey::Game(rom_id) => *rom_id,
-                    BackupItemKey::Emulator { .. } | BackupItemKey::Firmware(_) => 0,
+                    BackupItemKey::Store(_)
+                    | BackupItemKey::Emulator { .. }
+                    | BackupItemKey::Firmware(_) => 0,
                 };
-                ("backup", rom_id, String::new())
+                // A store game's row carries its game key, like a store job.
+                let source_id = match item {
+                    BackupItemKey::Store(key) => key.to_string(),
+                    _ => String::new(),
+                };
+                ("backup", rom_id, source_id)
             }
             // Never reached: `cancel_drive_queue` creates its own row.
             JobKey::BackupSummary(_) => ("backup", 0, String::new()),
@@ -399,6 +524,8 @@ impl QueueState {
             drive_name,
             drive_label,
             batch,
+            phase: JobPhase::None,
+            failure: None,
             key,
         });
 
@@ -441,6 +568,8 @@ impl QueueState {
             drive_name: String::new(),
             drive_label: String::new(),
             batch: 0,
+            phase: JobPhase::None,
+            failure: None,
             key: JobKey::External(id),
         });
         id
@@ -498,6 +627,8 @@ impl QueueState {
             drive_name: String::new(),
             drive_label: String::new(),
             batch: 0,
+            phase: JobPhase::None,
+            failure: None,
             key: JobKey::LibraryMove,
         });
         Some(id)
@@ -577,6 +708,8 @@ impl QueueState {
             drive_name: first.drive_name,
             drive_label: first.drive_label,
             batch: first.batch,
+            phase: JobPhase::None,
+            failure: None,
             key: JobKey::BackupSummary(id),
         });
         self.prune_terminal();
@@ -677,6 +810,13 @@ impl QueueState {
         }
     }
 
+    /// Sets the phase of `id`. No-op when `id` is unknown.
+    pub fn set_phase(&mut self, id: u64, phase: JobPhase) {
+        if let Some(entry) = self.entry_mut(id) {
+            entry.phase = phase;
+        }
+    }
+
     /// Updates install (extraction/finalize) progress for `id`. No-op when
     /// `id` is unknown.
     pub fn set_install_progress(&mut self, id: u64, processed: u64, total: u64) {
@@ -722,6 +862,7 @@ impl QueueState {
             }
             Err(e) => {
                 entry.status = DownloadStatus::Failed;
+                entry.failure = JobFailure::from_error(&e);
                 entry.error = e.to_string();
             }
         }
@@ -758,6 +899,7 @@ impl QueueState {
             }
             Err(e) => {
                 entry.status = DownloadStatus::Failed;
+                entry.failure = JobFailure::from_error(&e);
                 entry.error = if warning.is_empty() {
                     e.to_string()
                 } else {
@@ -1428,6 +1570,100 @@ mod tests {
     }
 
     #[test]
+    fn an_installer_failure_carries_its_parts_and_serializes() {
+        let mut state = QueueState::default();
+        let id = admit_idle(&mut state, 1);
+        assert_eq!(state.entry(id).unwrap().phase, JobPhase::None);
+        state.set_phase(id, JobPhase::InstallerSilent);
+        state.download_finished(id, Ok(()), false);
+        let error = LibraryError::InstallerDlcBaseMissing {
+            base_title: "Pale Summit".into(),
+            base_gog_id: "42".into(),
+        };
+        state.finalize_finished(id, Err(error), "");
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.status, DownloadStatus::Failed);
+        assert_eq!(
+            entry.error,
+            "Its archive holds a DLC installer for Pale Summit, which isn't installed. \
+             Install Pale Summit first; the download was removed."
+        );
+        let json = serde_json::to_value(entry).unwrap();
+        assert_eq!(json["phase"], "installer_silent");
+        assert_eq!(
+            json["failure"],
+            serde_json::json!({
+                "code": "installer_dlc_base_missing",
+                "base_title": "Pale Summit",
+                "base_gog_id": "42",
+                "kept": false
+            })
+        );
+
+        let plain = admit_idle(&mut state, 2);
+        state.download_finished(plain, Err(LibraryError::NoLaunchFile), false);
+        let json = serde_json::to_value(state.entry(plain).unwrap()).unwrap();
+        assert_eq!(json["phase"], "none");
+        assert!(json["failure"].is_null());
+    }
+
+    #[test]
+    fn installer_errors_use_the_design_words() {
+        assert_eq!(
+            LibraryError::InstallerUnrecognised {
+                file: "setup.exe".into()
+            }
+            .to_string(),
+            "Its archive holds an installer GRID doesn't recognise (setup.exe has no GOG game info). \
+             The download was removed."
+        );
+        assert_eq!(
+            LibraryError::InstallerExit(1).to_string(),
+            "The installer stopped with an error (exit code 1). The download was removed."
+        );
+        assert_eq!(
+            LibraryError::InstallerNeedsWizard { kept: true }.to_string(),
+            "This installer needs its setup window. Install it in desktop mode. The download was kept."
+        );
+        assert_eq!(
+            LibraryError::InstallerNeedsWizard { kept: false }.to_string(),
+            "This installer needs its setup window. Install it in desktop mode."
+        );
+        assert_eq!(
+            JobFailure::from_error(&LibraryError::InstallerNeedsWizard { kept: true }),
+            Some(JobFailure {
+                code: FailureCode::InstallerNeedsWizard,
+                base_title: String::new(),
+                base_gog_id: String::new(),
+                kept: true
+            })
+        );
+        assert_eq!(
+            JobFailure::from_error(&LibraryError::InstallerRefused("no".into())),
+            None
+        );
+    }
+
+    #[test]
+    fn store_ops_and_backup_rows_name_their_kind() {
+        for (op, kind) in [
+            (StoreOp::Repair, "store_repair"),
+            (StoreOp::Dlc, "store_dlc"),
+            (StoreOp::Installer, "store_installer"),
+            (StoreOp::Restore, "store_restore"),
+        ] {
+            assert_eq!(op.kind(), kind);
+        }
+        let mut state = QueueState::default();
+        let key = GameKey::store(StoreKind::Gog, "7");
+        let id = admit_backup(&mut state, T7, BackupItemKey::Store(key), 1);
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.kind, "backup_store_game");
+        assert_eq!(entry.source_id, "gog:7");
+        assert_eq!(entry.rom_id, 0);
+    }
+
+    #[test]
     fn finalize_err_appends_warning_after_newline() {
         let mut state = QueueState::default();
         let id = admit_idle(&mut state, 1);
@@ -1874,6 +2110,7 @@ mod tests {
             BackupItemKey::Game(_) => "backup_game",
             BackupItemKey::Emulator { .. } => "backup_emulator",
             BackupItemKey::Firmware(_) => "backup_firmware",
+            BackupItemKey::Store(_) => "backup_store_game",
         };
         match state.admit_with(
             backup_key(drive, item),

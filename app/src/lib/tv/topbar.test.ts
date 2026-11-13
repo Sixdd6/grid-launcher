@@ -6,7 +6,7 @@ const entry = (o: Partial<DownloadEntry>): DownloadEntry =>
   ({
     id: 1, job: 'install', kind: 'game', rom_id: 1, source_id: '', title: 'Game', platform: 'PS', status: 'queued',
     downloaded_bytes: 0, total_bytes: 0, speed_bps: 0, install_processed_bytes: 0, install_total_bytes: 0,
-    error: '', detail: '', drive_id: '', drive_name: '', drive_label: '', batch: 0, ...o,
+    error: '', detail: '', drive_id: '', drive_name: '', drive_label: '', batch: 0, phase: 'none', failure: null, ...o,
   }) as DownloadEntry;
 
 describe('connection (item 125, 517)', () => {

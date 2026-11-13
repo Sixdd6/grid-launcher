@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use grid_core::library::queue::{
-    DownloadStatus, DownloadsSnapshot, StoreJob, StoreJobRunner, StoreOp,
+    DownloadStatus, DownloadsSnapshot, DriveRef, JobPhase, StoreJob, StoreJobRunner, StoreOp,
+    StoreProgressSink,
 };
 use grid_core::library::registry::{InstalledGame, Registry};
 use grid_core::library::{InstallService, LibraryError};
@@ -46,8 +47,9 @@ impl StoreJobRunner for FakeRunner {
         Ok(())
     }
 
-    fn finalize(&self, progress: &mut dyn FnMut(u64, u64)) -> Result<String, LibraryError> {
-        progress(1, 2);
+    fn finalize(&self, sink: &mut dyn StoreProgressSink) -> Result<String, LibraryError> {
+        sink.phase(JobPhase::Verifying);
+        sink.progress(1, 2);
         self.registry.upsert_store(&InstalledGame {
             title: "The Witcher".into(),
             platform: StoreKind::Gog.platform_name().into(),
@@ -56,7 +58,7 @@ impl StoreJobRunner for FakeRunner {
             installed_at: 1,
             ..Default::default()
         })?;
-        progress(2, 2);
+        sink.progress(2, 2);
         self.finalized.store(true, Ordering::SeqCst);
         Ok(String::new())
     }
@@ -91,6 +93,8 @@ fn job(runner: Arc<FakeRunner>) -> StoreJob {
         source: StoreKind::Gog,
         store_id: "1207664643".into(),
         op: StoreOp::Install,
+        title: "The Witcher".into(),
+        drive: None,
         runner,
     }
 }
@@ -122,7 +126,7 @@ async fn a_store_job_downloads_finalizes_and_completes() {
     });
     let id = h
         .service
-        .enqueue_store_job(job(runner.clone()), "The Witcher")
+        .enqueue_store_job(job(runner.clone()))
         .unwrap()
         .expect("admitted");
     assert!(
@@ -143,6 +147,13 @@ async fn a_store_job_downloads_finalizes_and_completes() {
     assert_eq!(entry.platform, "GOG");
     assert_eq!(entry.source_id, "gog:1207664643");
     assert_eq!(entry.error, "");
+    assert_eq!(entry.title, "The Witcher");
+    assert_eq!(
+        entry.phase,
+        JobPhase::Verifying,
+        "the finalize's phase reached the row"
+    );
+    assert_eq!(entry.drive_label, "");
     // Progress reached the entry (the listener is throttled, so the entry
     // itself is the record), and the listener heard about the row.
     assert_eq!((entry.downloaded_bytes, entry.total_bytes), (100, 100));
@@ -171,14 +182,12 @@ async fn a_store_job_cancels_and_retries_with_its_runner() {
     });
     let id = h
         .service
-        .enqueue_store_job(job(runner.clone()), "The Witcher")
+        .enqueue_store_job(job(runner.clone()))
         .unwrap()
         .expect("admitted");
     // A second admission of the same product and op is a duplicate.
     assert_eq!(
-        h.service
-            .enqueue_store_job(job(runner.clone()), "The Witcher")
-            .unwrap(),
+        h.service.enqueue_store_job(job(runner.clone())).unwrap(),
         None
     );
     assert!(wait_for_status(&h.service, id, DownloadStatus::Downloading).await);
@@ -203,4 +212,52 @@ async fn a_store_job_cancels_and_retries_with_its_runner() {
     assert!(wait_for_status(&h.service, retried, DownloadStatus::Completed).await);
     assert!(runner.finalized.load(Ordering::SeqCst));
     assert_eq!(runner.downloads.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_restore_row_names_its_drive() {
+    let h = harness();
+    let runner = Arc::new(FakeRunner {
+        registry: h.registry.clone(),
+        block_first_download: false,
+        downloads: AtomicUsize::new(0),
+        finalized: AtomicBool::new(false),
+    });
+    let mut restore = job(runner);
+    restore.op = StoreOp::Restore;
+    restore.drive = Some(DriveRef {
+        key: "/media/t7".into(),
+        name: "Couch kit".into(),
+        label: "SAMSUNG T7".into(),
+    });
+    let id = h
+        .service
+        .enqueue_store_job(restore)
+        .unwrap()
+        .expect("admitted");
+    assert!(wait_for_status(&h.service, id, DownloadStatus::Completed).await);
+    let entry = h
+        .service
+        .snapshot()
+        .entries
+        .into_iter()
+        .find(|e| e.id == id)
+        .unwrap();
+    assert_eq!(entry.kind, "store_restore");
+    assert_eq!(
+        (
+            entry.drive_id.as_str(),
+            entry.drive_name.as_str(),
+            entry.drive_label.as_str()
+        ),
+        ("/media/t7", "Couch kit", "SAMSUNG T7")
+    );
+}
+
+#[test]
+fn the_wizard_check_defaults_to_yes_and_can_be_replaced() {
+    let h = harness();
+    assert!((h.service.wizard_allowed())());
+    h.service.set_wizard_allowed(Arc::new(|| false));
+    assert!(!(h.service.wizard_allowed())());
 }

@@ -470,7 +470,41 @@ export type DownloadKind =
   | 'backup_cancelled'
   // External game stores (`job: 'store'`).
   | 'store_install'
-  | 'store_update';
+  | 'store_update'
+  | 'store_repair'
+  | 'store_dlc'
+  // Installing from an offline installer file.
+  | 'store_installer'
+  // A store game copied back from a backup drive.
+  | 'store_restore'
+  // The store tool's own download (gogdl).
+  | 'store_tool'
+  // Game backups: a store game (GOG) written to a drive (`job: 'backup'`;
+  // its `source_id` is the game key).
+  | 'backup_store_game';
+
+/** What a running job is doing right now (`grid_core::library::queue::JobPhase`). */
+export type JobPhase =
+  | 'none'
+  | 'downloading'
+  | 'installing'
+  | 'verifying'
+  | 'unpacking'
+  | 'installer_silent'
+  | 'installer_wizard'
+  | 'copying_installer'
+  | 'running_installer'
+  | 'copying_from_drive'
+  | 'checksum';
+
+/** Why a failed row failed, when it is worded from parts (`queue::JobFailure`). */
+export type JobFailure = {
+  code: 'installer_unrecognised' | 'installer_dlc_base_missing' | 'installer_exit' | 'installer_needs_wizard';
+  base_title: string;
+  base_gog_id: string;
+  /** The download (or installer) was kept for a retry. */
+  kept: boolean;
+};
 
 export type DownloadEntry = {
   id: number;
@@ -497,6 +531,10 @@ export type DownloadEntry = {
   drive_label: string;
   /** The backup batch, for one notification per batch. `0` for none. */
   batch: number;
+  /** What the job is doing right now; `'none'` for a job that does not say. */
+  phase: JobPhase;
+  /** Set on a failed installer row; `null` otherwise. */
+  failure: JobFailure | null;
 };
 
 export type DownloadsSnapshot = { entries: DownloadEntry[] };
@@ -1150,6 +1188,176 @@ export type PythonImportReport = {
  *  Paths only — never a credential. */
 export type LayoutMigrationNotice = { message: string };
 
+// ── External game stores, Phase 1: GOG (docs/stores-phase1-plan.md; commands in
+// app/src-tauri/src/commands/stores.rs). ──
+
+export type StoreSource = Exclude<GameSource, 'romm'>;
+export type StorePlatform = 'linux' | 'windows';
+export type ToolStatus = {
+  name: 'gogdl';
+  version: string;
+  state: 'not_installed' | 'installing' | 'installed' | 'failed';
+  size_bytes: number;
+  error: string;
+  license: string;
+  source_url: string;
+  done: number;
+  total: number;
+};
+export type StoreStatus = {
+  source: StoreSource;
+  connection: 'connected' | 'expired' | 'not_connected';
+  username: string;
+  tool: ToolStatus;
+  owned: 'idle' | 'loading' | 'ready' | 'error';
+  owned_error: string;
+  owned_count: number;
+  installed_count: number;
+  installed_bytes: number;
+  refreshed_at: number;
+  cloud_saves: boolean;
+  install_dir: string;
+  in_rail: boolean;
+  last_error: string;
+};
+export type StoreDlc = { id: string; title: string; download_bytes: number; installed: boolean };
+export type StoreGame = {
+  key: string;
+  source: StoreSource;
+  store_id: string;
+  title: string;
+  installed: boolean;
+  cover: string;
+  screenshots: string[];
+  description: string;
+  developer: string;
+  genres: string[];
+  year: string;
+  platforms: StorePlatform[];
+  installed_platform: StorePlatform | null;
+  download_bytes: number;
+  disk_bytes: number;
+  version: string;
+  update_version: string;
+  origin: 'gogdl' | 'offline' | 'drive' | null;
+  not_supported: string;
+  dlc: StoreDlc[];
+  cloud: 'off' | 'none' | 'synced' | 'conflict' | 'unknown';
+  last_sync: number;
+  install_dir: string;
+  compat_tool: string;
+};
+export type StoreLibrary = { status: StoreStatus; installed: StoreGame[]; available: StoreGame[] };
+export type StoreInstallOptions = {
+  versions: { platform: StorePlatform; recommended: boolean; download_bytes: number; disk_bytes: number }[];
+  languages: string[];
+  default_language: string;
+  dlc: StoreDlc[];
+  install_dir: string;
+  free_bytes: number;
+  volume: string;
+  compat_tool: string;
+};
+export type StoreInstallRequest = {
+  key: string;
+  platform: StorePlatform;
+  language: string;
+  dlc_ids: string[];
+  install_dir: string;
+  compat_tool: string;
+};
+export type StoreGameSettings = {
+  install_dir: string;
+  executable: string;
+  exe_user_pinned: boolean;
+  launch_parameters: string;
+  compat_tool: string;
+  wineprefix: string;
+  cloud_saves: boolean;
+};
+export type StoreCloudState = {
+  state: 'off' | 'none' | 'synced' | 'syncing' | 'conflict';
+  synced_at: number;
+  locations: string[];
+  conflict: { local_at: number; local_files: number; local_bytes: number; cloud_at: number } | null;
+};
+export type InstallerInspection = {
+  path: string;
+  kind: 'linux_sh' | 'windows_exe' | 'mac_pkg';
+  key: string | null;
+  title: string;
+  cover: string;
+  version: string;
+  bytes: number;
+  verdict:
+    | { kind: 'install' }
+    | { kind: 'update'; installed_version: string }
+    | { kind: 'dlc'; base_title: string }
+    | { kind: 'refused'; title: string; body: string };
+};
+export type StoreNoticeAction = {
+  kind:
+    | 'play'
+    | 'open_downloads'
+    | 'try_again'
+    | 'sign_in'
+    | 'install_tool'
+    | 'show_updates'
+    | 'install_base'
+    | 'open_settings';
+  key?: string;
+  title?: string;
+};
+export type StoreNotice = {
+  source: StoreSource | null;
+  message: string;
+  detail: string;
+  error: boolean;
+  action: StoreNoticeAction | null;
+};
+/** The `store-login` event's payload. Never the login code. */
+export type StoreLoginEvent = {
+  source: StoreSource;
+  outcome: 'connected' | 'cancelled' | 'failed';
+  username: string;
+  error: string;
+};
+export type DriveStoreGame = {
+  key: string;
+  name: string;
+  platform: StorePlatform;
+  layout: 'installer' | 'installed';
+  version: string;
+  size: number;
+  cover: string;
+  installed: boolean;
+  added: string;
+  summary: string;
+};
+export type StoreBackupPlan = {
+  drive: string;
+  rows: {
+    key: string;
+    name: string;
+    layout: 'installer' | 'installed';
+    detail: string;
+    bytes: number;
+    windows_prefix_note: boolean;
+    already: boolean;
+    refused: string;
+  }[];
+  bytes_to_write: number;
+  free_bytes: number;
+  fits: boolean;
+};
+
+/** Emitted with `StoreStatus[]` when a store's status changes (commands/stores.rs `STORES_CHANGED_EVENT`). */
+export const STORES_CHANGED_EVENT = 'stores-changed';
+/** Emitted with a `StoreLoginEvent` when the login window finishes (`STORE_LOGIN_EVENT`). */
+export const STORE_LOGIN_EVENT = 'store-login';
+/** Emitted with a `StoreNotice` for a toast the backend decides on (`STORE_NOTICE_EVENT`). */
+export const STORE_NOTICE_EVENT = 'store-notice';
+
 export const api = {
   connect: (serverUrl: string, username: string, secret: string, useToken: boolean) =>
     invoke<SessionState>('connect', { serverUrl, username, secret, useToken }),
@@ -1496,4 +1704,53 @@ export const api = {
   setBackupIncludeFirmware: (value: boolean) => invoke<void>('set_backup_include_firmware', { value }),
   /** Offline mode: sets `Config.offline` and drops any live client. */
   useWithoutServer: () => invoke<void>('use_without_server'),
+  // ── External game stores (Phase 1: GOG). `key` is a game key unless noted. ──
+  storesStatus: () => invoke<StoreStatus[]>('stores_status'),
+  storeLibrary: (source: StoreSource) => invoke<StoreLibrary>('store_library', { source }),
+  /** Results come as `stores-changed` events. */
+  storeRefresh: (source: StoreSource) => invoke<void>('store_refresh', { source }),
+  /** Results come as `updates-changed` events. */
+  storeCheckUpdates: (source: StoreSource) => invoke<void>('store_check_updates', { source }),
+  /** Opens the login window; the outcome is a `store-login` event. */
+  storeConnect: (source: StoreSource) => invoke<void>('store_connect', { source }),
+  storeCancelLogin: (source: StoreSource) => invoke<void>('store_cancel_login', { source }),
+  storeDisconnect: (source: StoreSource) => invoke<void>('store_disconnect', { source }),
+  storeInstallTool: (source: StoreSource) => invoke<void>('store_install_tool', { source }),
+  /** TV mode's on-screen keyboard: types `text` into the login page. */
+  storeLoginType: (text: string) => invoke<void>('store_login_type', { text }),
+  storeSetInstallDir: (source: StoreSource, path: string) =>
+    invoke<void>('store_set_install_dir', { source, path }),
+  storeSetCloudSaves: (source: StoreSource, on: boolean) =>
+    invoke<void>('store_set_cloud_saves', { source, on }),
+  storeInstallOptions: (key: string) => invoke<StoreInstallOptions>('store_install_options', { key }),
+  storeInstall: (request: StoreInstallRequest) => invoke<void>('store_install', { request }),
+  storeUpdate: (key: string) => invoke<void>('store_update', { key }),
+  storeRepair: (key: string) => invoke<void>('store_repair', { key }),
+  storeUninstall: (key: string) => invoke<void>('store_uninstall', { key }),
+  storeInstallDlc: (key: string, dlcId: string) => invoke<void>('store_install_dlc', { key, dlcId }),
+  storeRemoveDlc: (key: string, dlcId: string) => invoke<void>('store_remove_dlc', { key, dlcId }),
+  storeGameSettings: (key: string) => invoke<StoreGameSettings>('store_game_settings', { key }),
+  storeSetGameSettings: (key: string, settings: StoreGameSettings) =>
+    invoke<void>('store_set_game_settings', { key, settings }),
+  storeCloudState: (key: string) => invoke<StoreCloudState>('store_cloud_state', { key }),
+  storeCloudSync: (key: string) => invoke<StoreCloudState>('store_cloud_sync', { key }),
+  storeCloudResolve: (key: string, choice: 'upload' | 'download') =>
+    invoke<StoreCloudState>('store_cloud_resolve', { key, choice }),
+  offlineInspect: (path: string) => invoke<InstallerInspection>('offline_inspect', { path }),
+  offlineInstall: (path: string, compatTool: string, installDir?: string) =>
+    invoke<void>('offline_install', { path, compatTool, installDir: installDir ?? null }),
+  /** `key` is the drive key; `gameKeys` the store games' keys. */
+  planStoreBackup: (key: string, gameKeys: string[]) =>
+    invoke<StoreBackupPlan>('plan_store_backup', { key, gameKeys }),
+  /** `key` is the drive key. */
+  startStoreBackup: (key: string, gameKeys: string[]) =>
+    invoke<BackupQueued>('start_store_backup', { key, gameKeys }),
+  /** `key` is the drive key. */
+  driveStoreGames: (key: string) => invoke<DriveStoreGame[]>('drive_store_games', { key }),
+  /** `key` is the drive key; `gameKey` the store game's key. */
+  installStoreFromDrive: (key: string, gameKey: string) =>
+    invoke<void>('install_store_from_drive', { key, gameKey }),
+  /** `key` is the drive key. Answers how many games were removed. */
+  removeStoreFromDrive: (key: string, gameKeys: string[]) =>
+    invoke<number>('remove_store_from_drive', { key, gameKeys }),
 };

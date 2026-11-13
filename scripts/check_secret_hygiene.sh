@@ -10,7 +10,10 @@ cd "$(dirname "$0")/.."
 # parameter and has no header form.
 # `tests/ra_login.rs` is on it for one assertion: that the FAKE token the mock
 # server returns is the one the login hands back.
-allowed_files=("crates/grid-core/src/secrets.rs" "crates/grid-core/src/romm/mod.rs" "crates/grid-core/src/autoconfig/mod.rs" "crates/grid-core/src/retroachievements.rs" "crates/grid-core/tests/ra_login.rs")
+# `stores/gog/auth.rs` and `stores/gog/api.rs` are on it for the GOG login
+# code and the in-memory bearer the GOG HTTP APIs take (the store-token
+# exception in AGENTS.md).
+allowed_files=("crates/grid-core/src/secrets.rs" "crates/grid-core/src/romm/mod.rs" "crates/grid-core/src/autoconfig/mod.rs" "crates/grid-core/src/retroachievements.rs" "crates/grid-core/tests/ra_login.rs" "crates/grid-core/src/stores/gog/auth.rs" "crates/grid-core/src/stores/gog/api.rs")
 allowed_args=()
 for f in "${allowed_files[@]}"; do
   allowed_args+=(-e "$f")

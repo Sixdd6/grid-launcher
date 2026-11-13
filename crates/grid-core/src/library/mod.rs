@@ -81,8 +81,8 @@ use platforms::{
     is_native_platform, is_ps3_platform, is_ps4_platform, is_ps5_platform, is_xbox360_platform,
 };
 use queue::{
-    Admission, CancelAction, DownloadStatus, DownloadsSnapshot, EntryMeta, JobKey, QueueState,
-    StoreJob,
+    Admission, CancelAction, DownloadStatus, DownloadsSnapshot, EntryMeta, JobKey, JobPhase,
+    QueueState, StoreJob, StoreProgressSink,
 };
 use registry::{identity_key, installed_match, InstalledGame, Registry};
 use relocate::LibraryGate;
@@ -114,6 +114,27 @@ pub enum LibraryError {
     /// A backup drive went away mid-job: "<label> was removed".
     #[error("{0}")]
     DriveRemoved(String),
+    /// An installer GRID found holds no GOG game info. Words from the
+    /// GameStores card ("Failed · ...").
+    #[error("Its archive holds an installer GRID doesn't recognise ({file} has no GOG game info). The download was removed.")]
+    InstallerUnrecognised { file: String },
+    /// A DLC installer whose base game is not installed.
+    #[error("Its archive holds a DLC installer for {base_title}, which isn't installed. Install {base_title} first; the download was removed.")]
+    InstallerDlcBaseMissing {
+        base_title: String,
+        base_gog_id: String,
+    },
+    /// The installer exited with this code.
+    #[error("The installer stopped with an error (exit code {0}). The download was removed.")]
+    InstallerExit(i32),
+    /// A Windows installer that could not run silently where its setup
+    /// window may not open (TV mode). `kept`: the download stays for a
+    /// retry in desktop mode.
+    #[error("This installer needs its setup window. Install it in desktop mode.{}", if *kept { " The download was kept." } else { "" })]
+    InstallerNeedsWizard { kept: bool },
+    /// An installer GRID refuses, in GRID's words.
+    #[error("{0}")]
+    InstallerRefused(String),
 }
 
 // --- constants --------------------------------------------------------------
@@ -1248,7 +1269,11 @@ pub struct InstallService {
     backup_rows: Mutex<HashMap<u64, (backup_job::DriveTarget, backup_job::BackupItem)>>,
     /// Every store job admitted this session, by entry id: what `retry`
     /// re-enqueues.
-    store_rows: Mutex<HashMap<u64, (StoreJob, String)>>,
+    store_rows: Mutex<HashMap<u64, StoreJob>>,
+    /// Whether an installer may open its own setup window
+    /// ([`Self::set_wizard_allowed`]; the app answers `!tv_mode`). Yes
+    /// until the app installs its own.
+    wizard_allowed: RwLock<Arc<dyn Fn() -> bool + Send + Sync>>,
     /// Test hook run before each file (and archive part) a backup writes
     /// to its drive.
     backup_write_hook: RwLock<Option<Arc<dyn Fn() + Send + Sync>>>,
@@ -1324,6 +1349,7 @@ impl InstallService {
             resolved_sizes: Mutex::new(HashMap::new()),
             backup_rows: Mutex::new(HashMap::new()),
             store_rows: Mutex::new(HashMap::new()),
+            wizard_allowed: RwLock::new(Arc::new(|| true)),
             backup_write_hook: RwLock::new(None),
             local_scans: Mutex::new(HashMap::new()),
             drive_rows: Mutex::new(HashMap::new()),
@@ -3159,11 +3185,11 @@ impl InstallService {
             // has none, and is left for the store's own page to restart.
             Some(JobKey::Store { .. }) => {
                 let row = self.store_rows.lock().unwrap().get(&entry_id).cloned();
-                let Some((job, title)) = row else {
+                let Some(job) = row else {
                     return Ok(());
                 };
                 self.dismiss(entry_id);
-                self.enqueue_store_job(job, &title).map(|_| ())
+                self.enqueue_store_job(job).map(|_| ())
             }
             None => Ok(()),
         }
@@ -3189,34 +3215,51 @@ impl InstallService {
 
     /// Queues a store operation ([`StoreJob`]) behind the same download and
     /// finalize slots as every other job, with the same progress, cancel
-    /// and retry handling. `title` is the drawer row's title; the platform
-    /// is the store's name. Returns the new entry id, or `None` when the
-    /// same product already has this op queued or running. Refused while a
-    /// library move holds the gate, like any admission.
-    pub fn enqueue_store_job(
-        self: &Arc<Self>,
-        job: StoreJob,
-        title: &str,
-    ) -> Result<Option<u64>, LibraryError> {
+    /// and retry handling. The drawer row's title is the job's; the
+    /// platform is the store's name; a restore's row names its drive.
+    /// Returns the new entry id, or `None` when the same product already
+    /// has this op queued or running. Refused while a library move holds
+    /// the gate, like any admission.
+    pub fn enqueue_store_job(self: &Arc<Self>, job: StoreJob) -> Result<Option<u64>, LibraryError> {
         let key = job.job_key();
         let kind = job.op.kind();
         let platform = job.source.platform_name();
+        let title = job.title.clone();
+        let meta = job
+            .drive
+            .as_ref()
+            .map(|drive| EntryMeta {
+                drive_id: drive.key.clone(),
+                drive_name: drive.name.clone(),
+                drive_label: drive.label.clone(),
+                batch: 0,
+            })
+            .unwrap_or_default();
         let remembered = job.clone();
-        let admitted = self.admit_meta(
-            key,
-            title,
-            platform,
-            kind,
-            JobPayload::Store(job),
-            EntryMeta::default(),
-        )?;
+        let admitted =
+            self.admit_meta(key, &title, platform, kind, JobPayload::Store(job), meta)?;
         if let Some(id) = admitted {
-            self.store_rows
-                .lock()
-                .unwrap()
-                .insert(id, (remembered, title.to_string()));
+            self.store_rows.lock().unwrap().insert(id, remembered);
         }
         Ok(admitted)
+    }
+
+    /// Installs the check an installer asks before it opens its own setup
+    /// window (the app: not in TV mode). A second call replaces the first.
+    pub fn set_wizard_allowed(&self, f: Arc<dyn Fn() -> bool + Send + Sync>) {
+        *self.wizard_allowed.write().unwrap() = f;
+    }
+
+    /// The check [`Self::set_wizard_allowed`] installed, for a job to ask
+    /// when it needs to.
+    pub fn wizard_allowed(&self) -> Arc<dyn Fn() -> bool + Send + Sync> {
+        self.wizard_allowed.read().unwrap().clone()
+    }
+
+    /// Entry `id` moved to `phase`: its row shows it at once.
+    pub fn on_install_phase(&self, id: u64, phase: JobPhase) {
+        self.queue.lock().unwrap().set_phase(id, phase);
+        self.notify_now();
     }
 
     /// Deletes an installed game's files and its registry row.
@@ -3914,7 +3957,7 @@ impl InstallService {
             JobPayload::Backup(job) => self.finalize_backup(id, job, cancel, &mut warning),
             JobPayload::Store(job) => job
                 .runner
-                .finalize(&mut |done, total| self.on_install_progress(id, done, total))
+                .finalize(&mut ServiceSink { service: self, id })
                 .map(|message| warning = message),
         };
         (result, warning)
@@ -5159,7 +5202,7 @@ impl InstallService {
         stop
     }
 
-    fn on_install_progress(&self, id: u64, processed: u64, total: u64) {
+    pub(crate) fn on_install_progress(&self, id: u64, processed: u64, total: u64) {
         if let Some(space) = self.job_space(id) {
             space.on_finalize(processed);
         }
@@ -6456,6 +6499,22 @@ fn add_mode(path: &Path, extra: u32) {
 
 #[cfg(not(unix))]
 fn make_tree_writable(_dir: &Path) {}
+
+/// A store job's finalize sink: progress and phase go to its row.
+struct ServiceSink<'a> {
+    service: &'a InstallService,
+    id: u64,
+}
+
+impl StoreProgressSink for ServiceSink<'_> {
+    fn progress(&mut self, done: u64, total: u64) {
+        self.service.on_install_progress(self.id, done, total);
+    }
+
+    fn phase(&mut self, phase: JobPhase) {
+        self.service.on_install_phase(self.id, phase);
+    }
+}
 
 #[cfg(test)]
 mod tests {

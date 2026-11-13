@@ -25,6 +25,8 @@ function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
     drive_name: '',
     drive_label: '',
     batch: 0,
+    phase: 'none',
+    failure: null,
     ...overrides,
   };
 }

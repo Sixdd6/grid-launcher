@@ -23,6 +23,8 @@ function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
     drive_name: '',
     drive_label: '',
     batch: 0,
+    phase: 'none',
+    failure: null,
     ...overrides,
   };
 }
@@ -477,6 +479,8 @@ describe('backup rows', () => {
       drive_name: 'Couch kit',
       drive_label: 'SAMSUNG T7',
       batch: 3,
+      phase: 'none',
+      failure: null,
       ...overrides,
     });
 

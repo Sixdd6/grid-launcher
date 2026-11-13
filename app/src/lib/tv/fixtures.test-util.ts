@@ -26,7 +26,7 @@ export const entry = (o: Partial<DownloadEntry>): DownloadEntry =>
   ({
     id: 1, job: 'game', kind: 'base', rom_id: 501, source_id: '', title: 'Game', platform: 'SNES', status: 'queued',
     downloaded_bytes: 0, total_bytes: 0, speed_bps: 0, install_processed_bytes: 0, install_total_bytes: 0,
-    error: '', detail: '', drive_id: '', drive_name: '', drive_label: '', batch: 0, ...o,
+    error: '', detail: '', drive_id: '', drive_name: '', drive_label: '', batch: 0, phase: 'none', failure: null, ...o,
   }) as DownloadEntry;
 
 export function packSummary(o: Partial<PackSummary> = {}): PackSummary {

@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::library::paths::sanitize_component;
 use crate::romm::{RomDetail, RomFile};
+use crate::stores::gog::meta::GogPlatform;
+use crate::stores::{GameKey, StoreKind};
 
 /// The folder GRID owns at a drive's root. GRID touches nothing outside it.
 pub const PACK_DIR: &str = "gridpack";
@@ -101,9 +103,123 @@ pub struct Pack {
     pub emulators: Vec<PackEmulator>,
     #[serde(default)]
     pub firmware: Vec<PackFirmware>,
+    /// Store games (GOG) that did not come from a RomM server. Not written
+    /// while empty; an older build keeps the key through `extra`, so FORMAT
+    /// stays 1.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub store_games: Vec<PackStoreGame>,
     /// Keys this build does not know, kept so a rewrite does not drop them.
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// How a store game is on the drive.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum StoreLayout {
+    /// Its offline installer files; restoring runs the installer again.
+    Installer,
+    /// A copy of the installed game; restoring copies it back.
+    Installed,
+}
+
+/// One store game on a drive. Its files live under
+/// [`store_game_dir_rel`]: `stores/<source>/<name>-<id>/` with `installer/`,
+/// `installed/`, `saves/` and `assets/` inside.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct PackStoreGame {
+    /// `gog` in Phase 1.
+    pub source: StoreKind,
+    pub store_id: String,
+    pub name: String,
+    pub platform: GogPlatform,
+    pub layout: StoreLayout,
+    pub version: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub companies: Vec<String>,
+    #[serde(default)]
+    pub genres: Vec<String>,
+    #[serde(default)]
+    pub release_date: String,
+    /// The bytes the game takes on the drive.
+    pub size: u64,
+    /// The installer files ([`StoreLayout::Installer`]), in order.
+    #[serde(default)]
+    pub installer: Vec<PackFile>,
+    /// Installed DLC, as their installer files.
+    #[serde(default)]
+    pub dlc_installers: Vec<PackStoreDlc>,
+    /// The installed copy ([`StoreLayout::Installed`]).
+    #[serde(default)]
+    pub installed: Option<PackInstalled>,
+    #[serde(default)]
+    pub saves: Option<PackSaves>,
+    #[serde(default)]
+    pub assets: PackAssets,
+    /// The row's store metadata (GOG: `GogMeta`), never a token.
+    #[serde(default)]
+    pub meta: serde_json::Value,
+    /// When it was written, RFC 3339 UTC.
+    pub added: String,
+    /// Keys this build does not know, kept so a rewrite does not drop them.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// One DLC's installer files.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PackStoreDlc {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub installer: Vec<PackFile>,
+    /// Keys this build does not know, kept so a rewrite does not drop them.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+impl PackStoreGame {
+    /// The game's key.
+    pub fn key(&self) -> GameKey {
+        GameKey::store(self.source, self.store_id.clone())
+    }
+
+    /// Every pack-relative path this entry names.
+    pub fn paths(&self) -> impl Iterator<Item = &str> {
+        let assets = &self.assets;
+        self.installer
+            .iter()
+            .chain(
+                self.dlc_installers
+                    .iter()
+                    .flat_map(|dlc| dlc.installer.iter()),
+            )
+            .map(|file| file.path.as_str())
+            .chain(
+                self.installed
+                    .iter()
+                    .flat_map(|copy| copy.parts.iter().map(|part| part.path.as_str())),
+            )
+            .chain(
+                self.saves
+                    .iter()
+                    .flat_map(|saves| saves.parts.iter().map(|part| part.path.as_str())),
+            )
+            .chain(
+                [
+                    &assets.cover,
+                    &assets.cover_small,
+                    &assets.fanart,
+                    &assets.logo,
+                ]
+                .into_iter()
+                .flatten()
+                .map(String::as_str),
+            )
+            .chain(assets.screenshots.iter().map(String::as_str))
+    }
 }
 
 /// Where a game came from: enough to rebuild its detail and image cache keys.
@@ -740,6 +856,7 @@ pub fn new_pack(name: &str, os: &[PackOs]) -> Pack {
         games: Vec::new(),
         emulators: Vec::new(),
         firmware: Vec::new(),
+        store_games: Vec::new(),
         extra: BTreeMap::new(),
     }
 }
@@ -820,6 +937,14 @@ pub fn game_dir_rel(platform_slug: &str, fs_name: &str, single_file_name: Option
         None => pack_component(fs_name, "game"),
     };
     format!("games/{slug}/{leaf}")
+}
+
+/// A store game's folder: `stores/<source>/<name>-<id>`, its installer,
+/// installed copy, saves and assets inside (`installer/`, `installed/`,
+/// `saves/`, `assets/`). Pass it through [`unique_rel`] before writing.
+pub fn store_game_dir_rel(source: StoreKind, name: &str, store_id: &str) -> String {
+    let leaf = pack_component(&format!("{}-{}", name.trim(), store_id.trim()), "game");
+    format!("stores/{}/{leaf}", source.as_str())
 }
 
 /// Part `index` (zero-based: the position in [`PackInstalled::parts`]) of
@@ -1078,6 +1203,34 @@ impl Pack {
                     .iter()
                     .flat_map(|set| set.files.iter().map(|file| file.path.as_str())),
             )
+            .chain(self.store_games.iter().flat_map(PackStoreGame::paths))
+    }
+
+    /// The store game with `key`.
+    pub fn find_store_game(&self, key: &GameKey) -> Option<&PackStoreGame> {
+        self.store_games.iter().find(|game| &game.key() == key)
+    }
+
+    /// Adds a store game, or replaces the entry with the same key. Returns
+    /// the entry it replaced.
+    pub fn upsert_store_game(&mut self, game: PackStoreGame) -> Option<PackStoreGame> {
+        let key = game.key();
+        match self.store_games.iter_mut().find(|old| old.key() == key) {
+            Some(old) => Some(std::mem::replace(old, game)),
+            None => {
+                self.store_games.push(game);
+                None
+            }
+        }
+    }
+
+    /// Removes the store game with `key`.
+    pub fn remove_store_game(&mut self, key: &GameKey) -> Option<PackStoreGame> {
+        let index = self
+            .store_games
+            .iter()
+            .position(|game| &game.key() == key)?;
+        Some(self.store_games.remove(index))
     }
 
     /// The game backed up from `rom_id` on `server` (compared by
@@ -1677,6 +1830,103 @@ mod tests {
 
     fn draft() -> Pack {
         serde_json::from_str(DRAFT).unwrap()
+    }
+
+    fn store_game(id: &str) -> PackStoreGame {
+        let dir = store_game_dir_rel(StoreKind::Gog, "Brightwater", id);
+        PackStoreGame {
+            source: StoreKind::Gog,
+            store_id: id.to_string(),
+            name: "Brightwater".into(),
+            platform: GogPlatform::Linux,
+            layout: StoreLayout::Installer,
+            version: "1.3".into(),
+            summary: String::new(),
+            companies: vec!["Studio".into()],
+            genres: Vec::new(),
+            release_date: String::new(),
+            size: 10,
+            installer: vec![PackFile {
+                path: format!("{dir}/installer/brightwater_1_3.sh"),
+                size: 10,
+                server_file_id: 0,
+                name: "brightwater_1_3.sh".into(),
+                category: String::new(),
+                top_level: true,
+                md5: String::new(),
+                sha1: String::new(),
+                extra: Default::default(),
+            }],
+            dlc_installers: Vec::new(),
+            installed: None,
+            saves: None,
+            assets: PackAssets::default(),
+            meta: serde_json::json!({"origin": "offline"}),
+            added: "2026-11-13T00:00:00Z".into(),
+            extra: Default::default(),
+        }
+    }
+
+    #[test]
+    fn store_games_round_trip_and_survive_an_older_build() {
+        let mut pack = draft();
+        assert!(pack.store_games.is_empty());
+        let json = serde_json::to_string(&pack).unwrap();
+        assert!(!json.contains("store_games"), "not written while empty");
+
+        assert!(pack.upsert_store_game(store_game("1")).is_none());
+        let key = GameKey::store(StoreKind::Gog, "1");
+        assert_eq!(pack.find_store_game(&key).unwrap().name, "Brightwater");
+        let mut newer = store_game("1");
+        newer.version = "1.4".into();
+        assert_eq!(pack.upsert_store_game(newer).unwrap().version, "1.3");
+        assert_eq!(pack.store_games.len(), 1);
+        assert!(pack
+            .paths()
+            .any(|rel| rel == "stores/gog/Brightwater-1/installer/brightwater_1_3.sh"));
+
+        let json = serde_json::to_string(&pack).unwrap();
+        let back: Pack = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, pack);
+        assert!(!back.extra.contains_key("store_games"));
+
+        // A build without `store_games` keeps it in its `extra`, so its
+        // rewrite hands the key back intact.
+        #[derive(Serialize, Deserialize)]
+        struct OlderPack {
+            format: u32,
+            name: String,
+            os: Vec<PackOs>,
+            created: String,
+            updated: String,
+            #[serde(default)]
+            games: Vec<serde_json::Value>,
+            #[serde(flatten)]
+            extra: BTreeMap<String, serde_json::Value>,
+        }
+        let older: OlderPack = serde_json::from_str(&json).unwrap();
+        assert!(older.extra.contains_key("store_games"));
+        let rewritten = serde_json::to_string(&older).unwrap();
+        let again: Pack = serde_json::from_str(&rewritten).unwrap();
+        assert_eq!(again.store_games, pack.store_games);
+        assert_eq!(again.format, FORMAT);
+        assert!(matches!(
+            parse_pack(rewritten.as_bytes()),
+            PackState::Ready(_)
+        ));
+
+        assert_eq!(pack.remove_store_game(&key).unwrap().version, "1.4");
+        assert!(pack.find_store_game(&key).is_none());
+    }
+
+    #[test]
+    fn a_bad_store_game_path_makes_the_pack_unreadable() {
+        let mut pack = draft();
+        let mut game = store_game("1");
+        game.installer[0].path = "../escape.sh".into();
+        pack.upsert_store_game(game);
+        let json = serde_json::to_vec(&pack).unwrap();
+        assert!(matches!(parse_pack(&json), PackState::Unreadable(_)));
     }
 
     fn game(server: &str, rom_id: i64, files: &[&str]) -> PackGame {
