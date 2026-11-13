@@ -162,6 +162,24 @@ pub trait StoreProgressSink {
     fn progress(&mut self, done: u64, total: u64);
     /// The job moved to `phase`.
     fn phase(&mut self, phase: JobPhase);
+    /// Whether the user cancelled the entry. Only a running installer
+    /// ([`JobPhase::is_cancellable_install`]) can be cancelled mid-finalize;
+    /// it then stops and returns [`LibraryError::Cancelled`]. `false` for a
+    /// sink that has no cancel.
+    fn cancelled(&self) -> bool {
+        false
+    }
+}
+
+impl JobPhase {
+    /// Whether a finalizing entry in this phase can be cancelled: an
+    /// installer process is running, and stopping it is safe.
+    pub fn is_cancellable_install(self) -> bool {
+        matches!(
+            self,
+            JobPhase::InstallerSilent | JobPhase::InstallerWizard | JobPhase::RunningInstaller
+        )
+    }
 }
 
 /// The work behind a store job, supplied by each store's phase (legendary,
@@ -937,7 +955,12 @@ impl QueueState {
 
         if self.finalize_active == Some(id) {
             return match self.entry_mut(id) {
-                Some(entry) if matches!(entry.key, JobKey::Backup { .. }) => {
+                // A backup's drive write, and a running installer, stop on
+                // their flag.
+                Some(entry)
+                    if matches!(entry.key, JobKey::Backup { .. })
+                        || entry.phase.is_cancellable_install() =>
+                {
                     entry.status = DownloadStatus::Cancelling;
                     CancelAction::ActiveWrite
                 }
@@ -1741,6 +1764,22 @@ mod tests {
         state.download_finished(id, Ok(()), false);
         assert_eq!(state.request_cancel(id), CancelAction::Ignored);
         assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Installing);
+    }
+
+    #[test]
+    fn a_running_installer_can_be_cancelled_mid_finalize() {
+        let mut state = QueueState::default();
+        let id = admit_idle(&mut state, 1);
+        state.download_finished(id, Ok(()), false);
+        state.set_phase(id, JobPhase::Unpacking);
+        assert_eq!(state.request_cancel(id), CancelAction::Ignored);
+        for phase in [JobPhase::InstallerSilent, JobPhase::InstallerWizard] {
+            state.set_phase(id, phase);
+            assert_eq!(state.request_cancel(id), CancelAction::ActiveWrite);
+            assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Cancelling);
+        }
+        state.finalize_finished(id, Err(LibraryError::Cancelled), "");
+        assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Cancelled);
     }
 
     // --- dismiss --------------------------------------------------------

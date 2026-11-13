@@ -13,6 +13,9 @@ dunce = "1"
 flate2 = "1.1.10"
 futures-util = "0.3.34"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
+# Reads a GOG Windows installer's (Inno Setup) header and goggame file
+# before it runs (stores::offline; spike 5). Apache-2.0, pure Rust.
+innospect = "0.2.0"
 keyring = "4.2.0"
 liblzma = "0.4.9"
 md-5 = "0.11.0"
