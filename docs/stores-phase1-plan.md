@@ -1,0 +1,322 @@
+# Game stores — Phase 1 (GOG) work plan
+
+Status: planned 2026-11-13. Read with `docs/external-stores-plan.md` (user decisions) and the
+approved design cards `docs/design/system/components/GameStores/README.md` and
+`TVStores/README.md`, which are the spec for every screen and state (generator sources:
+`docs/design/prototype/stores.js`, `stores_bk.js`, `tvstores.js`, `tvstores_bk.js`).
+
+Phase 0 gives us `GameKey`/`StoreKind` (`stores/mod.rs`); registry v11 rows (`upsert_store`,
+`find_key`, `remove_key`, `store_rows`; `store_meta` is never serialized to IPC);
+`JobPayload::Store(StoreJob)` with a runner that has `download` and `finalize` halves; and
+`launch_game_key` → `LaunchService::launch_key`.
+
+Gaps: backups know only rom ids (`BackupItemKey::Game(i64)`, `PackGame.source.rom_id`,
+`BackupRequest.rom_ids`, `DriveGame.rom_id`); Downloads rows have no phase field; only the
+`main` window has IPC capabilities (keep it so: the login window stays unprivileged).
+
+## Step 0 — contracts skeleton (one commit before fan-out)
+
+Every Rust type below, the `goggame` parser, the row builder and the meta struct, the queue enums
+and `JobPhase` plumbing, the pack struct, `Config.stores`, every Tauri command registered in
+`lib.rs` (stub bodies returning an error "not implemented"), the `api.ts` types and methods, and
+`check_secret_hygiene.sh` allowing `expose_secret` in `stores/gog/auth.rs` and `stores/gog/api.rs`.
+After it lands, `api.ts`, `config.rs`, `stores/mod.rs` and `stores/gog/{goggame,meta,row}.rs` are
+frozen: changes go through the lead.
+
+### grid-core
+
+```rust
+// stores/mod.rs adds: pub mod tools; pub mod paths; pub mod progress; pub mod runner; pub mod art;
+//                     pub mod gog; pub mod offline;
+#[derive(Debug, thiserror::Error)]
+pub enum StoreError {               // Display text is GRID's own words; never tool output
+    #[error("not signed in")] NotSignedIn,
+    #[error("login expired")] LoginExpired,
+    #[error("{0} isn't installed")] ToolMissing(&'static str),
+    #[error("{tool} stopped: {reason}")] ToolFailed { tool: &'static str, reason: String },
+    #[error("couldn't reach {0}")] Network(String),
+    #[error("{0}")] Refused(String),
+    #[error(transparent)] Library(#[from] LibraryError),
+}
+
+// stores/paths.rs
+pub fn tool_dir(data_dir: &Path, tool: StoreTool) -> PathBuf;   // <data>/stores/<tool>, 0700, files 0600
+pub fn ensure_private_dir(dir: &Path) -> io::Result<()>;
+pub fn remove_tool_dir(data_dir: &Path, tool: StoreTool) -> io::Result<()>;
+
+// stores/tools.rs
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)] #[serde(rename_all = "lowercase")]
+pub enum StoreTool { Gogdl, Innoextract }   // Innoextract only if the Windows-installer spike says so
+pub struct PinnedAsset { pub os: &'static str, pub arch: &'static str, pub url: &'static str,
+                         pub file_name: &'static str, pub sha256: &'static str, pub size: u64 }
+pub struct ToolPin { pub tool: StoreTool, pub version: &'static str, pub license: &'static str,
+                     pub source_url: &'static str, pub assets: &'static [PinnedAsset] }
+pub fn pin(tool: StoreTool) -> &'static ToolPin;
+pub fn host_asset(tool: StoreTool) -> Option<&'static PinnedAsset>;
+pub fn installed_path(data_dir: &Path, tool: StoreTool) -> Option<PathBuf>;  // E2E: GRID_LAUNCHER_E2E_TOOL_<TOOL> (feature e2e)
+pub async fn install_tool(http: &reqwest::Client, data_dir: &Path, tool: StoreTool,
+    progress: &mut (dyn FnMut(u64, u64) + Send)) -> Result<PathBuf, StoreError>; // SHA mismatch => file deleted, Refused(..)
+
+// stores/runner.rs  (the ONLY place a tool process is spawned; lines never logged)
+pub struct ToolCommand { pub program: PathBuf, pub args: Vec<String>, pub env: Vec<(String, String)>, pub cwd: Option<PathBuf> }
+pub struct ToolExit { pub code: Option<i32>, pub stdout: SecretString } // stdout kept only for JSON parse
+pub fn run_tool(cmd: &ToolCommand, cancel: &AtomicBool,
+    on_progress: &mut dyn FnMut(progress::ToolProgress)) -> Result<ToolExit, StoreError>;
+// stores/progress.rs
+pub struct ToolProgress { pub done: u64, pub total: u64, pub speed_bps: f64, pub phase: JobPhase }
+pub fn parse_gogdl_line(line: &str) -> Option<ToolProgress>;
+
+// library/queue.rs
+pub enum StoreOp { Install, Update, Repair, Dlc, Installer, Restore }   // kinds: store_install|store_update|store_repair|store_dlc|store_installer|store_restore
+pub enum BackupItemKey { Game(i64), Store(GameKey), Emulator{..}, Firmware(String) } // kind backup_store_game
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)] #[serde(rename_all = "snake_case")]
+pub enum JobPhase { #[default] None, Downloading, Installing, Verifying, Unpacking, InstallerSilent,
+    InstallerWizard, CopyingInstaller, RunningInstaller, CopyingFromDrive, Checksum }
+pub trait StoreProgressSink { fn progress(&mut self, done: u64, total: u64); fn phase(&mut self, phase: JobPhase); }
+pub trait StoreJobRunner: Send + Sync {          // finalize signature changes
+    fn download(&self, cancel: &AtomicBool, progress: &mut dyn FnMut(u64, u64, f64)) -> Result<(), LibraryError>;
+    fn finalize(&self, sink: &mut dyn StoreProgressSink) -> Result<String, LibraryError>;
+}
+pub struct StoreJob { pub source: StoreKind, pub store_id: String, pub op: StoreOp,
+                      pub title: String, pub drive: Option<DriveRef>, pub runner: Arc<dyn StoreJobRunner> }
+pub struct DriveRef { pub key: String, pub name: String, pub label: String }
+// InstallService:
+pub fn on_install_phase(&self, id: u64, phase: JobPhase);
+pub fn set_wizard_allowed(&self, f: Arc<dyn Fn() -> bool + Send + Sync>); // app: !tv_mode
+// LibraryError additions (Display = the design's "Failed ·" text):
+InstallerUnrecognised { file: String }, InstallerDlcBaseMissing { base_title: String, base_gog_id: String },
+InstallerExit(i32), InstallerNeedsWizard { kept: bool }, InstallerRefused(String)
+
+// stores/gog/goggame.rs  (fully implemented + tests in Step 0)
+pub struct GogGameInfo { pub game_id: String, pub root_game_id: String, pub name: String,
+    pub build_id: String, pub client_id: String, pub language: String, pub play_tasks: Vec<PlayTask> }
+pub struct PlayTask { pub is_primary: bool, pub path: String, pub arguments: String, pub working_dir: String, pub category: String }
+pub fn parse_info(bytes: &[u8]) -> Option<GogGameInfo>;
+pub fn find_info_files(dir: &Path) -> Vec<PathBuf>;          // goggame-*.info
+impl GogGameInfo { pub fn is_dlc(&self) -> bool; pub fn primary_task(&self) -> Option<&PlayTask>; }
+
+// stores/gog/meta.rs  (store_meta JSON; never a token)
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct GogMeta { pub origin: GogOrigin, pub platform: GogPlatform, pub version: String, pub build_id: String,
+    pub language: String, pub installer: Vec<String> /*abs paths, offline only*/, pub installer_bytes: u64,
+    pub dlc: Vec<GogDlcMeta>, pub cloud_saves: bool, pub save_locations: Vec<SaveLocation>,
+    pub last_sync: i64, pub exe_user_pinned: bool }
+#[serde(rename_all="lowercase")] pub enum GogOrigin { #[default] Gogdl, Offline, Drive }
+#[serde(rename_all="lowercase")] pub enum GogPlatform { #[default] Linux, Windows }
+pub struct GogDlcMeta { pub id: String, pub title: String, pub installer: Vec<String> }
+pub struct SaveLocation { pub name: String, pub path: String }
+
+// stores/gog/row.rs
+pub fn gog_row(info: &GogGameInfo, install_dir: &Path, meta: &GogMeta,
+               product: Option<&GogProduct>, wineprefix: Option<&Path>) -> InstalledGame; // platform "GOG", slug linux|win, native cols from primary task
+
+// stores/gog/mod.rs  (package A)
+pub struct GogEndpoints { pub auth: Url, pub embed: Url, pub api: Url, pub content: Url, pub cloud: Url } // ::real(), ::e2e(base)
+pub struct GogService;  // Clone, Send+Sync
+impl GogService {
+  pub fn new(data_dir: PathBuf, http: reqwest::Client, ep: GogEndpoints) -> Self;
+  pub fn login_url(&self) -> Url;
+  pub fn code_from_redirect(&self, url: &Url) -> Option<SecretString>;      // embed.gog.com/on_login_success?code=
+  pub async fn complete_login(&self, code: SecretString) -> Result<GogAccount, StoreError>; // gogdl auth --code
+  pub async fn account(&self) -> Result<Option<GogAccount>, StoreError>;     // Err(LoginExpired) on refresh failure
+  pub fn disconnect(&self) -> io::Result<()>;
+  pub async fn owned(&self) -> Result<Vec<GogProduct>, StoreError>;          // DLC folded into base.dlc
+  pub async fn install_options(&self, id: &str) -> Result<GogInstallOptions, StoreError>; // gogdl info
+  pub fn install_job(&self, req: GogInstallRequest, ctx: GogJobCtx) -> StoreJob;
+  pub fn update_job(&self, row: &InstalledGame, ctx: GogJobCtx) -> StoreJob;
+  pub fn repair_job(&self, row: &InstalledGame, ctx: GogJobCtx) -> StoreJob;
+  pub fn dlc_job(&self, row: &InstalledGame, dlc_id: &str, ctx: GogJobCtx) -> StoreJob;
+  pub fn remove_dlc(&self, registry: &Registry, row: &InstalledGame, dlc_id: &str) -> Result<(), StoreError>;
+  pub fn uninstall(&self, registry: &Registry, store_id: &str) -> Result<(), StoreError>;
+  pub async fn check_updates(&self, rows: &[InstalledGame]) -> Result<Vec<GogUpdate>, StoreError>;
+  pub async fn cloud_state(&self, row: &InstalledGame) -> Result<CloudState, StoreError>;
+  pub async fn cloud_sync(&self, registry: &Registry, row: &InstalledGame, mode: SyncMode) -> Result<CloudState, StoreError>;
+}
+pub struct GogJobCtx { pub registry: Arc<Registry>, pub library: PathBuf, pub default_compat_tool: String }
+pub struct GogAccount { pub username: String, pub user_id: String }
+pub enum SyncMode { Auto, PreferUpload, PreferDownload }
+pub enum CloudState { Off, None, Synced { at: i64 }, Conflict(SaveConflict) }
+pub struct SaveConflict { pub local_at: i64, pub local_files: u32, pub local_bytes: u64, pub cloud_at: i64 }
+
+// stores/offline/mod.rs  (package B)
+pub enum InstallerKind { LinuxSh, WindowsExe { parts: Vec<PathBuf> }, MacPkg }
+pub struct Inspection { pub path: PathBuf, pub kind: InstallerKind, pub info: Option<GogGameInfo>,
+    pub version: String, pub bytes: u64, pub verdict: Verdict }
+pub enum Verdict { Install, Update { installed_version: String }, Dlc { base_title: String },
+    Refused { title: String, body: String } }
+pub fn inspect(path: &Path, registry: &Registry, tools_dir: &Path) -> Result<Inspection, StoreError>;
+pub fn detect_in_dir(dir: &Path) -> Option<PathBuf>;                       // RomM archive: installer inside?
+pub fn install_job(insp: Inspection, opts: OfflineOpts, ctx: GogJobCtx, wizard_allowed: Arc<dyn Fn() -> bool + Send + Sync>) -> StoreJob;
+pub fn run_into(insp: &Inspection, dest: &Path, prefix: Option<&Path>, compat: &str,
+    wizard_allowed: bool, sink: &mut dyn StoreProgressSink) -> Result<GogGameInfo, LibraryError>; // shared by RomM path and drive restore
+pub struct OfflineOpts { pub install_dir: Option<PathBuf>, pub compat_tool: String }
+
+// backup/pack.rs (package C fills; struct in Step 0)
+pub struct Pack { /* existing */ #[serde(default, skip_serializing_if = "Vec::is_empty")] pub store_games: Vec<PackStoreGame> }
+pub struct PackStoreGame { pub source: StoreKind /*gog*/, pub store_id: String, pub name: String,
+    pub platform: GogPlatform, pub layout: StoreLayout /*"installer"|"installed"*/, pub version: String,
+    pub summary: String, pub companies: Vec<String>, pub genres: Vec<String>, pub release_date: String,
+    pub size: u64, #[serde(default)] pub installer: Vec<PackFile>, #[serde(default)] pub dlc_installers: Vec<PackStoreDlc>,
+    #[serde(default)] pub installed: Option<PackInstalled>, #[serde(default)] pub saves: Option<PackSaves>,
+    #[serde(default)] pub assets: PackAssets, pub meta: serde_json::Value, pub added: String,
+    #[serde(flatten)] pub extra: BTreeMap<String, serde_json::Value> }
+// paths: stores/gog/<component(name)>-<id>/{installer,installed,saves,assets}; FORMAT stays 1
+// (older builds keep `store_games` through Pack.extra)
+impl Pack { pub fn find_store_game(&self, key: &GameKey) -> Option<&PackStoreGame>; pub fn upsert_store_game(..); pub fn remove_store_game(..); }
+
+// config.rs
+pub struct StoresConfig { pub gog: GogConfig }
+pub struct GogConfig { pub connected: bool, pub username: String, pub install_dir: String /*"" = <library>/GOG*/, pub cloud_saves: bool }
+```
+
+### Tauri commands and events
+
+camelCase arguments, snake_case JSON. `key` is the game-key string.
+
+| Command | Args | Returns |
+|---|---|---|
+| `stores_status` | — | `StoreStatus[]` (GOG only in Phase 1) |
+| `store_library` | `source` | `StoreLibrary` |
+| `store_refresh` / `store_check_updates` | `source` | `void` (results come as events) |
+| `store_connect` | `source` | `void`; opens the login window; result is a `store-login` event |
+| `store_cancel_login` / `store_disconnect` / `store_install_tool` | `source` | `void` |
+| `store_login_type` | `text` | `void` (TV on-screen keyboard to the page) |
+| `store_set_install_dir` | `source, path` | `void` |
+| `store_set_cloud_saves` | `source, on` | `void` |
+| `store_install_options` | `key` | `StoreInstallOptions` |
+| `store_install` | `request: StoreInstallRequest` | `void` |
+| `store_update` / `store_repair` / `store_uninstall` | `key` | `void` |
+| `store_install_dlc` / `store_remove_dlc` | `key, dlcId` | `void` |
+| `store_game_settings` | `key` | `StoreGameSettings` |
+| `store_set_game_settings` | `key, settings` | `void` |
+| `store_cloud_state` / `store_cloud_sync` | `key` | `StoreCloudState` |
+| `store_cloud_resolve` | `key, choice: 'upload'\|'download'` | `StoreCloudState` |
+| `offline_inspect` | `path` | `InstallerInspection` |
+| `offline_install` | `path, compatTool, installDir?` | `void` |
+| `plan_store_backup` | `key /*drive*/, gameKeys` | `StoreBackupPlan` |
+| `start_store_backup` | `key, gameKeys` | `BackupQueued` |
+| `drive_store_games` | `key` | `DriveStoreGame[]` |
+| `install_store_from_drive` | `key, gameKey` | `void` |
+| `remove_store_from_drive` | `key, gameKeys` | `number` |
+
+`launch_game_key`, store branch: sync cloud saves before launch; on a conflict it rejects with
+`{code:'store_cloud_conflict', message}` (the UI prompts, then calls `store_cloud_resolve`); it
+uploads after the session ends.
+
+Events: `stores-changed` (`StoreStatus[]`), `store-login`
+(`{source, outcome:'connected'|'cancelled'|'failed', username, error}`; a network error stays in
+the login window), `store-notice` (`StoreNotice`). Existing events are reused: `downloads`
+snapshots, `installed-changed`, `updates-changed`, `drives-changed`.
+
+### TypeScript (`api.ts`)
+
+```ts
+export type StoreSource = Exclude<GameSource, 'romm'>;
+export type ToolStatus = { name: 'gogdl'; version: string; state: 'not_installed'|'installing'|'installed'|'failed';
+  size_bytes: number; error: string; license: string; source_url: string; done: number; total: number };
+export type StoreStatus = { source: StoreSource; connection: 'connected'|'expired'|'not_connected'; username: string;
+  tool: ToolStatus; owned: 'idle'|'loading'|'ready'|'error'; owned_error: string; owned_count: number;
+  installed_count: number; installed_bytes: number; refreshed_at: number; cloud_saves: boolean;
+  install_dir: string; in_rail: boolean; last_error: string };
+export type StoreDlc = { id: string; title: string; download_bytes: number; installed: boolean };
+export type StoreGame = { key: string; source: StoreSource; store_id: string; title: string; installed: boolean;
+  cover: string; screenshots: string[]; description: string; developer: string; genres: string[]; year: string;
+  platforms: ('linux'|'windows')[]; installed_platform: 'linux'|'windows'|null; download_bytes: number; disk_bytes: number;
+  version: string; update_version: string; origin: 'gogdl'|'offline'|'drive'|null; not_supported: string;
+  dlc: StoreDlc[]; cloud: 'off'|'none'|'synced'|'conflict'|'unknown'; last_sync: number; install_dir: string; compat_tool: string };
+export type StoreLibrary = { status: StoreStatus; installed: StoreGame[]; available: StoreGame[] };
+export type StoreInstallOptions = { versions: { platform: 'linux'|'windows'; recommended: boolean; download_bytes: number; disk_bytes: number }[];
+  languages: string[]; default_language: string; dlc: StoreDlc[]; install_dir: string; free_bytes: number; volume: string; compat_tool: string };
+export type StoreInstallRequest = { key: string; platform: 'linux'|'windows'; language: string; dlc_ids: string[]; install_dir: string; compat_tool: string };
+export type StoreGameSettings = { install_dir: string; executable: string; exe_user_pinned: boolean; launch_parameters: string;
+  compat_tool: string; wineprefix: string; cloud_saves: boolean };
+export type StoreCloudState = { state: 'off'|'none'|'synced'|'syncing'|'conflict'; synced_at: number; locations: string[];
+  conflict: { local_at: number; local_files: number; local_bytes: number; cloud_at: number } | null };
+export type InstallerInspection = { path: string; kind: 'linux_sh'|'windows_exe'|'mac_pkg'; key: string | null; title: string;
+  cover: string; version: string; bytes: number;
+  verdict: { kind: 'install' } | { kind: 'update'; installed_version: string } | { kind: 'dlc'; base_title: string }
+         | { kind: 'refused'; title: string; body: string } };
+export type StoreNoticeAction = { kind: 'play'|'open_downloads'|'try_again'|'sign_in'|'install_tool'|'show_updates'|'install_base'|'open_settings';
+  key?: string; title?: string };
+export type StoreNotice = { source: StoreSource | null; message: string; detail: string; error: boolean; action: StoreNoticeAction | null };
+// DownloadEntry gains:
+phase: 'none'|'downloading'|'installing'|'verifying'|'unpacking'|'installer_silent'|'installer_wizard'|'copying_installer'|'running_installer'|'copying_from_drive'|'checksum';
+failure: { code: 'installer_unrecognised'|'installer_dlc_base_missing'|'installer_exit'|'installer_needs_wizard'; base_title: string; base_gog_id: string; kept: boolean } | null;
+// DownloadKind gains: 'store_repair'|'store_dlc'|'store_installer'|'store_restore'|'store_tool'|'backup_store_game'
+export type DriveStoreGame = { key: string; name: string; platform: 'linux'|'windows'; layout: 'installer'|'installed';
+  version: string; size: number; cover: string; installed: boolean; added: string; summary: string };
+export type StoreBackupPlan = { drive: string; rows: { key: string; name: string; layout: 'installer'|'installed'; detail: string;
+  bytes: number; windows_prefix_note: boolean; already: boolean; refused: string }[]; bytes_to_write: number; free_bytes: number; fits: boolean };
+export const STORES_CHANGED_EVENT = 'stores-changed', STORE_LOGIN_EVENT = 'store-login', STORE_NOTICE_EVENT = 'store-notice';
+```
+
+Each command gets a camelCase `api.*` method (`storeInstall`, `offlineInspect`, …). Phase 1 hides
+Epic, Amazon and Steam (no cards, no rail groups).
+
+## Work packages (after Step 0)
+
+- **A — grid-core GOG online.** Owns `stores/{tools,paths,progress,runner,art}.rs`,
+  `stores/gog/{mod,auth,api,install,update,cloud}.rs`, `crates/grid-core/tests/gog_*.rs` and
+  fixtures. Pinned gogdl install (SHA-256), auth and refresh (bearer only in memory as
+  `SecretString`), owned list and art through GOG HTTP APIs, install options from `gogdl info`,
+  install/update/repair/DLC runners with progress and phases, uninstall, update check
+  (content-system builds vs `meta.build_id`), save-sync wrapper with GRID's own conflict
+  detection. Tests: parsers with `FAKE-STORE-TOKEN-not-real`, argv builders, wiremock API tests,
+  a `cfg(unix)` fake gogdl script, SHA mismatch deletes the file, the bearer never in
+  Display/Debug.
+- **B — offline installers and RomM installer archives.** Owns `stores/offline/*`,
+  `library/specials/gog_installer.rs`, `launch/native.rs` edits, the `finalize_native_base` region
+  and retry path in `library/mod.rs`, and `library/queue.rs` after Step 0 (keep the download on
+  `InstallerNeedsWizard`; retry without downloading again). `.sh` read as zip (`data/noarch`,
+  never run); `.exe` silent via umu/wine, native on Windows, wizard only when `wizard_allowed()`;
+  identity from `goggame-*.info`, DLC by `rootGameId`; `.pkg` refused plus the other refusals;
+  installer path recorded in `meta.installer`; a RomM archive with an installer stays a RomM row.
+- **C — GOG backups.** Owns the store parts of `backup/{pack,plan,local,saves}.rs`, new
+  `backup/store.rs`, `library/{backup_job,drive_restore,drive_install}.rs`, `finalize_backup` and
+  restore dispatch in `library/mod.rs`, the store commands in the app's backup commands and
+  `drive_service.rs`. Installer layout when every `meta.installer` path still exists with the same
+  size, else installed copy plus saves (no Wine prefix); refusals while running or installing;
+  restore via `offline::run_into` or copy back as a `StoreOp::Restore` job with `drive`; restored
+  rows get `origin: drive` (or `offline` after an installer restore). Merges after B.
+- **D — app services, login window, e2e harness.** Owns `stores_service.rs`, `store_auth.rs`,
+  `commands/stores.rs`, the store branch of `launch_game_key` (sync before launch, upload after
+  exit), `update_service.rs` store updates, `lib.rs` after Step 0, `app/src-tauri/Cargo.toml`,
+  `tauri.conf.json`, capabilities; e2e: `e2e/mock-romm/mock-gog.mjs`,
+  `e2e/fake-tools/{gogdl,installer,innoextract}.mjs`, `e2e/fixtures-gog/`, seeds, the `scripts/e2e.sh`
+  stage and `wdio.conf.ts`, e2e-feature env overrides, `e2e/specs/gog-login.spec.ts` and
+  `gog-secrets.spec.ts`. Login window: incognito data dir, no capability, redirect caught in Rust,
+  `store-login` event; gogdl install right after connect; owned cache and refresh; `store-notice`
+  for every notice on the GameStores list.
+- **E — shared frontend model and desktop UI.** Owns `app/src/lib/gamestores/**` (pure `.ts`),
+  `lib/stores/gameStores.svelte.ts`, `lib/gamestores/fakeApi.ts`, `Library.svelte`,
+  `lib/library/rail.ts`, store parts of `Details.svelte` and `lib/details/*`,
+  `lib/settings/StoresPage.svelte` and `pages.ts`, `lib/downloads/format.ts`,
+  `lib/notifications/*`, GOG parts of `lib/backups/*`, `e2e/specs/gog-*.spec.ts`. Port each screen
+  from `stores.js`/`stores_bk.js`, item by item from the GameStores checklist. Milestone E1: the
+  pure modules and the rune store, committed first.
+- **F — TV UI.** Owns new files under `lib/tv/**` and `e2e/specs/tv-gog-*.spec.ts`. Port from
+  `tvstores.js`/`tvstores_bk.js`, item by item from the TVStores checklist. Imports E1, never edits it.
+
+Order: Step 0; then A, B, C, D start together (backend wave); E and F after the backend merges
+(or against `fakeApi`). Merge order A, B, C, D, E, F; full e2e on the merged tree.
+
+Shared done criteria: the gate (incl. `check_secret_hygiene.sh`), fake markers only, UI packages
+tick every Phase 1 checklist item, e2e specs pass against `mock-gog` and fake tools: `gog-login`,
+`gog-library`, `gog-cloud`, `gog-offline`, `gog-romm-installer`, `gog-backups`, `tv-gog-*`,
+`gog-secrets`.
+
+## Spikes
+
+1. gogdl release: pinned tag, upstream asset names per OS/arch, self-contained or not, SHA-256s
+   and sizes.
+2. gogdl CLI at that tag: `auth --code`, `info` JSON, download/update/repair flags, DLC flags,
+   progress line format and stream; save-sync semantics (GRID decides conflicts itself from
+   `meta.last_sync`, local mtimes and GOG cloudstorage timestamps, then forces a direction); where
+   save paths come from.
+3. Tauri 2 login window on WebKitGTK: `on_navigation` for the redirect; GRID chrome via a child
+   webview (`unstable`) or a plain decorated window; separate data dir; cookie wipe on Disconnect.
+4. TV on-screen keyboard and d-pad inside a third-party page via `webview.eval`.
+5. Windows installers: identity before running (pinned innoextract `--list`?), silent flags, how
+   "needs wizard" shows, `/DIR` mapping under umu, the prefix a DLC installer uses.
+6. RomM pre-download hint: possible only from file names or multi-file ROMs; else after download.
+7. Update identity for offline installs: version string vs content-system build ids.
