@@ -434,3 +434,69 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
   strings are `String` where the TS union is wide). `#![allow(dead_code)]` until package D
   builds them. Event constants live there.
 - `api.ts` adds `StorePlatform`, `JobPhase`, `JobFailure` and `StoreLoginEvent` aliases.
+
+## Package D (app services, login window, e2e harness)
+
+### Login window (spike 3 and 4 outcome)
+
+- **Redirect:** a `WebviewWindowBuilder` window (label `store-login`, no capability) with
+  `on_navigation`; WebKitGTK asks the navigation policy for a server redirect too, so the
+  302 to `<embed>/on_login_success?code=…` is refused there and the success page never
+  loads. `on_page_load` checks the same URL as a fallback. The code is read in Rust
+  (`store_auth::classify`, matching the embed host's scheme, host, port and the
+  `on_login_success` path) and goes to `GogService::complete_login` as a `SecretString`.
+  `GogService::code_from_redirect` is not used by the app (the app holds `GogEndpoints`
+  itself); package A may keep it for its own tests. The e2e `gog-login` spec checks that
+  the mock never served `/on_login_success`.
+- **Data:** the webview is incognito (an ephemeral WebKit context on Linux) with its own
+  data folder `<data_dir>/stores/login-webview/gog`, which Disconnect deletes.
+- **Chrome: a plain decorated window**, no child webview (that needs Tauri's `unstable`
+  feature and would draw GRID's chrome next to a third-party page in one window). The
+  title is "Sign in to GOG — GRID · 🔒 login.gog.com" (scheme, host and port only; the
+  lock only for https), updated on each page load. ✕ and `store_cancel_login` cancel
+  silently. Not built: the footer line and Esc inside the store's page. The window is
+  transient for the main window, and always on top in TV mode.
+- **Network error:** on Linux, a WebKit network failure (not a cancelled or refused
+  navigation) replaces the page with GRID's own page: the warning strip "Couldn’t reach
+  <host>. Check your connection; the page reloads when you try again." and a Try again
+  button that reloads the login page. Other OSes show the webview's own error page.
+- **TV typing** (`store_login_type`): `webview.eval` of a script that inserts the text at
+  the caret of the focused field through the element's own value setter, then fires
+  `input` and `change`; the text is a JSON literal. Key words: `"\t"` Tab, `"\u{1b}[Z"`
+  Shift-Tab (focus moves through the page's visible, enabled focusables in document
+  order), `"\n"` Enter (clicks the focused button or submits the field's form),
+  `"\u{8}"` Backspace. Focus lands on the page's first field when a page loads. The text
+  crosses IPC (TV mode's keyboard is in the main window) but is never logged.
+
+### Contract deviations (package D)
+
+- `AppState.stores: Arc<StoresService>`; `commands::STORE_CLOUD_CONFLICT`.
+- No Downloads row for the gogdl install: Step 0 has no `StoreOp` for a tool, so the
+  `store_tool` kind is never used. The tool's progress is `StoreStatus.tool` (`done`,
+  `total`, `state`) and the cards "Installing gogdl (12 MB) for GOG…" / "gogdl installed" /
+  "Couldn’t install gogdl: …" · Install gogdl.
+- The installed / updated / verified cards come from `StoresService::observe_downloads`
+  (every Downloads snapshot: a `job: "store"`, `gog:` row that reaches Completed, once). A
+  restore's card stays package C's; failures are the Downloads row's.
+- Store updates live in `UpdateService.store_updates` (by GOG product id) and reach the UI
+  as `StoreGame.update_version`. `updates-changed` carries the RomM set only (frozen
+  `UpdateRow`), so a store check re-emits that set to make the Library re-read; each new
+  update gets the "update 2.2 is available on GOG" card (· Show).
+- The owned cache is `<data_dir>/stores/cache/gog-owned.json` (product metadata only).
+- `launch_game_key` rejects a conflict with `{code: 'store_cloud_conflict', message:
+  "<title>’s save on this computer and its cloud save both changed."}`; any other sync
+  failure only logs. The upload after the session is a second session-finished listener
+  (`StoresService::install_session_finished_hook`).
+- `InstallService::set_wizard_allowed` is wired to "not TV mode" in `lib.rs`.
+- e2e environment: `GRID_LAUNCHER_E2E_GOG_BASE` (app, `e2e` feature) points all five
+  hosts at the mock GOG (every other group gets the dead loopback address);
+  `GRID_LAUNCHER_E2E_TOOL_GOGDL` is `e2e/fake-tools/gogdl.mjs`, which package A's
+  `installed_path` returns and which must be run **directly** (a node script with a
+  shebang), not as `python3 <file>`. The mock serves the tool asset at
+  `/gogdl/good/gogdl_linux_x86_64` and `/gogdl/bad/…` with their SHA-256 at
+  `/__e2e__/gogdl-asset.json`, for an e2e asset override if package A adds one.
+- The mock login page posts to `/auth/login`, which redirects to
+  `<base>/on_login_success?origin=client&code=FAKE-E2E-GOG-CODE` (user `denied`: no
+  code; user `refused`: a code the fake gogdl refuses). The fake gogdl's `auth --code`
+  accepts only that code, writes the token file and prints it; the mock's `/token`
+  accepts it too.

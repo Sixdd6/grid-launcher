@@ -109,6 +109,9 @@ pub struct AppState {
     pub gamepad: Arc<crate::gamepad::GamepadService>,
     /// Desktop or TV mode, never persisted. See `commands/tv.rs`.
     pub ui_mode: tv::UiModeState,
+    /// External game stores (GOG): connection, login window, owned list,
+    /// notices. See `stores_service.rs` and `commands/stores.rs`.
+    pub stores: Arc<crate::stores_service::StoresService>,
 }
 
 /// Refuses a command that touches the library while a library move runs
@@ -1084,6 +1087,9 @@ pub struct LaunchCommandError {
     pub message: String,
 }
 
+/// `launch_game_key`'s code when a GOG game's saves conflict before launch.
+pub const STORE_CLOUD_CONFLICT: &str = "store_cloud_conflict";
+
 impl From<String> for LaunchCommandError {
     fn from(message: String) -> Self {
         Self { code: "", message }
@@ -1214,6 +1220,37 @@ pub async fn launch_game_key(
         .map_err(|busy| busy.reason)?;
     let launch = state.launch.as_ref().map_err(Clone::clone)?.clone();
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
+
+    // GOG cloud saves sync before the process spawns. A conflict stops the
+    // launch with `store_cloud_conflict` (the UI asks which save to keep,
+    // then calls `store_cloud_resolve`); any other sync failure only logs.
+    // The upload after the session is `StoresService`'s session-finished
+    // listener.
+    if key.store_kind() == Some(grid_core::stores::StoreKind::Gog) {
+        let registry = install.registry();
+        let lookup = registry.clone();
+        let lookup_key = key.clone();
+        let row = tokio::task::spawn_blocking(move || lookup.find_key(&lookup_key))
+            .await
+            .map_err(|e| format!("launch did not finish: {e}"))?
+            .map_err(err)?;
+        if let Some(row) = row {
+            if state
+                .stores
+                .sync_before_launch(&registry, &row)
+                .await
+                .is_err()
+            {
+                return Err(LaunchCommandError {
+                    code: STORE_CLOUD_CONFLICT,
+                    message: format!(
+                        "{}\u{2019}s save on this computer and its cloud save both changed.",
+                        row.title
+                    ),
+                });
+            }
+        }
+    }
 
     let session = launch.launch_key(&key).await?;
 

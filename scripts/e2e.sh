@@ -204,6 +204,15 @@ STAGE_GROUPS=(
   # ring, no text under 0.85rem, no document scroll, the bands' rem heights.
   # E2E_TV_SCREENS=1 saves each screen under ctr-out/tv-screens/<size>/.
   "tv-layout:specs/tv-layout.spec.ts"
+  # Game stores, GOG (docs/stores-phase1-plan.md package D) against the mock
+  # GOG (mock-romm/mock-gog.mjs, every GOG host at one base through
+  # GRID_LAUNCHER_E2E_GOG_BASE) and the fake gogdl (fake-tools/gogdl.mjs,
+  # GRID_LAUNCHER_E2E_TOOL_GOGDL), on a profile used without a server, seeded
+  # per spec by seed/gog-seed.mjs: (login) the login window signs in, is
+  # cancelled, fails on the page and on the code, shows a network error and
+  # takes TV mode's typed text; (secrets) after a login and an install no log
+  # holds the fake store token.
+  "gog:specs/gog-login.spec.ts specs/gog-secrets.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -375,6 +384,7 @@ LOG_DIR="$RUN_DIR/logs"
 mkdir -p "$LOG_DIR"
 mock_pid=""
 forge_pid=""
+gog_pid=""
 # Set by the INT/TERM handler below so cleanup() can force a nonzero exit
 # even when the interrupted command itself happened to leave $? at 0.
 signal_caught=""
@@ -452,6 +462,13 @@ stop_forge() {
   forge_pid=""
 }
 
+stop_gog() {
+  [[ -n "$gog_pid" ]] || return 0
+  kill -TERM "$gog_pid" 2>/dev/null
+  wait "$gog_pid" 2>/dev/null
+  gog_pid=""
+}
+
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM
@@ -467,6 +484,7 @@ cleanup() {
   fi
   stop_mock
   stop_forge
+  stop_gog
   if run_dir_is_safe; then
     kill_run_processes TERM
     sleep 1
@@ -632,6 +650,12 @@ mock_args_for_group() {
 # machine.
 DEAD_FORGE_URL="http://127.0.0.1:9"
 
+# Stage groups that run the mock GOG (mock-romm/mock-gog.mjs). Every other
+# group points GOG at the dead loopback address, so no e2e run reaches GOG.
+group_needs_gog() {
+  [[ "$1" == "gog" || "$1" == gog-* || "$1" == tv-gog* ]]
+}
+
 group_needs_forge() {
   [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" || "$1" == "tv-startup" || "$1" == "tv-layout" ]]
 }
@@ -664,6 +688,7 @@ seed_script_for_group() {
     tv-settings) printf '%s' "$E2E_DIR/seed/tv-settings-seed.mjs" ;;
     tv-large-platform) printf '%s' "$E2E_DIR/seed/tv-large-platform-seed.mjs" ;;
     tv-startup) printf '%s' "$E2E_DIR/seed/tv-startup-seed.mjs" ;;
+    gog) printf '%s' "$E2E_DIR/seed/gog-seed.mjs" ;;
     *) printf '' ;;
   esac
 }
@@ -674,7 +699,7 @@ seed_script_for_group() {
 # the run's keyring, but each starts the app on the state its own seed
 # variant writes.
 group_seeds_per_spec() {
-  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" ]]
+  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == "gog" ]]
 }
 
 # Runs every spec of one group against a freshly created data dir and mock.
@@ -814,6 +839,32 @@ EOF
     printf 'e2e: mock forge at %s\n' "$forge_url"
   fi
 
+  # The mock GOG, for the store groups. Same lifecycle as the mock forge.
+  local gog_url=""
+  attempt_gog_log=""
+  if group_needs_gog "$name"; then
+    attempt_gog_log="$LOG_DIR/$name-attempt-$attempt.gog.log"
+    rm -f "$attempt_gog_log" "$E2E_DIR/last-run-gog-requests.log"
+    ( cd "$E2E_DIR" && exec node mock-romm/mock-gog.mjs --port 0 ) >"$attempt_gog_log" 2>&1 &
+    gog_pid=$!
+    for _ in $(seq 1 100); do
+      gog_url="$(sed -n 's/^MOCK_GOG_URL=\(http[^ ]*\).*/\1/p' "$attempt_gog_log" 2>/dev/null | head -n1)"
+      [[ -n "$gog_url" ]] && break
+      kill -0 "$gog_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if [[ -z "$gog_url" ]]; then
+      printf 'e2e: mock GOG did not report a URL\n' >&2
+      tail -n 40 "$attempt_gog_log" >&2
+      stop_gog
+      stop_forge
+      stop_mock
+      attempt_failed_stage="$name (mock GOG)"
+      return 1
+    fi
+    printf 'e2e: mock GOG at %s\n' "$gog_url"
+  fi
+
   local spec stage wdio_log out_dir rc
   for spec in $specs; do
     stage="$name/$(basename "$spec")"
@@ -852,6 +903,15 @@ EOF
       if [[ "$name" == tv-* ]]; then E2E_APP_ARGS="--tv"; fi
       if grep -q '^// e2e-app-args:' "$spec"; then
         E2E_APP_ARGS="$(sed -n 's|^// e2e-app-args:[[:space:]]*\(.*\)$|\1|p' "$spec" | head -n1)"
+      fi
+      # The GOG base (wdio.conf.ts turns it into GRID_LAUNCHER_E2E_GOG_BASE,
+      # read by e2e builds only): the mock GOG for the store groups, else the
+      # dead loopback address. The fake gogdl stands in for the tool there.
+      if [[ -n "$gog_url" ]]; then
+        export E2E_GOG_URL="$gog_url"
+        export E2E_FAKE_GOGDL="$E2E_DIR/fake-tools/gogdl.mjs"
+      else
+        export E2E_GOG_URL="$DEAD_FORGE_URL"
       fi
       if [[ -n "$forge_url" ]]; then
         # wdio.conf.ts forwards both into the app process: the first is what
@@ -943,6 +1003,9 @@ EOF
   # before any dump — otherwise every failure report says "no requests".
   stop_mock
   stop_forge
+  stop_gog
+  [[ -n "$attempt_gog_log" && -f "$E2E_DIR/last-run-gog-requests.log" ]] &&
+    cp "$E2E_DIR/last-run-gog-requests.log" "$LOG_DIR/$name-attempt-$attempt.gog-requests.log"
   [[ -f "$attempt_request_log" ]] && cp "$attempt_request_log" "$LOG_DIR/$name-attempt-$attempt.requests.log"
   [[ -n "$attempt_forge_request_log" && -f "$attempt_forge_request_log" ]] &&
     cp "$attempt_forge_request_log" "$LOG_DIR/$name-attempt-$attempt.forge-requests.log"

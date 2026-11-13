@@ -80,6 +80,14 @@ const appEnv: Record<string, string> = {
   // backup/drives.rs, e2e feature only). e2e.sh sets E2E_DRIVE_ROOTS for the
   // `backups` group only; every other group keeps the OS probe.
   ...(process.env.E2E_DRIVE_ROOTS ? { GRID_LAUNCHER_E2E_DRIVE_ROOTS: process.env.E2E_DRIVE_ROOTS } : {}),
+  // GRID_LAUNCHER_E2E_GOG_BASE points every GOG host at one server (app
+  // stores_service.rs `gog_endpoints`, e2e feature only): the mock GOG for
+  // the store groups (e2e.sh group_needs_gog), else a dead loopback address,
+  // so no run reaches GOG. GRID_LAUNCHER_E2E_TOOL_GOGDL is the fake gogdl
+  // (fake-tools/gogdl.mjs, run directly), read by grid-core
+  // stores/tools.rs `installed_path` in e2e builds.
+  GRID_LAUNCHER_E2E_GOG_BASE: process.env.E2E_GOG_URL ?? 'http://127.0.0.1:9',
+  ...(process.env.E2E_FAKE_GOGDL ? { GRID_LAUNCHER_E2E_TOOL_GOGDL: process.env.E2E_FAKE_GOGDL } : {}),
   ...(process.env.GRID_E2E_ARGV_FILE
     ? { GRID_E2E_ARGV_FILE: process.env.GRID_E2E_ARGV_FILE }
     : {}),

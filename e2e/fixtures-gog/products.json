@@ -1,0 +1,71 @@
+{
+  "_comment": "The GOG account the mock-gog server (e2e/mock-romm/mock-gog.mjs) serves: three owned games, one with DLC. Ids are made up; titles are the GameStores card's invented ones. No real product, account or token.",
+  "user": {
+    "user_id": "48628349957132247",
+    "username": "sam_plays",
+    "email": "sam_plays@example.invalid"
+  },
+  "products": [
+    {
+      "id": "1207664643",
+      "title": "Ashen Tide",
+      "slug": "ashen_tide",
+      "folder_name": "Ashen Tide",
+      "client_id": "50225266424144145",
+      "platforms": ["linux", "windows"],
+      "developer": "Northlight Forge",
+      "publisher": "Northlight Forge",
+      "genres": ["Action", "Adventure"],
+      "release_date": "2019-05-14",
+      "description": "A fishing town under an ash sky.",
+      "version": "1.4.2",
+      "build_id": "56012345678901234",
+      "download_size": 1048576,
+      "disk_size": 2097152,
+      "languages": ["en-US", "de-DE"],
+      "dlcs": []
+    },
+    {
+      "id": "1453375253",
+      "title": "Lanternfall",
+      "slug": "lanternfall",
+      "folder_name": "Lanternfall",
+      "client_id": "51154268886064420",
+      "platforms": ["linux", "windows"],
+      "developer": "Paper Moth",
+      "publisher": "Paper Moth",
+      "genres": ["RPG"],
+      "release_date": "2021-10-02",
+      "description": "Carry the last lantern down the mountain.",
+      "version": "2.1",
+      "build_id": "56012345678905678",
+      "update_version": "2.2",
+      "update_build_id": "56012345678909999",
+      "download_size": 2097152,
+      "disk_size": 4194304,
+      "languages": ["en-US"],
+      "dlcs": [
+        { "id": "1453375254", "title": "Lanternfall: Ember Roads", "download_size": 524288 }
+      ]
+    },
+    {
+      "id": "1580232252",
+      "title": "Grey Meridian",
+      "slug": "grey_meridian",
+      "folder_name": "Grey Meridian",
+      "client_id": "52095557858325425",
+      "platforms": ["windows"],
+      "developer": "Harbor Lights",
+      "publisher": "Harbor Lights",
+      "genres": ["Strategy"],
+      "release_date": "2016-03-30",
+      "description": "Chart the last unmapped sea.",
+      "version": "1.0",
+      "build_id": "56012345678900001",
+      "download_size": 1048576,
+      "disk_size": 1048576,
+      "languages": ["en-US"],
+      "dlcs": []
+    }
+  ]
+}

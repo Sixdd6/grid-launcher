@@ -14,6 +14,8 @@ mod media_server;
 mod play_session_service;
 mod python_import;
 mod relink_service;
+mod store_auth;
+mod stores_service;
 pub(crate) mod test_env;
 mod update_service;
 mod youtube_relay;
@@ -270,6 +272,13 @@ pub fn run() {
     let install = registry
         .clone()
         .map(|registry| InstallService::new(registry, config_path.clone()));
+    // External game stores (GOG). Reads its config section and the owned
+    // cache now; the login check runs from `.setup()`.
+    let stores = stores_service::StoresService::real(config_path.clone());
+    if let Ok(registry) = &registry {
+        stores.set_registry(registry.clone());
+    }
+    stores.load();
     // A library move's space check leaves room for what queued installs and
     // backups still hold.
     if let Ok(install) = &install {
@@ -370,6 +379,7 @@ pub fn run() {
         drives: drive_service::DriveService::new(),
         gamepad: gamepad::GamepadService::new(),
         ui_mode: commands::tv::UiModeState::new(cli.tv),
+        stores: stores.clone(),
     });
     // Embedded WebDriver automation server, gated behind the `e2e` cargo
     // feature so it never ships in a release build (see
@@ -527,7 +537,9 @@ pub fn run() {
             }
             if let Ok(install) = &state.install {
                 let handle = app.handle().clone();
+                let stores = state.stores.clone();
                 install.set_notify(Arc::new(move |snapshot| {
+                    stores.observe_downloads(&snapshot);
                     let _ = handle.emit("downloads-changed", snapshot);
                 }));
                 // Reads the keyring and the config so D1 (a newly installed
@@ -651,6 +663,42 @@ pub fn run() {
                     commands::specials::apply_compat_default_after_install(&Config::default_path());
                     let _ = handle.emit(commands::specials::COMPAT_TOOLS_CHANGED_EVENT, ());
                 }));
+            }
+            // External game stores: events to the frontend, TV mode's
+            // silent-only installers, the login check, the update check.
+            {
+                let handle = app.handle().clone();
+                state.stores.set_emitter(Arc::new(move |event| {
+                    use commands::stores::{
+                        STORES_CHANGED_EVENT, STORE_LOGIN_EVENT, STORE_NOTICE_EVENT,
+                    };
+                    use stores_service::StoreEvent;
+                    let _ = match event {
+                        StoreEvent::Changed(statuses) => {
+                            handle.emit(STORES_CHANGED_EVENT, statuses)
+                        }
+                        StoreEvent::Login(login) => handle.emit(STORE_LOGIN_EVENT, login),
+                        StoreEvent::Notice(notice) => handle.emit(STORE_NOTICE_EVENT, notice),
+                    };
+                }));
+                if let Ok(install) = &state.install {
+                    // A Windows installer's own setup window opens only in
+                    // desktop mode (TVStores #3).
+                    let handle = app.handle().clone();
+                    install.set_wizard_allowed(Arc::new(move || {
+                        handle.state::<AppState>().ui_mode.mode() != commands::tv::UiMode::Tv
+                    }));
+                }
+                if let Ok(launch) = &state.launch {
+                    state.stores.install_session_finished_hook(launch);
+                }
+                let stores = state.stores.clone();
+                let updates = state.updates.clone();
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    stores.check_login().await;
+                    updates.spawn_store_check(handle, stores);
+                });
             }
             if let Ok(launch) = &state.launch {
                 let handle = app.handle().clone();

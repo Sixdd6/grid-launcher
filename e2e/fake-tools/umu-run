@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stand-in for wine/umu-run in the e2e suite: runs the fake GOG installer
+# (installer.mjs) with the .exe path and its Inno Setup flags.
+exec node "$(dirname "$0")/installer.mjs" "$@"
