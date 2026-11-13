@@ -762,3 +762,18 @@ Every item of the integration list above, after packages A–F merged:
 10. **Checked.** The only non-test `StoreProgressSink` is the service's `ServiceSink`,
     which answers `cancelled()` from the entry's cancel flag; restores and every store job
     finalize through it.
+
+Failures found and fixed at integration:
+- `wincheck`: `tests/backup_store.rs` imported `GogPlatform` for a `cfg(unix)` test only.
+- `gog-cloud`: the mock GOG parsed `--cloud-conflict` but never passed it on, so no
+  conflict existed; the spec also `Promise.all`'d a WebdriverIO element array (its `map`
+  is already async) and read the cover tag before the background cloud read.
+- `gog-library`: the store mark's letter was text ("GGOG"); it is drawn now. Details'
+  Uninstall confirm was a new element, so focus (and Escape) was lost.
+- `gog-romm-installer`: the spec opened a platform with Downloads on screen, and
+  expected a curly apostrophe in grid-core's error text.
+- `tv-gog`: the specs counted LB / RB presses (the tabs wrap; a page's LB / RB switch its
+  own tabs), so they go to a tab directly; TV mode raised no queued card for a store
+  install, update or DLC (now it does, as the desktop); the sign-in step followed the
+  store's login window as WebDriver's active window.
+- `tv-shell`, `tv-settings`, `tv-layout`: their lists of Settings panes now include Stores.
