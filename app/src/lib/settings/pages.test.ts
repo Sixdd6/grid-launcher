@@ -15,6 +15,7 @@ describe('settings rail', () => {
       'connection',
       'library',
       'retroachievements',
+      'stores',
       'systems',
       'updates',
     ]);
@@ -36,6 +37,7 @@ describe('settings rail', () => {
     expect(settingsPageLabel('updates')).toBe('Updates');
     expect(settingsPageLabel('appearance')).toBe('Appearance');
     expect(settingsPageLabel('backup-drives')).toBe('Backup drives');
+    expect(settingsPageLabel('stores')).toBe('Stores');
   });
 });
 
@@ -49,10 +51,11 @@ describe('settingsRailEntries', () => {
       'settings-nav-connection',
       'settings-nav-library',
       'settings-nav-retroachievements',
+      'settings-nav-stores',
       'settings-nav-systems',
       'settings-nav-updates',
     ]);
-    expect(entries.map((e) => e.selected)).toEqual([false, false, false, false, false, false, false, true]);
+    expect(entries.map((e) => e.selected)).toEqual([false, false, false, false, false, false, false, false, true]);
     expect(entries[0].heading).toBe('SETTINGS');
     expect(entries.slice(1).every((e) => e.heading === undefined)).toBe(true);
   });

@@ -8,7 +8,7 @@
   import { updates } from './stores/updates.svelte';
   import { installedKey, visibleLibraryGames } from './library';
   import { isMissing } from './library/missing';
-  import { driveKeyOf, emptyText, entryForKey, matchesRail, railEntries, type RailKey } from './library/rail';
+  import { driveKeyOf, emptyText, entryForKey, matchesRail, railEntries, type RailEntry, type RailKey } from './library/rail';
   import {
     DRIVE_SORTS,
     driveChips,
@@ -49,6 +49,7 @@
   import type { CloudMode } from './details/cloud';
   import GameCard from './GameCard.svelte';
   import { coverPair } from './cards/cover';
+  import type { Rect } from './cards/layout';
   import CardGrid from './CardGrid.svelte';
   import FoldingHeader from './FoldingHeader.svelte';
   import { gameCountLine, librarySearchPlaceholder } from './views/fold';
@@ -62,6 +63,31 @@
   import { attachScrollGate, createVisibleWarmer, scrollParent } from './visibleWarm';
   import { noteViewed } from './stores/lastViewed.svelte';
   import { inputMode, noteDirectional } from './stores/inputMode.svelte';
+  import type { DriveStoreGame, StoreGame } from './api';
+  import { isStoreRow } from './gameKey';
+  import { gameStores } from './stores/gameStores.svelte';
+  import { downloads } from './stores/downloads.svelte';
+  import { parseStoreRailKey, storeRailGroups } from './gamestores/rail';
+  import { coverFaded, coverPrimary, coverProgress, coverTags, showCoverCloud } from './gamestores/cover';
+  import { liveJobFor } from './gamestores/jobs';
+  import { noMatchText, storeGameMatches, storePanel, type PanelAct } from './gamestores/view';
+  import { mixedCounts, mixedStoreGames, selectedBytes, sortStoreView } from './gamestores/library';
+  import { driveGogChip, driveStoreGrid, driveStorePrimary, storeBackupTitle } from './gamestores/backup';
+  import { storeMark, storeName } from './gamestores/marks';
+  import StoreViewHeader from './gamestores/desktop/StoreViewHeader.svelte';
+  import StorePanel from './gamestores/desktop/StorePanel.svelte';
+  import {
+    installTool,
+    openInstall,
+    openInstaller,
+    openStoreBackup,
+    openStoreDetails,
+    playStore,
+    refreshStore,
+    showCard,
+    signIn,
+  } from './gamestores/desktop/ui.svelte';
+  import { refusedNotice } from './gamestores/notices';
 
   let { active }: { active: boolean } = $props();
 
@@ -91,18 +117,51 @@
   });
 
   let updateRomIds = $derived(new Set(updates.rows.map((r) => r.rom_id)));
-  let entries = $derived(railEntries(installed.list, updateRomIds, nowSeconds, drives.withPack));
+  // Store rows live in their store group (GameStores README): the RomM
+  // rail and grids read only RomM rows, and the store games are mixed into
+  // All games, Recent and Updates with their store's tag.
+  let romRows = $derived(installed.list.filter((r) => !isStoreRow(r)));
+  let storeMix = $derived(mixedCounts(gameStores.installedGames, installed.list, nowSeconds));
+  let storeGroups = $derived(storeRailGroups(gameStores.statuses, (s) => gameStores.library(s)));
+  let entries = $derived([
+    ...railEntries(romRows, updateRomIds, nowSeconds, drives.withPack).map((e) =>
+      e.key === 'all' || e.key === 'recent' || e.key === 'updates' ? { ...e, count: e.count + storeMix[e.key] } : e,
+    ),
+    ...storeGroups.flatMap((g) =>
+      g.rows.map((r): RailEntry => ({ key: r.key, testId: r.testId, label: r.label, count: r.count.kind === 'number' ? r.count.n : 0 })),
+    ),
+  ]);
   let selected = $derived(entryForKey(entries, librarySelection.key));
+
+  // A store view (Library › GOG › Installed / Available).
+  let storeSel = $derived(parseStoreRailKey(selected.key));
+  let storeStatus = $derived(storeSel ? gameStores.status(storeSel.source) : null);
+  let storeAll = $derived(
+    storeSel ? (storeSel.part === 'installed' ? gameStores.installed(storeSel.source) : gameStores.available(storeSel.source)) : [],
+  );
+  let storeList = $derived(sortStoreView(storeAll.filter((g) => storeGameMatches(g, search)), sort, installed.list));
+  let storePanelView = $derived(storeStatus && storeSel ? storePanel(storeStatus, storeSel.part, storeAll) : null);
+  /** GOG › Installed is the one store view with Select (GOG backups). */
+  let storeSelectable = $derived(storeSel !== null && storeSel.source === 'gog' && storeSel.part === 'installed' && storeAll.length > 0);
+  let storePicks = $state<string[]>([]);
 
   let rows = $derived(
     sortGames(
-      visibleLibraryGames(installed.list).filter(
+      visibleLibraryGames(romRows).filter(
         (row) =>
           matchesRail(row, selected.key, updateRomIds, nowSeconds) && titleContains(row.title, search),
       ),
       sort,
     ),
   );
+
+  // All games, Recent and Updates: the RomM rows, then the installed store games.
+  let mixed = $derived(mixedStoreGames(gameStores.installedGames, installed.list, selected.key, search, nowSeconds));
+  type LibItem = { kind: 'romm'; row: InstalledGame } | { kind: 'store'; game: StoreGame };
+  let items = $derived<LibItem[]>([
+    ...rows.map((row): LibItem => ({ kind: 'romm', row })),
+    ...mixed.map((game): LibItem => ({ kind: 'store', game })),
+  ]);
 
   // Library › Backup drives (GameBackups README): a drive row shows the
   // drive's own games. Unplugging the drive drops its row, and `entryForKey`
@@ -115,6 +174,15 @@
   let driveError = $state<string | null>(null);
   let driveSort = $state<DriveSort>('title');
   let driveRows = $derived(driveKey !== null && driveGamesFor === driveKey ? driveGrid(driveGames, search, driveSort) : []);
+  // Its GOG games follow its RomM games, each with a GOG tag (GameStores README).
+  let driveStore = $state.raw<DriveStoreGame[]>([]);
+  let driveStoreRows = $derived(driveKey !== null && driveGamesFor === driveKey ? driveStoreGrid(driveStore, search) : []);
+  type DriveItem = { kind: 'romm'; game: DriveGame } | { kind: 'gog'; game: DriveStoreGame };
+  let driveItems = $derived<DriveItem[]>([
+    ...driveRows.map((game): DriveItem => ({ kind: 'romm', game })),
+    ...driveStoreRows.map((game): DriveItem => ({ kind: 'gog', game })),
+  ]);
+  let gogChip = $derived(driveGogChip(driveStore));
   let driveLoading = $derived(driveKey !== null && driveGamesFor !== driveKey && driveError === null);
   let chips = $derived(drive === null ? null : driveChips(drive));
 
@@ -129,11 +197,11 @@
     if (key === null) return;
     let cancelled = false;
     driveError = null;
-    api
-      .driveGames(key)
-      .then((games) => {
+    Promise.all([api.driveGames(key), api.driveStoreGames(key).catch(() => [] as DriveStoreGame[])])
+      .then(([games, storeGames]) => {
         if (cancelled) return;
         driveGames = games;
+        driveStore = storeGames;
         driveGamesFor = key;
       })
       .catch((err) => {
@@ -146,7 +214,7 @@
   });
 
   /** The cards on screen, whichever grid: the empty state and the focus clamp read it. */
-  let gridCount = $derived(driveKey === null ? rows.length : driveRows.length);
+  let gridCount = $derived(driveKey !== null ? driveItems.length : storeSel !== null ? storeList.length : items.length);
 
   // Select mode (GameBackups README): on installed games it backs them up;
   // on a drive it installs or removes them. Changing the rail leaves it.
@@ -170,6 +238,7 @@
   function leaveSelectMode() {
     selecting = false;
     selection = EMPTY_SELECTION;
+    storePicks = [];
     confirmRemove = false;
     removeError = null;
   }
@@ -177,6 +246,76 @@
   function toggleSelectMode() {
     if (selecting) leaveSelectMode();
     else selecting = true;
+  }
+
+  /** "Backup to drive…" on GOG › Installed's select bar. */
+  function backUpStoreSelection() {
+    if (storePicks.length === 0) return;
+    openStoreBackup([...storePicks], storeBackupTitle({ kind: 'games', count: storePicks.length }), leaveSelectMode);
+  }
+
+  /** "Backup all N…" in the GOG › Installed header. */
+  function backUpStoreAll() {
+    const keys = storeAll.map((g) => g.key);
+    if (keys.length > 0) openStoreBackup(keys, storeBackupTitle({ kind: 'all', count: keys.length }));
+  }
+
+  /** A store state panel's action. */
+  function storePanelAct(act: PanelAct) {
+    if (!storeSel) return;
+    const source = storeSel.source;
+    switch (act) {
+      case 'open_available':
+        onRailSelect(`store:${source}:available`);
+        break;
+      case 'installer':
+        openInstaller();
+        break;
+      case 'refresh':
+        void refreshStore(source);
+        break;
+      case 'connect':
+      case 'sign_in':
+        void signIn(source);
+        break;
+      case 'install_tool':
+        void installTool(source);
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** A store cover's hover action. */
+  function storePrimary(game: StoreGame) {
+    const p = coverPrimary(game, gameStores.status(game.source), liveJobFor(downloads.entries, game.key));
+    if (p.act === 'play') void playStore(game);
+    else if (p.act === 'install') openInstall(game);
+    else openStoreDetails(game.key);
+  }
+
+  function openDriveStoreDetails(g: DriveStoreGame) {
+    if (drive === null) return;
+    openStoreDetails(g.key, 'overview', { key: drive.key, name: drive.pack?.name ?? drive.label, label: drive.label, game: g });
+  }
+
+  async function driveStoreAct(g: DriveStoreGame) {
+    const busy = liveJobFor(downloads.entries, g.key) !== null;
+    const p = driveStorePrimary(g, busy);
+    if (p.act === 'play') {
+      const game = gameStores.game(g.key);
+      if (game) void playStore(game);
+      return;
+    }
+    if (p.act === 'details' || driveKey === null) {
+      openDriveStoreDetails(g);
+      return;
+    }
+    try {
+      await api.installStoreFromDrive(driveKey, g.key);
+    } catch (err) {
+      showCard(refusedNotice(`Couldn’t install ${g.name}`, err instanceof Error ? err.message : String(err)));
+    }
   }
 
   function onRailSelect(key: RailKey) {
@@ -303,10 +442,20 @@
    *  §11 `library-rail-platform-<slug>` id already carries, so the count
    *  id beside it never grows a colon. */
   const slugOf = (key: RailKey): string =>
-    key.startsWith('platform:') ? key.slice('platform:'.length) : key;
+    key.startsWith('platform:')
+      ? key.slice('platform:'.length)
+      : key.startsWith('store:')
+        ? `store-${key.slice('store:'.length).replace(/:/g, '-')}`
+        : key;
 
   let firstPlatform = $derived(entries.findIndex((e) => e.key.startsWith('platform:')));
   let firstDrive = $derived(entries.findIndex((e) => e.key.startsWith('drive:')));
+
+  /** Each store group's heading, mark and badge, keyed by its first row. */
+  let storeHeads = $derived(
+    new Map(storeGroups.map((g) => [g.rows[0].key as string, { heading: g.heading, mark: storeMark(g.source), flag: g.flag }])),
+  );
+  let storeCounts = $derived(new Map(storeGroups.flatMap((g) => g.rows.map((r) => [r.key as string, r.count.kind] as const))));
 
   let railRows = $derived(
     entries.map(
@@ -320,9 +469,18 @@
         selected: entry.key === selected.key,
         // The three fixed entries come first, then the platforms, then the
         // backup drives; each group's heading sits on its first row.
-        heading: i === firstPlatform ? 'PLATFORMS' : i === firstDrive ? 'BACKUP DRIVES' : undefined,
+        heading:
+          i === firstPlatform ? 'PLATFORMS' : i === firstDrive ? 'BACKUP DRIVES' : storeHeads.get(entry.key)?.heading,
         icon: entry.key.startsWith('drive:') ? 'drive' : undefined,
         title: entry.title,
+        ...(entry.key.startsWith('store:')
+          ? {
+              indent: true,
+              countKind: storeCounts.get(entry.key) ?? 'number',
+              headingMark: storeHeads.get(entry.key)?.mark,
+              headingFlag: storeHeads.get(entry.key)?.flag,
+            }
+          : {}),
       }),
     ),
   );
@@ -593,19 +751,32 @@
   <div class="body">
     <FoldingHeader testId="library-head" scroller={scrollEl} resetKey={selected.key} bind:folded>
       {#snippet title()}
+        {#if storeSel !== null && storeStatus !== null}
+          <!-- GameStores README: "GOG · Installed", its count line, chips and actions. -->
+          <StoreViewHeader
+            status={storeStatus}
+            part={storeSel.part}
+            games={storeAll}
+            installedCount={gameStores.installed(storeSel.source).length}
+            now={nowSeconds}
+            onBackupAll={backUpStoreAll}
+          />
+        {:else}
         <header data-testid="library-header" class="title-row">
           <h2 data-testid="library-title">{selected.label}</h2>
           {#if drive !== null}
-            <p data-testid="library-count" class="counts">{driveCountLine(drive)}</p>
+            <p data-testid="library-count" class="counts">{driveCountLine(drive, driveStore.length)}</p>
             {#if chips !== null}
-              <!-- GameBackups README: chips for the drive's emulators and firmware. -->
+              <!-- GameBackups README: chips for the drive's emulators and firmware;
+                   GameStores README: "GOG: 2 games". -->
               <div class="chips" data-testid="library-drive-chips">
                 <span class="chip" data-testid="library-drive-emulators">{chips.emulators}</span>
                 <span class="chip" data-testid="library-drive-firmware">{chips.firmware}</span>
+                {#if gogChip}<span class="chip" data-testid="library-drive-gog">{gogChip}</span>{/if}
               </div>
             {/if}
           {:else}
-            <p data-testid="library-count" class="counts">{gameCountLine(rows.length)}</p>
+            <p data-testid="library-count" class="counts">{gameCountLine(items.length)}</p>
             {#if platformBackupIds.length > 0}
               <!-- GameBackups README: "Backup all N…" on a Library platform row, installed games only. -->
               <div class="chips">
@@ -622,6 +793,7 @@
             {/if}
           {/if}
         </header>
+        {/if}
       {/snippet}
       {#snippet toolbar()}
         <div class="toolbar">
@@ -629,7 +801,7 @@
             data-testid="library-search"
             class="search"
             type="search"
-            placeholder={librarySearchPlaceholder(folded, selected.key, selected.label)}
+            placeholder={storeSel !== null ? 'Search by title' : librarySearchPlaceholder(folded, selected.key, selected.label)}
             aria-label={drive !== null ? 'Search games on this drive' : 'Search installed games'}
             bind:this={searchEl}
             bind:value={search}
@@ -659,18 +831,62 @@
               {/each}
             </select>
           </label>
-          <button
-            data-testid="library-select"
-            class="select-btn"
-            class:active={selecting}
-            aria-pressed={selecting}
-            onclick={toggleSelectMode}
-          >
-            {selecting ? 'Done' : 'Select'}
-          </button>
+          <!-- Select: every RomM view; of the store views, GOG › Installed only (GOG backups). -->
+          {#if storeSel === null || storeSelectable}
+            <button
+              data-testid="library-select"
+              class="select-btn"
+              class:active={selecting}
+              aria-pressed={selecting}
+              onclick={toggleSelectMode}
+            >
+              {selecting ? 'Done' : 'Select'}
+            </button>
+          {/if}
         </div>
       {/snippet}
     </FoldingHeader>
+
+    {#snippet storeCard(game: StoreGame, i: number, rect: Rect, mixedTag: boolean)}
+      {@const job = liveJobFor(downloads.entries, game.key)}
+      {@const primary = coverPrimary(game, gameStores.status(game.source), job)}
+      {@const mark = storeMark(game.source)}
+      <GameCard
+        testId={`library-store-card-${game.key.replace(':', '-')}`}
+        index={i}
+        badgeId={game.key.replace(':', '-')}
+        title={game.title}
+        platform={storeName(game.source)}
+        cover={coverPair(null, game.cover || null)}
+        installed={game.installed}
+        updateLabel={null}
+        cloudPlatforms={new Set<string>()}
+        labels={uiSettings.cardLabels}
+        {rect}
+        showPlatform={false}
+        focused={i === focusIndex && inputMode.directional}
+        selecting={selecting && storeSel !== null}
+        selected={storePicks.includes(game.key)}
+        onSelect={() => {
+          focusIndex = i;
+          storePicks = storePicks.includes(game.key) ? storePicks.filter((k) => k !== game.key) : [...storePicks, game.key];
+        }}
+        onOpen={() => {
+          focusIndex = i;
+          openStoreDetails(game.key);
+        }}
+        onPrimary={() => storePrimary(game)}
+        onCloud={() => openStoreDetails(game.key, 'cloud')}
+        onHoverStart={() => {}}
+        onHoverEnd={hover.end}
+        extraTags={coverTags(game, job)}
+        progress={coverProgress(job)}
+        primaryLabel={primary.label}
+        storeTag={mixedTag ? { name: mark.name, mono: mark.mono, hue: mark.hue } : null}
+        showCloud={showCoverCloud(game)}
+        faded={coverFaded(game)}
+      />
+    {/snippet}
 
     <div class="scroller" bind:this={scrollEl}>
     {#if launchError}
@@ -683,7 +899,7 @@
         <p data-testid="library-drive-error" class="error panel" role="alert">{driveError}</p>
       {:else if driveLoading}
         <!-- The drive's index is being read; "nothing on this drive" would be a guess. -->
-      {:else if driveRows.length === 0}
+      {:else if driveItems.length === 0}
         <p data-testid="library-empty" class="empty panel">{driveEmptyText(search)}</p>
       {:else}
         <CardGrid
@@ -691,45 +907,104 @@
           gridId="library-grid"
           labels={uiSettings.cardLabels}
           display={uiSettings.cardDisplay}
-          cover={driveCover}
+          cover={(item) => (item.kind === 'romm' ? driveCover(item.game) : coverPair(null, item.game.cover || null))}
           size={uiSettings.cardSizeLibrary}
-          items={driveRows}
-          key={driveGameKey}
+          items={driveItems}
+          key={(item) => (item.kind === 'romm' ? driveGameKey(item.game) : `gog-${item.game.key}`)}
           {selecting}
         >
-          {#snippet card(game, i, rect)}
-            <GameCard
-              testId={`library-drive-card-${game.rom_id}`}
-              index={i}
-              badgeId={`drive-${game.rom_id}`}
-              title={game.name}
-              platform={game.platform_name}
-              cover={driveCover(game)}
-              installed={game.installed}
-              updateLabel={null}
-              {cloudPlatforms}
-              labels={uiSettings.cardLabels}
-              {rect}
-              focused={i === focusIndex && inputMode.directional}
-              {selecting}
-              selected={isPicked(selection, game.rom_id)}
-              onSelect={(shift) => {
-                focusIndex = i;
-                selection = pick(selection, game.rom_id, shift, visibleIds);
-              }}
-              onOpen={() => {
-                focusIndex = i;
-                openDriveDetails(game);
-              }}
-              onPrimary={() => drivePrimary(game)}
-              onCloud={() => openDriveDetails(game, 'save')}
-              onHoverStart={() => {}}
-              onHoverEnd={hover.end}
-            />
+          {#snippet card(item, i, rect)}
+            {#if item.kind === 'romm'}
+              {@const game = item.game}
+              <GameCard
+                testId={`library-drive-card-${game.rom_id}`}
+                index={i}
+                badgeId={`drive-${game.rom_id}`}
+                title={game.name}
+                platform={game.platform_name}
+                cover={driveCover(game)}
+                installed={game.installed}
+                updateLabel={null}
+                {cloudPlatforms}
+                labels={uiSettings.cardLabels}
+                {rect}
+                focused={i === focusIndex && inputMode.directional}
+                {selecting}
+                selected={isPicked(selection, game.rom_id)}
+                onSelect={(shift) => {
+                  focusIndex = i;
+                  selection = pick(selection, game.rom_id, shift, visibleIds);
+                }}
+                onOpen={() => {
+                  focusIndex = i;
+                  openDriveDetails(game);
+                }}
+                onPrimary={() => drivePrimary(game)}
+                onCloud={() => openDriveDetails(game, 'save')}
+                onHoverStart={() => {}}
+                onHoverEnd={hover.end}
+              />
+            {:else}
+              {@const g = item.game}
+              {@const job = liveJobFor(downloads.entries, g.key)}
+              {@const gogMark = storeMark('gog')}
+              <!-- GameStores README: a drive's GOG games, each with a GOG tag. -->
+              <GameCard
+                testId={`library-drive-store-card-${g.key.replace(':', '-')}`}
+                index={i}
+                badgeId={`drive-${g.key.replace(':', '-')}`}
+                title={g.name}
+                platform="GOG"
+                cover={coverPair(null, g.cover || null)}
+                installed={g.installed}
+                updateLabel={null}
+                cloudPlatforms={new Set<string>()}
+                labels={uiSettings.cardLabels}
+                {rect}
+                showPlatform={false}
+                focused={i === focusIndex && inputMode.directional}
+                selecting={false}
+                onOpen={() => {
+                  focusIndex = i;
+                  openDriveStoreDetails(g);
+                }}
+                onPrimary={() => driveStoreAct(g)}
+                onCloud={() => openDriveStoreDetails(g)}
+                onHoverStart={() => {}}
+                onHoverEnd={hover.end}
+                extraTags={job ? [{ text: job.status === 'queued' ? 'QUEUED' : `${coverProgress(job)}%`, tone: 'queue' }] : []}
+                progress={coverProgress(job)}
+                primaryLabel={driveStorePrimary(g, job !== null).label}
+                storeTag={{ name: 'GOG', mono: gogMark.mono, hue: gogMark.hue }}
+                showCloud={false}
+              />
+            {/if}
           {/snippet}
         </CardGrid>
       {/if}
-    {:else if rows.length === 0}
+    {:else if storeSel !== null}
+      {#if storePanelView !== null && storeStatus !== null}
+        <StorePanel panel={storePanelView} source={storeSel.source} onAct={storePanelAct} />
+      {:else if storeList.length === 0}
+        <p data-testid="library-empty" class="empty panel">{noMatchText(storeSel.source, storeSel.part, search)}</p>
+      {:else}
+        <CardGrid
+          bind:this={grid}
+          gridId="library-grid"
+          labels={uiSettings.cardLabels}
+          display={uiSettings.cardDisplay}
+          cover={(g) => coverPair(null, g.cover || null)}
+          size={uiSettings.cardSizeLibrary}
+          items={storeList}
+          key={(g) => g.key}
+          selecting={selecting && storeSelectable}
+        >
+          {#snippet card(g, i, rect)}
+            {@render storeCard(g, i, rect, false)}
+          {/snippet}
+        </CardGrid>
+      {/if}
+    {:else if items.length === 0}
       <p data-testid="library-empty" class="empty panel">
         {search.trim() === '' ? emptyText(selected) : `No games match “${search.trim()}”`}
       </p>
@@ -739,13 +1014,20 @@
         gridId="library-grid"
         labels={uiSettings.cardLabels}
         display={uiSettings.cardDisplay}
-        cover={(row) => coverPair(row.cover_small_path, row.cover_large_path)}
+        cover={(item) =>
+          item.kind === 'romm'
+            ? coverPair(item.row.cover_small_path, item.row.cover_large_path)
+            : coverPair(null, item.game.cover || null)}
         size={uiSettings.cardSizeLibrary}
-        items={rows}
-        key={installedKey}
+        items={items}
+        key={(item) => (item.kind === 'romm' ? installedKey(item.row) : `store-${item.game.key}`)}
         {selecting}
       >
-        {#snippet card(row, i, rect)}
+        {#snippet card(item, i, rect)}
+          {#if item.kind === 'store'}
+            {@render storeCard(item.game, i, rect, true)}
+          {:else}
+          {@const row = item.row}
           <GameCard
             testId={`library-card-${row.rom_id ?? `x-${i}`}`}
             index={i}
@@ -781,11 +1063,35 @@
             onHoverStart={() => hoverStart(row)}
             onHoverEnd={hover.end}
           />
+          {/if}
         {/snippet}
       </CardGrid>
     {/if}
     </div>
-    {#if selecting}
+    {#if selecting && storeSel !== null}
+      <!-- GameStores README: Select in GOG › Installed backs games up to a drive. -->
+      <SelectionBar
+        testId="library-selection"
+        count={storePicks.length}
+        size={sizeText(selectedBytes(storeAll, storePicks))}
+        visibleCount={storeList.length}
+        allSelected={storeList.length > 0 && storeList.every((g) => storePicks.includes(g.key))}
+        onSelectAll={() =>
+          (storePicks = storeList.every((g) => storePicks.includes(g.key)) ? [] : storeList.map((g) => g.key))}
+        onClear={() => (storePicks = [])}
+      >
+        {#snippet actions()}
+          <button
+            data-testid="library-selection-backup"
+            class="g-btn"
+            disabled={storePicks.length === 0}
+            onclick={backUpStoreSelection}
+          >
+            Backup to drive…
+          </button>
+        {/snippet}
+      </SelectionBar>
+    {:else if selecting}
       <SelectionBar
         testId="library-selection"
         count={selection.ids.length}

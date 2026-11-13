@@ -16,6 +16,8 @@ export const DEV_COVERS_ROUTE = '/__grid_covers__/';
  * URL. Every path `ensure_image` returns sits directly in that directory.
  */
 export function fileSrcFor(path: string, devServer: boolean): string {
+  // An inline image is already a source (the dev-only store fake's covers).
+  if (path.startsWith('data:')) return path;
   if (devServer) {
     const name = path.split(/[\\/]/).pop() ?? '';
     if (name) return DEV_COVERS_ROUTE + encodeURIComponent(name);

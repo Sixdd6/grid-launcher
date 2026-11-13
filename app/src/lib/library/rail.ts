@@ -8,7 +8,14 @@ import { isHiddenLibraryPlatform } from '../library';
 /** Design §5: "Recent (played in the last 30 days)", in whole seconds. */
 export const RECENT_WINDOW_SECONDS = 30 * 24 * 60 * 60;
 
-export type RailKey = 'all' | 'recent' | 'updates' | `platform:${string}` | `drive:${string}`;
+export type RailKey =
+  | 'all'
+  | 'recent'
+  | 'updates'
+  | `platform:${string}`
+  | `drive:${string}`
+  // A store group's row (GameStores README): `store:gog:installed`, `store:gog:available`.
+  | `store:${string}`;
 
 export type RailEntry = {
   key: RailKey;
@@ -66,8 +73,9 @@ export function matchesRail(
   if (key === 'all') return true;
   if (key === 'recent') return isRecent(row, nowSeconds);
   if (key === 'updates') return hasUpdate(row, updateRomIds);
-  // A drive's grid is the drive's own games, not installed rows.
-  if (driveKeyOf(key) !== null) return false;
+  // A drive's grid is the drive's own games, not installed rows; a store
+  // view's grid is the store's games.
+  if (driveKeyOf(key) !== null || key.startsWith('store:')) return false;
   return platformKey(row.platform) === key;
 }
 

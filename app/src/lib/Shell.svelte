@@ -27,6 +27,7 @@
   // switching the view behind it would strand it.
   import { chordBlocked, chordContext } from './views/searchKeys';
   import { enterTv, uiMode } from './stores/uiMode.svelte';
+  import StoreLayer from './gamestores/desktop/StoreLayer.svelte';
 
   let {
     initialView: forcedView = undefined,
@@ -295,6 +296,11 @@
 
 <!-- The one Backup dialog (GameBackups README), over every view and over
      Details. "Set up a drive…" goes to Settings › Backup drives. -->
+<!-- The store screens' dialogs (GameStores README): store Details, Install,
+     Game Settings, the cloud conflict prompt, the offline installer and the
+     GOG backup dialog, over every view. -->
+<StoreLayer onSetUpDrive={() => showSettings('backup-drives')} />
+
 {#if backupDialog.current}
   {#key backupDialog.current}
     <BackupDialog

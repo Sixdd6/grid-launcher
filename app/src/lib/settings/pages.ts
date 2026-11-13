@@ -1,4 +1,4 @@
-// The Settings rail (design §10): eight pages, their labels, and the rail
+// The Settings rail (design §10): nine pages (Stores from GameStores), their labels, and the rail
 // entries Settings.svelte hands to RailPane. Pure.
 
 /** Alphabetical by label (ProposedApp README, "Settings rail"). */
@@ -9,6 +9,7 @@ export const SETTINGS_PAGES = [
   'connection',
   'library',
   'retroachievements',
+  'stores',
   'systems',
   'updates',
 ] as const;
@@ -23,6 +24,7 @@ const LABELS: Record<SettingsPage, string> = {
   library: 'Library',
   'cloud-saves': 'Cloud saves',
   retroachievements: 'RetroAchievements',
+  stores: 'Stores',
   systems: 'Systems',
   updates: 'Updates',
   appearance: 'Appearance',
