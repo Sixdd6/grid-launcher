@@ -9,7 +9,7 @@ Click inside the card, then use the keyboard as a controller (TV mode's README h
 - **Library:** the rail's store folders are at the bottom (Amazon Games, Epic Games, GOG, Steam). Moving onto Installed or Available shows that list.
 - **Menu › Prototype only** adds: **Show: a store state…** (GOG login expired or not connected, Epic loading or legendary missing or failed, Amazon connected, Steam without a key, private, key rejected, client missing, and back to the start), **Show: Settings › Stores**, **Show: GOG offline installer**, **Show: sign in to Amazon Games**.
 - **GOG backups (2026-11-13):** in GOG › Installed, RT turns on Select; A picks covers, X selects all, Y opens the Backup page (Start backs up). **Backup all 3…** sits in the header and **Backup to drive…** on an installed GOG game's page. Library › Couch kit lists Marrowind Keep and Paper Lanterns after its RomM games, with a GOG tag; X on them is Install from drive.
-- **RomM installer archives (2026-11-13):** Server › Windows: X on Grey Meridian (silent), Foxglove (setup window), Iron Lullaby (unrecognised) and Low Tide Radio (DLC without Pale Summit); Server › Linux: Wren Hollow (.sh). Follow them in Downloads.
+- **RomM installer archives (2026-11-13):** Server › Windows: X on Grey Meridian (silent), Foxglove (needs its setup window, so it fails in TV mode and asks for desktop mode), Iron Lullaby (unrecognised) and Low Tide Radio (DLC without Pale Summit); Server › Linux: Wren Hollow (.sh). Follow them in Downloads. Foxglove waits behind the other queued installs, so give it a minute. The local-file case is Quarry Nine's installer through Menu › Show: GOG offline installer.
 - **Store pages:** Settings › Stores, then a store. Steam's Test cycles through its results (the row says which comes next).
 
 ## Library
@@ -44,12 +44,12 @@ Click inside the card, then use the keyboard as a controller (TV mode's README h
 ## Offline GOG installer
 
 - From the GOG header, the empty GOG Installed state, the GOG page in Settings, or the Menu. It opens TV mode's folder browser in ~/Downloads, files only; A on a file chooses it ("Reading the installer…").
-- A recognised installer opens a page with the desktop's words: what it is, how it installs (unpacked, or run silently with the setup window as a fallback, which needs a mouse or keyboard over TV mode), Compatibility tool, Install folder, and **Install** / **Install DLC** (Start).
+- A recognised installer opens a page with the desktop's words: what it is, how it installs (unpacked, or run silently: "TV mode never opens an installer's own setup window: if it can't run silently, GRID stops, keeps the installer and asks you to install it in desktop mode."), Compatibility tool, Install folder, and **Install** / **Install DLC** (Start).
 - A refusal opens a dialog with the desktop's words and **OK** / **Choose another file…**.
 
 ## Downloads and notifications
 
-- Store rows sit in Active, Queued and Completed with a store badge and kind badge, and the desktop's lines ("Installing in Steam 67% · Managed by Steam", "Waiting for the installer's setup window · finish it there", "Failed · legendary stopped: …"). A on a row opens a list: Cancel (not for Steam rows: the list's subtitle says Steam manages them), Retry, Dismiss, Open <game>. Y clears completed rows, store rows too.
+- Store rows sit in Active, Queued and Completed with a store badge and kind badge, and the desktop's lines ("Installing in Steam 67% · Managed by Steam", "Failed · legendary stopped: …"). A on a row opens a list: Cancel (not for Steam rows: the list's subtitle says Steam manages them), Retry, Dismiss, Open <game>. Y clears completed rows, store rows too.
 - Notification cards are the desktop's; those with an action (Play, Open Downloads, Try again) take it with View.
 
 ## RomM games with a GOG installer in their archive (2026-11-13)
@@ -58,7 +58,7 @@ The desktop's design with a controller (GameStores README). The game stays a Rom
 
 - **Game page:** the left column adds "Its archive holds a **GOG Windows installer**. GRID runs it after the download." (after install: "Installed by running its **GOG installer**").
 - **Downloads:** the row reads "Windows · Downloading · 45% · 38.2 MB/s", then "Windows · Running the GOG installer silently under GE-Proton9-20 · 40%" (Linux: "Unpacking the GOG installer 40%"), and "Windows · Installed · ran its GOG installer" when done. The cover shows the percentage while it runs.
-- **Wizard fallback:** "Waiting for the installer's setup window · finish it there", and the card "The Foxglove installer couldn't run silently — Its setup window opened over TV mode. Finish it with a mouse or keyboard; GRID adds the game when it closes."
+- **Silent only (user decision 2026-11-13):** TV mode never opens a Windows installer's setup window, whether the installer comes from a RomM archive, a local file or a drive restore. When it can't run silently, the row fails as "Windows · Failed · This installer needs its setup window. Install it in desktop mode. The download was kept." ("The installer was kept." for a local file), and the error card reads "Couldn't install Foxglove silently" / "This installer needs its setup window. Install it in desktop mode." with **Retry** (View). The download or installer is not deleted, so desktop mode installs it without downloading again.
 - **Failures:** the row fails with the desktop's words; the card is an error with **Install Pale Summit** (DLC without its base) or **Open Downloads** (unrecognised installer), taken with View. A on the failed row offers Retry and Dismiss.
 
 ## GOG games on backup drives (2026-11-13)
@@ -87,7 +87,7 @@ The desktop's design with a controller (GameStores README). Epic, Amazon and Ste
 - [ ] Folder browser for installers; recognised page (Linux, Windows, DLC); refusal dialogs
 - [ ] Downloads store rows and their A list
 - [ ] Prototype-only Menu entries reach every state
-- [ ] RomM installer archives: game-page line, download and installer phases, wizard wait and card, done, both failures with their card actions
+- [ ] RomM installer archives: game-page line, download and installer phases, the silent-only failure (row, card, Retry, download kept), done, both failures with their card actions
 - [ ] GOG select mode (RT, A, X, Y, bar, header chip), Backup all N…, Backup to drive… on the game page
 - [ ] Backup page: drives, Installer files / Installed copy rows, installer moved, refusals, skipped, disabled main button
 - [ ] Drive grid GOG covers, counts and chip; drive game page; restore rows and card
@@ -98,8 +98,8 @@ The GameStores card's list applies here too. TV-only:
 
 1. **Store folders** use the rail's existing folder rows (A opens and closes), one per store, opened by default.
 2. **Y opens the on-screen keyboard** in the login window (B cancels the sign-in), because the store's page, not GRID, owns its fields.
-3. **A Windows installer's own setup window** appears over TV mode and needs a mouse or keyboard; GRID says so before the install, rather than refusing Windows installers in TV mode.
+3. **CHANGED 2026-11-13 (user decision):** was "A Windows installer's own setup window appears over TV mode and needs a mouse or keyboard". Now TV mode runs Windows installers silently only; one that needs its setup window fails with "This installer needs its setup window. Install it in desktop mode." and Retry, and its download or installer is kept.
 4. **Steam Install** opens Steam's window over TV mode (Steam asks for the library folder); GRID only shows the progress.
 5. **The Steam API key** is typed with the on-screen keyboard (masked) in TV mode; pasting is the desktop's job.
 6. **CHANGED 2026-11-13 (user decision):** was "RT (Select) isn't offered in store views". Now RT is Select in GOG › Installed (for backups), matching the desktop; other store views still have none.
-7. **New:** in TV mode, a Windows installer's setup window (from a RomM archive or a drive restore) opens over TV mode and needs a mouse or keyboard; the notice says so.
+7. **CHANGED 2026-11-13 (user decision):** was "a Windows installer's setup window (from a RomM archive or a drive restore) opens over TV mode and needs a mouse or keyboard". Replaced by #3's silent-only rule for RomM archives, local files and drive restores.

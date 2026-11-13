@@ -235,14 +235,13 @@ function sPlay(g) {
 function sQueue(g, kind, o) {
   o = o || {};
   var busy = DL.some(function (d) { return d.st === 'sactive' && d.skind !== 'steam'; });
-  var d = { id: 's' + Date.now() + Math.random(), sgid: g ? g.id : null, t: o.t || g.t, store: o.store || g.s, skind: kind, kind: SKIND[kind], st: kind === 'steam' || kind === 'tool' || !busy ? 'sactive' : 'squeued', pct: 0, os: o.os, wizard: o.wizard, how: o.how, from: o.from, dname: o.dname };
+  var d = { id: 's' + Date.now() + Math.random(), sgid: g ? g.id : null, t: o.t || g.t, store: o.store || g.s, skind: kind, kind: SKIND[kind], st: kind === 'steam' || kind === 'tool' || !busy ? 'sactive' : 'squeued', pct: 0, os: o.os, needsWiz: o.needsWiz, how: o.how, from: o.from, dname: o.dname };
   DL.push(d); repaint(); return d;
 }
 function sLine(d) {
   if (d.store === 'romm') return riLine(d);
   if (d.st === 'squeued') return 'Waiting for a slot';
   if (d.skind === 'restore') return d.how === 'installer' ? (d.pct < 45 ? 'Copying the installer from ' + d.from + ' ' + d.pct + '%' : 'Running the installer · ' + d.pct + '%') : 'Copying from ' + d.from + ' ' + d.pct + '%';
-  if (d.wizard && d.pct > 30) return 'Waiting for the installer\'s setup window · finish it there';
   if (d.skind === 'steam') return 'Installing in Steam ' + d.pct + '% · Managed by Steam';
   if (d.skind === 'tool') return 'Downloading ' + d.pct + '% · checking its SHA-256';
   if (d.skind === 'repair') return 'Verifying files ' + d.pct + '%';
@@ -263,7 +262,7 @@ setInterval(function () {
   if (typeof riTvTick === 'function') riTvTick();
   var act = DL.filter(function (d) { return d.st === 'sactive'; }); if (!act.length && !DL.some(function (d) { return d.st === 'squeued'; })) return;
   var done = false;
-  act.forEach(function (d) { d.pct = Math.min(100, d.pct + (d.skind === 'tool' ? 25 : d.skind === 'steam' ? 1 : 2) + Math.floor(Math.random() * 3)); if (d.pct >= 100) { sFinish(d); done = true; } });
+  act.forEach(function (d) { if (d.needsWiz && d.pct >= 50) { sNeedsDesktop(d); done = true; return; } d.pct = Math.min(100, d.pct + (d.skind === 'tool' ? 25 : d.skind === 'steam' ? 1 : 2) + Math.floor(Math.random() * 3)); if (d.pct >= 100) { sFinish(d); done = true; } });
   if (!DL.some(function (d) { return d.st === 'sactive' && d.skind !== 'steam'; })) { var q = DL.filter(function (d) { return d.st === 'squeued'; })[0]; if (q) { q.st = 'sactive'; done = true; } }
   if (S.layers.length) { if (done) S.dirty = true; return; }
   if (done || (S.tab === 'downloads' && !S.pages.length) || (S.pages.length && S.pages[S.pages.length - 1].sid)) { repaint(); return; }
@@ -474,7 +473,7 @@ function sPicked(p) {
       h1: function () { return dlc ? 'Install DLC for ' + esc(g.t) : 'Install ' + esc(g.t); }, sub: function () { return 'From a GOG offline installer · ' + esc(f); },
       rows: function () {
         var R = [{ info: 1, label: dlc ? 'Digital Artbook' : g.t, val: dlc ? 'DLC · 118 MB' : (win ? 'Windows version' : 'Linux version') + ' · ' + (win ? 'v1.4 · 9.4 GB' : 'v1.1.0 · 1.1 GB') }];
-        R.push({ note: dlc ? 'Adds to the installed ' + esc(g.t) + ' (the Linux version). GRID unpacks its files into the game\'s folder; the installer script isn\'t run.' : win ? 'GRID runs the installer silently under ' + esc(F.compat) + '. If it can\'t run silently, its own setup window opens over TV mode; it needs a mouse or keyboard. Finish it there and GRID adds the game when it closes.' : 'GRID unpacks the game files from it. The installer script isn\'t run.' });
+        R.push({ note: dlc ? 'Adds to the installed ' + esc(g.t) + ' (the Linux version). GRID unpacks its files into the game\'s folder; the installer script isn\'t run.' : win ? 'GRID runs the installer silently under ' + esc(F.compat) + '. TV mode never opens an installer\'s own setup window: if it can\'t run silently, GRID stops, keeps the installer and asks you to install it in desktop mode.' : 'GRID unpacks the game files from it. The installer script isn\'t run.' });
         if (win) R.push({ label: 'Compatibility tool', val: esc(F.compat), fn: function () { openSheet({ title: 'Compatibility tool', items: ['GE-Proton9-20', 'Proton 9.0 (Steam)', 'System Wine'].map(function (t) { return { label: t, checked: F.compat === t, fn: function () { F.compat = t; repaint(); } }; }) }); } });
         if (!dlc) { R.push({ label: 'Install folder', val: esc(F.folder), fn: function () { openBrowser({ title: 'Install ' + g.t + ' in', start: '/home/sam/Games', onPick: function (q) { F.folder = q; } }); } }); R.push({ note: 'It joins your GOG games. Updates and cloud saves come from GOG while you\'re signed in.' }); }
         return R;
@@ -482,9 +481,8 @@ function sPicked(p) {
       main: function () { return { label: dlc ? 'Install DLC' : 'Install', summary: 'Needs ' + (dlc ? '160 MB' : win ? '13.2 GB' : '1.6 GB') + ' · 412 GB free', fn: function () {
         pop();
         if (dlc) { sQueue(g, 'dlc', { t: g.t + ' — Digital Artbook' }); toast('Digital Artbook added to download queue'); return; }
-        var d = sQueue(g, 'installer', { os: win ? 'windows' : 'linux', wizard: win });
+        var d = sQueue(g, 'installer', { os: win ? 'windows' : 'linux', needsWiz: win });
         toast(g.t + ' added to download queue', { act: ['Open Downloads', function () { S.pages = []; S.tab = 'downloads'; render(); }] });
-        if (win) setTimeout(function () { toast('The ' + g.t + ' installer couldn\'t run silently', { s: 'Its setup window opened. Finish it with a mouse or keyboard; GRID adds the game when it closes.' }); }, 3500);
       } }; },
       mainHint: 'Install'
     }));

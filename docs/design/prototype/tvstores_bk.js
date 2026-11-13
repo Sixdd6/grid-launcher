@@ -124,7 +124,6 @@ install = function (g) {
 };
 function riLine(d) {
   if (d.st === 'queued') return 'Queued';
-  if (d.wiz && !d.wizDone) return 'Waiting for the installer\'s setup window · finish it there';
   if (d.pct < 55) return 'Downloading · ' + Math.round(d.pct / 55 * 100) + '% · 38.2 MB/s';
   var q = Math.round((d.pct - 55) / 45 * 100);
   return d.ri.type === 'sh' ? 'Unpacking the GOG installer ' + q + '%' : 'Running the GOG installer silently under ' + STV.compat + ' · ' + q + '%';
@@ -143,10 +142,7 @@ function riTvTick() {
       toast('Couldn\'t install ' + d.t, { err: 1, s: r.fail === 'unknown' ? 'Its archive holds an installer GRID doesn\'t recognise.' : 'It\'s DLC for ' + r.base + ', which isn\'t installed.', act: base ? ['Install ' + r.base, function () { install(base); }] : ['Open Downloads', function () { S.pages = []; S.tab = 'downloads'; render(); }] });
       advanceQueue(); if (!S.layers.length) repaint(); return;
     }
-    if (r.wizard && d.pct >= 70 && !d.wizDone) {
-      if (!d.wiz) toast('The ' + d.t + ' installer couldn\'t run silently', { s: 'Its setup window opened over TV mode. Finish it with a mouse or keyboard; GRID adds the game when it closes.' });
-      d.wiz = (d.wiz || 0) + 1; d.pct = 70; if (d.wiz > 8) d.wizDone = 1;
-    }
+    if (r.wizard && d.pct >= 70) { sNeedsDesktop(d); advanceQueue(); if (!S.layers.length) repaint(); }
   });
 }
 /* Details of such a RomM game: one line says what its archive holds. */
@@ -165,3 +161,12 @@ libRailHTML = function () {
   readyDrives().forEach(function (d) { var n = (d.sgames || []).length; if (n) h = h.replace(new RegExp('(data-key="drv:' + d.id + '"[^>]*>[^<]*<span class="n">)(\\d+)'), function (m, a, c) { return a + (+c + n); }); });
   return h;
 };
+
+/* TV mode runs Windows installers silently only (user decision 2026-11-13): one that
+   can't run silently stops, keeps its files and asks for desktop mode; no setup
+   window ever opens over TV mode. */
+function sNeedsDesktop(d) {
+  d.st = 'failed';
+  d.line = 'Failed · This installer needs its setup window. Install it in desktop mode. The ' + (d.store === 'romm' ? 'download' : 'installer') + ' was kept.';
+  toast('Couldn\'t install ' + d.t + ' silently', { err: 1, s: 'This installer needs its setup window. Install it in desktop mode.', act: ['Retry', function () { d.st = d.store === 'romm' ? 'queued' : 'squeued'; d.pct = d.store === 'romm' ? 55 : 0; toast(d.t + ' added to download queue'); repaint(); }] });
+}

@@ -99,7 +99,7 @@ The user can zip a GOG offline installer (`setup_*.exe` with its `.bin` parts, o
 - **Details before install:** a line under the buttons, "Its archive holds a GOG Windows installer. GRID runs it after the download, under GE-Proton10-17." (Linux: "…a GOG Linux installer. GRID runs it after the download."; DLC: "…a GOG DLC installer for Harbor Lights."). After install: "Installed by running its GOG installer" ("Added to Harbor Lights by its GOG installer").
 - **Covers and Details while it runs:** "Installing…" / "Queued", the percentage tag and the bottom bar (as on store covers).
 - **Downloads row** (no new kind badge; it is a game install): "Windows · Downloading 45% · 38.2 MB/s", then a second phase, "Windows · Running the GOG installer silently under GE-Proton10-17 · 40%" (Linux: "Unpacking the GOG installer 40%": the .sh is read as a zip and its `data/noarch/` copied; the script never runs). On a Windows host the .exe runs natively and the line drops "under …".
-- **Wizard fallback:** "Waiting for the installer's setup window · finish it there" on the row and the strip, and the card "Foxglove's installer couldn't run silently, so its setup window opened. Finish it there; GRID adds the game when it closes."
+- **Wizard fallback:** "Waiting for the installer's setup window · finish it there" on the row and the strip, and the card "Foxglove's installer couldn't run silently, so its setup window opened. Finish it there; GRID adds the game when it closes." Desktop only: TV mode runs Windows installers silently only and never opens the setup window (user decision 2026-11-13, see the TVStores card).
 - **Done:** "Windows · Installed · ran its GOG installer" ("Added to Harbor Lights · ran its GOG installer" for DLC); card "Grey Meridian installed" · Play.
 - **Failures** (the row goes to Completed in red with Retry and Dismiss; the download is removed):
   - Unrecognised installer: "Failed · Its archive holds an installer GRID doesn't recognise (setup.exe has no GOG game info). The download was removed." Card "Couldn't install Iron Lullaby: its archive holds an installer GRID doesn't recognise" · Open Downloads.
@@ -184,7 +184,7 @@ GOG backups (2026-11-13)
 Edge cases
 - [ ] Steam games installed outside GRID show in Installed ("Installed in Steam, outside GRID"); Proton and Steam runtimes never show
 - [ ] Offline GOG install with no GOG login: GOG group shows, Available asks to connect
-- [ ] Windows installer falls back to its own wizard
+- [ ] Windows installer falls back to its own wizard (desktop only; in TV mode it fails with "This installer needs its setup window. Install it in desktop mode." and keeps the download)
 - [ ] Multi-part installer with a part missing
 - [ ] DLC installer for a base game that isn't installed
 - [ ] Installer for the other OS version of an installed game
@@ -219,3 +219,4 @@ Edge cases
 21. **Restoring a GOG backup needs no GOG login**; the game joins GOG › Installed and gets updates and cloud saves once signed in.
 22. **GOG games on a drive** follow its RomM games in the drive's grid with a GOG tag, and count in the rail and header. In this prototype they install one at a time; in the app, select mode's Install N games includes them.
 23. **GOG backup refusals:** a game being installed or updated, and a game that is running. A Windows game's Wine prefix is not copied, only the save folders GOG reports.
+24. **CHANGED 2026-11-13 (user decision), TV only:** the earlier TV notice that a setup window opens over TV mode is gone; TV mode is silent-only (TVStores #3, #7). The desktop keeps silent-first with the wizard fallback.
