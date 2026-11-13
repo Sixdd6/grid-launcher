@@ -5,6 +5,7 @@ import { availBlock, parseStoreRailKey, storeFlag, storeRailGroups, storeRailKey
 import { coverPrimary, coverProgress, coverTags, showCoverCloud } from './cover';
 import { jobPercent, liveJobFor, liveToolJob } from './jobs';
 import { noMatchText, storeChips, storeCountLine, storeHeaderActions, storePanel } from './view';
+import { selectedToWrite } from './library';
 import { installedGame, row, status, storeGame } from './fixtures.test-util';
 
 const GB = 1024 ** 3;
@@ -157,5 +158,12 @@ describe('store view', () => {
     expect(storePanel(status({ owned: 'loading' }), 'available', [])?.kind).toBe('loading');
     expect(storePanel(status(), 'available', [])?.title).toBe('Every GOG game you own is installed');
     expect(noMatchText('gog', 'installed', ' ash ')).toBe('No installed GOG games match “ash”');
+  });
+});
+
+describe('select bar', () => {
+  it('sums the picked games as "N GB to write"', () => {
+    const games = [installedGame({ key: 'gog:1', disk_bytes: 21.6 * 1024 ** 3 }), installedGame({ key: 'gog:2', disk_bytes: 2.9 * 1024 ** 3 }), installedGame({ key: 'gog:3', disk_bytes: 5 * 1024 ** 3 })];
+    expect(selectedToWrite(games, ['gog:1', 'gog:2'])).toBe('24.5 GB to write');
   });
 });

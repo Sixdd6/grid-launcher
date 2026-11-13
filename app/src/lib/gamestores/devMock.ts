@@ -66,7 +66,7 @@ const DRIVE: DriveInfo = {
   read_only: false,
   status: 'ready',
   problem: '',
-  pack: { name: 'Couch kit', os: ['linux'], game_count: 0, gridpack_bytes: 120 * GB, emulators: [], firmware: [], updated: '2026-11-12T10:00:00Z', rom_ids: [] },
+  pack: { name: 'Couch kit', os: ['linux'], game_count: 2, gridpack_bytes: 120 * GB, emulators: [], firmware: [], updated: '2026-11-12T10:00:00Z', rom_ids: [] },
 } as unknown as DriveInfo;
 
 export function installDevMock(): void {

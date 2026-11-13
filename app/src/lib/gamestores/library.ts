@@ -3,6 +3,7 @@
 // games, each with its store's tag; platform rows don't. Pure.
 import type { InstalledGame, StoreGame } from '../api';
 import { storeName } from './marks';
+import { sizeGb } from './text';
 
 /** Design §5: "Recent (played in the last 30 days)", in seconds. */
 const RECENT_WINDOW_SECONDS = 30 * 24 * 60 * 60;
@@ -60,4 +61,9 @@ export function sortStoreView(games: readonly StoreGame[], sort: string, rows: r
 /** "2 selected · 24.5 GB to write" sums the installed sizes (the dialog plans the real bytes). */
 export function selectedBytes(games: readonly StoreGame[], keys: readonly string[]): number {
   return games.filter((g) => keys.includes(g.key)).reduce((t, g) => t + g.disk_bytes, 0);
+}
+
+/** The select bar's second line in GOG › Installed: "24.5 GB to write". */
+export function selectedToWrite(games: readonly StoreGame[], keys: readonly string[]): string {
+  return `${sizeGb(selectedBytes(games, keys))} to write`;
 }

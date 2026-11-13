@@ -15,11 +15,14 @@ export function driveLabel(drive: Pick<DriveInfo, 'label' | 'mount'>): string {
   return drive.label.trim() || drive.mount;
 }
 
-/** The header's count line: "8 games · 13.3 GB · on SAMSUNG T7". */
-export function driveCountLine(drive: DriveInfo, storeGames = 0): string {
+/**
+ * The header's count line: "8 games · 13.3 GB · on SAMSUNG T7". The pack's
+ * `game_count` already counts its GOG games (drive_service `pack_summary`),
+ * as the GameStores README asks of the header and the rail.
+ */
+export function driveCountLine(drive: DriveInfo): string {
   const pack = drive.pack;
-  // GameStores README: the header counts the drive's GOG games too.
-  const games = (pack?.game_count ?? 0) + storeGames;
+  const games = pack?.game_count ?? 0;
   const bytes = pack?.gridpack_bytes ?? 0;
   return `${plural(games, 'game')} · ${sizeText(bytes)} · on ${driveLabel(drive)}`;
 }

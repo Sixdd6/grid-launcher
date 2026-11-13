@@ -71,7 +71,7 @@
   import { coverFaded, coverPrimary, coverProgress, coverTags, showCoverCloud } from './gamestores/cover';
   import { liveJobFor } from './gamestores/jobs';
   import { noMatchText, storeGameMatches, storePanel, type PanelAct } from './gamestores/view';
-  import { mixedCounts, mixedStoreGames, selectedBytes, sortStoreView } from './gamestores/library';
+  import { mixedCounts, mixedStoreGames, selectedToWrite, sortStoreView } from './gamestores/library';
   import { driveGogChip, driveStoreGrid, driveStorePrimary, storeBackupTitle } from './gamestores/backup';
   import { storeMark, storeName } from './gamestores/marks';
   import StoreViewHeader from './gamestores/desktop/StoreViewHeader.svelte';
@@ -765,7 +765,7 @@
         <header data-testid="library-header" class="title-row">
           <h2 data-testid="library-title">{selected.label}</h2>
           {#if drive !== null}
-            <p data-testid="library-count" class="counts">{driveCountLine(drive, driveStore.length)}</p>
+            <p data-testid="library-count" class="counts">{driveCountLine(drive)}</p>
             {#if chips !== null}
               <!-- GameBackups README: chips for the drive's emulators and firmware;
                    GameStores README: "GOG: 2 games". -->
@@ -1073,7 +1073,7 @@
       <SelectionBar
         testId="library-selection"
         count={storePicks.length}
-        size={sizeText(selectedBytes(storeAll, storePicks))}
+        size={selectedToWrite(storeAll, storePicks)}
         visibleCount={storeList.length}
         allSelected={storeList.length > 0 && storeList.every((g) => storePicks.includes(g.key))}
         onSelectAll={() =>
