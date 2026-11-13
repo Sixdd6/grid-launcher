@@ -58,7 +58,7 @@ var ST = {
   ],
   jobs: [], done: [], dlg: null, login: null, conf: null, proto: { amazon: 'expired' }, compat: 'GE-Proton10-17', playing: null
 };
-var ST_KIND = { install: '', update: 'Update', repair: 'Repair', dlc: 'Content', tool: 'Store tool', installer: 'Installer', steam: '' };
+var ST_KIND = { install: '', restore: '', romm: '', update: 'Update', repair: 'Repair', dlc: 'Content', tool: 'Store tool', installer: 'Installer', steam: '' };
 function stS(id) { return ST.stores[id]; }
 function stG(id) { return ST.games.filter(function (g) { return g.id === id; })[0]; }
 function stOf(sid) { return ST.games.filter(function (g) { return g.s === sid; }); }
@@ -212,6 +212,7 @@ function stRenderView(sv) {
   if (s.conn === 'expired') c.push('<button class="g-chip-outline st-chip-warn" data-st-login="' + s.id + '">Login expired · Sign in again</button>');
   if (s.conn === 'off') c.push('<button class="g-chip-outline" data-st-goset="' + s.id + '">Not connected · Connect…</button>');
   if (s.cloud && s.conn !== 'off') c.push('<span class="g-chip-outline">Cloud saves: on</span>');
+  if (s.id === 'gog' && inst && stInst(s).length) c.push('<button class="small-btn bk-plat" data-st-bkall>Backup all ' + stInst(s).length + '…</button>');
   if (s.id !== 'steam' && s.tool !== 'ok' && s.conn === 'ok') c.push('<button class="g-chip-outline st-chip-warn" data-st-goset="' + s.id + '">' + s.toolName + ' not installed</button>');
   /* Header actions sit after the chips, on the right like Backup all N… */
   chips.innerHTML = c.join('') + (s.id === 'gog' ? '<button class="small-btn" data-st-installer>Install from installer…</button>' : '') +
@@ -265,6 +266,7 @@ renderLibrary = function () {
   var sv = stView(); if (sv && !stShown(sv.s)) { S.libFilter = 'all'; sv = null; }
   var keep = S.libFilter;
   if (sv) { S.libFilter = 'all'; BK.sel = { view: null, ids: [] }; }
+  if (!sv || sv.s.id !== 'gog' || sv.part !== 'inst') ST.sel = null;
   stOrigLib();
   S.libFilter = keep;
   var rail = $('lib-rail');
@@ -272,11 +274,11 @@ renderLibrary = function () {
   rail.insertAdjacentHTML('beforeend', stRailHTML(sv));
   if (!sv) {
     var sel = document.querySelector('[data-view=library] [data-bk-select]'); if (sel && !bkLibDrive()) sel.hidden = false;
-    stMixIn(); return;
+    stMixIn(); stDriveGog(); return;
   }
   stRenderView(sv);
   $('lib-grid').querySelectorAll('.bk-check').forEach(function (x) { x.remove(); });
-  var bar = $('lib-selbar'); if (bar) bar.hidden = true;
+  stSelPaint(sv);
 };
 /* All games, Recent and Updates hold the installed store games too, each with
    its store's tag. Platform rows don't: store games live in their store group. */
@@ -311,6 +313,7 @@ function stRenderDlg() {
   var d = ST.dlg, el = $('stdlg'); if (!d) { $('stscrim').hidden = true; return; }
   var h = '';
   if (d.kind === 'install') h = stInstallHTML(d);
+  else if (d.kind === 'backup') h = stBackupHTML(d);
   else if (d.kind === 'settings') h = stSettingsHTML(d);
   else if (d.kind === 'picker') h = stPickerHTML(d);
   else if (d.kind === 'reading') h = stReadingHTML(d);
@@ -347,14 +350,15 @@ function stInstallHTML(d) {
 function stQueue(g, kind, opts) {
   opts = opts || {};
   var active = ST.jobs.some(function (j) { return j.st === 'active' && j.kind !== 'steam'; }) || !!S.dl;
-  var j = { id: 'j' + Date.now() + Math.random(), gid: g ? g.id : null, t: opts.t || g.t, s: opts.s || g.s, kind: kind, st: kind === 'steam' || kind === 'tool' || !active ? 'active' : 'queued', pct: 0, os: opts.os, line: '' };
+  var j = { id: 'j' + Date.now() + Math.random(), gid: g ? g.id : null, t: opts.t || g.t, s: opts.s || g.s, kind: kind, st: kind === 'steam' || kind === 'tool' || !active ? 'active' : 'queued', pct: 0, os: opts.os, line: '', how: opts.how, from: opts.from, ri: opts.ri, p: opts.p };
   ST.jobs.push(j); stRun(); renderAll(); return j;
 }
 function stTick() {
   var changed = false;
   ST.jobs.forEach(function (j) {
     if (j.st !== 'active') return;
-    j.pct = Math.min(100, j.pct + (j.kind === 'tool' ? 22 : j.kind === 'repair' ? 6 : j.kind === 'steam' ? 1 : 1.6) + Math.random() * 1.5); changed = true;
+    if (j.s === 'romm' && riTick(j)) { changed = true; return; }
+    j.pct = Math.min(100, j.pct + (j.kind === 'tool' ? 22 : j.kind === 'repair' ? 6 : j.kind === 'steam' ? 1 : j.s === 'romm' ? 3 : 1.6) + Math.random() * 1.5); changed = true;
     if (j.pct >= 100) stFinish(j);
   });
   var started = false;
@@ -369,7 +373,7 @@ function stTick() {
 function stLiveCards() {
   ST.jobs.forEach(function (j) {
     if (!j.gid) return;
-    document.querySelectorAll('[data-sgame="' + j.gid + '"]').forEach(function (c) {
+    document.querySelectorAll('[data-sgame="' + j.gid + '"], [data-game="' + j.gid + '"]').forEach(function (c) {
       var b = c.querySelector('.st-cprog b'), t = c.querySelector('.g-tag.st-q');
       if (b && j.st === 'active') b.style.width = Math.round(j.pct) + '%';
       if (t) t.textContent = j.st === 'active' ? Math.round(j.pct) + '%' : 'QUEUED';
@@ -378,6 +382,8 @@ function stLiveCards() {
 }
 function stRun() { if (!ST.timer) ST.timer = setInterval(stTick, 450); }
 function stFinish(j) {
+  if (j.s === 'romm') return riFinish(j);
+  if (j.kind === 'restore') return stRestoreDone(j);
   var g = j.gid && stG(j.gid), s = stS(j.s);
   j.st = 'done';
   ST.jobs.splice(ST.jobs.indexOf(j), 1);
@@ -395,6 +401,8 @@ function stFinish(j) {
 function stJobLine(j) {
   var p = Math.round(j.pct);
   if (j.st === 'queued') return 'Waiting for a slot';
+  if (j.s === 'romm') return riLine(j);
+  if (j.kind === 'restore') return j.how === 'installer' ? (p < 45 ? 'Copying the installer from ' + j.from + ' ' + Math.round(p / 45 * 100) + '%' : 'Running the installer · ' + Math.round((p - 45) / 55 * 100) + '%') : 'Copying from ' + j.from + ' ' + p + '%';
   if (j.kind === 'steam') return 'Installing in Steam ' + p + '%';
   if (j.kind === 'tool') return 'Downloading ' + p + '% · checking its SHA-256';
   if (j.kind === 'repair') return 'Verifying files ' + p + '%';
@@ -428,7 +436,7 @@ function stPlay(g) {
 
 /* ---- Details for a store game ---- */
 function stOpenDetails(g, tab) {
-  closeDetails();
+  var keepFrom = ST.detFrom; closeDetails(); ST.detFrom = keepFrom;
   S.stDetail = g; S.tab = tab || 'overview'; S.stConfirm = null; paintArt(g);
   $('scrim').hidden = false; stRenderDetails(); $('dialog').focus({ preventScroll: true });
 }
@@ -449,6 +457,11 @@ function stRenderDetails() {
   else b.push('<button class="g-btn" data-st-d="install"' + (s.conn !== 'ok' ? ' disabled' : '') + '>Install…</button>');
   if (g.inst && g.upd && !j) b.push('<button class="g-btn secondary" data-st-d="update">Update to ' + esc(g.upd) + '</button>');
   if (g.inst && !steam) b.push('<button class="g-btn secondary" data-st-d="settings">Game Settings</button>');
+  var fromD = ST.detFrom && bkDrive(ST.detFrom), packed = fromD && stPackOf(fromD, g);
+  if (packed) {
+    if (!g.inst && !j) b[0] = '<button class="g-btn" data-st-d="restore">Install from drive</button>';
+    b.push(S.stConfirm === 'drm' ? '<button class="g-btn destructive" data-st-d="drm-go">Remove from ' + esc(fromD.name) + '</button>' : '<button class="g-btn secondary destructive" data-st-d="drm">Remove from drive…</button>');
+  } else if (s.id === 'gog' && g.inst) b.push('<button class="g-btn secondary" data-st-d="backup">Backup to drive…</button>');
   if (g.inst && !j) b.push(steam ? '<button class="g-btn secondary" data-st-d="verify">Verify in Steam</button>' : '<button class="g-btn secondary" data-st-d="verify">Verify and repair</button>');
   if (g.inst && !j) b.push(steam ? '<button class="g-btn secondary" data-st-d="uninstall">Uninstall in Steam…</button>'
     : S.stConfirm === 'uninstall' ? '<button class="g-btn destructive confirm" data-st-d="uninstall-go">Confirm uninstall</button>' : '<button class="g-btn secondary destructive" data-st-d="uninstall">Uninstall</button>');
@@ -464,12 +477,14 @@ function stRenderDetails() {
   }
   if (g.offline) lines.push('<p class="g-meta-line">Installed from an offline installer</p>');
   if (g.outside) lines.push('<p class="g-meta-line">Installed in Steam, outside GRID</p>');
-  lines.push('<p class="g-meta-line">Store games are not backed up</p>');
+  if (packed) lines.push('<p class="g-meta-line">' + (packed.how === 'installer' ? 'On the drive as its installer files' + (packed.ver ? ' · v' + packed.ver : '') + ' and saves. Installing runs the installer again.' : 'On the drive as a copy of an installed game' + (packed.ver ? ' · v' + packed.ver : '') + ', with its saves. Installing copies it back.') + '</p>');
+  else if (s.id === 'gog') { var onD = bkReady().filter(function (d) { return stPackOf(d, g); }); if (onD.length) lines.push('<p class="g-meta-line bk-on"><span data-icon="drive" data-size="12"></span>On ' + esc(onD.map(function (d) { return d.name; }).join(', ')) + '</p>'); }
+  else lines.push('<p class="g-meta-line">' + ST_NOBK[s.id] + '</p>');
   $('d-left').innerHTML = '<div class="g-cover" style="box-shadow:var(--shadow-lift);max-height:320px"><div class="g-art" style="background:' + g.c + ';font-size:20px"><span>' + esc(g.t) + '</span></div></div>' + b.join('') + lines.join('');
   var chips = '<span class="g-chip st-schip">' + stMark(s) + esc(s.name) + '</span>' + (ST.playing === g.id ? '<span class="g-chip playing">Playing</span>' : '') +
     (g.inst && g.ver ? '<span class="g-chip">v' + esc(g.ver) + '</span>' : '') + (g.inst && g.os && g.os !== 'steam' ? '<span class="g-chip">' + (g.os === 'linux' ? 'Linux version' : 'Windows version') + '</span>' : '') +
     (g.offline ? '<span class="g-chip">Offline installer</span>' : '') + (g.ns ? '<span class="g-chip">Not supported</span>' : '');
-  $('d-head').innerHTML = '<h2>' + esc(g.t) + '</h2><p class="g-header-line">' + esc(s.name) + ' · ' + g.year + ' · ' + esc(g.dev) + ' · ' + esc(g.genre) + '</p><div class="row" style="display:flex;gap:6px;flex-wrap:wrap">' + chips + '</div>';
+  $('d-head').innerHTML = '<h2>' + esc(g.t) + '</h2><p class="g-header-line">' + (packed ? '<span class="bk-src">From ' + esc(fromD.name) + '</span> · ' : '') + esc(s.name) + ' · ' + g.year + ' · ' + esc(g.dev) + ' · ' + esc(g.genre) + '</p><div class="row" style="display:flex;gap:6px;flex-wrap:wrap">' + chips + '</div>';
   var tabs = stTabs(g); if (!tabs.some(function (t) { return t[0] === S.tab; })) S.tab = 'overview';
   $('d-tabs').innerHTML = tabs.map(function (t) { return '<button role="tab" data-tab="' + t[0] + '" class="' + (S.tab === t[0] ? 'active' : '') + '" aria-selected="' + (S.tab === t[0]) + '">' + t[1] + '</button>'; }).join('');
   var p = $('d-panel');
@@ -587,9 +602,10 @@ renderDownloads = function () {
   stOrigDl();
   var act = ST.jobs.filter(function (j) { return j.st === 'active'; }), q = ST.jobs.filter(function (j) { return j.st === 'queued'; });
   var row = function (j, live) {
-    var s = stS(j.s), steam = j.kind === 'steam', kind = ST_KIND[j.kind];
+    var romm = j.s === 'romm', s = romm ? null : stS(j.s), steam = j.kind === 'steam', kind = ST_KIND[j.kind];
     var line = j.wizard ? 'Waiting for the installer’s setup window · finish it there' : stJobLine(j);
-    return '<div class="dl" style="margin-top:8px"><div><span class="t">' + esc(j.t) + '</span><span class="kind st-schip" style="display:inline-flex;align-items:center;gap:4px">' + stMark(s) + esc(s.name) + '</span>' + (kind ? '<span class="kind">' + kind + '</span>' : '') +
+    if (romm) line = PLAT[j.p] + ' · ' + line;
+    return '<div class="dl" style="margin-top:8px"><div><span class="t">' + esc(j.t) + '</span>' + (romm ? '' : '<span class="kind st-schip" style="display:inline-flex;align-items:center;gap:4px">' + stMark(s) + esc(s.name) + '</span>') + (kind ? '<span class="kind">' + kind + '</span>' : '') +
       '<div class="s">' + esc(line) + (steam ? ' · Managed by Steam' : '') + '</div>' + (live ? '<div class="bar"><b style="width:' + Math.round(j.pct) + '%"></b></div>' : '') + '</div>' +
       (live ? '<svg width="120" height="38" viewBox="0 0 120 18" preserveAspectRatio="none"><polyline fill="none" stroke="' + (j.pct > 85 || j.kind === 'installer' || j.kind === 'repair' ? 'var(--graph-disk)' : 'var(--primary)') + '" stroke-width="1.2" points="0,12 20,8 40,10 60,6 80,9 100,7 120,8"/></svg>' : '<span></span>') +
       (steam ? '<button class="small-btn" disabled title="Managed by Steam">Cancel</button>' : '<button class="small-btn" data-st-cancel="' + j.id + '">Cancel</button>') + '</div>';
@@ -599,13 +615,13 @@ renderDownloads = function () {
   if (q.length) { var qq = $('dl-queued'); if (qq.querySelector('.note')) qq.innerHTML = ''; qq.insertAdjacentHTML('beforeend', q.map(function (j) { return row(j, false); }).join('')); fixN('dl-queued-n', q.length); }
   if (ST.done.length) {
     var d = $('dl-done'); if (d.querySelector('.note')) d.innerHTML = '';
-    d.insertAdjacentHTML('afterbegin', ST.done.map(function (x, i) { var s = stS(x.s); return '<div class="dl" style="margin-bottom:8px"><div><span class="t">' + esc(x.t) + '</span><span class="kind" style="display:inline-flex;align-items:center;gap:4px">' + stMark(s) + esc(s.name) + '</span>' + (ST_KIND[x.kind] ? '<span class="kind">' + ST_KIND[x.kind] + '</span>' : '') + '<div class="s' + (x.err ? ' err' : '') + '">' + esc(x.line) + '</div></div><span></span>' + (x.err ? '<span style="display:flex;gap:6px"><button class="small-btn" data-st-retry="' + i + '">Retry</button><button class="small-btn" data-st-undone="' + i + '">Dismiss</button></span>' : '<button class="small-btn" data-st-undone="' + i + '">Dismiss</button>') + '</div>'; }).join(''));
+    d.insertAdjacentHTML('afterbegin', ST.done.map(function (x, i) { var s = stS(x.s); return '<div class="dl" style="margin-bottom:8px"><div><span class="t">' + esc(x.t) + '</span>' + (s ? '<span class="kind" style="display:inline-flex;align-items:center;gap:4px">' + stMark(s) + esc(s.name) + '</span>' : '') + (ST_KIND[x.kind] ? '<span class="kind">' + ST_KIND[x.kind] + '</span>' : '') + '<div class="s' + (x.err ? ' err' : '') + '">' + esc(x.line) + '</div></div><span></span>' + (x.err ? '<span style="display:flex;gap:6px"><button class="small-btn" data-st-retry="' + i + '">Retry</button><button class="small-btn" data-st-undone="' + i + '">Dismiss</button></span>' : '<button class="small-btn" data-st-undone="' + i + '">Dismiss</button>') + '</div>'; }).join(''));
     fixN('dl-done-n', ST.done.length);
   }
   var first = act.filter(function (j) { return j.kind !== 'steam'; })[0] || act[0];
   if (first && !S.dl && !BK.job) {
     $('strip').hidden = false;
-    $('strip-line').innerHTML = esc(first.t) + ' · ' + esc(stS(first.s).name) + ' · ' + esc(stJobLine(first));
+    $('strip-line').innerHTML = esc(first.t) + ' · ' + esc(first.s === 'romm' ? PLAT[first.p] : stS(first.s).name) + ' · ' + esc(stJobLine(first));
   }
 };
 
@@ -732,6 +748,10 @@ document.addEventListener('click', function (e) {
   var card = t.closest('[data-sgame]');
   if (card && !card.classList.contains('st-skel')) {
     var g = stG(card.getAttribute('data-sgame')), a = t.closest('[data-st-act]'), act = a ? a.getAttribute('data-st-act') : 'details';
+    if (ST.sel && card.closest('.grid.selecting')) { var si = ST.sel.ids.indexOf(g.id); if (si >= 0) ST.sel.ids.splice(si, 1); else if (!card.classList.contains('st-nosel')) ST.sel.ids.push(g.id); renderLibrary(); return; }
+    var dv = card.getAttribute('data-sdrive');
+    if (dv) { ST.detFrom = dv; if (act === 'install') { stRestore(g, bkDrive(dv)); return; } if (act === 'play') { stPlay(g); return; } stOpenDetails(g); return; }
+    ST.detFrom = null;
     if (a && a.disabled) return;
     if (act === 'play') stPlay(g); else if (act === 'install') stOpenInstall(g); else if (act === 'cloud') stOpenDetails(g, 'cloud'); else stOpenDetails(g);
     return;
@@ -763,6 +783,10 @@ document.addEventListener('click', function (e) {
     else if (d === 'update') { stQueue(g2, 'update'); stToast('Update for ' + g2.t + ' added to download queue'); stRenderDetails(); }
     else if (d === 'verify') { if (s2.id === 'steam') { stToast('Steam is verifying ' + g2.t + '’s files. Watch it in Steam.'); return; } stQueue(g2, 'repair'); stToast('Verifying ' + g2.t + '’s files…'); stRenderDetails(); }
     else if (d === 'settings') { ST.dlg = { kind: 'settings', gid: g2.id }; stRenderDlg(); }
+    else if (d === 'backup') stOpenBackup([g2.id], 'Backup ' + g2.t);
+    else if (d === 'restore') stRestore(g2, bkDrive(ST.detFrom));
+    else if (d === 'drm') { S.stConfirm = 'drm'; stRenderDetails(); }
+    else if (d === 'drm-go') { var dd2 = bkDrive(ST.detFrom); dd2.sgames = dd2.sgames.filter(function (x) { return x.id !== g2.id; }); toast('Removed ' + g2.t + ' from ' + dd2.name); closeDetails(); renderAll(); }
     else if (d === 'uninstall') { if (s2.id === 'steam') { stToast('Steam opened its uninstall window for ' + g2.t + '. It leaves the Library once Steam removes it.'); return; } S.stConfirm = 'uninstall'; stRenderDetails(); }
     else if (d === 'uninstall-go') { g2.inst = false; delete g2.upd; S.stConfirm = null; stToast(g2.t + ' uninstalled' + (s2.cloud ? '. Its cloud saves stay in your ' + s2.name + ' account.' : '')); renderAll(); stRenderDetails(); }
     return;
@@ -781,6 +805,7 @@ document.addEventListener('click', function (e) {
   if ((b = t.closest('[data-st-dlg]'))) {
     var k = b.getAttribute('data-st-dlg');
     if (k === 'close') stClose();
+    else if (k === 'backup-go') stBackupGo();
     else if (k === 'install') { var g5 = stG(ST.dlg.gid), dd = ST.dlg; stClose(); stQueue(g5, 'install', { os: dd.os }); (g5.dlc || []).forEach(function (x2, i) { if (dd.dlc[i]) x2.inst = true; }); stToast(g5.t + ' added to download queue', '', ['Open Downloads', function () { S.view = 'downloads'; renderAll(); }]); }
     else if (k === 'save-settings') { var g6 = stG(ST.dlg.gid), c = document.querySelector('[data-st-gcloud]'); if (c) g6.cloud = c.checked ? (g6.cloud === 'off' ? 'synced' : g6.cloud) : 'off'; g6.synced = g6.synced || 'just now'; stClose(); stToast('Game Settings saved'); if (S.stDetail) stRenderDetails(); }
     else if (k === 'picker') { ST.dlg = { kind: 'picker', pick: null }; stRenderDlg(); }
@@ -794,7 +819,7 @@ document.addEventListener('click', function (e) {
   if (t.closest('[data-st-small]')) { ST.dlg.small = !ST.dlg.small; stRenderDlg(); return; }
   if ((b = t.closest('[data-st-cancel]'))) { var id = b.getAttribute('data-st-cancel'), jj = ST.jobs.filter(function (q) { return q.id === id; })[0]; if (jj) { ST.jobs.splice(ST.jobs.indexOf(jj), 1); if (jj.kind === 'tool') stS(jj.s).tool = 'missing'; ST.done.unshift({ t: jj.t, s: jj.s, kind: jj.kind, line: 'Cancelled' }); toast('Cancelled ' + jj.t); renderAll(); } return; }
   if ((b = t.closest('[data-st-undone]'))) { ST.done.splice(+b.getAttribute('data-st-undone'), 1); renderDownloads(); return; }
-  if ((b = t.closest('[data-st-retry]'))) { var r = ST.done.splice(+b.getAttribute('data-st-retry'), 1)[0], rg = ST.games.filter(function (q) { return q.t === r.t; })[0]; if (rg) { stQueue(rg, 'install', { os: rg.builds[0] }); toast(rg.t + ' added to download queue'); } return; }
+  if ((b = t.closest('[data-st-retry]'))) { var r = ST.done.splice(+b.getAttribute('data-st-retry'), 1)[0]; if (r.s === 'romm') { startInstall(G[r.gid]); return; } var rg = ST.games.filter(function (q) { return q.t === r.t; })[0]; if (rg) { stQueue(rg, 'install', { os: rg.builds[0] }); toast(rg.t + ' added to download queue'); } return; }
   /* Settings › Stores */
   if ((b = t.closest('[data-st-disc]'))) { ST.confirm = 'disc:' + b.getAttribute('data-st-disc'); renderSettings(); return; }
   if (t.closest('[data-st-confirm-cancel]')) { ST.confirm = null; renderSettings(); return; }
@@ -837,11 +862,12 @@ document.addEventListener('keydown', function (e) {
   if (ST.login) { e.stopImmediatePropagation(); stLoginFail(null); }
   else if (ST.dlg) { e.stopImmediatePropagation(); stClose(); }
   else if (S.stDetail) { e.stopImmediatePropagation(); closeDetails(); }
+  else if (ST.sel) { e.stopImmediatePropagation(); ST.sel = null; renderLibrary(); }
 }, true);
 var stOrigDet = renderDetails;
-renderDetails = function () { if (S.stDetail) { stRenderDetails(); return; } stOrigDet(); };
+renderDetails = function () { if (S.stDetail) { stRenderDetails(); return; } stOrigDet(); riDetails(); };
 var stOrigClose = closeDetails;
-closeDetails = function () { S.stDetail = null; S.stConfirm = null; stOrigClose(); };
+closeDetails = function () { S.stDetail = null; S.stConfirm = null; ST.detFrom = null; stOrigClose(); };
 
 function stBoot() {
   S.view = 'library'; S.libFilter = 'st:gog:inst'; S.platform = 'PS';

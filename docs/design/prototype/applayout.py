@@ -749,7 +749,7 @@ print('GameBackups written', len(bk))
 # Amazon Games and Steam in the Library, Settings › Stores, the store login
 # window and GOG offline installers. Its own card, so Game backups keeps
 # showing what is on main.
-ST_JS = open(os.path.join(HERE, 'stores.js')).read()
+ST_JS = open(os.path.join(HERE, 'stores.js')).read() + '\n' + open(os.path.join(HERE, 'stores_bk.js')).read()
 ST_CSS = open(os.path.join(HERE, 'stores.css')).read()
 st = bk
 st = sub(st, 'subtitle="Game backups: copy games to a USB drive and install them from it, with or without a server"', 'subtitle="Game stores: GOG (and its offline installers), Epic Games, Amazon Games and Steam in the Library, with Settings › Stores"')

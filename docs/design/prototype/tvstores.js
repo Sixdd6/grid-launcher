@@ -38,7 +38,7 @@ var STV = {
   ],
   compat: 'GE-Proton9-20', testIdx: 0
 };
-var SKIND = { install: '', update: 'Update', repair: 'Repair', dlc: 'Content', tool: 'Store tool', installer: 'Installer', steam: '' };
+var SKIND = { restore: '', install: '', update: 'Update', repair: 'Repair', dlc: 'Content', tool: 'Store tool', installer: 'Installer', steam: '' };
 var sst = function (id) { return STV.stores[id]; };
 var sG = function (id) { return STV.games.filter(function (g) { return g.id === id; })[0]; };
 var sOf = function (sid) { return STV.games.filter(function (g) { return g.s === sid; }); };
@@ -62,13 +62,16 @@ function sQuick(g) {
 function scover(g, o) {
   o = o || {};
   var s = sst(g.s), j = sJob(g), b = '', q = sQuick(g);
+  if (o.drive) q = j ? null : g.inst ? 'Play' : 'Install from drive';
+  var pk = S.selMode && (S.ssel || []).indexOf(g.id) >= 0;
+  if (pk) b += '<span class="pick" aria-label="Selected">' + gIcon('check', 16) + '</span>';
   if (g.ns) b += '<span class="tag sns">NOT SUPPORTED</span>';
   else if (g.inst && g.cloud === 'conflict') b += '<span class="tag scf">SAVE CONFLICT</span>';
   else if (g.inst && g.upd && !j) b += '<span class="tag upd">UPDATE</span>';
   if (g.inst) b += '<i class="idot" aria-label="Installed"></i>';
   if (o.mixed) b += '<span class="tag sst">' + smark(s) + esc(s.name) + '</span>';
   if (j) b += '<span class="tag q">' + (j.st === 'sactive' ? j.pct + '%' : 'Queued') + '</span><span class="sprog' + (j.kind === 'steam' ? ' steam' : '') + '"><b style="width:' + (j.st === 'sactive' ? j.pct : 0) + '%"></b></span>';
-  return '<button class="cv' + (g.ns ? ' sns' : '') + '" data-f data-k="' + (o.k || 's') + g.id + '" data-a="sdetails" data-sid="' + g.id + '" data-al="Details" data-onfocus="shero"' + (q ? ' data-xl="' + q + '" data-xa="squick"' : '') + ' style="--c:' + g.c + '">' +
+  return '<button class="cv' + (g.ns ? ' sns' : '') + (pk ? ' pk' : '') + '" data-f data-k="' + (o.k || 's') + g.id + '" data-a="sdetails" data-sid="' + g.id + '"' + (o.drive ? ' data-drive="' + o.drive + '"' : '') + ' data-al="Details" data-onfocus="shero"' + (q ? ' data-xl="' + q + '" data-xa="squick"' : '') + ' style="--c:' + g.c + '">' +
     '<span class="cv-art">' + b + '<span class="ttl">' + esc(g.t) + '</span></span><span class="cv-l">' + esc(g.t) + '</span></button>';
 }
 ONF.shero = function (el) { var g = sG(el.dataset.sid); if (g) hero({ c: g.c }); };
@@ -137,15 +140,16 @@ TABS.library.rt = function () { if (!sView()) tvsLibRt(); };
 /* ---- the store game page (Details) ---- */
 S.sdTab = 'Overview';
 function sTabs(g) { var s = sst(g.s); return ['Overview', 'Media'].concat(s.cloud && g.inst ? ['Cloud saves'] : []); }
-function sdetails(g) {
+function sdetails(g, drv) {
   return {
     title: g.t, sid: g.id,
     render: function () {
-      var s = sst(g.s), j = sJob(g), btn = [], steam = s.id === 'steam';
+      var s = sst(g.s), j = sJob(g), btn = [], steam = s.id === 'steam', pack = drv && sPackOf(drv, g);
       var B = function (lab, a, pri, extra) { btn.push('<button class="btn' + (pri ? ' pri' : '') + (/Uninstall/.test(lab) ? ' dng' : '') + '" data-f data-k="sd-' + a + '" data-a="' + a + '" data-sid="' + g.id + '"' + (extra || '') + '>' + lab + '</button>'); };
       if (j && j.kind === 'steam') B('Installing in Steam · ' + j.pct + '%', 'snop', 1, ' disabled data-why="Managed by Steam. Pause or cancel it in Steam."');
       else if (j) B('Cancel ' + (j.kind === 'update' ? 'update' : j.kind === 'repair' ? 'verify' : 'install') + (j.st === 'sactive' ? ' · ' + j.pct + '%' : ' · queued'), 'scancel', 1);
       else if (g.inst) B(gIcon('play', 18) + 'Play', 'splay', 1);
+      else if (pack) B(gIcon('download', 18) + 'Install from drive', 'srestore', 1, ' data-drive="' + drv.id + '"');
       else if (g.ns) B('Not supported', 'snop', 1, ' disabled data-why="Needs ' + g.ns + '. GRID can\'t install games that start through another company\'s launcher."');
       else if (steam) B(gIcon('download', 18) + 'Install in Steam', 'sinstall', 1);
       else B(gIcon('download', 18) + 'Install…', 'sinstall', 1, s.conn !== 'ok' ? ' disabled data-why="' + (s.conn === 'off' ? 'Connect ' + s.name + ' in Settings › Stores to install.' : 'Your ' + s.name + ' login expired. Sign in again in Settings › Stores.') + '"' : '');
@@ -153,6 +157,8 @@ function sdetails(g) {
       if (g.inst && !steam) B('Game settings', 'ssettings');
       if (g.inst && !j) B(steam ? 'Verify in Steam' : 'Verify and repair', 'sverify');
       if (g.inst && !j) B(steam ? 'Uninstall in Steam…' : 'Uninstall', 'suninstall');
+      if (pack) B('Remove from drive…', 'sdrm', 0, ' data-drive="' + drv.id + '"');
+      else if (s.id === 'gog' && g.inst) B('Backup to drive…', 'sbackup');
       var tabs = sTabs(g); if (tabs.indexOf(S.sdTab) < 0) S.sdTab = 'Overview';
       var lp = [];
       if (j && j.kind === 'steam') lp.push('<div class="smanaged"><b>Managed by Steam.</b> Pause or cancel it in Steam.<div class="pbar"><b style="width:' + j.pct + '%"></b></div></div>');
@@ -162,10 +168,12 @@ function sdetails(g) {
       if (s.cloud && g.inst) lp.push(g.cloud === 'conflict' ? '<span class="warn"><b>Cloud save conflict.</b></span> See Cloud saves.' : g.cloud === 'off' ? 'Cloud saves off for this game' : g.cloud === 'none' ? 'No cloud saves for this game' : 'Cloud saves synced <b>' + esc(g.synced) + '</b>');
       if (g.offline) lp.push('Installed from an offline installer');
       if (g.outside) lp.push('Installed in Steam, outside GRID');
-      lp.push('Store games are not backed up');
+      if (pack) lp.push('From <b>' + esc(drv.name) + '</b> · ' + (pack.how === 'installer' ? 'its installer files and saves. Installing runs the installer again.' : 'a copy of an installed game, with its saves. Installing copies it back.'));
+      else if (s.id === 'gog') { var on = readyDrives().filter(function (d) { return sPackOf(d, g); })[0]; if (on) lp.push('On <b>' + esc(on.name) + '</b>'); }
+      else lp.push(SNOBK[s.id]);
       var cv = scover(g, { k: 'dc' }).replace('data-f ', '').replace('data-a="sdetails"', '').replace(/ data-xl="[^"]*" data-xa="squick"/, '');
       return '<div class="det"><div class="det-l">' + cv + '<div class="lp">' + lp.join('<br>') + '</div></div>' +
-        '<div class="det-r"><h1>' + esc(g.t) + '</h1><div class="hl">' + esc(s.name) + ' · 2022 · Lantern Works · Adventure</div>' +
+        '<div class="det-r"><h1>' + esc(g.t) + '</h1><div class="hl">' + (pack ? 'From ' + esc(drv.name) + ' · ' : '') + esc(s.name) + ' · 2022 · Lantern Works · Adventure</div>' +
         '<div class="chips"><span class="chip">' + smark(s) + '<b>' + esc(s.name) + '</b></span>' + (g.inst ? '<span class="chip"><b>Installed</b></span>' : '') + (g.inst && g.ver ? '<span class="chip">v' + g.ver + '</span>' : '') + (g.upd && g.inst ? '<span class="chip warn">Update available</span>' : '') + (g.offline ? '<span class="chip">Offline installer</span>' : '') + (g.ns ? '<span class="chip warn">Not supported</span>' : '') + '</div>' +
         '<div class="btns" data-nav="h">' + btn.join('') + '</div>' +
         '<div class="ttabs">' + gl('LB') + tabs.map(function (t) { return '<button class="ttab' + (t === S.sdTab ? ' on' : '') + '">' + t + '</button>'; }).join('') + gl('RB') + '</div>' +
@@ -227,11 +235,13 @@ function sPlay(g) {
 function sQueue(g, kind, o) {
   o = o || {};
   var busy = DL.some(function (d) { return d.st === 'sactive' && d.skind !== 'steam'; });
-  var d = { id: 's' + Date.now() + Math.random(), sgid: g ? g.id : null, t: o.t || g.t, store: o.store || g.s, skind: kind, kind: SKIND[kind], st: kind === 'steam' || kind === 'tool' || !busy ? 'sactive' : 'squeued', pct: 0, os: o.os, wizard: o.wizard };
+  var d = { id: 's' + Date.now() + Math.random(), sgid: g ? g.id : null, t: o.t || g.t, store: o.store || g.s, skind: kind, kind: SKIND[kind], st: kind === 'steam' || kind === 'tool' || !busy ? 'sactive' : 'squeued', pct: 0, os: o.os, wizard: o.wizard, how: o.how, from: o.from, dname: o.dname };
   DL.push(d); repaint(); return d;
 }
 function sLine(d) {
+  if (d.store === 'romm') return riLine(d);
   if (d.st === 'squeued') return 'Waiting for a slot';
+  if (d.skind === 'restore') return d.how === 'installer' ? (d.pct < 45 ? 'Copying the installer from ' + d.from + ' ' + d.pct + '%' : 'Running the installer · ' + d.pct + '%') : 'Copying from ' + d.from + ' ' + d.pct + '%';
   if (d.wizard && d.pct > 30) return 'Waiting for the installer\'s setup window · finish it there';
   if (d.skind === 'steam') return 'Installing in Steam ' + d.pct + '% · Managed by Steam';
   if (d.skind === 'tool') return 'Downloading ' + d.pct + '% · checking its SHA-256';
@@ -242,6 +252,7 @@ function sLine(d) {
 function sFinish(d) {
   var g = d.sgid && sG(d.sgid), s = sst(d.store);
   d.st = 'done';
+  if (d.skind === 'restore') { g.inst = 1; g.os = d.os; var pk = DRIVES.map(function (x) { return sPackOf(x, g); }).filter(Boolean)[0]; g.ver = pk && pk.ver || g.ver || '1.0'; if (d.how === 'installer') g.offline = 1; if (!g.cloud) { g.cloud = 'synced'; g.synced = 'just now'; } d.line = d.how === 'installer' ? 'Installed from ' + d.from + ' · ran its installer · saves restored' : 'Copied from ' + d.from + ' · saves restored'; toast(g.t + ' installed from ' + d.dname, { act: ['Play', function () { sPlay(g); }] }); return; }
   if (d.skind === 'tool') { s.tool = 'ok'; d.line = 'Installed · ' + s.toolVer; toast(s.toolName + ' installed'); sLoad(s); }
   else if (d.skind === 'update') { g.ver = g.upd; delete g.upd; d.line = 'Updated to ' + g.ver; toast(g.t + ' updated to ' + g.ver); }
   else if (d.skind === 'repair') { d.line = 'Verified · 2 files repaired'; toast(g.t + ': 2 damaged files were downloaded again'); }
@@ -249,6 +260,7 @@ function sFinish(d) {
   else { g.inst = 1; g.os = d.os || (g.builds || [])[0]; g.ver = g.ver || '1.0'; if (d.skind === 'installer') g.offline = 1; if (s.cloud && !g.cloud) { g.cloud = 'synced'; g.synced = 'just now'; } d.line = d.skind === 'steam' ? 'Installed by Steam' : d.skind === 'installer' ? 'Installed from its installer' : 'Installed · ' + g.size; toast(g.t + ' installed', { act: ['Play', function () { sPlay(g); }] }); }
 }
 setInterval(function () {
+  if (typeof riTvTick === 'function') riTvTick();
   var act = DL.filter(function (d) { return d.st === 'sactive'; }); if (!act.length && !DL.some(function (d) { return d.st === 'squeued'; })) return;
   var done = false;
   act.forEach(function (d) { d.pct = Math.min(100, d.pct + (d.skind === 'tool' ? 25 : d.skind === 'steam' ? 1 : 2) + Math.floor(Math.random() * 3)); if (d.pct >= 100) { sFinish(d); done = true; } });
@@ -263,12 +275,13 @@ TABS.downloads.render = function () {
   var keep = DL; var rom = DL.filter(function (d) { return !d.store; });
   DL = rom; var base = tvsDlRender(); DL = keep;
   var srow = function (d) {
-    var s = sst(d.store), live = d.st === 'sactive', steam = d.skind === 'steam';
+    var romm = d.store === 'romm', s = romm ? null : sst(d.store), live = d.st === 'sactive' || d.st === 'active', steam = d.skind === 'steam';
     var line = d.st === 'done' || d.st === 'failed' || d.st === 'cancelled' ? d.line : sLine(d);
-    return '<div class="lrow dl" data-f data-k="dl-' + d.id + '" data-a="dlrow" data-id="' + d.id + '" data-al="' + (steam && live ? 'Open' : live || d.st === 'squeued' ? 'Cancel' : d.st === 'failed' ? 'Retry or dismiss' : 'Dismiss') + '"><div><div class="t">' + esc(d.t) + '<span class="kind" style="display:inline-flex;align-items:center;gap:.3rem">' + smark(s) + esc(s.name) + '</span>' + (d.kind ? '<span class="kind">' + d.kind + '</span>' : '') + '</div><div class="s' + (d.st === 'failed' ? ' err' : '') + '">' + esc(line) + '</div>' + (live ? '<div class="pbar"><b style="width:' + d.pct + '%"></b></div>' : '') + '</div>' +
+    if (romm) line = PLAT[d.p] + ' · ' + line;
+    return '<div class="lrow dl" data-f data-k="dl-' + d.id + '" data-a="dlrow" data-id="' + d.id + '" data-al="' + (steam && live ? 'Open' : live || d.st === 'squeued' ? 'Cancel' : d.st === 'failed' ? 'Retry or dismiss' : 'Dismiss') + '"><div><div class="t">' + esc(d.t) + (s ? '<span class="kind" style="display:inline-flex;align-items:center;gap:.3rem">' + smark(s) + esc(s.name) + '</span>' : '') + (d.kind ? '<span class="kind">' + d.kind + '</span>' : '') + '</div><div class="s' + (d.st === 'failed' ? ' err' : '') + '">' + esc(line) + '</div>' + (live ? '<div class="pbar"><b style="width:' + d.pct + '%"></b></div>' : '') + '</div>' +
       (live ? '<div class="spark"><svg viewBox="0 0 120 38" preserveAspectRatio="none"><polyline fill="none" stroke="var(--primary)" stroke-width="2" points="0,30 20,22 40,25 60,14 80,18 100,10 120,16"/></svg></div>' : '<div></div>') + '<div class="s">' + (live && !steam ? '41.2 MB/s' : '') + '</div></div>';
   };
-  var segs = { Active: ['sactive'], Queued: ['squeued'], Completed: ['done', 'failed', 'cancelled'] };
+  var segs = { Active: ['sactive', 'active'], Queued: ['squeued', 'queued'], Completed: ['done', 'failed', 'cancelled'] };
   var el = document.createElement('div'); el.innerHTML = base;
   el.querySelectorAll('section.panel').forEach(function (sec) {
     var name = sec.querySelector('h2').firstChild.textContent, L = DL.filter(function (d) { return d.store && segs[name].indexOf(d.st) >= 0; });
@@ -282,7 +295,7 @@ TABS.downloads.render = function () {
 var tvsDlrow = ACT.dlrow;
 ACT.dlrow = function (el) {
   var d = DL.filter(function (x) { return x.id === el.dataset.id; })[0];
-  if (!d || !d.store) return tvsDlrow(el);
+  if (!d || !d.store || d.store === 'romm') return tvsDlrow(el);
   var s = sst(d.store), items = [], g = d.sgid && sG(d.sgid);
   if ((d.st === 'sactive' || d.st === 'squeued') && d.skind !== 'steam') items.push({ label: 'Cancel', danger: 1, fn: function () { d.st = 'cancelled'; d.line = 'Cancelled'; if (d.skind === 'tool') s.tool = 'missing'; toast('Cancelled ' + d.t); renderStage(); } });
   if (d.st === 'failed' || d.st === 'cancelled') items.push({ label: 'Retry', fn: function () { d.st = 'squeued'; d.pct = 0; toast(d.t + ' added to download queue'); renderStage(); } });
@@ -479,8 +492,8 @@ function sPicked(p) {
 }
 
 /* ---- actions ---- */
-ACT.sdetails = function (el) { push(sdetails(sG(el.dataset.sid))); };
-ACT.squick = function (el) { var g = sG(el.dataset.sid), q = sQuick(g); if (q === 'Play') sPlay(g); else if (q) ACT.sinstall(el); };
+ACT.sdetails = function (el) { push(sdetails(sG(el.dataset.sid), el.dataset.drive ? driveOf(el.dataset.drive) : null)); };
+ACT.squick = function (el) { var g = sG(el.dataset.sid), q = sQuick(g); if (el.dataset.drive && !g.inst) { sRestore(g, driveOf(el.dataset.drive)); return; } if (q === 'Play') sPlay(g); else if (q) ACT.sinstall(el); };
 ACT.splay = function (el) { sPlay(sG(el.dataset.sid)); };
 ACT.sinstall = function (el) {
   var g = sG(el.dataset.sid), s = sst(g.s);

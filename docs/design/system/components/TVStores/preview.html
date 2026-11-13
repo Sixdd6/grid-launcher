@@ -2069,7 +2069,7 @@ var STV = {
   ],
   compat: 'GE-Proton9-20', testIdx: 0
 };
-var SKIND = { install: '', update: 'Update', repair: 'Repair', dlc: 'Content', tool: 'Store tool', installer: 'Installer', steam: '' };
+var SKIND = { restore: '', install: '', update: 'Update', repair: 'Repair', dlc: 'Content', tool: 'Store tool', installer: 'Installer', steam: '' };
 var sst = function (id) { return STV.stores[id]; };
 var sG = function (id) { return STV.games.filter(function (g) { return g.id === id; })[0]; };
 var sOf = function (sid) { return STV.games.filter(function (g) { return g.s === sid; }); };
@@ -2093,13 +2093,16 @@ function sQuick(g) {
 function scover(g, o) {
   o = o || {};
   var s = sst(g.s), j = sJob(g), b = '', q = sQuick(g);
+  if (o.drive) q = j ? null : g.inst ? 'Play' : 'Install from drive';
+  var pk = S.selMode && (S.ssel || []).indexOf(g.id) >= 0;
+  if (pk) b += '<span class="pick" aria-label="Selected">' + gIcon('check', 16) + '</span>';
   if (g.ns) b += '<span class="tag sns">NOT SUPPORTED</span>';
   else if (g.inst && g.cloud === 'conflict') b += '<span class="tag scf">SAVE CONFLICT</span>';
   else if (g.inst && g.upd && !j) b += '<span class="tag upd">UPDATE</span>';
   if (g.inst) b += '<i class="idot" aria-label="Installed"></i>';
   if (o.mixed) b += '<span class="tag sst">' + smark(s) + esc(s.name) + '</span>';
   if (j) b += '<span class="tag q">' + (j.st === 'sactive' ? j.pct + '%' : 'Queued') + '</span><span class="sprog' + (j.kind === 'steam' ? ' steam' : '') + '"><b style="width:' + (j.st === 'sactive' ? j.pct : 0) + '%"></b></span>';
-  return '<button class="cv' + (g.ns ? ' sns' : '') + '" data-f data-k="' + (o.k || 's') + g.id + '" data-a="sdetails" data-sid="' + g.id + '" data-al="Details" data-onfocus="shero"' + (q ? ' data-xl="' + q + '" data-xa="squick"' : '') + ' style="--c:' + g.c + '">' +
+  return '<button class="cv' + (g.ns ? ' sns' : '') + (pk ? ' pk' : '') + '" data-f data-k="' + (o.k || 's') + g.id + '" data-a="sdetails" data-sid="' + g.id + '"' + (o.drive ? ' data-drive="' + o.drive + '"' : '') + ' data-al="Details" data-onfocus="shero"' + (q ? ' data-xl="' + q + '" data-xa="squick"' : '') + ' style="--c:' + g.c + '">' +
     '<span class="cv-art">' + b + '<span class="ttl">' + esc(g.t) + '</span></span><span class="cv-l">' + esc(g.t) + '</span></button>';
 }
 ONF.shero = function (el) { var g = sG(el.dataset.sid); if (g) hero({ c: g.c }); };
@@ -2168,15 +2171,16 @@ TABS.library.rt = function () { if (!sView()) tvsLibRt(); };
 /* ---- the store game page (Details) ---- */
 S.sdTab = 'Overview';
 function sTabs(g) { var s = sst(g.s); return ['Overview', 'Media'].concat(s.cloud && g.inst ? ['Cloud saves'] : []); }
-function sdetails(g) {
+function sdetails(g, drv) {
   return {
     title: g.t, sid: g.id,
     render: function () {
-      var s = sst(g.s), j = sJob(g), btn = [], steam = s.id === 'steam';
+      var s = sst(g.s), j = sJob(g), btn = [], steam = s.id === 'steam', pack = drv && sPackOf(drv, g);
       var B = function (lab, a, pri, extra) { btn.push('<button class="btn' + (pri ? ' pri' : '') + (/Uninstall/.test(lab) ? ' dng' : '') + '" data-f data-k="sd-' + a + '" data-a="' + a + '" data-sid="' + g.id + '"' + (extra || '') + '>' + lab + '</button>'); };
       if (j && j.kind === 'steam') B('Installing in Steam · ' + j.pct + '%', 'snop', 1, ' disabled data-why="Managed by Steam. Pause or cancel it in Steam."');
       else if (j) B('Cancel ' + (j.kind === 'update' ? 'update' : j.kind === 'repair' ? 'verify' : 'install') + (j.st === 'sactive' ? ' · ' + j.pct + '%' : ' · queued'), 'scancel', 1);
       else if (g.inst) B(gIcon('play', 18) + 'Play', 'splay', 1);
+      else if (pack) B(gIcon('download', 18) + 'Install from drive', 'srestore', 1, ' data-drive="' + drv.id + '"');
       else if (g.ns) B('Not supported', 'snop', 1, ' disabled data-why="Needs ' + g.ns + '. GRID can\'t install games that start through another company\'s launcher."');
       else if (steam) B(gIcon('download', 18) + 'Install in Steam', 'sinstall', 1);
       else B(gIcon('download', 18) + 'Install…', 'sinstall', 1, s.conn !== 'ok' ? ' disabled data-why="' + (s.conn === 'off' ? 'Connect ' + s.name + ' in Settings › Stores to install.' : 'Your ' + s.name + ' login expired. Sign in again in Settings › Stores.') + '"' : '');
@@ -2184,6 +2188,8 @@ function sdetails(g) {
       if (g.inst && !steam) B('Game settings', 'ssettings');
       if (g.inst && !j) B(steam ? 'Verify in Steam' : 'Verify and repair', 'sverify');
       if (g.inst && !j) B(steam ? 'Uninstall in Steam…' : 'Uninstall', 'suninstall');
+      if (pack) B('Remove from drive…', 'sdrm', 0, ' data-drive="' + drv.id + '"');
+      else if (s.id === 'gog' && g.inst) B('Backup to drive…', 'sbackup');
       var tabs = sTabs(g); if (tabs.indexOf(S.sdTab) < 0) S.sdTab = 'Overview';
       var lp = [];
       if (j && j.kind === 'steam') lp.push('<div class="smanaged"><b>Managed by Steam.</b> Pause or cancel it in Steam.<div class="pbar"><b style="width:' + j.pct + '%"></b></div></div>');
@@ -2193,10 +2199,12 @@ function sdetails(g) {
       if (s.cloud && g.inst) lp.push(g.cloud === 'conflict' ? '<span class="warn"><b>Cloud save conflict.</b></span> See Cloud saves.' : g.cloud === 'off' ? 'Cloud saves off for this game' : g.cloud === 'none' ? 'No cloud saves for this game' : 'Cloud saves synced <b>' + esc(g.synced) + '</b>');
       if (g.offline) lp.push('Installed from an offline installer');
       if (g.outside) lp.push('Installed in Steam, outside GRID');
-      lp.push('Store games are not backed up');
+      if (pack) lp.push('From <b>' + esc(drv.name) + '</b> · ' + (pack.how === 'installer' ? 'its installer files and saves. Installing runs the installer again.' : 'a copy of an installed game, with its saves. Installing copies it back.'));
+      else if (s.id === 'gog') { var on = readyDrives().filter(function (d) { return sPackOf(d, g); })[0]; if (on) lp.push('On <b>' + esc(on.name) + '</b>'); }
+      else lp.push(SNOBK[s.id]);
       var cv = scover(g, { k: 'dc' }).replace('data-f ', '').replace('data-a="sdetails"', '').replace(/ data-xl="[^"]*" data-xa="squick"/, '');
       return '<div class="det"><div class="det-l">' + cv + '<div class="lp">' + lp.join('<br>') + '</div></div>' +
-        '<div class="det-r"><h1>' + esc(g.t) + '</h1><div class="hl">' + esc(s.name) + ' · 2022 · Lantern Works · Adventure</div>' +
+        '<div class="det-r"><h1>' + esc(g.t) + '</h1><div class="hl">' + (pack ? 'From ' + esc(drv.name) + ' · ' : '') + esc(s.name) + ' · 2022 · Lantern Works · Adventure</div>' +
         '<div class="chips"><span class="chip">' + smark(s) + '<b>' + esc(s.name) + '</b></span>' + (g.inst ? '<span class="chip"><b>Installed</b></span>' : '') + (g.inst && g.ver ? '<span class="chip">v' + g.ver + '</span>' : '') + (g.upd && g.inst ? '<span class="chip warn">Update available</span>' : '') + (g.offline ? '<span class="chip">Offline installer</span>' : '') + (g.ns ? '<span class="chip warn">Not supported</span>' : '') + '</div>' +
         '<div class="btns" data-nav="h">' + btn.join('') + '</div>' +
         '<div class="ttabs">' + gl('LB') + tabs.map(function (t) { return '<button class="ttab' + (t === S.sdTab ? ' on' : '') + '">' + t + '</button>'; }).join('') + gl('RB') + '</div>' +
@@ -2258,11 +2266,13 @@ function sPlay(g) {
 function sQueue(g, kind, o) {
   o = o || {};
   var busy = DL.some(function (d) { return d.st === 'sactive' && d.skind !== 'steam'; });
-  var d = { id: 's' + Date.now() + Math.random(), sgid: g ? g.id : null, t: o.t || g.t, store: o.store || g.s, skind: kind, kind: SKIND[kind], st: kind === 'steam' || kind === 'tool' || !busy ? 'sactive' : 'squeued', pct: 0, os: o.os, wizard: o.wizard };
+  var d = { id: 's' + Date.now() + Math.random(), sgid: g ? g.id : null, t: o.t || g.t, store: o.store || g.s, skind: kind, kind: SKIND[kind], st: kind === 'steam' || kind === 'tool' || !busy ? 'sactive' : 'squeued', pct: 0, os: o.os, wizard: o.wizard, how: o.how, from: o.from, dname: o.dname };
   DL.push(d); repaint(); return d;
 }
 function sLine(d) {
+  if (d.store === 'romm') return riLine(d);
   if (d.st === 'squeued') return 'Waiting for a slot';
+  if (d.skind === 'restore') return d.how === 'installer' ? (d.pct < 45 ? 'Copying the installer from ' + d.from + ' ' + d.pct + '%' : 'Running the installer · ' + d.pct + '%') : 'Copying from ' + d.from + ' ' + d.pct + '%';
   if (d.wizard && d.pct > 30) return 'Waiting for the installer\'s setup window · finish it there';
   if (d.skind === 'steam') return 'Installing in Steam ' + d.pct + '% · Managed by Steam';
   if (d.skind === 'tool') return 'Downloading ' + d.pct + '% · checking its SHA-256';
@@ -2273,6 +2283,7 @@ function sLine(d) {
 function sFinish(d) {
   var g = d.sgid && sG(d.sgid), s = sst(d.store);
   d.st = 'done';
+  if (d.skind === 'restore') { g.inst = 1; g.os = d.os; var pk = DRIVES.map(function (x) { return sPackOf(x, g); }).filter(Boolean)[0]; g.ver = pk && pk.ver || g.ver || '1.0'; if (d.how === 'installer') g.offline = 1; if (!g.cloud) { g.cloud = 'synced'; g.synced = 'just now'; } d.line = d.how === 'installer' ? 'Installed from ' + d.from + ' · ran its installer · saves restored' : 'Copied from ' + d.from + ' · saves restored'; toast(g.t + ' installed from ' + d.dname, { act: ['Play', function () { sPlay(g); }] }); return; }
   if (d.skind === 'tool') { s.tool = 'ok'; d.line = 'Installed · ' + s.toolVer; toast(s.toolName + ' installed'); sLoad(s); }
   else if (d.skind === 'update') { g.ver = g.upd; delete g.upd; d.line = 'Updated to ' + g.ver; toast(g.t + ' updated to ' + g.ver); }
   else if (d.skind === 'repair') { d.line = 'Verified · 2 files repaired'; toast(g.t + ': 2 damaged files were downloaded again'); }
@@ -2280,6 +2291,7 @@ function sFinish(d) {
   else { g.inst = 1; g.os = d.os || (g.builds || [])[0]; g.ver = g.ver || '1.0'; if (d.skind === 'installer') g.offline = 1; if (s.cloud && !g.cloud) { g.cloud = 'synced'; g.synced = 'just now'; } d.line = d.skind === 'steam' ? 'Installed by Steam' : d.skind === 'installer' ? 'Installed from its installer' : 'Installed · ' + g.size; toast(g.t + ' installed', { act: ['Play', function () { sPlay(g); }] }); }
 }
 setInterval(function () {
+  if (typeof riTvTick === 'function') riTvTick();
   var act = DL.filter(function (d) { return d.st === 'sactive'; }); if (!act.length && !DL.some(function (d) { return d.st === 'squeued'; })) return;
   var done = false;
   act.forEach(function (d) { d.pct = Math.min(100, d.pct + (d.skind === 'tool' ? 25 : d.skind === 'steam' ? 1 : 2) + Math.floor(Math.random() * 3)); if (d.pct >= 100) { sFinish(d); done = true; } });
@@ -2294,12 +2306,13 @@ TABS.downloads.render = function () {
   var keep = DL; var rom = DL.filter(function (d) { return !d.store; });
   DL = rom; var base = tvsDlRender(); DL = keep;
   var srow = function (d) {
-    var s = sst(d.store), live = d.st === 'sactive', steam = d.skind === 'steam';
+    var romm = d.store === 'romm', s = romm ? null : sst(d.store), live = d.st === 'sactive' || d.st === 'active', steam = d.skind === 'steam';
     var line = d.st === 'done' || d.st === 'failed' || d.st === 'cancelled' ? d.line : sLine(d);
-    return '<div class="lrow dl" data-f data-k="dl-' + d.id + '" data-a="dlrow" data-id="' + d.id + '" data-al="' + (steam && live ? 'Open' : live || d.st === 'squeued' ? 'Cancel' : d.st === 'failed' ? 'Retry or dismiss' : 'Dismiss') + '"><div><div class="t">' + esc(d.t) + '<span class="kind" style="display:inline-flex;align-items:center;gap:.3rem">' + smark(s) + esc(s.name) + '</span>' + (d.kind ? '<span class="kind">' + d.kind + '</span>' : '') + '</div><div class="s' + (d.st === 'failed' ? ' err' : '') + '">' + esc(line) + '</div>' + (live ? '<div class="pbar"><b style="width:' + d.pct + '%"></b></div>' : '') + '</div>' +
+    if (romm) line = PLAT[d.p] + ' · ' + line;
+    return '<div class="lrow dl" data-f data-k="dl-' + d.id + '" data-a="dlrow" data-id="' + d.id + '" data-al="' + (steam && live ? 'Open' : live || d.st === 'squeued' ? 'Cancel' : d.st === 'failed' ? 'Retry or dismiss' : 'Dismiss') + '"><div><div class="t">' + esc(d.t) + (s ? '<span class="kind" style="display:inline-flex;align-items:center;gap:.3rem">' + smark(s) + esc(s.name) + '</span>' : '') + (d.kind ? '<span class="kind">' + d.kind + '</span>' : '') + '</div><div class="s' + (d.st === 'failed' ? ' err' : '') + '">' + esc(line) + '</div>' + (live ? '<div class="pbar"><b style="width:' + d.pct + '%"></b></div>' : '') + '</div>' +
       (live ? '<div class="spark"><svg viewBox="0 0 120 38" preserveAspectRatio="none"><polyline fill="none" stroke="var(--primary)" stroke-width="2" points="0,30 20,22 40,25 60,14 80,18 100,10 120,16"/></svg></div>' : '<div></div>') + '<div class="s">' + (live && !steam ? '41.2 MB/s' : '') + '</div></div>';
   };
-  var segs = { Active: ['sactive'], Queued: ['squeued'], Completed: ['done', 'failed', 'cancelled'] };
+  var segs = { Active: ['sactive', 'active'], Queued: ['squeued', 'queued'], Completed: ['done', 'failed', 'cancelled'] };
   var el = document.createElement('div'); el.innerHTML = base;
   el.querySelectorAll('section.panel').forEach(function (sec) {
     var name = sec.querySelector('h2').firstChild.textContent, L = DL.filter(function (d) { return d.store && segs[name].indexOf(d.st) >= 0; });
@@ -2313,7 +2326,7 @@ TABS.downloads.render = function () {
 var tvsDlrow = ACT.dlrow;
 ACT.dlrow = function (el) {
   var d = DL.filter(function (x) { return x.id === el.dataset.id; })[0];
-  if (!d || !d.store) return tvsDlrow(el);
+  if (!d || !d.store || d.store === 'romm') return tvsDlrow(el);
   var s = sst(d.store), items = [], g = d.sgid && sG(d.sgid);
   if ((d.st === 'sactive' || d.st === 'squeued') && d.skind !== 'steam') items.push({ label: 'Cancel', danger: 1, fn: function () { d.st = 'cancelled'; d.line = 'Cancelled'; if (d.skind === 'tool') s.tool = 'missing'; toast('Cancelled ' + d.t); renderStage(); } });
   if (d.st === 'failed' || d.st === 'cancelled') items.push({ label: 'Retry', fn: function () { d.st = 'squeued'; d.pct = 0; toast(d.t + ' added to download queue'); renderStage(); } });
@@ -2510,8 +2523,8 @@ function sPicked(p) {
 }
 
 /* ---- actions ---- */
-ACT.sdetails = function (el) { push(sdetails(sG(el.dataset.sid))); };
-ACT.squick = function (el) { var g = sG(el.dataset.sid), q = sQuick(g); if (q === 'Play') sPlay(g); else if (q) ACT.sinstall(el); };
+ACT.sdetails = function (el) { push(sdetails(sG(el.dataset.sid), el.dataset.drive ? driveOf(el.dataset.drive) : null)); };
+ACT.squick = function (el) { var g = sG(el.dataset.sid), q = sQuick(g); if (el.dataset.drive && !g.inst) { sRestore(g, driveOf(el.dataset.drive)); return; } if (q === 'Play') sPlay(g); else if (q) ACT.sinstall(el); };
 ACT.splay = function (el) { sPlay(sG(el.dataset.sid)); };
 ACT.sinstall = function (el) {
   var g = sG(el.dataset.sid), s = sst(g.s);
@@ -2572,6 +2585,174 @@ function sBoot() {
   DL.push({ id: 'sb4', t: 'Glimmer Deep', store: 'epic', skind: 'install', kind: '', st: 'failed', line: 'Failed · legendary stopped: Epic\'s download server didn\'t answer' });
   S.tab = 'library'; S.libRail = 'st:gog:inst'; TABS.library._k = 'r-st:gog:inst';
 }
+
+/* ------------------------------------------------------------------ stores: backups and RomM installers
+   User decisions 2026-11-13, for a controller; the words and rules are the Game
+   stores card's. Loaded after tvstores.js. */
+
+/* ---- GOG games on backup drives ---- */
+var SNOBK = {
+  epic: 'Epic Games games can\'t be backed up: legendary installs only from Epic\'s servers.',
+  amazon: 'Amazon Games games can\'t be backed up: nile installs only from Amazon\'s servers.',
+  steam: 'Steam games can\'t be backed up here. Steam has its own Backup and restore.'
+};
+var SBKSRC = { g3: { file: '~/Downloads/brightwater_1_3_58810.sh', isize: '2.9 GB' } };
+function sBkSrc(g) {
+  var x = SBKSRC[g.id];
+  if (x && !x.gone) return { how: 'installer', tag: 'Installer files', note: x.file.split('/').pop() + ' · ' + x.isize + ', and its saves', gb: parseFloat(x.isize) };
+  return { how: 'copy', tag: 'Installed copy', note: (x && x.gone ? 'Its installer isn\'t at ' + x.file + ' any more, so the installed files are copied' : 'Installed with gogdl, which keeps no installer, so the installed files are copied') + ' · ' + (parseFloat(g.size) * 1.3).toFixed(1) + ' GB, and its saves', gb: parseFloat(g.size) * 1.3, wine: g.os === 'windows' };
+}
+function sPackOf(d, g) { return (d.sgames || []).filter(function (x) { return x.id === g.id; })[0]; }
+driveOf('couch').sgames = [{ id: 'g6', how: 'installer', ver: '1.2' }, { id: 'g7', how: 'copy', ver: '1.1.0' }];
+driveOf('travel').sgames = [{ id: 'g1', how: 'copy', ver: '1.0.4' }];
+
+/* The drive's grid: its RomM games, then its GOG games with a GOG tag. */
+var tvbPaint = libPaint;
+libPaint = function () {
+  tvbPaint();
+  var r = S.libRail, v = sView();
+  if (r.indexOf('drv:') === 0) {
+    var dv = driveOf(r.slice(4)); if (!dv || !dv.connected || !(dv.sgames || []).length) return;
+    var L = dv.sgames.map(function (x) { return sG(x.id); }).filter(function (g) { return !S.libQ || g.t.toLowerCase().indexOf(S.libQ.toLowerCase()) >= 0; });
+    var grid = $('lib-grid'), e = grid.querySelector('.empty'); if (e && L.length) e.remove();
+    grid.insertAdjacentHTML('beforeend', L.map(function (g) { return scover(g, { mixed: 1, k: 'dsg', drive: dv.id }); }).join(''));
+    var c = $('lib-h').querySelector('.cnt'); if (c) c.textContent = c.textContent.replace(/^\d+ games/, (dv.games.length + dv.sgames.length) + ' games');
+    var sp = $('lib-h').querySelector('.sp'); if (sp) sp.insertAdjacentHTML('beforebegin', '<span class="chip">GOG: <b>' + dv.sgames.length + ' games</b></span>');
+    return;
+  }
+  if (!v || v.s.id !== 'gog' || !v.inst) return;
+  var n = sInst(v.s).length, row = $('lib-h').querySelector('.vh-row');
+  if (n && row) row.querySelector('.sp').insertAdjacentHTML('afterend', '<button class="btn" data-f data-k="sh-bk" data-a="sbackupall" data-al="Backup">Backup all ' + n + '…</button>');
+  if (row) row.insertAdjacentHTML('beforeend', '<span class="chip">' + gl('RT') + ' Select</span>');
+  var bar = $('selbar'); if (!bar) return;
+  bar.hidden = !S.selMode; if (!S.selMode) return;
+  var ids = S.ssel || [], gb = ids.reduce(function (t, id) { return t + sBkSrc(sG(id)).gb; }, 0), all = ids.length === n;
+  bar.innerHTML = '<b>' + ids.length + ' selected · ' + gb.toFixed(1) + ' GB to write</b><span class="sp"></span><span class="hint">' + gl('X') + (all ? 'All ' + n + ' selected · Clear' : 'Select all ' + n) + '</span><span class="hint">' + gl('Y') + 'Backup to drive…</span><span class="hint">' + gl('RT') + 'Done</span>';
+};
+function sGogSel() { var v = sView(); return v && v.s.id === 'gog' && v.inst && S.tab === 'library' && !S.pages.length; }
+var tvbRt = TABS.library.rt, tvbHints = TABS.library.hints;
+TABS.library.rt = function () { if (sGogSel()) { S.selMode = !S.selMode; S.ssel = []; repaint(); return; } tvbRt(); };
+TABS.library.hints = function () { return sGogSel() ? [['Y', 'Search'], ['RT', 'Select']] : tvbHints(); };
+var tvbPick = selPick, tvbAll = selAll, tvbAct = selAct, tvbSelHints = selHints, tvbToggle = selToggle;
+selPick = function (el) { if (!el.dataset.sid) return tvbPick(el); var i = S.ssel.indexOf(el.dataset.sid); if (i >= 0) S.ssel.splice(i, 1); else S.ssel.push(el.dataset.sid); repaint(); };
+selAll = function () { if (!sGogSel()) return tvbAll(); var L = sInst(sst('gog')).map(function (g) { return g.id; }); S.ssel = S.ssel.length === L.length ? [] : L; repaint(); };
+selAct = function () { if (!sGogSel()) return tvbAct(); if (!S.ssel.length) { toast('Pick games first'); return; } sBackupPage(S.ssel.slice(), 'Backup ' + S.ssel.length + ' game' + (S.ssel.length === 1 ? '' : 's')); };
+selHints = function () {
+  if (!S.selMode || !sGogSel() || S.layers.length) return tvbSelHints();
+  var n = sInst(sst('gog')).length, on = cur && cur.dataset.sid && S.ssel.indexOf(cur.dataset.sid) >= 0;
+  return [['A', on ? 'Unpick' : 'Pick'], ['X', S.ssel.length === n ? 'Clear all' : 'Select all'], ['Y', 'Backup to drive…'], ['RT', 'Done']];
+};
+selToggle = function () { S.ssel = []; tvbToggle(); };
+S.ssel = [];
+
+/* The Backup page for GOG games: the Game backups page's layout. */
+function sBackupPage(ids, title) {
+  var F = { drive: (readyDrives()[0] || {}).id };
+  push(rowsPage({
+    title: title, key: 'sbk',
+    h1: function () { return esc(title); },
+    sub: function () { return 'GRID writes each GOG game to the drive\'s gridpack folder: its installer files when GRID has them, else a copy of the installed game. Saves always go with it. Nothing downloads, and no GOG login is needed.'; },
+    rows: function () {
+      var R = [{ heading: 'Drive' }], ready = readyDrives();
+      if (!ready.length) R.push({ note: 'No backup drive connected. Plug in a drive you set up for GRID, or set one up in Settings › Backup drives.', warn: 1 });
+      ready.forEach(function (d) { R.push({ label: esc(d.name), sub: esc(d.label) + ' · ' + d.fs + ' · ' + d.free + ' GB free', radio: F.drive === d.id, fn: function () { F.drive = d.id; repaint(); } }); });
+      var P = plan(); R.push({ heading: 'What goes on the drive' });
+      P.rows.forEach(function (x) { R.push({ info: 1, label: esc(x.g.t), sub: 'GOG · ' + esc(x.src.note), val: '<span class="st ok">' + x.src.tag + '</span>' }); });
+      if (P.rows.some(function (x) { return x.src.wine; })) R.push({ note: 'Windows games are copied without their Wine prefix. The save folders GOG reports are copied from it.' });
+      if (ids.indexOf('g3') >= 0) R.push({ label: SBKSRC.g3.gone ? 'Prototype: Brightwater\'s installer is back' : 'Prototype: Brightwater\'s installer was moved', fn: function () { SBKSRC.g3.gone = !SBKSRC.g3.gone; repaint(); } });
+      P.skip.forEach(function (t) { R.push({ note: esc(t) + ' is already on ' + esc(driveOf(F.drive).name) + ' and will be skipped.' }); });
+      P.refuse.forEach(function (t) { R.push({ note: t, warn: 1 }); });
+      return R;
+    },
+    main: function () {
+      var P = plan(), n = P.rows.length, d = driveOf(F.drive), over = d && P.gb > d.free;
+      return { label: over ? 'Not enough space' : n ? 'Backup ' + n + ' game' + (n === 1 ? '' : 's') : 'Nothing to backup', disabled: !n || over || !d, why: over ? 'Needs ' + P.gb.toFixed(1) + ' GB · ' + d.free + ' GB free' : 'Nothing new to write', summary: n ? P.gb.toFixed(1) + ' GB to write · nothing to download' : '', fn: function () {
+        var b = ++BATCH, active = DL.some(function (x) { return x.st === 'active'; });
+        P.rows.forEach(function (x, i) { DL.push({ id: 'sb' + b + '-' + x.g.id, sbk: x.g.id, how: x.src.how, ver: x.g.ver, t: x.g.t, st: !active && i === 0 ? 'active' : 'queued', pct: 0, kind: 'Backup', drive: d.id, batch: b, local: true }); });
+        BATCH_INFO[b] = { games: n, emus: 0 }; S.selMode = false; S.ssel = []; pop();
+        toast(n + ' game' + (n === 1 ? '' : 's') + ' added to the backup queue for ' + d.name, { act: ['Open Downloads', function () { S.pages = []; S.tab = 'downloads'; render(); }] });
+      } };
+    },
+    mainHint: 'Backup'
+  }));
+  function plan() {
+    var d = driveOf(F.drive), rows = [], skip = [], refuse = [];
+    ids.forEach(function (id) {
+      var g = sG(id);
+      if (sJob(g)) { refuse.push(esc(g.t) + ' is being installed or updated. Wait for it to finish.'); return; }
+      if (S.pages.some(function (p) { return p.title === 'Playing'; }) && g.played === 'today') { refuse.push(esc(g.t) + ' is running right now; close it to copy it.'); return; }
+      if (d && sPackOf(d, g)) { skip.push(g.t); return; }
+      rows.push({ g: g, src: sBkSrc(g) });
+    });
+    return { rows: rows, skip: skip, refuse: refuse, gb: rows.reduce(function (t, x) { return t + x.src.gb; }, 0) };
+  }
+}
+function sRestore(g, dv) {
+  var x = sPackOf(dv, g); if (!x || g.inst || sJob(g)) return;
+  sQueue(g, 'restore', { how: x.how, from: dv.label, dname: dv.name, os: g.builds.indexOf('linux') >= 0 ? 'linux' : 'windows' });
+  toast(g.t + ' added to download queue', { s: x.how === 'installer' ? 'Runs its installer from ' + dv.label : 'Copying from ' + dv.label, act: ['Open Downloads', function () { S.pages = []; S.tab = 'downloads'; render(); }] });
+}
+ACT.sbackup = function (el) { var g = sG(el.dataset.sid); sBackupPage([g.id], 'Backup ' + g.t); };
+ACT.sbackupall = function () { var L = sInst(sst('gog')).map(function (g) { return g.id; }); sBackupPage(L, 'Backup GOG · ' + L.length + ' games'); };
+ACT.srestore = function (el) { sRestore(sG(el.dataset.sid), driveOf(el.dataset.drive)); };
+ACT.sdrm = function (el) { var g = sG(el.dataset.sid), d = driveOf(el.dataset.drive); confirmBox({ title: 'Remove ' + g.t + ' from ' + d.name + '?', body: 'Its files leave the drive. ' + (g.inst ? 'The copy installed on this computer stays.' : 'You can back it up again later.'), ok: 'Remove from drive', danger: 1, fn: function () { d.sgames = d.sgames.filter(function (x) { return x.id !== g.id; }); toast(g.t + ' removed from ' + d.name); pop(); } }); };
+
+/* ---- RomM games whose archive holds a GOG offline installer ---- */
+G.push({ id: 21, t: 'Grey Meridian', c: 'hsl(220 15% 34%)', p: 'WIN', native: 1, rel: 220, added: 13 },
+  { id: 22, t: 'Foxglove', c: 'hsl(330 45% 40%)', p: 'WIN', native: 1, rel: 300, added: 14 },
+  { id: 23, t: 'Iron Lullaby', c: 'hsl(15 35% 34%)', p: 'WIN', native: 1, rel: 400, added: 15 },
+  { id: 24, t: 'Low Tide Radio', c: 'hsl(185 40% 34%)', p: 'WIN', native: 1, rel: 500, added: 16 },
+  { id: 25, t: 'Pale Summit', c: 'hsl(210 25% 46%)', p: 'WIN', native: 1, rel: 600, added: 17 });
+var RIT = { 'Grey Meridian': { type: 'exe' }, 'Foxglove': { type: 'exe', wizard: 1 }, 'Wren Hollow': { type: 'sh' }, 'Iron Lullaby': { type: 'exe', fail: 'unknown' }, 'Low Tide Radio': { type: 'exe', fail: 'dlc', base: 'Pale Summit' } };
+var tvbInstall = install;
+install = function (g) {
+  tvbInstall(g);
+  var r = RIT[g.t]; if (!r) return;
+  var d = DL.filter(function (x) { return x.gid === g.id && (x.st === 'active' || x.st === 'queued'); }).pop(); if (d) { d.store = 'romm'; d.ri = r; }
+};
+function riLine(d) {
+  if (d.st === 'queued') return 'Queued';
+  if (d.wiz && !d.wizDone) return 'Waiting for the installer\'s setup window · finish it there';
+  if (d.pct < 55) return 'Downloading · ' + Math.round(d.pct / 55 * 100) + '% · 38.2 MB/s';
+  var q = Math.round((d.pct - 55) / 45 * 100);
+  return d.ri.type === 'sh' ? 'Unpacking the GOG installer ' + q + '%' : 'Running the GOG installer silently under ' + STV.compat + ' · ' + q + '%';
+}
+function riTvTick() {
+  DL.forEach(function (d) {
+    if (d.sbk && d.st === 'done' && !d.packed) { d.packed = 1; var dv = driveOf(d.drive); dv.sgames = dv.sgames || []; if (!sPackOf(dv, sG(d.sbk))) dv.sgames.push({ id: d.sbk, how: d.how, ver: d.ver }); }
+    if (d.store !== 'romm') return;
+    if (d.st === 'done' && !d.fixed) { d.fixed = 1; d.line = 'Installed · ran its GOG installer'; }
+    if (d.st !== 'active') return;
+    var r = d.ri;
+    if (r.fail && d.pct >= 55) {
+      d.st = 'failed';
+      d.line = 'Failed · ' + (r.fail === 'unknown' ? 'Its archive holds an installer GRID doesn\'t recognise (setup.exe has no GOG game info). The download was removed.' : 'Its archive holds a DLC installer for ' + r.base + ', which isn\'t installed. Install ' + r.base + ' first; the download was removed.');
+      var base = r.base && G.filter(function (x) { return x.t === r.base; })[0];
+      toast('Couldn\'t install ' + d.t, { err: 1, s: r.fail === 'unknown' ? 'Its archive holds an installer GRID doesn\'t recognise.' : 'It\'s DLC for ' + r.base + ', which isn\'t installed.', act: base ? ['Install ' + r.base, function () { install(base); }] : ['Open Downloads', function () { S.pages = []; S.tab = 'downloads'; render(); }] });
+      advanceQueue(); if (!S.layers.length) repaint(); return;
+    }
+    if (r.wizard && d.pct >= 70 && !d.wizDone) {
+      if (!d.wiz) toast('The ' + d.t + ' installer couldn\'t run silently', { s: 'Its setup window opened over TV mode. Finish it with a mouse or keyboard; GRID adds the game when it closes.' });
+      d.wiz = (d.wiz || 0) + 1; d.pct = 70; if (d.wiz > 8) d.wizDone = 1;
+    }
+  });
+}
+/* Details of such a RomM game: one line says what its archive holds. */
+var tvbDetails = details;
+details = function (g, drv) {
+  var o = tvbDetails(g, drv), r = RIT[g.t]; if (!r) return o;
+  var rr = o.render;
+  o.render = function () { return rr.call(this).replace('<div class="lp">', '<div class="lp">' + (g.inst ? 'Installed by running its <b>GOG installer</b>' : 'Its archive holds a <b>GOG ' + (r.type === 'sh' ? 'Linux' : 'Windows') + ' installer</b>. GRID runs it after the download.') + '<br>'); };
+  return o;
+};
+
+/* A drive's rail count includes its GOG games. */
+var tvbRail = libRailHTML;
+libRailHTML = function () {
+  var h = tvbRail();
+  readyDrives().forEach(function (d) { var n = (d.sgames || []).length; if (n) h = h.replace(new RegExp('(data-key="drv:' + d.id + '"[^>]*>[^<]*<span class="n">)(\\d+)'), function (m, a, c) { return a + (+c + n); }); });
+  return h;
+};
 
 /* ------------------------------------------------------------------ start */
 document.documentElement.setAttribute('data-theme', 'dark');

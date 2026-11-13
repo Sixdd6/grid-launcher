@@ -12,13 +12,15 @@ A proposal: GOG (with GOG offline installers), Epic Games, Amazon Games and Stea
 - **Login window:** Settings › Stores › Amazon Games › Sign in again…, or Connect… on a store set to Not connected. The dashed buttons finish the sign-in or fail it (first a network error inside the window, then a failed sign-in).
 - **Offline installer:** GOG › Install from installer… (store header, or the GOG card in Settings › Stores). The stand-in file chooser lists one file for each case.
 - **Settings › Stores**, **Downloads** and the notification cards show every store event; the Steam card's dashed button picks what the next Test returns.
+- **GOG backups (2026-11-13):** GOG › Installed › **Select** (or **Backup all 3…**, or Details › Backup to drive…), pick Ashen Tide (installed copy) and Brightwater (installer files), then Backup to drive…. The dialog's dashed button moves Brightwater's installer away. Library › Couch kit shows two GOG games after its RomM games (Marrowind Keep as installer files, Paper Lanterns as an installed copy); Install restores them. Lanternfall while playing and Copper Saints while installing show the refusals.
+- **RomM games with a GOG installer in their archive (2026-11-13):** Server › Windows: Install **Grey Meridian** (runs silently), **Foxglove** (falls back to its setup window), **Ashgrove** (DLC for the installed Harbor Lights), **Iron Lullaby** (unrecognised installer) and **Low Tide Radio** (DLC for Pale Summit, which isn't installed); Server › Linux: **Paper Orbit** (.sh). Follow them in Downloads.
 
 ## Library
 
 - **Rail group per store.** Like Backup drives: the store's name is the group heading (with its mark), then two rows, **Installed** and **Available**, each with a count. A store shows when it is connected, when its login expired, or when it still has games installed here after a Disconnect (GOG also after an offline install with no login).
   - The heading carries a small badge when the store needs attention: **!** (login expired, store tool missing or failed, Steam without a key or client) or **off** (not connected, installed games only).
   - Available's count is a spinner while the owned list loads, and **!** while it can't load.
-- **Header:** "GOG · Installed" (or Available), then "3 games · 67.0 GB" (Installed) or "5 games you own and haven't installed · updated 5 min ago" (Available). Chips: "Signed in as sam_plays" (opens Settings › Stores), "Cloud saves: on" (GOG, Epic), "Login expired · Sign in again", "gogdl not installed". Actions on the right: **Install from installer…** (GOG only) and **Refresh** (Available). Search filters by title. Select mode is not offered in store views (store games aren't backed up).
+- **Header:** "GOG · Installed" (or Available), then "3 games · 67.0 GB" (Installed) or "5 games you own and haven't installed · updated 5 min ago" (Available). Chips: "Signed in as sam_plays" (opens Settings › Stores), "Cloud saves: on" (GOG, Epic), "Login expired · Sign in again", "gogdl not installed". Actions on the right: **Install from installer…** (GOG only) and **Refresh** (Available). Search filters by title. **Select** (beside Size) and **Backup all N…** are offered in GOG › Installed only (see GOG games on backup drives); other store views have no Select.
 - **All games, Recent and Updates** include installed store games, each with its store's tag (mark and name) in the corner. Platform rows don't: store games live in their store group. Updates counts store updates.
 - **Store covers:** the installed dot; tags **UPDATE**, **SAVE CONFLICT** (red), **NOT SUPPORTED**; while installing a percentage tag ("38%", "QUEUED") and a progress bar along the cover's bottom edge (teal for a Steam install). Hover action: **Play**, **Install** (opens the install dialog), **Install in Steam**, **Installing… / Queued / Updating… / Verifying…** (opens Details), **Installing in Steam** (disabled, "Managed by Steam"), **Details** (Not supported, or a store that isn't signed in). The cloud button (GOG, Epic, installed) opens Details on Cloud saves.
 - **States in place of the grid** (a panel with the store's mark, a title, one line and its action):
@@ -41,7 +43,7 @@ A proposal: GOG (with GOG offline installers), Epic Games, Amazon Games and Stea
 
 ## Details for a store game
 
-- No RomM sections: no server saves list, no "not linked to a server game", no Backup to drive (the left column says "Store games are not backed up"), no Achievements, no Related row.
+- No RomM sections: no server saves list, no "not linked to a server game", no Achievements, no Related row. An installed GOG game has **Backup to drive…** and "On Couch kit" when a connected drive holds it; an Epic, Amazon or Steam game says why it can't be backed up ("Epic Games games can't be backed up: legendary installs only from Epic's servers." / "…nile installs only from Amazon's servers." / "Steam games can't be backed up here. Steam has its own Backup and restore.").
 - **Left column buttons:** Play (Stop while it runs) · Install… / Install in Steam · Cancel install · 45% (Cancel update / Cancel verify) · Not supported (disabled) · **Update to 2.2** · **Game Settings** (not Steam) · **Verify and repair** (Verify in Steam) · **Uninstall** (two clicks: "Confirm uninstall"; Steam: "Uninstall in Steam…", which opens Steam's own dialog).
 - **Lines under them:** last played; "Runs natively · Linux version" / "Runs through GE-Proton10-17 · Windows version" / "Launches through Steam"; cloud state ("Cloud saves synced 2 hours ago", "Cloud save conflict · Resolve", "Cloud saves off for this game", "This game has no cloud saves"); "Installed from an offline installer"; "Installed in Steam, outside GRID"; for a store that isn't signed in "Your GOG login expired. Sign in again"; for Not supported "Needs the EA app. GRID can't install games that start through another company's launcher; install it from the Epic Games Launcher instead."
 - **Steam install in progress:** a box "Installing in Steam · 52%" with its bar and "Managed by Steam. Pause or cancel it in Steam.", and a disabled Cancel.
@@ -90,6 +92,37 @@ A pane in the alphabetical rail (… RetroAchievements, **Stores**, Systems, Upd
 - **Store installs share the one download slot** with RomM installs (one at a time, first in, first out). A store tool download starts at once. Steam installs run beside the queue (Steam runs them).
 - **Notification cards:** connected / signed in; "GOG: 8 games found · 5 to install"; tool installing / installed; added to download queue (· Open Downloads); installed (· Play); updated; verify result; update available ("Lanternfall: update 2.2 is available on GOG" · Show, which opens Library › Updates); syncing / uploaded / synced cloud saves; kept or restored a conflicting save; uninstalled ("Its cloud saves stay in your GOG account."); disconnected; error cards for a failed sign-in (· Try again), signed-out install (· Sign in again), missing tool (· Install gogdl), Steam not installed, Steam private profile on Refresh.
 
+## RomM games with a GOG installer in their archive (2026-11-13)
+
+The user can zip a GOG offline installer (`setup_*.exe` with its `.bin` parts, or a Linux `.sh`) and upload it to RomM as a Windows or Linux game. GRID never uploads. When GRID downloads such a game it finds the installer in the archive and runs the offline-installer flow. **The game stays a RomM game**: a normal Windows/Linux platform row with RomM cloud saves, play activity, update checks and drive backups. Nothing about it is a GOG store game.
+
+- **Details before install:** a line under the buttons, "Its archive holds a GOG Windows installer. GRID runs it after the download, under GE-Proton10-17." (Linux: "…a GOG Linux installer. GRID runs it after the download."; DLC: "…a GOG DLC installer for Harbor Lights."). After install: "Installed by running its GOG installer" ("Added to Harbor Lights by its GOG installer").
+- **Covers and Details while it runs:** "Installing…" / "Queued", the percentage tag and the bottom bar (as on store covers).
+- **Downloads row** (no new kind badge; it is a game install): "Windows · Downloading 45% · 38.2 MB/s", then a second phase, "Windows · Running the GOG installer silently under GE-Proton10-17 · 40%" (Linux: "Unpacking the GOG installer 40%": the .sh is read as a zip and its `data/noarch/` copied; the script never runs). On a Windows host the .exe runs natively and the line drops "under …".
+- **Wizard fallback:** "Waiting for the installer's setup window · finish it there" on the row and the strip, and the card "Foxglove's installer couldn't run silently, so its setup window opened. Finish it there; GRID adds the game when it closes."
+- **Done:** "Windows · Installed · ran its GOG installer" ("Added to Harbor Lights · ran its GOG installer" for DLC); card "Grey Meridian installed" · Play.
+- **Failures** (the row goes to Completed in red with Retry and Dismiss; the download is removed):
+  - Unrecognised installer: "Failed · Its archive holds an installer GRID doesn't recognise (setup.exe has no GOG game info). The download was removed." Card "Couldn't install Iron Lullaby: its archive holds an installer GRID doesn't recognise" · Open Downloads.
+  - DLC whose base game isn't installed: "Failed · Its archive holds a DLC installer for Pale Summit, which isn't installed. Install Pale Summit first; the download was removed." Card "Couldn't install Low Tide Radio: it's DLC for Pale Summit, which isn't installed" · **Install Pale Summit**.
+  - An installer that exits with an error (not a separate prototype game): "Failed · The installer stopped with an error (exit code 1). The download was removed.", with the same card.
+
+## GOG games on backup drives (2026-11-13)
+
+This replaces "store games are not backed up" for GOG. GOG games that are not from RomM (installed with gogdl or from an offline installer) can go on a backup drive. Epic, Amazon and Steam games still can't, and their Details say why.
+
+- **Starting a backup:** Details › **Backup to drive…**; **Select** in GOG › Installed (covers pick with the check and ring; the bar reads "2 selected · 24.5 GB to write", Select all N, Clear, **Backup to drive…**; Esc or Done leaves); **Backup all N…** in the GOG › Installed header.
+- **The dialog** is Game backups' dialog: title, lede ("GRID writes each GOG game to the drive's gridpack folder: its installer files when GRID has them, else a copy of the installed game. Saves always go with it. Nothing downloads, and no GOG login is needed."), **Drive** (radio rows with space and the hatched share; "Needs … · … free" in red), and **What goes on the drive**, a row per game with its tag:
+  - **Installer files**: "brightwater_1_3_58810.sh · 2.9 GB, and its saves" (a game GRID installed from an installer that is still where it was).
+  - **Installed copy**: "Installed with gogdl, which keeps no installer, so the installed files are copied · 21.6 GB, and its saves", or "Its installer isn't at ~/Downloads/… any more, so the installed files are copied". A Windows game adds "Windows games are copied without their Wine prefix. The save folders GOG reports are copied from it."
+  - The note "Covers and the store's details go too. GRID adds no emulator or Proton for GOG games; the computer that installs a Windows game uses its own compatibility tool."
+  - Notes: already on the drive (skipped); refusals in the warning colour: "Copper Saints is being installed or updated. Wait for it to finish.", "Lanternfall is running right now; close it to copy it."
+  - Footer: "24.5 GB to write · nothing to download", Cancel, **Backup N games** / Not enough space / Nothing to backup.
+- **Downloads:** each game is a **Backup** row, "GOG · Installer files and saves · Reading its GOG details", then "Copying from this computer to SAMSUNG T7 45%"; done "… · Copied from this computer · Written to Couch kit". One card per backup: "2 games added to the backup queue for Couch kit", then "2 games backed up to Couch kit".
+- **Library › a drive:** its GOG games follow its RomM games, each with a **GOG** tag; the header counts both ("9 games · 51.4 GB · on SAMSUNG T7"), a chip reads "GOG: 2 games", and the rail count includes them. Hover action: Install (Play when installed here).
+- **Details from a drive:** "From Couch kit" leads the header line; **Install from drive** and **Remove from drive…** (two clicks); a line says how it restores: "On the drive as its installer files · v1.2 and saves. Installing runs the installer again." or "On the drive as a copy of an installed game · v1.1.0, with its saves. Installing copies it back."
+- **Restoring:** from installer files, "Copying the installer from SAMSUNG T7 60%", then "Running the installer · 40%", done "Installed from SAMSUNG T7 · ran its installer · saves restored". From an installed copy, "Copying from SAMSUNG T7 45%", done "Copied from SAMSUNG T7 · saves restored". No network or GOG login is needed. The game then appears in GOG › Installed (an installer restore also says "Installed from an offline installer"); signed in to GOG, it gets updates and cloud saves as usual.
+
+
 ## Inventory checklist
 
 Screens
@@ -130,6 +163,24 @@ Prompts
 Notifications
 - [ ] Every card listed under Downloads and notifications, with its action button where it has one
 
+RomM installer archives (2026-11-13)
+- [ ] Details line before and after install (Windows, Linux, DLC)
+- [ ] Cover and Details progress while it runs
+- [ ] Downloads row: download phase, installer phase (.exe silent, .sh unpack), wizard wait, done, DLC done
+- [ ] Wizard-fallback card
+- [ ] Failures: unrecognised installer, DLC without its base (Install <base> action), installer error exit
+- [ ] The installed game is a plain RomM game (cloud saves, play activity, updates, Backup to drive)
+
+GOG backups (2026-11-13)
+- [ ] Select mode in GOG › Installed (button, picks, bar, Esc/Done)
+- [ ] Backup all N… in the GOG › Installed header; Details › Backup to drive…
+- [ ] Backup dialog: drives, Installer files / Installed copy rows, installer moved, Windows prefix note, skipped, refusals (installing, running), not enough space, no drive
+- [ ] Downloads Backup rows and the two cards
+- [ ] Drive grid: GOG covers with GOG tag, header count, GOG chip, rail count
+- [ ] Details from a drive: header, Install from drive, Remove from drive… (two clicks), restore line
+- [ ] Restore: installer re-run rows, copy rows, done card; game lands in GOG › Installed
+- [ ] Epic, Amazon, Steam Details: why they can't be backed up
+
 Edge cases
 - [ ] Steam games installed outside GRID show in Installed ("Installed in Steam, outside GRID"); Proton and Steam runtimes never show
 - [ ] Offline GOG install with no GOG login: GOG group shows, Available asks to connect
@@ -157,4 +208,14 @@ Edge cases
 13. **Login window** shows a read-only address line with a lock so the user can check the store's domain; Cancel is silent, a network error stays inside the window, a failed sign-in closes it with an error card.
 14. **Cloud conflict** is decided per game with two choices (keep this computer's, use the cloud's) and a third, Decide later / Don't launch; a launch never proceeds over a conflict without a choice.
 15. **Per-game cloud saves switch** in Game Settings, plus a per-store switch in Settings › Stores.
-16. **Select mode** is hidden in store views (store games can't be backed up, and there is no bulk store action yet).
+16. **CHANGED 2026-11-13 (user decision):** was "Select mode is hidden in store views (store games can't be backed up)". Now GOG games can be backed up, so Select and Backup all N… are in GOG › Installed; Epic, Amazon and Steam views still have no Select.
+
+### New with the 2026-11-13 decisions
+
+17. **A RomM installer archive needs no new kind badge** in Downloads: it is a game install with a second phase, "Running the GOG installer…" / "Unpacking the GOG installer…", after the download.
+18. **A failed installer removes the download** and offers Retry; a DLC whose base isn't installed offers **Install <base>** on its error card.
+19. **GOG backups are automatic per game:** installer files when GRID still finds the installer it installed from, else the installed copy; there is no per-game choice in the dialog. Saves go with both.
+20. **GRID keeps the installer's path** for games installed from an offline installer (it doesn't copy the installer into the library), so a moved or deleted installer means an installed-copy backup.
+21. **Restoring a GOG backup needs no GOG login**; the game joins GOG › Installed and gets updates and cloud saves once signed in.
+22. **GOG games on a drive** follow its RomM games in the drive's grid with a GOG tag, and count in the rail and header. In this prototype they install one at a time; in the app, select mode's Install N games includes them.
+23. **GOG backup refusals:** a game being installed or updated, and a game that is running. A Windows game's Wine prefix is not copied, only the save folders GOG reports.

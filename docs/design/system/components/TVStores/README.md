@@ -8,6 +8,8 @@ Click inside the card, then use the keyboard as a controller (TV mode's README h
 
 - **Library:** the rail's store folders are at the bottom (Amazon Games, Epic Games, GOG, Steam). Moving onto Installed or Available shows that list.
 - **Menu › Prototype only** adds: **Show: a store state…** (GOG login expired or not connected, Epic loading or legendary missing or failed, Amazon connected, Steam without a key, private, key rejected, client missing, and back to the start), **Show: Settings › Stores**, **Show: GOG offline installer**, **Show: sign in to Amazon Games**.
+- **GOG backups (2026-11-13):** in GOG › Installed, RT turns on Select; A picks covers, X selects all, Y opens the Backup page (Start backs up). **Backup all 3…** sits in the header and **Backup to drive…** on an installed GOG game's page. Library › Couch kit lists Marrowind Keep and Paper Lanterns after its RomM games, with a GOG tag; X on them is Install from drive.
+- **RomM installer archives (2026-11-13):** Server › Windows: X on Grey Meridian (silent), Foxglove (setup window), Iron Lullaby (unrecognised) and Low Tide Radio (DLC without Pale Summit); Server › Linux: Wren Hollow (.sh). Follow them in Downloads.
 - **Store pages:** Settings › Stores, then a store. Steam's Test cycles through its results (the row says which comes next).
 
 ## Library
@@ -21,7 +23,7 @@ Click inside the card, then use the keyboard as a controller (TV mode's README h
 ## The game page
 
 - **Buttons:** Play · Install… · Install in Steam · Cancel install · 45% · Installing in Steam · 52% (disabled; A on it says "Managed by Steam. Pause or cancel it in Steam.") · Not supported (disabled; A says why) · Update to 2.2 · Game settings · Verify and repair (Verify in Steam) · Uninstall (confirmed; Steam: Uninstall in Steam…, which opens Steam's window).
-- **Left column:** last played, how it runs, the cloud state ("Cloud save conflict. See Cloud saves."), "Installed from an offline installer", "Installed in Steam, outside GRID", "Store games are not backed up", and for a Steam install the Managed by Steam box with its bar.
+- **Left column:** last played, how it runs, the cloud state ("Cloud save conflict. See Cloud saves."), "Installed from an offline installer", "Installed in Steam, outside GRID", for Epic, Amazon and Steam games why they can't be backed up (the desktop's words), for a GOG game "On Couch kit" when a connected drive holds it, and for a Steam install the Managed by Steam box with its bar.
 - **Tabs (LB / RB):** Overview (description, **DLC you own** rows: A installs or, confirmed, removes; facts), Media, **Cloud saves** (GOG and Epic, installed): a Synced row whose A is Sync now; on a conflict, two rows, **Keep this computer's save** and **Use the cloud save**, each confirmed; off ("Turn them on in Game settings"); the save location; "RomM cloud saves are off for store games."
 - **Play:** "Launching Ashen Tide…" with "Synced cloud saves with GOG", then the Playing page ("GOG · Native"); Stop game syncs after ("Cloud saves uploaded to GOG for Ashen Tide"). A conflict opens a list first: Keep this computer's save, Use the cloud save, Don't launch. Steam: "Starting Moonlit Ferry through Steam…", and the Playing page has no Stop ("Steam runs this game. Quit it from the game; GRID notices when it closes.").
 - **Install page** (the desktop's install dialog as a page): Version (Linux recommended / Windows) as radio rows, Compatibility tool and Language (lists), Install folder (the folder browser), **DLC you own** switches, the footer "22.0 GB to download · 412 GB free on /home" and **Install**, which Start presses from anywhere.
@@ -50,6 +52,25 @@ Click inside the card, then use the keyboard as a controller (TV mode's README h
 - Store rows sit in Active, Queued and Completed with a store badge and kind badge, and the desktop's lines ("Installing in Steam 67% · Managed by Steam", "Waiting for the installer's setup window · finish it there", "Failed · legendary stopped: …"). A on a row opens a list: Cancel (not for Steam rows: the list's subtitle says Steam manages them), Retry, Dismiss, Open <game>. Y clears completed rows, store rows too.
 - Notification cards are the desktop's; those with an action (Play, Open Downloads, Try again) take it with View.
 
+## RomM games with a GOG installer in their archive (2026-11-13)
+
+The desktop's design with a controller (GameStores README). The game stays a RomM game.
+
+- **Game page:** the left column adds "Its archive holds a **GOG Windows installer**. GRID runs it after the download." (after install: "Installed by running its **GOG installer**").
+- **Downloads:** the row reads "Windows · Downloading · 45% · 38.2 MB/s", then "Windows · Running the GOG installer silently under GE-Proton9-20 · 40%" (Linux: "Unpacking the GOG installer 40%"), and "Windows · Installed · ran its GOG installer" when done. The cover shows the percentage while it runs.
+- **Wizard fallback:** "Waiting for the installer's setup window · finish it there", and the card "The Foxglove installer couldn't run silently — Its setup window opened over TV mode. Finish it with a mouse or keyboard; GRID adds the game when it closes."
+- **Failures:** the row fails with the desktop's words; the card is an error with **Install Pale Summit** (DLC without its base) or **Open Downloads** (unrecognised installer), taken with View. A on the failed row offers Retry and Dismiss.
+
+## GOG games on backup drives (2026-11-13)
+
+The desktop's design with a controller (GameStores README). Epic, Amazon and Steam games still can't be backed up.
+
+- **Select mode (RT) in GOG › Installed:** A picks a cover (check and ring), X selects all or clears, Y opens the Backup page, RT or B leaves. The bar under the grid reads "2 selected · 21.4 GB to write". The header has **Backup all N…** and the RT Select chip. An installed GOG game's page has **Backup to drive…**.
+- **Backup page:** the lede, **Drive** (radio rows with the free space), **What goes on the drive** (a row per game: "GOG · brightwater_1_3_58810.sh · 2.9 GB, and its saves" with the **Installer files** tag, or "Installed with gogdl, which keeps no installer…" with **Installed copy**), the Windows prefix note, skipped and refused games as notes, and the main button (Start): Backup N games, or, disabled, Not enough space / Nothing to backup. A dashed prototype row moves Brightwater's installer away.
+- **Downloads:** Backup rows ("Copying from this computer to SAMSUNG T7 45%", then "Copied from this computer · Written to Couch kit") and the two cards.
+- **A drive's grid:** its GOG games after its RomM games, with a GOG tag; the header count and the rail count include them, and a chip reads "GOG: 2 games". X is **Install from drive** (Play when installed here); A opens the game's page with "From Couch kit" in the header line, **Install from drive**, **Remove from drive…** (confirmed) and how it restores.
+- **Restoring:** a store row "Copying the installer from SAMSUNG T7 30%" then "Running the installer · 60%", or "Copying from SAMSUNG T7 45%"; done "Installed from SAMSUNG T7 · ran its installer · saves restored" / "Copied from SAMSUNG T7 · saves restored", and the card "<game> installed from Couch kit" with Play.
+
 ## Inventory checklist
 
 - [ ] Rail folders with ! / off flags, spinner and ! counts
@@ -66,6 +87,10 @@ Click inside the card, then use the keyboard as a controller (TV mode's README h
 - [ ] Folder browser for installers; recognised page (Linux, Windows, DLC); refusal dialogs
 - [ ] Downloads store rows and their A list
 - [ ] Prototype-only Menu entries reach every state
+- [ ] RomM installer archives: game-page line, download and installer phases, wizard wait and card, done, both failures with their card actions
+- [ ] GOG select mode (RT, A, X, Y, bar, header chip), Backup all N…, Backup to drive… on the game page
+- [ ] Backup page: drives, Installer files / Installed copy rows, installer moved, refusals, skipped, disabled main button
+- [ ] Drive grid GOG covers, counts and chip; drive game page; restore rows and card
 
 ## Decisions made by the designer — confirm with the user
 
@@ -76,4 +101,5 @@ The GameStores card's list applies here too. TV-only:
 3. **A Windows installer's own setup window** appears over TV mode and needs a mouse or keyboard; GRID says so before the install, rather than refusing Windows installers in TV mode.
 4. **Steam Install** opens Steam's window over TV mode (Steam asks for the library folder); GRID only shows the progress.
 5. **The Steam API key** is typed with the on-screen keyboard (masked) in TV mode; pasting is the desktop's job.
-6. **RT (Select)** isn't offered in store views, matching the desktop.
+6. **CHANGED 2026-11-13 (user decision):** was "RT (Select) isn't offered in store views". Now RT is Select in GOG › Installed (for backups), matching the desktop; other store views still have none.
+7. **New:** in TV mode, a Windows installer's setup window (from a RomM archive or a drive restore) opens over TV mode and needs a mouse or keyboard; the notice says so.

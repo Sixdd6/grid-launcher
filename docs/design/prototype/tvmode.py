@@ -51,7 +51,7 @@ def sub(t, a, b):
     assert t.count(a) == 1, a[:70]
     return t.replace(a, b)
 ST_CSS = open(os.path.join(HERE, 'tvstores.css')).read()
-ST_JS = open(os.path.join(HERE, 'tvstores.js')).read()
+ST_JS = open(os.path.join(HERE, 'tvstores.js')).read() + '\n' + open(os.path.join(HERE, 'tvstores_bk.js')).read()
 TVS = HTML
 TVS = sub(TVS, 'subtitle="TV mode: the fullscreen, controller-first GRID.', 'subtitle="TV mode with game stores: GOG, Epic Games, Amazon Games and Steam in the Library and Settings › Stores.')
 TVS = sub(TVS, '<title>TV mode</title>', '<title>TV mode: game stores</title>')
