@@ -1288,6 +1288,10 @@ pub struct InstallService {
     /// Whether a game is running ([`Self::set_running_check`]). `None`
     /// (grid-core tests that do not opt in): nothing counts as running.
     running_check: RwLock<Option<RunningCheck>>,
+    /// Whether a store game (by key) is running
+    /// ([`Self::set_store_running_check`]). `None`: nothing counts as
+    /// running.
+    store_running_check: RwLock<Option<backup_job::StoreRunningCheck>>,
     /// The space promised to queued and running jobs ([`space`]).
     space: space::SpaceLedger,
     /// How a volume's free space and filesystem are read
@@ -1355,6 +1359,7 @@ impl InstallService {
             drive_rows: Mutex::new(HashMap::new()),
             drive_copy_hook: RwLock::new(None),
             running_check: RwLock::new(None),
+            store_running_check: RwLock::new(None),
             space: space::SpaceLedger::new(),
             space_probe: RwLock::new(space::SpaceProbe::system()),
             job_spaces: Mutex::new(HashMap::new()),
@@ -2546,7 +2551,7 @@ impl InstallService {
         };
         for (item, space) in rows.into_iter().zip(spaces) {
             let admitted = self.admit_backup_item(
-                client.clone(),
+                Some(client.clone()),
                 drive.clone(),
                 item.clone(),
                 &library,
@@ -2555,7 +2560,9 @@ impl InstallService {
             )?;
             if admitted {
                 match item {
-                    backup_job::BackupItem::Game(_) => queued.games += 1,
+                    backup_job::BackupItem::Game(_) | backup_job::BackupItem::Store(_) => {
+                        queued.games += 1
+                    }
                     backup_job::BackupItem::Emulator(_) => queued.emulators += 1,
                     backup_job::BackupItem::Firmware(_) => queued.firmware += 1,
                 }
@@ -2626,7 +2633,7 @@ impl InstallService {
     /// duplicate.
     fn admit_backup_item(
         self: &Arc<Self>,
-        client: Arc<RommClient>,
+        client: Option<Arc<RommClient>>,
         drive: backup_job::DriveTarget,
         item: backup_job::BackupItem,
         library: &Path,
@@ -2878,7 +2885,6 @@ impl InstallService {
         drive_key: &str,
         item: queue::BackupItemKey,
     ) -> Result<(), LibraryError> {
-        let client = client.ok_or_else(|| LibraryError::Registry("not connected".to_string()))?;
         // Every backup row this session admitted is remembered (the queue
         // itself does not outlive the process).
         let remembered = self.backup_rows.lock().unwrap().get(&entry_id).cloned();
@@ -2886,6 +2892,12 @@ impl InstallService {
             return Err(LibraryError::Extract(
                 "This backup can't be retried; backup again".to_string(),
             ));
+        };
+        // A store game needs no server.
+        let client = match (&item, client) {
+            (backup_job::BackupItem::Store(_), _) => None,
+            (_, Some(client)) => Some(client),
+            (_, None) => return Err(LibraryError::Registry("not connected".to_string())),
         };
         let not_connected = || LibraryError::Extract(format!("Connect {} to retry", drive.label));
         if drive.key != drive_key || self.removed_reason(drive_key).is_some() {
@@ -3789,6 +3801,8 @@ impl InstallService {
                 ..
             }) => Some(drive.drive_id.as_str()),
             JobPayload::Emulator(job) => job.drive_id(),
+            // A store restore copies from a drive.
+            JobPayload::Store(job) => job.drive.as_ref().map(|drive| drive.key.as_str()),
             _ => None,
         };
         let result = match (drive.and_then(|key| self.removed_reason(key)), result) {
@@ -3987,22 +4001,31 @@ impl InstallService {
         // move from starting under it. So does one whose saves are copied
         // out of its Wine prefix.
         let reads_library = job.copies_saves()
-            || matches!(&job.item, backup_job::BackupItem::Game(game) if game.local);
+            || matches!(&job.item, backup_job::BackupItem::Game(game) if game.local)
+            || matches!(&job.item, backup_job::BackupItem::Store(_));
         let running = match &job.item {
             backup_job::BackupItem::Game(game) if game.local => self.game_running(game.rom_id),
+            backup_job::BackupItem::Store(item) => self.store_running(&item.key),
             _ => false,
         };
         // A downloaded game that is running here is still backed up, but
         // its saves stay in the prefix: they may be mid-write.
         let copy_saves = match &job.item {
             backup_job::BackupItem::Game(game) => !self.game_running(game.rom_id),
+            backup_job::BackupItem::Store(item) => !self.store_running(&item.key),
             _ => false,
+        };
+        let running_reason = match &job.item {
+            backup_job::BackupItem::Store(item) => {
+                crate::backup::store::running_refusal(&item.name)
+            }
+            _ => RUNNING_NOW.to_string(),
         };
         let gate = self.library_gate.read().unwrap().clone();
         let result = match self.removed_reason(&job.drive.key) {
             Some(reason) => Err(LibraryError::DriveRemoved(reason)),
             // Launched while it waited for the write slot.
-            None if running => Err(LibraryError::Extract(RUNNING_NOW.to_string())),
+            None if running => Err(LibraryError::Extract(running_reason)),
             None => match reads_library.then(|| gate.enter()).transpose() {
                 Err(busy) => Err(LibraryError::LibraryBusy(busy.reason)),
                 Ok(_ticket) => backup_job::write(

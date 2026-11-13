@@ -181,7 +181,7 @@ pub fn pack_summary(pack: &Pack) -> PackSummary {
     PackSummary {
         name: pack.name.clone(),
         os: pack.os.clone(),
-        game_count: pack.games.len() as u32,
+        game_count: (pack.games.len() + pack.store_games.len()) as u32,
         gridpack_bytes: pack.pack_bytes(),
         emulators: pack
             .emulators
@@ -248,7 +248,7 @@ pub fn remembered_of(drive: &DetectedDrive, pack: &Pack) -> RememberedDrive {
         label: drive.label.clone(),
         fs: drive.fs_display.clone(),
         total_bytes: drive.total_bytes,
-        game_count: pack.games.len() as u32,
+        game_count: (pack.games.len() + pack.store_games.len()) as u32,
         last_seen: String::new(),
     }
 }

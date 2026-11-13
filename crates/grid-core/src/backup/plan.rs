@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::pack::{InstalledLayout, Pack, PackOs, FAT32_MAX_FILE};
+use super::pack::{InstalledLayout, Pack, PackOs, StoreLayout, FAT32_MAX_FILE};
+use super::store::StoreSource;
 use super::write::SPACE_MARGIN;
 use crate::config::Config;
 use crate::launch::catalog;
@@ -17,6 +18,7 @@ use crate::launch::profiles::EmulatorProfile;
 use crate::launch::selection::NO_EMULATOR;
 use crate::launch::setup::recommendations;
 use crate::library::platforms::{is_native_platform, is_windows_platform};
+use crate::stores::GameKey;
 
 /// A game named in a plan without being written (already on the drive, or too
 /// big for the drive's file system).
@@ -1006,6 +1008,159 @@ pub fn os_name(os: PackOs) -> &'static str {
     match os {
         PackOs::Linux => "Linux",
         PackOs::Windows => "Windows",
+    }
+}
+
+// --- store games (GOG) ----------------------------------------------------------
+
+/// One store game row a backup queues (`backup_store_game`).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct StoreItem {
+    pub key: GameKey,
+    pub name: String,
+    /// How the plan saw it; the row decides again when it runs.
+    pub layout: StoreLayout,
+    /// What it writes to the drive, as the plan counted it.
+    pub bytes: u64,
+    /// A local image of its cover (the image cache's), written as its art.
+    pub cover: Option<PathBuf>,
+}
+
+/// What GRID found for one requested store game: the input of
+/// [`plan_store`].
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum StoreAssessment {
+    /// It can't be backed up, for this reason (a non-GOG store, running,
+    /// being installed, not installed, its files gone).
+    Refused(String),
+    Ready {
+        source: StoreSource,
+        /// What it writes: the installer files, or the installed copy's
+        /// archive, plus its saves.
+        bytes: u64,
+        windows_prefix_note: bool,
+        cover: Option<PathBuf>,
+    },
+}
+
+/// One requested store game.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct StorePlanGame {
+    pub key: GameKey,
+    pub name: String,
+    pub assessment: StoreAssessment,
+}
+
+/// One row of the store backup dialog (`StoreBackupPlan.rows` in api.ts).
+#[derive(Serialize, Clone, PartialEq, Eq, Debug)]
+pub struct StorePlanRow {
+    pub key: String,
+    pub name: String,
+    pub layout: StoreLayout,
+    /// The line after "GOG · " ([`super::store::plan_detail`]); blank for a
+    /// refused or skipped game.
+    pub detail: String,
+    pub bytes: u64,
+    pub windows_prefix_note: bool,
+    /// Already on the drive: skipped.
+    pub already: bool,
+    /// Why it can't be backed up; blank when it can.
+    pub refused: String,
+}
+
+/// The store backup dialog's plan for one drive.
+#[derive(Serialize, Clone, PartialEq, Eq, Debug)]
+pub struct StoreBackupPlan {
+    pub drive: String,
+    pub rows: Vec<StorePlanRow>,
+    pub bytes_to_write: u64,
+    /// Free space less what other backups to the drive still hold.
+    pub free_bytes: u64,
+    pub fits: bool,
+}
+
+/// [`plan_store`]'s output: the dialog's plan and the rows to queue.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct StorePlanned {
+    pub plan: StoreBackupPlan,
+    pub items: Vec<StoreItem>,
+}
+
+/// Plans a store game backup to one drive. Pure.
+///
+/// One row per requested game, in order (a repeated key once): refused
+/// games keep their reason; a game whose key the pack already holds is
+/// skipped (`already`); the others are written. `fits` as for a RomM
+/// backup: the bytes to write plus the write margin within the free space
+/// other backups do not hold.
+pub fn plan_store(
+    drive: &str,
+    pack: &Pack,
+    games: &[StorePlanGame],
+    free_bytes: u64,
+    reserved_bytes: u64,
+    home: Option<&Path>,
+) -> StorePlanned {
+    let mut rows = Vec::new();
+    let mut items = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut bytes: u64 = 0;
+    for game in games {
+        if !seen.insert(game.key.clone()) {
+            continue;
+        }
+        let mut row = StorePlanRow {
+            key: game.key.to_string(),
+            name: game.name.clone(),
+            layout: StoreLayout::Installed,
+            detail: String::new(),
+            bytes: 0,
+            windows_prefix_note: false,
+            already: false,
+            refused: String::new(),
+        };
+        match (&game.assessment, pack.find_store_game(&game.key)) {
+            (StoreAssessment::Refused(reason), _) => row.refused = reason.clone(),
+            (_, Some(on_drive)) => {
+                row.layout = on_drive.layout;
+                row.already = true;
+            }
+            (
+                StoreAssessment::Ready {
+                    source,
+                    bytes: game_bytes,
+                    windows_prefix_note,
+                    cover,
+                },
+                None,
+            ) => {
+                row.layout = source.layout();
+                row.detail = super::store::plan_detail(source, *game_bytes, home);
+                row.bytes = *game_bytes;
+                row.windows_prefix_note = *windows_prefix_note;
+                bytes = bytes.saturating_add(*game_bytes);
+                items.push(StoreItem {
+                    key: game.key.clone(),
+                    name: game.name.clone(),
+                    layout: source.layout(),
+                    bytes: *game_bytes,
+                    cover: cover.clone(),
+                });
+            }
+        }
+        rows.push(row);
+    }
+    let available = free_bytes.saturating_sub(reserved_bytes);
+    let fits = bytes == 0 || bytes.saturating_add(SPACE_MARGIN) <= available;
+    StorePlanned {
+        plan: StoreBackupPlan {
+            drive: drive.to_string(),
+            rows,
+            bytes_to_write: bytes,
+            free_bytes: available,
+            fits,
+        },
+        items,
     }
 }
 
