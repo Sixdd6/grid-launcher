@@ -320,3 +320,71 @@ tick every Phase 1 checklist item, e2e specs pass against `mock-gog` and fake to
    "needs wizard" shows, `/DIR` mapping under umu, the prefix a DLC installer uses.
 6. RomM pre-download hint: possible only from file names or multi-file ROMs; else after download.
 7. Update identity for offline installs: version string vs content-system build ids.
+
+## Spike results (2026-11-13)
+
+Decisions taken from them (lead):
+- **Pin heroic-gogdl v1.4.0** (has the chunk-cache integrity fix). Assets under
+  `https://github.com/Heroic-Games-Launcher/heroic-gogdl/releases/download/v1.4.0/`; SHA-256 from
+  GitHub's published asset digests:
+
+  | asset | size | sha256 | kind |
+  |---|---|---|---|
+  | gogdl_linux_x86_64 | 983218 | 2aa2b59c83d3bfbe7b60ead91c6297b263b5d1e6c233a04b7409bafe26738f02 | Python zipapp |
+  | gogdl_linux_arm64 | 975558 | 3df71cb07603b5d17fd914c96d17e4b381fad5a5705dc7dd3e3ff7a3856c6cc3 | Python zipapp |
+  | gogdl_windows_x86_64.exe | 12471749 | 291b653e6dbf7a394a3342ed0ebcea2cbc83e5f66d030777d65ccdd60d18ab02 | PyInstaller |
+  | gogdl_windows_arm64.exe | 12296193 | f3885d51c823d2faaf3b49647c63e799339afdc51fdbd0515e399ca08954630c | PyInstaller |
+  | gogdl_macos_x86_64 | 11720560 | 5b7e68497907025549f83f960a6d325e53cf48f5cac63a4f1313318e50dd2de8 | PyInstaller |
+  | gogdl_macos_arm64 | 11098928 | af167d29ca822f495ff677d03c40bb9d6dc5535dac1f30d71775c91fe844149c | PyInstaller |
+
+  The Linux assets are zipapps (`#!/usr/bin/env python3`, Python ≥ 3.10; a bundled xdelta3 `.so`
+  unpacks into `$XDG_CACHE_HOME/heroic_gogdl/vendored`). GRID already requires python3 ≥ 3.10
+  for umu-launcher (`launch::umu`); reuse that check, and show the same "needs Python 3.10" tool
+  state when it fails. Run Linux gogdl as `python3 <zipapp>`. License GPL-3.0 (repo `LICENSE`).
+- **Running gogdl.** `gogdl --auth-config-path <data>/stores/gogdl/auth.json <cmd> …` — the flag
+  is top-level and MUST come before the subcommand (after it, it is silently ignored). Env:
+  `GOGDL_CONFIG_PATH=<data>/stores/gogdl` (manifests land in `…/heroic_gogdl/manifests/<id>`),
+  and on Linux `XDG_CACHE_HOME=<data>/stores/gogdl/cache`. Logging goes to stderr as
+  `[NAME] LEVEL: msg`; results to stdout. `auth` prints token JSON on stdout: never log or
+  forward it; parse only what GRID needs (user id; the access token as `SecretString`).
+- **`info <id> --platform X [--lang L] --with-dlcs`**: one JSON line on stdout:
+  `{"size":{"*":{download_size,disk_size},"<lang>":{…}},"dlcs":[{title,id,size}],"buildId",
+  "languages":[…],"folder_name","dependencies","versionEtag","versionName",…}`; a language's size is
+  `size["*"] + size[lang]`. `--platform linux` returns a flat shape (download_size, disk_size,
+  dlcs, languages, folder_name, versionName).
+- **download/update/repair**: `--path` (download appends the build's install directory; update and
+  repair take the game dir), `--support <dir>`, `--platform`, `--lang`, `--with-dlcs --dlcs a,b`
+  (`--dlcs` does nothing without `--with-dlcs`; default no DLC), `--max-workers`. Progress on
+  stderr about once a second: `[PROGRESS] INFO: = Progress: 12.34 123456/1000000, Running for:
+  00:01:02, ETA: 00:07:30` plus `= Downloaded: … MiB, Written: … MiB` and `+ Download\t- …` /
+  `+ Disk\t- …` lines. Exit 2 = not enough disk space; 1 = no builds / platform unsupported;
+  `-signum` on signals. **A fatal worker error exits 0 without writing the manifest: success = exit
+  0 AND the manifest was rewritten.** The executor uses 1 GiB of `/dev/shm`.
+- **Cloud saves.** Save locations come from
+  `https://remote-config.gog.com/components/galaxy_client/clients/{clientId}?component_version=2.0.45`
+  → `content.{Windows|MacOS}.cloudStorage.{enabled, locations:[{name, location}]}` with variables
+  `<?INSTALL?>`, `SAVED_GAMES`, `APPLICATION_DATA_LOCAL(_LOW)`, `APPLICATION_DATA_ROAMING`,
+  `DOCUMENTS`, `APPLICATION_SUPPORT`; `clientId` from the gogdl manifest or `goggame-<id>.info`.
+  `save-sync <path> <id> --os <os> --ts <float> --name <location name>` with direction flags
+  `--skip-download|--skip-upload|--force-upload|--force-download` prints the new timestamp on
+  stdout and reports nothing structured (it exits 0 even on upload/download errors and on
+  conflicts). **GRID decides the direction itself** (from `meta.last_sync`, local mtimes and the
+  cloudstorage listing) and always passes `--force-upload` or `--force-download`.
+  `--force-download` deletes local files missing in the cloud: copy the local saves aside first.
+- **Windows installers.** Silent flags: `/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL
+  /NOICONS /LANG=<inno lang> /DIR="<path>" /LOG="<path>\grid-install.log"`; under Wine/umu use
+  a `Z:\…` path (backslashes). Exit 0 ok; 2 and 5 = cancelled; 1, 3, 4, 7, 8 = failed → wizard
+  offer (desktop) / `InstallerNeedsWizard` (TV). "Needs a wizard" mostly shows as a **hang**: treat
+  the process as stalled when neither the log nor the target dir has grown for 120 s, then kill
+  it (`wineserver -k` in that prefix) and treat it as needing the wizard. No overall timeout.
+  **A DLC installer runs in the base game's prefix with the base game's `/DIR`.**
+- **No innoextract.** 1.9 is too old for current Inno versions and has no macOS build. For identity
+  before running, try the `innospect` crate (Apache-2.0, pure Rust) to read `goggame-*.info`
+  (gameId, buildId) and languages; when it fails, fall back to the file name, then read
+  `goggame-*.info` from the install dir after the run. Drop `StoreTool::Innoextract`.
+- **Update identity for offline installs.** The file name's number is not a build id.
+  `goggame-<id>.info` `buildId` (or `goggame-<id>.id`) matches content-system
+  `builds?generation=2`; store it in `meta.build_id`. Windows: compare the default build's
+  `build_id`. Linux installers: compare `api.gog.com/products/{id}?expand=downloads`
+  `installers[os=linux].version` with the version in `gameinfo`. An offline install with no build
+  id never shows an update.
