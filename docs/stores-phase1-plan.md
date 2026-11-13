@@ -530,3 +530,41 @@ From packages E and F, to fix once B, C and D are on main:
 6. **Store covers:** check `StoreGame.cover` is a URL GRID can show through the store art
    allowlist; TV draws store art with a plain `<img>`.
 7. Run every `gog-*` and `tv-gog-*` e2e spec (add a `tv-gog` stage group in `scripts/e2e.sh`).
+
+### Package C
+
+No frozen type changed (`Pack`, `PackStoreGame`, `StoreLayout`, `api.ts` as in Step 0).
+Additions and choices the other packages should know:
+- The five store backup commands keep their IPC arguments and gain `State`/`AppHandle`;
+  their bodies live in a new `app/src-tauri/src/commands/store_backups.rs`.
+- `InstallService` gains `set_store_running_check(Fn(&GameKey) -> bool)` (the store
+  backup commands install it from the launch service's sessions on each call; package D
+  may move that wiring into `lib.rs`), `store_running`, `store_job_live` (a live
+  `job == "store"` row for the key: the "being installed or updated" refusal),
+  `store_backup_busy` (a live `backup_store_game` row: for D's uninstall/update guards),
+  `plan_store_backup`, `start_store_backup` and `install_store_from_drive`.
+  `BackupItem::Store(StoreItem)`; `BackupJob.client` is now `Option` (a store backup
+  needs no server; retry too).
+- Restore: `drive_restore::store_restore_job(drive, game, StoreRestoreCtx, InstallerRun)`.
+  The installer step is a seam (`InstallerRun`); production uses
+  `offline_installer` = `offline::inspect(staged, registry, <config dir>/stores)` then
+  `offline::run_into`. DLC installers run after the base game into the same folder and
+  prefix; a DLC failure is a warning. An installer restore records origin `offline`, no
+  `installer` paths and `installer_bytes` 0 (the staged copy is deleted); an installed
+  copy records origin `drive`. Both clear `exe_user_pinned` (the pinned path is gone).
+- A restored Windows GOG game (off Windows) gets `<install dir>/prefix`
+  (`backup::store::STORE_PREFIX_DIR`) as its Wine prefix. A backup leaves out the row's
+  `native_wineprefix` when it is inside the install folder, and a `prefix/` holding
+  `drive_c` or `pfx`. Package A: put GOG prefixes there too, or anywhere outside the
+  install folder.
+- Save folders: `meta.save_locations` (GOG's `<?VAR?>` paths) become Windows-token
+  folders, and `<?INSTALL?>\…` for a folder inside the install folder; the cloud-save
+  folders GRID's config knows for the title are added for a Windows game.
+- A store job's download half has no phase sink, so a restore row shows
+  `RunningInstaller` / `Installing` only from finalize; while it copies off the drive
+  its phase is `none` (the row's kind `store_restore` with `drive_label` tells the UI).
+- `DriveStoreGame.cover` is the pack path of the cover; `drive_asset` serves a store
+  game's art under the cache key `gridpack://<drive>/<rel>`. A backup's cover is the
+  row's `cover_large_path`/`cover_small_path` (a local file or the image cache's copy).
+- Drive summaries count store games in `game_count`; `Pack::pack_bytes` includes them.
+- `drive_copy::copy_targets` no longer needs a `Send` progress callback.

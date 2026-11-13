@@ -21,14 +21,15 @@ use crate::backup::archive;
 use crate::backup::local::{self, LocalSource, Located, TreePlan};
 use crate::backup::pack::{
     self, asset_dir_rel, emulator_dir_rel, firmware_dir_rel, game_dir_rel, game_file_rel,
-    pack_component, saves_dir_rel, unique_rel, ArchiveKind, InstalledLayout, Pack, PackAssets,
-    PackEmulator, PackError, PackFile, PackFirmware, PackFirmwareFile, PackGame, PackInstalled,
-    PackOs, PackSaves, PackSource, PackState,
+    pack_component, saves_dir_rel, store_game_dir_rel, unique_rel, ArchiveKind, InstalledLayout,
+    Pack, PackAssets, PackEmulator, PackError, PackFile, PackFirmware, PackFirmwareFile, PackGame,
+    PackInstalled, PackOs, PackSaves, PackSource, PackState, PackStoreDlc, PackStoreGame,
 };
 use crate::backup::plan::{
-    os_name, EmulatorItem, EmulatorKind, EmulatorSource, FirmwareItem, GameItem,
+    os_name, EmulatorItem, EmulatorKind, EmulatorSource, FirmwareItem, GameItem, StoreItem,
 };
 use crate::backup::saves;
+use crate::backup::store::{self as store_backup, StoreSource};
 use crate::backup::write::{self as drive_write, FileWrite, WriteError, WriteTarget};
 use crate::cloud::native::{row_wine_prefix, OwnedWinePrefix};
 use crate::cloud::ops::native::manual_paths_key_for_title;
@@ -39,6 +40,8 @@ use crate::launch::forge::{ForgeClient, ForgeProvider, ResolvedDownload};
 use crate::launch::setup::{newest_server_build, recommendations, ServerPackage};
 use crate::library::platforms::is_windows_platform;
 use crate::romm::{strip_userinfo, RomDetail, RomFile, RommClient};
+use crate::stores::gog::meta::{GogMeta, GogPlatform};
+use crate::stores::GameKey;
 
 use super::download::{download_targets, FileTarget, RommProvider};
 use super::paths::archive_name;
@@ -94,12 +97,18 @@ pub enum BackupItem {
     Game(GameItem),
     Emulator(EmulatorItem),
     Firmware(FirmwareItem),
+    /// A store game (GOG), copied from this computer.
+    Store(StoreItem),
 }
+
+/// The Downloads row kind of a store game backup.
+pub const STORE_GAME_KIND: &str = "backup_store_game";
 
 impl BackupItem {
     /// The queue key part that names this item.
     pub fn key(&self) -> BackupItemKey {
         match self {
+            Self::Store(item) => BackupItemKey::Store(item.key.clone()),
             Self::Game(game) => BackupItemKey::Game(game.rom_id),
             Self::Emulator(item) => BackupItemKey::Emulator {
                 name: item.pick.name.clone(),
@@ -116,15 +125,17 @@ impl BackupItem {
             Self::Game(game) => game.bytes,
             Self::Emulator(item) => item.bytes,
             Self::Firmware(item) => item.bytes,
+            Self::Store(item) => item.bytes,
         }
     }
 
     /// What the row stages in the library folder first: everything but a
     /// game copied from this computer, which is written straight from its
-    /// install.
+    /// install (a store game always is).
     pub fn staging_bytes(&self) -> u64 {
         match self {
             Self::Game(game) if game.local => 0,
+            Self::Store(_) => 0,
             _ => self.bytes(),
         }
     }
@@ -132,6 +143,14 @@ impl BackupItem {
     /// The row's title, platform column and kind.
     pub(crate) fn row(&self) -> (String, String, &'static str) {
         match self {
+            Self::Store(item) => (
+                item.name.clone(),
+                item.key
+                    .store_kind()
+                    .map_or("GOG", |kind| kind.platform_name())
+                    .to_string(),
+                STORE_GAME_KIND,
+            ),
             Self::Game(game) => (
                 game.name.clone(),
                 game.platform_name.clone(),
@@ -174,8 +193,10 @@ impl BackupItem {
 pub(crate) struct BackupJob {
     pub drive: DriveTarget,
     pub item: BackupItem,
-    pub client: Arc<RommClient>,
-    /// The server, as the pack records it: never with userinfo.
+    /// The server session; `None` for a store game, which needs none.
+    pub client: Option<Arc<RommClient>>,
+    /// The server, as the pack records it: never with userinfo. Blank
+    /// without a session.
     pub server: String,
     /// The library root; staging goes under it.
     pub library: PathBuf,
@@ -218,10 +239,13 @@ impl BackupJob {
     pub(crate) fn new(
         drive: DriveTarget,
         item: BackupItem,
-        client: Arc<RommClient>,
+        client: Option<Arc<RommClient>>,
         library: PathBuf,
     ) -> Self {
-        let server = strip_userinfo(client.server_url());
+        let server = client
+            .as_ref()
+            .map(|client| strip_userinfo(client.server_url()))
+            .unwrap_or_default();
         Self {
             drive,
             item,
@@ -234,6 +258,13 @@ impl BackupJob {
             saves: None,
             space: None,
         }
+    }
+
+    /// The server session a RomM item needs.
+    fn client(&self) -> Result<Arc<RommClient>, LibraryError> {
+        self.client
+            .clone()
+            .ok_or_else(|| LibraryError::Registry("not connected".to_string()))
     }
 }
 
@@ -282,6 +313,19 @@ pub(crate) enum Staged {
         tree: Box<TreePlan>,
         assets: Vec<(AssetKind, StagedFile)>,
     },
+    /// A store game (GOG) from this computer: its installer files, read
+    /// where they are, or its installed folder, archived straight to the
+    /// drive. Its saves are in [`BackupJob::saves`].
+    Store {
+        /// The entry, with every `path` blank and no parts.
+        game: Box<PackStoreGame>,
+        /// One file per `game.installer`, in order.
+        installer: Vec<StagedFile>,
+        /// One list per `game.dlc_installers`, in order.
+        dlc: Vec<Vec<StagedFile>>,
+        tree: Option<Box<TreePlan>>,
+        assets: Vec<(AssetKind, StagedFile)>,
+    },
 }
 
 /// `<library>/.grid-staging/backup-<id>`.
@@ -311,7 +355,7 @@ type Progress<'a> = &'a mut (dyn FnMut(u64, u64, f64) + Send);
 /// The download phase of one backup row: fetches the item into
 /// `job.staging` and fills `job.staged`.
 pub(crate) async fn download(
-    service: &InstallService,
+    service: &Arc<InstallService>,
     job: &mut BackupJob,
     cancel: &AtomicBool,
     on_progress: Progress<'_>,
@@ -328,6 +372,7 @@ pub(crate) async fn download(
             download_emulator(service, job, &item, cancel, on_progress).await
         }
         BackupItem::Firmware(item) => download_firmware(job, &item, cancel, on_progress).await,
+        BackupItem::Store(item) => download_store_game(service, job, &item, cancel).await,
     }
 }
 
@@ -338,7 +383,8 @@ async fn download_game(
     cancel: &AtomicBool,
     on_progress: Progress<'_>,
 ) -> Result<(), LibraryError> {
-    let detail = job.client.rom_detail(rom_id).await?;
+    let client = job.client()?;
+    let detail = client.rom_detail(rom_id).await?;
     let home = crate::platform::home_dir();
     // The install on this computer, if any, for its Wine prefix: only a
     // row from this server stands for this rom id.
@@ -379,7 +425,7 @@ async fn download_game(
             name: file.file_name.clone(),
         });
     }
-    download_targets(&RommProvider(&job.client), &targets, cancel, on_progress).await?;
+    download_targets(&RommProvider(&client), &targets, cancel, on_progress).await?;
 
     let assets = download_assets(job, &detail, cancel).await?;
     let mut pack_files = Vec::new();
@@ -426,7 +472,7 @@ async fn download_local_game(
     rom_id: i64,
     cancel: &AtomicBool,
 ) -> Result<(), LibraryError> {
-    let detail = job.client.rom_detail(rom_id).await?;
+    let detail = job.client()?.rom_detail(rom_id).await?;
     let gone = || {
         LibraryError::Extract(format!(
             "{} is no longer installed on this computer; backup again",
@@ -633,6 +679,467 @@ async fn stage_saves(
 /// The warning for saves left in a prefix because the game is running.
 const SAVES_RUNNING: &str = "Its saves weren't copied because it's running";
 
+// --- store games (GOG) ------------------------------------------------------------
+
+/// What GRID found for one store game it may back up ([`assess_store`]).
+pub(crate) struct StoreAssessed {
+    pub row: InstalledGame,
+    pub meta: GogMeta,
+    pub source: StoreSource,
+    /// The installed copy's tree ([`StoreSource::Installed`]).
+    pub tree: Option<TreePlan>,
+    /// The save folders to record and, when they were scanned, the saves
+    /// found.
+    pub saves: StagedSaves,
+    pub saves_refused: Vec<(String, String)>,
+    /// What the row writes: the installer files or the archive, plus the
+    /// saves' archive.
+    pub bytes: u64,
+}
+
+/// Judges the store game `key` for a backup to a drive (`fat32`,
+/// `for_windows`), reading only metadata: `Err` is the refusal the dialog
+/// shows (a non-GOG store, not installed, running, being installed or
+/// updated, its files gone or not copyable). `copy_saves` scans its saves
+/// too. Blocking.
+pub(crate) fn assess_store(
+    service: &InstallService,
+    key: &GameKey,
+    fat32: bool,
+    for_windows: bool,
+    copy_saves: bool,
+) -> Result<StoreAssessed, String> {
+    if let Some(reason) = key.store_kind().and_then(store_backup::store_refusal) {
+        return Err(reason.to_string());
+    }
+    let GameKey::Store { store_id, .. } = key else {
+        return Err(local::REASON_STORE.to_string());
+    };
+    let row = service
+        .registry
+        .find_key(key)
+        .ok()
+        .flatten()
+        .ok_or_else(|| store_backup::gone_refusal(store_id))?;
+    let name = row.title.clone();
+    if service.store_running(key) {
+        return Err(store_backup::running_refusal(&name));
+    }
+    if service.store_job_live(key) {
+        return Err(store_backup::installing_refusal(&name));
+    }
+    let home = crate::platform::home_dir();
+    let home = home.as_deref();
+    let meta = GogMeta::from_json(&row.store_meta);
+    let install_dir = store_backup::install_dir(&row, home)
+        .filter(|dir| dir.is_dir())
+        .ok_or_else(|| local::REASON_MISSING.to_string())?;
+    let source = store_backup::decide_source(&meta, fat32, &store_backup::file_size);
+    let tree = match &source {
+        StoreSource::Installer { .. } => None,
+        StoreSource::Installed(_) => {
+            let tree_source = store_backup::installed_source(&row, home)?;
+            Some(
+                local::scan_tree(&tree_source, for_windows)
+                    .map_err(|refusal| refusal.reason().to_string())?,
+            )
+        }
+    };
+
+    // The save folders: GOG's, then the ones cloud saves know.
+    let config = Config::load(&service.config_path).unwrap_or_default();
+    let prefix = if meta.platform == GogPlatform::Windows {
+        wine_prefix_of(&row, &config.default_compat_tool, home)
+    } else {
+        None
+    };
+    let title_key = manual_paths_key_for_title(&row.title);
+    let list = |map: &std::collections::BTreeMap<String, Vec<String>>| {
+        map.get(&title_key).cloned().unwrap_or_default()
+    };
+    let extra = if meta.platform == GogPlatform::Windows {
+        saves::recorded_folders(
+            &list(&config.native_pcgw_save_paths),
+            &list(&config.native_manual_save_paths),
+            &list(&config.native_removed_save_paths),
+            prefix.as_ref().map(|prefix| prefix.path.as_path()),
+            home,
+        )
+    } else {
+        Vec::new()
+    };
+    let folders = store_backup::save_folders(
+        &meta,
+        &extra,
+        &install_dir,
+        prefix.as_ref().map(|prefix| prefix.path.as_path()),
+    );
+    let mut saves_tree = None;
+    let mut saves_refused = Vec::new();
+    if copy_saves && !folders.is_empty() {
+        let installed = tree.is_some();
+        let documents = crate::platform::windows_documents_dir();
+        let resolve = |raw: &str| {
+            // An installed copy already carries the install folder's saves.
+            if installed && store_backup::is_install_folder(raw) {
+                return None;
+            }
+            store_backup::resolve_save_folder(
+                raw,
+                &install_dir,
+                prefix
+                    .as_ref()
+                    .filter(|prefix| prefix.path.is_dir())
+                    .map(OwnedWinePrefix::as_prefix),
+                documents.as_deref(),
+            )
+        };
+        let scan = saves::scan_saves_with(&folders, &resolve, &install_dir, for_windows);
+        saves_tree = scan.tree;
+        saves_refused = scan.refused;
+    }
+    let bytes = match &tree {
+        Some(tree) => tree.archive_bytes,
+        None => source.installer_bytes(),
+    }
+    .saturating_add(saves_tree.as_ref().map_or(0, |tree| tree.archive_bytes));
+    Ok(StoreAssessed {
+        row,
+        meta,
+        source,
+        tree,
+        saves: StagedSaves {
+            folders,
+            tree: saves_tree,
+        },
+        saves_refused,
+        bytes,
+    })
+}
+
+/// The art file a store game's cover is staged from: `cover` as it is,
+/// named `cover.<ext>` by its bytes.
+fn store_cover(cover: &Path) -> Option<StagedFile> {
+    let meta = fs::metadata(cover).ok().filter(|meta| meta.is_file())?;
+    if meta.len() == 0 {
+        return None;
+    }
+    let mut head = [0u8; 16];
+    let read = fs::File::open(cover)
+        .and_then(|mut file| file.read(&mut head))
+        .unwrap_or(0);
+    let ext = magic_extension(&head[..read])
+        .map(str::to_string)
+        .or_else(|| {
+            cover
+                .extension()
+                .map(|ext| ext.to_string_lossy().to_lowercase())
+        })
+        .unwrap_or_else(|| "img".to_string());
+    Some(StagedFile {
+        src: cover.to_path_buf(),
+        name: format!("cover.{ext}"),
+    })
+}
+
+/// The download phase of a store game backup: nothing downloads. The row
+/// is judged again ([`assess_store`]): a game no longer eligible fails the
+/// row with its reason. Its installer files, or its installed tree, and its
+/// saves are left for the write phase to read where they are.
+async fn download_store_game(
+    service: &Arc<InstallService>,
+    job: &mut BackupJob,
+    item: &StoreItem,
+    cancel: &AtomicBool,
+) -> Result<(), LibraryError> {
+    let key = item.key.clone();
+    let fat32 = job.drive.fat32;
+    let for_windows = pack_for_windows(&job.drive.mount);
+    // The tree scan reads only metadata, but a big tree is many calls.
+    let owner = service.clone();
+    let judged = key.clone();
+    let assessed = tokio::task::spawn_blocking(move || {
+        assess_store(&owner, &judged, fat32, for_windows, true)
+    })
+    .await
+    .map_err(|e| LibraryError::Extract(format!("the scan did not finish: {e}")))?
+    .map_err(LibraryError::Extract)?;
+    if cancel.load(Ordering::Relaxed) {
+        return Err(LibraryError::Cancelled);
+    }
+    for (folder, why) in &assessed.saves_refused {
+        job.warnings
+            .push(format!("Saves in {folder} weren't copied: {why}"));
+    }
+    let StoreAssessed {
+        row,
+        meta,
+        source,
+        tree,
+        saves,
+        ..
+    } = assessed;
+    let pack_file = |name: &str, size: u64| PackFile {
+        path: String::new(),
+        size,
+        server_file_id: 0,
+        name: name.to_string(),
+        category: String::new(),
+        top_level: true,
+        md5: String::new(),
+        sha1: String::new(),
+        extra: Default::default(),
+    };
+    let mut game = PackStoreGame {
+        source: key.store_kind().unwrap_or(crate::stores::StoreKind::Gog),
+        store_id: row.store_id.clone(),
+        name: row.title.clone(),
+        platform: meta.platform,
+        layout: source.layout(),
+        version: if meta.version.trim().is_empty() {
+            row.revision.clone()
+        } else {
+            meta.version.clone()
+        },
+        summary: row.description.clone(),
+        companies: split_list(&row.companies),
+        genres: split_list(&row.genres),
+        release_date: row.first_release_date.clone(),
+        size: 0,
+        installer: Vec::new(),
+        dlc_installers: Vec::new(),
+        installed: None,
+        saves: None,
+        assets: PackAssets::default(),
+        meta: serde_json::to_value(&meta).unwrap_or(serde_json::Value::Null),
+        added: pack::now_rfc3339(),
+        extra: Default::default(),
+    };
+    let mut installer = Vec::new();
+    let mut dlc_staged = Vec::new();
+    match &source {
+        StoreSource::Installer { files, dlc } => {
+            for each in files {
+                let name = each.name();
+                game.installer.push(pack_file(&name, each.size));
+                installer.push(StagedFile {
+                    src: each.path.clone(),
+                    name,
+                });
+            }
+            for item in dlc {
+                let mut staged = Vec::new();
+                let mut entry = PackStoreDlc {
+                    id: item.id.clone(),
+                    title: item.title.clone(),
+                    installer: Vec::new(),
+                    extra: Default::default(),
+                };
+                for each in &item.files {
+                    let name = each.name();
+                    entry.installer.push(pack_file(&name, each.size));
+                    staged.push(StagedFile {
+                        src: each.path.clone(),
+                        name,
+                    });
+                }
+                game.dlc_installers.push(entry);
+                dlc_staged.push(staged);
+            }
+            game.size = source.installer_bytes();
+        }
+        StoreSource::Installed(_) => {
+            if let Some(tree) = &tree {
+                let name = tree
+                    .root
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                game.installed = Some(PackInstalled {
+                    archive: ArchiveKind::Tar,
+                    layout: InstalledLayout::Multi,
+                    name,
+                    parts: Vec::new(),
+                    tree_bytes: tree.tree_bytes,
+                    tree_files: tree.tree_files,
+                    launch: String::new(),
+                    rom_file_name: String::new(),
+                    server_updated_at: String::new(),
+                    version: game.version.clone(),
+                    outdated: false,
+                    from_os: PackOs::host(),
+                    row: Default::default(),
+                });
+            }
+        }
+    }
+    let assets = item
+        .cover
+        .as_deref()
+        .and_then(store_cover)
+        .map(|cover| vec![(AssetKind::Cover, cover)])
+        .unwrap_or_default();
+    job.saves = (!saves.folders.is_empty()).then_some(saves);
+    job.staged = Some(Staged::Store {
+        game: Box::new(game),
+        installer,
+        dlc: dlc_staged,
+        tree: tree.map(Box::new),
+        assets,
+    });
+    Ok(())
+}
+
+/// Whether a store game (by key) is running right now. Installed by the
+/// app layer, which owns the launch sessions.
+pub type StoreRunningCheck = Arc<dyn Fn(&GameKey) -> bool + Send + Sync>;
+
+impl InstallService {
+    /// Installs the check that tells whether a store game is running: a
+    /// running GOG game is not backed up. A second call replaces the first.
+    pub fn set_store_running_check(&self, check: Option<StoreRunningCheck>) {
+        *self.store_running_check.write().unwrap() = check;
+    }
+
+    /// Whether the store game `key` is running, per
+    /// [`Self::set_store_running_check`].
+    pub fn store_running(&self, key: &GameKey) -> bool {
+        let check = self.store_running_check.read().unwrap().clone();
+        check.is_some_and(|check| check(key))
+    }
+
+    /// Whether a store job (install, update, repair, DLC, installer,
+    /// restore) for `key` is queued or running.
+    pub fn store_job_live(&self, key: &GameKey) -> bool {
+        let wanted = key.to_string();
+        self.snapshot().entries.iter().any(|entry| {
+            entry.status.is_live() && entry.job == "store" && entry.source_id == wanted
+        })
+    }
+
+    /// Whether a backup is copying the store game `key` from this
+    /// computer (a live `backup_store_game` row): its uninstall, update and
+    /// repair should wait.
+    pub fn store_backup_busy(&self, key: &GameKey) -> bool {
+        let wanted = key.to_string();
+        self.snapshot().entries.iter().any(|entry| {
+            entry.status.is_live() && entry.kind == STORE_GAME_KIND && entry.source_id == wanted
+        })
+    }
+
+    /// Queues a store game backup to `drive`: one `backup_store_game` row
+    /// per item, all in one new batch, through the same queue, space check
+    /// and write engine as a RomM backup. No server is needed. An item
+    /// already queued for the drive is skipped. `Err` only before anything
+    /// is queued (a library move running, no library folder for staging,
+    /// not enough space).
+    pub fn start_store_backup(
+        self: &Arc<Self>,
+        drive: DriveTarget,
+        items: Vec<StoreItem>,
+        drive_free: Option<u64>,
+    ) -> Result<crate::backup::plan::BackupQueued, LibraryError> {
+        self.check_library_gate()?;
+        let library = self.library_root()?;
+        self.drive_connected(&drive.key);
+        let rows: Vec<BackupItem> = {
+            let queue = self.queue.lock().unwrap();
+            items
+                .into_iter()
+                .map(BackupItem::Store)
+                .filter(|item| {
+                    !queue.has_pending(&super::queue::JobKey::Backup {
+                        drive: drive.key.clone(),
+                        item: item.key(),
+                    })
+                })
+                .collect()
+        };
+        let spaces = self.reserve_backup(&drive, &library, &rows, drive_free)?;
+        let batch = self.next_batch.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut queued = crate::backup::plan::BackupQueued {
+            batch,
+            ..Default::default()
+        };
+        for (item, space) in rows.into_iter().zip(spaces) {
+            if self.admit_backup_item(None, drive.clone(), item, &library, batch, Some(space))? {
+                queued.games += 1;
+            }
+        }
+        Ok(queued)
+    }
+
+    /// Plans a store game backup to `drive` ([`crate::backup::plan::plan_store`]):
+    /// each of `keys` judged now ([`assess_store`]), against the drive's
+    /// `pack` and its free space (`free`, less what other backups to it
+    /// still hold). `cover_of` gives a row's cover image on this computer,
+    /// if any. Blocking: it scans each installed copy's tree.
+    pub fn plan_store_backup(
+        &self,
+        drive: &DriveTarget,
+        pack: &Pack,
+        keys: &[GameKey],
+        free: u64,
+        cover_of: &dyn Fn(&InstalledGame) -> Option<PathBuf>,
+    ) -> crate::backup::plan::StorePlanned {
+        use crate::backup::plan::{StoreAssessment, StorePlanGame};
+        let for_windows = pack.os.contains(&PackOs::Windows);
+        let games: Vec<StorePlanGame> = keys
+            .iter()
+            .map(|key| {
+                let fallback = match key {
+                    GameKey::Store { store_id, .. } => store_id.clone(),
+                    GameKey::Rom(id) => id.to_string(),
+                };
+                if pack.find_store_game(key).is_some() {
+                    let name = pack
+                        .find_store_game(key)
+                        .map_or(fallback, |game| game.name.clone());
+                    // Skipped by the plan; nothing to judge.
+                    return StorePlanGame {
+                        key: key.clone(),
+                        name,
+                        assessment: StoreAssessment::Ready {
+                            source: StoreSource::Installed(store_backup::InstalledWhy::Gogdl),
+                            bytes: 0,
+                            windows_prefix_note: false,
+                            cover: None,
+                        },
+                    };
+                }
+                match assess_store(self, key, drive.fat32, for_windows, true) {
+                    Ok(assessed) => StorePlanGame {
+                        key: key.clone(),
+                        name: assessed.row.title.clone(),
+                        assessment: StoreAssessment::Ready {
+                            windows_prefix_note: store_backup::windows_prefix_note(
+                                &assessed.meta,
+                                &assessed.source,
+                            ),
+                            cover: cover_of(&assessed.row),
+                            source: assessed.source,
+                            bytes: assessed.bytes,
+                        },
+                    },
+                    Err(reason) => StorePlanGame {
+                        key: key.clone(),
+                        name: self
+                            .registry
+                            .find_key(key)
+                            .ok()
+                            .flatten()
+                            .map_or(fallback, |row| row.title),
+                        assessment: StoreAssessment::Refused(reason),
+                    },
+                }
+            })
+            .collect();
+        let reserved = self.drive_reserved(&drive.mount, &drive.key, &[]);
+        let home = crate::platform::home_dir();
+        crate::backup::plan::plan_store(&drive.key, pack, &games, free, reserved, home.as_deref())
+    }
+}
+
 /// "Its install contains links" as "its install contains links".
 fn lower_first(text: &str) -> String {
     let mut chars = text.chars();
@@ -741,7 +1248,7 @@ async fn download_assets(
         if url.is_empty() {
             continue;
         }
-        match job.client.get_bytes_with_type(&url).await {
+        match job.client()?.get_bytes_with_type(&url).await {
             Ok((bytes, content_type)) if !bytes.is_empty() => {
                 let name = format!("{stem}.{}", asset_extension(&url, &bytes, &content_type));
                 let src = dir.join(&name);
@@ -918,7 +1425,8 @@ async fn download_emulator(
             }
         }
         EmulatorSource::Server { source_id } => {
-            let (request, size) = server_build(service, &job.client, source_id, item.os).await?;
+            let client = job.client()?;
+            let (request, size) = server_build(service, &client, source_id, item.os).await?;
             let dest = job.staging.join("emulator.bin");
             let target = FileTarget {
                 url_path: format!(
@@ -930,7 +1438,7 @@ async fn download_emulator(
                 dest: dest.clone(),
                 expected_size: size,
             };
-            download_targets(&RommProvider(&job.client), &[target], cancel, on_progress).await?;
+            download_targets(&RommProvider(&client), &[target], cancel, on_progress).await?;
             Staged::Emulator {
                 entry: Box::new(entry(&request.version, &request.file_name)),
                 primary: StagedFile {
@@ -1204,7 +1712,8 @@ async fn download_firmware(
     cancel: &AtomicBool,
     on_progress: Progress<'_>,
 ) -> Result<(), LibraryError> {
-    let records = job.client.firmware(item.platform_id).await?;
+    let client = job.client()?;
+    let records = client.firmware(item.platform_id).await?;
     if records.is_empty() {
         return Err(LibraryError::Extract(format!(
             "Your server has no firmware for {}",
@@ -1222,11 +1731,7 @@ async fn download_firmware(
         if cancel.load(Ordering::Relaxed) {
             return Err(LibraryError::Cancelled);
         }
-        let bytes = match job
-            .client
-            .firmware_bytes(record.id, &record.file_name)
-            .await
-        {
+        let bytes = match client.firmware_bytes(record.id, &record.file_name).await {
             Ok(bytes) => bytes,
             Err(error) => {
                 job.warnings.push(format!(
@@ -1401,6 +1906,67 @@ pub(crate) fn write(
             tree_write = Some((&**tree, dir));
             Entry::Game(Box::new(game))
         }
+        Staged::Store {
+            game,
+            installer,
+            dlc,
+            tree,
+            assets,
+        } => {
+            let key = game.key();
+            if pack.find_store_game(&key).is_some() {
+                warnings.push(already());
+                return Ok(());
+            }
+            let mut game = (**game).clone();
+            let dir = pack.unique_store_dir(
+                &store_game_dir_rel(game.source, &game.name, &game.store_id),
+                &key,
+            );
+            // Installer file names, unique in `installer/` without case.
+            let mut names: Vec<String> = Vec::new();
+            let mut place = |name: &str| {
+                let base = pack_component(name, "installer");
+                let mut candidate = base.clone();
+                let mut n = 2;
+                while names
+                    .iter()
+                    .any(|have| have.eq_ignore_ascii_case(&candidate))
+                {
+                    candidate = format!("{n}-{base}");
+                    n += 1;
+                }
+                names.push(candidate.clone());
+                format!("{dir}/installer/{candidate}")
+            };
+            for (file, pack_file) in installer.iter().zip(game.installer.iter_mut()) {
+                let rel = place(&file.name);
+                pack_file.path = rel.clone();
+                writes.push((file, rel));
+            }
+            for (files, entry) in dlc.iter().zip(game.dlc_installers.iter_mut()) {
+                for (file, pack_file) in files.iter().zip(entry.installer.iter_mut()) {
+                    let rel = place(&file.name);
+                    pack_file.path = rel.clone();
+                    writes.push((file, rel));
+                }
+            }
+            for (kind, file) in assets {
+                let rel = format!("{dir}/assets/{}", pack_component(&file.name, "image"));
+                match kind {
+                    AssetKind::Cover => game.assets.cover = Some(rel.clone()),
+                    AssetKind::Fanart => game.assets.fanart = Some(rel.clone()),
+                    AssetKind::Logo => game.assets.logo = Some(rel.clone()),
+                    AssetKind::Screenshot => game.assets.screenshots.push(rel.clone()),
+                }
+                writes.push((file, rel));
+            }
+            if let Some(tree) = tree {
+                tree_write = Some((&**tree, format!("{dir}/installed")));
+            }
+            saves_dir = Some(format!("{dir}/saves"));
+            Entry::Store(Box::new(game))
+        }
         Staged::Emulator {
             entry,
             primary,
@@ -1490,13 +2056,22 @@ pub(crate) fn write(
             Ok(parts) => {
                 done = tree_total;
                 written.extend(parts.iter().map(|part| part.path.clone()));
-                if let Entry::Game(game) = &mut entry {
-                    game.size = parts
-                        .iter()
-                        .fold(0, |sum, part| sum.saturating_add(part.size));
-                    if let Some(installed) = game.installed.as_mut() {
-                        installed.parts = parts;
+                let size = parts
+                    .iter()
+                    .fold(0_u64, |sum, part| sum.saturating_add(part.size));
+                let installed = match &mut entry {
+                    Entry::Game(game) => {
+                        game.size = size;
+                        game.installed.as_mut()
                     }
+                    Entry::Store(game) => {
+                        game.size = size;
+                        game.installed.as_mut()
+                    }
+                    _ => None,
+                };
+                if let Some(installed) = installed {
+                    installed.parts = parts;
                 }
             }
             Err(error) => outcome = Err(write_error(error, drive)),
@@ -1527,8 +2102,9 @@ pub(crate) fn write(
             }
         }
     }
-    if let (Ok(()), Entry::Game(game), Some(staged_saves), Some(dir)) =
-        (&outcome, &mut entry, &job.saves, &saves_dir)
+    let takes_saves = matches!(entry, Entry::Game(_) | Entry::Store(_));
+    if let (Ok(()), true, Some(staged_saves), Some(dir)) =
+        (&outcome, takes_saves, &job.saves, &saves_dir)
     {
         let mut record = saves::folders_only(staged_saves.folders.clone());
         match (&staged_saves.tree, copy_saves) {
@@ -1565,12 +2141,19 @@ pub(crate) fn write(
             }
             (None, _) => {}
         }
-        game.saves = Some(record);
+        match &mut entry {
+            Entry::Game(game) => game.saves = Some(record),
+            Entry::Store(game) => game.saves = Some(record),
+            _ => {}
+        }
     }
     if outcome.is_ok() {
         let edited = pack::edit_pack(mount, |pack| match &entry {
             Entry::Game(game) => {
                 pack.upsert_game((**game).clone());
+            }
+            Entry::Store(game) => {
+                pack.upsert_store_game((**game).clone());
             }
             Entry::Emulator(emulator) => {
                 pack.upsert_emulator(emulator.clone());
@@ -1659,6 +2242,7 @@ enum Entry {
     Game(Box<PackGame>),
     Emulator(PackEmulator),
     Firmware(PackFirmware),
+    Store(Box<PackStoreGame>),
 }
 
 /// "<label> was removed".

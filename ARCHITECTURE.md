@@ -73,7 +73,21 @@ Modules as declared in `src/lib.rs`:
   (folder `i` under `i/`), `restore_targets` is the pure rule for where each folder goes
   (inside the new prefix, or the real folder on Windows, never into one that holds
   files), `restore_saves` reads the tar back and copies it there, and `seed_folders`
-  gives the folders to cloud saves without replacing anything. `steam_runtime` fetches
+  gives the folders to cloud saves without replacing anything (`scan_saves_with`,
+  `restore_targets_with` and `restore_saves_with` take the caller's own resolver).
+  `store` is GOG games on a drive (`Pack.store_games`, under `stores/gog/<name>-<id>/`):
+  `decide_source` is the pure layout rule (installer files when every recorded
+  installer file, DLC included, is still there with the recorded size, else the
+  installed copy), `installed_source` the install folder less its Wine prefix,
+  `save_folders` / `resolve_save_folder` GOG's save locations as folder strings
+  (`<?INSTALL?>\…` for the install folder), and `plan_detail` the dialog's line;
+  Epic, Amazon and Steam are refused with `local::REASON_STORE`. A store backup is a
+  `backup_store_game` row (`BackupItem::Store`, no server needed:
+  `InstallService::start_store_backup`, planned by `plan_store_backup` over
+  `plan::plan_store`); a restore is a `StoreOp::Restore` job built by
+  `drive_restore::store_restore_job` (installer files run again through
+  `stores::offline::run_into`, origin `offline`; an installed copy moved into place,
+  origin `drive`). `steam_runtime` fetches
   the Steam Linux Runtime the way umu does and places it where umu looks.
 - `cloud` — the cloud save/state sync engine: scope classification, sync candidates,
   per-emulator directories, archive transfer, restore, retention, session windows, and

@@ -22,9 +22,11 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
 
+use super::drive_copy;
 use super::drive_install::DriveCopyHook;
 use super::path_change::is_strictly_inside;
-use super::registry::InstalledGame;
+use super::queue::{DriveRef, JobPhase, StoreJob, StoreJobRunner, StoreOp, StoreProgressSink};
+use super::registry::{InstalledGame, Registry};
 use super::{
     append_warning, is_appimage, is_ps3_platform, make_executable, new_record, path_string,
     platform_dir, removal_key, sanitize_component, specials, DriveSource, GameSource, InstallJob,
@@ -32,13 +34,20 @@ use super::{
 };
 use crate::backup::archive::{self, PartSource, RestoreError};
 use crate::backup::local::WINE_PREFIX_DIR;
-use crate::backup::pack::{self, InstalledLayout, PackGame, PackInstalled};
+use crate::backup::pack::{
+    self, InstalledLayout, PackGame, PackInstalled, PackStoreGame, StoreLayout,
+};
 use crate::backup::saves;
+use crate::backup::store::STORE_PREFIX_DIR;
 use crate::backup::write::SPACE_MARGIN;
 use crate::cloud::native::{row_wine_prefix, OwnedWinePrefix};
 use crate::config::Config;
 use crate::images::ImageFields;
 use crate::romm::RomDetail;
+use crate::stores::gog::goggame::{find_info_files, parse_info, GogGameInfo};
+use crate::stores::gog::meta::{GogDlcMeta, GogMeta, GogOrigin, GogPlatform};
+use crate::stores::gog::row::gog_row;
+use crate::stores::{offline, StoreError};
 
 /// The refusal for a copy this build cannot restore.
 pub const NEEDS_NEWER_GRID: &str = "This backup needs a newer GRID";
@@ -657,6 +666,604 @@ impl InstallService {
 /// The temporary folder a restore reads a game's saves into, in the
 /// platform folder.
 const SAVES_TMP_PREFIX: &str = ".grid-saves-";
+
+// --- store games (GOG) ------------------------------------------------------------
+//
+// A GOG game on a drive restores as a `StoreOp::Restore` job (its row names
+// the drive), with no network and no GOG login:
+// - installer files: the download half copies them into staging, the
+//   finalize half runs them (`stores::offline::run_into`, DLC after the base
+//   game, into the same folder and prefix); the row's origin is `offline`
+//   and it records no installer path, since the staged copy is deleted;
+// - an installed copy: the download half reads the parts into a temporary
+//   folder beside the destination, the finalize half moves it into place;
+//   the row's origin is `drive`.
+// Both rows come from the copy's own `goggame-<id>.info` through `gog_row`,
+// and the saves on the drive are put back last (warnings, never a failure).
+
+/// Runs one staged installer file (`staged`) into `dest`, with the Wine
+/// `prefix` (off Windows, for a Windows game), the compat tool, and whether
+/// the installer may open its setup window; returns the installed game's
+/// info. [`offline_installer`] in the app; tests pass their own.
+pub type InstallerRun = Arc<
+    dyn Fn(
+            &Path,
+            &Path,
+            Option<&Path>,
+            &str,
+            bool,
+            &mut dyn StoreProgressSink,
+        ) -> Result<GogGameInfo, LibraryError>
+        + Send
+        + Sync,
+>;
+
+/// The real installer step: [`offline::inspect`], then [`offline::run_into`].
+pub fn offline_installer(registry: Arc<Registry>, tools_dir: PathBuf) -> InstallerRun {
+    Arc::new(move |staged, dest, prefix, compat, wizard, sink| {
+        let inspection = offline::inspect(staged, &registry, &tools_dir).map_err(store_error)?;
+        offline::run_into(&inspection, dest, prefix, compat, wizard, sink)
+    })
+}
+
+/// A store error as the row shows it.
+fn store_error(error: StoreError) -> LibraryError {
+    match error {
+        StoreError::Library(error) => error,
+        other => LibraryError::Extract(other.to_string()),
+    }
+}
+
+/// What a store restore needs from this computer.
+pub struct StoreRestoreCtx {
+    pub registry: Arc<Registry>,
+    /// The GOG install folder (`[stores.gog] install_dir`, else
+    /// `<library>/GOG`): the game goes in `<root>/<name>`.
+    pub install_root: PathBuf,
+    /// Where installer files wait between the halves (`<library>/.grid-staging`).
+    pub staging_root: PathBuf,
+    /// The compat tool a Windows installer runs under, and that picks the
+    /// user folder of a new prefix.
+    pub compat_tool: String,
+    pub wizard_allowed: Arc<dyn Fn() -> bool + Send + Sync>,
+    /// Free space where the game goes, `None` when it can't be read.
+    pub free: Option<u64>,
+}
+
+/// One store restore: the [`StoreJobRunner`] of a `StoreOp::Restore` job.
+struct StoreRestore {
+    mount: PathBuf,
+    label: String,
+    game: PackStoreGame,
+    registry: Arc<Registry>,
+    dest: PathBuf,
+    /// Installer files: `<staging root>/store-restore-<source>-<id>`; an
+    /// installed copy: `<install root>/.grid-restore-<source>-<id>`.
+    staging: PathBuf,
+    compat_tool: String,
+    wizard_allowed: Arc<dyn Fn() -> bool + Send + Sync>,
+    installer: InstallerRun,
+}
+
+/// The job that restores `game` from `drive` ([`StoreRestoreCtx`]).
+/// Refused before admission: a store GRID doesn't back up, a copy this
+/// build can't restore ([`NEEDS_NEWER_GRID`]), an unusable pack path, or
+/// too little room where it goes.
+pub fn store_restore_job(
+    drive: &super::backup_job::DriveTarget,
+    game: &PackStoreGame,
+    ctx: StoreRestoreCtx,
+    installer: InstallerRun,
+) -> Result<StoreJob, LibraryError> {
+    if let Some(reason) = crate::backup::store::store_refusal(game.source) {
+        return Err(LibraryError::Extract(reason.to_string()));
+    }
+    let unusable = |error: crate::backup::pack::PackError| {
+        LibraryError::Extract(format!(
+            "The backup on {} can't be used: {error}",
+            drive.label
+        ))
+    };
+    let needed = match game.layout {
+        StoreLayout::Installer => {
+            if game.installer.is_empty() {
+                return Err(damaged(&game.name, &drive.label));
+            }
+            for file in game.installer.iter().chain(
+                game.dlc_installers
+                    .iter()
+                    .flat_map(|dlc| dlc.installer.iter()),
+            ) {
+                pack::resolve(&drive.mount, &file.path).map_err(unusable)?;
+            }
+            // The staged copy, then what the installer unpacks (about as
+            // much again).
+            game.size.saturating_mul(2)
+        }
+        StoreLayout::Installed => {
+            let copy = game
+                .installed
+                .as_ref()
+                .ok_or_else(|| damaged(&game.name, &drive.label))?;
+            if !copy.is_supported() {
+                return Err(LibraryError::Extract(NEEDS_NEWER_GRID.to_string()));
+            }
+            if copy.parts.is_empty() {
+                return Err(damaged(&game.name, &drive.label));
+            }
+            for part in &copy.parts {
+                pack::resolve(&drive.mount, &part.path).map_err(unusable)?;
+            }
+            copy.tree_bytes
+        }
+    };
+    if ctx
+        .free
+        .is_some_and(|free| free < needed.saturating_add(SPACE_MARGIN))
+    {
+        return Err(LibraryError::Extract(format!(
+            "There isn't enough free space in the library folder for {}",
+            game.name
+        )));
+    }
+    let leaf = format!("{}-{}", game.source.as_str(), game.store_id);
+    let staging = match game.layout {
+        StoreLayout::Installer => ctx.staging_root.join(format!("store-restore-{leaf}")),
+        StoreLayout::Installed => ctx.install_root.join(format!("{TMP_PREFIX}{leaf}")),
+    };
+    let runner = StoreRestore {
+        mount: drive.mount.clone(),
+        label: drive.label.clone(),
+        game: game.clone(),
+        registry: ctx.registry,
+        dest: ctx
+            .install_root
+            .join(sanitize_component(&game.name, "game")),
+        staging,
+        compat_tool: ctx.compat_tool,
+        wizard_allowed: ctx.wizard_allowed,
+        installer,
+    };
+    Ok(StoreJob {
+        source: game.source,
+        store_id: game.store_id.clone(),
+        op: StoreOp::Restore,
+        title: game.name.clone(),
+        drive: Some(DriveRef {
+            key: drive.key.clone(),
+            name: drive.name.clone(),
+            label: drive.label.clone(),
+        }),
+        runner: Arc::new(runner),
+    })
+}
+
+impl StoreRestore {
+    /// The installer files on the drive and where each is staged, in run
+    /// order: the base game's, then each DLC's in a folder of its own. A
+    /// `setup_*.exe` keeps its `.bin` parts beside it under their names.
+    fn installer_files(&self) -> Result<Vec<(Vec<drive_copy::CopyFile>, String)>, LibraryError> {
+        let mut groups = Vec::new();
+        let mut group = |dir: PathBuf,
+                         files: &[crate::backup::pack::PackFile],
+                         title: &str|
+         -> Result<(), LibraryError> {
+            let mut copies = Vec::new();
+            for file in files {
+                let src = pack::resolve(&self.mount, &file.path)
+                    .map_err(|_| damaged(&self.game.name, &self.label))?;
+                let name = if file.name.trim().is_empty() {
+                    file.path
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or("installer")
+                        .to_string()
+                } else {
+                    file.name.clone()
+                };
+                copies.push((
+                    src,
+                    dir.join(sanitize_component(&name, "installer")),
+                    file.size,
+                ));
+            }
+            groups.push((copies, title.to_string()));
+            Ok(())
+        };
+        group(self.staging.join("base"), &self.game.installer, "")?;
+        for (index, dlc) in self.game.dlc_installers.iter().enumerate() {
+            let title = if dlc.title.trim().is_empty() {
+                dlc.id.clone()
+            } else {
+                dlc.title.clone()
+            };
+            group(
+                self.staging.join(format!("dlc-{index}")),
+                &dlc.installer,
+                &title,
+            )?;
+        }
+        Ok(groups)
+    }
+
+    fn parts(&self) -> Result<Vec<PartSource>, LibraryError> {
+        let copy = self
+            .game
+            .installed
+            .as_ref()
+            .ok_or_else(|| damaged(&self.game.name, &self.label))?;
+        copy.parts
+            .iter()
+            .map(|part| {
+                pack::resolve(&self.mount, &part.path)
+                    .map(|path| PartSource {
+                        path,
+                        size: part.size,
+                        md5: part.md5.clone(),
+                    })
+                    .map_err(|_| damaged(&self.game.name, &self.label))
+            })
+            .collect()
+    }
+
+    /// The finalize half, without the cleanup.
+    fn finish(&self, sink: &mut dyn StoreProgressSink) -> Result<String, LibraryError> {
+        if self.registry.find_key(&self.game.key())?.is_some() {
+            return Err(LibraryError::Extract(format!(
+                "{} is already installed",
+                self.game.name
+            )));
+        }
+        let mut meta: GogMeta = serde_json::from_value(self.game.meta.clone()).unwrap_or_default();
+        meta.platform = self.game.platform;
+        if meta.version.trim().is_empty() {
+            meta.version = self.game.version.clone();
+        }
+        meta.installer.clear();
+        meta.installer_bytes = 0;
+        meta.exe_user_pinned = false;
+        let windows_prefix = cfg!(not(windows)) && meta.platform == GogPlatform::Windows;
+        let prefix = windows_prefix.then(|| self.dest.join(STORE_PREFIX_DIR));
+        let mut warning = String::new();
+
+        let dest_was_there = fs::symlink_metadata(&self.dest).is_ok();
+        if dest_was_there {
+            let rows = self.registry.all()?;
+            if dest_in_use(&rows, &self.dest) {
+                return Err(LibraryError::Extract(format!(
+                    "{} is already used by another game",
+                    self.dest.display()
+                )));
+            }
+            remove_path(&self.dest);
+        }
+        if let Some(parent) = self.dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let result = self.place(sink, &mut meta, prefix.as_deref(), &mut warning);
+        let info = match result {
+            Ok(info) => info,
+            Err(error) => {
+                remove_path(&self.dest);
+                return Err(error);
+            }
+        };
+
+        let mut row = gog_row(&info, &self.dest, &meta, None, prefix.as_deref());
+        if row.description.trim().is_empty() {
+            row.description = self.game.summary.clone();
+        }
+        if row.genres.trim().is_empty() {
+            row.genres = self.game.genres.join(", ");
+        }
+        if row.companies.trim().is_empty() {
+            row.companies = self.game.companies.join(", ");
+        }
+        if row.first_release_date.trim().is_empty() {
+            row.first_release_date = self.game.release_date.clone();
+        }
+        if !self.game.name.trim().is_empty() {
+            row.title = self.game.name.clone();
+        }
+        row.filesize_bytes = i64::try_from(tree_bytes(&self.dest)).unwrap_or(i64::MAX);
+        if let Err(error) = self.registry.upsert_store(&row) {
+            remove_path(&self.dest);
+            return Err(error);
+        }
+        self.restore_saves(&row, &mut warning);
+        Ok(warning)
+    }
+
+    /// Puts the game in `self.dest` (running its installer, or moving the
+    /// restored copy) and returns its info. Updates `meta` with what was
+    /// installed.
+    fn place(
+        &self,
+        sink: &mut dyn StoreProgressSink,
+        meta: &mut GogMeta,
+        prefix: Option<&Path>,
+        warning: &mut String,
+    ) -> Result<GogGameInfo, LibraryError> {
+        let id = self.game.store_id.trim();
+        match self.game.layout {
+            StoreLayout::Installer => {
+                meta.origin = GogOrigin::Offline;
+                if let Some(prefix) = prefix {
+                    fs::create_dir_all(prefix)?;
+                }
+                fs::create_dir_all(&self.dest)?;
+                sink.phase(JobPhase::RunningInstaller);
+                let wizard = (self.wizard_allowed)();
+                let groups = self.installer_files()?;
+                let mut installed_dlc = Vec::new();
+                let mut base = None;
+                for (index, (files, title)) in groups.iter().enumerate() {
+                    let Some((_, first, _)) = files.first() else {
+                        continue;
+                    };
+                    let run = (self.installer)(
+                        first,
+                        &self.dest,
+                        prefix,
+                        &self.compat_tool,
+                        wizard,
+                        sink,
+                    );
+                    match (index, run) {
+                        (0, Ok(info)) => base = Some(info),
+                        (0, Err(error)) => return Err(error),
+                        (_, Ok(_)) => installed_dlc.push(index - 1),
+                        (_, Err(error)) => {
+                            append_warning(warning, &format!("{title} wasn't installed: {error}"))
+                        }
+                    }
+                }
+                meta.dlc = installed_dlc
+                    .into_iter()
+                    .filter_map(|index| self.game.dlc_installers.get(index))
+                    .map(|dlc| GogDlcMeta {
+                        id: dlc.id.clone(),
+                        title: dlc.title.clone(),
+                        installer: Vec::new(),
+                    })
+                    .collect();
+                base.ok_or_else(|| damaged(&self.game.name, &self.label))
+            }
+            StoreLayout::Installed => {
+                meta.origin = GogOrigin::Drive;
+                for dlc in &mut meta.dlc {
+                    dlc.installer.clear();
+                }
+                sink.phase(JobPhase::Installing);
+                if !self.staging.is_dir() {
+                    return Err(damaged(&self.game.name, &self.label));
+                }
+                fs::rename(&self.staging, &self.dest)?;
+                if let Some(prefix) = prefix {
+                    fs::create_dir_all(prefix)?;
+                }
+                let infos: Vec<GogGameInfo> = find_info_files(&self.dest)
+                    .iter()
+                    .filter_map(|path| fs::read(path).ok())
+                    .filter_map(|bytes| parse_info(&bytes))
+                    .collect();
+                infos
+                    .iter()
+                    .find(|info| info.game_id.trim() == id)
+                    .or_else(|| infos.iter().find(|info| !info.is_dlc()))
+                    .cloned()
+                    .ok_or_else(|| {
+                        LibraryError::Extract(format!(
+                            "The backup of {} on {} has no GOG game info",
+                            self.game.name, self.label
+                        ))
+                    })
+            }
+        }
+    }
+
+    /// Puts the saves on the drive back once the row is written: into the
+    /// new prefix off Windows, the real folders on Windows, the install
+    /// folder for an installer restore's install-relative folders; never
+    /// into a folder that already holds files. Problems are warnings.
+    fn restore_saves(&self, row: &InstalledGame, warning: &mut String) {
+        let Some(drive_saves) = &self.game.saves else {
+            return;
+        };
+        if drive_saves.parts.is_empty() || drive_saves.folders.is_empty() {
+            return;
+        }
+        let parts: Result<Vec<PartSource>, _> = drive_saves
+            .parts
+            .iter()
+            .map(|part| {
+                pack::resolve(&self.mount, &part.path).map(|path| PartSource {
+                    path,
+                    size: part.size,
+                    md5: part.md5.clone(),
+                })
+            })
+            .collect();
+        let Ok(parts) = parts else {
+            append_warning(
+                warning,
+                &format!("Its saves on {} can't be used", self.label),
+            );
+            return;
+        };
+        let prefix = if cfg!(windows) {
+            None
+        } else {
+            row_wine_prefix(row, &self.compat_tool, None)
+        };
+        let installed = self.game.layout == StoreLayout::Installed;
+        let documents = crate::platform::windows_documents_dir();
+        let resolve = |raw: &str| {
+            // An installed copy brought its install folder's saves.
+            if installed && crate::backup::store::is_install_folder(raw) {
+                return None;
+            }
+            crate::backup::store::resolve_save_folder(
+                raw,
+                &self.dest,
+                prefix.as_ref().map(OwnedWinePrefix::as_prefix),
+                documents.as_deref(),
+            )
+        };
+        let tmp = self.dest.with_file_name(format!(
+            "{SAVES_TMP_PREFIX}{}-{}",
+            self.game.source.as_str(),
+            self.game.store_id
+        ));
+        let result = saves::restore_saves_with(
+            &pack::pack_dir(&self.mount),
+            &parts,
+            &drive_saves.folders,
+            &tmp,
+            &resolve,
+            &AtomicBool::new(false),
+        );
+        match result {
+            Ok(restored) => {
+                for line in restored.warnings(&drive_saves.folders) {
+                    append_warning(warning, &line);
+                }
+            }
+            Err(RestoreError::DriveRemoved) => append_warning(
+                warning,
+                &format!("Its saves weren't restored: {} was removed", self.label),
+            ),
+            Err(error) => append_warning(warning, &format!("Its saves weren't restored: {error}")),
+        }
+    }
+}
+
+impl StoreJobRunner for StoreRestore {
+    fn download(
+        &self,
+        cancel: &AtomicBool,
+        progress: &mut dyn FnMut(u64, u64, f64),
+    ) -> Result<(), LibraryError> {
+        let root = pack::pack_dir(&self.mount);
+        remove_path(&self.staging);
+        let result = match self.game.layout {
+            StoreLayout::Installer => {
+                let files: Vec<drive_copy::CopyFile> = self
+                    .installer_files()?
+                    .into_iter()
+                    .flat_map(|(files, _)| files)
+                    .collect();
+                drive_copy::copy_targets(&root, &self.label, &files, cancel, progress)
+            }
+            StoreLayout::Installed => {
+                let parts = self.parts()?;
+                if let Some(parent) = self.staging.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let start = Instant::now();
+                let mut on_read = |read: u64, total: u64| {
+                    let elapsed = start.elapsed().as_secs_f64();
+                    let speed = if elapsed > 0.0 {
+                        read as f64 / elapsed
+                    } else {
+                        0.0
+                    };
+                    progress(read, total, speed);
+                };
+                archive::restore_tree(
+                    &root,
+                    &parts,
+                    &self.staging,
+                    cancel,
+                    &mut on_read,
+                    &mut || Ok(()),
+                )
+                .map_err(|error| restore_error(error, &root, &self.game.name, &self.label))
+            }
+        };
+        if result.is_err() {
+            remove_path(&self.staging);
+        }
+        result
+    }
+
+    fn finalize(&self, sink: &mut dyn StoreProgressSink) -> Result<String, LibraryError> {
+        let result = self.finish(sink);
+        remove_path(&self.staging);
+        if let Some(parent) = self.staging.parent() {
+            // The staging root goes once it is empty.
+            if self.game.layout == StoreLayout::Installer {
+                let _ = fs::remove_dir(parent);
+            }
+        }
+        result
+    }
+}
+
+/// The bytes of every file under `dir`, links not followed.
+fn tree_bytes(dir: &Path) -> u64 {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| match entry.file_type() {
+            Ok(kind) if kind.is_dir() => tree_bytes(&entry.path()),
+            Ok(kind) if kind.is_file() => entry.metadata().map_or(0, |meta| meta.len()),
+            _ => 0,
+        })
+        .sum()
+}
+
+impl InstallService {
+    /// Queues the restore of the store game `game` from `drive`
+    /// ([`store_restore_job`]): into the GOG install folder, running its
+    /// installer or copying its installed copy back. Refused when it is
+    /// already installed here. `Ok(None)` when the same restore is already
+    /// queued.
+    pub fn install_store_from_drive(
+        self: &Arc<Self>,
+        drive: &super::backup_job::DriveTarget,
+        game: &PackStoreGame,
+    ) -> Result<Option<u64>, LibraryError> {
+        if self.registry.find_key(&game.key())?.is_some() {
+            return Err(LibraryError::Extract(format!(
+                "{} is already installed",
+                game.name
+            )));
+        }
+        let library = self.library_root()?;
+        let config = Config::load(&self.config_path).unwrap_or_default();
+        let configured = config.stores.gog.install_dir.trim();
+        let install_root = if configured.is_empty() {
+            library.join(game.source.platform_name())
+        } else {
+            crate::library::path_change::expand(configured, crate::platform::home_dir().as_deref())
+        };
+        let probe_at = install_root
+            .ancestors()
+            .find(|dir| dir.is_dir())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| library.clone());
+        let free = (self.space_probe().free)(&probe_at);
+        let tools_dir = self
+            .config_path
+            .parent()
+            .map(|dir| dir.join("stores"))
+            .unwrap_or_default();
+        let ctx = StoreRestoreCtx {
+            registry: self.registry.clone(),
+            install_root,
+            staging_root: library.join(super::backup_job::STAGING_DIR),
+            compat_tool: config.default_compat_tool.clone(),
+            wizard_allowed: self.wizard_allowed(),
+            free,
+        };
+        let installer = offline_installer(self.registry.clone(), tools_dir);
+        let job = store_restore_job(drive, game, ctx, installer)?;
+        self.enqueue_store_job(job)
+    }
+}
 
 #[cfg(test)]
 mod tests {
