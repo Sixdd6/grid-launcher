@@ -42,6 +42,13 @@ python3 -I docs/design/prototype/applayout.py docs/design/system/components
 - `themetoggle.js`, `themetoggle.css` — the light / dark toggle.
 - `tvmode.py`, `tvmode.js`, `tvmode.css` — the TV mode card (its own shell and focus
   engine): `python3 -I docs/design/prototype/tvmode.py docs/design/system/components`.
+- `stores.js`, `stores.css` — the Game stores card (`components/GameStores/`, written by
+  `applayout.py` on top of Game backups): store groups in the Library, store Details,
+  the install dialog, Settings › Stores, the login window and GOG offline installers.
+  `stores_bk.js` (loaded after it) adds GOG games on backup drives and RomM games whose
+  archive holds a GOG installer.
+- `tvstores.js`, `tvstores.css`, `tvstores_bk.js` — the same for TV mode: the TVStores
+  card, written by `tvmode.py` on top of the TV mode card.
 - `glyphs/` — the controller button glyphs the TV mode card inlines (Kenney Input
   Prompts, CC0; `map.json` assigns them, `License.txt` is the pack's license).
 - `icons.json` — icon paths: the app's (`app/src/lib/icons.ts`) plus proposed ones.
