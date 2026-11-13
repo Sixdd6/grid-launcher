@@ -509,3 +509,24 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
 - Dev only: `VITE_FAKE_STORES=1 npm run dev` runs the desktop UI in a browser against
   `gamestores/fakeApi.ts` (`gamestores/devMock.ts`, Tauri's IPC mock); `window.__gridFake`
   switches the prototype's states. `main.ts` imports it only under `import.meta.env.DEV`.
+
+## Integration list (lead, after all packages merge)
+
+From packages E and F, to fix once B, C and D are on main:
+1. **Notices, once each.** The desktop shell's `store-notice`/`store-login` subscription must be
+   desktop-only (TV subscribes itself). `store-notice` carries only background notices (D agreed).
+   The shared notifier must skip `installer_needs_wizard` in TV mode (TV shows its own "Couldn't
+   install X silently" card with Retry). Check the backup-queued card isn't doubled by a backend
+   notice.
+2. **Library rail (E):** `library/rail.ts` must leave store rows out of the Platforms list (no
+   "GOG" platform row; the GOG group covers it).
+3. **Backend:** `set_wizard_allowed` false in TV mode; controller input still reaches GRID while
+   the login window has focus; the launch conflict rejects with code `store_cloud_conflict`.
+4. **RomM installer-archive line** on Details / the TV game page ("Installed by running its GOG
+   installer") needs a field: add one (e.g. `InstalledGame.installed_by_installer`) at
+   integration. The pre-install line ("Its archive holds a GOG installer") can't be known before
+   download (spike 6); drop it from the build and tell the user.
+5. **Drive rail count** must include GOG games (`pack.game_count` or the UI sum).
+6. **Store covers:** check `StoreGame.cover` is a URL GRID can show through the store art
+   allowlist; TV draws store art with a plain `<img>`.
+7. Run every `gog-*` and `tv-gog-*` e2e spec (add a `tv-gog` stage group in `scripts/e2e.sh`).
