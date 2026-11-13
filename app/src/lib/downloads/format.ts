@@ -3,6 +3,16 @@
 // "Display text per status" and "Aggregate status text"). No store imports here
 // so this module stays import-cycle-free.
 import type { DownloadEntry, DownloadKind, DownloadStatus, MovePhase } from '../api';
+import {
+  rommInstallerLine,
+  storeBackupLine,
+  storeEntryLine,
+  storeKindLabel,
+  storeStripLine,
+  type LineContext,
+} from '../gamestores/downloads';
+
+export type { LineContext } from '../gamestores/downloads';
 
 const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
 
@@ -22,9 +32,19 @@ export function percent(done: number, total: number): number {
   return Math.max(0, Math.min(100, Math.trunc((done * 100) / total)));
 }
 
-export function entryDetail(e: DownloadEntry): string {
+/**
+ * A row's status line. Store rows, GOG backup rows and RomM installs that run
+ * a GOG installer from their archive take the GameStores words
+ * (`gamestores/downloads.ts`); `ctx` gives them what the row does not carry
+ * (the compatibility tool, an update's new version).
+ */
+export function entryDetail(e: DownloadEntry, ctx: LineContext = {}): string {
   if (e.kind === 'library_move') return moveDetail(e);
+  if (e.job === 'store') return storeEntryLine(e, ctx);
+  if (e.kind === 'backup_store_game') return storeBackupLine(e);
   if (e.job === 'backup') return backupDetail(e);
+  const installer = rommInstallerLine(e, ctx);
+  if (installer !== null) return installer;
   // An install from a backup drive reads the drive, not the network.
   const fetching = copiesFromDrive(e) ? `Copying from ${e.drive_label}` : 'Downloading';
   switch (e.status) {
@@ -173,6 +193,8 @@ export function aggregate(all: DownloadEntry[]): string {
  * kind so the drawer distinguishes them from ordinary game rows at a glance.
  */
 export function kindLabel(kind: DownloadKind): string {
+  const store = storeKindLabel(kind);
+  if (store !== null) return store;
   switch (kind) {
     case 'base':
       return '';
@@ -294,10 +316,14 @@ export function currentTransfer(entries: DownloadEntry[]): DownloadEntry | null 
  * and the speed slot carries the phase word when there is no byte rate to
  * show (an install reads local bytes, and a queued job has not started).
  */
-export function footerLine(entries: DownloadEntry[]): string | null {
+export function footerLine(entries: DownloadEntry[], ctx: LineContext = {}): string | null {
   const current = currentTransfer(entries);
   if (current === null) return null;
+  // GameStores README: "Copper Saints · GOG · Downloading 63% · 41.2 MB/s".
+  if (current.job === 'store') return storeStripLine(current, ctx);
   if (current.job === 'backup') return backupFooterLine(current);
+  const installer = rommInstallerLine(current, ctx);
+  if (installer !== null) return `${current.title} · ${installer}`;
 
   const dash = '—';
   let pct = dash;

@@ -14,7 +14,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use grid_core::backup::pack::{self, Pack, PackEmulator, PackGame, PackOs, PackState, TMP_SUFFIX};
+use grid_core::backup::pack::{
+    self, Pack, PackEmulator, PackGame, PackOs, PackState, PackStoreGame, TMP_SUFFIX,
+};
 use grid_core::backup::plan::{
     self, BackupPlan, BackupQueued, EmulatorItem, EmulatorKind, EmulatorPick, EmulatorSource,
     LocalState, Outdated, PlanFirmwareSet, PlanGame, PlanInput, Planned, SourceChoice,
@@ -250,6 +252,24 @@ pub fn art_owner<'a>(pack: &'a Pack, rel: &str) -> Option<&'a PackGame> {
         .find(|game| art_paths(game).any(|path| path == rel))
 }
 
+/// The store game in `pack` whose art `rel` is. Pure. `None` for anything
+/// else, an installer file or an archive part included.
+pub fn store_art_owner<'a>(pack: &'a Pack, rel: &str) -> Option<&'a PackStoreGame> {
+    pack.store_games.iter().find(|game| {
+        let assets = &game.assets;
+        [
+            &assets.cover,
+            &assets.cover_small,
+            &assets.fanart,
+            &assets.logo,
+        ]
+        .into_iter()
+        .flatten()
+        .chain(assets.screenshots.iter())
+        .any(|path| path == rel)
+    })
+}
+
 /// Whether `game` from a pack is installed on this computer. Pure. A row
 /// matches by rom id when it was installed from the pack's server: its own
 /// `source_server`, or (for a server install) the live session's server
@@ -386,13 +406,17 @@ pub fn emulators_for_added_os(pack: &Pack, os: PackOs) -> Vec<EmulatorItem> {
 
 // --- drive resolution ---------------------------------------------------------------
 
-fn install(state: &AppState) -> Result<&Arc<InstallService>, String> {
+pub(crate) fn install(state: &AppState) -> Result<&Arc<InstallService>, String> {
     state.install.as_ref().map_err(Clone::clone)
 }
 
 /// The connected drive `key`, from the latest scan (scanning once more when
 /// it is not in it, so a drive plugged in a moment ago is found).
-async fn connected(state: &AppState, app: &AppHandle, key: &str) -> Result<ScannedDrive, String> {
+pub(crate) async fn connected(
+    state: &AppState,
+    app: &AppHandle,
+    key: &str,
+) -> Result<ScannedDrive, String> {
     if let Ok(found) = state.drives.connected(key) {
         return Ok(found);
     }
@@ -401,7 +425,7 @@ async fn connected(state: &AppState, app: &AppHandle, key: &str) -> Result<Scann
 }
 
 /// The drive's pack, for a command that only reads it.
-fn readable_pack(scanned: &ScannedDrive) -> Result<Pack, String> {
+pub(crate) fn readable_pack(scanned: &ScannedDrive) -> Result<Pack, String> {
     let label = &scanned.drive.label;
     match &scanned.pack {
         Ok(PackState::Ready(pack)) => Ok(pack.clone()),
@@ -415,7 +439,7 @@ fn readable_pack(scanned: &ScannedDrive) -> Result<Pack, String> {
 }
 
 /// The drive's pack, for a command that writes to it.
-fn writable_pack(scanned: &ScannedDrive) -> Result<Pack, String> {
+pub(crate) fn writable_pack(scanned: &ScannedDrive) -> Result<Pack, String> {
     let pack = readable_pack(scanned)?;
     if scanned.drive.read_only {
         return Err(format!("{} is read-only", scanned.drive.label));
@@ -424,7 +448,7 @@ fn writable_pack(scanned: &ScannedDrive) -> Result<Pack, String> {
 }
 
 /// Whether a live backup row writes to the drive `key`.
-fn backup_running(install: &InstallService, key: &str) -> bool {
+pub(crate) fn backup_running(install: &InstallService, key: &str) -> bool {
     install
         .snapshot()
         .entries
@@ -432,12 +456,15 @@ fn backup_running(install: &InstallService, key: &str) -> bool {
         .any(|entry| entry.status.is_live() && entry.drive_id == key && entry.job == "backup")
 }
 
-fn joined<T>(result: Result<T, tokio::task::JoinError>, what: &str) -> Result<T, String> {
+pub(crate) fn joined<T>(
+    result: Result<T, tokio::task::JoinError>,
+    what: &str,
+) -> Result<T, String> {
     result.map_err(|e| format!("{what} did not finish: {e}"))
 }
 
 /// Removes `rel`'s parent folders under `gridpack/` while they are empty.
-fn prune_empty_parents(mount: &Path, rel: &str) {
+pub(crate) fn prune_empty_parents(mount: &Path, rel: &str) {
     let root = pack::pack_dir(mount);
     let Ok(path) = pack::resolve(mount, rel) else {
         return;
@@ -842,11 +869,29 @@ pub async fn drive_asset(
 ) -> Result<String, String> {
     let scanned = connected(&state, &app, &key).await?;
     let pack = readable_pack(&scanned)?;
+    let session = state.session.clone();
+    let mount = scanned.drive.mount.clone();
+    // A store game's art (GOG) has no server URL: it is cached under its
+    // place on the drive.
+    if store_art_owner(&pack, &rel).is_some() {
+        let url = format!("gridpack://{key}/{rel}");
+        let path = joined(
+            tokio::task::spawn_blocking(move || -> Result<PathBuf, String> {
+                let cache = session.cache();
+                if let Some(hit) = cache.cached_path(&url) {
+                    return Ok(hit);
+                }
+                let src = pack::resolve(&mount, &rel).map_err(err)?;
+                cache.seed(&url, &src).map_err(err)
+            })
+            .await,
+            "drive_asset",
+        )??;
+        return Ok(path.to_string_lossy().into_owned());
+    }
     let game = art_owner(&pack, &rel)
         .cloned()
         .ok_or_else(|| "That file is not a game's art on the drive".to_string())?;
-    let session = state.session.clone();
-    let mount = scanned.drive.mount.clone();
     let path = joined(
         tokio::task::spawn_blocking(move || seed_asset(session.cache(), &mount, &key, &game, &rel))
             .await,

@@ -40,7 +40,7 @@ pub fn copy_targets(
     label: &str,
     files: &[CopyFile],
     cancel: &AtomicBool,
-    on_progress: &mut (dyn FnMut(u64, u64, f64) + Send),
+    on_progress: &mut dyn FnMut(u64, u64, f64),
 ) -> Result<(), LibraryError> {
     copy_targets_with(root, label, files, cancel, on_progress, &mut || Ok(()))
 }
@@ -52,7 +52,7 @@ pub(crate) fn copy_targets_with(
     label: &str,
     files: &[CopyFile],
     cancel: &AtomicBool,
-    on_progress: &mut (dyn FnMut(u64, u64, f64) + Send),
+    on_progress: &mut dyn FnMut(u64, u64, f64),
     after_chunk: &mut dyn FnMut() -> io::Result<()>,
 ) -> Result<(), LibraryError> {
     let start = Instant::now();
@@ -171,7 +171,7 @@ fn emit(
     start: Instant,
     copied: u64,
     total: u64,
-    on_progress: &mut (dyn FnMut(u64, u64, f64) + Send),
+    on_progress: &mut dyn FnMut(u64, u64, f64),
     force: bool,
 ) {
     let now = Instant::now();

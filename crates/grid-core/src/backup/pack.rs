@@ -1327,7 +1327,52 @@ impl Pack {
             .iter()
             .flat_map(|set| set.files.iter().map(|file| file.size))
             .sum();
-        games.saturating_add(emulators).saturating_add(firmware)
+        let store: u64 = self
+            .store_games
+            .iter()
+            .map(|game| {
+                let saves = game.saves.as_ref().map_or(0, PackSaves::parts_bytes);
+                game.size.saturating_add(saves)
+            })
+            .sum();
+        games
+            .saturating_add(emulators)
+            .saturating_add(firmware)
+            .saturating_add(store)
+    }
+
+    /// A store game folder for `key` that no other entry's files use:
+    /// `candidate` itself ([`store_game_dir_rel`]), else `candidate` with
+    /// ` (2)`, ` (3)`… Paths compare without case, as on a FAT or exFAT
+    /// drive. The entry with `key` itself never collides (a rewrite).
+    pub fn unique_store_dir(&self, candidate: &str, key: &GameKey) -> String {
+        let taken: Vec<String> = self
+            .games
+            .iter()
+            .flat_map(PackGame::paths)
+            .chain(
+                self.store_games
+                    .iter()
+                    .filter(|game| &game.key() != key)
+                    .flat_map(PackStoreGame::paths),
+            )
+            .map(str::to_lowercase)
+            .collect();
+        let collides = |dir: &str| {
+            let folded = dir.to_lowercase();
+            taken.iter().any(|path| {
+                *path == folded
+                    || path.starts_with(&format!("{folded}/"))
+                    || folded.starts_with(&format!("{path}/"))
+            })
+        };
+        if !collides(candidate) {
+            return candidate.to_string();
+        }
+        (2..)
+            .map(|n| format!("{candidate} ({n})"))
+            .find(|dir| !collides(dir))
+            .unwrap_or_else(|| candidate.to_string())
     }
 }
 

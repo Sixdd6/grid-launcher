@@ -34,6 +34,14 @@
     onCloud,
     onHoverStart,
     onHoverEnd,
+    extraTags = [],
+    progress = null,
+    primaryLabel = null,
+    primaryDisabled = false,
+    primaryTitle = undefined,
+    storeTag = null,
+    showCloud = true,
+    faded = false,
   }: {
     testId: string;
     /** The card's position in the view's whole list, as `data-index`: the
@@ -74,6 +82,21 @@
     onCloud: () => void;
     onHoverStart: () => void;
     onHoverEnd: () => void;
+    /** Store covers (GameStores README): the job's "38%" / "QUEUED", UPDATE,
+     *  SAVE CONFLICT, NOT SUPPORTED tags, after the card's own. */
+    extraTags?: { text: string; tone: 'queue' | 'update' | 'conflict' | 'unsupported' }[];
+    /** A running install's bar along the cover's bottom edge (0–100); `null` for none. */
+    progress?: number | null;
+    /** The hover bar's main button text, when the caller words it (store covers). */
+    primaryLabel?: string | null;
+    primaryDisabled?: boolean;
+    primaryTitle?: string;
+    /** The store's corner tag (mark and name) in mixed grids, in place of the platform chip. */
+    storeTag?: { name: string; mono: string; hue: string } | null;
+    /** The hover bar's cloud button. */
+    showCloud?: boolean;
+    /** Faded art: a game GRID can't install. */
+    faded?: boolean;
   } = $props();
 
   /** The cover this card's drawn width needs. */
@@ -120,6 +143,7 @@
   class:focused
   class:selecting
   class:selected={selecting && selected}
+  class:faded
   onclick={onClick}
   onmousedown={onMouseDown}
   onmouseenter={onHoverStart}
@@ -142,7 +166,7 @@
 
       <!-- Top-left tags stack in one column so MISSING and UPDATE never cover
            each other (a missing game can still have a newer server version). -->
-      {#if missing || badges.update}
+      {#if missing || badges.update || extraTags.length > 0}
         <div class="tag-stack">
           {#if missing}
             <span data-testid={`library-card-missing-${badgeId}`} class="tag missing" title="Files not found">{MISSING_BADGE_TEXT}</span>
@@ -150,12 +174,19 @@
           {#if badges.update}
             <span data-testid={`library-update-badge-${badgeId}`} class="tag update">{UPDATE_TAG_TEXT}</span>
           {/if}
+          {#each extraTags as tag (tag.text)}
+            <span data-testid={`card-tag-${badgeId}`} class="tag st-{tag.tone}">{tag.text}</span>
+          {/each}
         </div>
       {/if}
       {#if badges.installed}
         <span data-testid={`installed-badge-${badgeId}`} class="dot" role="img" aria-label="Installed" title="Installed"></span>
       {/if}
-      {#if showPlatform && badges.platform}
+      {#if storeTag}
+        <span data-testid={`card-store-${badgeId}`} class="tag platform corner store-tag"
+          ><span class="mark" style:--st-hue={storeTag.hue} aria-hidden="true">{storeTag.mono}</span>{storeTag.name}</span
+        >
+      {:else if showPlatform && badges.platform}
         <span data-testid={`card-platform-${badgeId}`} class="tag platform corner">{badges.platform}</span>
       {/if}
       {#if badges.cloud}
@@ -168,6 +199,10 @@
         </span>
       {/if}
 
+      {#if progress !== null}
+        <span data-testid={`card-progress-${badgeId}`} class="cprog" aria-hidden="true"><b style:width={`${progress}%`}></b></span>
+      {/if}
+
       <!-- The shade never takes a click: a click on the cover above the bar
            falls through to `onOpen` (see `ACTION_BAR_HEIGHT_PX`). -->
       <div class="shade" aria-hidden="true"></div>
@@ -178,9 +213,17 @@
            selection with the `focused` class instead. -->
       {#if !selecting}
       <div class="bar">
-        <button data-testid={`card-primary-${badgeId}`} class="primary" onclick={act(onPrimary)} tabindex="0">
-          {cardPrimaryLabel(installed, missing)}
+        <button
+          data-testid={`card-primary-${badgeId}`}
+          class="primary"
+          onclick={act(onPrimary)}
+          tabindex="0"
+          disabled={primaryDisabled}
+          title={primaryTitle}
+        >
+          {primaryLabel ?? cardPrimaryLabel(installed, missing)}
         </button>
+        {#if showCloud}
         <button
           data-testid={`card-cloud-${badgeId}`}
           class="round"
@@ -191,6 +234,7 @@
         >
           <Icon name="cloud" size={15} />
         </button>
+        {/if}
         <button
           data-testid={`card-details-${badgeId}`}
           class="round"
@@ -493,6 +537,75 @@
   .tag,
   .cloud-badge {
     transition: opacity var(--m-fast) ease;
+  }
+
+  /* Store covers (GameStores prototype `.st-q`, `.st-conflict`, `.st-ns`,
+     `.st-cprog`, `.st-ns-card`, `.st-tag`). */
+  .tag.st-queue {
+    background: var(--primary);
+    color: var(--on-primary);
+  }
+
+  .tag.st-update {
+    background: var(--warning);
+    color: #1a1a12;
+    letter-spacing: 0.06em;
+  }
+
+  .tag.st-conflict {
+    background: #c62828;
+    color: #fff;
+    letter-spacing: 0.06em;
+  }
+
+  .tag.st-unsupported {
+    background: var(--field);
+    color: var(--text-h);
+    letter-spacing: 0.06em;
+    border: 1px solid var(--line-strong);
+  }
+
+  .cprog {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 2;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.45);
+  }
+
+  .cprog b {
+    display: block;
+    height: 100%;
+    background: var(--primary);
+    transition: width 300ms ease;
+  }
+
+  .faded .cover :global(img) {
+    filter: saturate(0.35) brightness(0.8);
+  }
+
+  .primary:disabled {
+    opacity: 0.7;
+    cursor: default;
+  }
+
+  .tag.store-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .store-tag .mark {
+    display: inline-grid;
+    place-items: center;
+    width: 11px;
+    height: 11px;
+    border-radius: 2px;
+    background: var(--st-hue, var(--field));
+    color: #fff;
+    font: 700 7px/1 system-ui, sans-serif;
   }
 
   .tag {

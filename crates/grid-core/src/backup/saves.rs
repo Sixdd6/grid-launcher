@@ -178,10 +178,28 @@ fn refusal_text(refusal: &ScanRefusal) -> &'static str {
 /// in [`SavesScan::refused`]; the others are still copied. A folder that
 /// is itself a link to a folder is followed.
 pub fn scan_saves(folders: &[String], prefix: WinePrefix<'_>, for_windows: bool) -> SavesScan {
+    scan_saves_with(
+        folders,
+        &|raw| translate_windows_path_to_wine_prefix(raw, prefix),
+        prefix.path,
+        for_windows,
+    )
+}
+
+/// [`scan_saves`] with the caller's own idea of where each folder is on
+/// this computer: `resolve` gives folder `raw`'s path, or `None` to leave
+/// it out (a GOG game's install-relative folder when the installed copy
+/// already carries it). `root` is the plan's root.
+pub fn scan_saves_with(
+    folders: &[String],
+    resolve: &dyn Fn(&str) -> Option<PathBuf>,
+    root: &Path,
+    for_windows: bool,
+) -> SavesScan {
     let mut entries = Vec::new();
     let mut refused = Vec::new();
     for (index, raw) in folders.iter().enumerate() {
-        let Some(dir) = translate_windows_path_to_wine_prefix(raw, prefix) else {
+        let Some(dir) = resolve(raw) else {
             continue;
         };
         let meta = match fs::metadata(&dir) {
@@ -211,7 +229,7 @@ pub fn scan_saves(folders: &[String], prefix: WinePrefix<'_>, for_windows: bool)
     }
     let tree = (!entries.is_empty()).then(|| {
         local::plan_of(
-            prefix.path.to_path_buf(),
+            root.to_path_buf(),
             InstalledLayout::Multi,
             Vec::new(),
             entries,
@@ -272,15 +290,26 @@ pub fn restore_targets(
     windows_documents: Option<&Path>,
     probe: impl Fn(&Path) -> TargetState,
 ) -> Vec<SaveTarget> {
+    let resolve = |raw: &str| match prefix {
+        Some(prefix) => translate_windows_path_to_wine_prefix(raw, prefix),
+        None => Some(resolve_native_save_dir(raw, windows_documents, None)),
+    };
+    restore_targets_with(folders, present, &resolve, probe)
+}
+
+/// [`restore_targets`] with the caller's own resolver (`None`: the folder
+/// has no place on this computer).
+pub fn restore_targets_with(
+    folders: &[String],
+    present: &[usize],
+    resolve: &dyn Fn(&str) -> Option<PathBuf>,
+    probe: impl Fn(&Path) -> TargetState,
+) -> Vec<SaveTarget> {
     present
         .iter()
         .filter_map(|&index| {
             let raw = folders.get(index)?;
-            let path = match prefix {
-                Some(prefix) => translate_windows_path_to_wine_prefix(raw, prefix),
-                None => Some(resolve_native_save_dir(raw, windows_documents, None)),
-            }
-            .filter(|path| path.is_absolute());
+            let path = resolve(raw).filter(|path| path.is_absolute());
             Some(match path {
                 None => SaveTarget::Unresolved { index },
                 Some(path) => match probe(&path) {
@@ -353,11 +382,42 @@ fn restore_saves_via(
     windows_documents: Option<&Path>,
     cancel: &AtomicBool,
 ) -> Result<SavesRestored, RestoreError> {
+    let resolve = |raw: &str| match prefix {
+        Some(prefix) => translate_windows_path_to_wine_prefix(raw, prefix),
+        None => Some(resolve_native_save_dir(raw, windows_documents, None)),
+    };
+    restore_saves_into(root, parts, folders, tmp, &resolve, cancel)
+}
+
+/// [`restore_saves`] with the caller's own resolver for each folder
+/// ([`restore_targets_with`]). `tmp` is removed whatever happens.
+pub fn restore_saves_with(
+    root: &Path,
+    parts: &[PartSource],
+    folders: &[String],
+    tmp: &Path,
+    resolve: &dyn Fn(&str) -> Option<PathBuf>,
+    cancel: &AtomicBool,
+) -> Result<SavesRestored, RestoreError> {
+    let _ = fs::remove_dir_all(tmp);
+    let result = restore_saves_into(root, parts, folders, tmp, resolve, cancel);
+    let _ = fs::remove_dir_all(tmp);
+    result
+}
+
+fn restore_saves_into(
+    root: &Path,
+    parts: &[PartSource],
+    folders: &[String],
+    tmp: &Path,
+    resolve: &dyn Fn(&str) -> Option<PathBuf>,
+    cancel: &AtomicBool,
+) -> Result<SavesRestored, RestoreError> {
     archive::restore_tree(root, parts, tmp, cancel, &mut |_, _| {}, &mut || Ok(()))?;
     let present: Vec<usize> = (0..folders.len())
         .filter(|index| tmp.join(index.to_string()).is_dir())
         .collect();
-    let targets = restore_targets(folders, &present, prefix, windows_documents, probe);
+    let targets = restore_targets_with(folders, &present, resolve, probe);
     for target in &targets {
         if let SaveTarget::Restore { index, path } = target {
             copy_tree(&tmp.join(index.to_string()), path).map_err(RestoreError::Io)?;

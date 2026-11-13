@@ -994,42 +994,56 @@ pub async fn offline_install(
     enqueue(&install, job)
 }
 
-/// `key` is the drive key; `game_keys` the store games' keys.
+/// `key` is the drive key; `game_keys` the store games' keys
+/// (`commands/store_backups.rs`).
 #[tauri::command]
 pub async fn plan_store_backup(
+    state: tauri::State<'_, crate::commands::AppState>,
+    app: tauri::AppHandle,
     key: String,
     game_keys: Vec<String>,
 ) -> Result<StoreBackupPlan, String> {
-    let _ = (key, game_keys);
-    not_implemented()
+    crate::commands::store_backups::plan(&state, &app, &key, &game_keys).await
 }
 
 #[tauri::command]
 pub async fn start_store_backup(
+    state: tauri::State<'_, crate::commands::AppState>,
+    app: tauri::AppHandle,
     key: String,
     game_keys: Vec<String>,
 ) -> Result<BackupQueued, String> {
-    let _ = (key, game_keys);
-    not_implemented()
+    crate::commands::store_backups::start(&state, &app, &key, &game_keys).await
 }
 
 #[tauri::command]
-pub async fn drive_store_games(key: String) -> Result<Vec<DriveStoreGame>, String> {
-    let _ = key;
-    not_implemented()
+pub async fn drive_store_games(
+    state: tauri::State<'_, crate::commands::AppState>,
+    app: tauri::AppHandle,
+    key: String,
+) -> Result<Vec<DriveStoreGame>, String> {
+    crate::commands::store_backups::list(&state, &app, &key).await
 }
 
 #[tauri::command]
-pub async fn install_store_from_drive(key: String, game_key: String) -> Result<(), String> {
-    let _ = (key, game_key);
-    not_implemented()
+pub async fn install_store_from_drive(
+    state: tauri::State<'_, crate::commands::AppState>,
+    app: tauri::AppHandle,
+    key: String,
+    game_key: String,
+) -> Result<(), String> {
+    crate::commands::store_backups::install(&state, &app, &key, &game_key).await
 }
 
 /// Answers how many games were removed.
 #[tauri::command]
-pub async fn remove_store_from_drive(key: String, game_keys: Vec<String>) -> Result<u32, String> {
-    let _ = (key, game_keys);
-    not_implemented()
+pub async fn remove_store_from_drive(
+    state: tauri::State<'_, crate::commands::AppState>,
+    app: tauri::AppHandle,
+    key: String,
+    game_keys: Vec<String>,
+) -> Result<u32, String> {
+    crate::commands::store_backups::remove(&state, &app, &key, &game_keys).await
 }
 
 #[cfg(test)]

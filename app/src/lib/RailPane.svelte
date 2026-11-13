@@ -22,6 +22,14 @@
     icon?: IconName;
     /** The row's tooltip (a drive row's volume label). */
     title?: string;
+    /** A store group's heading (GameStores README): its monogram tile before the heading text. */
+    headingMark?: { mono: string; hue: string };
+    /** The store heading's badge: `!` (needs attention) or `off` (not connected). */
+    headingFlag?: { text: string; title: string } | null;
+    /** A store group's rows sit indented under their heading. */
+    indent?: boolean;
+    /** The count is a spinner (`loading`) or a `!` (`attention`) instead of a number. */
+    countKind?: 'number' | 'loading' | 'attention';
   };
 </script>
 
@@ -46,12 +54,26 @@
 <nav data-testid={testId} class="rail" aria-label={ariaLabel}>
   {#each entries as entry (entry.key)}
     {#if entry.heading}
-      <span class="rail-heading">{entry.heading}</span>
+      <span class="rail-heading" class:store-head={entry.headingMark !== undefined}>
+        {#if entry.headingMark}
+          <span class="rail-mark" style:--st-hue={entry.headingMark.hue} aria-hidden="true">{entry.headingMark.mono}</span>
+        {/if}
+        {entry.heading}
+        {#if entry.headingFlag}
+          <span
+            class="rail-flag"
+            class:off={entry.headingFlag.text === 'off'}
+            title={entry.headingFlag.title}
+            data-testid={`${entry.testId}-flag`}>{entry.headingFlag.text}</span
+          >
+        {/if}
+      </span>
     {/if}
     <button
       data-testid={entry.testId}
       data-rail={entry.dataRail}
       class="rail-item"
+      class:indent={entry.indent}
       class:active={entry.selected}
       aria-current={entry.selected ? 'page' : undefined}
       title={entry.title}
@@ -61,7 +83,11 @@
         <span class="rail-icon" aria-hidden="true"><Icon name={entry.icon} size={14} /></span>
       {/if}
       <span class="rail-label">{entry.label}</span>
-      {#if entry.count !== undefined}
+      {#if entry.countKind === 'loading'}
+        <span data-testid={entry.countTestId} class="rail-count" aria-label="Loading"><span class="rail-spin"></span></span>
+      {:else if entry.countKind === 'attention'}
+        <span data-testid={entry.countTestId} class="rail-count warn" aria-label="Needs attention">!</span>
+      {:else if entry.count !== undefined}
         <span data-testid={entry.countTestId} class="rail-count">{entry.count}</span>
       {/if}
     </button>
@@ -159,5 +185,81 @@
     flex: none;
     font-size: 11px;
     color: var(--text-muted);
+  }
+
+  /* GameStores prototype `.st-head`, `.st-flag`, `.st-row`, `.st-spin`. */
+  .rail-heading.store-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .rail-mark {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    background: var(--st-hue, var(--field));
+    color: #fff;
+    font: 700 9px/1 system-ui, sans-serif;
+    letter-spacing: 0;
+  }
+
+  .rail-flag {
+    margin-left: auto;
+    display: inline-grid;
+    place-items: center;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    box-sizing: border-box;
+    border-radius: var(--r-pill);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0;
+    background: var(--warning);
+    color: #1a1a12;
+  }
+
+  .rail-flag.off {
+    background: var(--field);
+    color: var(--text-muted);
+    border: 1px solid var(--line-strong);
+  }
+
+  .rail-item.indent {
+    padding-left: 26px;
+  }
+
+  .rail-count.warn {
+    color: var(--warning-text);
+    font-weight: 700;
+  }
+
+  .rail-spin {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    box-sizing: border-box;
+    border-radius: 50%;
+    border: 2px solid var(--line-strong);
+    border-top-color: var(--primary);
+    animation: rail-spin 800ms linear infinite;
+    vertical-align: -1px;
+  }
+
+  @keyframes rail-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rail-spin {
+      animation: none;
+      border-top-color: var(--line-strong);
+    }
   }
 </style>

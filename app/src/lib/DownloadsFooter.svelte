@@ -3,11 +3,12 @@
   import { currentTransfer, footerLine } from './downloads/format';
   import Sparkline from './downloads/Sparkline.svelte';
   import Icon from './Icon.svelte';
+  import { compatTools } from './stores/compatTools.svelte';
 
   let { onOpen }: { onOpen: () => void } = $props();
 
   let current = $derived(currentTransfer(downloads.entries));
-  let line = $derived(footerLine(downloads.entries));
+  let line = $derived(footerLine(downloads.entries, { compat: compatTools.defaultTool }));
 </script>
 
 <!-- Always mounted, hidden when nothing is live (design §3). Clicking

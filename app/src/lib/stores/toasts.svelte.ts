@@ -15,7 +15,9 @@ export type ToastLevel = 'success' | 'error';
  *  TV mode's cards show the second line, and View runs the action (TV mode
  *  plan P6, checklist items 144, 148). */
 export type ToastAction = { label: string; run: () => void };
-export type ToastExtra = { sub?: string; action?: ToastAction };
+/** `desktopAction` is the one button a desktop card shows beside Dismiss
+ *  (GameStores README: the store cards' Play, Try again, Sign in again…). */
+export type ToastExtra = { sub?: string; action?: ToastAction; desktopAction?: ToastAction };
 
 /** A pushed card, as a subscriber (TV mode's card stack) sees it. */
 export type PushedToast = { text: string; level: ToastLevel; durationMs: number } & ToastExtra;
@@ -28,6 +30,8 @@ export type Toast = {
   durationMs: number;
   /** True while the pointer is over the card or focus is inside it. */
   paused: boolean;
+  /** The card's one action button on the desktop, when it has one. */
+  desktopAction?: ToastAction;
 };
 
 /**
@@ -101,7 +105,14 @@ export function pushToast(
   for (const fn of subscribers) fn({ text: trimmed, level, durationMs, ...extra });
   nextId += 1;
   const id = nextId;
-  const next = appendToast(state.list, { id, text: trimmed, level, durationMs, paused: false });
+  const next = appendToast(state.list, {
+    id,
+    text: trimmed,
+    level,
+    durationMs,
+    paused: false,
+    ...(extra.desktopAction ? { desktopAction: extra.desktopAction } : {}),
+  });
   // Cards that fell off the top of a full stack take their timers with them.
   const kept = new Set(next.map((t) => t.id));
   for (const t of state.list) if (!kept.has(t.id)) stopTimer(t.id);

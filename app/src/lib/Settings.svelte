@@ -1,6 +1,6 @@
 <script lang="ts">
   // The Settings view (design §10, D-UI-5): a 220px category rail and one
-  // pane per page. All eight panes stay mounted and switch with `hidden`,
+  // pane per page. All nine panes stay mounted and switch with `hidden`,
   // the same rule the shell applies to views, so an in-flight save or a
   // typed-but-unsaved field survives a rail click. Each pane's column caps
   // at 1100px (D-UI-7).
@@ -19,6 +19,7 @@
   import UpdatesPage from './settings/UpdatesPage.svelte';
   import AppearancePage from './settings/AppearancePage.svelte';
   import BackupDrivesPage from './settings/BackupDrivesPage.svelte';
+  import StoresPage from './settings/StoresPage.svelte';
   import SystemsPage from './systems/SystemsPage.svelte';
 
   let {
@@ -91,6 +92,8 @@
                  form holds a plain-typed password, so leaving this page must
                  clear it. -->
             <RetroAchievementsPage active={active && page === 'retroachievements'} />
+          {:else if p === 'stores'}
+            <StoresPage active={active && page === 'stores'} />
           {:else if p === 'systems'}
             <!-- Page-level activation: its fetches (and the once-per-session
                  update check) run only while it is in front. -->

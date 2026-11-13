@@ -474,6 +474,104 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
   `<data>/stores/save-backups/gog/<id>/<epoch-ms>/<location>/`, newest 5 kept.
 - `auth::read_stdout` is the one place GOG code reads a tool's kept stdout (a JSON parse).
 
+### Package E
+
+- `api.ts` is unchanged: no type or method was missing for the desktop UI.
+- **Who raises which card.** The frontend words the cards for the commands it calls and their
+  answers: added to download queue (install dialog, offline installer), refusals, Launching /
+  Syncing cloud saves, the cloud conflict choices, uninstalled, disconnected, and the sign-in
+  outcome from `store-login` ("Connected to GOG as …", "Couldn’t sign in to GOG: …" · Try again).
+  Package D's `store-notice` carries the asynchronous ones only (tool installing / installed,
+  owned list loaded, installed / updated / verified, update available, cloud upload after a game
+  closes, the offline installer's wizard fallback). D must not also send `store-notice` for the
+  ones above, or they show twice. Store rows (`job: 'store'`) earn no card from the Downloads
+  diff.
+- RomM installs that run a GOG installer from their archive are worded by the frontend from the
+  row: the wizard card on the move to `phase: 'installer_wizard'`, the failure card from
+  `failure` (`install_base` carries `title` and, when known, `key: 'gog:<base_gog_id>'`), and
+  the generic "Couldn’t install" card is not shown for a row with `failure`.
+- `launch_game_key`'s conflict refusal is read from `{ code: 'store_cloud_conflict' }`; the
+  prompt then reads `store_cloud_state` for the two sides.
+- `StoreGame.cover` and `screenshots` go through `ensure_image` like RomM art (a URL or a data
+  URL); a backend that answers a cached path should answer the URL instead.
+- `DownloadEntry.detail` is read for: a store tool's completed version ("Installed · 1.4.0"), a
+  repair's result ("Verified · 2 files repaired"), and a GOG backup row's layout ("Installer
+  files and saves"). An update's new version comes from the game's library entry.
+- The store rail rows' keys are `store:<source>:installed|available`; `RailKey` gained
+  `` `store:${string}` ``. Settings gained the `stores` page (and TV mode's `TV_PANES` the
+  `stores` pane, which package F fills).
+- Shared components gained optional props only: `RailPane` (store heading mark, flag, indent,
+  spinner / `!` counts), `GameCard` (extra tags, progress bar, primary label, store corner tag,
+  no cloud button, faded art), the toasts (`desktopAction`, the desktop card's one button).
+- Desktop components live in `app/src/lib/gamestores/desktop/`; package F imports only the pure
+  modules in `app/src/lib/gamestores/*.ts` and `stores/gameStores.svelte.ts`. TV mode shows
+  `store-notice` its own way through `onStoreNotice` (the desktop's wiring is in `StoreLayer`).
+- Dev only: `VITE_FAKE_STORES=1 npm run dev` runs the desktop UI in a browser against
+  `gamestores/fakeApi.ts` (`gamestores/devMock.ts`, Tauri's IPC mock); `window.__gridFake`
+  switches the prototype's states. `main.ts` imports it only under `import.meta.env.DEV`.
+
+## Integration list (lead, after all packages merge)
+
+From packages E and F, to fix once B, C and D are on main:
+1. **Notices, once each.** The desktop shell's `store-notice`/`store-login` subscription must be
+   desktop-only (TV subscribes itself). `store-notice` carries only background notices (D agreed).
+   The shared notifier must skip `installer_needs_wizard` in TV mode (TV shows its own "Couldn't
+   install X silently" card with Retry). Check the backup-queued card isn't doubled by a backend
+   notice.
+2. **Library rail (E):** `library/rail.ts` must leave store rows out of the Platforms list (no
+   "GOG" platform row; the GOG group covers it).
+3. **Backend:** `set_wizard_allowed` false in TV mode; controller input still reaches GRID while
+   the login window has focus; the launch conflict rejects with code `store_cloud_conflict`.
+4. **RomM installer-archive line** on Details / the TV game page ("Installed by running its GOG
+   installer") needs a field: add one (e.g. `InstalledGame.installed_by_installer`) at
+   integration. The pre-install line ("Its archive holds a GOG installer") can't be known before
+   download (spike 6); drop it from the build and tell the user.
+5. **Drive rail count** must include GOG games (`pack.game_count` or the UI sum).
+6. **Store covers:** check `StoreGame.cover` is a URL GRID can show through the store art
+   allowlist; TV draws store art with a plain `<img>`.
+7. Run every `gog-*` and `tv-gog-*` e2e spec (add a `tv-gog` stage group in `scripts/e2e.sh`).
+
+### Package C
+
+No frozen type changed (`Pack`, `PackStoreGame`, `StoreLayout`, `api.ts` as in Step 0).
+Additions and choices the other packages should know:
+- The five store backup commands keep their IPC arguments and gain `State`/`AppHandle`;
+  their bodies live in a new `app/src-tauri/src/commands/store_backups.rs`.
+- `InstallService` gains `set_store_running_check(Fn(&GameKey) -> bool)` (the store
+  backup commands install it from the launch service's sessions on each call; package D
+  may move that wiring into `lib.rs`), `store_running`, `store_job_live` (a live
+  `job == "store"` row for the key: the "being installed or updated" refusal),
+  `store_backup_busy` (a live `backup_store_game` row: for D's uninstall/update guards),
+  `plan_store_backup`, `start_store_backup` and `install_store_from_drive`.
+  `BackupItem::Store(StoreItem)`; `BackupJob.client` is now `Option` (a store backup
+  needs no server; retry too).
+- Restore: `drive_restore::store_restore_job(drive, game, StoreRestoreCtx, InstallerRun)`.
+  The installer step is a seam (`InstallerRun`); production uses
+  `offline_installer` = `offline::inspect(staged, registry, <config dir>/stores)` then
+  `offline::run_into`. DLC installers run after the base game into the same folder and
+  prefix; a DLC failure is a warning. An installer restore records origin `offline`, no
+  `installer` paths and `installer_bytes` 0 (the staged copy is deleted); an installed
+  copy records origin `drive`. Both clear `exe_user_pinned` (the pinned path is gone).
+- A restored Windows GOG game (off Windows) gets `<install dir>/prefix`
+  (`backup::store::STORE_PREFIX_DIR`) as its Wine prefix. A backup leaves out the row's
+  `native_wineprefix` when it is inside the install folder, and a `prefix/` holding
+  `drive_c` or `pfx`. Package A: put GOG prefixes there too, or anywhere outside the
+  install folder.
+- Save folders: `meta.save_locations` (GOG's `<?VAR?>` paths) become Windows-token
+  folders, and `<?INSTALL?>\…` for a folder inside the install folder; the cloud-save
+  folders GRID's config knows for the title are added for a Windows game.
+- A store job's download half has no phase sink, so a restore row shows
+  `RunningInstaller` / `Installing` only from finalize; while it copies off the drive
+  its phase is `none` (the row's kind `store_restore` with `drive_label` tells the UI).
+- `DriveStoreGame.cover` is the pack path of the cover; `drive_asset` serves a store
+  game's art under the cache key `gridpack://<drive>/<rel>`. A backup's cover is the
+  row's `cover_large_path`/`cover_small_path` (a local file or the image cache's copy).
+- Drive summaries count store games in `game_count`; `Pack::pack_bytes` includes them.
+- `drive_copy::copy_targets` no longer needs a `Send` progress callback.
+8. **From package C:** check the real installer-restore path (`offline::inspect` then `run_into`)
+   once B is on main (C tested it through a seam). A restore row shows phase `none` while it
+   copies off the drive (the download half has no phase sink): give it `CopyingFromDrive`.
+
 ## Package D (app services, login window, e2e harness)
 
 ### Login window (spike 3 and 4 outcome)

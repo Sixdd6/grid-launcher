@@ -192,6 +192,9 @@ function outcomeNotice(entry: DownloadEntry, ctx: NoticeContext): Notice | null 
           return { group: 'content-installed', text: `Extra content for ${t} installed`, level: 'success' };
         return { group: 'game-installed', text: `${t} installed`, level: 'success' };
       case 'failed': {
+        // A failure in the archive's GOG installer has its own card, worded
+        // from `failure` (gamestores/notices.ts `installerFailedNotice`).
+        if (entry.failure) return null;
         const what = shape === 'update' ? `Couldn't update ${t}` : shape === 'content' ? `Couldn't install extra content for ${t}` : `Couldn't install ${t}`;
         return { group: 'game-failed', text: withReason(what, entry.error), level: 'error', action: 'downloads' };
       }
