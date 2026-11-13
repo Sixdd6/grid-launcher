@@ -78,7 +78,8 @@ use paths::{
     sanitize_component, saves_dir, SAVES_DIR,
 };
 use platforms::{
-    is_native_platform, is_ps3_platform, is_ps4_platform, is_ps5_platform, is_xbox360_platform,
+    is_native_platform, is_ps3_platform, is_ps4_platform, is_ps5_platform, is_windows_platform,
+    is_xbox360_platform,
 };
 use queue::{
     Admission, CancelAction, DownloadStatus, DownloadsSnapshot, EntryMeta, JobKey, JobPhase,
@@ -1274,6 +1275,12 @@ pub struct InstallService {
     /// ([`Self::set_wizard_allowed`]; the app answers `!tv_mode`). Yes
     /// until the app installs its own.
     wizard_allowed: RwLock<Arc<dyn Fn() -> bool + Send + Sync>>,
+    /// What runs a GOG installer found in a RomM archive, and the
+    /// supervisor's timing ([`Self::set_installer_runner`], a test seam).
+    installer_runner: RwLock<(
+        Arc<dyn crate::stores::offline::InstallerSpawner>,
+        crate::stores::offline::Watch,
+    )>,
     /// Test hook run before each file (and archive part) a backup writes
     /// to its drive.
     backup_write_hook: RwLock<Option<Arc<dyn Fn() + Send + Sync>>>,
@@ -1354,6 +1361,10 @@ impl InstallService {
             backup_rows: Mutex::new(HashMap::new()),
             store_rows: Mutex::new(HashMap::new()),
             wizard_allowed: RwLock::new(Arc::new(|| true)),
+            installer_runner: RwLock::new((
+                Arc::new(crate::stores::offline::SystemSpawner),
+                crate::stores::offline::Watch::default(),
+            )),
             backup_write_hook: RwLock::new(None),
             local_scans: Mutex::new(HashMap::new()),
             drive_rows: Mutex::new(HashMap::new()),
@@ -3268,6 +3279,16 @@ impl InstallService {
         self.wizard_allowed.read().unwrap().clone()
     }
 
+    /// Replaces what runs a GOG installer found in a RomM archive, and the
+    /// stall timing. A test seam: the default spawns the real process.
+    pub fn set_installer_runner(
+        &self,
+        spawner: Arc<dyn crate::stores::offline::InstallerSpawner>,
+        watch: crate::stores::offline::Watch,
+    ) {
+        *self.installer_runner.write().unwrap() = (spawner, watch);
+    }
+
     /// Entry `id` moved to `phase`: its row shows it at once.
     pub fn on_install_phase(&self, id: u64, phase: JobPhase) {
         self.queue.lock().unwrap().set_phase(id, phase);
@@ -3875,8 +3896,14 @@ impl InstallService {
         // it gets a fresh flag, registered before the task exists. A cancel
         // that landed between the download ending and this point left
         // `Cancelling` behind; honour it.
+        // A running installer (a store installer job, or a RomM archive
+        // that holds one) is cancellable too, once it reports its phase
+        // (`JobPhase::is_cancellable_install`); its flag is registered here.
         let cancel = Arc::new(AtomicBool::new(false));
-        if matches!(payload, JobPayload::Backup(_)) {
+        if matches!(
+            payload,
+            JobPayload::Backup(_) | JobPayload::Store(_) | JobPayload::Game(_)
+        ) {
             self.cancel_flags.lock().unwrap().insert(id, cancel.clone());
             let cancelling = matches!(
                 self.queue.lock().unwrap().entry(id).map(|e| e.status),
@@ -3971,7 +3998,11 @@ impl InstallService {
             JobPayload::Backup(job) => self.finalize_backup(id, job, cancel, &mut warning),
             JobPayload::Store(job) => job
                 .runner
-                .finalize(&mut ServiceSink { service: self, id })
+                .finalize(&mut ServiceSink {
+                    service: self,
+                    id,
+                    cancel: Some(cancel),
+                })
                 .map(|message| warning = message),
         };
         (result, warning)
@@ -4460,19 +4491,31 @@ impl InstallService {
         record.native_game_dir = path_string(game_dir);
 
         let mut archive_to_delete = None;
+        // An archive holding a GOG offline installer: its launch comes from
+        // the installed game info, not from `game.json`'s launch section.
+        let mut ran_installer = false;
         // D13: a bare disc image or loose executable served under a native
         // platform is not an archive, whatever `should_extract`'s table says.
-        if should_extract(
+        let extracts = should_extract(
             &job.detail.platform_slug,
             &job.detail.platform_name,
             archive,
-        ) && is_extractable_archive(archive)
-        {
-            // Fixed at `<home>/game` whatever the archive is called, so
-            // every native install has the same shape.
-            let dest = game_dir.join("game");
+        ) && is_extractable_archive(archive);
+        // Fixed at `<home>/game` whatever the archive is called, so every
+        // native install has the same shape.
+        let dest = game_dir.join("game");
+        if extracts {
             let mut progress = |processed, total| self.on_install_progress(id, processed, total);
             extract_archive(archive, &dest, &mut progress)?;
+            if let Some(installer) = crate::stores::offline::detect_in_dir(&dest) {
+                archive_to_delete =
+                    self.finalize_installer_archive(id, job, record, game_dir, &dest, &installer)?;
+                ran_installer = true;
+            }
+        }
+        if ran_installer {
+            // The installer laid the game down; nothing more to pick.
+        } else if extracts {
             let Some(launch) = select_launch_file(&dest, &archive_stem(archive)) else {
                 let _ = fs::remove_dir_all(&dest);
                 return Err(LibraryError::NoLaunchFile);
@@ -4505,12 +4548,89 @@ impl InstallService {
             if let Ok(bytes) = fs::read(sidecar) {
                 if let Some(parsed) = specials::native::parse_game_json(&bytes) {
                     specials::native::apply_game_json(record, &parsed);
-                    let folder = sidecar_game_folder(record, game_dir);
-                    apply_sidecar_launch_to(record, &folder, Some(&parsed), warning);
+                    if !ran_installer {
+                        let folder = sidecar_game_folder(record, game_dir);
+                        apply_sidecar_launch_to(record, &folder, Some(&parsed), warning);
+                    }
                 }
             }
         }
         Ok(archive_to_delete)
+    }
+
+    /// A native archive that holds a GOG offline installer
+    /// ([`specials::gog_installer`]): the extracted archive moves aside to
+    /// `<home>/installer`, the installer runs into `<home>/game` (a DLC:
+    /// into its base game), and the row stays a RomM row with the installed
+    /// game's launch. The Downloads row shows the installer's phases, and a
+    /// running installer can be cancelled.
+    ///
+    /// The extracted installer is removed whatever happens. On success the
+    /// archive goes like any extracted archive's; an unrecognised installer,
+    /// a DLC without its base, or an installer error removes it too ("The
+    /// download was removed."); a run that needs its setup window (TV
+    /// mode), or a cancel, keeps it, so a retry installs without
+    /// downloading again.
+    fn finalize_installer_archive<'a>(
+        &self,
+        id: u64,
+        job: &'a InstallJob,
+        record: &mut InstalledGame,
+        game_dir: &Path,
+        extracted: &Path,
+        installer: &Path,
+    ) -> Result<Option<&'a Path>, LibraryError> {
+        let archive = job.primary_archive.as_path();
+        let staging = game_dir.join("installer");
+        let _ = fs::remove_dir_all(&staging);
+        fs::rename(extracted, &staging)?;
+        let installer = staging.join(installer.strip_prefix(extracted).unwrap_or(installer));
+        let compat = Config::load(&self.config_path)
+            .map(|config| config.default_compat_tool)
+            .unwrap_or_default();
+        let (spawner, watch) = self.installer_runner.read().unwrap().clone();
+        let cancel = self.cancel_flags.lock().unwrap().get(&id).cloned();
+        let wizard_allowed = (self.wizard_allowed())();
+        let mut sink = ServiceSink {
+            service: self,
+            id,
+            cancel: cancel.as_deref(),
+        };
+        let result = specials::gog_installer::install(
+            &specials::gog_installer::ArchiveRun {
+                installer: &installer,
+                game_dir,
+                windows_platform: is_windows_platform(
+                    &job.detail.platform_slug,
+                    &job.detail.platform_name,
+                ),
+                registry: &self.registry,
+                compat: &compat,
+                wizard_allowed,
+                spawner: spawner.as_ref(),
+                watch,
+            },
+            &mut sink,
+        );
+        let _ = fs::remove_dir_all(&staging);
+        let installed = match result {
+            Ok(installed) => installed,
+            Err(error) => {
+                if specials::gog_installer::removes_download(&error) {
+                    let _ = fs::remove_file(archive);
+                }
+                return Err(error);
+            }
+        };
+        record.extracted_dir = path_string(&installed.extracted_dir);
+        record.extracted_path = installed.executable.clone();
+        record.native_executable_path = installed.executable;
+        record.native_launch_parameters = installed.arguments;
+        record.native_working_dir = installed.working_dir;
+        record.native_wineprefix = installed.wineprefix;
+        record.native_compat_tool = installed.compat_tool;
+        record.native_launch_source = specials::native::LAUNCH_SOURCE_SIDECAR.to_string();
+        Ok(Some(archive))
     }
 
     /// Finalizes a PlayStation 3 base install.
@@ -6523,10 +6643,12 @@ fn add_mode(path: &Path, extra: u32) {
 #[cfg(not(unix))]
 fn make_tree_writable(_dir: &Path) {}
 
-/// A store job's finalize sink: progress and phase go to its row.
+/// A store job's (or an installer archive's) finalize sink: progress and
+/// phase go to its row; `cancel` is the entry's finalize flag.
 struct ServiceSink<'a> {
     service: &'a InstallService,
     id: u64,
+    cancel: Option<&'a AtomicBool>,
 }
 
 impl StoreProgressSink for ServiceSink<'_> {
@@ -6536,6 +6658,10 @@ impl StoreProgressSink for ServiceSink<'_> {
 
     fn phase(&mut self, phase: JobPhase) {
         self.service.on_install_phase(self.id, phase);
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel.is_some_and(|flag| flag.load(Ordering::Relaxed))
     }
 }
 

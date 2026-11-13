@@ -572,6 +572,52 @@ Additions and choices the other packages should know:
    once B is on main (C tested it through a seam). A restore row shows phase `none` while it
    copies off the drive (the download half has no phase sink): give it `CopyingFromDrive`.
 
+### Package B
+
+- `StoreProgressSink` gains `fn cancelled(&self) -> bool` (default `false`): `run_into`'s
+  signature has no cancel, so the sink carries it. The queue lets a finalizing entry be
+  cancelled while its phase is `InstallerSilent`, `InstallerWizard` or `RunningInstaller`
+  (`JobPhase::is_cancellable_install`); `spawn_finalize` registers a cancel flag for game and
+  store jobs too, and the service sink answers from it. A cancel kills the installer's
+  process group (`taskkill /T` on Windows) and runs `wineserver -k` in its prefix.
+- Additions to `stores::offline` (nothing frozen renamed): `run_into_with` and
+  `install_job_with` take an `InstallerSpawner` and a `Watch` (stall and poll times) for
+  tests; `InstallerCommand`, `InstallerProcess`, `SystemSpawner`; `Inspection::{files,
+  file_name, title}`, `InstallerKind::platform`, `default_prefix`, `needs_prefix`,
+  `installed_infos`, `row_platform`, `base_title_guess`, `refusal_message`, `GOG_FOLDER`.
+  `InstallService::set_installer_runner(spawner, watch)` is the same seam for RomM archives.
+  `launch::native::build_installer_command` builds the umu/wine/native argv.
+- `inspect`'s `tools_dir` is unused (no innoextract).
+- innospect reads only the first 64 MiB of a `.exe` (the whole file up to 256 MiB when the
+  goggame bytes are further in); it can't read `.bin` slices. A `.exe` it lists one
+  `goggame-<id>.info` for, but can't extract, gets an id-only `info` (name = Inno
+  `AppName`). One it can't parse at all is `Verdict::Install` with `info: None` (title and
+  version from the file name); after the run the installed `goggame-*.info` decides, and
+  one that turns out to be DLC moves into its base game's folder (or fails with
+  `InstallerDlcBaseMissing`). Not a PE, not Inno, or Inno without a goggame file: "This
+  isn't a GOG installer".
+- A `.sh` with no goggame file but a numeric `id`/`gogid` in `scripts/config.lua` gets an
+  id-only identity. A Linux game launches through `start.sh`.
+- Words not in the design: a Linux installer on a non-Linux host ("This is a Linux
+  installer"); DLC for the other OS's version ("<base> is installed here as the Linux
+  version" / "This is DLC for the Windows version. A Linux game takes Linux DLC installers
+  only."); a RomM archive whose installer is for the other platform. A DLC whose base isn't
+  installed names the base from the DLC's own name ("<Base> - <DLC>"), else "its base game".
+- Paths: `GogJobCtx.library` is read as the library root; an offline install with no
+  `install_dir` goes to `<library>/GOG/<name>`. A fresh Windows install's prefix is
+  `<install dir's parent>/.prefixes/<folder name>` (package A: use the same for gogdl, or
+  say so). The installer log goes to a temporary folder beside the install folder.
+- RomM archives: the archive extracts to `<home>/game`, moves to `<home>/installer`, and the
+  installer runs into `<home>/game` (prefix `<home>/prefix`). A RomM DLC row keeps its own
+  home as `extracted_dir`/`native_game_dir` (so uninstalling it never touches the base) and
+  launches the base's executable in the base's prefix; a GOG base row also lists it in
+  `meta.dlc`. `game.json` still fills metadata, but its launch section is not applied.
+9. **One Wine prefix location for GOG.** A (gogdl) and C (restore) use `<install dir>/prefix`;
+   B (offline installers) uses `<parent>/.prefixes/<folder>`. Use `<install dir>/prefix` everywhere
+   (uninstall removes it with the game; C's backups already exclude it).
+10. **From package B:** `StoreProgressSink::cancelled` was added to a frozen trait (default false);
+    check C's restore sink and D's sinks pass cancels through.
+
 ## Package D (app services, login window, e2e harness)
 
 ### Login window (spike 3 and 4 outcome)
