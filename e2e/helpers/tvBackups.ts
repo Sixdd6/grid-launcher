@@ -12,10 +12,15 @@ export const byK = (k: string) => `[data-tv-root] [data-k="${k}"]`;
  *  had moved there. */
 export async function tap(selector: string): Promise<void> {
   // A top-bar tab isn't an item: switch to it as LB / RB would.
-  const tab = (await browser.execute((sel: string) => {
-    const el = document.querySelector(sel);
-    return el && !el.hasAttribute('data-f') ? el.getAttribute('data-tab') : null;
-  }, selector)) as string | null;
+  // While a page is open the top bar shows its breadcrumb instead of the
+  // tabs, so a tab's test id names the tab even when it isn't on screen.
+  const named = /^\[data-testid="tv-tab-(\w+)"\]$/.exec(selector)?.[1] ?? null;
+  const tab =
+    named ??
+    ((await browser.execute((sel: string) => {
+      const el = document.querySelector(sel);
+      return el && !el.hasAttribute('data-f') ? el.getAttribute('data-tab') : null;
+    }, selector)) as string | null);
   if (tab) {
     await browser.execute((t: string) => (window as unknown as { __tvE2E: { tab: (t: string) => void } }).__tvE2E.tab(t), tab);
     await browser.waitUntil(

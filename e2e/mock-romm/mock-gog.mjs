@@ -441,7 +441,7 @@ if (isMainModule()) {
     else if (args[i] === "--fixtures-dir" && args[i + 1]) { fixturesDir = path.resolve(__dirname, "..", args[++i]); }
     else if (args[i] === "--cloud-conflict") { cloudConflict = true; }
   }
-  const handle = await startMockGog({ port, logPath, fixturesDir });
+  const handle = await startMockGog({ port, logPath, fixturesDir, cloudConflict });
   // e2e.sh scrapes this exact line.
   console.log(`MOCK_GOG_URL=${handle.url}`);
   const shutdown = async () => { await handle.close(); process.exit(0); };

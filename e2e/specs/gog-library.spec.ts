@@ -74,7 +74,8 @@ describe('gog-library', () => {
     await expect($(testId('store-card-tool-gog'))).toHaveText(/gogdl .* · installed/);
     await $(testId('store-disconnect-gog')).click();
     await expect($(testId('store-disconnect-confirm-gog'))).toHaveText(expect.stringContaining('Disconnect GOG?'));
-    await $('button=Cancel').click();
+    // This card's own Cancel (another view's Cancel may come first in the page).
+    await $(testId('store-disconnect-cancel-gog')).click();
     await expect($(testId('store-disconnect-confirm-gog'))).not.toExist();
   });
 });

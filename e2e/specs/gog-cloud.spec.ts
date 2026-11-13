@@ -21,8 +21,19 @@ describe('gog-cloud', () => {
 
   it('tags the cover SAVE CONFLICT', async () => {
     await $(testId(`library-store-card-${BADGE}`)).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    const tags = await $$(`[data-testid="library-store-card-${BADGE}"] [data-testid="card-tag-${BADGE}"]`);
-    const texts = await Promise.all(tags.map((t) => t.getText()));
+    // The state is read in the background after sign-in, so the tag can come a moment later.
+    let texts: string[] = [];
+    await browser
+      .waitUntil(
+        async () => {
+          const tags = await $$(`[data-testid="library-store-card-${BADGE}"] [data-testid="card-tag-${BADGE}"]`);
+          // An element array's `map` is already async in WebdriverIO: await it, not Promise.all.
+          texts = await tags.map((t) => t.getText());
+          return texts.includes('SAVE CONFLICT');
+        },
+        { timeout: TRANSITION_TIMEOUT },
+      )
+      .catch(() => undefined);
     expect(texts).toContain('SAVE CONFLICT');
     expect((await storeCards()).length).toBeGreaterThan(0);
   });

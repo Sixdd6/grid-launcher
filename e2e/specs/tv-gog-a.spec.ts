@@ -2,7 +2,7 @@
 import { APP_START_TIMEOUT, FIXTURE_TOKEN, INSTALL_TIMEOUT, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { connectPad, focused, hints, key, waitFocused, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, pageErrors, testId, text, waitGone, waitText } from '../helpers/tvDetails.js';
-import { byK, dlLines, gridCovers, pageRow, tap, tapK, waitNotice } from '../helpers/tvBackups.js';
+import { byK, dlLines, focusOn, gridCovers, pageRow, tap, tapK, waitNotice } from '../helpers/tvBackups.js';
 
 /**
  * Stage `tv-gog/tv-gog-a` (docs/stores-phase1-plan.md package F; TVStores
@@ -34,9 +34,8 @@ describe('tv-gog-a: GOG in the Library, the game page and the install page', () 
   });
 
   it('the rail has a GOG folder with Installed and Available, open by default', async () => {
-    await key('q');
-    await key('q');
-    await key('q');
+    // The tabs wrap (LB/RB), so go to the tab itself.
+    await tap(testId('tv-tab-library'));
     await $(testId('tv-lib-fold-store-gog')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'no GOG folder in the Library rail' });
     expect(await $(testId('tv-lib-fold-store-gog')).getAttribute('aria-expanded')).toBe('true');
     await $(testId('tv-lib-rail-store-gog-installed')).waitForExist({ timeout: TRANSITION_TIMEOUT });
@@ -82,12 +81,14 @@ describe('tv-gog-a: GOG in the Library, the game page and the install page', () 
   });
 
   it('Downloads shows the store row with the GOG badge; A lists Cancel and Open', async () => {
-    await key('e');
-    await key('e');
+    // The game page is still open under the install page: LB / RB switch its
+    // tabs there, so go to the Downloads tab itself.
+    await tap(testId('tv-tab-downloads'));
     const rows = await dlLines();
     const mine = rows.find((r) => r.title.startsWith(title));
     expect(mine).toBeDefined();
-    expect(mine!.title).toContain('GOG');
+    // The store badge is the row's first kind tag (`dlLines` keeps it out of the title).
+    expect(mine!.kind).toContain('GOG');
     await browser.waitUntil(async () => (await dlLines()).some((r) => r.title.startsWith(title) && /^Installed/.test(r.line)), {
       timeout: INSTALL_TIMEOUT * 3,
       timeoutMsg: `${title} never finished installing`,
@@ -96,14 +97,22 @@ describe('tv-gog-a: GOG in the Library, the game page and the install page', () 
   });
 
   it('GOG › Installed lists it with Play; its page has the installed buttons and Cloud saves', async () => {
-    await key('q');
-    await key('q');
-    await key('q');
+    // The tabs wrap (LB/RB), so go to the tab itself.
+    await tap(testId('tv-tab-library'));
     await tap(testId('tv-lib-rail-store-gog-installed'));
     await waitText('tv-lib-name', 'GOG · Installed');
     expect(await hints()).toEqual(expect.arrayContaining(['RT Select']));
     expect(await $(testId('tv-store-backup-all')).isExisting()).toBe(true);
-    await key('ArrowRight');
+    // The game this spec installed, wherever the sort put it.
+    const k = (await browser.execute(
+      (t: string) =>
+        Array.from(document.querySelectorAll('#lib-grid [data-cover]'))
+          .find((c) => c.querySelector(`img[alt="${t}"]`) !== null || (c.textContent ?? '').includes(t))
+          ?.getAttribute('data-k') ?? null,
+      title,
+    )) as string | null;
+    expect(k).not.toBeNull();
+    await focusOn(byK(k!));
     await browser.waitUntil(async () => (await hints()).includes('X Play'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'X Play never showed' });
     await key('Enter');
     await $(testId('tv-store-details')).waitForExist({ timeout: TRANSITION_TIMEOUT });

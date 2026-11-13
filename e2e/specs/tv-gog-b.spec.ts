@@ -52,13 +52,10 @@ describe('tv-gog-b: Settings › Stores, signing in, offline installers, backups
     const d = await confirmDialog();
     expect(d).toMatchObject({ title: 'Disconnect GOG?', ok: 'Disconnect', danger: true });
     expect(d.body).toMatch(/^GRID deletes your GOG login and gogdl from this computer\./);
-    await key('Escape');
-    await waitGone('tv-confirm');
   });
 
   it('Disconnect leaves GOG not connected; Start opens the sign-in with its hints, B cancels silently', async () => {
-    await tap(testId('tv-pr-disconnect'));
-    await tap(testId('tv-confirm-ok'));
+    // `confirmDialog` read the question and pressed Disconnect: the page closes.
     await waitGone('tv-store-page');
     await tap(testId('tv-stores-row-gog'));
     await waitText('tv-rows-sub', 'Not signed in');
@@ -100,9 +97,8 @@ describe('tv-gog-b: Settings › Stores, signing in, offline installers, backups
   });
 
   it('GOG › Installed: RT picks, Y opens the Backup page', async () => {
-    await key('q');
-    await key('q');
-    await key('q');
+    // The tabs wrap (LB/RB), so go to the tab itself.
+    await tap(testId('tv-tab-library'));
     await tap(testId('tv-lib-rail-store-gog-installed'));
     await key('ArrowRight');
     await key('r');

@@ -18,6 +18,8 @@ const SH_ROM = process.env.E2E_GOG_ROMM_SH_ROM ?? '';
 const BAD_ROM = process.env.E2E_GOG_ROMM_BAD_ROM ?? '';
 
 async function install(rom: string): Promise<void> {
+  // Downloads may be on screen (the previous case ends there).
+  await $(testId('nav-server')).click();
   await openPlatform(PLATFORM);
   const card = $(testId(`game-card-${rom}`));
   await card.waitForExist({ timeout: TRANSITION_TIMEOUT });
@@ -42,6 +44,7 @@ describe('gog-romm-installer', () => {
     await install(BAD_ROM);
     await waitForToast(/^Couldn’t install .+: its archive holds an installer GRID doesn’t recognise$/);
     await openDownloads();
-    await waitForDownloadLine(/ · Failed · Its archive holds an installer GRID doesn’t recognise/);
+    // The reason is grid-core's error text, written with a plain apostrophe.
+    await waitForDownloadLine(/ · Failed · Its archive holds an installer GRID doesn['’]t recognise/);
   });
 });
