@@ -514,9 +514,17 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
   `store_tool` kind is never used. The tool's progress is `StoreStatus.tool` (`done`,
   `total`, `state`) and the cards "Installing gogdl (12 MB) for GOG…" / "gogdl installed" /
   "Couldn’t install gogdl: …" · Install gogdl.
-- The installed / updated / verified cards come from `StoresService::observe_downloads`
-  (every Downloads snapshot: a `job: "store"`, `gog:` row that reaches Completed, once). A
-  restore's card stays package C's; failures are the Downloads row's.
+- `store-notice` carries only what happens in the background (agreed with package E, whose
+  frontend raises the cards for the commands it calls: queued, refusals, the sign-in
+  outcome from `store-login`, cloud choices, uninstalled, disconnected). The backend's
+  cards: "Installing gogdl … for GOG…" (after a connect only), gogdl installed / couldn't
+  install (· Install gogdl), "GOG: N games found · M to install", login expired found in
+  the background (· Sign in again), update available (· Show), cloud saves uploaded /
+  conflict / sync failed after a session, and from `StoresService::observe_downloads`
+  (every Downloads snapshot, once per `job: "store"`, `gog:` row) installed (· Play),
+  installed from <drive> (a restore), updated, verified, and a failed row's
+  "Couldn’t install <title>" with its error as `detail` (· Install <base> for a DLC whose
+  base is missing, else · Open Downloads).
 - Store updates live in `UpdateService.store_updates` (by GOG product id) and reach the UI
   as `StoreGame.update_version`. `updates-changed` carries the RomM set only (frozen
   `UpdateRow`), so a store check re-emits that set to make the Library re-read; each new
@@ -527,6 +535,16 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
   failure only logs. The upload after the session is a second session-finished listener
   (`StoresService::install_session_finished_hook`).
 - `InstallService::set_wizard_allowed` is wired to "not TV mode" in `lib.rs`.
+- e2e stages: `gog` (`gog-login`, `gog-secrets`, a profile used without a server) and one
+  group per package E spec (`gog-library`, `gog-cloud`, `gog-offline`,
+  `gog-romm-installer`, `gog-backups`; a spec not in the checkout yet is skipped), seeded
+  per spec by `seed/gog-seed.mjs` (signed in to GOG, Ashen Tide and Grey Meridian
+  installed, Lanternfall available) on the mock RomM's `fixtures-gog` (rom 901: a GOG
+  `.sh` in its archive, 902: an unrecognised `.exe`, platform 2). Exported:
+  `E2E_GOG_INSTALLER_SH`, `E2E_GOG_INSTALLER_PKG`, `E2E_GOG_CONFLICT_KEY` (`gog:1580232252`,
+  whose cloud save the mock makes newer with `--cloud-conflict` in `gog-cloud`),
+  `E2E_GOG_ROMM_PLATFORM`, `E2E_GOG_ROMM_SH_ROM`, `E2E_GOG_ROMM_BAD_ROM`. The login helper
+  is `e2e/helpers/gogLogin.ts` (package E owns `helpers/gog.ts`).
 - e2e environment: `GRID_LAUNCHER_E2E_GOG_BASE` (app, `e2e` feature) points all five
   hosts at the mock GOG (every other group gets the dead loopback address);
   `GRID_LAUNCHER_E2E_TOOL_GOGDL` is `e2e/fake-tools/gogdl.mjs`, which package A's

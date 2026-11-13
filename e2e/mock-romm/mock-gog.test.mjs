@@ -104,3 +104,14 @@ test("the request log never records a query", async () => {
     assert.equal(mock.requestLog[0].auth, true);
   });
 });
+
+test("--cloud-conflict starts Grey Meridian with a cloud save", async () => {
+  const mock = await startMockGog({ port: 0, logPath: null, cloudConflict: true });
+  try {
+    const list = await (await fetch(`${mock.url}/v1/48628349957132247/52095557858325425`)).json();
+    assert.equal(list[0].name, "saves/slot1.sav");
+    assert.ok(!list[0].last_modified.endsWith("Z"));
+  } finally {
+    await mock.close();
+  }
+});

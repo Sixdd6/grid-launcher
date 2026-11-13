@@ -100,6 +100,7 @@ import { fileURLToPath } from "node:url";
 import { readFile, writeFile } from "node:fs/promises";
 
 import { buildStfs, buildZip } from "./archives.mjs";
+import { buildLinuxSh, buildUnrecognisedExe } from "../fake-tools/gog-installers.mjs";
 import { PCSX2_APPIMAGE_BYTES, PCSX2_ASSET_NAME } from "./mock-forge.mjs";
 
 export const FAKE_TOKEN = "FAKE-E2E-TOKEN-not-real";
@@ -255,7 +256,14 @@ function buildContentFixtures() {
     { name: "PCSX2/readme.txt", data: Buffer.from("server package\n", "utf8") },
   ]);
 
+  // RomM archives that hold a GOG offline installer (the gog stages,
+  // fixtures-gog): a Linux `.sh`, and an `.exe` with no GOG game info.
+  const gogShZipBytes = buildZip([{ name: "wren_hollow_1_0_3_12345.sh", data: buildLinuxSh() }]);
+  const gogBadZipBytes = buildZip([{ name: "setup_iron_lullaby.exe", data: buildUnrecognisedExe() }]);
+
   return {
+    gogShZipBytes,
+    gogBadZipBytes,
     zipBytes,
     bigZipBytes,
     m3uBytes,
@@ -288,6 +296,8 @@ function buildContentFixtures() {
 function contentForFile(fileName, content) {
   const lower = fileName.toLowerCase();
   if (fileName === "disc1.bin") return content.disc1Bytes;
+  if (lower === "wren_hollow_gog.zip") return content.gogShZipBytes;
+  if (lower === "iron_lullaby_gog.zip") return content.gogBadZipBytes;
   if (fileName === "disc2.bin") return content.disc2Bytes;
   if (lower.endsWith(".m3u")) return content.m3uBytes;
   if (lower === "big arcade game.zip") return content.bigZipBytes;

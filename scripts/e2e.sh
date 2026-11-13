@@ -213,6 +213,17 @@ STAGE_GROUPS=(
   # takes TV mode's typed text; (secrets) after a login and an install no log
   # holds the fake store token.
   "gog:specs/gog-login.spec.ts specs/gog-secrets.spec.ts"
+  # Package E's desktop GOG specs, each on a profile of its own seeded by
+  # seed/gog-seed.mjs: the connect form for the mock RomM (fixtures-gog: a
+  # Linux platform whose archives hold a GOG .sh and an unrecognised .exe),
+  # already signed in to GOG with two installed games. The variables they
+  # read (E2E_GOG_INSTALLER_SH/_PKG, E2E_GOG_CONFLICT_KEY, E2E_GOG_ROMM_*) are
+  # exported below. A spec file that is not in this checkout yet is skipped.
+  "gog-library:specs/gog-library.spec.ts"
+  "gog-cloud:specs/gog-cloud.spec.ts"
+  "gog-offline:specs/gog-offline.spec.ts"
+  "gog-romm-installer:specs/gog-romm-installer.spec.ts"
+  "gog-backups:specs/gog-backups.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -629,6 +640,8 @@ mock_args_for_group() {
     # Emulators platform whose `ps2` folder has PCSX2 builds for Linux and
     # Windows, so a backup never needs a forge.
     backups|tv-backups|tv-layout) printf -- '--fixtures-dir fixtures-backups' ;;
+    # The GOG stages: a Linux platform whose archives hold GOG installers.
+    gog|gog-*) printf -- '--fixtures-dir fixtures-gog' ;;
     # One "Arcade" platform of 2500 generated ROMs (`e2e_synthetic` in
     # roms.json; see mock-romm/server.mjs), with covers that take 40ms each
     # like a remote server's.
@@ -688,7 +701,7 @@ seed_script_for_group() {
     tv-settings) printf '%s' "$E2E_DIR/seed/tv-settings-seed.mjs" ;;
     tv-large-platform) printf '%s' "$E2E_DIR/seed/tv-large-platform-seed.mjs" ;;
     tv-startup) printf '%s' "$E2E_DIR/seed/tv-startup-seed.mjs" ;;
-    gog) printf '%s' "$E2E_DIR/seed/gog-seed.mjs" ;;
+    gog|gog-*) printf '%s' "$E2E_DIR/seed/gog-seed.mjs" ;;
     *) printf '' ;;
   esac
 }
@@ -699,7 +712,7 @@ seed_script_for_group() {
 # the run's keyring, but each starts the app on the state its own seed
 # variant writes.
 group_seeds_per_spec() {
-  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == "gog" ]]
+  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == gog || "$1" == gog-* ]]
 }
 
 # Runs every spec of one group against a freshly created data dir and mock.
@@ -845,7 +858,11 @@ EOF
   if group_needs_gog "$name"; then
     attempt_gog_log="$LOG_DIR/$name-attempt-$attempt.gog.log"
     rm -f "$attempt_gog_log" "$E2E_DIR/last-run-gog-requests.log"
-    ( cd "$E2E_DIR" && exec node mock-romm/mock-gog.mjs --port 0 ) >"$attempt_gog_log" 2>&1 &
+    local gog_args=""
+    # gog-cloud: Grey Meridian starts with a newer cloud save (a conflict).
+    [[ "$name" == "gog-cloud" ]] && gog_args="--cloud-conflict"
+    # shellcheck disable=SC2086 # a script-controlled flag
+    ( cd "$E2E_DIR" && exec node mock-romm/mock-gog.mjs --port 0 $gog_args ) >"$attempt_gog_log" 2>&1 &
     gog_pid=$!
     for _ in $(seq 1 100); do
       gog_url="$(sed -n 's/^MOCK_GOG_URL=\(http[^ ]*\).*/\1/p' "$attempt_gog_log" 2>/dev/null | head -n1)"
@@ -868,6 +885,12 @@ EOF
   local spec stage wdio_log out_dir rc
   for spec in $specs; do
     stage="$name/$(basename "$spec")"
+    # A group can name a spec another work package adds (the gog-* UI
+    # specs); until it is in this checkout the stage is skipped.
+    if [[ ! -f "$E2E_DIR/$spec" ]]; then
+      printf 'e2e: %s is not in this checkout; skipped\n' "$spec"
+      continue
+    fi
     wdio_log="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.log"
     out_dir="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.d"
     say "running $stage (attempt $attempt)"
@@ -875,7 +898,7 @@ EOF
     # earlier spec saved in this run's private keyring must go too, or the
     # app would restore that session. Same best-effort clear as the
     # python-import group.
-    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
+    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */gog-*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
       secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
     fi
     if [[ -n "$seed_script" ]] && group_seeds_per_spec "$name"; then
@@ -910,6 +933,13 @@ EOF
       if [[ -n "$gog_url" ]]; then
         export E2E_GOG_URL="$gog_url"
         export E2E_FAKE_GOGDL="$E2E_DIR/fake-tools/gogdl.mjs"
+        # What the GOG specs read (seed/gog-seed.mjs, fixtures-gog).
+        export E2E_GOG_INSTALLER_SH="$data_dir/installers/wren_hollow_1_0_3_12345.sh"
+        export E2E_GOG_INSTALLER_PKG="$data_dir/installers/quarry_nine_1_2_0_54321.pkg"
+        export E2E_GOG_CONFLICT_KEY="gog:1580232252"
+        export E2E_GOG_ROMM_PLATFORM=2
+        export E2E_GOG_ROMM_SH_ROM=901
+        export E2E_GOG_ROMM_BAD_ROM=902
       else
         export E2E_GOG_URL="$DEAD_FORGE_URL"
       fi
@@ -970,7 +1000,7 @@ EOF
       # <data>/media (wdio.conf.ts turns this into
       # GRID_LAUNCHER_E2E_DRIVE_ROOTS, read by the e2e build only; the
       # specs plug and unplug drives there, e2e/helpers/drives.ts).
-      if [[ "$name" == "backups" || "$name" == "tv-library" || "$name" == "tv-startup" || "$name" == "tv-backups" || "$name" == "tv-layout" ]]; then
+      if [[ "$name" == "backups" || "$name" == "tv-library" || "$name" == "tv-startup" || "$name" == "tv-backups" || "$name" == "tv-layout" || "$name" == "gog-backups" ]]; then
         mkdir -p "$data_dir/media"
         export E2E_DRIVE_ROOTS="$data_dir/media"
       fi

@@ -177,6 +177,7 @@ pub fn focus_first_field_script() -> String {
 /// GRID's page in place of a login page that could not be reached
 /// (GameStores "Network error": a warning strip inside the window). The
 /// button reloads the login page.
+#[cfg(any(target_os = "linux", test))]
 pub fn network_error_html(host: &str, login_url: &Url) -> String {
     let host = html_escape(host);
     let target = serde_json::to_string(login_url.as_str()).unwrap_or_else(|_| "\"\"".to_string());
@@ -191,6 +192,7 @@ button:focus{{outline:2px solid #7aa7ff;outline-offset:2px}}</style></head><body
     )
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn html_escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -390,15 +392,18 @@ pub fn login_window_open(app: &AppHandle) -> bool {
 #[cfg(target_os = "linux")]
 fn install_network_error_page(window: &tauri::WebviewWindow, login_url: Url) {
     let _ = window.with_webview(move |webview| {
-        use webkit2gtk::{NetworkError, WebViewExt};
+        use webkit2gtk::{NetworkError, PolicyError, WebViewExt};
         let login_url = login_url.clone();
         webview
             .inner()
             .connect_load_failed(move |view, _event, uri, error| {
-                let Some(kind) = error.kind::<NetworkError>() else {
-                    return false;
-                };
-                if matches!(kind, NetworkError::Cancelled) {
+                // A refused navigation (the finish redirect) and a
+                // cancelled load are not network errors; anything else
+                // (WebKit's network domain, or the HTTP stack's own error
+                // for a dropped or refused connection) is.
+                if error.kind::<PolicyError>().is_some()
+                    || matches!(error.kind::<NetworkError>(), Some(NetworkError::Cancelled))
+                {
                     return false;
                 }
                 let host = Url::parse(uri)

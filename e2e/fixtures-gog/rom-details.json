@@ -1,0 +1,36 @@
+{
+  "901": {
+    "id": 901,
+    "name": "Wren Hollow",
+    "fs_name_no_ext": "wren_hollow_gog",
+    "platform_id": 2,
+    "platform_display_name": "Linux",
+    "fs_name": "wren_hollow_gog.zip",
+    "summary": "A RomM archive holding a GOG Linux installer (.sh): GRID unpacks it and the game stays a RomM game.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [{ "id": 9901, "file_name": "wren_hollow_gog.zip", "file_size_bytes": 0, "is_top_level": true }],
+    "metadatum": null
+  },
+  "902": {
+    "id": 902,
+    "name": "Iron Lullaby",
+    "fs_name_no_ext": "iron_lullaby_gog",
+    "platform_id": 2,
+    "platform_display_name": "Linux",
+    "fs_name": "iron_lullaby_gog.zip",
+    "summary": "A RomM archive holding a setup .exe with no GOG game info: GRID refuses it.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [{ "id": 9902, "file_name": "iron_lullaby_gog.zip", "file_size_bytes": 0, "is_top_level": true }],
+    "metadatum": null
+  }
+}

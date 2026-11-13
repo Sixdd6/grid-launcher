@@ -14,7 +14,7 @@ import {
   waitLogin,
   waitLoginClosed,
   type StoreLoginEvent,
-} from '../helpers/gog.js';
+} from '../helpers/gogLogin.js';
 import { invoke } from '../helpers/tv.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;

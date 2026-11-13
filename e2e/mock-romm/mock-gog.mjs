@@ -44,7 +44,8 @@
 // query string or a body.
 //
 // Standalone (e2e.sh scrapes the MOCK_GOG_URL= line off stdout):
-//   node mock-gog.mjs --port 0 [--log <path>] [--fixtures-dir <dir>]
+//   node mock-gog.mjs --port 0 [--log <path>] [--fixtures-dir <dir>] [--cloud-conflict]
+//   (--cloud-conflict: Grey Meridian starts with a newer cloud save.)
 
 import http from "node:http";
 import path from "node:path";
@@ -372,7 +373,7 @@ async function handleRequest(req, res, state) {
  * Starts the mock GOG server.
  * @returns {Promise<{port:number,url:string,requestLog:Array<object>,state:object,close:()=>Promise<void>}>}
  */
-export async function startMockGog({ port = 0, logPath = DEFAULT_LOG_PATH, fixturesDir } = {}) {
+export async function startMockGog({ port = 0, logPath = DEFAULT_LOG_PATH, fixturesDir, cloudConflict = false } = {}) {
   const requestLog = [];
   const state = {
     fixtures: loadFixtures(fixturesDir),
@@ -390,6 +391,15 @@ export async function startMockGog({ port = 0, logPath = DEFAULT_LOG_PATH, fixtu
       }
     },
   };
+  if (cloudConflict) {
+    // Grey Meridian's cloud save, newer than the seeded install's last sync
+    // (seed/gog-seed.mjs): its next sync is a conflict.
+    const grey = state.fixtures.products.find((g) => g.id === "1580232252");
+    const data = Buffer.from("cloud save", "utf8");
+    state.cloud.set(`${state.fixtures.user.user_id}/${grey.client_id}`, new Map([
+      ["saves/slot1.sav", { data, hash: createHash("md5").update(data).digest("hex"), at: new Date().toISOString().replace("Z", "") }],
+    ]));
+  }
   const server = http.createServer((req, res) => {
     handleRequest(req, res, state).catch(() => {
       try { sendJson(res, 500, { detail: "mock error" }); } catch { /* closed */ }
@@ -424,10 +434,12 @@ if (isMainModule()) {
   let port = 0;
   let logPath = DEFAULT_LOG_PATH;
   let fixturesDir;
+  let cloudConflict = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port" && args[i + 1]) { port = Number(args[++i]); }
     else if (args[i] === "--log" && args[i + 1]) { logPath = path.resolve(args[++i]); }
     else if (args[i] === "--fixtures-dir" && args[i + 1]) { fixturesDir = path.resolve(__dirname, "..", args[++i]); }
+    else if (args[i] === "--cloud-conflict") { cloudConflict = true; }
   }
   const handle = await startMockGog({ port, logPath, fixturesDir });
   // e2e.sh scrapes this exact line.

@@ -17,7 +17,7 @@ import {
   waitLoginForm,
   type StoreLoginEvent,
   type StoreNotice,
-} from '../helpers/gog.js';
+} from '../helpers/gogLogin.js';
 import { invoke } from '../helpers/tv.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
@@ -32,10 +32,8 @@ async function loginCount(): Promise<number> {
  * `invoke` and the login window itself: no store UI exists yet. A profile
  * used without a server; the mock GOG serves the login page.
  *
- * Passes on package D alone: cancel, ✕, the network error, the page's own
- * failure, TV typing. Needs package A merged: the successful sign-in (its
- * `complete_login` runs the fake gogdl's `auth --code`), and the refused
- * code's wording.
+ * With package A merged every case runs end to end: the successful
+ * sign-in's `complete_login` runs the fake gogdl's `auth --code`.
  */
 describe('gog: the login window', () => {
   before(async () => {
@@ -146,7 +144,7 @@ describe('gog: the login window', () => {
     expect(error).toContain("The sign-in window isn't open.");
   });
 
-  it('a redirect without a code fails with a Try again card', async () => {
+  it('a redirect without a code fails, with its error on the store', async () => {
     const before = await loginCount();
     await openLogin();
     await submitLogin('denied');
@@ -154,14 +152,8 @@ describe('gog: the login window', () => {
     const event = await waitLogin(before);
     expect(event.outcome).toBe('failed');
     expect(event.error).toBe('GOG returned an error. Try again.');
-    await browser.waitUntil(async () => (await storeEvents<StoreNotice>('store-notice')).length > 0, {
-      timeout: LOGIN_TIMEOUT,
-      timeoutMsg: 'no error card',
-    });
-    const notice = (await storeEvents<StoreNotice>('store-notice'))[0];
-    expect(notice.error).toBe(true);
-    expect(notice.action?.kind).toBe('try_again');
-    expect(notice.message).toBe('Couldn’t sign in to GOG: GOG returned an error. Try again.');
+    // The sign-in outcome card is the frontend's, from `store-login`.
+    expect(await storeEvents<StoreNotice>('store-notice')).toEqual([]);
     const status = await gogStatus();
     expect(status.connection).toBe('not_connected');
     expect(status.last_error).toContain('GOG returned an error');
@@ -200,7 +192,8 @@ describe('gog: the login window', () => {
     expect(status.owned_count).toBe(3);
     expect(status.last_error).toBe('');
     const messages = (await storeEvents<StoreNotice>('store-notice')).map((n) => n.message);
-    expect(messages).toContain('Connected to GOG as sam_plays');
+    // "Connected to GOG as …" is the frontend's card (from `store-login`).
+    expect(messages).not.toContain('Connected to GOG as sam_plays');
     expect(messages).toContain('GOG: 3 games found · 3 to install');
     // No IPC payload carries the code.
     const payloads = JSON.stringify(await storeEvents('store-login')) + JSON.stringify(await storeEvents('store-notice'));

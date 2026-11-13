@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::{ensure_library_idle, err, AppState};
-use crate::stores_service::{cloud_state_ipc, notice, StoresService};
+use crate::stores_service::{cloud_state_ipc, StoresService};
 
 /// Emitted with the full `StoreStatus[]` whenever a store's status changes.
 pub const STORES_CHANGED_EVENT: &str = "stores-changed";
@@ -362,18 +362,10 @@ fn job_ctx(install: &Arc<InstallService>) -> Result<GogJobCtx, String> {
     })
 }
 
-/// Queues `job`; the card says so.
-fn enqueue(
-    state: &AppState,
-    install: &Arc<InstallService>,
-    job: StoreJob,
-    notice: StoreNotice,
-) -> Result<(), String> {
+/// Queues `job` (the frontend raises the queued card).
+fn enqueue(install: &Arc<InstallService>, job: StoreJob) -> Result<(), String> {
     match install.enqueue_store_job(job).map_err(err)? {
-        Some(_) => {
-            state.stores.notice(notice);
-            Ok(())
-        }
+        Some(_) => Ok(()),
         None => Err("It's already in the download queue.".to_string()),
     }
 }
@@ -658,7 +650,7 @@ pub async fn store_install(
         },
         ctx,
     );
-    enqueue(&state, &install, job, notice::queued(&title))
+    enqueue(&install, job)
 }
 
 #[tauri::command]
@@ -668,7 +660,7 @@ pub async fn store_update(state: State<'_, AppState>, key: String) -> Result<(),
     state.stores.ensure_can_install()?;
     let row = gog_row(&install, &key).await?;
     let job = state.stores.api().update_job(&row, job_ctx(&install)?);
-    enqueue(&state, &install, job, notice::update_queued(&row.title))
+    enqueue(&install, job)
 }
 
 #[tauri::command]
@@ -678,7 +670,7 @@ pub async fn store_repair(state: State<'_, AppState>, key: String) -> Result<(),
     state.stores.ensure_can_install()?;
     let row = gog_row(&install, &key).await?;
     let job = state.stores.api().repair_job(&row, job_ctx(&install)?);
-    enqueue(&state, &install, job, notice::verifying(&row.title))
+    enqueue(&install, job)
 }
 
 #[tauri::command]
@@ -705,7 +697,6 @@ pub async fn store_uninstall(
     state
         .updates
         .forget_store_update(&app, &stores, &row.store_id);
-    stores.notice(notice::uninstalled(&row.title));
     let _ = app.emit(crate::relink_service::INSTALLED_CHANGED_EVENT, 1usize);
     stores.changed();
     Ok(())
@@ -722,16 +713,11 @@ pub async fn store_install_dlc(
     state.stores.ensure_can_install()?;
     state.stores.ensure_owned_fetched().await;
     let row = gog_row(&install, &key).await?;
-    let dlc_title = state
-        .stores
-        .product(&row.store_id)
-        .and_then(|p| p.dlc.into_iter().find(|d| d.id == dlc_id).map(|d| d.title))
-        .unwrap_or_else(|| row.title.clone());
     let job = state
         .stores
         .api()
         .dlc_job(&row, &dlc_id, job_ctx(&install)?);
-    enqueue(&state, &install, job, notice::queued(&dlc_title))
+    enqueue(&install, job)
 }
 
 #[tauri::command]
@@ -744,12 +730,6 @@ pub async fn store_remove_dlc(
     ensure_library_idle(&state)?;
     let install = install_service(&state)?;
     let row = gog_row(&install, &key).await?;
-    let dlc_title = GogMeta::from_json(&row.store_meta)
-        .dlc
-        .into_iter()
-        .find(|d| d.id == dlc_id)
-        .map(|d| d.title)
-        .unwrap_or_else(|| dlc_id.clone());
     let api = state.stores.api().clone();
     let registry = install.registry();
     let blocking_row = row.clone();
@@ -757,9 +737,6 @@ pub async fn store_remove_dlc(
         .await
         .map_err(err)?
         .map_err(err)?;
-    state
-        .stores
-        .notice(notice::dlc_removed(&row.title, &dlc_title));
     let _ = app.emit(crate::relink_service::INSTALLED_CHANGED_EVENT, 1usize);
     Ok(())
 }
@@ -892,9 +869,6 @@ pub async fn store_cloud_sync(
     key: String,
 ) -> Result<StoreCloudState, String> {
     let (row, cloud) = sync_now(&state, &key, SyncMode::Auto).await?;
-    if matches!(cloud, CloudState::Synced { .. }) {
-        state.stores.notice(notice::cloud_synced(&row.title));
-    }
     Ok(cloud_state_ipc(
         &cloud,
         &GogMeta::from_json(&row.store_meta),
@@ -913,12 +887,6 @@ pub async fn store_cloud_resolve(
         CloudChoice::Download => SyncMode::PreferDownload,
     };
     let (row, cloud) = sync_now(&state, &key, mode).await?;
-    if matches!(cloud, CloudState::Synced { .. }) {
-        state.stores.notice(match choice {
-            CloudChoice::Upload => notice::cloud_kept_local(&row.title),
-            CloudChoice::Download => notice::cloud_restored(&row.title),
-        });
-    }
     Ok(cloud_state_ipc(
         &cloud,
         &GogMeta::from_json(&row.store_meta),
@@ -1015,11 +983,6 @@ pub async fn offline_install(
     if let offline::Verdict::Refused { body, .. } = &insp.verdict {
         return Err(body.clone());
     }
-    let product = insp
-        .info
-        .as_ref()
-        .and_then(|info| state.stores.product(&info.game_id));
-    let title = inspection_ipc(&insp, product.as_ref()).title;
     let opts = offline::OfflineOpts {
         install_dir: install_dir
             .map(|dir| dir.trim().to_string())
@@ -1028,7 +991,7 @@ pub async fn offline_install(
         compat_tool,
     };
     let job = offline::install_job(insp, opts, job_ctx(&install)?, install.wizard_allowed());
-    enqueue(&state, &install, job, notice::queued(&title))
+    enqueue(&install, job)
 }
 
 /// `key` is the drive key; `game_keys` the store games' keys.

@@ -444,6 +444,7 @@ impl StoresService {
             return;
         }
         let result = self.api.account().await;
+        let mut expired = false;
         let refresh = {
             let mut state = self.state.lock().unwrap();
             match &result {
@@ -460,6 +461,7 @@ impl StoresService {
                 }
                 Err(StoreError::LoginExpired) => {
                     state.connection = StoreConnection::Expired;
+                    expired = true;
                     false
                 }
                 Err(e) => {
@@ -470,6 +472,9 @@ impl StoresService {
         };
         if let Ok(None) = result {
             self.write_gog_config(|gog| gog.connected = false);
+        }
+        if expired {
+            self.notify(notice::login_expired());
         }
         self.changed();
         if refresh {
@@ -591,18 +596,13 @@ impl StoresService {
             username: String::new(),
             error: why.to_string(),
         }));
-        self.notify(notice::sign_in_failed(why));
         self.changed();
     }
 
     /// The redirect's code: signs in through gogdl, then installs gogdl
     /// when it is missing, then loads the owned list.
     pub async fn finish_login(self: &Arc<Self>, code: SecretString) {
-        let was_expired = {
-            let mut state = self.state.lock().unwrap();
-            state.login = LoginPhase::Completing;
-            state.connection == StoreConnection::Expired
-        };
+        self.state.lock().unwrap().login = LoginPhase::Completing;
         let result = self.api.complete_login(code).await;
         match result {
             Ok(account) => {
@@ -624,7 +624,6 @@ impl StoresService {
                     username: account.username.clone(),
                     error: String::new(),
                 }));
-                self.notify(notice::connected(&account.username, was_expired));
                 self.changed();
                 self.after_connect().await;
             }
@@ -638,7 +637,7 @@ impl StoresService {
     /// Right after a connect: gogdl when it is missing, then the owned list.
     async fn after_connect(self: &Arc<Self>) {
         if !self.api.tool_installed() {
-            self.install_tool_then(false).await;
+            self.install_tool_then(false, true).await;
             if !self.tool_ready() {
                 return;
             }
@@ -679,7 +678,6 @@ impl StoresService {
                 ..GogState::default()
             };
         }
-        self.notify(notice::disconnected());
         self.changed();
         Ok(())
     }
@@ -689,10 +687,12 @@ impl StoresService {
     /// Installs gogdl (pinned, SHA-256 checked), then loads the owned list
     /// when it never loaded. One at a time.
     pub async fn install_tool(self: &Arc<Self>) {
-        self.install_tool_then(true).await;
+        self.install_tool_then(true, false).await;
     }
 
-    async fn install_tool_then(self: &Arc<Self>, load_owned: bool) {
+    /// `announce`: the "Installing gogdl…" card (after a connect; the
+    /// frontend words its own Install button).
+    async fn install_tool_then(self: &Arc<Self>, load_owned: bool, announce: bool) {
         {
             let mut state = self.state.lock().unwrap();
             if matches!(state.tool, ToolPhase::Installing { .. }) {
@@ -706,7 +706,9 @@ impl StoresService {
             self.changed();
             return;
         }
-        self.notify(notice::tool_installing(tool_size_bytes()));
+        if announce {
+            self.notify(notice::tool_installing(tool_size_bytes()));
+        }
         self.changed();
         let this = self.clone();
         let mut last_emit = std::time::Instant::now();
@@ -790,10 +792,13 @@ impl StoresService {
                 }
             }
             Err(StoreError::LoginExpired) => {
-                let mut state = self.state.lock().unwrap();
-                state.connection = StoreConnection::Expired;
-                state.owned = OwnedState::Error;
-                state.owned_error = StoreError::LoginExpired.to_string();
+                {
+                    let mut state = self.state.lock().unwrap();
+                    state.connection = StoreConnection::Expired;
+                    state.owned = OwnedState::Error;
+                    state.owned_error = StoreError::LoginExpired.to_string();
+                }
+                self.notify(notice::login_expired());
             }
             Err(error) => {
                 let mut state = self.state.lock().unwrap();
@@ -960,9 +965,9 @@ impl StoresService {
     }
 
     /// Every Downloads snapshot: a GOG job that just finished gets its card
-    /// ("Grey Meridian installed" · Play, "… updated", "Verified …"), and
-    /// the store's counts change. A restore from a drive is the backups'
-    /// card, and a failure is the Downloads row's.
+    /// ("Grey Meridian installed" · Play, "… updated", "Verified …",
+    /// "… installed from Couch kit"), a failed one its error card, and the
+    /// store's counts change.
     pub fn observe_downloads(&self, snapshot: &DownloadsSnapshot) {
         self.observe_rows(
             snapshot
@@ -975,6 +980,18 @@ impl StoresService {
                     key: entry.source_id.clone(),
                     title: entry.title.clone(),
                     completed: matches!(entry.status, DownloadStatus::Completed),
+                    failed: matches!(entry.status, DownloadStatus::Failed),
+                    error: entry.error.clone(),
+                    drive: entry.drive_name.clone(),
+                    base: entry.failure.as_ref().and_then(|failure| {
+                        (!failure.base_gog_id.is_empty()).then(|| {
+                            (
+                                failure.base_title.clone(),
+                                GameKey::store(StoreKind::Gog, failure.base_gog_id.clone())
+                                    .to_string(),
+                            )
+                        })
+                    }),
                 })
                 .collect(),
         );
@@ -985,7 +1002,10 @@ impl StoresService {
         {
             let mut announced = self.announced.lock().unwrap();
             for entry in &rows {
-                if !entry.store || !entry.key.starts_with("gog:") || !entry.completed {
+                if !entry.store
+                    || !entry.key.starts_with("gog:")
+                    || !(entry.completed || entry.failed)
+                {
                     continue;
                 }
                 if announced.insert(entry.id) {
@@ -997,7 +1017,17 @@ impl StoresService {
             announced.retain(|id| live.contains(id));
         }
         for entry in &finished {
-            if let Some(card) = notice::finished(entry.kind, &entry.title, &entry.key) {
+            let card = if entry.completed {
+                notice::finished(entry.kind, &entry.title, &entry.key, &entry.drive)
+            } else {
+                notice::failed(
+                    entry.kind,
+                    &entry.title,
+                    &entry.error,
+                    entry.base.as_ref().map(|(t, k)| (t.as_str(), k.as_str())),
+                )
+            };
+            if let Some(card) = card {
                 self.notify(card);
             }
         }
@@ -1015,7 +1045,6 @@ impl StoresService {
     /// Sets the per-store cloud switch and says so.
     pub fn set_cloud_saves(&self, on: bool) {
         self.write_gog_config(|gog| gog.cloud_saves = on);
-        self.notify(notice::cloud_switch(on));
         self.changed();
     }
 
@@ -1034,17 +1063,13 @@ impl StoresService {
         };
         match connection {
             StoreConnection::Connected => {}
-            StoreConnection::Expired => {
-                self.notify(notice::signed_out_install(true));
-                return Err(StoreError::LoginExpired.to_string());
-            }
-            StoreConnection::NotConnected => {
-                self.notify(notice::signed_out_install(false));
-                return Err(StoreError::NotSignedIn.to_string());
-            }
+            StoreConnection::Expired => return Err(StoreError::LoginExpired.to_string()),
+            StoreConnection::NotConnected => return Err(StoreError::NotSignedIn.to_string()),
+        }
+        if let ToolPhase::Failed(problem) = &tool {
+            return Err(problem.clone());
         }
         if tool != ToolPhase::Installed {
-            self.notify(notice::tool_missing());
             return Err(StoreError::ToolMissing(TOOL_NAME).to_string());
         }
         Ok(())
@@ -1077,6 +1102,11 @@ struct JobRow {
     key: String,
     title: String,
     completed: bool,
+    failed: bool,
+    error: String,
+    drive: String,
+    /// A DLC installer's missing base game: its title and key.
+    base: Option<(String, String)>,
 }
 
 /// The tool's download size for the cards ("Installing gogdl (12 MB)…").
@@ -1554,7 +1584,10 @@ fn write_owned_cache(data_dir: &Path, products: &[GogProduct], refreshed_at: i64
 
 // --- notices --------------------------------------------------------------------
 
-/// The `store-notice` cards, in the GameStores card's words.
+/// The `store-notice` cards, in the GameStores card's words. Only what
+/// happens in the background: the frontend raises the cards for the
+/// commands it calls itself (queued, refusals, sign-in outcome from
+/// `store-login`, cloud choices, uninstalled, disconnected).
 pub mod notice {
     use super::{StoreNotice, StoreNoticeAction, STORE_NAME, TOOL_NAME};
 
@@ -1590,23 +1623,7 @@ pub mod notice {
         }
     }
 
-    pub fn connected(username: &str, was_expired: bool) -> StoreNotice {
-        let verb = if was_expired {
-            "Signed in to"
-        } else {
-            "Connected to"
-        };
-        card(format!("{verb} {STORE_NAME} as {username}"), false, None)
-    }
-
-    pub fn sign_in_failed(why: &str) -> StoreNotice {
-        card(
-            format!("Couldn\u{2019}t sign in to {STORE_NAME}: {why}"),
-            true,
-            action("try_again", None, None),
-        )
-    }
-
+    /// gogdl starts installing right after a connect.
     pub fn tool_installing(size: u64) -> StoreNotice {
         let size = size_label(size);
         let size = if size.is_empty() {
@@ -1633,14 +1650,7 @@ pub mod notice {
         )
     }
 
-    pub fn tool_missing() -> StoreNotice {
-        card(
-            format!("{STORE_NAME} needs {TOOL_NAME} to install games"),
-            true,
-            action("install_tool", None, None),
-        )
-    }
-
+    /// The owned list loaded after a connect (or a Refresh).
     pub fn games_found(count: usize, to_install: usize) -> StoreNotice {
         let games = if count == 1 { "game" } else { "games" };
         card(
@@ -1650,36 +1660,12 @@ pub mod notice {
         )
     }
 
-    pub fn signed_out_install(expired: bool) -> StoreNotice {
-        let message = if expired {
-            format!("Your {STORE_NAME} login expired. Sign in again to install games.")
-        } else {
-            format!("Sign in to {STORE_NAME} to install games.")
-        };
-        card(message, true, action("sign_in", None, None))
-    }
-
-    pub fn queued(title: &str) -> StoreNotice {
+    /// GRID found the login expired in the background.
+    pub fn login_expired() -> StoreNotice {
         card(
-            format!("{title} added to download queue"),
-            false,
-            action("open_downloads", None, None),
-        )
-    }
-
-    pub fn update_queued(title: &str) -> StoreNotice {
-        card(
-            format!("Update for {title} added to download queue"),
-            false,
-            action("open_downloads", None, None),
-        )
-    }
-
-    pub fn verifying(title: &str) -> StoreNotice {
-        card(
-            format!("Verifying {title}\u{2019}s files\u{2026}"),
-            false,
-            action("open_downloads", None, None),
+            format!("Your {STORE_NAME} login expired. Sign in again to install and update games."),
+            true,
+            action("sign_in", None, None),
         )
     }
 
@@ -1702,10 +1688,6 @@ pub mod notice {
             false,
             action("show_updates", None, None),
         )
-    }
-
-    pub fn cloud_synced(title: &str) -> StoreNotice {
-        card(format!("Cloud saves synced for {title}"), false, None)
     }
 
     pub fn cloud_uploaded(title: &str) -> StoreNotice {
@@ -1732,58 +1714,23 @@ pub mod notice {
         )
     }
 
-    pub fn cloud_kept_local(title: &str) -> StoreNotice {
-        card(
-            format!("Kept this computer\u{2019}s save for {title} and uploaded it"),
-            false,
-            None,
-        )
-    }
-
-    pub fn cloud_restored(title: &str) -> StoreNotice {
-        card(format!("Restored the cloud save for {title}"), false, None)
-    }
-
-    pub fn cloud_switch(on: bool) -> StoreNotice {
-        if on {
-            card(
-                format!("Cloud saves on for {STORE_NAME} games"),
-                false,
-                None,
-            )
-        } else {
-            card(
-                format!("Cloud saves off for {STORE_NAME} games. Your saves stay in your account."),
-                false,
-                None,
-            )
-        }
-    }
-
-    pub fn uninstalled(title: &str) -> StoreNotice {
-        card(
-            format!("{title} uninstalled. Its cloud saves stay in your {STORE_NAME} account."),
-            false,
-            None,
-        )
-    }
-
-    pub fn dlc_removed(title: &str, dlc: &str) -> StoreNotice {
-        card(format!("Removed {dlc} from {title}"), false, None)
-    }
-
-    pub fn disconnected() -> StoreNotice {
-        card(
-            format!("{STORE_NAME} disconnected. Its login and {TOOL_NAME} were deleted; installed games stay."),
-            false,
-            None,
-        )
-    }
-
     /// The card for a GOG Downloads row that just finished, by its kind.
-    pub fn finished(kind: &str, title: &str, key: &str) -> Option<StoreNotice> {
+    /// `drive` names the drive a restore copied from.
+    pub fn finished(kind: &str, title: &str, key: &str, drive: &str) -> Option<StoreNotice> {
         match kind {
             "store_install" | "store_installer" | "store_dlc" => Some(installed(title, key)),
+            "store_restore" => {
+                let from = if drive.is_empty() {
+                    "a backup drive".to_string()
+                } else {
+                    drive.to_string()
+                };
+                Some(card(
+                    format!("{title} installed from {from}"),
+                    false,
+                    action("play", Some(key), Some(title)),
+                ))
+            }
             "store_update" => Some(card(
                 format!("{title} updated"),
                 false,
@@ -1796,6 +1743,31 @@ pub mod notice {
             )),
             _ => None,
         }
+    }
+
+    /// The card for a GOG Downloads row that just failed. An installer's
+    /// DLC-without-base failure offers to install the base game.
+    pub fn failed(
+        kind: &str,
+        title: &str,
+        error: &str,
+        base: Option<(&str, &str)>,
+    ) -> Option<StoreNotice> {
+        let what = match kind {
+            "store_install" | "store_installer" | "store_dlc" | "store_restore" => "install",
+            "store_update" => "update",
+            "store_repair" => "verify",
+            _ => return None,
+        };
+        let action = match base {
+            Some((base_title, base_key)) => {
+                action("install_base", Some(base_key), Some(base_title))
+            }
+            None => action("open_downloads", None, None),
+        };
+        let mut notice = card(format!("Couldn\u{2019}t {what} {title}"), true, action);
+        notice.detail = error.to_string();
+        Some(notice)
     }
 }
 
@@ -2087,7 +2059,6 @@ mod tests {
         assert_eq!(
             messages,
             vec![
-                "Connected to GOG as sam_plays".to_string(),
                 notice::tool_installing(tool_size_bytes()).message,
                 "gogdl installed".to_string(),
                 "GOG: 2 games found \u{b7} 2 to install".to_string(),
@@ -2112,9 +2083,10 @@ mod tests {
             "Couldn\u{2019}t sign in to GOG: gogdl stopped: the code was refused"
         );
         assert_eq!(h.logins()[0].outcome, "failed");
-        let notice = h.notices().pop().unwrap();
-        assert!(notice.error);
-        assert_eq!(notice.action.unwrap().kind, "try_again");
+        assert!(
+            h.notices().is_empty(),
+            "the frontend words the sign-in outcome"
+        );
         assert!(!h.config().connected);
         // The next sign-in clears it.
         h.service.begin_login().unwrap();
@@ -2209,6 +2181,7 @@ mod tests {
         *h.fake.account.lock().unwrap() = Some(Err("expired"));
         rt().block_on(h.service.check_login());
         assert_eq!(h.service.status().connection, StoreConnection::Expired);
+        assert_eq!(h.notices().pop().unwrap().action.unwrap().kind, "sign_in");
         assert_eq!(h.service.status().username, "sam");
         assert!(h.service.status().in_rail);
     }
@@ -2243,6 +2216,11 @@ mod tests {
         // An install then asks to sign in again.
         assert!(h.service.ensure_can_install().is_err());
         assert_eq!(h.notices().pop().unwrap().action.unwrap().kind, "sign_in");
+        assert_eq!(
+            h.notices().len(),
+            1,
+            "one card for the expiry, none for the refusal"
+        );
     }
 
     #[test]
@@ -2267,10 +2245,6 @@ mod tests {
         assert!(!h.config().connected);
         assert!(!owned_cache_path(h.dir.path()).exists());
         assert!(!crate::store_auth::login_data_dir(h.dir.path(), "gog").exists());
-        assert_eq!(
-            h.notices().pop().unwrap().message,
-            "GOG disconnected. Its login and gogdl were deleted; installed games stay."
-        );
     }
 
     #[test]
@@ -2282,10 +2256,7 @@ mod tests {
             h.service.ensure_can_install().unwrap_err(),
             "gogdl isn't installed"
         );
-        assert_eq!(
-            h.notices().pop().unwrap().action.unwrap().kind,
-            "install_tool"
-        );
+        assert!(h.notices().is_empty());
         h.service.state.lock().unwrap().tool = ToolPhase::Installed;
         h.service.ensure_can_install().unwrap();
     }
@@ -2522,6 +2493,10 @@ mod tests {
             key: key.into(),
             title: "Grey Meridian".into(),
             completed,
+            failed: false,
+            error: String::new(),
+            drive: "Couch kit".into(),
+            base: None,
         }
     }
 
@@ -2532,41 +2507,42 @@ mod tests {
             .observe_rows(vec![entry(1, "store_install", "gog:5", false)]);
         assert!(h.notices().is_empty());
         let done = || {
+            let mut failed = entry(3, "store_installer", "gog:7", false);
+            failed.failed = true;
+            failed.error = "Its archive holds a DLC installer for Pale Summit".into();
+            failed.base = Some(("Pale Summit".into(), "gog:8".into()));
             vec![
                 entry(1, "store_install", "gog:5", true),
                 entry(2, "store_restore", "gog:6", true),
-                entry(3, "store_update", "gog:7", false),
+                failed,
+                entry(4, "store_update", "gog:9", false),
             ]
         };
         h.service.observe_rows(done());
         h.service.observe_rows(done());
         let notices = h.notices();
-        assert_eq!(notices.len(), 1);
+        assert_eq!(notices.len(), 3);
         assert_eq!(notices[0].message, "Grey Meridian installed");
         assert_eq!(
             notices[0].action.as_ref().unwrap().key.as_deref(),
             Some("gog:5")
         );
+        assert_eq!(notices[1].message, "Grey Meridian installed from Couch kit");
+        assert_eq!(notices[2].message, "Couldn\u{2019}t install Grey Meridian");
+        assert!(notices[2].error);
+        assert_eq!(notices[2].action.as_ref().unwrap().kind, "install_base");
         assert_eq!(
-            notice::finished("store_update", "A", "gog:1")
-                .unwrap()
-                .message,
-            "A updated"
+            notices[2].action.as_ref().unwrap().key.as_deref(),
+            Some("gog:8")
         );
-        assert_eq!(
-            notice::finished("store_repair", "A", "gog:1")
-                .unwrap()
-                .message,
-            "Verified A\u{2019}s files"
-        );
+        let update = notice::finished("store_update", "A", "gog:1", "").unwrap();
+        assert_eq!(update.message, "A updated");
+        let repair = notice::finished("store_repair", "A", "gog:1", "").unwrap();
+        assert_eq!(repair.message, "Verified A\u{2019}s files");
     }
 
     #[test]
     fn notices_use_the_cards_words() {
-        assert_eq!(
-            notice::connected("sam", true).message,
-            "Signed in to GOG as sam"
-        );
         assert_eq!(
             notice::tool_installing(12_400_000).message,
             "Installing gogdl (12 MB) for GOG\u{2026}"
@@ -2586,25 +2562,17 @@ mod tests {
                 .kind,
             "show_updates"
         );
-        assert_eq!(
-            notice::queued("Marrowind Keep").message,
-            "Marrowind Keep added to download queue"
-        );
-        assert_eq!(notice::queued("x").action.unwrap().kind, "open_downloads");
         let installed = notice::installed("Grey Meridian", "gog:5");
         assert_eq!(installed.action.as_ref().unwrap().kind, "play");
         assert_eq!(installed.action.unwrap().key.as_deref(), Some("gog:5"));
+        assert_eq!(notice::login_expired().action.unwrap().kind, "sign_in");
         assert_eq!(
-            notice::uninstalled("Ashen Tide").message,
-            "Ashen Tide uninstalled. Its cloud saves stay in your GOG account."
-        );
-        assert_eq!(
-            notice::cloud_kept_local("A").message,
-            "Kept this computer\u{2019}s save for A and uploaded it"
-        );
-        assert_eq!(
-            notice::cloud_restored("A").message,
-            "Restored the cloud save for A"
+            notice::failed("store_update", "A", "x", None)
+                .unwrap()
+                .action
+                .unwrap()
+                .kind,
+            "open_downloads"
         );
         assert_eq!(notice::size_label(1_100_000_000), "1.1 GB");
         assert_eq!(notice::size_label(0), "");
