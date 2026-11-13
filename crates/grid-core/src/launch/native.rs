@@ -258,6 +258,87 @@ fn sidecar_working_dir(
     dir.is_dir().then_some(dir)
 }
 
+/// The [`NativeCommandError::Message`] a Windows installer gets on a
+/// non-Windows host with no compat tool chosen.
+pub const INSTALLER_NEEDS_COMPAT_MESSAGE: &str =
+    "Choose a compatibility tool (Wine or Proton) to run a Windows installer.";
+
+/// Builds the command that runs a Windows installer (`program`, with its
+/// own `args`), the way [`build_native_command`] wraps a Windows game:
+///
+/// - On a Windows host (`host` starts with `"win"`) the installer runs
+///   directly; `compat` and `prefix` are ignored.
+/// - `compat == "wine"` prepends `which("wine")` (the literal `"wine"` when
+///   not found).
+/// - Any other non-blank `compat` runs through `which("umu-run")` with
+///   `PROTONPATH = compat` (missing umu-run is
+///   [`NativeCommandError::UmuMissing`]).
+/// - A blank `compat` off Windows is [`INSTALLER_NEEDS_COMPAT_MESSAGE`].
+///
+/// Both wrapped branches set `WINEPREFIX` to `prefix` (created first) when
+/// one is given. `cwd` is the installer's own folder; `tool_label` is
+/// `"wine"`, the compat value, or `""` for a direct run.
+pub fn build_installer_command(
+    program: &Path,
+    args: Vec<String>,
+    compat: &str,
+    prefix: Option<&Path>,
+    host: &str,
+    which: &dyn Fn(&str) -> Option<PathBuf>,
+) -> Result<NativeLaunch, NativeCommandError> {
+    let on_windows = host.trim().to_lowercase().starts_with("win");
+    let tool = if on_windows { "" } else { compat.trim() };
+    if tool.is_empty() && !on_windows {
+        return Err(NativeCommandError::Message(
+            INSTALLER_NEEDS_COMPAT_MESSAGE.to_string(),
+        ));
+    }
+    let mut argv = vec![program.to_string_lossy().into_owned()];
+    argv.extend(args);
+    let mut env = Vec::new();
+    let tool_label = if tool.is_empty() {
+        String::new()
+    } else if tool == "wine" {
+        let wine = which("wine")
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "wine".to_string());
+        argv.insert(0, wine);
+        "wine".to_string()
+    } else {
+        let Some(umu) = which(super::umu::UMU_RUN) else {
+            return Err(NativeCommandError::UmuMissing);
+        };
+        argv.insert(0, umu.to_string_lossy().into_owned());
+        env.push(("PROTONPATH".to_string(), tool.to_string()));
+        tool.to_string()
+    };
+    if !tool.is_empty() {
+        if let Some(prefix) = prefix {
+            fs::create_dir_all(prefix).map_err(|e| {
+                format!(
+                    "Could not create Wine prefix directory:\n{}\n{e}",
+                    prefix.display()
+                )
+            })?;
+            env.push((
+                "WINEPREFIX".to_string(),
+                prefix.to_string_lossy().into_owned(),
+            ));
+        }
+    }
+    let cwd = match program.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    Ok(NativeLaunch {
+        argv,
+        cwd,
+        env,
+        tool_label,
+        redact: Vec::new(),
+    })
+}
+
 /// Adds `WINEPREFIX` to `env` and creates the directory when
 /// `row.native_wineprefix` is non-blank (`os.makedirs(..., exist_ok=True)`,
 /// launch.py:255/266). Unlike the Python original — where a `makedirs`
@@ -805,4 +886,74 @@ mod tests {
     // makes it return `Err` today; the wrapping above
     // ("Invalid custom launch parameters: {e}") is defensive/forward-looking
     // and is not independently exercised by a test here.
+
+    #[test]
+    fn an_installer_runs_through_umu_wine_or_directly() {
+        let dir = tempfile::tempdir().unwrap();
+        let setup = dir.path().join("setup_game.exe");
+        let prefix = dir.path().join("prefix");
+        let which = |name: &str| match name {
+            "umu-run" => Some(PathBuf::from("/usr/bin/umu-run")),
+            "wine" => Some(PathBuf::from("/usr/bin/wine")),
+            _ => None,
+        };
+        let args = vec!["/VERYSILENT".to_string()];
+
+        let umu = build_installer_command(
+            &setup,
+            args.clone(),
+            "GE-Proton10-17",
+            Some(&prefix),
+            "linux",
+            &which,
+        )
+        .unwrap();
+        assert_eq!(
+            umu.argv,
+            vec![
+                "/usr/bin/umu-run".to_string(),
+                setup.to_string_lossy().into_owned(),
+                "/VERYSILENT".to_string()
+            ]
+        );
+        assert!(umu
+            .env
+            .contains(&("PROTONPATH".to_string(), "GE-Proton10-17".to_string())));
+        assert!(umu.env.contains(&(
+            "WINEPREFIX".to_string(),
+            prefix.to_string_lossy().into_owned()
+        )));
+        assert!(prefix.is_dir(), "the prefix is created");
+        assert_eq!(umu.cwd, dir.path());
+
+        let wine =
+            build_installer_command(&setup, args.clone(), "wine", None, "linux", &which).unwrap();
+        assert_eq!(wine.argv[0], "/usr/bin/wine");
+        assert_eq!(wine.tool_label, "wine");
+        assert!(wine.env.is_empty());
+
+        let native = build_installer_command(
+            &setup,
+            args.clone(),
+            "wine",
+            Some(&prefix),
+            "windows",
+            &which,
+        )
+        .unwrap();
+        assert_eq!(native.argv[0], setup.to_string_lossy());
+        assert!(native.env.is_empty());
+        assert_eq!(native.tool_label, "");
+
+        assert_eq!(
+            build_installer_command(&setup, args.clone(), " ", None, "linux", &which),
+            Err(NativeCommandError::Message(
+                INSTALLER_NEEDS_COMPAT_MESSAGE.to_string()
+            ))
+        );
+        assert_eq!(
+            build_installer_command(&setup, args, "GE-Proton", None, "linux", &|_| None),
+            Err(NativeCommandError::UmuMissing)
+        );
+    }
 }
