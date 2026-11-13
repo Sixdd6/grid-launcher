@@ -434,3 +434,42 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
   strings are `String` where the TS union is wide). `#![allow(dead_code)]` until package D
   builds them. Event constants live there.
 - `api.ts` adds `StorePlatform`, `JobPhase`, `JobFailure` and `StoreLoginEvent` aliases.
+
+### Package A
+
+- `GogEndpoints` gains `library` (galaxy-library), `gamesdb` and `remote_config` (Galaxy remote
+  config); `e2e(base)` points them at the mock too. The paths GRID uses on each host do not
+  overlap: `auth`, `on_login_success`, `userData.json`, `user/data/games`,
+  `users/{uid}/releases`, `products?ids=`, `products/{id}`,
+  `platforms/gog/external_releases/{id}`, `products/{id}/os/windows/builds`,
+  `components/galaxy_client/clients/{clientId}`, `v1/{uid}/{clientId}`.
+- `ToolCommand`'s `Debug` no longer derives: it prints the program and the argument and
+  variable counts only (a login code is an argument). `ToolExit::success()` added.
+- `tools`: `asset_for`, `tool_command` (wraps a zipapp as `python3 <file>` after the Python
+  3.10 check, `python_problem` words it), `StoreTool::e2e_env` (feature `e2e`). An asset counts
+  as installed when its file has the pinned size. With `GRID_LAUNCHER_E2E_TOOL_GOGDL` set (e2e
+  feature only) the fake runs directly and `install_tool` returns it without downloading.
+- `paths`: `make_private_file`, `make_private_executable`, `save_backups_dir`
+  (`<data>/stores/save-backups/`, outside the tool folder so Disconnect keeps save copies).
+- `progress`: a `+ Download` line is a speed-only report (`done == total == 0`);
+  `ProgressMerger` folds it into the byte report.
+- A fresh install runs `gogdl update --path <install_dir>` (after deleting a stale manifest),
+  not `download --path <parent>`: `download` appends GOG's folder name, and
+  `GogInstallRequest.install_dir` is the game's own folder. Success = exit 0 and the manifest
+  (`manifests/<id>`, or `<dir>/.gogdl-linux-manifest`) written during the run; a repair that
+  finds nothing broken leaves the manifest alone, so a repair needs only exit 0 and the manifest.
+- A Windows build on Linux gets the prefix `<install_dir>/prefix` (`WINE_PREFIX_DIR`, as RomM
+  native games and drive restores). A Linux build launches `start.sh` when it has one, with a
+  synthesized `GogGameInfo` (name from `gameinfo`) when there is no `goggame-*.info`.
+- `uninstall`: `unins000.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART` through
+  `build_native_command` (native on Windows; skipped on Linux when the row has no compat tool),
+  stopped after 120 s; then the folder through `RemovalGuard` with the game's parent folder as
+  the library root plus every configured root. A refused folder stays (logged, path only) and
+  the row still goes, like a RomM uninstall.
+- `remove_dlc` runs gogdl `update` with the remaining DLC list (blocking) for gogdl installs;
+  offline/drive rows only drop the meta entry.
+- Cloud saves: Windows builds only (remote-config has no Linux locations). The game-scope token
+  comes from `gogdl auth --client-id --client-secret` (secret from gogdl's manifest, else the
+  default Windows build's meta). Local copies before a forced download go to
+  `<data>/stores/save-backups/gog/<id>/<epoch-ms>/<location>/`, newest 5 kept.
+- `auth::read_stdout` is the one place GOG code reads a tool's kept stdout (a JSON parse).
