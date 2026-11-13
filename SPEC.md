@@ -1227,8 +1227,9 @@ testable statement.
   the Library rail, and Settings › Backup drives with a page per drive.
 
 # Game stores
-Status: planned (2026-11-13). Phase 0, the shared model, is in place; no store screen
-exists yet. The plan is `docs/external-stores-plan.md`. The approved design is
+Status: Phase 1, GOG with offline installers, built (2026-11-13); Epic, Amazon and Steam
+are planned. The plan is `docs/external-stores-plan.md`, Phase 1's work plan
+`docs/stores-phase1-plan.md`. The approved design is
 `docs/design/system/components/GameStores/README.md` and
 `docs/design/system/components/TVStores/README.md`.
 
@@ -1271,7 +1272,9 @@ User decisions (2026-11-13):
 - **Installers on the RomM server.** The user zips GOG offline installers and uploads
   them to RomM; GRID never uploads them. When a downloaded RomM archive holds an
   installer instead of loose game files, GRID runs the offline-installer flow. The game
-  stays a RomM game, with every RomM feature.
+  stays a RomM game, with every RomM feature. Once installed, Details says "Installed by
+  running its GOG installer". Before the download GRID can't know what the archive
+  holds, so Details says nothing about an installer then.
 - **GOG backups.** GOG games that did not come from RomM can be backed up (see "Game
   backups"). Epic, Amazon and Steam games cannot.
 
@@ -1293,7 +1296,11 @@ What store games get:
 | Details Overview, Game Settings, uninstall | On |
 
 GOG, Epic and Amazon games launch like native games, from their install folder (with
-Wine/Proton for a Windows build). An Epic launch carries a one-time exchange code, which
+Wine/Proton for a Windows build). A Windows GOG game's Wine prefix is `prefix/` in its
+install folder, however it was installed (gogdl, an offline installer, a backup drive),
+so uninstalling the game removes it and a backup leaves it out. A DLC installer runs in
+its base game's prefix. Store art (covers, screenshots) is fetched from the store's own
+image hosts without any credential and cached under `<data_dir>/stores/art/`. An Epic launch carries a one-time exchange code, which
 is never printed in a log, an error or a warning. A Steam game's session is watched
 rather than spawned: GRID sees it running until its process ends.
 

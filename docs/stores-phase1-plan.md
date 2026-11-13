@@ -714,3 +714,51 @@ Additions and choices the other packages should know:
   code; user `refused`: a code the fake gogdl refuses). The fake gogdl's `auth --code`
   accepts only that code, writes the token file and prints it; the mock's `/token`
   accepts it too.
+
+## Integration outcome (2026-11-13)
+
+Every item of the integration list above, after packages A–F merged:
+
+1. **Done.** The desktop's `store-notice` / `store-login` cards are `StoreLayer`'s, which
+   only the desktop shell mounts (`App.svelte` mounts one shell at a time); TV mode
+   subscribes in `tv/stores/storeEvents.ts`. A store row that failed with
+   `installer_needs_wizard` gets no backend card (`StoresService::observe_rows` skips
+   it): TV mode's "Couldn’t install X silently" · Retry is the only one. TV mode now also
+   words every other installer failure of a RomM row (the shared notifier skips a row
+   with `failure`, and the desktop's `installerCards` is desktop-only). No backend notice
+   exists for a backup row (`notice::finished` has no `backup_store_game` kind), so the
+   backup-queued card shows once.
+2. **Done.** `library/rail.ts` `railEntries` lists no platform row for a store row, for
+   the desktop and TV mode alike.
+3. **Already in place (D).** `set_wizard_allowed` is "not TV mode" (`lib.rs`); the
+   gamepad gate counts the login window's focus as GRID's; `launch_game_key` rejects a
+   conflict with `store_cloud_conflict`.
+4. **Done.** Registry v12 adds `installed_by_installer`, set by
+   `finalize_installer_archive`; desktop Details (`details-gog-installer`) and the TV game
+   page's left lines show "Installed by running its GOG installer". The DLC variant
+   ("Added to <base> by its GOG installer") is not built: the RomM row doesn't record its
+   base game's title. **The pre-install line ("Its archive holds a GOG installer") is
+   dropped**: GRID can't know what an archive holds before it downloads it (spike 6).
+5. **Already in place (C).** A drive's `game_count` counts `store_games`
+   (`drive_service.rs`).
+6. **Fixed.** Store art never showed: `ensure_image` refused every host but the RomM
+   server, and the CSP refuses web images, so a plain `<img>` (TV mode, the desktop
+   dialogs) failed too. `ensure_image` now has a store branch: an address on GOG's image
+   hosts (`gog-statics.com`, `gog.com`) or the gamesdb endpoint's origin
+   (`stores::art::is_store_art_url`) is fetched without any credential and cached under
+   `<data_dir>/stores/art/` (`StoresService::art`), which the asset protocol scope now
+   allows. TV mode (`TvStoreArt`) and the desktop dialogs (`StoreCoverSm`) load store art
+   through `gamestores/storeArt.ts`.
+7. **Done.** The `tv-gog` stage group runs `tv-gog-a` and `tv-gog-b`; every `gog-*` and
+   `tv-gog` group passes in the full suite.
+8. **Done.** The production restore runs `offline::inspect` then `run_into` (no seam left
+   but the tests'). `StoreJobRunner::download_phase` (default `None`) lets a restore's
+   row show `copying_installer` / `copying_from_drive` while it copies off the drive.
+9. **Done.** `offline::default_prefix` is `<install dir>/prefix`, so every GOG Wine prefix
+   (gogdl, offline installers, drive restores) is there; a DLC installer runs in its base
+   game's prefix. A fresh install that turns out to be DLC drops its own prefix before
+   joining the base folder, and an offline row's size leaves the prefix out. RomM
+   installer archives keep `<home>/prefix` (a RomM row).
+10. **Checked.** The only non-test `StoreProgressSink` is the service's `ServiceSink`,
+    which answers `cancelled()` from the entry's cancel flag; restores and every store job
+    finalize through it.

@@ -212,7 +212,7 @@ Modules as declared in `src/lib.rs`:
   plan's `reserved_bytes`; the app hands the ledger to `LibraryMoveService` so a move's
   free-space check counts it. `SpaceProbe` (free space and filesystem key) is
   injectable for tests (`set_space_probe`).
-  The registry is at v11. v10's `source_server` records the server a row came from when
+  The registry is at v12. v10's `source_server` records the server a row came from when
   that was not the live session (an install from a drive), `""` otherwise. v11 adds
   `source` (`romm` or a store id), `store_id` and `store_meta` (the store's JSON
   metadata, never a token), and a partial unique index on `(source, store_id) WHERE
@@ -226,6 +226,9 @@ Modules as declared in `src/lib.rs`:
   server update detection, image replenish, play activity, RomM cloud saves
   (`cloud::romm_cloud_applies`) and drive backups (`backup::local::REASON_STORE`); the
   missing-files reconcile checks them but never searches for them.
+  v12 adds `installed_by_installer`: a RomM row whose archive held a GOG installer that
+  GRID ran (`specials::gog_installer`), which Details words ("Installed by running its GOG
+  installer").
   `Registry::clear_foreign_rom_ids` is the relink guard: it clears `rom_id` on rows whose
   `source_server` names another server (compared by `pack::server_key`).
 - `pcgw` — PCGamingWiki client that resolves a Windows game's save paths.
@@ -236,13 +239,25 @@ Modules as declared in `src/lib.rs`:
   of the registry's `pending_play_sessions` outbox — what is deleted, dropped or kept
   after each batch.
 - `retroachievements` — the RetroAchievements login client. Login only.
-- `stores` — external game stores (SPEC "Game stores", `docs/external-stores-plan.md`).
-  Phase 0 holds the shared identity types: `StoreKind` (gog, epic, amazon, steam, with
-  their platform names "GOG", "Epic Games", "Amazon Games", "Steam"), `GameSource` (the
-  registry `source`) and `GameKey` (`Rom(i64)` or `Store { source, store_id }`, string
-  and serde form `romm:123` / `gog:1207664643`). Later phases add `tools`, `progress`,
-  `paths`, `art` and one folder per source (`gog`, `offline`, `epic`, `amazon`,
-  `steam`). Nothing here may log or forward a store tool's stdout or stderr.
+- `stores` — external game stores (SPEC "Game stores", `docs/external-stores-plan.md`,
+  `docs/stores-phase1-plan.md`). The shared identity types: `StoreKind` (gog, epic,
+  amazon, steam, with their platform names "GOG", "Epic Games", "Amazon Games", "Steam"),
+  `GameSource` (the registry `source`) and `GameKey` (`Rom(i64)` or `Store { source,
+  store_id }`, string and serde form `romm:123` / `gog:1207664643`). Beside them:
+  `tools` (the pinned heroic-gogdl release, its SHA-256 check and the command that starts
+  it), `runner` (the only place a store tool is spawned; its output is never logged or
+  forwarded), `progress` (tool progress lines), `paths` (`<data_dir>/stores/<tool>/`,
+  0700/0600) and `art` (store image URLs, the token-free art cache under
+  `<data_dir>/stores/art/`, and `is_store_art_url`, the host rule `ensure_image` uses).
+  `gog` is GOG's HTTP APIs (`api`), sign-in (`auth`), gogdl install, update, repair, DLC
+  and uninstall jobs (`install`), cloud saves (`cloud`), the update check (`update`), and
+  the parts every install path shares: `goggame` (`goggame-*.info`), `meta` (a row's
+  `store_meta` JSON) and `row` (`gog_row`). `offline` is GOG offline installers (a Linux
+  `.sh` read as a zip, a Windows Inno Setup `.exe` run silently or, outside TV mode, with
+  its wizard; a macOS `.pkg` refused) and their Downloads job. Every GOG Wine prefix is
+  `<install dir>/prefix` (gogdl, offline installers, drive restores), so uninstall
+  removes it and a backup leaves it out. Nothing here may log or forward a store tool's
+  stdout or stderr.
 - `romm` — the RomM HTTP client: `RommClient`, platforms, games, ROM detail, firmware,
   byte fetches, the cloud save/state endpoints, and the play-session ingest. All request construction lives here;
   check `openapi.json` before changing any of it. `RommClient::recent_games` is one
@@ -274,6 +289,15 @@ The shell owns *when* things run; grid-core owns *what* they do.
   layout migration and its relinked resync (skipped while the root is unreachable) →
   `relocate::recover` (finishes a Commit) → gates handed to the services → `.setup()`,
   which resumes a Copy or Cleanup in the background.
+- `stores_service.rs` — `StoresService` (Phase 1: GOG) around grid-core's
+  `stores::gog::GogService`: the store status and library the UI reads (owned list cached
+  at `<data_dir>/stores/cache/gog-owned.json`), the gogdl install, the cloud sync before a
+  launch and after a session, the update check, the `store-notice` cards for what
+  happens in the background (`observe_downloads`; a frontend command's own outcome is
+  worded by the frontend, never sent twice), and store art (`art`). `store_auth.rs` is the
+  login window: a separate, unprivileged, incognito webview whose final redirect is
+  caught in Rust (the code goes to `GogService` as a `SecretString`). The commands are
+  `commands/stores.rs` and, for GOG backups, `commands/store_backups.rs`.
 - `commands.rs` — also `launch_game_key`: a RomM key takes `launch_game`'s path, a store
   key skips the RomM-only steps (cloud restore, firmware, session stamps) and stamps
   `last_played_at` by key.
@@ -523,6 +547,18 @@ session exists and `Shell.svelte` afterwards.
   Rust reads the controller (`gamepad/`, above); the webview's Gamepad API is not used.
 - `lib/icons.ts` — hand-authored 24×24 icon paths. The old app's `assets/svg/` files are
   deliberately not reused.
+
+- `lib/gamestores/` — Game stores (GameStores README). Pure `.ts` modules shared by both
+  modes: the rail group (`rail.ts`), cover tags (`cover.ts`), Details lines
+  (`details.ts`), Downloads lines (`downloads.ts`), the cards' words (`notices.ts`),
+  `storeArt.ts` (a store image's `src` through `ensure_image`'s store branch: the CSP
+  refuses web images) and the rest; `desktop/` holds the desktop's store dialogs, mounted
+  once by `StoreLayer.svelte`, which also shows `store-notice` and sign-in cards while
+  the desktop shell is up. `lib/stores/gameStores.svelte.ts` owns the store status and
+  libraries for either shell. `lib/settings/StoresPage.svelte` is Settings › Stores.
+  `lib/tv/stores/` is TV mode's side (TVStores README): its rail folders, pages, store
+  cards (`storeEvents.ts`, started by the TV shell) and TV-only words (`storeWords.ts`).
+  Store rows never appear as a Library platform (`library/rail.ts`).
 
 ## `e2e`
 
