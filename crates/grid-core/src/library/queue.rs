@@ -4,10 +4,13 @@
 //! ("Queue rules", doc 03 §1, ported) for the behavior this implements.
 
 use std::collections::VecDeque;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use super::content::ContentKind;
 use super::LibraryError;
 use crate::backup::pack::PackOs;
+use crate::stores::{GameKey, StoreKind};
 
 /// Identifies what one queued job is for. Two admissions with an equal key
 /// dedupe against each other; two admissions with unequal keys — including a
@@ -40,6 +43,89 @@ pub enum JobKey {
     /// The summary row [`QueueState::cancel_drive_queue`] leaves behind for
     /// the waiting rows it removed. Keyed by its own id; never retried.
     BackupSummary(u64),
+    /// A store operation (install, update, ...) on one store product, run
+    /// through the same slots, progress and cancel machinery as a RomM
+    /// install ([`StoreJob`]). An install and an update of one product
+    /// queue side by side; two installs of it dedupe.
+    Store {
+        source: StoreKind,
+        store_id: String,
+        op: StoreOp,
+    },
+}
+
+/// What a store job does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoreOp {
+    Install,
+    Update,
+}
+
+impl StoreOp {
+    /// The entry `kind` this op shows as.
+    pub fn kind(self) -> &'static str {
+        match self {
+            StoreOp::Install => "store_install",
+            StoreOp::Update => "store_update",
+        }
+    }
+}
+
+/// The work behind a store job, supplied by each store's phase (legendary,
+/// gogdl, nile, an offline installer). Both halves run on the blocking
+/// pool: a store tool is a subprocess whose progress is read line by line.
+///
+/// Never log or forward a tool's stdout or stderr line from an
+/// implementation (AGENTS.md "Secrets"): report progress through the
+/// callbacks and failures as GRID's own words.
+pub trait StoreJobRunner: Send + Sync {
+    /// The download half. `progress(downloaded, total, speed_bps)`; stop
+    /// promptly with [`LibraryError::Cancelled`] once `cancel` is set.
+    fn download(
+        &self,
+        cancel: &AtomicBool,
+        progress: &mut dyn FnMut(u64, u64, f64),
+    ) -> Result<(), LibraryError>;
+
+    /// The install half (registry write included): `progress(processed,
+    /// total)`. Returns a warning for the finished entry, `""` for none.
+    /// Not cancellable, like a RomM finalize.
+    fn finalize(&self, progress: &mut dyn FnMut(u64, u64)) -> Result<String, LibraryError>;
+}
+
+/// One store job for [`super::InstallService::enqueue_store_job`].
+#[derive(Clone)]
+pub struct StoreJob {
+    pub source: StoreKind,
+    pub store_id: String,
+    pub op: StoreOp,
+    pub runner: Arc<dyn StoreJobRunner>,
+}
+
+impl StoreJob {
+    /// The queue key this job dedupes on.
+    pub fn job_key(&self) -> JobKey {
+        JobKey::Store {
+            source: self.source,
+            store_id: self.store_id.clone(),
+            op: self.op,
+        }
+    }
+
+    /// The product's [`GameKey`].
+    pub fn game_key(&self) -> GameKey {
+        GameKey::store(self.source, self.store_id.clone())
+    }
+}
+
+impl std::fmt::Debug for StoreJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoreJob")
+            .field("source", &self.source)
+            .field("store_id", &self.store_id)
+            .field("op", &self.op)
+            .finish_non_exhaustive()
+    }
 }
 
 /// What one backup row writes to a drive.
@@ -88,7 +174,8 @@ pub struct DownloadEntry {
     /// `"game"` for a `JobKey::Rom` / `Content` / `NativeUpdate` entry,
     /// `"emulator"` for a `JobKey::Emulator` one, `"firmware"` for an
     /// external one, `"backup"` for a `JobKey::Backup` one and the
-    /// `"backup_cancelled"` summary row.
+    /// `"backup_cancelled"` summary row, `"store"` for a `JobKey::Store`
+    /// one (its `source_id` is the product's game key).
     pub job: &'static str,
     /// What this entry installs: `"base"`, `"ps4_content"`,
     /// `"xbox360_content"`, `"native_update"`, `"emulator"`,
@@ -277,6 +364,14 @@ impl QueueState {
             }
             // Never reached: `cancel_drive_queue` creates its own row.
             JobKey::BackupSummary(_) => ("backup", 0, String::new()),
+            // `source_id` carries the product's game key (`gog:1207664643`).
+            JobKey::Store {
+                source, store_id, ..
+            } => (
+                "store",
+                0,
+                GameKey::store(*source, store_id.clone()).to_string(),
+            ),
         };
         let EntryMeta {
             drive_id,
@@ -830,6 +925,72 @@ impl QueueState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn store_key(store_id: &str, op: StoreOp) -> JobKey {
+        JobKey::Store {
+            source: StoreKind::Gog,
+            store_id: store_id.to_string(),
+            op,
+        }
+    }
+
+    #[test]
+    fn a_store_job_takes_a_slot_and_dedupes_by_product_and_op() {
+        let mut state = QueueState::default();
+        let Admission::Start(first) = state.admit(
+            store_key("1207664643", StoreOp::Install),
+            "The Witcher",
+            "GOG",
+            StoreOp::Install.kind(),
+        ) else {
+            panic!("an idle queue starts the store job");
+        };
+        let entry = state.entry(first).unwrap();
+        assert_eq!(entry.job, "store");
+        assert_eq!(entry.kind, "store_install");
+        assert_eq!(entry.rom_id, 0);
+        assert_eq!(entry.source_id, "gog:1207664643");
+        assert_eq!(entry.status, DownloadStatus::Downloading);
+
+        // The same product and op again: a duplicate.
+        assert_eq!(
+            state.admit(
+                store_key("1207664643", StoreOp::Install),
+                "The Witcher",
+                "GOG",
+                "store_install"
+            ),
+            Admission::Duplicate
+        );
+        // An update of it, another product, and a RomM game all queue.
+        assert!(matches!(
+            state.admit(
+                store_key("1207664643", StoreOp::Update),
+                "The Witcher",
+                "GOG",
+                "store_update"
+            ),
+            Admission::Queued(_)
+        ));
+        assert!(matches!(
+            state.admit(
+                store_key("2", StoreOp::Install),
+                "Doom",
+                "GOG",
+                "store_install"
+            ),
+            Admission::Queued(_)
+        ));
+        assert!(matches!(
+            state.admit(JobKey::Rom(1207664643), "Doom", "SNES", "base"),
+            Admission::Queued(_)
+        ));
+        assert_eq!(
+            state.retryable(first),
+            None,
+            "a live entry is not retryable"
+        );
+    }
 
     fn admit_idle(state: &mut QueueState, rom_id: i64) -> u64 {
         match state.admit(JobKey::Rom(rom_id), "Title", "Platform", "base") {

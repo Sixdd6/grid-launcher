@@ -32,6 +32,7 @@ use crate::library::extract::which_on_path;
 use crate::library::paths::expand_home;
 use crate::library::registry::{installed_match, InstalledGame, Registry};
 use crate::library::relocate::LibraryGate;
+use crate::stores::GameKey;
 
 use native::build_native_command;
 use profiles::{load_profiles, EmulatorProfile};
@@ -46,9 +47,10 @@ use spawn::{
 };
 use template::{host_os, retroarch_core_argument_path, Placeholders};
 
+pub use native::redact_argv;
 pub use platform_slugs::{set_platform_slugs, slug_for_platform};
 pub use selection::NO_EMULATOR;
-pub use sessions::{GameSession, SessionsSnapshot};
+pub use sessions::{AliveCheck, GameSession, SessionsSnapshot};
 
 /// Errors raised while resolving or running an emulated launch.
 #[derive(Debug, thiserror::Error)]
@@ -84,6 +86,10 @@ impl From<native::NativeCommandError> for LaunchError {
 }
 
 // --- constants --------------------------------------------------------------
+
+/// Why [`LaunchService::launch_key`] refuses a Steam row: the Steam client
+/// launches those (a later phase), not GRID.
+pub const STEAM_LAUNCH_UNSUPPORTED: &str = "Steam games start through the Steam client.";
 
 /// How often the background loop reaps exited children.
 const POLL_INTERVAL: Duration = Duration::from_millis(2500);
@@ -265,7 +271,18 @@ impl LaunchService {
         }
     }
 
-    /// Resolves and starts the launch for `rom_id`, native or emulated.
+    /// Resolves and starts the launch for `rom_id`, native or emulated: a
+    /// thin wrapper over [`Self::launch_key`] with [`GameKey::Rom`].
+    pub async fn launch(self: &Arc<Self>, rom_id: i64) -> Result<GameSession, LaunchError> {
+        self.launch_key(&GameKey::Rom(rom_id)).await
+    }
+
+    /// Resolves and starts the launch for `key`, native or emulated.
+    ///
+    /// A store row (GOG, Epic, Amazon) always takes the native branch: it
+    /// launches from its native columns through [`build_native_command`].
+    /// A Steam row is refused here: the Steam client launches it, and its
+    /// session is a watched one ([`Self::register_watched`]).
     ///
     /// Order (doc 04 §8): registry lookup, duplicate gate, config load, then
     /// either the native branch ([`build_native_command`], doc 04 §9) for a
@@ -274,22 +291,32 @@ impl LaunchService {
     /// everything else; either way the result is spawned the same way. A
     /// RetroArch or RPCS3 entry also gets the pre-launch settings sync
     /// ([`Self::set_pre_launch_hook`]) between resolution and the spawn.
-    pub async fn launch(self: &Arc<Self>, rom_id: i64) -> Result<GameSession, LaunchError> {
+    pub async fn launch_key(self: &Arc<Self>, key: &GameKey) -> Result<GameSession, LaunchError> {
         let gate = self.library_gate.read().unwrap().clone();
         let _ticket = gate
             .enter()
             .map_err(|busy| LaunchError::LibraryBusy(busy.reason))?;
-        let game = self.installed_game(rom_id).await?;
+        let game = match key {
+            GameKey::Rom(rom_id) => self.installed_game(*rom_id).await?,
+            GameKey::Store { .. } => self.installed_store_game(key).await?,
+        };
 
         // Cheap rejection before any work; `SessionStore::register` repeats
         // the check under the store lock as the authoritative one.
-        if self.sessions.contains_rom(rom_id) {
+        if self.sessions.contains_key(key) {
             return Err(LaunchError::AlreadyRunning);
+        }
+        if game.is_store() && !game.is_native() {
+            return Err(LaunchError::Validation(
+                STEAM_LAUNCH_UNSUPPORTED.to_string(),
+            ));
         }
 
         let config = Config::load(&self.config_path)?;
 
-        let (emulator_name, argv, working_dir, extra_env, pre_launch_sync) = if game.is_native() {
+        let (emulator_name, argv, redact, working_dir, extra_env, pre_launch_sync) = if game
+            .is_native()
+        {
             // Blank on a Windows host: no compat tool makes sense there.
             // `build_native_command` applies the same gate on `default_compat_tool`
             // itself (and blanks the tool entirely for a linux-platform row),
@@ -331,7 +358,14 @@ impl LaunchService {
             } else {
                 native.tool_label
             };
-            (emulator_name, native.argv, native.cwd, native.env, None)
+            (
+                emulator_name,
+                native.argv,
+                native.redact,
+                native.cwd,
+                native.env,
+                None,
+            )
         } else {
             let plan = resolve_launch(&game, &config)?;
             // `Some` only for a RetroArch or RPCS3 entry: the settings sync's
@@ -343,6 +377,7 @@ impl LaunchService {
             (
                 plan.emulator_name,
                 plan.argv,
+                Vec::new(),
                 plan.working_dir,
                 Vec::new(),
                 sync,
@@ -357,7 +392,9 @@ impl LaunchService {
         }
 
         let title = game.title.clone();
-        let watched_argv = argv.clone();
+        // What the early-exit message may quote: redacted positions (an
+        // Epic exchange code) print as `<redacted>`.
+        let watched_argv = redact_argv(&argv, &redact);
         let mut child = spawn_child(argv, working_dir, extra_env).await?;
         let pid = child.id();
         let stderr = StderrCapture::start(&mut child);
@@ -370,7 +407,8 @@ impl LaunchService {
         let started_at_ms = sessions::unix_now_ms();
         let session = GameSession {
             id: self.next_id.fetch_add(1, Ordering::Relaxed),
-            rom_id,
+            key: key.clone(),
+            rom_id: key.rom_id(),
             title,
             emulator_name,
             started_at: started_at_ms.div_euclid(1000),
@@ -400,6 +438,49 @@ impl LaunchService {
 
         self.emit(None);
         self.schedule_early_exit_check(session.id);
+        Ok(session)
+    }
+
+    /// Registers a session for a game GRID did not spawn and holds no handle
+    /// to (a Steam game started through the Steam client): it is live while
+    /// `alive` answers `true`, and is reaped, emitted and handed to the
+    /// session-finished hooks like any other session once it answers
+    /// `false`. `alive` runs on every reap under the session store's lock,
+    /// so it must be cheap and must not block. `pid` is display-only and is
+    /// never signalled: [`Self::stop`] does nothing for a watched session.
+    ///
+    /// Refuses a key that already has a live session.
+    pub fn register_watched(
+        &self,
+        key: GameKey,
+        title: &str,
+        platform: &str,
+        emulator_name: &str,
+        pid: u32,
+        alive: AliveCheck,
+    ) -> Result<GameSession, LaunchError> {
+        let started_at_ms = sessions::unix_now_ms();
+        let session = GameSession {
+            id: self.next_id.fetch_add(1, Ordering::Relaxed),
+            rom_id: key.rom_id(),
+            key,
+            title: title.to_string(),
+            emulator_name: emulator_name.to_string(),
+            started_at: started_at_ms.div_euclid(1000),
+            pid,
+            platform: platform.to_string(),
+            started_at_ms,
+            ended_at_ms: None,
+            duration_ms: None,
+        };
+        if self
+            .sessions
+            .register_watched(session.clone(), alive)
+            .is_err()
+        {
+            return Err(LaunchError::AlreadyRunning);
+        }
+        self.emit(None);
         Ok(session)
     }
 
@@ -493,6 +574,24 @@ impl LaunchService {
             .filter(|row| installed_match(row, rom_id))
             .map(with_known_platform_slug)
             .ok_or(LaunchError::NotInstalled)
+    }
+
+    /// The installed store row for `key`, on the blocking pool. Never a
+    /// title/platform fallback: a store row is found by its key only.
+    async fn installed_store_game(&self, key: &GameKey) -> Result<InstalledGame, LaunchError> {
+        let registry = self.registry.clone();
+        let lookup = key.clone();
+        tokio::task::spawn_blocking(move || registry.find_key(&lookup))
+            .await
+            .map_err(|e| LaunchError::Registry(format!("the lookup did not finish: {e}")))?
+            .map_err(|e| LaunchError::Registry(e.to_string()))?
+            .ok_or(LaunchError::NotInstalled)
+    }
+
+    /// Reaps now and tells the listener (test hook for watched sessions).
+    #[cfg(test)]
+    fn reap_now(&self) {
+        self.reap_and_notify();
     }
 
     /// Runs the 500 ms post-launch check: reap, which reports the failure if
@@ -832,13 +931,115 @@ mod tests {
 
         let finished = |id| GameSession {
             id,
-            rom_id: 7,
+            key: GameKey::Rom(7),
+            rom_id: Some(7),
             ..Default::default()
         };
         service.fire_session_finished(vec![finished(1), finished(2)]);
 
         assert_eq!(*first.lock().unwrap(), vec![1, 2]);
         assert_eq!(*second.lock().unwrap(), vec![1, 2]);
+    }
+
+    /// A watched session (Steam, later) runs through the same reap, emit
+    /// and session-finished path as a spawned one.
+    #[test]
+    fn a_watched_session_is_reaped_and_finished_like_any_other() {
+        use crate::stores::StoreKind;
+        use std::sync::atomic::AtomicBool;
+        let dir = tempfile::tempdir().unwrap();
+        let registry = Arc::new(Registry::open(&dir.path().join("registry.db")).unwrap());
+        let service = LaunchService::new(registry, dir.path().join("config.toml"));
+        let snapshots: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new(Vec::new()));
+        let log = snapshots.clone();
+        service.set_notify(Arc::new(move |snap: SessionsSnapshot| {
+            log.lock().unwrap().push(snap.sessions.len());
+        }));
+        let finished: Arc<Mutex<Vec<GameSession>>> = Arc::new(Mutex::new(Vec::new()));
+        let log = finished.clone();
+        service.add_session_finished_hook(Arc::new(move |s: GameSession| {
+            log.lock().unwrap().push(s);
+        }));
+
+        let running = Arc::new(AtomicBool::new(true));
+        let flag = running.clone();
+        let key = GameKey::store(StoreKind::Steam, "620");
+        let session = service
+            .register_watched(
+                key.clone(),
+                "Portal 2",
+                "Steam",
+                "Steam",
+                0,
+                Box::new(move || flag.load(Ordering::SeqCst)),
+            )
+            .unwrap();
+        assert_eq!(session.key, key);
+        assert_eq!(session.rom_id, None);
+        assert!(matches!(
+            service.register_watched(
+                key.clone(),
+                "Portal 2",
+                "Steam",
+                "Steam",
+                0,
+                Box::new(|| true)
+            ),
+            Err(LaunchError::AlreadyRunning)
+        ));
+        assert_eq!(service.snapshot().sessions.len(), 1);
+
+        service.reap_now();
+        assert!(finished.lock().unwrap().is_empty(), "still running");
+
+        running.store(false, Ordering::SeqCst);
+        service.reap_now();
+        assert!(service.snapshot().sessions.is_empty());
+        let done = finished.lock().unwrap().clone();
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0].key, key);
+        assert!(done[0].duration_ms.is_some());
+        // Registered (1 session), then reaped (0 sessions).
+        assert_eq!(*snapshots.lock().unwrap(), vec![1, 0]);
+        // Stop never signals a watched session (pid 0 would hit GRID's own
+        // process group); it is a no-op that must not panic.
+        service.stop(session.id);
+    }
+
+    /// A store row launches by its key; a Steam row is refused, and a
+    /// missing key is NotInstalled.
+    #[tokio::test]
+    async fn launch_key_finds_store_rows_by_key() {
+        use crate::stores::{GameSource, StoreKind};
+        let dir = tempfile::tempdir().unwrap();
+        let registry = Arc::new(Registry::open(&dir.path().join("registry.db")).unwrap());
+        registry
+            .upsert_store(&InstalledGame {
+                title: "Portal 2".into(),
+                platform: "Steam".into(),
+                source: GameSource::Store(StoreKind::Steam),
+                store_id: "620".into(),
+                installed_at: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        let service = LaunchService::new(registry, dir.path().join("config.toml"));
+        match service
+            .launch_key(&GameKey::store(StoreKind::Steam, "620"))
+            .await
+        {
+            Err(LaunchError::Validation(message)) => {
+                assert_eq!(message, STEAM_LAUNCH_UNSUPPORTED)
+            }
+            other => panic!("expected the Steam refusal, got {other:?}"),
+        }
+        assert!(matches!(
+            service
+                .launch_key(&GameKey::store(StoreKind::Gog, "404"))
+                .await,
+            Err(LaunchError::NotInstalled)
+        ));
+        assert!(service.snapshot().sessions.is_empty());
     }
 
     #[test]

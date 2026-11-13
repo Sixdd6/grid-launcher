@@ -40,11 +40,17 @@ pub fn rfc3339_utc(ms: i64) -> Option<String> {
 }
 
 /// The ingest entry for a finished session, or `None` when the session is
-/// not play activity: no rom id, the Emulators platform, not finished, a
+/// not play activity: no rom id (a store game: play activity is RomM's
+/// ingest, so store sessions never reach it), the Emulators platform, not
+/// finished, a
 /// start or end that is not a valid time, an end before the start, a zero
 /// or negative duration, or a duration under `min_duration_ms`.
 pub fn entry_for_session(session: &GameSession, min_duration_ms: i64) -> Option<PlaySessionEntry> {
-    if session.rom_id <= 0 || is_emulators_platform(&session.platform) {
+    if session.key.store_kind().is_some() {
+        return None;
+    }
+    let rom_id = session.rom_id.filter(|id| *id > 0)?;
+    if is_emulators_platform(&session.platform) {
         return None;
     }
     let start = session.started_at_ms;
@@ -54,7 +60,7 @@ pub fn entry_for_session(session: &GameSession, min_duration_ms: i64) -> Option<
         return None;
     }
     Some(PlaySessionEntry {
-        rom_id: session.rom_id,
+        rom_id,
         start_time: rfc3339_utc(start)?,
         end_time: rfc3339_utc(end)?,
         duration_ms,
@@ -180,7 +186,8 @@ mod tests {
     fn finished(duration_ms: i64) -> GameSession {
         GameSession {
             id: 1,
-            rom_id: 42,
+            key: crate::stores::GameKey::Rom(42),
+            rom_id: Some(42),
             title: "Chrono".into(),
             emulator_name: "Stub".into(),
             started_at: START_MS / 1000,
@@ -221,7 +228,13 @@ mod tests {
     #[test]
     fn skip_rules() {
         let mut no_rom = finished(60_000);
-        no_rom.rom_id = 0;
+        no_rom.rom_id = Some(0);
+        let mut store = finished(60_000);
+        store.key = crate::stores::GameKey::store(crate::stores::StoreKind::Gog, "1207664643");
+        store.rom_id = None;
+        // Defensive: a store key wins even if a rom id were ever set.
+        let mut store_with_rom = store.clone();
+        store_with_rom.rom_id = Some(42);
         let mut emulators = finished(60_000);
         emulators.platform = " emulators ".into();
         let running = GameSession {
@@ -241,6 +254,8 @@ mod tests {
             ("zero duration", finished(0), 0),
             ("negative duration", finished(-5_000), 0),
             ("no rom id", no_rom, MIN_PLAY_SESSION_MS),
+            ("a store game", store, MIN_PLAY_SESSION_MS),
+            ("a store key", store_with_rom, MIN_PLAY_SESSION_MS),
             ("Emulators platform", emulators, MIN_PLAY_SESSION_MS),
             ("still running", running, MIN_PLAY_SESSION_MS),
             ("no start time", no_start, MIN_PLAY_SESSION_MS),

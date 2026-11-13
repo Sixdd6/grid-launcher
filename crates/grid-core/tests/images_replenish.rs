@@ -305,6 +305,20 @@ async fn plan_caps_variants_at_the_limit_and_keeps_the_most_recently_played() {
         .all(|i| matches!(i, ReplenishItem::NeedsFile { .. })));
 }
 
+/// A store row's art comes from its store: replenish never plans it, even
+/// one carrying a stray rom id and no image fields.
+#[tokio::test]
+async fn plan_skips_store_rows() {
+    use grid_core::stores::{GameSource, StoreKind};
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    let mut store = row(Some(9), "", "", "");
+    store.source = GameSource::Store(StoreKind::Gog);
+    store.store_id = "1207664643".to_string();
+    store.images_version = 0;
+    assert!(plan(&[store], &cache, "https://h", 12).is_empty());
+}
+
 /// With no play history the cap falls back to most-recently-installed.
 #[tokio::test]
 async fn plan_orders_unplayed_rows_by_install_time() {

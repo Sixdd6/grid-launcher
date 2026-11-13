@@ -5,6 +5,7 @@
 use super::LibraryError;
 use crate::images::ImageFields;
 use crate::romm::PlaySessionEntry;
+use crate::stores::{GameKey, GameSource, StoreKind, ROMM_SOURCE};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::path::Path;
 use std::sync::Mutex;
@@ -56,8 +57,20 @@ CREATE TABLE installed_games (
     native_launch_source     TEXT NOT NULL DEFAULT '',
     native_working_dir       TEXT NOT NULL DEFAULT '',
     source_server            TEXT NOT NULL DEFAULT '',
+    source                   TEXT NOT NULL DEFAULT 'romm',
+    store_id                 TEXT NOT NULL DEFAULT '',
+    store_meta               TEXT NOT NULL DEFAULT '',
     UNIQUE (title_key, platform_key)
 );
+";
+
+/// v11: one row per store product. RomM rows (`source = 'romm'`, every
+/// `store_id` blank) are outside the index, so they keep their
+/// title/platform identity only. `IF NOT EXISTS` makes the v10 -> v11 step
+/// idempotent.
+const STORE_INDEX_SQL: &str = "
+CREATE UNIQUE INDEX IF NOT EXISTS installed_games_store_identity
+    ON installed_games (source, store_id) WHERE source <> 'romm';
 ";
 
 /// The play-session outbox (v7, Q10): finished sessions waiting for
@@ -79,7 +92,7 @@ CREATE TABLE IF NOT EXISTS pending_play_sessions (
 
 /// The schema version this build understands. Bumped when a migration adds
 /// columns or tables (see spec: later milestones add native/PS3/PS4 fields).
-const LATEST_USER_VERSION: i64 = 10;
+const LATEST_USER_VERSION: i64 = 11;
 
 /// The columns v1 -> v2 (milestone 7) adds to `installed_games`.
 const V2_IMAGE_COLUMNS: [&str; 3] = ["cover_small_path", "cover_large_path", "screenshot_urls"];
@@ -351,6 +364,38 @@ fn migrate_9_to_10(conn: &mut Connection) -> Result<(), LibraryError> {
     tx.commit().map_err(registry_err)
 }
 
+/// The columns v10 -> v11 adds (external game stores, phase 0):
+///
+/// - `source`: `'romm'` or a store id (`gog`, `epic`, `amazon`, `steam`);
+/// - `store_id`: the store's product id, `''` for a RomM row;
+/// - `store_meta`: the store's JSON metadata for the row. Never a token.
+const V11_COLUMNS: [(&str, &str); 3] = [
+    ("source", "TEXT NOT NULL DEFAULT 'romm'"),
+    ("store_id", "TEXT NOT NULL DEFAULT ''"),
+    ("store_meta", "TEXT NOT NULL DEFAULT ''"),
+];
+
+/// v10 -> v11: adds [`V11_COLUMNS`] and the partial unique index on
+/// `(source, store_id)`. Same transaction + idempotent-`ADD COLUMN` shape as
+/// every migration above it. Every existing row becomes a `romm` row.
+fn migrate_10_to_11(conn: &mut Connection) -> Result<(), LibraryError> {
+    let tx = conn.transaction().map_err(registry_err)?;
+    let existing = installed_games_columns(&tx)?;
+    for (column, definition) in V11_COLUMNS {
+        if existing.iter().any(|name| name == column) {
+            continue;
+        }
+        tx.execute_batch(&format!(
+            "ALTER TABLE installed_games ADD COLUMN {column} {definition};"
+        ))
+        .map_err(registry_err)?;
+    }
+    tx.execute_batch(STORE_INDEX_SQL).map_err(registry_err)?;
+    tx.pragma_update(None, "user_version", 11)
+        .map_err(registry_err)?;
+    tx.commit().map_err(registry_err)
+}
+
 /// Every column of `installed_games`, in the order selected/inserted below.
 const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_path, \
      extracted_path, extracted_dir, multi_file_game_dir, description, rating, genres, \
@@ -359,7 +404,7 @@ const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_pa
      native_executable_path, native_launch_parameters, native_compat_tool, native_wineprefix, \
      native_game_dir, included_dlc, ps3_trophy_paths, ps3_game_id, ps3_iso_path, ps4_game_id, \
      ps4_content, ra_id, last_played_at, fanart_urls, images_version, platform_slug, \
-     native_launch_source, native_working_dir, source_server";
+     native_launch_source, native_working_dir, source_server, source, store_id, store_meta";
 
 /// The path-bearing columns [`Registry::rewrite_paths`] hands to its
 /// closure as plain strings. `ps3_trophy_paths` is the ninth, handled
@@ -467,13 +512,36 @@ pub struct InstalledGame {
     /// for a server install. See [`V10_COLUMN`].
     #[serde(default)]
     pub source_server: String,
+    /// Where the row came from (v11): `romm` (the default) or a store.
+    /// A store row never carries a `rom_id`, and is reached through the
+    /// key-based APIs ([`Registry::find_key`], [`Registry::upsert_store`],
+    /// [`Registry::remove_key`], ...): its stored `title_key` carries its
+    /// [`GameKey`] ([`InstalledGame::identity_keys`]), so no title/platform
+    /// lookup ever matches it.
+    #[serde(default)]
+    pub source: GameSource,
+    /// The store's product id; `""` for a RomM row.
+    #[serde(default)]
+    pub store_id: String,
+    /// The store's JSON metadata for this row (for GOG, `origin: offline`
+    /// marks an offline-installer install). Never a token. Kept out of IPC
+    /// payloads.
+    #[serde(default, skip_serializing)]
+    pub store_meta: String,
 }
 
 impl InstalledGame {
     /// Whether this row is a native (host-executable) game:
     /// [`crate::library::platforms::is_native_platform`] over the row's
     /// slug and platform name.
+    ///
+    /// A GOG, Epic or Amazon row is always native: GRID launches it from the
+    /// native launch columns. A Steam row is not (the Steam client launches
+    /// it).
     pub fn is_native(&self) -> bool {
+        if let GameSource::Store(kind) = self.source {
+            return kind.launches_natively();
+        }
         crate::library::platforms::is_native_platform(&self.platform_slug, &self.platform)
     }
 
@@ -485,7 +553,53 @@ impl InstalledGame {
 }
 
 impl InstalledGame {
+    /// Whether this row came from an external store.
+    pub fn is_store(&self) -> bool {
+        self.source != GameSource::Romm
+    }
+
+    /// The row's store, `None` for a RomM row.
+    pub fn store_kind(&self) -> Option<StoreKind> {
+        self.source.store()
+    }
+
+    /// This row's [`GameKey`]: `Rom(rom_id)` for a linked RomM row, the
+    /// store key for a store row, `None` for a RomM row with no rom id (it
+    /// cannot be launched or keyed until it is linked).
+    pub fn key(&self) -> Option<GameKey> {
+        match self.source {
+            GameSource::Romm => self.rom_id.map(GameKey::Rom),
+            GameSource::Store(kind) => Some(GameKey::store(kind, self.store_id.clone())),
+        }
+    }
+
+    /// The `(title_key, platform_key)` this row is stored under. For a RomM
+    /// row, the trimmed lowercase title and platform. For a store row the
+    /// title key also carries the row's [`GameKey`] after a U+001F
+    /// separator, so two products in one store with the same title never
+    /// collide on `UNIQUE (title_key, platform_key)`, the rows still sort by
+    /// title, and no title/platform lookup (`find`, `remove`,
+    /// `set_rom_id_by_key`, ...) can reach a store row by accident.
+    pub fn identity_keys(&self) -> (String, String) {
+        let platform_key = identity_key(&self.platform);
+        match self.source {
+            GameSource::Romm => (identity_key(&self.title), platform_key),
+            GameSource::Store(kind) => (
+                store_title_key(&self.title, kind, &self.store_id),
+                platform_key,
+            ),
+        }
+    }
+
     fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
+        let source: String = row.get(42)?;
+        let source = GameSource::parse(&source).ok_or_else(|| {
+            rusqlite::Error::FromSqlConversionFailure(
+                42,
+                rusqlite::types::Type::Text,
+                format!("unknown game source {source:?}").into(),
+            )
+        })?;
         Ok(Self {
             title: row.get(0)?,
             platform: row.get(1)?,
@@ -529,12 +643,24 @@ impl InstalledGame {
             native_launch_source: row.get(39)?,
             native_working_dir: row.get(40)?,
             source_server: row.get(41)?,
+            source,
+            store_id: row.get(43)?,
+            store_meta: row.get(44)?,
         })
     }
 }
 
 pub(crate) fn identity_key(value: &str) -> String {
     value.trim().to_lowercase()
+}
+
+/// A store row's stored title key ([`InstalledGame::identity_keys`]).
+fn store_title_key(title: &str, kind: StoreKind, store_id: &str) -> String {
+    format!(
+        "{}\u{1f}{}",
+        identity_key(title),
+        GameKey::store(kind, store_id)
+    )
 }
 
 /// Whether `row` — a hit from [`Registry::find`] — really is the install for
@@ -587,6 +713,7 @@ impl Registry {
             conn.execute_batch(SCHEMA_SQL).map_err(registry_err)?;
             conn.execute_batch(PLAY_SESSIONS_SQL)
                 .map_err(registry_err)?;
+            conn.execute_batch(STORE_INDEX_SQL).map_err(registry_err)?;
             version = LATEST_USER_VERSION;
         }
         // Each step commits its own `user_version` bump with its own schema
@@ -603,6 +730,7 @@ impl Registry {
                 7 => migrate_7_to_8(&mut conn)?,
                 8 => migrate_8_to_9(&mut conn)?,
                 9 => migrate_9_to_10(&mut conn)?,
+                10 => migrate_10_to_11(&mut conn)?,
                 v => {
                     return Err(LibraryError::Registry(format!(
                         "no migration from user_version {v}"
@@ -626,9 +754,15 @@ impl Registry {
     /// `images_version` is stamped with [`IMAGES_VERSION`], NOT taken from
     /// `rec`: an install or reinstall resolves the image fields with this
     /// build's rules, so the row is current by construction.
+    ///
+    /// A store row (`rec.source` is a store) is written under its
+    /// [`InstalledGame::identity_keys`]; its `rom_id` is always stored as
+    /// NULL and a blank `store_id` is refused. When the store renamed the
+    /// product, the existing row for `(source, store_id)` is re-keyed first,
+    /// in the same transaction, so the write updates it instead of tripping
+    /// the `(source, store_id)` index. `last_played_at` survives either way.
     pub fn upsert(&self, rec: &InstalledGame) -> Result<(), LibraryError> {
-        let title_key = identity_key(&rec.title);
-        let platform_key = identity_key(&rec.platform);
+        let (title_key, platform_key) = rec.identity_keys();
         let archive_path: &str = if rec.extracted_path.is_empty() {
             &rec.archive_path
         } else {
@@ -637,9 +771,31 @@ impl Registry {
 
         let ps3_game_id = rec.ps3_game_id.to_uppercase();
         let ps4_game_id = rec.ps4_game_id.to_uppercase();
+        let store_id = rec.store_id.trim();
+        let rom_id = if rec.is_store() {
+            if store_id.is_empty() {
+                return Err(LibraryError::Registry(
+                    "a store game needs its store id".to_string(),
+                ));
+            }
+            None
+        } else {
+            rec.rom_id
+        };
+        // A RomM row never carries a store id: the partial index keys on it.
+        let store_id = if rec.is_store() { store_id } else { "" };
 
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(registry_err)?;
+        if rec.is_store() {
+            tx.execute(
+                "UPDATE installed_games SET title_key = ?1, platform_key = ?2 \
+                 WHERE source = ?3 AND store_id = ?4",
+                params![title_key, platform_key, rec.source.as_str(), store_id],
+            )
+            .map_err(registry_err)?;
+        }
+        tx.execute(
             "INSERT INTO installed_games (
                 title, platform, title_key, platform_key, rom_id, rom_file_name,
                 archive_path, extracted_path, extracted_dir, multi_file_game_dir,
@@ -649,11 +805,13 @@ impl Registry {
                 native_executable_path, native_launch_parameters, native_compat_tool,
                 native_wineprefix, native_game_dir, included_dlc, ps3_trophy_paths,
                 ps3_game_id, ps3_iso_path, ps4_game_id, ps4_content, ra_id, images_version,
-                platform_slug, native_launch_source, native_working_dir, source_server
+                platform_slug, native_launch_source, native_working_dir, source_server,
+                source, store_id, store_meta
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
                 ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43
+                ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43,
+                ?44, ?45, ?46
             )
             ON CONFLICT(title_key, platform_key) DO UPDATE SET
                 title = excluded.title,
@@ -696,6 +854,9 @@ impl Registry {
                 native_launch_source = excluded.native_launch_source,
                 native_working_dir = excluded.native_working_dir,
                 source_server = excluded.source_server,
+                source = excluded.source,
+                store_id = excluded.store_id,
+                store_meta = excluded.store_meta,
                 platform_slug = CASE WHEN excluded.platform_slug = ''
                     THEN installed_games.platform_slug ELSE excluded.platform_slug END",
             params![
@@ -703,7 +864,7 @@ impl Registry {
                 rec.platform,
                 title_key,
                 platform_key,
-                rec.rom_id,
+                rom_id,
                 rec.rom_file_name,
                 archive_path,
                 rec.extracted_path,
@@ -742,10 +903,158 @@ impl Registry {
                 rec.native_launch_source,
                 rec.native_working_dir,
                 rec.source_server,
+                rec.source.as_str(),
+                store_id,
+                rec.store_meta,
             ],
         )
         .map_err(registry_err)?;
-        Ok(())
+        tx.commit().map_err(registry_err)
+    }
+
+    // --- store rows (v11), by key -------------------------------------------
+
+    /// [`Self::upsert`] for a store row; refuses a RomM row.
+    pub fn upsert_store(&self, rec: &InstalledGame) -> Result<(), LibraryError> {
+        if !rec.is_store() {
+            return Err(LibraryError::Registry(
+                "upsert_store takes a store game".to_string(),
+            ));
+        }
+        self.upsert(rec)
+    }
+
+    /// The row for a store product.
+    pub fn find_store(
+        &self,
+        source: StoreKind,
+        store_id: &str,
+    ) -> Result<Option<InstalledGame>, LibraryError> {
+        let conn = self.conn.lock().unwrap();
+        let sql = format!(
+            "SELECT {SELECT_COLUMNS} FROM installed_games WHERE source = ?1 AND store_id = ?2"
+        );
+        conn.query_row(
+            &sql,
+            params![source.as_str(), store_id.trim()],
+            InstalledGame::from_row,
+        )
+        .optional()
+        .map_err(registry_err)
+    }
+
+    /// The row for `key`: the RomM row holding the rom id, or the store row.
+    /// Never a title/platform fallback.
+    pub fn find_key(&self, key: &GameKey) -> Result<Option<InstalledGame>, LibraryError> {
+        match key {
+            GameKey::Rom(rom_id) => {
+                let conn = self.conn.lock().unwrap();
+                let sql = format!(
+                    "SELECT {SELECT_COLUMNS} FROM installed_games \
+                     WHERE rom_id = ?1 AND source = '{ROMM_SOURCE}'"
+                );
+                conn.query_row(&sql, params![rom_id], InstalledGame::from_row)
+                    .optional()
+                    .map_err(registry_err)
+            }
+            GameKey::Store { source, store_id } => self.find_store(*source, store_id),
+        }
+    }
+
+    /// Every row of one store, ordered by title.
+    pub fn store_rows(&self, source: StoreKind) -> Result<Vec<InstalledGame>, LibraryError> {
+        let conn = self.conn.lock().unwrap();
+        let sql = format!(
+            "SELECT {SELECT_COLUMNS} FROM installed_games WHERE source = ?1 ORDER BY title_key"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(registry_err)?;
+        let rows = stmt
+            .query_map(params![source.as_str()], InstalledGame::from_row)
+            .map_err(registry_err)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(registry_err)
+    }
+
+    /// Removes a store product's row. Registry only. Returns whether a row
+    /// was removed.
+    pub fn remove_store(&self, source: StoreKind, store_id: &str) -> Result<bool, LibraryError> {
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute(
+                "DELETE FROM installed_games WHERE source = ?1 AND store_id = ?2",
+                params![source.as_str(), store_id.trim()],
+            )
+            .map_err(registry_err)?;
+        Ok(affected > 0)
+    }
+
+    /// Removes the row for `key`. Registry only.
+    pub fn remove_key(&self, key: &GameKey) -> Result<bool, LibraryError> {
+        match key {
+            GameKey::Rom(rom_id) => {
+                let conn = self.conn.lock().unwrap();
+                let affected = conn
+                    .execute(
+                        &format!(
+                            "DELETE FROM installed_games \
+                             WHERE rom_id = ?1 AND source = '{ROMM_SOURCE}'"
+                        ),
+                        params![rom_id],
+                    )
+                    .map_err(registry_err)?;
+                Ok(affected > 0)
+            }
+            GameKey::Store { source, store_id } => self.remove_store(*source, store_id),
+        }
+    }
+
+    /// [`Self::touch_last_played`] for any key.
+    pub fn touch_last_played_key(&self, key: &GameKey, at: i64) -> Result<bool, LibraryError> {
+        match key {
+            GameKey::Rom(rom_id) => self.touch_last_played(*rom_id, at),
+            GameKey::Store { source, store_id } => {
+                let conn = self.conn.lock().unwrap();
+                let affected = conn
+                    .execute(
+                        "UPDATE installed_games SET last_played_at = ?1 \
+                         WHERE source = ?2 AND store_id = ?3",
+                        params![at, source.as_str(), store_id],
+                    )
+                    .map_err(registry_err)?;
+                Ok(affected > 0)
+            }
+        }
+    }
+
+    /// [`Self::update_images`] for any key (a store's own art for a store
+    /// row).
+    pub fn update_images_key(
+        &self,
+        key: &GameKey,
+        fields: &ImageFields,
+    ) -> Result<bool, LibraryError> {
+        match key {
+            GameKey::Rom(rom_id) => self.update_images(*rom_id, fields),
+            GameKey::Store { source, store_id } => {
+                let conn = self.conn.lock().unwrap();
+                let affected = conn
+                    .execute(
+                        "UPDATE installed_games SET cover_small_path = ?1, cover_large_path = ?2, \
+                         screenshot_urls = ?3, fanart_urls = ?4, images_version = ?5 \
+                         WHERE source = ?6 AND store_id = ?7",
+                        params![
+                            fields.cover_small_path,
+                            fields.cover_large_path,
+                            fields.screenshot_urls,
+                            fields.fanart_urls,
+                            IMAGES_VERSION,
+                            source.as_str(),
+                            store_id
+                        ],
+                    )
+                    .map_err(registry_err)?;
+                Ok(affected > 0)
+            }
+        }
     }
 
     /// Sets the image columns on the row for `rom_id`, and stamps
@@ -1181,7 +1490,7 @@ impl Registry {
         let affected = tx
             .execute(
                 "UPDATE installed_games SET rom_id = ?1, images_version = 0 \
-                 WHERE title_key = ?2 AND platform_key = ?3",
+                 WHERE title_key = ?2 AND platform_key = ?3 AND source = 'romm'",
                 params![rom_id, title_key, platform_key],
             )
             .map_err(registry_err)?;

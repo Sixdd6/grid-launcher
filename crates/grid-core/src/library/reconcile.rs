@@ -170,6 +170,11 @@ fn decide(
     if probe(&anchor.path) == Some(anchor.kind) {
         return RowState::Present;
     }
+    // A store row is checked, never searched: its install lies wherever its
+    // store tool put it, not at a layout location of the library.
+    if row.is_store() {
+        return RowState::Missing;
+    }
     let Some(root) = roots.iter().find(|root| {
         is_strictly_inside(&anchor.path, root, home)
             && at_layout_location(&anchor.path, root, &row.platform, home)
@@ -209,6 +214,10 @@ pub enum RowState {
 pub struct RowDecision {
     pub title: String,
     pub platform: String,
+    /// The row's stored `(title_key, platform_key)`
+    /// ([`InstalledGame::identity_keys`]): what the Missing flag is keyed
+    /// by, so two store products with one title are told apart.
+    pub identity: (String, String),
     pub state: RowState,
 }
 
@@ -253,6 +262,7 @@ pub fn plan(
         .map(|row| RowDecision {
             title: row.title.clone(),
             platform: row.platform.clone(),
+            identity: row.identity_keys(),
             state: if busy(row) {
                 RowState::NotChecked
             } else {
@@ -504,6 +514,49 @@ mod tests {
             run(&rows, root.path(), ReconcileGate::Ready),
             [RowState::Present]
         );
+    }
+
+    /// A store row is checked, never searched: present when its folder is
+    /// there, Missing (not Moved) when it is gone even though a folder of
+    /// the same name sits at a layout location. Two store products with one
+    /// title carry distinct identities.
+    #[test]
+    fn a_store_row_is_checked_but_never_searched() {
+        use crate::stores::{GameSource, StoreKind};
+        let root = tempfile::tempdir().unwrap();
+        let store_row = |id: &str, dir: &Path| InstalledGame {
+            title: "Doom".to_string(),
+            platform: "GOG".to_string(),
+            source: GameSource::Store(StoreKind::Gog),
+            store_id: id.to_string(),
+            native_game_dir: text(dir),
+            ..Default::default()
+        };
+        let here = root.path().join("stores").join("Doom");
+        fs::create_dir_all(&here).unwrap();
+        // Gone from where the row says, but a same-named folder is at the
+        // GOG "platform" layout location: a RomM row would be re-pointed.
+        let old = root
+            .path()
+            .join("games")
+            .join("GOG")
+            .join("old")
+            .join("Doom");
+        fs::create_dir_all(root.path().join("games").join("GOG").join("Doom")).unwrap();
+        let rows = [store_row("1", &here), store_row("2", &old)];
+        assert_eq!(
+            run(&rows, root.path(), ReconcileGate::Ready),
+            [RowState::Present, RowState::Missing]
+        );
+        let decisions = plan(
+            &rows,
+            &[root.path().to_path_buf()],
+            ReconcileGate::Ready,
+            &|_| false,
+            &fs_probe,
+            None,
+        );
+        assert_ne!(decisions[0].identity, decisions[1].identity);
     }
 
     #[test]

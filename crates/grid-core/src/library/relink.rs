@@ -57,6 +57,13 @@ pub fn server_platform_matches(row_platform: &str, platform: &Platform) -> bool 
     .any(|alias| !alias.trim().is_empty() && normalize_platform_key(alias) == wanted)
 }
 
+/// Whether the relink pass may link `row`: a RomM row (`source == romm`)
+/// with no rom id. A store row never has a rom id and is never a RomM
+/// game, so it is never considered.
+pub fn needs_link(row: &InstalledGame) -> bool {
+    !row.is_store() && row.rom_id.is_none()
+}
+
 /// The ids of every server platform `row_platform` names, in server order.
 pub fn platform_ids_for(row_platform: &str, platforms: &[Platform]) -> Vec<i64> {
     platforms
@@ -71,7 +78,7 @@ pub fn platform_ids_for(row_platform: &str, platforms: &[Platform]) -> Vec<i64> 
 pub fn platforms_to_fetch(rows: &[InstalledGame], platforms: &[Platform]) -> Vec<i64> {
     let ids: BTreeSet<i64> = rows
         .iter()
-        .filter(|row| row.rom_id.is_none())
+        .filter(|row| needs_link(row))
         .flat_map(|row| platform_ids_for(&row.platform, platforms))
         .collect();
     ids.into_iter().collect()
@@ -97,7 +104,7 @@ pub fn match_unlinked(
 
     let mut proposed: Vec<(usize, i64)> = Vec::new();
     for (index, row) in rows.iter().enumerate() {
-        if row.rom_id.is_some() {
+        if !needs_link(row) {
             continue;
         }
         let title = normalize_title(&row.title);
@@ -168,7 +175,7 @@ pub async fn relink_pass(
     let rows = tokio::task::spawn_blocking(move || reg.all())
         .await
         .map_err(join_err)??;
-    if rows.iter().all(|row| row.rom_id.is_some()) {
+    if !rows.iter().any(needs_link) {
         return Ok(Vec::new());
     }
 
@@ -303,6 +310,30 @@ mod tests {
                 101
             )]
         );
+    }
+
+    /// A store row has no rom id but is never a RomM game: relink must not
+    /// consider it, even when a server ROM on a same-named platform matches
+    /// its title.
+    #[test]
+    fn store_rows_are_never_relinked() {
+        use crate::stores::{GameSource, StoreKind};
+        let store = InstalledGame {
+            source: GameSource::Store(StoreKind::Gog),
+            store_id: "1207664643".to_string(),
+            ..row(
+                "Super Mario World",
+                "Super Nintendo Entertainment System",
+                None,
+            )
+        };
+        assert!(!needs_link(&store));
+        assert!(needs_link(&row("X", "snes", None)));
+        assert!(!needs_link(&row("X", "snes", Some(1))));
+        let rows = vec![store];
+        let server = roms(vec![(1, vec![rom(101, "Super Mario World", 1)])]);
+        assert!(match_unlinked(&rows, &[snes()], &server).is_empty());
+        assert!(platforms_to_fetch(&rows, &[snes()]).is_empty());
     }
 
     #[test]

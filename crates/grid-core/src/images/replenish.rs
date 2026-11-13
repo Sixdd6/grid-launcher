@@ -117,6 +117,10 @@ pub fn plan(
     let mut items = Vec::new();
     let mut variants = Vec::new();
     for row in rows {
+        // A store row's art comes from its store, never from RomM.
+        if row.is_store() {
+            continue;
+        }
         let Some(rom_id) = row.rom_id else { continue };
         if row.images_version < IMAGES_VERSION
             || (row.cover_small_path.is_empty()

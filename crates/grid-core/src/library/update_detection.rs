@@ -137,7 +137,13 @@ pub struct ServerVersion<'a> {
 }
 
 /// `game_has_server_update` (update_detection.py:97-122).
+///
+/// A store row is never a RomM game: it has no server update (its store's
+/// own update check owns that).
 pub fn game_has_server_update(installed: &InstalledGame, server: &ServerVersion<'_>) -> bool {
+    if installed.is_store() {
+        return false;
+    }
     if is_emulators_platform(&installed.platform) || is_emulators_platform(server.platform) {
         return false;
     }
@@ -187,6 +193,20 @@ mod tests {
             rom_file_name,
             updated_at,
         }
+    }
+
+    #[test]
+    fn a_store_row_never_has_a_server_update() {
+        use crate::stores::{GameSource, StoreKind};
+        let romm = row("Windows", "Game (v1.0).zip", "2026-01-01T00:00:00Z");
+        let newer = server("Windows", "Game (v2.0).zip", "2026-06-01T00:00:00Z");
+        assert!(game_has_server_update(&romm, &newer));
+        let store = InstalledGame {
+            source: GameSource::Store(StoreKind::Epic),
+            store_id: "Sugar".to_string(),
+            ..romm
+        };
+        assert!(!game_has_server_update(&store, &newer));
     }
 
     // tests/test_update_detection.py:162-176

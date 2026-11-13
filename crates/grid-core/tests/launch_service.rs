@@ -242,7 +242,8 @@ async fn launch_registers_a_session_and_passes_the_rom_path() {
     service.spawn_poll_loop();
     let session = service.launch(7).await.unwrap();
 
-    assert_eq!(session.rom_id, 7);
+    assert_eq!(session.rom_id, Some(7));
+    assert_eq!(session.key, grid_core::stores::GameKey::Rom(7));
     assert_eq!(session.title, "Chrono");
     assert_eq!(session.emulator_name, "Stub");
     assert!(session.pid > 0, "expected a real pid");
@@ -260,6 +261,73 @@ async fn launch_registers_a_session_and_passes_the_rom_path() {
     assert_eq!(lines, vec!["--run", rom.to_string_lossy().as_ref()]);
 
     service.stop(session.id);
+}
+
+/// A GOG store row launches by its key through the native branch: its
+/// pinned launch file runs with its parameters, the session carries the
+/// store key and no rom id, a second launch is refused, and the RomM
+/// wrapper does not see it.
+#[tokio::test]
+async fn a_store_row_launches_natively_by_its_key() {
+    use grid_core::stores::{GameKey, GameSource, StoreKind};
+    let h = Harness::new();
+    h.write_config(Vec::new(), &[]);
+    let game_dir = h.root.join("stores-games").join("The Witcher");
+    fs::create_dir_all(&game_dir).unwrap();
+    let record = h.root.join("store.args");
+    let exe = game_dir.join("start.sh");
+    fs::write(
+        &exe,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nsleep 30\n",
+            record.to_string_lossy()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
+    let dir_text = game_dir.to_string_lossy().into_owned();
+    h.registry
+        .upsert_store(&InstalledGame {
+            title: "The Witcher".to_string(),
+            platform: StoreKind::Gog.platform_name().to_string(),
+            platform_slug: "linux".to_string(),
+            source: GameSource::Store(StoreKind::Gog),
+            store_id: "1207664643".to_string(),
+            extracted_dir: dir_text.clone(),
+            native_game_dir: dir_text,
+            native_executable_path: exe.to_string_lossy().into_owned(),
+            native_launch_parameters: "--windowed".to_string(),
+            installed_at: 1,
+            ..Default::default()
+        })
+        .unwrap();
+
+    let service = h.service();
+    let key = GameKey::store(StoreKind::Gog, "1207664643");
+    let session = service.launch_key(&key).await.unwrap();
+    assert_eq!(session.key, key);
+    assert_eq!(session.rom_id, None);
+    assert_eq!(session.emulator_name, "native");
+    assert!(session.pid > 0);
+    assert!(matches!(
+        service.launch_key(&key).await,
+        Err(LaunchError::AlreadyRunning)
+    ));
+    // The store row has no rom id, so the RomM path never finds it.
+    assert!(matches!(
+        service.launch(1207664643).await,
+        Err(LaunchError::NotInstalled)
+    ));
+
+    let recorded = wait_until(|| record.is_file()).await;
+    assert!(recorded, "the launch file never wrote its argv");
+    let argv = fs::read_to_string(&record).unwrap();
+    assert_eq!(argv.lines().collect::<Vec<_>>(), vec!["--windowed"]);
+
+    service.spawn_poll_loop();
+    service.stop(session.id);
+    let gone = wait_until(|| service.snapshot().sessions.is_empty()).await;
+    assert!(gone, "the store session was not reaped after stop");
 }
 
 #[tokio::test]
@@ -528,7 +596,7 @@ async fn the_session_finished_hook_fires_once_per_reaped_session_after_the_snaps
     #[derive(Debug, Clone, PartialEq)]
     enum Event {
         Snapshot,
-        Hook(u64, i64, String),
+        Hook(u64, Option<i64>, String),
     }
     let log: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -567,7 +635,7 @@ async fn the_session_finished_hook_fires_once_per_reaped_session_after_the_snaps
         vec![
             Event::Snapshot,
             Event::Snapshot,
-            Event::Hook(session.id, 7, "Chrono".to_string()),
+            Event::Hook(session.id, Some(7), "Chrono".to_string()),
         ],
         "the hook must fire exactly once, after the snapshot emit(s): {events:?}"
     );

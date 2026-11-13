@@ -98,6 +98,49 @@ impl CloudGame {
     }
 }
 
+/// What a RomM cloud call says for a store game: RomM cloud saves are off
+/// for store rows (each store's own cloud saves take their place).
+pub const STORE_CLOUD_REFUSAL: &str = "Store games don't use RomM cloud saves.";
+
+/// Whether RomM cloud saves apply to a game from `source` (the registry
+/// `source` value, `""` meaning a RomM row): only RomM games. The one gate
+/// every RomM cloud path checks: the manual panel calls, the pre-launch
+/// restore, the session stamps and the auto-upload on exit.
+pub fn romm_cloud_applies(source: &str) -> bool {
+    let source = source.trim();
+    source.is_empty() || source == crate::stores::ROMM_SOURCE
+}
+
+/// [`romm_cloud_applies`] for a registry row.
+pub fn romm_cloud_applies_to_row(row: &crate::library::registry::InstalledGame) -> bool {
+    romm_cloud_applies(row.source.as_str())
+}
+
+#[cfg(test)]
+mod store_gate_tests {
+    use super::*;
+    use crate::library::registry::InstalledGame;
+    use crate::stores::{GameSource, StoreKind};
+
+    #[test]
+    fn romm_cloud_saves_are_off_for_store_games() {
+        assert!(romm_cloud_applies(""));
+        assert!(romm_cloud_applies("romm"));
+        for kind in StoreKind::ALL {
+            assert!(!romm_cloud_applies(kind.as_str()), "{kind}");
+            let row = InstalledGame {
+                source: GameSource::Store(kind),
+                store_id: "1".into(),
+                ..Default::default()
+            };
+            assert!(!romm_cloud_applies_to_row(&row), "{kind}");
+        }
+        // An unknown source is not RomM either.
+        assert!(!romm_cloud_applies("itch"));
+        assert!(romm_cloud_applies_to_row(&InstalledGame::default()));
+    }
+}
+
 /// Case-insensitive block lists for save-directory scanning, in
 /// [`latest_mtime_under`] and the directory filters in `cloud::window`:
 /// file basenames and extensions (leading dot, e.g. `".tmp"`) to skip.

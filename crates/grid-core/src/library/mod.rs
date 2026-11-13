@@ -82,6 +82,7 @@ use platforms::{
 };
 use queue::{
     Admission, CancelAction, DownloadStatus, DownloadsSnapshot, EntryMeta, JobKey, QueueState,
+    StoreJob,
 };
 use registry::{identity_key, installed_match, InstalledGame, Registry};
 use relocate::LibraryGate;
@@ -584,6 +585,9 @@ enum JobPayload {
     /// One backup row (`backup_job`): download to staging, then write to
     /// the drive.
     Backup(Box<backup_job::BackupJob>),
+    /// One store operation ([`StoreJob`]): its runner does both halves on
+    /// the blocking pool.
+    Store(StoreJob),
 }
 
 impl JobPayload {
@@ -593,6 +597,8 @@ impl JobPayload {
             JobPayload::Game(job) => job.space.as_ref(),
             JobPayload::Emulator(job) => job.space.as_ref(),
             JobPayload::Backup(job) => job.space.as_ref(),
+            // A store tool checks its own space.
+            JobPayload::Store(_) => None,
         }
     }
 }
@@ -1240,6 +1246,9 @@ pub struct InstallService {
     /// Every backup row admitted this session, by entry id: what `retry`
     /// rebuilds the row from.
     backup_rows: Mutex<HashMap<u64, (backup_job::DriveTarget, backup_job::BackupItem)>>,
+    /// Every store job admitted this session, by entry id: what `retry`
+    /// re-enqueues.
+    store_rows: Mutex<HashMap<u64, (StoreJob, String)>>,
     /// Test hook run before each file (and archive part) a backup writes
     /// to its drive.
     backup_write_hook: RwLock<Option<Arc<dyn Fn() + Send + Sync>>>,
@@ -1314,6 +1323,7 @@ impl InstallService {
             removed_drives: Mutex::new(HashMap::new()),
             resolved_sizes: Mutex::new(HashMap::new()),
             backup_rows: Mutex::new(HashMap::new()),
+            store_rows: Mutex::new(HashMap::new()),
             backup_write_hook: RwLock::new(None),
             local_scans: Mutex::new(HashMap::new()),
             drive_rows: Mutex::new(HashMap::new()),
@@ -1444,7 +1454,7 @@ impl InstallService {
             .all()?
             .into_iter()
             .map(|game| {
-                let key = (identity_key(&game.title), identity_key(&game.platform));
+                let key = game.identity_keys();
                 InstalledRow {
                     missing: report.missing.contains(&key),
                     game,
@@ -1503,10 +1513,7 @@ impl InstallService {
             home,
         );
         for decision in decisions {
-            let key = (
-                identity_key(&decision.title),
-                identity_key(&decision.platform),
-            );
+            let key = decision.identity.clone();
             match decision.state {
                 reconcile::RowState::Moved { from, to } => {
                     let rewrite = |value: &str| reconcile::repoint(value, &from, &to, home);
@@ -3148,6 +3155,16 @@ impl InstallService {
             }
             // A summary row is never retryable.
             Some(JobKey::BackupSummary(_)) => Ok(()),
+            // Re-enqueued with the same runner; one from an earlier session
+            // has none, and is left for the store's own page to restart.
+            Some(JobKey::Store { .. }) => {
+                let row = self.store_rows.lock().unwrap().get(&entry_id).cloned();
+                let Some((job, title)) = row else {
+                    return Ok(());
+                };
+                self.dismiss(entry_id);
+                self.enqueue_store_job(job, &title).map(|_| ())
+            }
             None => Ok(()),
         }
     }
@@ -3166,7 +3183,40 @@ impl InstallService {
         self.cancel_flags.lock().unwrap().remove(&entry_id);
         self.backup_rows.lock().unwrap().remove(&entry_id);
         self.drive_rows.lock().unwrap().remove(&entry_id);
+        self.store_rows.lock().unwrap().remove(&entry_id);
         self.notify_now();
+    }
+
+    /// Queues a store operation ([`StoreJob`]) behind the same download and
+    /// finalize slots as every other job, with the same progress, cancel
+    /// and retry handling. `title` is the drawer row's title; the platform
+    /// is the store's name. Returns the new entry id, or `None` when the
+    /// same product already has this op queued or running. Refused while a
+    /// library move holds the gate, like any admission.
+    pub fn enqueue_store_job(
+        self: &Arc<Self>,
+        job: StoreJob,
+        title: &str,
+    ) -> Result<Option<u64>, LibraryError> {
+        let key = job.job_key();
+        let kind = job.op.kind();
+        let platform = job.source.platform_name();
+        let remembered = job.clone();
+        let admitted = self.admit_meta(
+            key,
+            title,
+            platform,
+            kind,
+            JobPayload::Store(job),
+            EntryMeta::default(),
+        )?;
+        if let Some(id) = admitted {
+            self.store_rows
+                .lock()
+                .unwrap()
+                .insert(id, (remembered, title.to_string()));
+        }
+        Ok(admitted)
     }
 
     /// Deletes an installed game's files and its registry row.
@@ -3608,6 +3658,19 @@ impl InstallService {
                     JobPayload::Emulator(job) => {
                         download_emulator(job, &cancel, &mut on_progress).await
                     }
+                    JobPayload::Store(job) => {
+                        let runner = job.runner.clone();
+                        let cancel = cancel.clone();
+                        tokio::task::spawn_blocking(move || {
+                            runner.download(&cancel, &mut on_progress)
+                        })
+                        .await
+                        .unwrap_or_else(|e| {
+                            Err(LibraryError::Extract(format!(
+                                "the store download did not finish: {e}"
+                            )))
+                        })
+                    }
                     JobPayload::Backup(job) => {
                         job.staging = backup_job::staging_dir(&job.library, id);
                         match owner.removed_reason(&job.drive.key) {
@@ -3670,8 +3733,9 @@ impl InstallService {
                     && self.already_installed(&job.detail).await
             }
             // A backup never short-circuits: its write phase decides whether
-            // the item is already on the drive.
-            JobPayload::Emulator(_) | JobPayload::Backup(_) => false,
+            // the item is already on the drive. A store job's runner decides
+            // for itself.
+            JobPayload::Emulator(_) | JobPayload::Backup(_) | JobPayload::Store(_) => false,
         };
         // A row whose drive was removed fails with the removal, whether its
         // download was cancelled by `abort_drive` or finished just before.
@@ -3848,6 +3912,10 @@ impl InstallService {
                 .and_then(|()| self.finalize_inner(id, job, &mut warning)),
             JobPayload::Emulator(job) => self.finalize_emulator(id, job, &mut warning),
             JobPayload::Backup(job) => self.finalize_backup(id, job, cancel, &mut warning),
+            JobPayload::Store(job) => job
+                .runner
+                .finalize(&mut |done, total| self.on_install_progress(id, done, total))
+                .map(|message| warning = message),
         };
         (result, warning)
     }

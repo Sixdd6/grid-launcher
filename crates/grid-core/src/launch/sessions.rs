@@ -11,6 +11,8 @@
 use std::process::{Child, ExitStatus};
 use std::sync::Mutex;
 
+use crate::stores::GameKey;
+
 /// One running game, as handed to the UI. Serialized straight to the
 /// frontend, so field names are part of the IPC contract. The fields marked
 /// `#[serde(skip)]` stay on the Rust side: the session-finished hooks read
@@ -18,7 +20,12 @@ use std::sync::Mutex;
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct GameSession {
     pub id: u64,
-    pub rom_id: i64,
+    /// The game's identity (`romm:123`, `gog:1207664643`). One live
+    /// session per key.
+    pub key: GameKey,
+    /// The RomM rom id, `None` for a store game. Play activity and the
+    /// cloud auto-upload skip a session without one.
+    pub rom_id: Option<i64>,
     pub title: String,
     pub emulator_name: String,
     /// Unix seconds at spawn time.
@@ -69,10 +76,25 @@ pub struct SessionsSnapshot {
     pub warning: Option<String>,
 }
 
-/// A live session: the public record plus the child handle that backs it.
+/// Answers whether an externally watched game is still running. Called by
+/// every reap, under the session store's lock, so it must be cheap and must
+/// not block (a `/proc` scan, not a network call).
+pub type AliveCheck = Box<dyn FnMut() -> bool + Send>;
+
+/// What backs a live session.
+enum Tracked {
+    /// A process GRID spawned: reaped through its handle.
+    Child(Child),
+    /// A process GRID did not spawn and holds no handle to (a Steam game,
+    /// started by the Steam client): live while the check says so. Such a
+    /// session has no pid GRID may signal, so `stop` never reaches it.
+    Watched(AliveCheck),
+}
+
+/// A live session: the public record plus what backs it.
 struct Entry {
     info: GameSession,
-    child: Child,
+    tracked: Tracked,
 }
 
 /// The live-session table. One mutex guards both the records and the child
@@ -83,7 +105,7 @@ pub(crate) struct SessionStore {
 }
 
 impl SessionStore {
-    /// Adds `info`/`child` unless a session for `info.rom_id` is already
+    /// Adds `info`/`child` unless a session for `info.key` is already
     /// live. On rejection the child is handed back, because the caller — not
     /// this store — has to decide what to do with a process nobody is
     /// tracking (it kills it).
@@ -94,20 +116,42 @@ impl SessionStore {
     /// the pre-check, and only this one can reject the loser.
     pub(crate) fn register(&self, info: GameSession, child: Child) -> Result<(), Child> {
         let mut entries = self.entries.lock().unwrap();
-        if entries.iter().any(|e| e.info.rom_id == info.rom_id) {
+        if entries.iter().any(|e| e.info.key == info.key) {
             return Err(child);
         }
-        entries.push(Entry { info, child });
+        entries.push(Entry {
+            info,
+            tracked: Tracked::Child(child),
+        });
         Ok(())
     }
 
-    /// Whether a session for `rom_id` is live.
-    pub(crate) fn contains_rom(&self, rom_id: i64) -> bool {
+    /// Adds an externally watched session ([`Tracked::Watched`]) unless a
+    /// session for `info.key` is already live; on rejection the check is
+    /// handed back. `info.pid` is display-only: it is never signalled.
+    pub(crate) fn register_watched(
+        &self,
+        info: GameSession,
+        alive: AliveCheck,
+    ) -> Result<(), AliveCheck> {
+        let mut entries = self.entries.lock().unwrap();
+        if entries.iter().any(|e| e.info.key == info.key) {
+            return Err(alive);
+        }
+        entries.push(Entry {
+            info,
+            tracked: Tracked::Watched(alive),
+        });
+        Ok(())
+    }
+
+    /// Whether a session for `key` is live.
+    pub(crate) fn contains_key(&self, key: &GameKey) -> bool {
         self.entries
             .lock()
             .unwrap()
             .iter()
-            .any(|e| e.info.rom_id == rom_id)
+            .any(|e| &e.info.key == key)
     }
 
     /// The current session records, in start order.
@@ -120,7 +164,8 @@ impl SessionStore {
             .collect()
     }
 
-    /// `try_wait`s every child and drops the ones that have exited,
+    /// `try_wait`s every child (and asks every watched session's check)
+    /// and drops the ones that have exited,
     /// returning one entry per *removed* session. This is the only place a
     /// session is removed, so a pid can never be reaped while another caller
     /// still believes the session is live.
@@ -158,14 +203,28 @@ impl SessionStore {
             // out of its entry and waited once the lock is gone. Order is
             // preserved: survivors are pushed back in the order they came.
             for mut entry in entries.drain(..) {
-                match entry.child.try_wait() {
+                let child = match &mut entry.tracked {
+                    Tracked::Child(child) => child,
+                    // A watched game has no exit status to report.
+                    Tracked::Watched(alive) => {
+                        if alive() {
+                            kept.push(entry);
+                        } else {
+                            exited.push((entry.info.clone().finished_at(now_ms), None));
+                        }
+                        continue;
+                    }
+                };
+                match child.try_wait() {
                     Ok(Some(status)) => {
                         exited.push((entry.info.clone().finished_at(now_ms), Some(status)))
                     }
                     Ok(None) => kept.push(entry),
                     Err(_) => {
                         exited.push((entry.info.clone().finished_at(now_ms), None));
-                        unusable.push(entry.child);
+                        if let Tracked::Child(child) = entry.tracked {
+                            unusable.push(child);
+                        }
                     }
                 }
             }
@@ -177,7 +236,10 @@ impl SessionStore {
         exited
     }
 
-    /// The pid of `session_id`, if it is still live.
+    /// The pid of `session_id`, if it is still live and is a child GRID
+    /// spawned. A watched session has no pid GRID may signal (its `pid`
+    /// field may be `0`, and `kill(0, ..)` would hit GRID's own process
+    /// group), so it answers `None`.
     #[cfg(unix)]
     pub(crate) fn pid_of(&self, session_id: u64) -> Option<u32> {
         self.entries
@@ -185,7 +247,9 @@ impl SessionStore {
             .unwrap()
             .iter()
             .find(|e| e.info.id == session_id)
+            .filter(|e| matches!(e.tracked, Tracked::Child(_)))
             .map(|e| e.info.pid)
+            .filter(|pid| *pid > 0)
     }
 
     /// Kills `session_id`'s child through its handle. Windows only: there is
@@ -196,7 +260,9 @@ impl SessionStore {
     pub(crate) fn kill(&self, session_id: u64) {
         let mut entries = self.entries.lock().unwrap();
         if let Some(entry) = entries.iter_mut().find(|e| e.info.id == session_id) {
-            let _ = entry.child.kill();
+            if let Tracked::Child(child) = &mut entry.tracked {
+                let _ = child.kill();
+            }
         }
     }
 }
@@ -209,7 +275,8 @@ mod finish_tests {
     fn finished_at_records_the_end_and_the_duration() {
         let running = GameSession {
             id: 1,
-            rom_id: 7,
+            key: GameKey::Rom(7),
+            rom_id: Some(7),
             started_at: 1_700_000_000,
             started_at_ms: 1_700_000_000_250,
             ..Default::default()
@@ -220,7 +287,8 @@ mod finish_tests {
         let done = running.finished_at(1_700_000_045_750);
         assert_eq!(done.ended_at_ms, Some(1_700_000_045_750));
         assert_eq!(done.duration_ms, Some(45_500));
-        // The IPC shape is unchanged: none of the Rust-side fields reach JSON.
+        // None of the Rust-side fields reach JSON; the key is a string.
+        assert_eq!(serde_json::to_value(&done).unwrap()["key"], "romm:7");
         let json = serde_json::to_value(&done).unwrap();
         let mut keys: Vec<&str> = json
             .as_object()
@@ -234,6 +302,7 @@ mod finish_tests {
             vec![
                 "emulator_name",
                 "id",
+                "key",
                 "pid",
                 "rom_id",
                 "started_at",
@@ -262,7 +331,8 @@ mod tests {
     fn session(id: u64, rom_id: i64, pid: u32) -> GameSession {
         GameSession {
             id,
-            rom_id,
+            key: GameKey::Rom(rom_id),
+            rom_id: Some(rom_id),
             title: "Chrono".to_string(),
             emulator_name: "Stub".to_string(),
             started_at: 1,
@@ -306,8 +376,8 @@ mod tests {
         assert!(store.register(session(3, 8, other_pid), other).is_ok());
 
         assert_eq!(store.list().len(), 2);
-        assert!(store.contains_rom(7));
-        assert!(!store.contains_rom(9));
+        assert!(store.contains_key(&GameKey::Rom(7)));
+        assert!(!store.contains_key(&GameKey::Rom(9)));
 
         // Kill both tracked children and reap them through the store.
         for id in [1, 3] {
@@ -365,5 +435,72 @@ mod tests {
 
         unsafe { libc::kill(alive_pid as i32, libc::SIGKILL) };
         drain(&store);
+    }
+}
+
+#[cfg(test)]
+mod watched_tests {
+    use super::*;
+    use crate::stores::StoreKind;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    fn steam_session(id: u64) -> GameSession {
+        GameSession {
+            id,
+            key: GameKey::store(StoreKind::Steam, "620"),
+            rom_id: None,
+            title: "Portal 2".to_string(),
+            emulator_name: "Steam".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_watched_session_lives_until_its_check_says_otherwise() {
+        let store = SessionStore::default();
+        let running = Arc::new(AtomicBool::new(true));
+        let flag = running.clone();
+        assert!(store
+            .register_watched(
+                steam_session(1),
+                Box::new(move || flag.load(Ordering::SeqCst))
+            )
+            .is_ok());
+        let key = GameKey::store(StoreKind::Steam, "620");
+        assert!(store.contains_key(&key));
+        assert!(!store.contains_key(&GameKey::Rom(620)));
+
+        // A second session for the same key is refused, check handed back.
+        let mut refused = store
+            .register_watched(steam_session(2), Box::new(|| true))
+            .expect_err("one session per key");
+        assert!(refused());
+
+        assert!(store.reap().is_empty(), "still running");
+        assert_eq!(store.list().len(), 1);
+
+        running.store(false, Ordering::SeqCst);
+        let exited = store.reap();
+        assert_eq!(exited.len(), 1);
+        assert_eq!(exited[0].0.id, 1);
+        assert_eq!(exited[0].0.rom_id, None);
+        assert!(exited[0].0.ended_at_ms.is_some());
+        assert!(exited[0].1.is_none(), "no exit status for a watched game");
+        assert!(store.list().is_empty());
+        assert!(!store.contains_key(&key));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_watched_session_has_no_pid_to_signal() {
+        let store = SessionStore::default();
+        let mut info = steam_session(9);
+        info.pid = 0;
+        store
+            .register_watched(info, Box::new(|| true))
+            .ok()
+            .unwrap();
+        assert_eq!(store.pid_of(9), None);
     }
 }

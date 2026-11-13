@@ -24,6 +24,38 @@ pub struct NativeLaunch {
     /// `umu-run` branch, or `""` when the game runs with no compat tool at
     /// all. The caller maps `""` to `"native"` for the session record.
     pub tool_label: String,
+    /// Positions in `argv` that hold a secret (an Epic exchange code) and
+    /// must never be printed: logs, error messages and anything a session
+    /// record carries show them as [`REDACTED_ARG`] ([`Self::printable_argv`],
+    /// [`redact_argv`]). Empty for every launch GRID builds today.
+    pub redact: Vec<usize>,
+}
+
+/// What a redacted argv position prints as.
+pub const REDACTED_ARG: &str = "<redacted>";
+
+impl NativeLaunch {
+    /// `argv` as it may be printed: every position in `redact` replaced by
+    /// [`REDACTED_ARG`].
+    pub fn printable_argv(&self) -> Vec<String> {
+        redact_argv(&self.argv, &self.redact)
+    }
+}
+
+/// `argv` with every position in `redact` replaced by [`REDACTED_ARG`].
+/// A position past the end is ignored. The one way a launch command line
+/// reaches a log line, an error message or the early-exit warning.
+pub fn redact_argv(argv: &[String], redact: &[usize]) -> Vec<String> {
+    argv.iter()
+        .enumerate()
+        .map(|(index, arg)| {
+            if redact.contains(&index) {
+                REDACTED_ARG.to_string()
+            } else {
+                arg.clone()
+            }
+        })
+        .collect()
 }
 
 /// Why [`build_native_command`] could not build a launch.
@@ -193,6 +225,7 @@ pub fn build_native_command(
         cwd,
         env,
         tool_label,
+        redact: Vec::new(),
     })
 }
 
@@ -247,6 +280,37 @@ fn set_wineprefix(row: &InstalledGame, env: &mut Vec<(String, String)>) -> Resul
 mod tests {
     use super::*;
     use std::fs;
+
+    /// An Epic exchange code in argv never reaches printed text: the
+    /// printable argv and the early-exit warning built from it show
+    /// `<redacted>` at that position, and the real argv is untouched.
+    #[test]
+    fn redacted_argv_positions_never_print() {
+        let launch = NativeLaunch {
+            argv: vec![
+                "/games/epic/Game.exe".to_string(),
+                "-AUTH_LOGIN=unused".to_string(),
+                "-AUTH_PASSWORD=FAKE-STORE-TOKEN-not-real".to_string(),
+                "-epicenv=Prod".to_string(),
+            ],
+            cwd: PathBuf::from("/games/epic"),
+            env: Vec::new(),
+            tool_label: String::new(),
+            redact: vec![2, 99],
+        };
+        let printable = launch.printable_argv();
+        assert_eq!(printable[2], REDACTED_ARG);
+        assert_eq!(printable[0], launch.argv[0]);
+        assert_eq!(printable[3], "-epicenv=Prod");
+        assert_eq!(printable.len(), launch.argv.len());
+        assert!(launch.argv[2].contains("FAKE-STORE-TOKEN-not-real"));
+
+        let message = super::super::spawn::early_exit_message("Game", None, &printable, "");
+        assert!(message.contains(REDACTED_ARG), "{message}");
+        assert!(!message.contains("FAKE-STORE-TOKEN-not-real"), "{message}");
+
+        assert_eq!(redact_argv(&launch.argv, &[]), launch.argv);
+    }
 
     fn row(title: &str, extracted_dir: &Path) -> InstalledGame {
         InstalledGame {

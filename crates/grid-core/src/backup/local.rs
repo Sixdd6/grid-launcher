@@ -52,6 +52,8 @@ pub const REASON_EMULATORS: &str = "Emulator packages always download from the s
 pub const REASON_OTHER_SERVER: &str = "It was installed from another server";
 /// The row predates rom-id tracking, so it cannot be tied to this game.
 pub const REASON_NO_ROM_ID: &str = "It isn't linked to this server's game";
+/// A store game (GOG, Epic, Amazon, Steam): its store installs it.
+pub const REASON_STORE: &str = "Store games are not backed up";
 
 /// The folder inside a native game's home that holds its Wine prefix. Never
 /// copied as a whole: only the save folders GRID knows are, through
@@ -96,6 +98,7 @@ pub enum Located {
 /// (`InstallService::installed_rows`).
 ///
 /// The checks, in order:
+/// 0. a store row is refused ([`REASON_STORE`]);
 /// 1. the row is for `rom_id` (a row for another game is `NotInstalled`;
 ///    one with no rom id is refused) and from the live server (a blank
 ///    `source_server` is a server install);
@@ -119,6 +122,9 @@ pub fn locate(
     let Some(row) = row else {
         return Located::NotInstalled;
     };
+    if row.is_store() {
+        return Located::Ineligible(REASON_STORE.into());
+    }
     match row.rom_id {
         Some(id) if id == rom_id => {}
         Some(_) => return Located::NotInstalled,
@@ -740,6 +746,21 @@ mod tests {
         let mut row = extracted_row(&platform_dir(&library(), PS4).join("Ember Run"));
         row.rom_id = None;
         assert_eq!(refused(&row), REASON_NO_ROM_ID);
+    }
+
+    #[test]
+    fn a_store_game_is_not_backed_up() {
+        use crate::stores::{GameSource, StoreKind};
+        for kind in StoreKind::ALL {
+            let mut row = extracted_row(&platform_dir(&library(), PS4).join("Ember Run"));
+            row.source = GameSource::Store(kind);
+            row.store_id = "42".into();
+            assert_eq!(refused(&row), REASON_STORE, "{kind}");
+            // Even with no rom id, the store reason wins.
+            row.rom_id = None;
+            assert_eq!(refused(&row), REASON_STORE, "{kind}");
+        }
+        assert_eq!(REASON_STORE, "Store games are not backed up");
     }
 
     #[test]

@@ -19,6 +19,7 @@ pub mod retroachievements;
 pub mod romm;
 pub mod secrets;
 pub mod session;
+pub mod stores;
 #[cfg(test)]
 pub(crate) mod test_env;
 

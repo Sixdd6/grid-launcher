@@ -61,7 +61,7 @@ fn table_columns(conn: &Connection) -> Vec<String> {
 }
 
 #[test]
-fn open_creates_file_and_sets_user_version_10() {
+fn open_creates_file_and_sets_user_version_11() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -71,12 +71,12 @@ fn open_creates_file_and_sets_user_version_10() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     drop(registry);
 }
 
 #[test]
-fn fresh_db_is_v10_and_has_the_twelve_columns() {
+fn fresh_db_is_v11_and_has_the_twelve_columns() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -85,7 +85,7 @@ fn fresh_db_is_v10_and_has_the_twelve_columns() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -260,7 +260,7 @@ fn open_migrates_a_v1_database_and_update_images_round_trips() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].cover_small_path, "");
@@ -310,7 +310,7 @@ fn open_migrates_a_v1_database_that_already_has_one_v2_column() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
 
     let columns = table_columns(&conn);
     for column in ["cover_small_path", "cover_large_path", "screenshot_urls"] {
@@ -352,7 +352,7 @@ fn v2_schema() -> String {
 }
 
 #[test]
-fn migrates_v1_to_v10_transactionally() {
+fn migrates_v1_to_latest_transactionally() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -368,7 +368,7 @@ fn migrates_v1_to_v10_transactionally() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -388,7 +388,7 @@ fn migrates_v1_to_v10_transactionally() {
 }
 
 #[test]
-fn migrates_v2_to_v10() {
+fn migrates_v2_to_latest() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -404,7 +404,7 @@ fn migrates_v2_to_v10() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -445,7 +445,7 @@ fn migration_is_idempotent_when_columns_preexist() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -554,7 +554,7 @@ fn v3_schema() -> String {
 }
 
 #[test]
-fn fresh_db_is_v10_and_has_last_played_at() {
+fn fresh_db_is_v11_and_has_last_played_at() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -563,7 +563,7 @@ fn fresh_db_is_v10_and_has_last_played_at() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     let columns = table_columns(&conn);
     assert!(
         columns.iter().any(|c| c == "last_played_at"),
@@ -579,7 +579,7 @@ fn fresh_db_is_v10_and_has_last_played_at() {
 }
 
 #[test]
-fn migrates_v3_to_v10_keeping_rows_and_defaulting_last_played_to_zero() {
+fn migrates_v3_to_latest_keeping_rows_and_defaulting_last_played_to_zero() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -599,7 +599,7 @@ fn migrates_v3_to_v10_keeping_rows_and_defaulting_last_played_to_zero() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
 
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
@@ -626,12 +626,12 @@ fn v3_to_v4_migration_is_idempotent_when_the_column_preexists() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     assert!(registry.all().unwrap().is_empty());
 }
 
 #[test]
-fn migrates_v4_to_v10_keeping_rows_and_defaulting_fanart_to_blank() {
+fn migrates_v4_to_latest_keeping_rows_and_defaulting_fanart_to_blank() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -656,7 +656,7 @@ fn migrates_v4_to_v10_keeping_rows_and_defaulting_fanart_to_blank() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
 
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
@@ -682,12 +682,12 @@ fn v4_to_v5_migration_is_idempotent_when_the_column_preexists() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     assert!(registry.all().unwrap().is_empty());
 }
 
 #[test]
-fn fresh_db_is_v10_and_stamps_images_version_on_insert() {
+fn fresh_db_is_v11_and_stamps_images_version_on_insert() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -696,7 +696,7 @@ fn fresh_db_is_v10_and_stamps_images_version_on_insert() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     let columns = table_columns(&conn);
     assert!(
         columns.iter().any(|c| c == "images_version"),
@@ -712,7 +712,7 @@ fn fresh_db_is_v10_and_stamps_images_version_on_insert() {
 }
 
 #[test]
-fn migrates_v5_to_v10_keeping_rows_and_defaulting_images_version_to_zero() {
+fn migrates_v5_to_latest_keeping_rows_and_defaulting_images_version_to_zero() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -737,7 +737,7 @@ fn migrates_v5_to_v10_keeping_rows_and_defaulting_images_version_to_zero() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     let columns = table_columns(&conn);
     assert!(
         columns.iter().any(|c| c == "images_version"),
@@ -770,7 +770,7 @@ fn v5_to_v6_migration_is_idempotent_when_the_column_preexists() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     assert!(registry.all().unwrap().is_empty());
 }
 
@@ -881,7 +881,7 @@ fn a_fresh_database_has_the_play_session_outbox() {
 }
 
 #[test]
-fn migrates_v6_to_v10_adding_the_outbox_and_keeping_rows() {
+fn migrates_v6_to_latest_adding_the_outbox_and_keeping_rows() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -900,7 +900,7 @@ fn migrates_v6_to_v10_adding_the_outbox_and_keeping_rows() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     assert!(has_table(&conn, "pending_play_sessions"));
     assert_eq!(registry.all().unwrap().len(), 1);
     assert!(registry
@@ -1081,7 +1081,7 @@ fn migrates_v7_to_v8_adding_a_blank_platform_slug_and_keeping_rows() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     assert!(table_columns(&conn).iter().any(|c| c == "platform_slug"));
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
@@ -1177,7 +1177,7 @@ fn migrates_v8_to_v9_marking_an_existing_pin_as_the_users_choice() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     let columns = table_columns(&conn);
     assert!(columns.iter().any(|c| c == "native_launch_source"));
     assert!(columns.iter().any(|c| c == "native_working_dir"));
@@ -1260,7 +1260,7 @@ fn migrates_v9_to_v10_keeping_rows_and_defaulting_source_server_to_blank() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     assert!(table_columns(&conn).iter().any(|c| c == "source_server"));
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
@@ -1289,4 +1289,235 @@ fn v9_to_v10_migration_is_idempotent_when_the_column_preexists() {
         registry.all().unwrap()[0].source_server,
         "https://romm.example"
     );
+}
+
+// --- store rows (v11) -------------------------------------------------------
+
+use grid_core::stores::{GameKey, GameSource, StoreKind};
+
+fn store_row(kind: StoreKind, store_id: &str, title: &str) -> InstalledGame {
+    InstalledGame {
+        title: title.to_string(),
+        platform: kind.platform_name().to_string(),
+        source: GameSource::Store(kind),
+        store_id: store_id.to_string(),
+        store_meta: "{\"origin\":\"online\"}".to_string(),
+        native_game_dir: format!("/games/{store_id}"),
+        native_executable_path: format!("/games/{store_id}/game.exe"),
+        installed_at: 1_700_000_000,
+        images_version: IMAGES_VERSION,
+        ..Default::default()
+    }
+}
+
+fn index_names(conn: &Connection) -> Vec<String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'installed_games'",
+        )
+        .unwrap();
+    stmt.query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect()
+}
+
+#[test]
+fn fresh_db_is_v11_with_the_store_columns_and_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    let registry = Registry::open(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 11);
+    let columns = table_columns(&conn);
+    for column in ["source", "store_id", "store_meta"] {
+        assert!(columns.iter().any(|c| c == column), "missing {column}");
+    }
+    assert!(index_names(&conn)
+        .iter()
+        .any(|n| n == "installed_games_store_identity"));
+    drop(registry);
+}
+
+#[test]
+fn migrates_v10_to_v11_keeping_rows_as_romm_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        // A v10 database: today's schema without the v11 index and columns.
+        let registry = Registry::open(&path).unwrap();
+        let mut row = sample("Ten", "SNES");
+        row.rom_id = Some(10);
+        row.source_server = "https://romm.example".into();
+        registry.upsert(&row).unwrap();
+        registry.touch_last_played(10, 99).unwrap();
+        drop(registry);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "DROP INDEX installed_games_store_identity;
+             ALTER TABLE installed_games DROP COLUMN source;
+             ALTER TABLE installed_games DROP COLUMN store_id;
+             ALTER TABLE installed_games DROP COLUMN store_meta;",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 10).unwrap();
+        assert!(!table_columns(&conn).iter().any(|c| c == "source"));
+    }
+
+    let registry = Registry::open(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 11);
+    assert!(index_names(&conn)
+        .iter()
+        .any(|n| n == "installed_games_store_identity"));
+    let rows = registry.all().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "Ten");
+    assert_eq!(rows[0].rom_id, Some(10));
+    assert_eq!(rows[0].source_server, "https://romm.example");
+    assert_eq!(rows[0].last_played_at, 99);
+    assert_eq!(rows[0].source, GameSource::Romm);
+    assert_eq!(rows[0].store_id, "");
+    assert_eq!(rows[0].store_meta, "");
+    assert_eq!(rows[0].key(), Some(GameKey::Rom(10)));
+
+    // The upgraded database takes store rows.
+    registry
+        .upsert_store(&store_row(StoreKind::Gog, "1207664643", "Ten"))
+        .unwrap();
+    assert_eq!(registry.all().unwrap().len(), 2);
+}
+
+#[test]
+fn v10_to_v11_migration_is_idempotent_when_the_columns_preexist() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        let registry = Registry::open(&path).unwrap();
+        registry
+            .upsert(&store_row(StoreKind::Epic, "Sugar", "Sugar"))
+            .unwrap();
+        drop(registry);
+        // Torn between the ALTERs and the version bump.
+        let conn = Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", 10).unwrap();
+    }
+    let registry = Registry::open(&path).unwrap();
+    let row = registry
+        .find_store(StoreKind::Epic, "Sugar")
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.source, GameSource::Store(StoreKind::Epic));
+}
+
+#[test]
+fn a_store_row_round_trips_and_is_found_by_key_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("r.db")).unwrap();
+    let mut rec = store_row(StoreKind::Gog, "1207664643", "The Witcher");
+    rec.rom_id = Some(5); // never stored for a store row
+    registry.upsert_store(&rec).unwrap();
+
+    let key = GameKey::store(StoreKind::Gog, "1207664643");
+    let stored = registry.find_key(&key).unwrap().unwrap();
+    assert_eq!(stored.rom_id, None);
+    assert_eq!(stored.source, GameSource::Store(StoreKind::Gog));
+    assert_eq!(stored.store_id, "1207664643");
+    assert_eq!(stored.store_meta, "{\"origin\":\"online\"}");
+    assert_eq!(stored.platform, "GOG");
+    assert_eq!(stored.key(), Some(key.clone()));
+    assert!(stored.is_store());
+    assert!(stored.is_native(), "a GOG row launches natively");
+
+    // No title/platform path reaches it.
+    assert!(registry.find(None, "The Witcher", "GOG").unwrap().is_none());
+    assert!(registry.find(Some(5), "", "").unwrap().is_none());
+    assert!(!registry.remove("The Witcher", "GOG").unwrap());
+    assert_eq!(
+        registry.set_rom_id_by_key("The Witcher", "GOG", 9).unwrap(),
+        grid_core::library::registry::SetRomIdOutcome::NoSuchRow
+    );
+    assert!(registry.find_key(&GameKey::Rom(5)).unwrap().is_none());
+
+    // Key-based writes.
+    assert!(registry.touch_last_played_key(&key, 1234).unwrap());
+    let images = ImageFields {
+        cover_small_path: "/c/s.png".into(),
+        cover_large_path: "/c/l.png".into(),
+        screenshot_urls: String::new(),
+        fanart_urls: String::new(),
+    };
+    assert!(registry.update_images_key(&key, &images).unwrap());
+    let stored = registry.find_key(&key).unwrap().unwrap();
+    assert_eq!(stored.last_played_at, 1234);
+    assert_eq!(stored.cover_large_path, "/c/l.png");
+    assert_eq!(registry.store_rows(StoreKind::Gog).unwrap().len(), 1);
+    assert!(registry.store_rows(StoreKind::Epic).unwrap().is_empty());
+
+    assert!(registry.remove_key(&key).unwrap());
+    assert!(registry.find_key(&key).unwrap().is_none());
+    assert!(!registry.remove_key(&key).unwrap());
+}
+
+#[test]
+fn two_products_with_one_title_in_one_store_do_not_collide() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("r.db")).unwrap();
+    registry
+        .upsert_store(&store_row(StoreKind::Gog, "1", "Doom"))
+        .unwrap();
+    registry
+        .upsert_store(&store_row(StoreKind::Gog, "2", "Doom"))
+        .unwrap();
+    // A RomM row with the same title on a platform named "GOG" is its own row.
+    let mut romm = sample("Doom", "GOG");
+    romm.rom_id = Some(77);
+    registry.upsert(&romm).unwrap();
+    let rows = registry.all().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert!(rows.iter().all(|r| r.title == "Doom"));
+    assert_eq!(
+        registry.find(Some(77), "", "").unwrap().unwrap().source,
+        GameSource::Romm
+    );
+    assert_eq!(registry.store_rows(StoreKind::Gog).unwrap().len(), 2);
+}
+
+#[test]
+fn a_renamed_store_product_updates_its_row_and_keeps_its_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("r.db")).unwrap();
+    let key = GameKey::store(StoreKind::Epic, "Sugar");
+    registry
+        .upsert_store(&store_row(StoreKind::Epic, "Sugar", "Old Name"))
+        .unwrap();
+    registry.touch_last_played_key(&key, 55).unwrap();
+    registry
+        .upsert_store(&store_row(StoreKind::Epic, "Sugar", "New Name"))
+        .unwrap();
+    let rows = registry.all().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "New Name");
+    assert_eq!(rows[0].last_played_at, 55);
+}
+
+#[test]
+fn a_store_row_needs_a_store_id_and_upsert_store_refuses_romm_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("r.db")).unwrap();
+    assert!(registry
+        .upsert(&store_row(StoreKind::Amazon, "  ", "Blank"))
+        .is_err());
+    assert!(registry.upsert_store(&sample("Romm", "SNES")).is_err());
+    // A RomM row's stray store id is never stored.
+    let mut romm = sample("Romm", "SNES");
+    romm.store_id = "junk".into();
+    registry.upsert(&romm).unwrap();
+    assert_eq!(registry.all().unwrap()[0].store_id, "");
 }
