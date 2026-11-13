@@ -219,7 +219,8 @@ VALUES
       platform: 'windows',
       version: '1.0',
       build_id: '56012345678900001',
-      save_locations: [{ name: 'saves', path: path.join(grey, 'saves') }],
+      // Empty: grid-core asks remote-config (the mock: <?INSTALL?>/saves).
+      save_locations: [],
       last_sync: now - 7 * 86400,
     }),
   })};

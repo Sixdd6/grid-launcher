@@ -479,6 +479,30 @@ impl StoresService {
         self.changed();
         if refresh {
             self.refresh_owned(false).await;
+            self.refresh_cloud_states().await;
+        }
+    }
+
+    /// Looks at every installed game's cloud saves (no sync), so the
+    /// Library shows SAVE CONFLICT before anyone presses Play. Signed in
+    /// only; failures only log.
+    pub async fn refresh_cloud_states(self: &Arc<Self>) {
+        if self.connection() != StoreConnection::Connected || !self.gog_config().cloud_saves {
+            return;
+        }
+        let rows = self.installed_rows();
+        let mut changed = false;
+        for row in rows.iter().filter(|row| self.cloud_enabled(row)) {
+            match self.api.cloud_state(row).await {
+                Ok(state) => {
+                    self.remember_cloud(&row.store_id, &state);
+                    changed = true;
+                }
+                Err(e) => tracing::info!("stores: cloud state not read: {e}"),
+            }
+        }
+        if changed {
+            self.changed();
         }
     }
 
@@ -651,6 +675,7 @@ impl StoresService {
             }
         }
         self.refresh_owned(true).await;
+        self.refresh_cloud_states().await;
     }
 
     /// Disconnect: gogdl's folder (its token file with it), the login
