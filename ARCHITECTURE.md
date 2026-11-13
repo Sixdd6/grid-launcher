@@ -99,7 +99,16 @@ Modules as declared in `src/lib.rs`:
   parsed struct has no field for one.
 - `launch` — the launch core: emulator profiles and the install catalog, forge
   (GitHub/direct) downloads, argument templates, emulator selection per platform, native
-  (Windows) launch and compat tools, process spawn and session tracking. `launch::umu`
+  (Windows) launch and compat tools, process spawn and session tracking. Launch and
+  sessions are keyed by `stores::GameKey`: `LaunchService::launch_key` resolves a RomM row
+  by rom id or a store row by its key (`launch(rom_id)` is a thin wrapper), and a GOG,
+  Epic or Amazon row always takes the native branch (`build_native_command`; the row sets
+  `extracted_dir`, `native_game_dir`, `native_executable_path` and a `win`/`linux`
+  `platform_slug`). `GameSession` carries `key` and an optional `rom_id`; one live session
+  per key. `LaunchService::register_watched` adds a session GRID did not spawn (Steam,
+  later): no child, liveness from a polled `AliveCheck`, never signalled by `stop`.
+  `NativeLaunch::redact` lists argv positions (an Epic exchange code) that print as
+  `<redacted>` (`redact_argv`) in logs, errors and the early-exit warning. `launch::umu`
   owns umu-run: the system-then-managed lookup, the managed copy's install directory and
   forge source, its config record (`Config.umu_launcher`) and the python3 >= 3.10 check;
   `InstallService::install_umu_launcher` installs it.
@@ -110,6 +119,11 @@ Modules as declared in `src/lib.rs`:
   `platform_slug` from ROM details; nativeness reads the slug first). `server_emulator` (Q3) registers a package from the
   server's "Emulators" platform as an emulator entry; `emulator_removal` removes an
   emulator's files and finds the package rows a deleted entry takes with it.
+  The queue (`queue.rs`) also runs store jobs: `JobKey::Store { source, store_id, op }`
+  and `JobPayload::Store(StoreJob)`, admitted by `InstallService::enqueue_store_job`. A
+  `StoreJob` carries a `StoreJobRunner` whose `download` and `finalize` halves run on the
+  blocking pool through the same slots, progress, cancel and retry as a RomM install
+  (`job: "store"`, `source_id` = the game key).
   `user_data_links` links an emulator's own-written directories into
   `saves/`; `layout_migration` is the one-shot startup migration to the layout below.
   `path_change` (Q2) validates a new library folder, switches `library_path` (the old
@@ -184,8 +198,20 @@ Modules as declared in `src/lib.rs`:
   plan's `reserved_bytes`; the app hands the ledger to `LibraryMoveService` so a move's
   free-space check counts it. `SpaceProbe` (free space and filesystem key) is
   injectable for tests (`set_space_probe`).
-  The registry is at v10: `source_server` records the server a row came from when that
-  was not the live session (an install from a drive), `""` otherwise.
+  The registry is at v11. v10's `source_server` records the server a row came from when
+  that was not the live session (an install from a drive), `""` otherwise. v11 adds
+  `source` (`romm` or a store id), `store_id` and `store_meta` (the store's JSON
+  metadata, never a token), and a partial unique index on `(source, store_id) WHERE
+  source <> 'romm'`. A store row never has a `rom_id`; its stored `title_key` carries its
+  game key after a U+001F separator (`InstalledGame::identity_keys`), so two products
+  with one title never collide on `UNIQUE (title_key, platform_key)` and no
+  title/platform API (`find`, `remove`, `set_rom_id_by_key`, `rewrite_row_paths`)
+  reaches a store row. Store rows use the key APIs: `find_key`, `find_store`,
+  `upsert_store`, `remove_key`/`remove_store`, `store_rows`, `touch_last_played_key`,
+  `update_images_key`. Store rows are excluded from relink (`relink::needs_link`),
+  server update detection, image replenish, play activity, RomM cloud saves
+  (`cloud::romm_cloud_applies`) and drive backups (`backup::local::REASON_STORE`); the
+  missing-files reconcile checks them but never searches for them.
   `Registry::clear_foreign_rom_ids` is the relink guard: it clears `rom_id` on rows whose
   `source_server` names another server (compared by `pack::server_key`).
 - `pcgw` — PCGamingWiki client that resolves a Windows game's save paths.
@@ -196,6 +222,13 @@ Modules as declared in `src/lib.rs`:
   of the registry's `pending_play_sessions` outbox — what is deleted, dropped or kept
   after each batch.
 - `retroachievements` — the RetroAchievements login client. Login only.
+- `stores` — external game stores (SPEC "Game stores", `docs/external-stores-plan.md`).
+  Phase 0 holds the shared identity types: `StoreKind` (gog, epic, amazon, steam, with
+  their platform names "GOG", "Epic Games", "Amazon Games", "Steam"), `GameSource` (the
+  registry `source`) and `GameKey` (`Rom(i64)` or `Store { source, store_id }`, string
+  and serde form `romm:123` / `gog:1207664643`). Later phases add `tools`, `progress`,
+  `paths`, `art` and one folder per source (`gog`, `offline`, `epic`, `amazon`,
+  `steam`). Nothing here may log or forward a store tool's stdout or stderr.
 - `romm` — the RomM HTTP client: `RommClient`, platforms, games, ROM detail, firmware,
   byte fetches, the cloud save/state endpoints, and the play-session ingest. All request construction lives here;
   check `openapi.json` before changing any of it. `RommClient::recent_games` is one
@@ -227,6 +260,9 @@ The shell owns *when* things run; grid-core owns *what* they do.
   layout migration and its relinked resync (skipped while the root is unreachable) →
   `relocate::recover` (finishes a Commit) → gates handed to the services → `.setup()`,
   which resumes a Copy or Cleanup in the background.
+- `commands.rs` — also `launch_game_key`: a RomM key takes `launch_game`'s path, a store
+  key skips the RomM-only steps (cloud restore, firmware, session stamps) and stamps
+  `last_played_at` by key.
 - `commands.rs` (+ `commands/cloud.rs`, `commands/specials.rs`, `commands/updates.rs`,
   `commands/logging.rs`, `commands/setup.rs`, `commands/discover.rs`,
   `commands/backups.rs`) — the `#[tauri::command]` surface. Thin
@@ -376,6 +412,8 @@ session exists and `Shell.svelte` afterwards.
 - `lib/api.ts` — the single `invoke` boundary. Every command wrapper and every payload
   type lives here, and the type field names mirror the Rust structs' serde output
   exactly, with no cosmetic renames.
+- `lib/gameKey.ts` — `gameKey(row)` and `parseGameKey`, the TypeScript mirror of
+  grid-core's `GameKey` (`launchGameKey`, `GameSession.key`).
 - `lib/stores/*.svelte.ts` — rune-based state shared across views: `session`,
   `installed`, `downloads`, `sessions`, `updates`, `appUpdate`, `uiSettings`, `toasts`,
   `drives` (the latest drives snapshot from `list_drives` and `drives-changed`, and the
@@ -542,6 +580,16 @@ Game files themselves go to the user-configured library path, not here.
 Tokens and passwords live **only** in the OS keyring, and in memory only as redacting
 types (`SecretString` / `Credential`). They must never reach a config file, a log line at
 any level, an error message, an IPC payload, a test fixture, or console output.
+
+One narrow exception (AGENTS.md "Secrets"): the external store tools legendary (Epic),
+heroic-gogdl (GOG) and nile (Amazon) keep their own token files, and only under
+`<data_dir>/stores/{legendary,gogdl,nile}/` (folder 0700, files 0600, deleted on
+Disconnect). GRID never reads those tokens into its own types, never logs or forwards the
+tools' stdout or stderr, and redacts an Epic exchange code in a launch argv
+(`NativeLaunch::redact`). GRID's own secrets, the Steam Web API key included, stay in the
+keyring. The hygiene script refuses a log or print macro in the store code that mentions
+stdout or stderr, and allows only the fake markers `FAKE-STORE-TOKEN-not-real` and
+`FAKE-STEAM-KEY-not-real` in store fixtures.
 
 `scripts/check_secret_hygiene.sh` enforces the mechanical half: `expose_secret()` is
 allowed only at a fixed list of call sites, and committed fixtures must not contain

@@ -29,6 +29,15 @@
   types (`SecretString` / `Credential`). They must never appear in a config file, a log
   line at any level, an error message, an IPC payload, a test fixture, or console output.
   `scripts/check_secret_hygiene.sh` is part of the gate.
+  One narrow exception, for the external game stores: the tokens that legendary (Epic),
+  heroic-gogdl (GOG) and nile (Amazon) own live only in those tools' own files under
+  `<data_dir>/stores/{legendary,gogdl,nile}/`. GRID creates that folder 0700 and its
+  files 0600, and deletes them on Disconnect. Those tools' stdout and stderr are never
+  logged at any level and never forwarded (no IPC payload, no error message, no console
+  output); an Epic exchange code in a launch argv is redacted (`NativeLaunch::redact`).
+  Everything else is unchanged: GRID's own secrets, the Steam Web API key included, stay
+  in the keyring, and fixtures use the fake markers `FAKE-STORE-TOKEN-not-real` and
+  `FAKE-STEAM-KEY-not-real` only.
 - **Never destroy work.** Do not run `git checkout`, `git restore`, `git reset`, or
   `git stash` on tracked files. Ever.
 - **Commit verified work.** After a change passes the gate, commit it with

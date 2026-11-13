@@ -792,6 +792,9 @@ library; any other game downloads from the server. Any computer with GRID can th
 them from that drive, with or without a network. The design is
 `docs/design/system/components/GameBackups/README.md`.
 
+Store games (GOG, Epic, Amazon, Steam; see "Game stores") are not backed up. The Backup
+dialog shows them as ineligible with the reason "Store games are not backed up".
+
 ## Drives
 - **Detection.** GRID scans for removable drives every 2 seconds. On Linux these are the
   block-device mounts under `/run/media` and `/media`; on Windows, the drive letters
@@ -1221,8 +1224,72 @@ testable statement.
   on RT, the Backup page as a page whose main button Start presses, Backup drives rows in
   the Library rail, and Settings › Backup drives with a page per drive.
 
+# Game stores
+Status: planned (2026-11-13). Phase 0, the shared model, is in place; no store screen
+exists yet. The plan is `docs/external-stores-plan.md`.
+
+GRID installs and launches games from external stores beside RomM games.
+
+User decisions (2026-11-13):
+- **Stores.** GOG, Epic, Amazon and Steam, plus installing GOG games from offline
+  installers. They ship in this order: GOG with offline installers, then Epic, Amazon,
+  Steam.
+- **Tools.** GRID uses Heroic's CLI tools as they are: legendary (Epic), heroic-gogdl
+  (GOG) and nile (Amazon). They are GRID-managed downloads with a pinned version and
+  SHA-256 per OS and architecture, installed the first time their store is connected.
+  Settings shows each tool's license and a source link.
+- **Tokens.** The tools keep their own token files under `<data_dir>/stores/<tool>/`
+  (folder 0700, files 0600). Disconnect deletes them. This is a narrow, documented
+  exception to the keyring-only rule (AGENTS.md "Secrets"). GRID's own secrets, the
+  Steam Web API key included, stay in the OS keyring. Tool output is never logged or
+  forwarded.
+- **Steam.** Steam needs the user's own Web API key and SteamID64. The owned library comes
+  from `GetOwnedGames`, so the profile's game details must be public. Install, uninstall
+  and launch go through the Steam client with `steam://` links. Steam games installed
+  outside GRID appear automatically. Only games appear: Proton and the Steam runtimes are
+  filtered out.
+- **Placement.** Each connected store gets a group in the Library rail, like Backup
+  drives. The group's title is the store's name, with two sub-labels: **Installed** and
+  **Available**. Desktop and TV mode work the same way.
+- **Store cloud saves.** `gogdl save-sync` (GOG) and `legendary sync-saves` (Epic) are in
+  scope, each in its store's phase. RomM cloud saves stay off for store games.
+- **Logins.** A store's login page opens in a GRID window that catches the store's
+  redirect in Rust; the code and the tokens never cross IPC. In TV mode the login page
+  opens over TV mode, with the on-screen keyboard.
+- **Offline installers.** A Linux `.sh` installer is read as a zip, and GRID takes
+  `data/noarch/` from it without running the script. A Windows `setup_*.exe` runs
+  silently under Wine/Proton (natively on a Windows host), falling back to the wizard.
+  The game is identified from `goggame-*.info`; a DLC installer attaches to its base game
+  by `rootGameId`. A macOS `.pkg` is refused with a reason. An offline install is the
+  same GOG product as an online one.
+
+Identity: a store game is keyed by its store and the store's product id (`gog:1207664643`);
+a RomM game keeps its rom id (`romm:123`). Store rows carry the platform names "GOG",
+"Epic Games", "Amazon Games" and "Steam".
+
+What store games get:
+
+| Feature | Store games |
+|---|---|
+| Play activity | Off |
+| RomM cloud saves | Off |
+| Store cloud saves | On, for GOG and Epic |
+| Drive backups | Off ("Store games are not backed up") |
+| Relink and server update checks | Off |
+| Each store's own update check | On |
+| Last played, rail, sort, search | On |
+| Details Overview, Game Settings, uninstall | On |
+
+GOG, Epic and Amazon games launch like native games, from their install folder (with
+Wine/Proton for a Windows build). An Epic launch carries a one-time exchange code, which
+is never printed in a log, an error or a warning. A Steam game's session is watched
+rather than spawned: GRID sees it running until its process ends.
+
 # Cloud Save Synchronization
 The application now includes cloud save and state synchronization for emulator-based games using the RomM saves/states API.
+
+Store games (see "Game stores") never use RomM cloud saves: no manual action, no restore
+before launch and no upload on exit.
 
 Core behavior should include:
 - manual upload and restore actions from the Game Details view
@@ -1258,7 +1325,7 @@ The sync flow should track recent game sessions so that auto-upload focuses on f
 Some emulator/platform combinations may limit state-sync actions when that behavior is not reliable.
 
 ## Play activity
-Every finished game session of 30 seconds or more is sent to RomM as a play session (start, end, duration). It is always on; there is no setting. Sessions without a server ROM id and Emulators-platform entries are not sent. While the server is unreachable, sessions wait in a local queue and go out after the next successful connect or restore. RomM's "last played" for the game follows the session end; the app never changes the game's play status on the server.
+Every finished game session of 30 seconds or more is sent to RomM as a play session (start, end, duration). It is always on; there is no setting. Sessions without a server ROM id, store games (see "Game stores") and Emulators-platform entries are not sent. While the server is unreachable, sessions wait in a local queue and go out after the next successful connect or restore. RomM's "last played" for the game follows the session end; the app never changes the game's play status on the server.
 
 ## Screenshot upload
 When uploading saves or states, the app should attempt to attach the most recently captured screenshot as a companion `screenshotFile`.

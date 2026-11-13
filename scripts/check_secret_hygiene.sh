@@ -31,11 +31,52 @@ if [ -d e2e ]; then
 fi
 suspicious=$(grep -rnE "(Bearer|token|password)[\"': =]+[A-Za-z0-9+/_-]{30,}" \
   "${scan_dirs[@]}" --include="*.rs" --include="*.ts" --include="*.svelte" --include="*.json" --include="*.mjs" \
-  | grep -v -e "FAKE-TEST-TOKEN-not-real" -e "FAKE-E2E-TOKEN-not-real" -e "FAKE-RA-TOKEN-not-real" || true)
+  | grep -v -e "FAKE-TEST-TOKEN-not-real" -e "FAKE-E2E-TOKEN-not-real" -e "FAKE-RA-TOKEN-not-real" \
+      -e "FAKE-STORE-TOKEN-not-real" -e "FAKE-STEAM-KEY-not-real" || true)
 if [ -n "$suspicious" ]; then
   echo "Possible real credential in committed code/fixtures:" >&2
   echo "$suspicious" >&2
   exit 1
+fi
+
+# External game stores (AGENTS.md "Secrets"): legendary, gogdl and nile print
+# tokens and account details, so their stdout/stderr is never logged or
+# forwarded. In the store code, a log or print macro whose invocation (up to
+# its closing `;`, so multi-line calls count) mentions stdout or stderr fails,
+# and println!/eprintln!/dbg! are refused outright. The app-side store files
+# are checked too once they exist.
+store_paths=()
+for p in crates/grid-core/src/stores app/src-tauri/src/stores_service.rs \
+         app/src-tauri/src/store_auth.rs app/src-tauri/src/commands/stores.rs; do
+  if [ -e "$p" ]; then
+    store_paths+=("$p")
+  fi
+done
+if [ "${#store_paths[@]}" -gt 0 ]; then
+  store_logs=$(find "${store_paths[@]}" -name '*.rs' -print0 | xargs -0 awk '
+    FNR == 1 { inside = 0 }
+    {
+      if (!inside && $0 ~ /(println|eprintln|print|eprint|dbg)!/ && $0 !~ /^[[:space:]]*\/\//) {
+        print FILENAME ":" FNR ": print macro in store code: " $0
+      }
+      if (!inside && $0 ~ /(tracing::|log::)?(trace|debug|info|warn|error|event)!/ && $0 !~ /^[[:space:]]*\/\//) {
+        inside = 1; start = FNR; text = ""
+      }
+      if (inside) {
+        text = text " " $0
+        if ($0 ~ /;/) {
+          if (tolower(text) ~ /std(out|err)/) {
+            print FILENAME ":" start ": store tool output in a log macro:" text
+          }
+          inside = 0
+        }
+      }
+    }' || true)
+  if [ -n "$store_logs" ]; then
+    echo "Store code must never log or print a store tool's stdout/stderr:" >&2
+    echo "$store_logs" >&2
+    exit 1
+  fi
 fi
 
 # The RetroAchievements token's keyring account name may appear only in
