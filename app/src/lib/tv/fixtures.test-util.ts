@@ -8,7 +8,7 @@ export function row(o: Partial<InstalledGame> = {}): InstalledGame {
     description: 'A time-travel RPG.\nSecond paragraph.', rating: '', genres: '', regions: '', languages: '', tags: '', revision: '',
     companies: '', first_release_date: '795571200', filesize_bytes: 0, server_updated_at: '', installed_at: 0,
     cover_small_path: 's.png', cover_large_path: 'l.png', screenshot_urls: '', fanart_urls: '',
-    native_executable_path: '', native_launch_parameters: '', native_compat_tool: '', native_wineprefix: '',
+    source: 'romm', store_id: '', native_executable_path: '', native_launch_parameters: '', native_compat_tool: '', native_wineprefix: '',
     native_game_dir: '', included_dlc: '', ps3_trophy_paths: '', ps3_game_id: '', ps3_iso_path: '', ps4_game_id: '',
     ps4_content: '', ra_id: '', last_played_at: 0, ...o,
   } as InstalledGame;

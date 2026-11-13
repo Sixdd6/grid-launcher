@@ -41,7 +41,7 @@ function row(overrides: Partial<InstalledGame>): InstalledGame {
     cover_large_path: '',
     screenshot_urls: '',
     fanart_urls: '',
-    native_executable_path: '',
+    source: 'romm', store_id: '', native_executable_path: '',
     native_launch_parameters: '',
     native_compat_tool: '',
     native_wineprefix: '',

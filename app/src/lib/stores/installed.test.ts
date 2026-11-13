@@ -29,7 +29,7 @@ function row(overrides: Partial<InstalledGame>): InstalledGame {
     cover_large_path: '',
     screenshot_urls: '',
     fanart_urls: '',
-    native_executable_path: '',
+    source: 'romm', store_id: '', native_executable_path: '',
     native_launch_parameters: '',
     native_compat_tool: '',
     native_wineprefix: '',
@@ -108,6 +108,12 @@ describe('matchesInstalled', () => {
     // duplicate-title library would badge/uninstall the wrong game.
     const r = row({ rom_id: 7, title: 'Chrono Trigger', platform: 'SNES' });
     expect(matchesInstalled(r, game({ id: 42, name: 'Chrono Trigger' }), 'SNES')).toBe(false);
+  });
+
+  it('never matches a store row to a RomM game, even by title and platform', () => {
+    const r = row({ rom_id: null, title: 'Portal 2', platform: 'Steam', source: 'steam', store_id: '620' });
+    expect(matchesInstalled(r, game({ id: 620, name: 'Portal 2' }), 'Steam')).toBe(false);
+    expect(indexHas(buildInstalledIndex([r]), game({ id: 620, name: 'Portal 2' }), 'Steam')).toBe(false);
   });
 });
 

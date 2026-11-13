@@ -439,7 +439,9 @@ export type DownloadStatus =
 // the entry takes no queue slot and reports no progress. `'backup'` is one
 // item of a backup to a drive: `downloading` from the server into staging,
 // then `installing` while it writes to the drive.
-export type DownloadJob = 'game' | 'emulator' | 'firmware' | 'library' | 'backup';
+// A store install or update (external game stores) is `job: 'store'`; its
+// `source_id` is the product's game key (`gog:1207664643`).
+export type DownloadJob = 'game' | 'emulator' | 'firmware' | 'library' | 'backup' | 'store';
 
 // What an entry installs — finer-grained than `job`.
 export type DownloadKind =
@@ -465,7 +467,10 @@ export type DownloadKind =
   | 'backup_firmware'
   // The one `cancelled` row that stands for the waiting backup rows of a
   // removed drive ("13 more items"). Dismiss only, never Retry.
-  | 'backup_cancelled';
+  | 'backup_cancelled'
+  // External game stores (`job: 'store'`).
+  | 'store_install'
+  | 'store_update';
 
 export type DownloadEntry = {
   id: number;
@@ -711,7 +716,10 @@ export const BACKUP_NOTICE_EVENT = 'backup-notice';
 
 export type GameSession = {
   id: number;
-  rom_id: number;
+  /** The game's identity (`romm:123`, `gog:1207664643`); see gameKey.ts. */
+  key: string;
+  /** The RomM rom id; null for a store game. */
+  rom_id: number | null;
   title: string;
   emulator_name: string;
   started_at: number;
@@ -860,9 +868,16 @@ export type LaunchDefaults = {
   launch_args: string;
 };
 
+/** Where an installed row came from (registry v11 `source`). */
+export type GameSource = 'romm' | 'gog' | 'epic' | 'amazon' | 'steam';
+
 export type InstalledGame = {
   title: string;
   platform: string;
+  /** 'romm' for a RomM game, else the store it came from. */
+  source: GameSource;
+  /** The store's product id; '' for a RomM game. */
+  store_id: string;
   /**
    * The server platform's slug (registry v8); nativeness reads it first
    * (`isNativePlatform`). '' for a row the connect-time backfill has not
@@ -1264,6 +1279,13 @@ export const api = {
    *  when a Proton launch found no umu-run. */
   launchGame: (romId: number) =>
     invoke<GameSession>('launch_game', { romId }).catch((err: unknown) => {
+      throw toLaunchFailure(err);
+    }),
+  /** Launches any game by its key (`gameKey(row)`): a RomM key takes
+   *  `launchGame`'s path; a store key skips the RomM-only steps. Rejects with
+   *  a `LaunchFailure` like `launchGame`. */
+  launchGameKey: (key: string) =>
+    invoke<GameSession>('launch_game_key', { key }).catch((err: unknown) => {
       throw toLaunchFailure(err);
     }),
   stopGame: (sessionId: number) => invoke<void>('stop_game', { sessionId }),

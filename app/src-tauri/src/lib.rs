@@ -348,7 +348,7 @@ pub fn run() {
                     .snapshot()
                     .sessions
                     .iter()
-                    .any(|session| session.rom_id == rom_id)
+                    .any(|session| session.rom_id == Some(rom_id))
             })
         })));
     }
@@ -791,6 +791,7 @@ pub fn run() {
             commands::platform_firmware_status,
             commands::install_firmware_for_platform,
             commands::launch_game,
+            commands::launch_game_key,
             commands::stop_game,
             commands::list_sessions,
             commands::list_emulators,

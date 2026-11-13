@@ -193,7 +193,7 @@ describe('initNotifications', () => {
     await expect(notifier.launchGame(1, 'Zelda')).rejects.toThrow('Emulator executable not found: /x');
     await vi.advanceTimersByTimeAsync(1_000);
     expect(texts()).toEqual(['Launching Zelda…', "Couldn't launch Zelda: Emulator executable not found: /x"]);
-    const s = { id: 3, rom_id: 1, title: 'Zelda', emulator_name: 'E', started_at: 0, pid: 1 };
+    const s = { id: 3, key: 'romm:1', rom_id: 1, title: 'Zelda', emulator_name: 'E', started_at: 0, pid: 1 };
     sessionsListener!([s], { sessions: [], warning: 'Process exited immediately (code 3).' });
     await vi.advanceTimersByTimeAsync(1_000);
     expect(texts().at(-1)).toBe('Zelda — Process exited immediately (code 3).');

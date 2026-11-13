@@ -1,5 +1,6 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { api, type DownloadEntry, type GameSummary, type InstalledGame } from '../api';
+import { isStoreRow } from '../gameKey';
 import { downloads } from './downloads.svelte';
 
 // `$state.raw`: the list is only ever replaced whole (by `refresh`), never
@@ -69,6 +70,8 @@ export function initReplenishListener(): Promise<UnlistenFn> {
  * (covers rows installed before a rom_id was recorded).
  */
 export function matchesInstalled(row: InstalledGame, game: GameSummary, platformName: string): boolean {
+  // A store row is never a RomM game, whatever its title and platform.
+  if (isStoreRow(row)) return false;
   if (row.rom_id !== null) return row.rom_id === game.id;
   return (
     row.title.trim().toLowerCase() === game.name.trim().toLowerCase() &&
@@ -93,6 +96,7 @@ export function buildInstalledIndex(rows: readonly InstalledGame[]): InstalledIn
   const romIds = new Set<number>();
   const identities = new Set<string>();
   for (const row of rows) {
+    if (isStoreRow(row)) continue;
     if (row.rom_id !== null) romIds.add(row.rom_id);
     else identities.add(identityKey(row.title, row.platform));
   }

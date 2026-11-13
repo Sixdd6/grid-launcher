@@ -259,6 +259,7 @@ describe('single notices', () => {
   it('names the game an early exit was about when exactly one session went', () => {
     const s = (id: number, title: string): GameSession => ({
       id,
+      key: `romm:${id}`,
       rom_id: id,
       title,
       emulator_name: 'E',

@@ -368,6 +368,9 @@ impl CloudService {
     /// finalized install. Hung off `InstallService::set_game_finalized_hook`
     /// in `lib.rs`; a no-op for non-native platforms.
     pub fn spawn_pcgw_lookup(self: &Arc<Self>, config_path: PathBuf, record: InstalledGame) {
+        if !grid_core::cloud::romm_cloud_applies_to_row(&record) {
+            return;
+        }
         let game = cloud_game_from_installed(&record);
         if !game.is_native() {
             return;
@@ -429,7 +432,7 @@ impl CloudService {
         save_type: SaveType,
     ) -> Result<CloudPanelInfoDto, String> {
         let inputs = Self::load_inputs(config_path, install, launch).await?;
-        let cloud_game = cloud_game_from_input(&game);
+        let cloud_game = cloud_game_from_input(&game)?;
         let installed = inputs
             .all_games
             .iter()
@@ -464,7 +467,7 @@ impl CloudService {
     ) -> Result<Vec<CloudRecordDto>, String> {
         let client = session.client().ok_or("not connected")?;
         let inputs = Self::load_inputs(config_path, install, launch).await?;
-        let cloud_game = cloud_game_from_input(&game);
+        let cloud_game = cloud_game_from_input(&game)?;
         let pcgw_paths = Self::persisted_pcgw_paths(&inputs.config, &cloud_game);
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
         let ctx = inputs.context(
@@ -501,7 +504,7 @@ impl CloudService {
         let _transfer = self.begin_transfer()?;
         let client = session.client().ok_or("not connected")?;
         let inputs = Self::load_inputs(config_path, install, launch).await?;
-        let cloud_game = cloud_game_from_input(&game);
+        let cloud_game = cloud_game_from_input(&game)?;
         // `_perform_upload_saves_action` / `_perform_upload_states_action`
         // (cloud_mixin.py:2780-2797, doc 06 "Manual actions"): a no-op —
         // no dialog, no upload attempt — when the game isn't installed.
@@ -565,7 +568,7 @@ impl CloudService {
         let _transfer = self.begin_transfer()?;
         let client = session.client().ok_or("not connected")?;
         let inputs = Self::load_inputs(config_path, install, launch).await?;
-        let cloud_game = cloud_game_from_input(&game);
+        let cloud_game = cloud_game_from_input(&game)?;
         let pcgw_paths = Self::persisted_pcgw_paths(&inputs.config, &cloud_game);
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
         let ctx = inputs.context(
@@ -659,7 +662,7 @@ impl CloudService {
         game: CloudGameInput,
     ) -> Result<NativeSavePathsDto, String> {
         let config = blocking_load_config(config_path.to_path_buf()).await?;
-        let cloud_game = cloud_game_from_input(&game);
+        let cloud_game = cloud_game_from_input(&game)?;
         let key = manual_paths_key(&cloud_game);
         let manual = config
             .native_manual_save_paths
@@ -743,7 +746,7 @@ impl CloudService {
         mutate: impl FnOnce(&mut Vec<String>, &mut Vec<String>) + Send + 'static,
     ) -> Result<(), String> {
         let config_path = config_path.to_path_buf();
-        let cloud_game = cloud_game_from_input(&game);
+        let cloud_game = cloud_game_from_input(&game)?;
         let key = manual_paths_key(&cloud_game);
         tokio::task::spawn_blocking(move || {
             modify_config(&config_path, |config| {
@@ -828,6 +831,9 @@ impl CloudService {
         config_path: &Path,
         installed_game: &InstalledGame,
     ) {
+        if !grid_core::cloud::romm_cloud_applies_to_row(installed_game) {
+            return;
+        }
         let Ok(_transfer) = self.begin_transfer() else {
             // A library move holds the save folders: no restore now. The
             // launch itself is refused by the same gate.
@@ -939,6 +945,9 @@ impl CloudService {
         installed_game: &InstalledGame,
         started_at: f64,
     ) {
+        if !grid_core::cloud::romm_cloud_applies_to_row(installed_game) {
+            return;
+        }
         let inputs = match Self::load_inputs(config_path, install, launch).await {
             Ok(inputs) => inputs,
             Err(e) => {
@@ -1050,8 +1059,7 @@ impl CloudService {
                 return;
             }
         };
-        let Some(installed_game) = installed.iter().find(|g| g.rom_id == Some(session.rom_id))
-        else {
+        let Some(installed_game) = installed_for_session(&installed, &session) else {
             return;
         };
         let key = game_key(&cloud_game_from_installed(installed_game));
@@ -1107,8 +1115,7 @@ impl CloudService {
             return;
         };
         // Uninstalled meanwhile: nothing to upload.
-        let Some(installed_game) = installed.iter().find(|g| g.rom_id == Some(session.rom_id))
-        else {
+        let Some(installed_game) = installed_for_session(&installed, &session) else {
             return;
         };
         let cloud_game = cloud_game_from_installed(installed_game);
@@ -1360,15 +1367,28 @@ fn active_session_refs(
     sessions
         .iter()
         .filter_map(|s| {
-            installed
-                .iter()
-                .find(|g| g.rom_id == Some(s.rom_id))
-                .map(|g| grid_core::cloud::window::ActiveSessionRef {
+            installed_for_session(installed, s).map(|g| {
+                grid_core::cloud::window::ActiveSessionRef {
                     game: cloud_game_from_installed(g),
                     started_at: s.started_at as f64,
-                })
+                }
+            })
         })
         .collect()
+}
+
+/// The installed RomM row a finished or running session belongs to: the
+/// row holding the session's rom id. `None` for a store session (no rom
+/// id: RomM cloud saves are off for it) and for a RomM game uninstalled
+/// meanwhile.
+fn installed_for_session<'a>(
+    installed: &'a [InstalledGame],
+    session: &GameSession,
+) -> Option<&'a InstalledGame> {
+    let rom_id = session.rom_id?;
+    installed
+        .iter()
+        .find(|g| g.rom_id == Some(rom_id) && grid_core::cloud::romm_cloud_applies_to_row(g))
 }
 
 fn merge_update(base: &mut SyncStateUpdate, other: SyncStateUpdate) {
@@ -1515,6 +1535,10 @@ pub struct CloudGameInput {
     /// because a server game has none.
     #[serde(default)]
     pub ps3_game_id: String,
+    /// The registry `source` (`romm` or a store id); `""` for a server
+    /// game. A store game is refused ([`cloud_game_from_input`]).
+    #[serde(default)]
+    pub source: String,
 }
 
 /// `CloudGame` from an `InstalledGame` registry row (task ruling):
@@ -1540,8 +1564,14 @@ pub fn cloud_game_from_installed(game: &InstalledGame) -> CloudGame {
     }
 }
 
-fn cloud_game_from_input(game: &CloudGameInput) -> CloudGame {
-    CloudGame {
+/// The [`CloudGame`] for a frontend call, or the refusal for a store game:
+/// RomM cloud saves are off for store rows
+/// ([`grid_core::cloud::romm_cloud_applies`]).
+fn cloud_game_from_input(game: &CloudGameInput) -> Result<CloudGame, String> {
+    if !grid_core::cloud::romm_cloud_applies(&game.source) {
+        return Err(grid_core::cloud::STORE_CLOUD_REFUSAL.to_string());
+    }
+    Ok(CloudGame {
         title: game.title.clone(),
         platform: game.platform.clone(),
         platform_slug: game.platform_slug.clone(),
@@ -1555,7 +1585,7 @@ fn cloud_game_from_input(game: &CloudGameInput) -> CloudGame {
         title_id: String::new(),
         base_title_id: String::new(),
         ps3_game_id: game.ps3_game_id.clone(),
-    }
+    })
 }
 
 // ---------------------------------------------------------------------
@@ -2233,7 +2263,10 @@ mod tests {
         };
         let json = serde_json::to_value(&row).unwrap();
         let input: CloudGameInput = serde_json::from_value(json).unwrap();
-        assert_eq!(cloud_game_from_input(&input).ps3_game_id, "BLUS30443");
+        assert_eq!(
+            cloud_game_from_input(&input).unwrap().ps3_game_id,
+            "BLUS30443"
+        );
 
         // A server game has no such field: it stays blank.
         let server: CloudGameInput = serde_json::from_value(serde_json::json!({
@@ -2242,7 +2275,57 @@ mod tests {
             "rom_id": 7
         }))
         .unwrap();
-        assert_eq!(cloud_game_from_input(&server).ps3_game_id, "");
+        assert_eq!(cloud_game_from_input(&server).unwrap().ps3_game_id, "");
+    }
+
+    #[test]
+    fn store_games_never_reach_romm_cloud_saves() {
+        use grid_core::stores::{GameKey, GameSource, StoreKind};
+        // A store row as the frontend sends it is refused.
+        let row = InstalledGame {
+            title: "The Witcher".to_string(),
+            platform: "GOG".to_string(),
+            source: GameSource::Store(StoreKind::Gog),
+            store_id: "1207664643".to_string(),
+            ..Default::default()
+        };
+        let input: CloudGameInput =
+            serde_json::from_value(serde_json::to_value(&row).unwrap()).unwrap();
+        assert_eq!(
+            cloud_game_from_input(&input).unwrap_err(),
+            grid_core::cloud::STORE_CLOUD_REFUSAL
+        );
+
+        // A store session (no rom id) finds no row, even next to a RomM
+        // row with no rom id.
+        let romm_unlinked = InstalledGame {
+            title: "Unlinked".to_string(),
+            ..Default::default()
+        };
+        let installed = vec![row, romm_unlinked];
+        let store_session = GameSession {
+            key: GameKey::store(StoreKind::Gog, "1207664643"),
+            rom_id: None,
+            ..Default::default()
+        };
+        assert!(installed_for_session(&installed, &store_session).is_none());
+
+        // A RomM session finds its row.
+        let linked = InstalledGame {
+            title: "Linked".to_string(),
+            rom_id: Some(7),
+            ..Default::default()
+        };
+        let installed = vec![linked];
+        let romm_session = GameSession {
+            key: GameKey::Rom(7),
+            rom_id: Some(7),
+            ..Default::default()
+        };
+        assert_eq!(
+            installed_for_session(&installed, &romm_session).map(|g| g.title.as_str()),
+            Some("Linked")
+        );
     }
 
     #[test]

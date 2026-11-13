@@ -8,12 +8,20 @@ export function findSession(sessions: GameSession[], romId: number): GameSession
   return sessions.find((s) => s.rom_id === romId);
 }
 
+/** Pure lookup: the session for a game key (`romm:123`, `gog:1207664643`), if any. */
+export function findSessionByKey(sessions: GameSession[], key: string): GameSession | undefined {
+  return sessions.find((s) => s.key === key);
+}
+
 export const sessions = {
   get list() {
     return state.sessions;
   },
   sessionFor(romId: number): GameSession | undefined {
     return findSession(state.sessions, romId);
+  },
+  sessionForKey(key: string): GameSession | undefined {
+    return findSessionByKey(state.sessions, key);
   },
 };
 

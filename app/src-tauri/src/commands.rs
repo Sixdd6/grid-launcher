@@ -48,6 +48,7 @@ use grid_core::romm::achievements;
 use grid_core::romm::{AchievementsView, GameSummary, Platform, RaUsernameSync, RomDetail};
 use grid_core::secrets::RaTokenStore;
 use grid_core::session::{RestoreOutcome, SessionManager, SessionState};
+use grid_core::stores::GameKey;
 use secrecy::SecretString;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -1182,6 +1183,47 @@ pub async fn launch_game(
         tokio::task::spawn_blocking(move || {
             if let Err(e) = registry.touch_last_played(rom_id, at) {
                 tracing::debug!("last_played_at stamp failed for rom {rom_id}: {e}");
+            }
+        });
+    }
+
+    Ok(session)
+}
+
+/// Launches any game by its [`GameKey`] (`romm:123`, `gog:1207664643`).
+/// A RomM key takes exactly [`launch_game`]'s path (cloud restore, firmware
+/// top-up, session stamps). A store key skips every RomM-only step — store
+/// games have no RomM cloud saves, firmware or play activity — and stamps
+/// `last_played_at` by key once the process has spawned.
+#[tauri::command]
+pub async fn launch_game_key(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    key: GameKey,
+) -> Result<GameSession, LaunchCommandError> {
+    if let GameKey::Rom(rom_id) = key {
+        return launch_game(state, app, rom_id).await;
+    }
+    ensure_library_idle(&state)?;
+    // Held until the session is registered, as in `launch_game`.
+    let _library_ticket = state
+        .library_move
+        .gate()
+        .enter()
+        .map_err(|busy| busy.reason)?;
+    let launch = state.launch.as_ref().map_err(Clone::clone)?.clone();
+    let install = state.install.as_ref().map_err(Clone::clone)?.clone();
+
+    let session = launch.launch_key(&key).await?;
+
+    // Fire-and-forget, like `launch_game`'s stamp. The key is safe to log:
+    // a store id is a product id, never a credential.
+    {
+        let registry = install.registry();
+        let at = session.started_at;
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = registry.touch_last_played_key(&key, at) {
+                tracing::debug!("last_played_at stamp failed for {key}: {e}");
             }
         });
     }

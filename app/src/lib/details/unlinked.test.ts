@@ -32,7 +32,7 @@ function row(extra: Partial<InstalledGame> = {}): InstalledGame {
     extracted_path: '',
     extracted_dir: '',
     multi_file_game_dir: '',
-    native_executable_path: '',
+    source: 'romm', store_id: '', native_executable_path: '',
     native_game_dir: '',
     ps3_iso_path: '',
     ...extra,
