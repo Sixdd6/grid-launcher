@@ -10,7 +10,7 @@
   import { gameStores } from '../../stores/gameStores.svelte';
   import { inspectionView, PICKER_FOOT, PICKER_TITLE, readingLine, REFUSED_HEADING, spaceNote, fileName } from '../inspection';
   import { queuedNotice, refusedNotice } from '../notices';
-  import { storeCoverUrl } from './coverUrl';
+  import StoreCoverSm from './StoreCoverSm.svelte';
   import StoreDialog from './StoreDialog.svelte';
   import { showCard } from './ui.svelte';
 
@@ -134,7 +134,7 @@
   {:else if view?.kind === 'found' && step.kind === 'done'}
     <h3>{view.heading}</h3>
     <div class="found" data-testid="store-installer-found">
-      {#if storeCoverUrl(step.insp.cover)}<img class="st-cover-sm" src={storeCoverUrl(step.insp.cover)} alt="" />{/if}
+      <StoreCoverSm cover={step.insp.cover} />
       <span>
         <b>{view.title}</b>
         <span class="note">{view.what}</span>

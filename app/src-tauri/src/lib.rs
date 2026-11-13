@@ -519,6 +519,17 @@ pub fn run() {
                     covers_dir.display()
                 );
             }
+            // Store art (GOG covers and screenshots) is cached under
+            // `<data_dir>/stores/art` (`ensure_image`'s store branch).
+            let art_dir =
+                grid_core::stores::art::art_dir(app.state::<AppState>().stores.data_dir());
+            let _ = std::fs::create_dir_all(&art_dir);
+            if let Err(e) = app.asset_protocol_scope().allow_directory(&art_dir, true) {
+                tracing::warn!(
+                    "failed to extend asset protocol scope for {}: {e}",
+                    art_dir.display()
+                );
+            }
             let state = app.state::<AppState>();
             // Q6: the first 401 on a live session sends the user back to the
             // Connect form. grid-core fires this once per session and drops

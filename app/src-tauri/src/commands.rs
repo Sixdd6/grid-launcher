@@ -422,6 +422,14 @@ pub async fn sync_ra_username_to_romm(
 
 #[tauri::command]
 pub async fn ensure_image(state: State<'_, AppState>, url: String) -> Result<String, String> {
+    // A store's art (GOG covers and screenshots) comes from the store's own
+    // image hosts, never the RomM server, and goes without a credential.
+    if state.stores.is_art_url(&url) {
+        return match state.stores.art(&url).await {
+            Some(path) => Ok(path.to_string_lossy().into_owned()),
+            None => Err("couldn\u{2019}t load the store\u{2019}s image".to_string()),
+        };
+    }
     let base = state.session.server_url();
     // The cache is checked before the host filter: a hit makes no request,
     // so it may serve any host (rows installed from a drive keep their

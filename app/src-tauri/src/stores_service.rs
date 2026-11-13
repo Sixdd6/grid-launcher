@@ -311,6 +311,8 @@ pub struct StoresService {
     announced: Mutex<HashSet<u64>>,
     /// `owned()` answered this run.
     owned_fetched: std::sync::atomic::AtomicBool,
+    /// The client store art is fetched with (no credential, ever).
+    art_http: std::sync::OnceLock<reqwest::Client>,
 }
 
 /// The tool's name in GRID's words.
@@ -341,6 +343,7 @@ impl StoresService {
             syncing: Mutex::new(HashSet::new()),
             announced: Mutex::new(HashSet::new()),
             owned_fetched: std::sync::atomic::AtomicBool::new(false),
+            art_http: std::sync::OnceLock::new(),
         })
     }
 
@@ -369,6 +372,26 @@ impl StoresService {
 
     pub fn embed_url(&self) -> &Url {
         &self.endpoints.embed
+    }
+
+    /// Whether `url` is store art the UI may load ([`art::is_store_art_url`]).
+    pub fn is_art_url(&self, url: &str) -> bool {
+        grid_core::stores::art::is_store_art_url(url, &self.endpoints.gamesdb)
+    }
+
+    /// The cached copy of a store art `url`, fetched with no credential on a
+    /// miss; `None` for an address that isn't store art or a failed fetch.
+    pub async fn art(&self, url: &str) -> Option<PathBuf> {
+        if !self.is_art_url(url) {
+            return None;
+        }
+        let http = self.art_http.get_or_init(|| {
+            reqwest::Client::builder()
+                .user_agent(concat!("grid-launcher/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .unwrap_or_default()
+        });
+        grid_core::stores::art::cached(http, &self.data_dir, url).await
     }
 
     pub fn set_emitter(&self, emitter: Emitter) {
@@ -1008,6 +1031,9 @@ impl StoresService {
                     failed: matches!(entry.status, DownloadStatus::Failed),
                     error: entry.error.clone(),
                     drive: entry.drive_name.clone(),
+                    needs_wizard: entry.failure.as_ref().is_some_and(|failure| {
+                        failure.code == grid_core::library::queue::FailureCode::InstallerNeedsWizard
+                    }),
                     base: entry.failure.as_ref().and_then(|failure| {
                         (!failure.base_gog_id.is_empty()).then(|| {
                             (
@@ -1042,6 +1068,12 @@ impl StoresService {
             announced.retain(|id| live.contains(id));
         }
         for entry in &finished {
+            // An installer that needs its setup window fails only where GRID
+            // may not open one (TV mode), which words that card itself
+            // ("Couldn't install <title> silently" · Retry).
+            if entry.failed && entry.needs_wizard {
+                continue;
+            }
             let card = if entry.completed {
                 notice::finished(entry.kind, &entry.title, &entry.key, &entry.drive)
             } else {
@@ -1130,6 +1162,8 @@ struct JobRow {
     failed: bool,
     error: String,
     drive: String,
+    /// The installer needed its setup window, which GRID may not open here.
+    needs_wizard: bool,
     /// A DLC installer's missing base game: its title and key.
     base: Option<(String, String)>,
 }
@@ -2521,6 +2555,7 @@ mod tests {
             failed: false,
             error: String::new(),
             drive: "Couch kit".into(),
+            needs_wizard: false,
             base: None,
         }
     }
@@ -2564,6 +2599,17 @@ mod tests {
         assert_eq!(update.message, "A updated");
         let repair = notice::finished("store_repair", "A", "gog:1", "").unwrap();
         assert_eq!(repair.message, "Verified A\u{2019}s files");
+    }
+
+    #[test]
+    fn an_installer_that_needs_its_setup_window_gets_no_backend_card() {
+        // TV mode words that failure itself ("Couldn't install … silently").
+        let h = harness();
+        let mut row = entry(1, "store_installer", "gog:5", false);
+        row.failed = true;
+        row.needs_wizard = true;
+        h.service.observe_rows(vec![row]);
+        assert!(h.notices().is_empty());
     }
 
     #[test]

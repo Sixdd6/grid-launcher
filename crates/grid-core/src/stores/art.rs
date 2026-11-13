@@ -70,6 +70,33 @@ pub fn cache_path(data_dir: &Path, url: &str) -> PathBuf {
     art_dir(data_dir).join(format!("{digest}.{ext}"))
 }
 
+/// GOG's image hosts: these domains and their subdomains.
+const GOG_ART_DOMAINS: [&str; 2] = ["gog-statics.com", "gog.com"];
+
+/// Whether `url` is store art GRID may fetch for the UI: an `https` address
+/// on GOG's image hosts ([`GOG_ART_DOMAINS`]), or any address on the
+/// `gamesdb` endpoint's own origin (where an e2e build's mock serves art).
+/// Store art is fetched with no credential, so this never admits the RomM
+/// server just because it is connected.
+pub fn is_store_art_url(url: &str, gamesdb: &url::Url) -> bool {
+    let Ok(parsed) = url::Url::parse(&absolute_url(url)) else {
+        return false;
+    };
+    if parsed.origin() == gamesdb.origin() && !parsed.cannot_be_a_base() {
+        return true;
+    }
+    if parsed.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    let host = host.to_ascii_lowercase();
+    GOG_ART_DOMAINS
+        .iter()
+        .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+}
+
 /// The cached copy of `url`, downloading it on a miss. `None` for a blank
 /// or non-http URL, or when the download fails.
 pub async fn cached(http: &reqwest::Client, data_dir: &Path, url: &str) -> Option<PathBuf> {
@@ -143,6 +170,39 @@ mod tests {
             cache_path(data, "https://x/noext").extension().unwrap(),
             "img"
         );
+    }
+
+    #[test]
+    fn store_art_is_gogs_image_hosts_or_the_gamesdb_origin() {
+        let gamesdb = url::Url::parse("https://gamesdb.gog.com/").unwrap();
+        assert!(is_store_art_url(
+            "https://images.gog-statics.com/a_196.jpg",
+            &gamesdb
+        ));
+        assert!(is_store_art_url(
+            "//images-1.gog-statics.com/a.jpg",
+            &gamesdb
+        ));
+        assert!(is_store_art_url(
+            "https://gamesdb.gog.com/art.png",
+            &gamesdb
+        ));
+        assert!(!is_store_art_url(
+            "http://images.gog-statics.com/a.jpg",
+            &gamesdb
+        ));
+        assert!(!is_store_art_url(
+            "https://evilgog-statics.com/a.jpg",
+            &gamesdb
+        ));
+        assert!(!is_store_art_url("https://romm.example/a.jpg", &gamesdb));
+        assert!(!is_store_art_url("file:///etc/passwd", &gamesdb));
+        let mock = url::Url::parse("http://127.0.0.1:4100/").unwrap();
+        assert!(is_store_art_url(
+            "http://127.0.0.1:4100/art/a_cover.png",
+            &mock
+        ));
+        assert!(!is_store_art_url("http://127.0.0.1:4200/art/a.png", &mock));
     }
 
     #[tokio::test]

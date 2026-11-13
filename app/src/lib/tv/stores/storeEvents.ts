@@ -120,9 +120,11 @@ export function startStoreEvents(): () => void {
       for (const e of entries) {
         const was = book.get(e.id);
         if (was === undefined || was === e.status) continue;
-        // TV mode's own card is for the silent-only rule; the other
-        // installer failures keep the shared notifier's card.
-        if (e.status === 'failed' && e.failure?.code === 'installer_needs_wizard') failureCard(e);
+        // A RomM row's installer failure has no shared card (the shared
+        // notifier skips a row with `failure`), so TV mode words each one.
+        // A store row's failures are the backend's `store-notice` cards,
+        // except the silent-only rule, which the backend leaves to TV mode.
+        if (e.status === 'failed' && e.failure && (e.job === 'game' || e.failure.code === 'installer_needs_wizard')) failureCard(e);
         if (e.status === 'completed' && (e.kind === 'store_restore' || e.kind === 'backup_store_game')) bumpDrives();
       }
     }

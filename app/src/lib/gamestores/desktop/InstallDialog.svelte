@@ -7,7 +7,7 @@
   import { COMPAT_HELP, folderHelp, initialChoice, installDialogView, installRequest, type InstallChoice } from '../install';
   import { storeName } from '../marks';
   import { dlcShortTitle, sizeGb } from '../text';
-  import { storeCoverUrl } from './coverUrl';
+  import StoreCoverSm from './StoreCoverSm.svelte';
   import StoreDialog from './StoreDialog.svelte';
   import StoreMark from './StoreMark.svelte';
   import { queueInstall } from './ui.svelte';
@@ -67,7 +67,7 @@
 
 <StoreDialog testId="store-install-dialog" label={`Install ${game.title}`} {onClose}>
   <div class="st-dlg-head">
-    {#if storeCoverUrl(game.cover)}<img class="st-cover-sm" src={storeCoverUrl(game.cover)} alt="" />{/if}
+    <StoreCoverSm cover={game.cover} />
     <span>
       <h3>Install {game.title}</h3>
       <span class="note" data-testid="store-install-sub"><StoreMark source={game.source} />{view ? view.sub : `${name} · ${sizeGb(game.download_bytes)} download`}</span>

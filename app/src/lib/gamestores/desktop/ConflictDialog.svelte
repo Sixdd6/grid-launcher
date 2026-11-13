@@ -5,7 +5,7 @@
   import type { StoreCloudState, StoreGame } from '../../api';
   import { conflictNote, conflictPromptTitle, conflictSides } from '../details';
   import { storeName } from '../marks';
-  import { storeCoverUrl } from './coverUrl';
+  import StoreCoverSm from './StoreCoverSm.svelte';
   import StoreDialog from './StoreDialog.svelte';
   import ConflictSides from './ConflictSides.svelte';
 
@@ -29,7 +29,7 @@
 
 <StoreDialog testId="store-conflict-dialog" label={conflictPromptTitle(game.title)} {onClose}>
   <div class="st-dlg-head">
-    {#if storeCoverUrl(game.cover)}<img class="st-cover-sm" src={storeCoverUrl(game.cover)} alt="" />{/if}
+    <StoreCoverSm cover={game.cover} />
     <span>
       <h3>{conflictPromptTitle(game.title)}</h3>
       <span class="note">{storeName(game.source)} cloud saves</span>
