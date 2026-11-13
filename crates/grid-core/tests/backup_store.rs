@@ -26,7 +26,7 @@ use grid_core::library::queue::{
 use grid_core::library::registry::{InstalledGame, Registry};
 use grid_core::library::{InstallService, LibraryError};
 use grid_core::stores::gog::goggame::parse_info;
-use grid_core::stores::gog::meta::{GogMeta, GogOrigin, GogPlatform, SaveLocation};
+use grid_core::stores::gog::meta::{GogMeta, GogOrigin, SaveLocation};
 use grid_core::stores::gog::row::gog_row;
 use grid_core::stores::{GameKey, StoreKind};
 
@@ -428,7 +428,7 @@ async fn a_windows_game_is_copied_without_its_prefix_but_with_its_saves() {
     )
     .unwrap();
     let meta = GogMeta {
-        platform: GogPlatform::Windows,
+        platform: grid_core::stores::gog::meta::GogPlatform::Windows,
         save_locations: vec![SaveLocation {
             name: "saves".into(),
             path: "<?APPLICATION_DATA_ROAMING?>/Lanternfall".into(),
@@ -444,7 +444,10 @@ async fn a_windows_game_is_copied_without_its_prefix_but_with_its_saves() {
     let done = h.back_up().await;
     assert_eq!(done.status, DownloadStatus::Completed, "{done:#?}");
     let game = h.pack().find_store_game(&key()).unwrap().clone();
-    assert_eq!(game.platform, GogPlatform::Windows);
+    assert_eq!(
+        game.platform,
+        grid_core::stores::gog::meta::GogPlatform::Windows
+    );
     assert_eq!(game.installed.as_ref().unwrap().tree_files, 3, "no prefix");
     let saves = game.saves.as_ref().unwrap();
     assert_eq!(saves.folders, vec!["%APPDATA%\\Lanternfall".to_string()]);
