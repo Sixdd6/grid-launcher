@@ -448,7 +448,6 @@ export class FakeStores {
         this.status.username = '';
         this.status.tool = { ...this.status.tool, state: 'not_installed' };
         this.status.in_rail = this.games.some((x) => x.installed);
-        this.notice('GOG disconnected. Its login and gogdl were deleted; installed games stay.');
         this.changed();
         return null;
       case 'store_install_tool':
@@ -483,7 +482,6 @@ export class FakeStores {
           g.installed = false;
           g.update_version = '';
           g.origin = null;
-          this.notice(`${g.title} uninstalled. Its cloud saves stay in your GOG account.`);
           this.changed();
         }
         return null;
@@ -546,7 +544,6 @@ export class FakeStores {
             }, 2400);
           }
         }
-        this.notice(`${insp?.title ?? 'The game'} added to download queue`, { action: { kind: 'open_downloads' } });
         return null;
       }
       case 'plan_store_backup':

@@ -11,7 +11,7 @@ export function sizeGb(bytes: number): string {
   const gb = Math.max(0, bytes) / GIB;
   if (gb >= 100) return `${Math.round(gb)} GB`;
   if (gb >= 1) return `${gb.toFixed(1)} GB`;
-  if (gb >= 0.001) return `${Math.max(1, Math.round(gb * 1000))} MB`;
+  if (gb >= 0.0004) return `${Math.max(1, Math.round(gb * 1000))} MB`;
   return '<1 MB';
 }
 

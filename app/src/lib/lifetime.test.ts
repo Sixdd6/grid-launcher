@@ -45,6 +45,12 @@ describe('startShellLifetime', () => {
     vi.doMock('./stores/toasts.svelte', () => ({
       pushToast: (text: string, level: string) => toasts.push([text, level]),
     }));
+    vi.doMock('./stores/gameStores.svelte', () => ({
+      initGameStores: () => {
+        calls.push('game-stores');
+        return Promise.resolve(() => calls.push('game-stores-stop'));
+      },
+    }));
   });
 
   afterEach(() => {
@@ -54,6 +60,7 @@ describe('startShellLifetime', () => {
     vi.doUnmock('./stores/installed.svelte');
     vi.doUnmock('./stores/lastViewed.svelte');
     vi.doUnmock('./stores/toasts.svelte');
+    vi.doUnmock('./stores/gameStores.svelte');
   });
 
   it('starts every shell-lifetime listener once and stops them all', async () => {
@@ -61,7 +68,7 @@ describe('startShellLifetime', () => {
     const stop = startShellLifetime();
     // Vitest compiles Svelte for the server, where effects never run, so the
     // background-art seed (an effect over the registry) is not observed here.
-    expect(calls).toEqual(['refresh', 'emulator-events', 'notifications']);
+    expect(calls).toEqual(['refresh', 'emulator-events', 'notifications', 'game-stores']);
     expect(Object.keys(handlers).sort()).toEqual(['cloud-restore-notice', 'cloud-upload-finished']);
 
     stop();
@@ -69,6 +76,7 @@ describe('startShellLifetime', () => {
     await Promise.resolve();
     expect(calls).toContain('notifications-stop');
     expect(calls).toContain('emulator-events-stop');
+    expect(calls).toContain('game-stores-stop');
     expect(unlistened.sort()).toEqual(['cloud-restore-notice', 'cloud-upload-finished']);
   });
 

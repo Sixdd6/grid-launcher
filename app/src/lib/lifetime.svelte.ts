@@ -18,6 +18,7 @@ import { installed, refresh as refreshInstalled } from './stores/installed.svelt
 import { seedLastViewed } from './stores/lastViewed.svelte';
 import { pushToast } from './stores/toasts.svelte';
 import { initEmulatorEvents } from './systems/events';
+import { initGameStores } from './stores/gameStores.svelte';
 
 /** The card an automatic cloud upload ends with. */
 export function uploadFinishedToast(e: CloudUploadFinished): { text: string; level: 'error' | 'success' } {
@@ -71,6 +72,11 @@ export function startShellLifetime(): () => void {
     pushToast(e.payload.message, e.payload.failed ? 'error' : 'success');
   });
   stops.push(() => void offRestore.then((off) => off()));
+
+  // The external stores' status and libraries (GameStores / TVStores), for
+  // whichever shell is on screen. Each shell shows `store-notice` its own way.
+  const offStores = initGameStores();
+  stops.push(() => void offStores.then((off) => off()));
 
   return () => {
     for (const stop of stops) stop();

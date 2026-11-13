@@ -14,6 +14,8 @@ export const TV_PANES = [
   'connection',
   'library',
   'retroachievements',
+  // Settings › Stores (GameStores / TVStores); TV mode's pane is package F's.
+  'stores',
   'systems',
   'tv',
   'updates',
@@ -27,6 +29,7 @@ export const TV_PANE_LABELS: Record<TvPane, string> = {
   connection: 'Connection',
   library: 'Library',
   retroachievements: 'RetroAchievements',
+  stores: 'Stores',
   systems: 'Systems',
   tv: 'TV mode',
   updates: 'Updates',

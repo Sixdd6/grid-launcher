@@ -11,6 +11,17 @@
     SEGMENTS,
   } from './downloads/segments';
   import Sparkline from './downloads/Sparkline.svelte';
+  import { compatTools } from './stores/compatTools.svelte';
+  import { gameStores } from './stores/gameStores.svelte';
+  import { entrySource, hasStoreBadge } from './gamestores/downloads';
+  import { storeName } from './gamestores/marks';
+  import StoreMark from './gamestores/desktop/StoreMark.svelte';
+  import type { LineContext } from './downloads/format';
+
+  /** What a store or installer row's line needs beyond the row (GameStores README). */
+  function lineCtx(e: DownloadEntry): LineContext {
+    return { compat: compatTools.defaultTool, version: e.job === 'store' ? (gameStores.game(e.source_id)?.version ?? '') : '' };
+  }
 
   let errors = $state<Record<number, string>>({});
   let pending = $state<Record<number, boolean>>({});
@@ -103,9 +114,20 @@
                 {#if kindLabel(e.kind)}
                   <span data-testid={`download-kind-${e.id}`} class="kind">{kindLabel(e.kind)}</span>
                 {/if}
-                <span class="platform">{e.platform}</span>
+                {#if hasStoreBadge(e) && entrySource(e) !== null}
+                  {@const src = entrySource(e)!}
+                  <!-- GameStores README: a store row's badge, its mark and name. -->
+                  <span data-testid={`download-store-${e.id}`} class="kind store"><StoreMark source={src} />{storeName(src)}</span>
+                {:else}
+                  <span class="platform">{e.platform}</span>
+                {/if}
               </span>
-              <span data-testid={`download-detail-${e.id}`} class="detail" title={entryDetail(e)}>{entryDetail(e)}</span>
+              <span
+                data-testid={`download-detail-${e.id}`}
+                class="detail"
+                class:err={e.status === 'failed' && (e.job === 'store' || e.failure !== null)}
+                title={entryDetail(e, lineCtx(e))}>{entryDetail(e, lineCtx(e))}</span
+              >
               <span class="bar-track" class:indeterminate={progress.indeterminate}>
                 <span class="bar-fill" style={progress.indeterminate ? '' : `width: ${progress.pct}%`}></span>
               </span>
@@ -303,6 +325,20 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* A failed store or installer row's line is red (GameStores prototype `.s.err`). */
+  .detail.err {
+    color: var(--danger);
+  }
+
+  /* A store row's badge: its mark and name (GameStores prototype `.kind.st-schip`). */
+  .kind.store {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    text-transform: none;
+    letter-spacing: 0;
   }
 
   .bar-track {

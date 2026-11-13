@@ -29,6 +29,17 @@
           {#if toast.level === 'error'}<span class="sr-only">Error: </span>{/if}{toast.text}
         </p>
         <div class="note-actions">
+          {#if toast.desktopAction}
+            {@const act = toast.desktopAction}
+            <button
+              class="note-btn primary"
+              data-testid="toast-action"
+              onclick={() => {
+                dismissToast(toast.id);
+                act.run();
+              }}>{act.label}</button
+            >
+          {/if}
           <button class="note-btn note-dismiss" data-testid="toast-dismiss" onclick={() => dismissToast(toast.id)}>
             Dismiss<span
               class="note-cd"
@@ -44,6 +55,17 @@
 {/if}
 
 <style>
+  /* A store card's one action (GameStores prototype `stToast`'s small-btn primary). */
+  .note-btn.primary {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--on-primary);
+  }
+
+  .note-btn.primary:hover {
+    background: var(--primary-hover);
+  }
+
   .stack {
     position: fixed;
     right: 24px;

@@ -83,6 +83,7 @@ export function toolNeededNotice(source: StoreSource): StoreCard {
   return err(`${storeName(source)} needs ${tool?.name ?? 'its tool'} to install games`, { kind: 'install_tool' });
 }
 
+export const removedFromDriveNotice = (title: string, pack: string) => ok(`Removed ${title} from ${pack}`);
 export const gameSettingsSavedNotice = () => ok('Game Settings saved');
 
 export function storeCloudSwitchNotice(source: StoreSource, on: boolean): StoreCard {

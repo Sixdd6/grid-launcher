@@ -12,6 +12,14 @@ if (import.meta.env.VITE_E2E) {
   await import('@wdio/tauri-plugin')
 }
 
+// DEV ONLY: VITE_FAKE_STORES=1 runs the UI in a plain browser against the
+// store fake (gamestores/devMock.ts). `import.meta.env.DEV` is false in every
+// build, so the import is dropped from production bundles.
+if (import.meta.env.DEV && import.meta.env.VITE_FAKE_STORES) {
+  const { installDevMock } = await import('./lib/gamestores/devMock')
+  installDevMock()
+}
+
 const app = mount(App, {
   target: document.getElementById('app')!,
 })

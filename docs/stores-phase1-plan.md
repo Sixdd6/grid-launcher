@@ -434,3 +434,39 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
   strings are `String` where the TS union is wide). `#![allow(dead_code)]` until package D
   builds them. Event constants live there.
 - `api.ts` adds `StorePlatform`, `JobPhase`, `JobFailure` and `StoreLoginEvent` aliases.
+
+### Package E
+
+- `api.ts` is unchanged: no type or method was missing for the desktop UI.
+- **Who raises which card.** The frontend words the cards for the commands it calls and their
+  answers: added to download queue (install dialog, offline installer), refusals, Launching /
+  Syncing cloud saves, the cloud conflict choices, uninstalled, disconnected, and the sign-in
+  outcome from `store-login` ("Connected to GOG as …", "Couldn’t sign in to GOG: …" · Try again).
+  Package D's `store-notice` carries the asynchronous ones only (tool installing / installed,
+  owned list loaded, installed / updated / verified, update available, cloud upload after a game
+  closes, the offline installer's wizard fallback). D must not also send `store-notice` for the
+  ones above, or they show twice. Store rows (`job: 'store'`) earn no card from the Downloads
+  diff.
+- RomM installs that run a GOG installer from their archive are worded by the frontend from the
+  row: the wizard card on the move to `phase: 'installer_wizard'`, the failure card from
+  `failure` (`install_base` carries `title` and, when known, `key: 'gog:<base_gog_id>'`), and
+  the generic "Couldn’t install" card is not shown for a row with `failure`.
+- `launch_game_key`'s conflict refusal is read from `{ code: 'store_cloud_conflict' }`; the
+  prompt then reads `store_cloud_state` for the two sides.
+- `StoreGame.cover` and `screenshots` go through `ensure_image` like RomM art (a URL or a data
+  URL); a backend that answers a cached path should answer the URL instead.
+- `DownloadEntry.detail` is read for: a store tool's completed version ("Installed · 1.4.0"), a
+  repair's result ("Verified · 2 files repaired"), and a GOG backup row's layout ("Installer
+  files and saves"). An update's new version comes from the game's library entry.
+- The store rail rows' keys are `store:<source>:installed|available`; `RailKey` gained
+  `` `store:${string}` ``. Settings gained the `stores` page (and TV mode's `TV_PANES` the
+  `stores` pane, which package F fills).
+- Shared components gained optional props only: `RailPane` (store heading mark, flag, indent,
+  spinner / `!` counts), `GameCard` (extra tags, progress bar, primary label, store corner tag,
+  no cloud button, faded art), the toasts (`desktopAction`, the desktop card's one button).
+- Desktop components live in `app/src/lib/gamestores/desktop/`; package F imports only the pure
+  modules in `app/src/lib/gamestores/*.ts` and `stores/gameStores.svelte.ts`. TV mode shows
+  `store-notice` its own way through `onStoreNotice` (the desktop's wiring is in `StoreLayer`).
+- Dev only: `VITE_FAKE_STORES=1 npm run dev` runs the desktop UI in a browser against
+  `gamestores/fakeApi.ts` (`gamestores/devMock.ts`, Tauri's IPC mock); `window.__gridFake`
+  switches the prototype's states. `main.ts` imports it only under `import.meta.env.DEV`.
