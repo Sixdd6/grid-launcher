@@ -83,7 +83,7 @@
   }
 </script>
 
-<StoreDialog testId="store-backup-dialog" label={title} width={520} {onClose}>
+<StoreDialog testId="store-backup-dialog" label={title} width={540} {onClose}>
   <h3 data-testid="store-backup-title">{title}</h3>
   <p class="note">{STORE_BACKUP_LEDE}</p>
 
@@ -247,23 +247,25 @@
     background: var(--danger);
   }
 
+  /* Game backups' source list (backups/BackupDialog.svelte, prototype `.bk-src-list`). */
   .src-list {
     list-style: none;
     margin: 0;
     padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-row);
+    background: var(--surface);
   }
 
   .src-list li {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 8px 12px;
-    border-radius: var(--r-row);
-    border: 1px solid var(--line);
-    background: var(--surface);
+    padding: 7px 12px;
+  }
+
+  .src-list li + li {
+    border-top: 1px solid var(--line);
   }
 
   .src-name {
@@ -279,16 +281,17 @@
     color: var(--text-h);
   }
 
+  /* Game backups' "local" source tag: both GOG kinds come from this computer. */
   .src-tag {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
     flex: none;
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 12px;
     padding: 2px 8px;
     border-radius: var(--r-pill);
-    background: var(--field);
+    white-space: nowrap;
+    background: var(--selected);
     color: var(--text-h);
   }
 

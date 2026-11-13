@@ -651,7 +651,6 @@
     margin: 0;
     color: var(--text-muted);
     font-size: 12px;
-    text-align: center;
   }
 
   .meta-line.cloud,
@@ -668,6 +667,7 @@
 
   .meta-line.why {
     margin-top: -2px;
+    text-align: center;
   }
 
   .linkish {
@@ -692,20 +692,28 @@
     min-width: 0;
     color: var(--text);
     font-size: 14px;
-    line-height: 1.55;
+    line-height: 1.65;
   }
 
   .desc p {
-    margin: 0 0 10px;
+    margin: 0;
   }
 
+  .desc p + p {
+    margin-top: 0.75em;
+  }
+
+  /* The prototype's `.sec-title` (and the RomM Details' section headings). */
   .sec-title {
-    margin: 18px 0 0;
-    font-size: 12px;
+    margin: 4px 0 8px;
+    font-size: 13px;
     font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--text-muted);
+    color: var(--text-h);
+  }
+
+  .desc .sec-title {
+    margin-top: 18px;
+    line-height: inherit;
   }
 
   .tabpanel > .sec-title:first-child {

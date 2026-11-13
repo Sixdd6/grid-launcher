@@ -49,7 +49,7 @@
       {/if}
     {/each}
     {#if actions.backupAll > 0}
-      <button class="chip link backup-all" data-testid="library-store-backup-all" onclick={onBackupAll}>Backup all {actions.backupAll}…</button>
+      <button class="small-btn" data-testid="library-store-backup-all" onclick={onBackupAll}>Backup all {actions.backupAll}…</button>
     {/if}
     {#if actions.installer}
       <button class="small-btn" data-testid="library-store-installer" onclick={openInstaller}>Install from installer…</button>

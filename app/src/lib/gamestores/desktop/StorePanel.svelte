@@ -47,7 +47,8 @@
     flex-direction: column;
     align-items: center;
     gap: 10px;
-    margin: var(--gutter) 0 0;
+    /* The prototype's panel sits in the grid (padding --gutter 2px) with a --gutter margin. */
+    margin: calc(var(--gutter) * 2) 2px 0;
     padding: 34px 24px;
     text-align: center;
     background: var(--panel);
@@ -95,7 +96,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    margin: var(--gutter) 2px 0;
+    margin: calc(var(--gutter) * 2) 2px 0;
     color: var(--text-muted);
     font-size: 13px;
   }
@@ -121,7 +122,7 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 22px 18px;
-    margin-top: 14px;
+    margin: 18px 2px 0;
   }
 
   .skel {

@@ -239,26 +239,32 @@
     font-size: 14px;
   }
 
+  /* The prototype's `.pill-s` (Settings › Systems' status pill). */
   .pill {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
-    padding: 3px 10px;
+    padding: 2px 10px;
     border-radius: var(--r-pill);
-    border: 1px solid var(--line-strong);
+    border: 1px solid var(--line);
     color: var(--text-muted);
+    white-space: nowrap;
   }
 
   .pill.ok {
-    border-color: var(--primary);
+    color: var(--text-h);
+  }
+
+  .pill.ok :global(svg) {
     color: var(--primary);
   }
 
   .pill.warn {
+    background: var(--warning);
     border-color: var(--warning);
-    color: var(--warning-text);
+    color: #1a1a12;
   }
 
   .st-store :global(.g-kv > div) {
