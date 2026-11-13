@@ -568,3 +568,6 @@ Additions and choices the other packages should know:
   row's `cover_large_path`/`cover_small_path` (a local file or the image cache's copy).
 - Drive summaries count store games in `game_count`; `Pack::pack_bytes` includes them.
 - `drive_copy::copy_targets` no longer needs a `Send` progress callback.
+8. **From package C:** check the real installer-restore path (`offline::inspect` then `run_into`)
+   once B is on main (C tested it through a seam). A restore row shows phase `none` while it
+   copies off the drive (the download half has no phase sink): give it `CopyingFromDrive`.
