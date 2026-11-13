@@ -224,6 +224,10 @@ STAGE_GROUPS=(
   "gog-offline:specs/gog-offline.spec.ts"
   "gog-romm-installer:specs/gog-romm-installer.spec.ts"
   "gog-backups:specs/gog-backups.spec.ts"
+  # Package F's TV mode GOG specs (desktop start, then the TV button; see
+  # their `// e2e-app-args:` line) on the same seeded profile. The app's HOME
+  # is the stage's `home/`, so TV mode's folder browser opens its Downloads.
+  "tv-gog:specs/tv-gog-a.spec.ts specs/tv-gog-b.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -641,7 +645,7 @@ mock_args_for_group() {
     # Windows, so a backup never needs a forge.
     backups|tv-backups|tv-layout) printf -- '--fixtures-dir fixtures-backups' ;;
     # The GOG stages: a Linux platform whose archives hold GOG installers.
-    gog|gog-*) printf -- '--fixtures-dir fixtures-gog' ;;
+    gog|gog-*|tv-gog) printf -- '--fixtures-dir fixtures-gog' ;;
     # One "Arcade" platform of 2500 generated ROMs (`e2e_synthetic` in
     # roms.json; see mock-romm/server.mjs), with covers that take 40ms each
     # like a remote server's.
@@ -701,7 +705,7 @@ seed_script_for_group() {
     tv-settings) printf '%s' "$E2E_DIR/seed/tv-settings-seed.mjs" ;;
     tv-large-platform) printf '%s' "$E2E_DIR/seed/tv-large-platform-seed.mjs" ;;
     tv-startup) printf '%s' "$E2E_DIR/seed/tv-startup-seed.mjs" ;;
-    gog|gog-*) printf '%s' "$E2E_DIR/seed/gog-seed.mjs" ;;
+    gog|gog-*|tv-gog) printf '%s' "$E2E_DIR/seed/gog-seed.mjs" ;;
     *) printf '' ;;
   esac
 }
@@ -712,7 +716,7 @@ seed_script_for_group() {
 # the run's keyring, but each starts the app on the state its own seed
 # variant writes.
 group_seeds_per_spec() {
-  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == gog || "$1" == gog-* ]]
+  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == gog || "$1" == gog-* || "$1" == tv-gog ]]
 }
 
 # Runs every spec of one group against a freshly created data dir and mock.
@@ -898,7 +902,7 @@ EOF
     # earlier spec saved in this run's private keyring must go too, or the
     # app would restore that session. Same best-effort clear as the
     # python-import group.
-    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */gog-*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
+    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */gog-*.spec.ts || "$spec" == */tv-gog-*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
       secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
     fi
     if [[ -n "$seed_script" ]] && group_seeds_per_spec "$name"; then
@@ -937,9 +941,12 @@ EOF
         export E2E_GOG_INSTALLER_SH="$data_dir/installers/wren_hollow_1_0_3_12345.sh"
         export E2E_GOG_INSTALLER_PKG="$data_dir/installers/quarry_nine_1_2_0_54321.pkg"
         export E2E_GOG_CONFLICT_KEY="gog:1580232252"
-        export E2E_GOG_ROMM_PLATFORM=2
+        export E2E_GOG_ROMM_PLATFORM=1
         export E2E_GOG_ROMM_SH_ROM=901
         export E2E_GOG_ROMM_BAD_ROM=902
+        if [[ "$name" == "tv-gog" ]]; then
+          export E2E_HOME="$data_dir/home"
+        fi
       else
         export E2E_GOG_URL="$DEAD_FORGE_URL"
       fi
@@ -1000,7 +1007,7 @@ EOF
       # <data>/media (wdio.conf.ts turns this into
       # GRID_LAUNCHER_E2E_DRIVE_ROOTS, read by the e2e build only; the
       # specs plug and unplug drives there, e2e/helpers/drives.ts).
-      if [[ "$name" == "backups" || "$name" == "tv-library" || "$name" == "tv-startup" || "$name" == "tv-backups" || "$name" == "tv-layout" || "$name" == "gog-backups" ]]; then
+      if [[ "$name" == "backups" || "$name" == "tv-library" || "$name" == "tv-startup" || "$name" == "tv-backups" || "$name" == "tv-layout" || "$name" == "gog-backups" || "$name" == "tv-gog" ]]; then
         mkdir -p "$data_dir/media"
         export E2E_DRIVE_ROOTS="$data_dir/media"
       fi

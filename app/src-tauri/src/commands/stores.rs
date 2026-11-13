@@ -11,8 +11,8 @@
 //! this file may log or forward a store tool's output.
 //!
 //! The five backup commands at the end (`plan_store_backup` …
-//! `remove_store_from_drive`) are package C's and answer "not implemented"
-//! until it lands.
+//! `remove_store_from_drive`) are package C's: they delegate to
+//! `commands/store_backups.rs`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -39,13 +39,6 @@ pub const STORES_CHANGED_EVENT: &str = "stores-changed";
 pub const STORE_LOGIN_EVENT: &str = "store-login";
 /// Emitted with a [`StoreNotice`] for a toast the backend decides on.
 pub const STORE_NOTICE_EVENT: &str = "store-notice";
-
-/// The error every Step 0 stub answers.
-const NOT_IMPLEMENTED: &str = "not implemented";
-
-fn not_implemented<T>() -> Result<T, String> {
-    Err(NOT_IMPLEMENTED.to_string())
-}
 
 // --- IPC types (mirror api.ts) ----------------------------------------------
 
@@ -370,6 +363,18 @@ fn enqueue(install: &Arc<InstallService>, job: StoreJob) -> Result<(), String> {
     }
 }
 
+/// Refuses to change a store game while a backup copies it.
+fn refuse_while_backing_up(install: &InstallService, row: &InstalledGame) -> Result<(), String> {
+    let key = GameKey::store(StoreKind::Gog, row.store_id.clone());
+    if install.store_backup_busy(&key) {
+        return Err(format!(
+            "{} is being backed up. Try again when the backup is done.",
+            row.title
+        ));
+    }
+    Ok(())
+}
+
 /// Whether the game is running right now.
 fn running(state: &AppState, key: &GameKey) -> bool {
     state
@@ -659,6 +664,7 @@ pub async fn store_update(state: State<'_, AppState>, key: String) -> Result<(),
     let install = install_service(&state)?;
     state.stores.ensure_can_install()?;
     let row = gog_row(&install, &key).await?;
+    refuse_while_backing_up(&install, &row)?;
     let job = state.stores.api().update_job(&row, job_ctx(&install)?);
     enqueue(&install, job)
 }
@@ -669,6 +675,7 @@ pub async fn store_repair(state: State<'_, AppState>, key: String) -> Result<(),
     let install = install_service(&state)?;
     state.stores.ensure_can_install()?;
     let row = gog_row(&install, &key).await?;
+    refuse_while_backing_up(&install, &row)?;
     let job = state.stores.api().repair_job(&row, job_ctx(&install)?);
     enqueue(&install, job)
 }
@@ -686,6 +693,7 @@ pub async fn store_uninstall(
     if running(&state, &game_key) {
         return Err(format!("Quit {} before uninstalling it.", row.title));
     }
+    refuse_while_backing_up(&install, &row)?;
     let stores = state.stores.clone();
     let registry = install.registry();
     let id = row.store_id.clone();

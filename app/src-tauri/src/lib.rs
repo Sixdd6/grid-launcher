@@ -350,14 +350,26 @@ pub fn run() {
     // backup: its files may change while they are read. Weak, so the
     // install service never keeps the launch service alive.
     if let (Ok(install), Ok(launch)) = (&install, &launch) {
-        let launch = Arc::downgrade(launch);
+        let weak = Arc::downgrade(launch);
         install.set_running_check(Some(Arc::new(move |rom_id| {
-            launch.upgrade().is_some_and(|launch| {
+            weak.upgrade().is_some_and(|launch| {
                 launch
                     .snapshot()
                     .sessions
                     .iter()
                     .any(|session| session.rom_id == Some(rom_id))
+            })
+        })));
+        // The same for store games, by game key (a running GOG game is not
+        // backed up).
+        let weak = Arc::downgrade(launch);
+        install.set_store_running_check(Some(Arc::new(move |key: &grid_core::stores::GameKey| {
+            weak.upgrade().is_some_and(|launch| {
+                launch
+                    .snapshot()
+                    .sessions
+                    .iter()
+                    .any(|session| &session.key == key)
             })
         })));
     }
@@ -422,13 +434,30 @@ pub fn run() {
         // TV mode's controller gate follows the window's focus, and a close
         // from TV mode leaves fullscreen first (`commands::tv::exit_app`).
         .on_window_event(|window, event| {
+            // The store login window opens over TV mode: while it has the
+            // focus the controller still reaches GRID (its d-pad and the
+            // on-screen keyboard drive the login page).
+            if window.label() == store_auth::LOGIN_WINDOW_LABEL {
+                if let tauri::WindowEvent::Focused(focused) = event {
+                    let state = window.state::<AppState>();
+                    let main_focused = window
+                        .app_handle()
+                        .get_webview_window("main")
+                        .and_then(|main| main.is_focused().ok())
+                        .unwrap_or(false);
+                    state.gamepad.set_window_focused(*focused || main_focused);
+                }
+                return;
+            }
             if window.label() != "main" {
                 return;
             }
             let state = window.state::<AppState>();
             match event {
                 tauri::WindowEvent::Focused(focused) => {
-                    state.gamepad.set_window_focused(*focused);
+                    state.gamepad.set_window_focused(
+                        *focused || store_auth::login_window_focused(window.app_handle()),
+                    );
                 }
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     let mode = state.ui_mode.mode();

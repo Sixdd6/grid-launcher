@@ -381,6 +381,14 @@ pub fn type_into_login_window(app: &AppHandle, text: &str) -> bool {
     }
 }
 
+/// Whether the login window is open and has the focus (TV mode's
+/// controller gate stays open then).
+pub fn login_window_focused(app: &AppHandle) -> bool {
+    app.get_webview_window(LOGIN_WINDOW_LABEL)
+        .and_then(|window| window.is_focused().ok())
+        .unwrap_or(false)
+}
+
 /// Whether the login window is open.
 pub fn login_window_open(app: &AppHandle) -> bool {
     app.get_webview_window(LOGIN_WINDOW_LABEL).is_some()

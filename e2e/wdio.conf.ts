@@ -88,6 +88,9 @@ const appEnv: Record<string, string> = {
   // stores/tools.rs `installed_path` in e2e builds.
   GRID_LAUNCHER_E2E_GOG_BASE: process.env.E2E_GOG_URL ?? 'http://127.0.0.1:9',
   ...(process.env.E2E_FAKE_GOGDL ? { GRID_LAUNCHER_E2E_TOOL_GOGDL: process.env.E2E_FAKE_GOGDL } : {}),
+  // E2E_HOME (the tv-gog stage only) is the app's HOME: a folder in the
+  // stage's data dir whose Downloads holds the fake GOG installers.
+  ...(process.env.E2E_HOME ? { HOME: process.env.E2E_HOME } : {}),
   ...(process.env.GRID_E2E_ARGV_FILE
     ? { GRID_E2E_ARGV_FILE: process.env.GRID_E2E_ARGV_FILE }
     : {}),

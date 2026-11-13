@@ -16,7 +16,8 @@
  *   sync; the mock GOG holds a newer cloud save too, so launching it
  *   conflicts: `E2E_GOG_CONFLICT_KEY`). Lanternfall stays available.
  *
- * Always: `stubs/bin` with `wine` and `umu-run` stand-ins that run the fake
+ * Always: `home/Downloads` with the same two installers (tv-gog's HOME), and
+ * `stubs/bin` with `wine` and `umu-run` stand-ins that run the fake
  * GOG installer (e2e/fake-tools/installer.mjs), and `installers/` with a
  * GOG Linux `.sh` (`E2E_GOG_INSTALLER_SH`) and a macOS `.pkg`
  * (`E2E_GOG_INSTALLER_PKG`).
@@ -58,6 +59,12 @@ const installers = path.join(dataDir, 'installers');
 mkdirSync(installers, { recursive: true });
 writeFileSync(path.join(installers, 'wren_hollow_1_0_3_12345.sh'), buildLinuxSh());
 writeFileSync(path.join(installers, 'quarry_nine_1_2_0_54321.pkg'), buildMacPkg());
+// The same two in the stage's own home folder's Downloads (`home/`, the
+// app's HOME for the tv-gog stage: TV mode's folder browser opens there).
+const downloads = path.join(dataDir, 'home', 'Downloads');
+mkdirSync(downloads, { recursive: true });
+writeFileSync(path.join(downloads, 'wren_hollow_1_0_3_12345.sh'), buildLinuxSh());
+writeFileSync(path.join(downloads, 'quarry_nine_1_2_0_54321.pkg'), buildMacPkg());
 
 const signedOut = spec === 'gog-login' || spec === 'gog-secrets';
 if (signedOut) {
