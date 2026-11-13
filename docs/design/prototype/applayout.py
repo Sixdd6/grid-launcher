@@ -744,3 +744,22 @@ bk = sub(bk, "freshReset(); paintArt(null); $('art').style.opacity = 0; renderAl
 d = os.path.join(OUT, 'GameBackups'); os.makedirs(d, exist_ok=True)
 open(os.path.join(d, 'preview.html'), 'w').write(bk)
 print('GameBackups written', len(bk))
+
+# External stores: GameBackups (which is what main has) plus GOG, Epic Games,
+# Amazon Games and Steam in the Library, Settings › Stores, the store login
+# window and GOG offline installers. Its own card, so Game backups keeps
+# showing what is on main.
+ST_JS = open(os.path.join(HERE, 'stores.js')).read()
+ST_CSS = open(os.path.join(HERE, 'stores.css')).read()
+st = bk
+st = sub(st, 'subtitle="Game backups: copy games to a USB drive and install them from it, with or without a server"', 'subtitle="Game stores: GOG (and its offline installers), Epic Games, Amazon Games and Steam in the Library, with Settings › Stores"')
+st = sub(st, '<title>Game backups</title>', '<title>Game stores</title>')
+st = sub(st, '</style></head>', ST_CSS + '\n</style></head>')
+st = sub(st, '/* ---- details ---- */', ST_JS + '\n/* ---- details ---- */')
+st = sub(st, "['ra','RetroAchievements'],['systems','Systems'],", "['ra','RetroAchievements'],['stores','Stores'],['systems','Systems'],")
+st = sub(st, "  if (S.setPane === 'backup') { renderBackupPane(el); return; }\n", "  if (S.setPane === 'backup') { renderBackupPane(el); return; }\n  if (S.setPane === 'stores') { renderStoresPane(el); return; }\n")
+st = sub(st, '  <div class="g-scrim" id="libscrim" hidden>', '  <div class="g-scrim" id="stscrim" hidden><div class="g-dialog bkdlg stdlg" role="dialog" aria-modal="true" id="stdlg"></div></div>\n  <div class="st-login" id="stlogin" hidden></div>\n  <div class="g-scrim" id="libscrim" hidden>')
+st = sub(st, 'bkBoot();', 'stBoot();')
+d = os.path.join(OUT, 'GameStores'); os.makedirs(d, exist_ok=True)
+open(os.path.join(d, 'preview.html'), 'w').write(st)
+print('GameStores written', len(st))

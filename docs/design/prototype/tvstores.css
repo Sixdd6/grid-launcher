@@ -1,0 +1,53 @@
+/* ==== External stores in TV mode (the Game stores card's design, for a controller). */
+.smono { display: inline-grid; place-items: center; flex: none; width: 1.3rem; height: 1.3rem; border-radius: .3rem; background: var(--h, var(--field)); color: #fff; font: 700 .75rem/1 system-ui, sans-serif; }
+.smono.lg { width: 3rem; height: 3rem; border-radius: .7rem; font-size: 1.4rem; }
+.ri.fold .smono { margin-right: .15rem; }
+.ri .n.warn { color: var(--warning-text); font-weight: 700; }
+.ri .n .sspin, .sspin { display: inline-block; width: .9rem; height: .9rem; border-radius: 50%; border: .18rem solid var(--line-strong); border-top-color: var(--primary); animation: sspin 800ms linear infinite; vertical-align: -.1rem; }
+@keyframes sspin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sspin { animation: none; } }
+.ri.fold .sflag { margin-left: auto; font-size: .75rem; font-weight: 700; padding: .05rem .45rem; border-radius: 100px; background: var(--warning); color: #1a1a12; }
+.ri.fold .sflag.off { background: var(--field); color: var(--text-muted); border: 1px solid var(--line-strong); }
+
+/* Store covers */
+.tag.sns { top: .6rem; left: .6rem; background: var(--field); color: var(--text-h); border: 1px solid var(--line-strong); }
+.tag.scf { top: .6rem; left: .6rem; background: var(--danger); color: #fff; }
+.tag.sst { bottom: .6rem; left: .6rem; background: rgba(0,0,0,.7); color: #fff; display: inline-flex; align-items: center; gap: .3rem; }
+.tag.sst .smono { width: .95rem; height: .95rem; font-size: .55rem; border-radius: .2rem; }
+.cv .sprog { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; height: .35rem; background: rgba(0,0,0,.45); }
+.cv .sprog b { display: block; height: 100%; background: var(--primary); }
+.cv .sprog.steam b { background: var(--graph-disk); }
+.cv.sns .cv-art { filter: saturate(.35) brightness(.8); }
+
+/* Store views in the Library: states in place of the grid */
+.sstate { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: flex-start; gap: .8rem; max-width: 44rem; padding: 1.6rem 1.8rem; border-radius: 1rem; background: var(--panel); border: 1px solid var(--line); color: var(--text-muted); font-size: 1.05rem; line-height: 1.5; }
+.sstate.warn { border-left: .3rem solid var(--warning); }
+.sstate.err { border-left: .3rem solid var(--danger); }
+.sstate h2 { margin: 0; color: var(--text-h); font-size: 1.4rem; }
+.sstate p { margin: 0; }
+.sstate .btns { margin-top: .4rem; }
+.sskel { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 1.6rem; }
+.sskel i { width: 11rem; aspect-ratio: 3 / 4; border-radius: .7rem; background: var(--field); }
+.vh h1 .muted { font-weight: 400; }
+
+/* Details */
+.det-l .lp .warn { color: var(--danger); }
+.smanaged { padding: .8rem 1rem; border-radius: .7rem; background: var(--field); color: var(--text-muted); font-size: .95rem; line-height: 1.45; }
+.smanaged .pbar { margin-top: .5rem; }
+.lrow.warnrow { box-shadow: inset .25rem 0 0 var(--danger); }
+
+/* The store login window over TV mode: GRID's chrome, the store's own page inside. */
+.layer.slogin { align-items: center; }
+.swin { width: 58rem; max-width: calc(100% - 4rem); height: calc(100% - 5rem); display: flex; flex-direction: column; border-radius: 1rem; overflow: hidden; background: var(--overlay); border: 1px solid var(--line-strong); box-shadow: var(--shadow-overlay); }
+.swin-bar { display: flex; align-items: center; gap: .7rem; padding: .8rem 1.2rem; background: var(--surface); border-bottom: 1px solid var(--line); color: var(--text-h); font-weight: 600; }
+.swin-url { padding: .5rem 1.2rem; font: .9rem ui-monospace, monospace; color: var(--text-muted); background: var(--field); border-bottom: 1px solid var(--line); }
+.swin-url .lock { color: var(--success); font-family: system-ui, sans-serif; }
+.swin-page { flex: 1; min-height: 0; display: grid; place-items: center; padding: 1.6rem; background: repeating-linear-gradient(135deg, var(--surface) 0 1rem, transparent 1rem 2rem); }
+.swin-ph { width: 30rem; display: flex; flex-direction: column; gap: .7rem; padding: 1.6rem 1.8rem; border-radius: 1rem; border: 1px dashed var(--line-strong); background: var(--overlay); color: var(--text-muted); text-align: center; }
+.swin-ph b { color: var(--text-h); font-size: 1.15rem; }
+.swin-ph .field { text-align: left; margin: 0; }
+.swin-ph .btn { align-self: center; }
+.swin-err { margin: 0 0 1rem; padding: .7rem 1rem; border-radius: .6rem; border-left: .3rem solid var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--text); text-align: left; }
+.swin-foot { display: flex; align-items: center; gap: 1rem; padding: .8rem 1.2rem; background: var(--surface); border-top: 1px solid var(--line); }
+.swin-foot .note { margin: 0 auto 0 0; }
+.btn.proto { border-style: dashed; color: var(--text-muted); font-weight: 500; }

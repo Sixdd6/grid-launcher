@@ -44,3 +44,20 @@ HTML = f"""<!-- @dsCard group="Prototype" height=800 width=1280 subtitle="TV mod
 d = os.path.join(gen.OUT, 'TVMode')
 os.makedirs(d, exist_ok=True)
 open(os.path.join(d, 'preview.html'), 'w').write(HTML)
+
+# Game stores in TV mode: the TV mode card plus tvstores.js / tvstores.css, its own
+# card so TV mode keeps showing what is on main. It opens on Library › GOG › Installed.
+def sub(t, a, b):
+    assert t.count(a) == 1, a[:70]
+    return t.replace(a, b)
+ST_CSS = open(os.path.join(HERE, 'tvstores.css')).read()
+ST_JS = open(os.path.join(HERE, 'tvstores.js')).read()
+TVS = HTML
+TVS = sub(TVS, 'subtitle="TV mode: the fullscreen, controller-first GRID.', 'subtitle="TV mode with game stores: GOG, Epic Games, Amazon Games and Steam in the Library and Settings › Stores.')
+TVS = sub(TVS, '<title>TV mode</title>', '<title>TV mode: game stores</title>')
+TVS = sub(TVS, '\n</style></head>', '\n' + ST_CSS + '\n</style></head>')
+TVS = sub(TVS, '/* ------------------------------------------------------------------ start */', ST_JS + '\n/* ------------------------------------------------------------------ start */')
+TVS = sub(TVS, 'openStart();\nhero(byId(1));', 'sBoot(); render(); hero(sG(\'g1\'));')
+d = os.path.join(gen.OUT, 'TVStores')
+os.makedirs(d, exist_ok=True)
+open(os.path.join(d, 'preview.html'), 'w').write(TVS)
