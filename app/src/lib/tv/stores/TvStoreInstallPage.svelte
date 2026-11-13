@@ -16,7 +16,7 @@
   import { openList } from '../overlays/overlays.svelte';
   import TvRowsPage from '../pages/TvRowsPage.svelte';
   import type { PageMain, PageRow } from '../pages/pageRows';
-  import { compatChoices, fail } from './storeActions';
+  import { card, compatChoices, fail, toDownloads } from './storeActions';
   import { COMPAT_SUB, folderName, installFolderSub, joinPath } from './storeWords';
 
   let { gameKey }: { gameKey: string } = $props();
@@ -110,8 +110,9 @@
       fail(err);
       return;
     }
-    // The queued card ("<title> added to download queue", Open Downloads)
-    // is the shared notifier's, from the new Downloads row.
+    // The queued card is this page's: the shared notifier gives a store
+    // row none, and the backend sends no card for a command's own outcome.
+    card(`${game.title} added to download queue`, 'success', undefined, toDownloads);
     await popPage();
   }
 

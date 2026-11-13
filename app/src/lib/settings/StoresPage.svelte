@@ -98,7 +98,7 @@
           <p><b>{c.bold}</b> {c.rest}</p>
           <div class="g-actions">
             <button class="g-btn danger" data-testid={`store-disconnect-go-${s.source}`} onclick={() => disconnect(s)}>Disconnect</button>
-            <button class="g-btn secondary" onclick={() => (confirmFor = null)}>Cancel</button>
+            <button class="g-btn secondary" data-testid={`store-disconnect-cancel-${s.source}`} onclick={() => (confirmFor = null)}>Cancel</button>
           </div>
         </div>
       {:else if !on}

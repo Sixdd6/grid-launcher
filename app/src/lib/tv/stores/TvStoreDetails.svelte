@@ -32,7 +32,8 @@
   import TvStoreMark from './TvStoreMark.svelte';
   import TvStoreViewer from './TvStoreViewer.svelte';
   import { bumpDrives, driveStoreCache, setSyncing, tvStores } from './storeState.svelte';
-  import { card, defaultCompat, fail, openInstall, openStoreBackup, playStore, resolveCloud, restoreFromDrive } from './storeActions';
+  import { card, defaultCompat, fail, openInstall, openStoreBackup, playStore, resolveCloud, restoreFromDrive, toDownloads } from './storeActions';
+  import { uninstalledNotice } from '../../gamestores/notices';
   import {
     cancelJobWords,
     dlcAction,
@@ -184,8 +185,11 @@
         if (drive && driveGame) void restoreFromDrive(drive.key, gameKey);
         return;
       case 'update':
-        // The queued card is the shared notifier's, from the new row.
-        ask(updateWords(g), false, () => void api.storeUpdate(g.key).catch(fail));
+        // The queued card is this page's (a store row earns none from the
+        // shared notifier, and the backend sends none for a command).
+        ask(updateWords(g), false, () =>
+          void api.storeUpdate(g.key).then(() => card(`Update for ${g.title} added to download queue`, 'success', undefined, toDownloads), fail),
+        );
         return;
       case 'settings':
         void pushPage({ title: 'Game settings', component: TvStoreGameSettings, props: { gameKey } });
@@ -194,7 +198,11 @@
         void api.storeRepair(g.key).then(() => card(`Verifying ${g.title}’s files…`), fail);
         return;
       case 'uninstall':
-        ask(uninstallWords(g), true, () => void api.storeUninstall(g.key).catch(fail));
+        ask(uninstallWords(g), true, () =>
+          void api
+            .storeUninstall(g.key)
+            .then(() => card(uninstalledNotice(g.source, g.title, (gameStores.status(g.source)?.cloud_saves ?? false) && g.cloud !== 'none').text), fail),
+        );
         return;
       case 'remove_drive':
         if (drive)
@@ -230,7 +238,7 @@
       );
       return;
     }
-    void api.storeInstallDlc(g.key, d.id).catch(fail);
+    void api.storeInstallDlc(g.key, d.id).then(() => card(`${short} added to download queue`, 'success', undefined, toDownloads), fail);
   }
 
   function syncNow() {

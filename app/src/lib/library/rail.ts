@@ -4,6 +4,7 @@
 // entries and asks `matchesRail` which rows an entry keeps.
 import type { DriveInfo, InstalledGame } from '../api';
 import { isHiddenLibraryPlatform } from '../library';
+import { isStoreRow } from '../gameKey';
 
 /** Design §5: "Recent (played in the last 30 days)", in whole seconds. */
 export const RECENT_WINDOW_SECONDS = 30 * 24 * 60 * 60;
@@ -95,7 +96,9 @@ export function railEntries(
   const visible = rows.filter((row) => !isHiddenLibraryPlatform(row.platform));
 
   const platforms = new Map<RailKey, { label: string; count: number }>();
-  for (const row of visible) {
+  // A store game is listed under its store's group, never as a platform
+  // (GameStores README: no "GOG" platform row).
+  for (const row of visible.filter((r) => !isStoreRow(r))) {
     const key = platformKey(row.platform);
     const existing = platforms.get(key);
     if (existing) existing.count += 1;

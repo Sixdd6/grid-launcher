@@ -2,6 +2,8 @@
    tvstores.css, sized as tv.css sizes the rest: rem, nothing under .85rem).
    Scoped to html[data-ui="tv"] like tv.css. ==== */
 html[data-ui='tv'] .tv .smono { display: inline-grid; place-items: center; flex: none; width: 1.3rem; height: 1.3rem; border-radius: .3rem; background: var(--h, var(--field)); color: #fff; font: 700 .85rem/1 system-ui, sans-serif; }
+/* The letter is drawn, not text: a label reads as the store's name alone. */
+html[data-ui='tv'] .tv .smono::before { content: attr(data-mono); }
 html[data-ui='tv'] .tv .smono.lg { width: 3rem; height: 3rem; border-radius: .7rem; font-size: 1.4rem; }
 html[data-ui='tv'] .tv .ri.fold .smono { margin-right: .15rem; }
 html[data-ui='tv'] .tv .ri .n.warn { color: var(--warning-text); font-weight: 700; }

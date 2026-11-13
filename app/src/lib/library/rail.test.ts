@@ -91,6 +91,15 @@ describe('railEntries (design section 5)', () => {
   it('still lists the three fixed entries, at zero, for an empty library', () => {
     expect(railEntries([], new Set(), NOW).map((e) => e.count)).toEqual([0, 0, 0]);
   });
+
+  it('lists no platform row for a store game (its store group covers it)', () => {
+    const entries = railEntries(
+      [row({ rom_id: 1, platform: 'SNES' }), row({ rom_id: null, platform: 'GOG', source: 'gog', store_id: '5' })],
+      new Set(),
+      NOW,
+    );
+    expect(entries.filter((e) => e.key.startsWith('platform:')).map((e) => e.label)).toEqual(['SNES']);
+  });
 });
 
 describe('matchesRail', () => {

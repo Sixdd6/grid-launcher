@@ -184,7 +184,7 @@
       {/if}
       {#if storeTag}
         <span data-testid={`card-store-${badgeId}`} class="tag platform corner store-tag"
-          ><span class="mark" style:--st-hue={storeTag.hue} aria-hidden="true">{storeTag.mono}</span>{storeTag.name}</span
+          ><span class="mark" style:--st-hue={storeTag.hue} aria-hidden="true" data-mono={storeTag.mono}></span>{storeTag.name}</span
         >
       {:else if showPlatform && badges.platform}
         <span data-testid={`card-platform-${badgeId}`} class="tag platform corner">{badges.platform}</span>
@@ -606,6 +606,11 @@
     background: var(--st-hue, var(--field));
     color: #fff;
     font: 700 7px/1 system-ui, sans-serif;
+  }
+
+  /* The letter is drawn, not text: a label reads as the store's name alone. */
+  .store-tag .mark::before {
+    content: attr(data-mono);
   }
 
   .tag {

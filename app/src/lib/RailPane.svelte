@@ -56,7 +56,7 @@
     {#if entry.heading}
       <span class="rail-heading" class:store-head={entry.headingMark !== undefined}>
         {#if entry.headingMark}
-          <span class="rail-mark" style:--st-hue={entry.headingMark.hue} aria-hidden="true">{entry.headingMark.mono}</span>
+          <span class="rail-mark" style:--st-hue={entry.headingMark.hue} aria-hidden="true" data-mono={entry.headingMark.mono}></span>
         {/if}
         {entry.heading}
         {#if entry.headingFlag}
@@ -192,6 +192,11 @@
     display: flex;
     align-items: center;
     gap: 7px;
+  }
+
+  /* The letter is drawn, not text: a label reads as the store's name alone. */
+  .rail-mark::before {
+    content: attr(data-mono);
   }
 
   .rail-mark {

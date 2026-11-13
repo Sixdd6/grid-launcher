@@ -287,7 +287,9 @@
           </div>
 
           <div class="action">
-            {#each buttons as b (b.act)}
+            <!-- Keyed without `_confirm`: the second click's button is the
+                 same element, so it keeps focus (and Escape still closes). -->
+            {#each buttons as b (b.act.replace(/_confirm$/, ''))}
               <button
                 data-testid={`store-details-${b.act.replace(/_/g, '-')}`}
                 class:secondary={!b.primary}

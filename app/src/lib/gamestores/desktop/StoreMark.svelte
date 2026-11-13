@@ -8,7 +8,7 @@
   let mark = $derived(storeMark(source));
 </script>
 
-<span class="st-mono {size}" style:--st-hue={mark.hue} aria-hidden="true">{mark.mono}</span>
+<span class="st-mono {size}" style:--st-hue={mark.hue} aria-hidden="true" data-mono={mark.mono}></span>
 
 <style>
   .st-mono {
@@ -22,6 +22,11 @@
     color: #fff;
     font: 700 10px/1 system-ui, sans-serif;
     letter-spacing: 0;
+  }
+
+  /* The letter is drawn, not text: a label reads as the store's name alone. */
+  .st-mono::before {
+    content: attr(data-mono);
   }
 
   .st-mono.xs {

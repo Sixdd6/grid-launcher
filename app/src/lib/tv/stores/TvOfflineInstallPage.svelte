@@ -11,7 +11,7 @@
   import { openList } from '../overlays/overlays.svelte';
   import TvRowsPage from '../pages/TvRowsPage.svelte';
   import type { PageMain, PageRow } from '../pages/pageRows';
-  import { compatChoices, defaultCompat, fail } from './storeActions';
+  import { card, compatChoices, defaultCompat, fail, toDownloads } from './storeActions';
   import { folderName, installerNeeds, joinPath, tvInspectionView } from './storeWords';
 
   let { insp }: { insp: InstallerInspection } = $props();
@@ -64,7 +64,9 @@
       fail(err);
       return;
     }
-    // The backend's card says it was queued ("<title> added to download queue").
+    // The queued card is this page's: the shared notifier gives a store
+    // row none, and the backend sends no card for a command's own outcome.
+    card(`${insp.title || 'The game'} added to download queue`, 'success', undefined, toDownloads);
     void popPage();
   }
 

@@ -10,4 +10,4 @@
   let m = $derived(storeMark(source));
 </script>
 
-<span class="smono" class:lg style={`--h:${m.hue}`} aria-hidden="true">{m.mono}</span>
+<span class="smono" class:lg style={`--h:${m.hue}`} aria-hidden="true" data-mono={m.mono}></span>
