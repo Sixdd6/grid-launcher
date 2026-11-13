@@ -42,10 +42,20 @@ export async function focusOn(selector: string): Promise<void> {
     const w = window as unknown as { __tvE2E: { focus: (el: Element | null) => void } };
     w.__tvE2E.focus(document.querySelector(sel));
   }, selector);
-  await browser.waitUntil(
-    async () => (await browser.execute((sel: string) => document.querySelector(sel)?.classList.contains('f') ?? false, selector)) as boolean,
-    { timeout: TRANSITION_TIMEOUT, timeoutMsg: `${selector} never took focus` },
-  );
+  await browser
+    .waitUntil(
+      async () => (await browser.execute((sel: string) => document.querySelector(sel)?.classList.contains('f') ?? false, selector)) as boolean,
+      { timeout: TRANSITION_TIMEOUT },
+    )
+    .catch(async () => {
+      // Say where focus is and which layers are open, so a failure is readable.
+      const where = await browser.execute(() => ({
+        focused: document.querySelector('[data-tv-root] .f')?.getAttribute('data-k') ?? null,
+        layers: Array.from(document.querySelectorAll('[data-layer]')).map((l) => l.getAttribute('data-layer')),
+        notices: (window as unknown as { __tvE2E?: { notices: () => string[] } }).__tvE2E?.notices() ?? [],
+      }));
+      throw new Error(`${selector} never took focus (${JSON.stringify(where)})`);
+    });
 }
 
 /** Focuses the TV item `k` and presses A. */

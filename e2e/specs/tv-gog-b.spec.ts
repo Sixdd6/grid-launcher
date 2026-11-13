@@ -1,8 +1,9 @@
 // e2e-app-args:
 import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
-import { connectPad, hints, key, XBOX_PAD } from '../helpers/tv.js';
+import { connectPad, focused, hints, key, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, pageErrors, testId, text, waitGone, waitText } from '../helpers/tvDetails.js';
 import { confirmDialog, pageRow, tap, waitNotice } from '../helpers/tvBackups.js';
+import { loginWindowOpen, MAIN_WINDOW } from '../helpers/gogLogin.js';
 
 /**
  * Stage `tv-gog/tv-gog-b` (docs/stores-phase1-plan.md package F; TVStores
@@ -61,13 +62,28 @@ describe('tv-gog-b: Settings › Stores, signing in, offline installers, backups
     await waitText('tv-rows-sub', 'Not signed in');
     await waitText('tv-rows-main', 'Connect GOG…');
     await key('m');
+    // The store's login window opens beside TV mode. WebDriver may follow it
+    // as the active window, so every step below runs in the main window.
+    await browser.waitUntil(loginWindowOpen, { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the login window never opened' });
+    await browser.switchToWindow(MAIN_WINDOW);
     await $(testId('tv-store-login')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the sign-in layer never opened' });
+    // The layer's hints come a frame after the layer itself.
+    await browser
+      .waitUntil(async () => JSON.stringify(await hints()) === JSON.stringify(['A Select', 'Y Keyboard', 'B Cancel sign-in']), { timeout: TRANSITION_TIMEOUT })
+      .catch(() => undefined);
     expect(await hints()).toEqual(['A Select', 'Y Keyboard', 'B Cancel sign-in']);
     await key('y');
     await $(testId('tv-osk')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    // One B per layer, each after the one before has gone: the keyboard,
+    // then the sign-in, which closes the login window too.
+    await browser.waitUntil(async () => /^k/.test((await focused()) ?? ''), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the keyboard never took focus' });
     await key('Escape');
+    await waitGone('tv-osk');
     await key('Escape');
     await waitGone('tv-store-login');
+    await browser.waitUntil(async () => !(await loginWindowOpen()), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the login window stayed open' });
+    await browser.switchToWindow(MAIN_WINDOW);
+    expect(await browser.execute(() => document.querySelectorAll('[data-layer]').length)).toBe(0);
   });
 
   it('Install from installer… opens the folder browser in Downloads, files only; a .pkg is refused', async () => {

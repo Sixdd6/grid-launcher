@@ -207,6 +207,7 @@ describe('tv-settings: Downloads and Settings', () => {
       ['connection', 'Connection'],
       ['library', 'Library'],
       ['retroachievements', 'RetroAchievements'],
+      ['stores', 'Stores'],
       ['systems', 'Systems'],
       ['tv', 'TV mode'],
       ['updates', 'Updates'],

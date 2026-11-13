@@ -107,7 +107,7 @@ describe('tv-shell (a): --tv', () => {
     await browser.pause(800);
     await release('dpad_down');
     const after = await focused();
-    const order = ['r-appearance', 'r-backup-drives', 'r-cloud-saves', 'r-connection', 'r-library', 'r-retroachievements', 'r-systems', 'r-tv', 'r-updates'];
+    const order = ['r-appearance', 'r-backup-drives', 'r-cloud-saves', 'r-connection', 'r-library', 'r-retroachievements', 'r-stores', 'r-systems', 'r-tv', 'r-updates'];
     expect(order.indexOf(after ?? '')).toBeGreaterThanOrEqual(3);
     const settled = await focused();
     await browser.pause(400);
@@ -122,7 +122,7 @@ describe('tv-shell (a): --tv', () => {
     const before = await focused();
     await axis('left_stick_y', 0.9);
     await axis('left_stick_y', 0);
-    const order = ['r-appearance', 'r-backup-drives', 'r-cloud-saves', 'r-connection', 'r-library', 'r-retroachievements', 'r-systems', 'r-tv', 'r-updates'];
+    const order = ['r-appearance', 'r-backup-drives', 'r-cloud-saves', 'r-connection', 'r-library', 'r-retroachievements', 'r-stores', 'r-systems', 'r-tv', 'r-updates'];
     await browser.waitUntil(async () => order.indexOf((await focused()) ?? '') === order.indexOf(before ?? '') - 1, {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the left stick did not move focus up',

@@ -328,7 +328,7 @@ describe('tv-layout: every screen fits at 720p, 1080p and 4K', () => {
     await tap(testId('tv-tab-settings'));
     await waitTab('settings');
     await waitShown('tv-settings', 'Settings');
-    for (const pane of ['appearance', 'backup-drives', 'cloud-saves', 'connection', 'library', 'retroachievements', 'systems', 'tv', 'updates']) {
+    for (const pane of ['appearance', 'backup-drives', 'cloud-saves', 'connection', 'library', 'retroachievements', 'stores', 'systems', 'tv', 'updates']) {
       await tapK(`r-${pane}`);
       await browser.pause(400);
       // Up and Down only: Left and Right adjust a slider or a choice.
