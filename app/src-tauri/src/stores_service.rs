@@ -60,6 +60,9 @@ pub trait GogApi: Send + Sync {
     fn disconnect(&self) -> io::Result<()>;
     fn owned(&self) -> BoxFut<'_, Result<Vec<GogProduct>, StoreError>>;
     fn tool_installed(&self) -> bool;
+    /// Why the tool can't run here (the Linux gogdl needs Python 3.10),
+    /// `None` when it can.
+    fn tool_problem(&self) -> Option<String>;
     fn install_tool<'a>(
         &'a self,
         progress: Box<dyn FnMut(u64, u64) + Send + 'a>,
@@ -130,6 +133,25 @@ impl GogApi for RealGog {
     }
     fn tool_installed(&self) -> bool {
         tools::installed_path(&self.data_dir, StoreTool::Gogdl).is_some()
+    }
+    fn tool_problem(&self) -> Option<String> {
+        if self.tool_installed() {
+            return match tools::tool_command(
+                &self.data_dir,
+                StoreTool::Gogdl,
+                Vec::new(),
+                Vec::new(),
+            ) {
+                Err(StoreError::Refused(problem)) => Some(problem),
+                _ => None,
+            };
+        }
+        let asset = tools::host_asset(StoreTool::Gogdl)?;
+        if asset.launcher != tools::AssetLauncher::Python3 {
+            return None;
+        }
+        let env = grid_core::launch::spawn::clean_env();
+        tools::python_problem(grid_core::launch::umu::probe_python(&env))
     }
     fn install_tool<'a>(
         &'a self,
@@ -287,6 +309,8 @@ pub struct StoresService {
     syncing: Mutex<HashSet<String>>,
     /// Downloads entries whose finish already had its card.
     announced: Mutex<HashSet<u64>>,
+    /// `owned()` answered this run.
+    owned_fetched: std::sync::atomic::AtomicBool,
 }
 
 /// The tool's name in GRID's words.
@@ -316,6 +340,7 @@ impl StoresService {
             registry: RwLock::new(None),
             syncing: Mutex::new(HashSet::new()),
             announced: Mutex::new(HashSet::new()),
+            owned_fetched: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -396,13 +421,9 @@ impl StoresService {
     pub fn load(&self) {
         let config = self.gog_config();
         let cache = read_owned_cache(&self.data_dir);
-        let tool = self.api.tool_installed();
+        let tool = self.tool_phase_now();
         let mut state = self.state.lock().unwrap();
-        state.tool = if tool {
-            ToolPhase::Installed
-        } else {
-            ToolPhase::NotInstalled
-        };
+        state.tool = tool;
         if config.connected {
             state.connection = StoreConnection::Connected;
             state.username = config.username.clone();
@@ -496,6 +517,18 @@ impl StoresService {
 
     pub fn connection(&self) -> StoreConnection {
         self.state.lock().unwrap().connection
+    }
+
+    /// The tool's state on disk: installed, missing, or installed but
+    /// unable to run (its Python problem).
+    fn tool_phase_now(&self) -> ToolPhase {
+        if !self.api.tool_installed() {
+            return ToolPhase::NotInstalled;
+        }
+        match self.api.tool_problem() {
+            Some(problem) => ToolPhase::Failed(problem),
+            None => ToolPhase::Installed,
+        }
     }
 
     pub fn tool_ready(&self) -> bool {
@@ -610,7 +643,13 @@ impl StoresService {
                 return;
             }
         } else {
-            self.state.lock().unwrap().tool = ToolPhase::Installed;
+            let phase = self.tool_phase_now();
+            let ready = phase == ToolPhase::Installed;
+            self.state.lock().unwrap().tool = phase;
+            if !ready {
+                self.changed();
+                return;
+            }
         }
         self.refresh_owned(true).await;
     }
@@ -636,11 +675,7 @@ impl StoresService {
             let login = state.login;
             *state = GogState {
                 login,
-                tool: if self.api.tool_installed() {
-                    ToolPhase::Installed
-                } else {
-                    ToolPhase::NotInstalled
-                },
+                tool: self.tool_phase_now(),
                 ..GogState::default()
             };
         }
@@ -665,6 +700,12 @@ impl StoresService {
             }
             state.tool = ToolPhase::Installing { done: 0, total: 0 };
         }
+        if let Some(problem) = self.api.tool_problem() {
+            self.state.lock().unwrap().tool = ToolPhase::Failed(problem.clone());
+            self.notify(notice::tool_failed(&problem));
+            self.changed();
+            return;
+        }
         self.notify(notice::tool_installing(tool_size_bytes()));
         self.changed();
         let this = self.clone();
@@ -679,6 +720,14 @@ impl StoresService {
         let result = self.api.install_tool(progress).await;
         match result {
             Ok(()) => {
+                let phase = self.tool_phase_now();
+                if let ToolPhase::Failed(problem) = &phase {
+                    let problem = problem.clone();
+                    self.state.lock().unwrap().tool = phase;
+                    self.notify(notice::tool_failed(&problem));
+                    self.changed();
+                    return;
+                }
                 self.state.lock().unwrap().tool = ToolPhase::Installed;
                 self.notify(notice::tool_installed());
                 self.changed();
@@ -727,6 +776,8 @@ impl StoresService {
                     .count();
                 let count = products.len();
                 let at = now();
+                self.owned_fetched
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
                 write_owned_cache(&self.data_dir, &products, at);
                 {
                     let mut state = self.state.lock().unwrap();
@@ -751,6 +802,16 @@ impl StoresService {
             }
         }
         self.changed();
+    }
+
+    /// Loads the owned list through GOG once this run (GogService keeps
+    /// the products the install jobs read their details from; the disk
+    /// cache only feeds the Library). Quiet: no card.
+    pub async fn ensure_owned_fetched(self: &Arc<Self>) {
+        if self.owned_fetched.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        self.refresh_owned(false).await;
     }
 
     /// The cached product for `id`.
@@ -1756,6 +1817,7 @@ mod tests {
         tool_result: Mutex<Option<Result<(), String>>>,
         sync: Mutex<Option<CloudState>>,
         disconnects: Mutex<u32>,
+        problem: Mutex<Option<String>>,
     }
 
     fn err_of(text: &str) -> StoreError {
@@ -1801,6 +1863,9 @@ mod tests {
         }
         fn tool_installed(&self) -> bool {
             *self.tool.lock().unwrap()
+        }
+        fn tool_problem(&self) -> Option<String> {
+            self.problem.lock().unwrap().clone()
         }
         fn install_tool<'a>(
             &'a self,
@@ -2106,6 +2171,21 @@ mod tests {
         assert!(notice
             .message
             .starts_with("Couldn\u{2019}t install gogdl: "));
+    }
+
+    #[test]
+    fn a_python_problem_fails_the_tool_with_its_words() {
+        let h = harness();
+        *h.fake.problem.lock().unwrap() =
+            Some("gogdl needs Python 3.10 or newer, and python3 was not found.".into());
+        rt().block_on(h.service.install_tool());
+        let status = h.service.status();
+        assert_eq!(status.tool.state, ToolState::Failed);
+        assert!(status.tool.error.contains("Python 3.10"));
+        *h.fake.tool.lock().unwrap() = true;
+        h.service.load();
+        assert_eq!(h.service.status().tool.state, ToolState::Failed);
+        assert!(h.service.ensure_can_install().is_err());
     }
 
     #[test]

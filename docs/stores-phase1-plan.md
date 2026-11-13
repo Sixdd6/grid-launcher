@@ -531,9 +531,22 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
   hosts at the mock GOG (every other group gets the dead loopback address);
   `GRID_LAUNCHER_E2E_TOOL_GOGDL` is `e2e/fake-tools/gogdl.mjs`, which package A's
   `installed_path` returns and which must be run **directly** (a node script with a
-  shebang), not as `python3 <file>`. The mock serves the tool asset at
-  `/gogdl/good/gogdl_linux_x86_64` and `/gogdl/bad/…` with their SHA-256 at
-  `/__e2e__/gogdl-asset.json`, for an e2e asset override if package A adds one.
+  shebang), not as `python3 <file>`; under e2e `install_tool` returns it without a
+  download, so the SHA-256 refusal is covered by package A's unit tests only. The mock
+  still serves `/gogdl/good/…` and `/gogdl/bad/…` (SHA-256s at
+  `/__e2e__/gogdl-asset.json`) for a later asset override.
+- The tool's Python problem (`tools::python_problem`, through `tool_command` once
+  installed) shows as `ToolStatus.state: failed` with its words in `error`.
+- Installs, install options and DLC installs first make sure `GogService::owned()` has
+  answered this run (its cache gives the rows their product details); the disk cache only
+  feeds the Library.
+- The mock serves package A's paths: `auth`, `on_login_success`, `userData.json`,
+  `user/data/games`, `users/{uid}/releases`, `products?ids=`, `products/{id}`,
+  `platforms/gog/external_releases/{id}`, `products/{id}/os/{os}/builds`,
+  `components/galaxy_client/clients/{clientId}`, `v1/{uid}/{clientId}`. The fake gogdl's
+  `update --path <dir>` writes the game into `<dir>` (Linux: `start.sh`, `gameinfo`,
+  `<dir>/.gogdl-linux-manifest`; Windows: `goggame-<id>.info`, `game.exe`,
+  `manifests/<id>`), and `auth --client-id … --client-secret …` answers game credentials.
 - The mock login page posts to `/auth/login`, which redirects to
   `<base>/on_login_success?origin=client&code=FAKE-E2E-GOG-CODE` (user `denied`: no
   code; user `refused`: a code the fake gogdl refuses). The fake gogdl's `auth --code`

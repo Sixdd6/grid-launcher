@@ -592,6 +592,7 @@ pub async fn store_install_options(
     let id = gog_id(&key)?;
     let stores = state.stores.clone();
     stores.ensure_can_install()?;
+    stores.ensure_owned_fetched().await;
     let options = stores
         .api()
         .install_options(&id)
@@ -628,6 +629,7 @@ pub async fn store_install(
     let stores = state.stores.clone();
     stores.ensure_can_install()?;
     let platform = parse_platform(&request.platform)?;
+    stores.ensure_owned_fetched().await;
     let title = stores
         .product(&id)
         .map(|p| p.title)
@@ -718,6 +720,7 @@ pub async fn store_install_dlc(
     ensure_library_idle(&state)?;
     let install = install_service(&state)?;
     state.stores.ensure_can_install()?;
+    state.stores.ensure_owned_fetched().await;
     let row = gog_row(&install, &key).await?;
     let dlc_title = state
         .stores

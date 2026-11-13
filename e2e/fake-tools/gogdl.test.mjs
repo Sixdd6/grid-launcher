@@ -61,7 +61,11 @@ test("download prints progress on stderr and writes the tree and the manifest", 
   const info = JSON.parse(readFileSync(path.join(game, "goggame-1453375253.info"), "utf8"));
   assert.equal(info.playTasks[0].path, "start.sh");
   assert.ok(existsSync(path.join(game, "goggame-1453375254.info")));
-  assert.ok(existsSync(path.join(dir, "cfg", "heroic_gogdl", "manifests", "1453375253")));
+  assert.ok(existsSync(path.join(game, ".gogdl-linux-manifest")));
+  const win = run(["--auth-config-path", "/x", "update", "1580232252", "--platform", "windows", "--path", path.join(dir, "Grey"), "--skip-dlcs"], { GOGDL_CONFIG_PATH: path.join(dir, "cfg") });
+  assert.equal(win.status, 0, win.stderr);
+  assert.ok(existsSync(path.join(dir, "Grey", "goggame-1580232252.info")));
+  assert.ok(existsSync(path.join(dir, "cfg", "heroic_gogdl", "manifests", "1580232252")));
 });
 
 test("a worker failure exits 0 without a manifest", () => {
@@ -71,7 +75,7 @@ test("a worker failure exits 0 without a manifest", () => {
     FAKE_GOGDL_WORKER_FAIL: "1",
   });
   assert.equal(out.status, 0);
-  assert.ok(!existsSync(path.join(dir, "cfg", "heroic_gogdl", "manifests", "1207664643")));
+  assert.ok(!existsSync(path.join(dir, "Ashen Tide", ".gogdl-linux-manifest")));
 });
 
 test("save-sync prints a timestamp", () => {

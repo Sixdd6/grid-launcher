@@ -19,6 +19,7 @@
 //   GET  /userData.json                  embed: the signed-in user
 //   GET  /user/data/games                embed: owned ids (DLC too)
 //   GET  /account/getFilteredProducts    embed: the owned games, one page
+//   GET  /products?ids=a,b               api.gog.com, a batch (expand=…)
 //   GET  /products/<id>                  api.gog.com/products/<id>?expand=…
 //   GET  /v2/games/<id>                  api.gog.com/v2/games/<id>
 //   GET  /products/<id>/os/<os>/builds   content-system builds (generation 2)
@@ -111,6 +112,7 @@ function apiProduct(p) {
   return {
     id: Number(p.id),
     title: p.title,
+    game_type: "game",
     slug: p.slug,
     content_system_compatibility: {
       windows: p.platforms.includes("windows"),
@@ -265,6 +267,11 @@ async function handleRequest(req, res, state) {
     if (!g || !g.platforms.includes(m[2] === "osx" ? "mac" : m[2])) return sendJson(res, 200, { total_count: 0, count: 0, items: [] });
     return sendJson(res, 200, builds(g, m[2]));
   }
+  // api.gog.com, a batch: /products?ids=a,b&expand=…
+  if (p === "/products") {
+    const ids = (url.searchParams.get("ids") ?? "").split(",").filter(Boolean);
+    return sendJson(res, 200, ids.map((id) => productById(fx, id)).filter((g) => g && g.id === id).map(apiProduct));
+  }
   // api.gog.com
   m = p.match(/^\/products\/(\d+)$/);
   if (m) {
@@ -291,6 +298,9 @@ async function handleRequest(req, res, state) {
     if (!g) return sendJson(res, 404, {});
     return sendJson(res, 200, {
       title: { "*": g.title },
+      type: "game",
+      dlcs_ids: g.dlcs.map((d) => d.id),
+      supported_operating_systems: g.platforms.map((slug) => ({ slug })),
       game: {
         title: { "*": g.title },
         summary: { "*": g.description },
@@ -314,7 +324,7 @@ async function handleRequest(req, res, state) {
   if (m) {
     return sendJson(res, 200, {
       total_count: fx.products.length,
-      items: fx.products.map((g) => ({ platform_id: "gog", external_id: g.id, date_created: 1700000000 })),
+      items: allIds(fx).map((id) => ({ platform_id: "gog", external_id: id, date_created: 1700000000 })),
     });
   }
   // remote-config
@@ -335,13 +345,14 @@ async function handleRequest(req, res, state) {
     const name = decodeURIComponent(m[3]);
     if (req.method === "PUT") {
       const data = await readBody(req);
-      files.set(name, { data, hash: createHash("md5").update(data).digest("hex"), at: new Date().toISOString() });
+      // GOG's listing time has no zone suffix.
+      files.set(name, { data, hash: createHash("md5").update(data).digest("hex"), at: new Date().toISOString().replace("Z", "") });
       return sendJson(res, 200, {});
     }
     if (req.method === "DELETE") { files.delete(name); return sendJson(res, 200, {}); }
     const f = files.get(name);
     if (!f) return sendJson(res, 404, {});
-    res.writeHead(200, { "content-type": "application/octet-stream", "last-modified": new Date(f.at).toUTCString() });
+    res.writeHead(200, { "content-type": "application/octet-stream", "last-modified": new Date(`${f.at}Z`).toUTCString() });
     res.end(f.data);
     return;
   }

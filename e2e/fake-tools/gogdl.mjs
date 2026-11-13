@@ -9,10 +9,14 @@
 // gog-secrets.spec.ts proves GRID never logs or forwards tool output.
 // The only token is FAKE-STORE-TOKEN-not-real.
 //
-//   gogdl --auth-config-path <file> auth [--code <code>]
+//   gogdl --auth-config-path <file> auth [--code <code> | --client-id <id> --client-secret <s>]
 //   gogdl --auth-config-path <file> info <id> --platform <os> [--lang <l>] [--with-dlcs]
 //   gogdl --auth-config-path <file> download|update|repair <id> --platform <os> --path <dir>
-//         [--lang <l>] [--with-dlcs --dlcs a,b] [--support <dir>] [--max-workers <n>]
+//         [--lang <l>] [--with-dlcs --dlcs a,b | --skip-dlcs] [--support <dir>] [--max-workers <n>]
+//   (GRID installs with `update --path <the game's own folder>`; `download`
+//   appends the folder name. A Linux build gets start.sh, gameinfo and
+//   <dir>/.gogdl-linux-manifest; a Windows build goggame-<id>.info, game.exe
+//   and $GOGDL_CONFIG_PATH/heroic_gogdl/manifests/<id>.)
 //   gogdl --auth-config-path <file> save-sync <path> <id> --os <os> --ts <float> --name <n>
 //         --force-upload|--force-download|--skip-upload|--skip-download
 //
@@ -107,6 +111,11 @@ function cmdAuth({ top, flags }, fx) {
     return 1;
   }
   const record = JSON.parse(readFileSync(file, "utf8"))[CLIENT_ID];
+  if (flags["client-id"] !== undefined) {
+    // A game client's credentials (cloud saves).
+    process.stdout.write(JSON.stringify({ ...record, client_id: flags["client-id"] }) + "\n");
+    return 0;
+  }
   process.stdout.write(JSON.stringify(record) + "\n");
   return 0;
 }
@@ -181,20 +190,26 @@ async function cmdDownload({ command, positional, flags }, fx) {
   if (os === "linux") {
     writeFileSync(path.join(dir, "start.sh"), "#!/bin/sh\nexit 0\n");
     try { chmodSync(path.join(dir, "start.sh"), 0o755); } catch { /* not unix */ }
+    writeFileSync(path.join(dir, "gameinfo"), `${g.title}\n${g.version}\n`);
   } else {
     writeFileSync(path.join(dir, "game.exe"), "MZ fake");
   }
   mkdirSync(path.join(dir, "saves"), { recursive: true });
   const config = process.env.GOGDL_CONFIG_PATH;
-  if (config) {
-    const manifest = path.join(config, "heroic_gogdl", "manifests", g.id);
+  const manifest = os === "linux"
+    ? path.join(dir, ".gogdl-linux-manifest")
+    : config ? path.join(config, "heroic_gogdl", "manifests", g.id) : null;
+  if (manifest) {
     mkdirSync(path.dirname(manifest), { recursive: true });
-    const build = command === "update" && g.update_build_id ? g.update_build_id : g.build_id;
+    // A fresh `update` gets the build a new install gets; the update build
+    // comes from an `update` over an existing install.
+    const build = g.build_id;
     writeFileSync(manifest, JSON.stringify({
+      clientId: g.client_id, clientSecret: "fake-client-secret",
       version: 2, buildId: build, platform: os, install_directory: dir,
       languages: [lang ?? "en-US"], dlcs: dlcIds.map((id) => ({ id })), HGLInstallLanguage: lang ?? "en-US",
-      HGLPlatform: os, HGLdlcs: dlcIds.map((id) => ({ id })), clientId: g.client_id,
-      versionName: command === "update" && g.update_version ? g.update_version : g.version,
+      HGLPlatform: os, HGLdlcs: dlcIds.map((id) => ({ id })),
+      versionName: g.version,
     }));
   }
   return 0;
