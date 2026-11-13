@@ -583,16 +583,12 @@ fn installed_info(dest: &Path, insp: &Inspection) -> Option<GogGameInfo> {
     })
 }
 
-/// Where a fresh Windows install's Wine prefix goes: beside the install
-/// folder, `<parent>/.prefixes/<folder name>` (so the game folder holds
-/// only the game, and a backup copies no prefix).
+/// Where a fresh Windows install's Wine prefix goes: `<install dir>/prefix`,
+/// like every GOG game's (gogdl installs, drive restores), so uninstalling
+/// the game removes it and a backup leaves it out
+/// ([`crate::backup::store::STORE_PREFIX_DIR`]).
 pub fn default_prefix(dest: &Path) -> PathBuf {
-    let parent = dest.parent().unwrap_or(Path::new(""));
-    let name = dest
-        .file_name()
-        .map(|name| name.to_os_string())
-        .unwrap_or_else(|| "game".into());
-    parent.join(".prefixes").join(name)
+    dest.join(crate::backup::store::STORE_PREFIX_DIR)
 }
 
 /// Whether a Windows installer needs a Wine prefix on this host.

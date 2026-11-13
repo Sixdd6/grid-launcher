@@ -660,6 +660,11 @@ fn a_silent_windows_install_reads_its_identity_after_the_run() {
     assert!(cmd.argv.contains(&"/VERYSILENT".to_string()));
     assert_eq!(dir_arg(&cmd.argv), dest);
     let prefix = offline::default_prefix(&dest);
+    assert_eq!(
+        prefix,
+        dest.join("prefix"),
+        "every GOG prefix is <install dir>/prefix"
+    );
     assert!(cmd
         .env
         .contains(&("WINEPREFIX".into(), prefix.to_string_lossy().into_owned())));

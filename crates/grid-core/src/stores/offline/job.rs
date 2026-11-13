@@ -201,6 +201,11 @@ impl OfflineRunner {
             )));
         }
         let base_dir = PathBuf::from(base.extracted_dir.trim());
+        // The run's own prefix stays out of the base game's folder (the base
+        // keeps its prefix).
+        if let Some(prefix) = prefix.filter(|prefix| prefix.starts_with(dest)) {
+            let _ = fs::remove_dir_all(prefix);
+        }
         crate::library::specials::copy_tree_merge(dest, &base_dir)?;
         remove_install(dest, prefix);
         self.record_dlc(base, info, &base_dir)
@@ -259,7 +264,7 @@ impl OfflineRunner {
         if meta.platform == GogPlatform::Windows {
             row.native_compat_tool = self.opts.compat_tool.trim().to_string();
         }
-        row.filesize_bytes = i64::try_from(dir_bytes(dest)).unwrap_or(i64::MAX);
+        row.filesize_bytes = i64::try_from(game_bytes(dest)).unwrap_or(i64::MAX);
         let row = match old {
             Some(old) => carry_over(old, row, meta.exe_user_pinned),
             None => row,
@@ -285,7 +290,7 @@ impl OfflineRunner {
             None => meta.dlc.push(entry),
         }
         base.store_meta = meta.to_json();
-        base.filesize_bytes = i64::try_from(dir_bytes(base_dir)).unwrap_or(i64::MAX);
+        base.filesize_bytes = i64::try_from(game_bytes(base_dir)).unwrap_or(i64::MAX);
         self.ctx.registry.upsert_store(&base)?;
         Ok(String::new())
     }
@@ -355,6 +360,11 @@ pub(crate) fn remove_install(dest: &Path, prefix: Option<&Path>) {
     if let Some(prefix) = prefix {
         let _ = fs::remove_dir_all(prefix);
     }
+}
+
+/// The game's bytes: the files under `dir` without its Wine prefix.
+pub(crate) fn game_bytes(dir: &Path) -> u64 {
+    dir_bytes(dir).saturating_sub(dir_bytes(&dir.join(crate::backup::store::STORE_PREFIX_DIR)))
 }
 
 /// Total bytes of the files under `dir`.
