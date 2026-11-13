@@ -1,7 +1,7 @@
 // Entering and leaving TV mode on the same view (checklist items 521, 523).
 // Pure: which TV tab a desktop view opens, and which desktop view a TV tab
 // goes back to. The four views and the four tabs are the same places.
-import type { SettingsPage } from './settings/pages';
+import { SETTINGS_PAGES, type SettingsPage } from './settings/pages';
 import type { View } from './shell';
 import type { TvTab } from './tv/input/press';
 
@@ -14,7 +14,8 @@ export const TV_PANES = [
   'connection',
   'library',
   'retroachievements',
-  // Settings › Stores (GameStores / TVStores); TV mode's pane is package F's.
+  // Game stores (TVStores README § Settings › Stores: between
+  // RetroAchievements and Systems).
   'stores',
   'systems',
   'tv',
@@ -45,8 +46,11 @@ export function tvPaneFor(page: SettingsPage): TvPane {
 }
 
 /** The desktop view a TV tab leaves to, and the Settings page when it is
- *  Settings (TV mode's own pane has no desktop page: Appearance, the first). */
+ *  Settings (TV mode's own pane has no desktop page: Appearance, the first;
+ *  Stores goes to the desktop's Stores page once it has one). */
 export function desktopViewFor(tab: TvTab, pane: TvPane): { view: View; settingsPage: SettingsPage | null } {
   if (tab !== 'settings') return { view: tab, settingsPage: null };
-  return { view: 'settings', settingsPage: pane === 'tv' ? 'appearance' : pane };
+  // A pane with no desktop page of its own yet opens Appearance, the first.
+  const page = (SETTINGS_PAGES as readonly string[]).includes(pane) ? (pane as SettingsPage) : 'appearance';
+  return { view: 'settings', settingsPage: page };
 }

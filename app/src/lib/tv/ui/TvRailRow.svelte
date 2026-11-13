@@ -13,6 +13,8 @@
     k,
     selected = false,
     count = null,
+    countSpin = false,
+    countWarn = false,
     sub = false,
     fold = null,
     holdsSel = false,
@@ -25,7 +27,11 @@
   }: {
     k: string;
     selected?: boolean;
-    count?: number | null;
+    /** A number, or `!` for a store row that needs attention (game stores). */
+    count?: number | string | null;
+    /** A spinner in place of the count while a store's owned list loads. */
+    countSpin?: boolean;
+    countWarn?: boolean;
     sub?: boolean;
     /** A folder header: whether it is open. */
     fold?: boolean | null;
@@ -68,6 +74,6 @@
     aria-current={selected ? 'true' : undefined}
     use:tvf={{ a: railOpen, x: onX, focus: () => onSelect?.() }}
   >
-    {@render children()}{#if count !== null}<span class="n">{count}</span>{/if}
+    {@render children()}{#if countSpin}<span class="n"><span class="sspin" aria-label="Loading"></span></span>{:else if count !== null}<span class="n" class:warn={countWarn}>{count}</span>{/if}
   </button>
 {/if}

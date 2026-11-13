@@ -11,6 +11,9 @@ import { DEFAULT_DRIVE_SORT, DEFAULT_SORT } from './libraryHeader';
 import type { DriveSort } from '../../../library/drive';
 import { DEFAULT_FOLDS, railRowKey, type FolderId, type Folds } from './libraryRail';
 import { rememberFocus, showTab } from '../../nav.svelte';
+import type { StoreSource } from '../../../api';
+import type { StorePart } from '../../../gamestores/rail';
+import { clearStoreView, selectStoreView, tvStores } from '../../stores/storeState.svelte';
 
 export const lib = $state<{ query: string; sort: LibrarySort; driveSort: DriveSort; folds: Folds }>({
   query: '',
@@ -22,6 +25,12 @@ export const lib = $state<{ query: string; sort: LibrarySort; driveSort: DriveSo
 
 /** Moving through the rail selects a row at once; a new row clears the search (item 178). */
 export function selectLibRail(key: RailKey): void {
+  // Leaving a store view (game stores) for one of the desktop's rows.
+  if (tvStores.view !== null) {
+    selEnd();
+    clearStoreView();
+    lib.query = '';
+  }
   if (librarySelection.key === key) return;
   // Another rail row leaves select mode, as the desktop's does.
   selEnd();
@@ -52,4 +61,15 @@ export function selectDriveRow(key: string): void {
 export function showDriveInLibrary(key: string): void {
   selectDriveRow(key);
   void showTab('library', { again: true });
+}
+
+/** Moving onto a store's Installed or Available row (TVStores README §
+ *  Library): that list shows at once; a new row clears the search and
+ *  leaves select mode. */
+export function selectLibStore(source: StoreSource, part: StorePart): void {
+  const v = tvStores.view;
+  if (v && v.source === source && v.part === part) return;
+  selEnd();
+  selectStoreView(source, part);
+  lib.query = '';
 }
