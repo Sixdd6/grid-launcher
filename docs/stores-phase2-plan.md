@@ -1255,3 +1255,80 @@ Failures found and fixed at integration:
 
 Results: `scripts/ctr.sh gate` PASS; `scripts/ctr.sh wincheck` PASS; full
 `scripts/ctr.sh e2e`: all 46 stage groups, `== e2e: all stages passed`, with no retries.
+
+## Prerequisites outcome (2026-11-14)
+
+User decision (2026-11-14, `docs/external-stores-plan.md` "User decisions"): an Epic
+game's prerequisite runs silently right after its install, through the store-neutral
+`stores::redist` runner and `stores::setup_steps` job that Amazon's `PostInstall` steps
+use (`docs/stores-phase3-plan.md` "PostInstall steps outcome", "Setup steps job
+outcome"). Research: `docs/research/store-redistributables.md` §2.
+
+- **Source.** legendary's `prereq_info` (`{ids, name, path, args[, installed]}` or
+  `null`, at most one per game): `EpicInstalled.prereq_info` from `list-installed`, else
+  `info`'s `manifest.prerequisites` (`EpicInfo.prerequisites`); the setup-steps job
+  reads legendary's `installed.json` directly (`list::installed_prereq`), with no
+  legendary run and no login. An odd shape reads as none and never breaks
+  `list-installed`.
+- **What runs** (`install::prereq_steps`): nothing for `null`, a blank path,
+  legendary's `installed: true`, a game the owned list marks third-party, or a path that
+  names another launcher's installer (`uplay`, `ubisoft`, `eadesktop`, `eaapp`,
+  `originsetup`, `originthinsetup`). Else one `RedistStep`: id = Epic's ids joined with
+  `,`, command = the path (relative to the install folder, either separator), args =
+  `args` split shell-style (`launch::template::split_template`, as Heroic's
+  `shlex.split`), started in the program's own folder (as legendary's `Popen(cwd=…)`).
+- **When.** Last step of `finalize`, after the row is written: a first install always;
+  an update or a repair only when `redist::steps_due` says it differs from
+  `EpicMeta.prereq_ran` (recorded only when it worked; cleared when the game lists none);
+  never after a DLC job. A failure, a declined prompt or a cancel is a warning; the game
+  stays installed. Retry: `EpicService::setup_steps_job` (refuses "<title> has no setup
+  steps to run." when none is due) behind `StoreBackend::setup_steps_job`.
+- **Detection.** `redist::Redist::UePrereqs { x64 }`: `UE4PrereqSetup_x64.exe` /
+  `UEPrereqSetup_x64.exe` (and `_x86`), there only when all its parts are (VC++
+  2015–2022 x86, x64 for the 64-bit bundle, and DirectX June 2010). VC++, DirectX and
+  OpenAL installers named by file go by the existing table; anything else always runs.
+- **Not done, on purpose.** legendary's `installed` flag is never written (legendary
+  sets it only from its own Windows prompt; GRID's prefix marker and
+  `EpicMeta.prereq_ran` are its record). Heroic's `reg add HKCR\com.epicgames.launcher
+  /f` is not run: the research lists it as optional and as a launch fix for a few games
+  (Fallout: New Vegas, Dishonored DotO), not part of the prerequisite.
+
+### Contract deviations — prerequisites
+
+- `stores::redist`: `RedistStep.in_exe_folder` (serialized only when true, so Amazon's
+  saved lists are unchanged) and `step_dir`; `runner_script` takes `ScriptStep`
+  `(program, args, folder)` so the Windows runner starts each step in its own folder;
+  `Redist::UePrereqs` and `Redist::parts`. Amazon's `FuelStep` literals (`amazon/meta.rs`,
+  `amazon/row.rs`) and the `setup_steps` test name the new field.
+- `epic/meta.rs` (Step 0 frozen): `EpicMeta.prereq_ran: Vec<RedistStep>` (defaults to
+  empty, so older rows read back). `epic/mod.rs`: `EpicInstalled.prereq_info`,
+  `EpicPrereq`, `EpicService::with_redist_runner` / `setup_steps_job`. `epic/row.rs`: one
+  test literal names `prereq_info`.
+- `stores_service/mod.rs`: the "stores without setup steps" test no longer lists Epic.
+- e2e: the signed-in Epic seed sets `default_compat_tool = "wine"` (the stand-in), and
+  its stand-ins also log `WINEPREFIX`, `PROTONPATH` and `CWD=` to `epic-game-env.log`
+  and exit 0 at once for `*PrereqSetup*`. The fake legendary gives Glimmer Deep a
+  prerequisite (`fixtures-epic/owned.json` `prereq`).
+
+Tests: `stores::redist` (Unreal's bundle by file name and by its parts in a prefix; a
+step that starts in its own folder, on Linux and in the Windows runner script; the flag
+serialized only when set), `epic::list` (`info`'s prerequisites, `installed.json`'s
+`prereq_info`, null and odd shapes), `epic::mod` (`list-installed` with a prerequisite),
+`epic::meta` (round trip, older rows), `epic::install` (one step with split arguments in
+its own folder; nothing for null, blank, `installed`, third-party or a launcher's
+installer; the changed-prerequisite rule); integration `epic_prereq` with a fake
+legendary and a fake runner (install runs it last under umu in `<game>/prefix` from
+`Engine/Extras/Redist/en-us`; an unchanged update runs nothing, a changed one runs the
+new one; a game that drops it forgets it; null or `installed` runs nothing and Retry is
+refused; a failed step is a warning, Retry runs only it with no legendary call and
+records it; a third-party title is refused); app test for `EpicStore::setup_steps_job`;
+`node --test e2e/fake-tools/legendary.test.mjs` 12/12. e2e `epic-library`: Glimmer
+Deep's install ran `UE4PrereqSetup_x64.exe /quiet /norestart` under the `wine` stand-in
+with `WINEPREFIX=<Glimmer Deep>/prefix` from its own folder, and the row has no
+setup-step warning; Rustbelt Rally (`prereq_info: null`) runs nothing.
+
+Results: `scripts/ctr.sh gate` PASS; `scripts/ctr.sh wincheck` PASS;
+`scripts/ctr.sh e2e epic epic-library epic-cloud tv-epic`: epic, epic-cloud and tv-epic
+passed; epic-library's new Rustbelt step clicked Install before the sizes loaded (fixed
+in the spec), then `E2E_SKIP_BUILD=1 scripts/ctr.sh e2e epic-library`: all stages
+passed.

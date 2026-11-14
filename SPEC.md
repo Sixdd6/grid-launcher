@@ -1346,7 +1346,17 @@ Store screens (2026-11-13, matching the approved design):
   reached, GRID retries such a game once offline. Epic cloud saves always sync to the save
   folder GRID resolves from the game's cloud folder; before a download replaces the local
   save, a copy goes to `<data_dir>/stores/save-backups/epic/<game>/` (the newest five
-  kept). Epic games are never backed up to a drive.
+  kept). Epic games are never backed up to a drive. A game's prerequisite (the one
+  installer legendary lists for it, such as Unreal Engine's prerequisites) runs silently
+  as the last step of its install, and after an update or a Verify and repair only when
+  it has changed since it last worked (never after a DLC install). It runs from its own
+  folder with the arguments Epic gives it, exactly like Amazon's `PostInstall` steps: in
+  the game's prefix under its compat tool on Linux, in one elevated run (one permission
+  prompt) on Windows, skipped when what it installs is already there, with "Running the
+  installer silently" on the row, a failure or a declined prompt as a warning, and Retry
+  running only it (the "Setup" row; no legendary call, no login). Nothing runs for a game
+  that lists none, one legendary already marked installed, or a title another launcher
+  manages. GRID never changes legendary's own record of it.
 - **Amazon Games** (Phase 3, 2026-11-14). nile makes the sign-in URL, so on Connect GRID
   installs nile first ("Installing nile (11 MB) for Amazon Games…"), then opens the login
   window. The sign-in code goes to nile on its command line for the one short `register`
@@ -1370,7 +1380,7 @@ Store screens (2026-11-13, matching the approved design):
   Downloads row with no download, no login and no nile call, reading "Running the
   installer silently · N%" and then "Setup steps done" (or "Setup steps didn't all run ·
   <warnings>", with Retry again). It is refused while the game runs or has another job.
-  GOG and Epic will use the same job. A cancel stops the steps and leaves the game
+  Epic uses the same job for its prerequisite; GOG will too. A cancel stops the steps and leaves the game
   installed. A
   "Sign in again" that is cancelled leaves the store expired (nile's old login is deleted
   before a new sign-in). On a Linux system older than glibc 2.35, nile can't run, and

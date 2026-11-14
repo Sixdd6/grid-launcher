@@ -114,6 +114,7 @@ mod tests {
             is_dlc: false,
             can_run_offline: true,
             save_path: String::new(),
+            prereq_info: None,
         }
     }
 

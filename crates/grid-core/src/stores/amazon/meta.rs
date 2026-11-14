@@ -56,6 +56,7 @@ mod tests {
                 command: "oalinst.exe".into(),
                 args: vec!["/silent".into()],
                 valid_returns: vec![],
+                in_exe_folder: false,
             }],
         };
         assert_eq!(AmazonMeta::from_json(&meta.to_json()), meta);

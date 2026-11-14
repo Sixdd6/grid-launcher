@@ -18,6 +18,7 @@
       "namespace": "glimmer", "build_version": "2.4", "download_size": 45000000, "disk_size": 60000000,
       "cloud_save_folder": "{UserDir}/My Games/GlimmerDeep", "can_run_offline": true,
       "executable": "Game/Glimmer.exe",
+      "prereq": { "ids": ["UE4PrereqSetup"], "name": "UE4 Prerequisites (x64)", "path": "Engine/Extras/Redist/en-us/UE4PrereqSetup_x64.exe", "args": "/quiet /norestart" },
       "dlcs": [
         { "app_name": "GlimmerAbyss", "title": "Glimmer Deep — The Abyssal Trench", "download_size": 3200000 }
       ]

@@ -42,6 +42,11 @@
 //   .fake-download-fail     an install/update/repair dies with a
 //                           requests.exceptions.ConnectionError traceback
 //   .fake-launch-network    an online `launch` dies the same way
+// A fixture game with a `prereq` ({ids, name, path, args}) gets it as
+// `prereq_info` in installed.json and as `info`'s `manifest.prerequisites`,
+// and its program (a stub file) in the game folder; like legendary on Linux
+// the fake only names it and runs nothing ("Automatic installation not
+// available on Linux."). Every other game has `null`.
 // Environment: FAKE_LEGENDARY_FIXTURES (owned.json, default
 // e2e/fixtures-epic), FAKE_LEGENDARY_STEPS (progress lines, default 5),
 // FAKE_LEGENDARY_STEP_MS (default 150), FAKE_LEGENDARY_REPAIRED (files a
@@ -371,7 +376,7 @@ function cmdInfo(ctx, { positional }) {
       launch_command: "",
       build_version: (g ?? d.base).build_version,
       build_id: "fake",
-      prerequisites: null,
+      prerequisites: g?.prereq ?? null,
       uninstaller: null,
       install_tags: [""],
       num_files: 2,
@@ -464,7 +469,12 @@ async function cmdInstall(ctx, { command, positional, flags }) {
     mkdirSync(path.dirname(exe), { recursive: true });
     writeFileSync(exe, "MZ fake epic game\n");
     write(path.join(dir, ".egstore", `${app}.manifest`), "fake manifest\n");
-    map[app] = installedEntry(app, g.title, g.build_version, dir, g.disk_size, g.executable, g.can_run_offline);
+    if (g.prereq?.path) {
+      const prereq = path.join(dir, ...g.prereq.path.split(/[\\/]/));
+      mkdirSync(path.dirname(prereq), { recursive: true });
+      writeFileSync(prereq, "MZ fake prerequisite\n");
+    }
+    map[app] = installedEntry(app, g.title, g.build_version, dir, g.disk_size, g.executable, g.can_run_offline, g.prereq ?? null);
     if (existing?.save_path) map[app].save_path = existing.save_path;
     // `-y` without --skip-dlcs installs every owned DLC.
     if (!flags["skip-dlcs"] && !existing) {
@@ -473,10 +483,16 @@ async function cmdInstall(ctx, { command, positional, flags }) {
   }
   ctx.saveInstalled(map);
   log("cli", "INFO", "Finished installation process in 1.00 seconds.");
+  const prereq = map[app].prereq_info;
+  if (prereq && !prereq.installed) {
+    out("This game lists the following prerequisites to be installed:\n");
+    out(`- ${prereq.name}: ${prereq.path} ${prereq.args}\n`);
+    log("cli", "INFO", "Automatic installation not available on Linux.");
+  }
   return 0;
 }
 
-function installedEntry(app, title, version, dir, size, exe, offline) {
+function installedEntry(app, title, version, dir, size, exe, offline, prereq = null) {
   return {
     app_name: app,
     base_urls: [],
@@ -491,7 +507,7 @@ function installedEntry(app, title, version, dir, size, exe, offline) {
     manifest_path: null,
     needs_verification: false,
     platform: "Windows",
-    prereq_info: null,
+    prereq_info: prereq,
     requires_ot: false,
     save_path: null,
     title,
@@ -525,6 +541,11 @@ function cmdUninstall(ctx, { positional, flags }) {
     rmSync(exe, { force: true });
     removeEmptyDirs(path.dirname(exe), e.install_path);
     rmSync(path.join(e.install_path, ".egstore"), { recursive: true, force: true });
+    if (e.prereq_info?.path) {
+      const prereq = path.join(e.install_path, ...e.prereq_info.path.split(/[\\/]/));
+      rmSync(prereq, { force: true });
+      removeEmptyDirs(path.dirname(prereq), e.install_path);
+    }
     try { rmdirSync(e.install_path); } catch { /* leftovers (the prefix) stay for GRID */ }
   };
   if (!entry.is_dlc) {

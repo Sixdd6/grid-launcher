@@ -13,27 +13,42 @@
 //! Progress comes from [`crate::stores::progress::parse_legendary_line`]
 //! as a fraction of [`LEGENDARY_PROGRESS_TOTAL`], turned into bytes with
 //! `info`'s download sizes when GRID has them ([`overall_progress`]).
+//!
+//! The game's prerequisite (legendary's `prereq_info`: at most one, a
+//! program in the game folder) is the job's last step, through
+//! `stores::redist` (user decisions 2026-11-14, `docs/external-stores-plan.md`):
+//! after a first install always, after an update or a repair only when it
+//! differs from [`EpicMeta::prereq_ran`], the one that last worked; never
+//! after a DLC job. [`prereq_steps`] says what runs. legendary's own
+//! `installed` mark is read, never written. A failed step is a warning on
+//! the Downloads row, never a failed install; Retry runs only the
+//! prerequisite ([`setup_steps_job`]).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
-use super::list::{info_args, installed_args, parse_info, parse_installed, EpicInfo};
+use super::list::{
+    info_args, installed_args, installed_prereq, parse_info, parse_installed, EpicInfo,
+};
 use super::meta::{EpicDlcMeta, EpicMeta};
 use super::row::epic_row;
 use super::{
     EpicGame, EpicGameDlc, EpicInstallOptions, EpicInstallRequest, EpicInstalled, EpicJobCtx,
-    EpicService,
+    EpicPrereq, EpicService,
 };
+use crate::launch::template::split_template;
 use crate::library::queue::{JobPhase, StoreJob, StoreJobRunner, StoreOp, StoreProgressSink};
 use crate::library::registry::{InstalledGame, Registry};
 use crate::library::LibraryError;
 use crate::stores::gog::install::{game_dir, removal_refusal};
 use crate::stores::gog::library_error;
 use crate::stores::progress::{ProgressMerger, LEGENDARY_PROGRESS_TOTAL};
+use crate::stores::redist::{run_steps, steps_due, RedistStep, RedistTarget};
 use crate::stores::runner::{run_tool, ToolExit, ToolSignal};
-use crate::stores::{StoreError, StoreKind};
+use crate::stores::setup_steps::{self, SetupStepsStore};
+use crate::stores::{GameKey, StoreError, StoreKind};
 
 /// The Wine prefix folder inside an Epic game's folder (as GOG and RomM
 /// native games use).
@@ -230,6 +245,56 @@ pub fn repair_detail(repaired: u32) -> String {
     }
 }
 
+// --- prerequisites ----------------------------------------------------------
+
+/// Words in a prerequisite's path that mark another company's launcher
+/// (legendary flags a `uplay`/`ubisoft` path as Ubisoft-required). GRID
+/// runs no launcher's installer.
+const LAUNCHER_PREREQ: [&str; 6] = [
+    "uplay",
+    "ubisoft",
+    "eadesktop",
+    "eaapp",
+    "originsetup",
+    "originthinsetup",
+];
+
+/// Whether a prerequisite's path is another company's launcher.
+pub fn is_launcher_prereq(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    LAUNCHER_PREREQ.iter().any(|word| lower.contains(word))
+}
+
+/// The setup steps for a game's prerequisite: none when it has none
+/// (`null`), its path is blank, legendary already marked it `installed`,
+/// or the game starts through another company's launcher (`third_party`,
+/// or a launcher's installer as the prerequisite). Else one step: the
+/// program in the game folder, its arguments split shell-style (as Heroic
+/// splits them), started in its own folder (as legendary starts it), with
+/// Epic's ids.
+pub fn prereq_steps(prereq: Option<&EpicPrereq>, third_party: bool) -> Vec<RedistStep> {
+    let Some(prereq) = prereq else {
+        return Vec::new();
+    };
+    let path = prereq.path.trim();
+    if third_party || prereq.installed || path.is_empty() || is_launcher_prereq(path) {
+        return Vec::new();
+    }
+    vec![RedistStep {
+        id: prereq.ids.join(","),
+        command: path.to_string(),
+        args: split_template(&prereq.args).unwrap_or_default(),
+        valid_returns: Vec::new(),
+        in_exe_folder: true,
+    }]
+}
+
+/// Whether the owned list says `game` starts through another company's
+/// launcher.
+fn third_party(game: Option<&EpicGame>) -> bool {
+    game.is_some_and(|g| g.third_party.is_some())
+}
+
 // --- install options --------------------------------------------------------
 
 /// The install options from the base game's `info` and each DLC's. A DLC
@@ -280,6 +345,8 @@ struct Fetched {
     entry: EpicInstalled,
     installed: Vec<EpicInstalled>,
     info: Option<EpicInfo>,
+    /// The game's prerequisite: `list-installed`'s, else `info`'s.
+    prereq: Option<EpicPrereq>,
     warnings: Vec<String>,
     repaired: u32,
 }
@@ -546,10 +613,16 @@ impl StoreJobRunner for EpicJob {
                 }
             }
         }
+        let prereq = entry.prereq_info.clone().or_else(|| {
+            base_info
+                .as_ref()
+                .and_then(|info| info.prerequisites.clone())
+        });
         *self.fetched.lock().unwrap_or_else(|e| e.into_inner()) = Some(Fetched {
             entry,
             installed,
             info: base_info,
+            prereq,
             warnings,
             repaired,
         });
@@ -575,7 +648,7 @@ impl StoreJobRunner for EpicJob {
             .ok_or_else(|| LibraryError::Extract("The download didn't finish.".to_string()))?;
         let game = self.svc.game(&self.app);
         let old_meta = self.old_meta();
-        let meta = build_meta(
+        let mut meta = build_meta(
             &self.app,
             &fetched.entry,
             &fetched.installed,
@@ -584,18 +657,58 @@ impl StoreJobRunner for EpicJob {
             old_meta.as_ref(),
             &self.new_dlc,
         );
-        let row = build_row(
+        // A DLC job leaves the prerequisite alone.
+        let steps = if self.op == StoreOp::Dlc {
+            Vec::new()
+        } else {
+            prereq_steps(fetched.prereq.as_ref(), third_party(game.as_ref()))
+        };
+        let due = self.op != StoreOp::Dlc
+            && steps_due(self.op == StoreOp::Install, &steps, &meta.prereq_ran);
+        if self.op != StoreOp::Dlc && steps.is_empty() {
+            meta.prereq_ran.clear();
+        }
+        let mut row = build_row(
             &fetched.entry,
             game.as_ref(),
             &meta,
             self.old_row.as_ref(),
             &self.compat_tool,
         )?;
+        // The game is installed before its prerequisite runs: a cancel or
+        // a failed step leaves it so.
         self.ctx.registry.upsert_store(&row)?;
         sink.progress(1, 1);
         // A repair's result is the row's detail line ([`Self::detail`]);
         // the message holds only warnings.
-        Ok(fetched.warnings.join("\n"))
+        let mut warnings = fetched.warnings;
+        if due {
+            let compat = match row.native_compat_tool.trim() {
+                "" => self.ctx.default_compat_tool.trim().to_string(),
+                chosen => chosen.to_string(),
+            };
+            let prefix = Some(row.native_wineprefix.trim())
+                .filter(|p| !p.is_empty())
+                .map(PathBuf::from);
+            let dir = PathBuf::from(fetched.entry.install_path.trim());
+            let outcome = run_steps(
+                &steps,
+                RedistTarget {
+                    game_dir: &dir,
+                    compat: &compat,
+                    prefix: prefix.as_deref(),
+                },
+                &self.svc.redist,
+                sink,
+            );
+            if outcome.all_worked {
+                meta.prereq_ran = steps;
+                row.store_meta = meta.to_json();
+                self.ctx.registry.upsert_store(&row)?;
+            }
+            warnings.extend(outcome.warnings);
+        }
+        Ok(warnings.join("\n"))
     }
 
     fn detail(&self) -> String {
@@ -726,6 +839,71 @@ fn build_row(
         row.genres = old.genres.clone();
     }
     Ok(row)
+}
+
+// --- setup steps job ----------------------------------------------------------
+
+/// Where Epic's setup-steps job reads and records a game's prerequisite:
+/// legendary's `installed.json` (read directly: no legendary run, no
+/// login), and [`EpicMeta::prereq_ran`] on its registry row.
+struct EpicSetupSteps {
+    registry: Arc<Registry>,
+    app: String,
+    tool_dir: PathBuf,
+    third_party: bool,
+}
+
+impl SetupStepsStore for EpicSetupSteps {
+    fn steps(&self) -> Result<Vec<RedistStep>, LibraryError> {
+        Ok(prereq_steps(
+            installed_prereq(&self.tool_dir, &self.app).as_ref(),
+            self.third_party,
+        ))
+    }
+
+    fn record(&self, ran: &[RedistStep]) -> Result<(), LibraryError> {
+        let key = GameKey::store(StoreKind::Epic, self.app.clone());
+        let Some(mut row) = self.registry.find_key(&key)? else {
+            return Ok(());
+        };
+        let mut meta = EpicMeta::from_json(&row.store_meta);
+        meta.prereq_ran = ran.to_vec();
+        row.store_meta = meta.to_json();
+        self.registry.upsert_store(&row)
+    }
+}
+
+/// The job that runs only `row`'s prerequisite (no legendary run, no
+/// login). Refuses a game with none to run.
+pub fn setup_steps_job(
+    svc: &EpicService,
+    row: &InstalledGame,
+    ctx: EpicJobCtx,
+) -> Result<StoreJob, StoreError> {
+    let store = EpicSetupSteps {
+        registry: ctx.registry.clone(),
+        app: row.store_id.trim().to_string(),
+        tool_dir: svc.tool_dir(),
+        third_party: third_party(svc.game(row.store_id.trim()).as_ref()),
+    };
+    if prereq_steps(
+        installed_prereq(&store.tool_dir, &store.app).as_ref(),
+        store.third_party,
+    )
+    .is_empty()
+    {
+        return Err(StoreError::Refused(format!(
+            "{} has no setup steps to run.",
+            row.title.trim()
+        )));
+    }
+    Ok(setup_steps::setup_steps_job(
+        StoreKind::Epic,
+        row,
+        &ctx.default_compat_tool,
+        Arc::new(store),
+        svc.redist.clone(),
+    ))
 }
 
 // --- DLC removal and uninstall ---------------------------------------------
@@ -1077,5 +1255,117 @@ mod tests {
         let fresh = build_meta("S", &installed[0], &installed, None, None, None, &[]);
         assert!(fresh.cloud_saves, "a new install has cloud saves on");
         assert!(fresh.dlc.is_empty());
+    }
+
+    fn ue_prereq() -> EpicPrereq {
+        EpicPrereq {
+            ids: vec!["uepre".into()],
+            name: "UE4 Prerequisites (x64)".into(),
+            path: "Engine/Extras/Redist/en-us/UE4PrereqSetup_x64.exe".into(),
+            args: "/quiet /norestart".into(),
+            installed: false,
+        }
+    }
+
+    #[test]
+    fn a_prerequisite_is_one_step_in_its_own_folder_with_split_arguments() {
+        let steps = prereq_steps(Some(&ue_prereq()), false);
+        assert_eq!(
+            steps,
+            vec![RedistStep {
+                id: "uepre".into(),
+                command: "Engine/Extras/Redist/en-us/UE4PrereqSetup_x64.exe".into(),
+                args: vec!["/quiet".into(), "/norestart".into()],
+                valid_returns: vec![],
+                in_exe_folder: true,
+            }]
+        );
+        // Arguments split shell-style: quotes group, and none is no argument.
+        let quoted = EpicPrereq {
+            args: r#"/S /D="C:\Program Files\X" 'two words'  "#.into(),
+            ..ue_prereq()
+        };
+        assert_eq!(
+            prereq_steps(Some(&quoted), false)[0].args,
+            ["/S", "/D=C:\\Program Files\\X", "two words"]
+        );
+        let bare = EpicPrereq {
+            args: "  ".into(),
+            ids: vec!["a".into(), "b".into()],
+            ..ue_prereq()
+        };
+        let step = &prereq_steps(Some(&bare), false)[0];
+        assert!(step.args.is_empty());
+        assert_eq!(step.id, "a,b");
+        // The detection table knows Unreal's bundle by its file name.
+        assert_eq!(
+            crate::stores::redist::redist_of(step),
+            Some(crate::stores::redist::Redist::UePrereqs { x64: true })
+        );
+    }
+
+    #[test]
+    fn no_prerequisite_runs_when_null_blank_installed_or_third_party() {
+        assert!(prereq_steps(None, false).is_empty(), "null");
+        let blank = EpicPrereq {
+            path: "  ".into(),
+            ..ue_prereq()
+        };
+        assert!(prereq_steps(Some(&blank), false).is_empty(), "no path");
+        let marked = EpicPrereq {
+            installed: true,
+            ..ue_prereq()
+        };
+        assert!(
+            prereq_steps(Some(&marked), false).is_empty(),
+            "legendary marked it installed"
+        );
+        assert!(
+            prereq_steps(Some(&ue_prereq()), true).is_empty(),
+            "a game another launcher manages"
+        );
+        for launcher in [
+            "Support/UplayInstaller.exe",
+            "redist\\Ubisoft Connect\\setup.exe",
+            "EA/EAappInstaller.exe",
+            "__Installer/OriginThinSetup.exe",
+        ] {
+            let prereq = EpicPrereq {
+                path: launcher.into(),
+                ..ue_prereq()
+            };
+            assert!(prereq_steps(Some(&prereq), false).is_empty(), "{launcher}");
+        }
+        assert!(!is_launcher_prereq(
+            "Engine/Extras/Redist/en-us/UE4PrereqSetup_x64.exe"
+        ));
+    }
+
+    #[test]
+    fn an_update_runs_the_prerequisite_again_only_when_it_changed() {
+        let ran = prereq_steps(Some(&ue_prereq()), false);
+        assert!(
+            steps_due(true, &ran, &ran),
+            "a first install always runs it"
+        );
+        assert!(!steps_due(false, &ran, &ran), "an update with the same one");
+        let newer = prereq_steps(
+            Some(&EpicPrereq {
+                path: "Engine/Extras/Redist/en-us/UEPrereqSetup_x64.exe".into(),
+                ..ue_prereq()
+            }),
+            false,
+        );
+        assert!(steps_due(false, &newer, &ran), "a new program");
+        let new_args = prereq_steps(
+            Some(&EpicPrereq {
+                args: "/passive".into(),
+                ..ue_prereq()
+            }),
+            false,
+        );
+        assert!(steps_due(false, &new_args, &ran), "new arguments");
+        assert!(steps_due(false, &ran, &[]), "it never worked before");
+        assert!(!steps_due(false, &[], &ran), "it has none now");
     }
 }

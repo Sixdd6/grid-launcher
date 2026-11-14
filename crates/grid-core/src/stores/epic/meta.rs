@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::stores::redist::RedistStep;
+
 /// What GRID keeps about one installed Epic game.
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 #[serde(default)]
@@ -34,6 +36,10 @@ pub struct EpicMeta {
     pub can_run_offline: bool,
     /// The user picked the executable in Game Settings; an update keeps it.
     pub exe_user_pinned: bool,
+    /// The game's prerequisite as it last ran with every step working
+    /// (`install::prereq_steps`; empty for none, or before it worked). An
+    /// update or a repair runs it again only when it differs.
+    pub prereq_ran: Vec<RedistStep>,
 }
 
 /// One installed DLC.
@@ -77,6 +83,13 @@ mod tests {
             last_sync: 1_700_000_000,
             can_run_offline: true,
             exe_user_pinned: true,
+            prereq_ran: vec![RedistStep {
+                id: "p1".into(),
+                command: "Engine/Extras/Redist/en-us/UE4PrereqSetup_x64.exe".into(),
+                args: vec!["/quiet".into(), "/norestart".into()],
+                valid_returns: vec![],
+                in_exe_folder: true,
+            }],
         };
         let json = meta.to_json();
         assert!(json.contains(r#""app_name":"Starlight""#), "{json}");
@@ -89,6 +102,7 @@ mod tests {
         assert_eq!(meta.version, "2");
         assert!(!meta.cloud_saves);
         assert!(meta.dlc.is_empty());
+        assert!(meta.prereq_ran.is_empty(), "a row from before");
         assert_eq!(EpicMeta::from_json(""), EpicMeta::default());
         assert_eq!(EpicMeta::from_json("nope"), EpicMeta::default());
     }

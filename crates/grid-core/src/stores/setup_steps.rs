@@ -218,6 +218,7 @@ mod tests {
             command: command.into(),
             args: vec!["/silent".into()],
             valid_returns: vec![],
+            in_exe_folder: false,
         }
     }
 

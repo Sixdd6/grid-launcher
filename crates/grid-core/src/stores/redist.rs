@@ -9,7 +9,9 @@
 //!
 //! Each step's command is resolved inside the game folder ([`resolve_step`]:
 //! either separator, never out of the folder) and runs with its arguments
-//! as given, in the game folder. A `.msi` runs through `msiexec /i`.
+//! as given, in the game folder (or, for a step marked
+//! [`RedistStep::in_exe_folder`], its program's own folder). A `.msi` runs
+//! through `msiexec /i`.
 //!
 //! - **Linux and macOS:** each step runs under the game's compat tool in the
 //!   game's own prefix: the command a launch of the game would use
@@ -28,7 +30,8 @@
 //! Before anything runs, a step whose redistributable is already there is
 //! skipped, so nobody sees a prompt or waits for nothing ([`satisfied`]):
 //! [`redist_of`] maps a store id or a file name to a known redistributable
-//! (OpenAL, DirectX June 2010, Visual C++ 2010–2022, .NET 4.8), and
+//! (OpenAL, DirectX June 2010, Visual C++ 2010–2022, .NET 4.8, and
+//! Unreal Engine's prerequisites bundle by its parts), and
 //! [`already_installed`] checks it: on Windows its registry value
 //! (`VisualStudio\<ver>\VC\Runtimes`, .NET's `Release`) or its system
 //! files; in a prefix its files under `drive_c/windows/system32|syswow64`,
@@ -112,6 +115,23 @@ pub struct RedistStep {
     /// The exit codes that mean it worked; empty for
     /// [`DEFAULT_VALID_RETURNS`].
     pub valid_returns: Vec<i64>,
+    /// Starts in its program's own folder instead of the game folder
+    /// (Epic's prerequisite, as legendary runs it).
+    #[serde(skip_serializing_if = "is_false")]
+    pub in_exe_folder: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// The folder `step` (program `exe`) starts in: the game folder, or with
+/// [`RedistStep::in_exe_folder`] its program's own folder.
+pub fn step_dir(step: &RedistStep, exe: &Path, game_dir: &Path) -> PathBuf {
+    match exe.parent() {
+        Some(dir) if step.in_exe_folder && !dir.as_os_str().is_empty() => dir.to_path_buf(),
+        _ => game_dir.to_path_buf(),
+    }
 }
 
 // --- what is already installed ---------------------------------------------------
@@ -131,6 +151,13 @@ pub enum Redist {
     },
     /// .NET Framework 4.8.
     DotNet48,
+    /// Unreal Engine's prerequisites bundle (`UE4PrereqSetup_x64.exe`,
+    /// `UEPrereqSetup_x64.exe`): Visual C++ 2015–2022 (both builds for the
+    /// 64-bit bundle) and the DirectX June 2010 runtime. There when all
+    /// its parts are ([`Redist::parts`]).
+    UePrereqs {
+        x64: bool,
+    },
 }
 
 impl Redist {
@@ -143,6 +170,31 @@ impl Redist {
                 format!("vcredist-{year}-{}", if x64 { "x64" } else { "x86" })
             }
             Redist::DotNet48 => "dotnet48".to_string(),
+            Redist::UePrereqs { x64 } => {
+                format!("ue-prereqs-{}", if x64 { "x64" } else { "x86" })
+            }
+        }
+    }
+
+    /// What a bundle installs (each checked on its own), `[]` for a single
+    /// redistributable.
+    pub fn parts(self) -> Vec<Redist> {
+        match self {
+            Redist::UePrereqs { x64 } => {
+                let mut parts = vec![Redist::VcRedist {
+                    year: 2015,
+                    x64: false,
+                }];
+                if x64 {
+                    parts.push(Redist::VcRedist {
+                        year: 2015,
+                        x64: true,
+                    });
+                }
+                parts.push(Redist::DirectXJun2010);
+                parts
+            }
+            _ => Vec::new(),
         }
     }
 }
@@ -158,6 +210,7 @@ impl Redist {
 /// | `msvc2010[_x64]` … `msvc2013[_x64]` | `vcredist_x86/x64.exe` with that year in its path | VC++ of that year |
 /// | `msvc2015` … `msvc2022[_x64]` | `vc_redist.x86/x64.exe`, `vcredist_x86/x64.exe` | VC++ 2015–2022 |
 /// | `dotnet48`, `dotnet4` | `ndp48-*.exe` | .NET Framework 4.8 |
+/// | | `ue4prereqsetup[_x64].exe`, `ueprereqsetup[_x64].exe` | Unreal Engine prerequisites (VC++ 2015–2022, DirectX June 2010) |
 pub fn redist_of(step: &RedistStep) -> Option<Redist> {
     let id = step.id.trim().to_lowercase();
     if !id.is_empty() {
@@ -185,6 +238,13 @@ pub fn redist_of(step: &RedistStep) -> Option<Redist> {
             })
         }
         _ if name.starts_with("ndp48") && name.ends_with(".exe") => Some(Redist::DotNet48),
+        _ if (name.starts_with("ue4prereqsetup") || name.starts_with("ueprereqsetup"))
+            && name.ends_with(".exe") =>
+        {
+            Some(Redist::UePrereqs {
+                x64: !name.contains("x86"),
+            })
+        }
         _ => None,
     }
 }
@@ -239,8 +299,9 @@ fn files_of(redist: Redist) -> (&'static [&'static str], Bits) {
             };
             (files, if x64 { Bits::X64 } else { Bits::X86 })
         }
-        // No file says which .NET release is there.
-        Redist::DotNet48 => (&[], Bits::Both),
+        // No file says which .NET release is there; a bundle goes by its
+        // parts.
+        Redist::DotNet48 | Redist::UePrereqs { .. } => (&[], Bits::Both),
     }
 }
 
@@ -371,6 +432,12 @@ pub fn already_installed(
     system_root: Option<&Path>,
     probe: &dyn SystemProbe,
 ) -> bool {
+    let parts = redist.parts();
+    if !parts.is_empty() {
+        return parts
+            .into_iter()
+            .all(|part| already_installed(part, prefix, system_root, probe));
+    }
     if prefix.is_none() {
         if let Some((key, name, least)) = registry_of(redist) {
             if probe.reg_dword(&key, name).is_some_and(|v| v >= least) {
@@ -555,8 +622,9 @@ pub fn is_msi(path: &Path) -> bool {
 
 /// The command for one step off Windows: [`build_installer_command`] (the
 /// compat tool and prefix as a launch wraps the game), started in
-/// `game_dir`. A `.msi` runs as `msiexec /i <package> <args>`. `Err` is the
-/// warning's reason (no compat tool, umu-run missing).
+/// `game_dir` (the step's folder: [`step_dir`]). A `.msi` runs as
+/// `msiexec /i <package> <args>`. `Err` is the warning's reason (no compat
+/// tool, umu-run missing).
 pub fn step_command(
     exe: &Path,
     args: &[String],
@@ -635,16 +703,21 @@ pub fn windows_command_line(args: &[String]) -> String {
         .join(" ")
 }
 
+/// One step of the elevated runner: its program, its arguments and the
+/// folder it starts in ([`step_dir`]).
+pub type ScriptStep = (PathBuf, Vec<String>, PathBuf);
+
 /// The elevated runner's script: each step in order (`Start-Process
-/// -Wait`, in `game_dir`; a `.msi` through `msiexec.exe /i`), its index and
-/// exit code (or `failed`) appended to `result` as one line.
-pub fn runner_script(steps: &[(PathBuf, Vec<String>)], game_dir: &Path, result: &Path) -> String {
-    let dir = ps_quote(&game_dir.to_string_lossy());
+/// -Wait`, in its own folder; a `.msi` through `msiexec.exe /i`), its index
+/// and exit code (or `failed`) appended to `result` as one line.
+pub fn runner_script(steps: &[ScriptStep], game_dir: &Path, result: &Path) -> String {
+    let game = ps_quote(&game_dir.to_string_lossy());
     let mut script = format!(
-        "$ErrorActionPreference = 'Stop'\n$result = {}\nSet-Location -LiteralPath {dir}\n",
+        "$ErrorActionPreference = 'Stop'\n$result = {}\nSet-Location -LiteralPath {game}\n",
         ps_quote(&result.to_string_lossy())
     );
-    for (index, (exe, args)) in steps.iter().enumerate() {
+    for (index, (exe, args, work)) in steps.iter().enumerate() {
+        let dir = ps_quote(&work.to_string_lossy());
         let (file, args) = if is_msi(exe) {
             let mut all = vec!["/i".to_string(), exe.to_string_lossy().into_owned()];
             all.extend(args.iter().cloned());
@@ -896,7 +969,7 @@ fn run_wrapped(
         let cmd = match step_command(
             &exe,
             &step.args,
-            target.game_dir,
+            &step_dir(step, &exe, target.game_dir),
             target.compat,
             target.prefix,
             &runner.host,
@@ -973,9 +1046,16 @@ fn run_elevated(
     };
     let script_path = work.path().join("grid-setup-steps.ps1");
     let result_path = work.path().join("grid-setup-results.txt");
-    let items: Vec<(PathBuf, Vec<String>)> = runnable
+    let items: Vec<ScriptStep> = runnable
         .iter()
-        .map(|(index, exe)| (exe.clone(), steps[*index].args.clone()))
+        .map(|(index, exe)| {
+            let step = &steps[*index];
+            (
+                exe.clone(),
+                step.args.clone(),
+                step_dir(step, exe, target.game_dir),
+            )
+        })
         .collect();
     let script = runner_script(&items, target.game_dir, &result_path);
     if let Err(e) = fs::write(&script_path, script) {
@@ -1118,6 +1198,7 @@ mod tests {
             command: command.into(),
             args: args.iter().map(|a| a.to_string()).collect(),
             valid_returns: vec![],
+            in_exe_folder: false,
         }
     }
 
@@ -1284,14 +1365,20 @@ mod tests {
     #[test]
     fn on_windows_every_step_runs_in_one_elevated_runner() {
         let game = Path::new("C:\\Games\\Hotline Miami");
+        let here = game.to_path_buf();
         let steps = vec![
-            (game.join("oalinst.exe"), vec!["/silent".to_string()]),
+            (
+                game.join("oalinst.exe"),
+                vec!["/silent".to_string()],
+                here.clone(),
+            ),
             (
                 game.join("DirectX\\DXSETUP.exe"),
                 vec!["/silent".to_string(), "two words".to_string()],
+                PathBuf::from("C:\\Games\\Hotline Miami\\DirectX"),
             ),
-            (game.join("vc.msi"), vec!["/qn".to_string()]),
-            (game.join("it's.exe"), vec![]),
+            (game.join("vc.msi"), vec!["/qn".to_string()], here.clone()),
+            (game.join("it's.exe"), vec![], here),
         ];
         let result = Path::new("C:\\Games\\.grid-setup-x\\grid-setup-results.txt");
         let script = runner_script(&steps, game, result);
@@ -1304,6 +1391,12 @@ mod tests {
             lines[3]
         );
         assert!(lines[3].contains("-ArgumentList '/silent'"));
+        assert!(lines[3].contains("-WorkingDirectory 'C:\\Games\\Hotline Miami' -Wait"));
+        assert!(
+            lines[4].contains("-WorkingDirectory 'C:\\Games\\Hotline Miami\\DirectX' -Wait"),
+            "a step in its own folder: {}",
+            lines[4]
+        );
         assert!(lines[3].contains("-Wait -PassThru"));
         assert!(lines[3].contains("\"0 $($p.ExitCode)\""));
         assert!(lines[3].contains("'0 failed'"));
@@ -1526,7 +1619,19 @@ mod tests {
             ),
             ("redist/2010/vcredist_x86.exe", vc(2010, false)),
             ("ndp48-x86-x64-allos-enu.exe", Some(Redist::DotNet48)),
-            ("UE4PrereqSetup_x64.exe", None),
+            (
+                "Engine\\Extras\\Redist\\en-us\\UE4PrereqSetup_x64.exe",
+                Some(Redist::UePrereqs { x64: true }),
+            ),
+            (
+                "Engine/Extras/Redist/en-us/UEPrereqSetup_x64.exe",
+                Some(Redist::UePrereqs { x64: true }),
+            ),
+            (
+                "UE4PrereqSetup_x86.exe",
+                Some(Redist::UePrereqs { x64: false }),
+            ),
+            ("EasyAntiCheat_EOS_Setup.exe", None),
         ] {
             assert_eq!(redist_of(&step(command, &[])), want, "{command}");
         }
@@ -1610,6 +1715,31 @@ mod tests {
             x64: true
         }));
         assert!(!have(Redist::DotNet48), "no file says so");
+        // Unreal's bundle is there only with every part: 32-bit VC++ is,
+        // 64-bit VC++ and DirectX aren't (stubs).
+        assert!(!have(Redist::UePrereqs { x64: false }));
+        sys(
+            &prefix,
+            "system32",
+            &["d3dx9_43.dll", "XAudio2_7.dll", "d3dcompiler_43.dll"],
+            false,
+        );
+        sys(
+            &prefix,
+            "syswow64",
+            &["d3dx9_43.dll", "XAudio2_7.dll", "d3dcompiler_43.dll"],
+            false,
+        );
+        assert!(have(Redist::UePrereqs { x64: false }));
+        assert!(!have(Redist::UePrereqs { x64: true }), "no 64-bit VC++");
+        sys(
+            &prefix,
+            "system32",
+            &["vcruntime140.dll", "msvcp140.dll"],
+            false,
+        );
+        assert!(have(Redist::UePrereqs { x64: true }));
+        assert_eq!(Redist::UePrereqs { x64: true }.key(), "ue-prereqs-x64");
         assert!(is_wine_stub(b"MZ....Wine placeholder DLL"));
         assert!(!is_wine_stub(b"MZ real"));
     }
@@ -1819,6 +1949,36 @@ mod tests {
         assert_eq!(sink.phases, vec![JobPhase::InstallerSilent]);
         assert_eq!(sink.progress.first(), Some(&(0, 4)));
         assert_eq!(sink.progress.last(), Some(&(4, 4)));
+    }
+
+    #[test]
+    fn a_step_marked_in_exe_folder_starts_in_its_programs_folder() {
+        let (_dir, game) = game();
+        let prefix = game.join("prefix");
+        let mut own = step("DirectX\\DXSETUP.exe", &["/silent"]);
+        own.in_exe_folder = true;
+        let steps = vec![step("oalinst.exe", &["/silent"]), own.clone()];
+        let script = Script::new(vec![(Ok(Some(Some(0))), ""), (Ok(Some(Some(0))), "")]);
+        let outcome = run_steps(
+            &steps,
+            wrapped(&game, &prefix),
+            &runner(&script, "linux"),
+            &mut Sink::default(),
+        );
+        assert!(outcome.all_worked, "{outcome:?}");
+        let spawned = script.spawned.lock().unwrap();
+        assert_eq!(spawned[0].cwd, game);
+        assert_eq!(spawned[1].cwd, game.join("DirectX"));
+        assert_eq!(
+            step_dir(&own, Path::new("x.exe"), &game),
+            game,
+            "no folder of its own"
+        );
+        // Only a marked step keeps the flag in a saved list.
+        let json = serde_json::to_string(&steps).unwrap();
+        assert_eq!(json.matches("in_exe_folder").count(), 1, "{json}");
+        let back: Vec<RedistStep> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, steps);
     }
 
     #[test]

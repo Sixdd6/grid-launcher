@@ -169,6 +169,33 @@ test("install, DLC, update, repair and uninstall keep installed.json and the fil
   assert.match(again.stderr, /not installed, cannot uninstall!/);
 });
 
+test("a game's prerequisite: prereq_info, info's prerequisites and its program; null elsewhere", () => {
+  const dir = fresh();
+  signIn(dir);
+  const games = path.join(dir, "games");
+  const want = {
+    ids: ["UE4PrereqSetup"],
+    name: "UE4 Prerequisites (x64)",
+    path: "Engine/Extras/Redist/en-us/UE4PrereqSetup_x64.exe",
+    args: "/quiet /norestart",
+  };
+  assert.deepEqual(JSON.parse(run(dir, ["info", "Glimmer", "--json"]).stdout).manifest.prerequisites, want);
+  assert.equal(JSON.parse(run(dir, ["info", "Rustbelt", "--json"]).stdout).manifest.prerequisites, null);
+  const out = run(dir, ["install", "Glimmer", "-y", "--skip-sdl", "--skip-dlcs", "--base-path", games, "--game-folder", "Glimmer Deep"]);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /This game lists the following prerequisites to be installed:/);
+  assert.match(out.stderr, /Automatic installation not available on Linux\./);
+  const exe = path.join(games, "Glimmer Deep", "Engine", "Extras", "Redist", "en-us", "UE4PrereqSetup_x64.exe");
+  assert.ok(existsSync(exe));
+  const saved = JSON.parse(readFileSync(path.join(dir, "legendary", "installed.json"), "utf8"));
+  assert.deepEqual(saved.Glimmer.prereq_info, want, "never marked installed");
+  assert.equal(run(dir, ["install", "Rustbelt", "-y", "--skip-sdl", "--base-path", games, "--game-folder", "Rustbelt"]).status, 0);
+  const listed = JSON.parse(run(dir, ["list-installed", "--json"]).stdout);
+  assert.equal(listed.find((e) => e.app_name === "Rustbelt").prereq_info, null);
+  assert.equal(run(dir, ["uninstall", "Glimmer", "-y"]).status, 0);
+  assert.ok(!existsSync(exe));
+});
+
 test("an update moves the version to the owned build; a download failure is a network traceback", () => {
   const dir = fresh();
   signIn(dir);

@@ -83,6 +83,10 @@ pub trait EpicApi: Send + Sync {
     fn update_job(&self, row: &InstalledGame, ctx: EpicJobCtx) -> StoreJob;
     fn repair_job(&self, row: &InstalledGame, ctx: EpicJobCtx) -> StoreJob;
     fn dlc_job(&self, row: &InstalledGame, dlc: &str, ctx: EpicJobCtx) -> StoreJob;
+    /// Only the game's prerequisite (no legendary call); refuses a game
+    /// with none to run.
+    fn setup_steps_job(&self, row: &InstalledGame, ctx: EpicJobCtx)
+        -> Result<StoreJob, StoreError>;
     fn remove_dlc(
         &self,
         registry: &Registry,
@@ -189,6 +193,13 @@ impl EpicApi for RealEpic {
     }
     fn dlc_job(&self, row: &InstalledGame, dlc: &str, ctx: EpicJobCtx) -> StoreJob {
         self.service.dlc_job(row, dlc, ctx)
+    }
+    fn setup_steps_job(
+        &self,
+        row: &InstalledGame,
+        ctx: EpicJobCtx,
+    ) -> Result<StoreJob, StoreError> {
+        self.service.setup_steps_job(row, ctx)
     }
     fn remove_dlc(
         &self,
@@ -1369,6 +1380,11 @@ impl StoreBackend for EpicStore {
     fn repair_job(&self, row: &InstalledGame, ctx: JobCtx) -> StoreJob {
         self.api.repair_job(row, ctx.epic())
     }
+    fn setup_steps_job(&self, row: &InstalledGame, ctx: JobCtx) -> Result<StoreJob, String> {
+        self.api
+            .setup_steps_job(row, ctx.epic())
+            .map_err(|e| e.to_string())
+    }
     fn dlc_job(
         self: Arc<Self>,
         row: InstalledGame,
@@ -2145,6 +2161,20 @@ mod tests {
         fn dlc_job(&self, row: &InstalledGame, _dlc: &str, _ctx: EpicJobCtx) -> StoreJob {
             job(row.store_id.clone(), StoreOp::Dlc)
         }
+        fn setup_steps_job(
+            &self,
+            row: &InstalledGame,
+            _ctx: EpicJobCtx,
+        ) -> Result<StoreJob, StoreError> {
+            if row.store_id == "Glimmer" {
+                Ok(job(row.store_id.clone(), StoreOp::SetupSteps))
+            } else {
+                Err(StoreError::Refused(format!(
+                    "{} has no setup steps to run.",
+                    row.title
+                )))
+            }
+        }
         fn remove_dlc(
             &self,
             _r: &Registry,
@@ -2486,6 +2516,31 @@ mod tests {
         );
         h.service.state.lock().unwrap().tool = ToolPhase::Installed;
         h.service.ensure_can_install().unwrap();
+
+        // Retry on a setup-step warning: only the prerequisite, in GRID's
+        // words when there is none.
+        let setup_ctx = JobCtx {
+            registry: Arc::new(Registry::open(&h.dir.path().join("s.db")).unwrap()),
+            library: h.dir.path().to_path_buf(),
+            default_compat_tool: String::new(),
+        };
+        let row = |id: &str, title: &str| InstalledGame {
+            store_id: id.into(),
+            title: title.into(),
+            ..Default::default()
+        };
+        let backend: &dyn StoreBackend = h.service.as_ref();
+        let setup = backend
+            .setup_steps_job(&row("Glimmer", "Glimmer Deep"), setup_ctx.clone())
+            .unwrap();
+        assert_eq!(setup.op, StoreOp::SetupSteps);
+        assert_eq!(
+            backend
+                .setup_steps_job(&row("Vector", "Vector Bloom"), setup_ctx)
+                .err()
+                .unwrap(),
+            "Vector Bloom has no setup steps to run."
+        );
 
         let mut iron = game("IronOrchard", "Iron Orchard");
         iron.third_party = Some("the EA app".into());
