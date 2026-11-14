@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use grid_core::library::registry::{InstalledGame, Registry};
-use grid_core::stores::epic::launch::{launch_ticket_error, set_tool_override_for_tests};
+use grid_core::stores::epic::launch::launch_ticket_error;
 use grid_core::stores::epic::meta::EpicMeta;
 use grid_core::stores::epic::{EpicEndpoints, EpicService};
 use grid_core::stores::{CloudState, GameSource, StoreError, StoreKind, SyncMode};
@@ -102,8 +102,8 @@ impl Fixture {
         let script = bin.join("legendary");
         fs::write(&script, SCRIPT).unwrap();
         fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
-        set_tool_override_for_tests(&data, script);
-        let svc = EpicService::new(data.clone(), reqwest::Client::new(), EpicEndpoints::real());
+        let svc = EpicService::new(data.clone(), reqwest::Client::new(), EpicEndpoints::real())
+            .with_tool_override(script);
         let tool_dir = svc.tool_dir();
         fs::create_dir_all(&tool_dir).unwrap();
         fs::write(tool_dir.join("game_dir"), game.to_string_lossy().as_bytes()).unwrap();
@@ -347,20 +347,20 @@ async fn the_launch_ticket_carries_the_code_as_redacted_arguments() {
     let launches = fs::read_to_string(fx.tool("launches")).unwrap();
     assert_eq!(launches.trim(), "--json --skip-version-check");
 
-    // Epic unreachable, the game may run offline: one retry with
-    // `--offline`, and no exchange code.
+    // Epic unreachable: `launch_prep` never retries by itself (the app's
+    // launch hook owns the one offline retry); asked for `--offline`, it
+    // gets a ticket with no exchange code.
     fs::write(fx.tool("no-network"), "").unwrap();
-    let prep = fx.svc.launch_prep(&fx.row(), false).await.unwrap();
+    let error = fx.svc.launch_prep(&fx.row(), false).await.unwrap_err();
+    assert!(matches!(error, StoreError::Network(_)), "{error:?}");
+    let launches = fs::read_to_string(fx.tool("launches")).unwrap();
+    assert_eq!(launches.lines().count(), 2, "{launches}");
+    let prep = fx.svc.launch_prep(&fx.row(), true).await.unwrap();
     assert!(prep.secret_args.contains(&"-AUTH_PASSWORD=".to_string()));
     let launches = fs::read_to_string(fx.tool("launches")).unwrap();
     assert!(launches
         .trim_end()
         .ends_with("--json --skip-version-check --offline"));
-
-    // A game that may not run offline: GRID's words, no retry.
-    fx.insert_row(true, false);
-    let error = fx.svc.launch_prep(&fx.row(), false).await.unwrap_err();
-    assert!(matches!(error, StoreError::Network(_)), "{error:?}");
     let words = launch_ticket_error(&error).to_string();
     assert!(
         words.starts_with("Couldn\u{2019}t get a launch ticket from Epic Games: "),

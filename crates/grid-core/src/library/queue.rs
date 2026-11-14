@@ -208,6 +208,13 @@ pub trait StoreJobRunner: Send + Sync {
     /// to `sink`. Returns a warning for the finished entry, `""` for none.
     /// Not cancellable, like a RomM finalize.
     fn finalize(&self, sink: &mut dyn StoreProgressSink) -> Result<String, LibraryError>;
+
+    /// The finished entry's detail line, asked after a successful
+    /// [`Self::finalize`]: a repair's result ("2 files repaired", shown as
+    /// "Verified · 2 files repaired"). `""` keeps the row's detail as is.
+    fn detail(&self) -> String {
+        String::new()
+    }
 }
 
 /// The backup drive a store job copies from (a restore).

@@ -37,6 +37,8 @@ use grid_core::config::{Config, EpicConfig};
 use grid_core::launch::{LaunchError, StoreLaunchHook, StoreLaunchPrep};
 use grid_core::library::queue::{DownloadStatus, DownloadsSnapshot, StoreJob};
 use grid_core::library::registry::{InstalledGame, Registry};
+use grid_core::stores::epic::launch::launch_ticket_error;
+use grid_core::stores::epic::list::{self as epic_list, read_owned_cache};
 use grid_core::stores::epic::meta::EpicMeta;
 use grid_core::stores::epic::{
     EpicAccount, EpicEndpoints, EpicGame, EpicGameDlc, EpicInstallOptions, EpicInstallRequest,
@@ -45,7 +47,6 @@ use grid_core::stores::epic::{
 use grid_core::stores::tools::{self, StoreTool};
 use grid_core::stores::{CloudState, GameKey, GameSource, StoreError, StoreKind, SyncMode};
 use secrecy::SecretString;
-use serde::{Deserialize, Serialize};
 
 use super::gog::conflict_ipc;
 use super::{default_install_dir, BoxFut, JobCtx, StoreBackend, StoreEvent, StoreShared};
@@ -64,6 +65,8 @@ pub trait EpicApi: Send + Sync {
     fn account(&self) -> BoxFut<'_, Result<Option<EpicAccount>, StoreError>>;
     fn disconnect(&self) -> io::Result<()>;
     fn owned(&self) -> BoxFut<'_, Result<Vec<EpicGame>, StoreError>>;
+    /// Seeds the service's kept owned list (from the cache at startup).
+    fn set_owned(&self, _games: Vec<EpicGame>) {}
     fn tool_installed(&self) -> bool;
     /// Why legendary can't run here (the Linux zipapp needs Python 3.10),
     /// `None` when it can.
@@ -107,15 +110,13 @@ pub trait EpicApi: Send + Sync {
 /// [`EpicApi`] over grid-core.
 pub struct RealEpic {
     service: EpicService,
-    http: reqwest::Client,
     data_dir: PathBuf,
 }
 
 impl RealEpic {
     pub fn new(data_dir: PathBuf, http: reqwest::Client, endpoints: EpicEndpoints) -> Self {
         RealEpic {
-            service: EpicService::new(data_dir.clone(), http.clone(), endpoints),
-            http,
+            service: EpicService::new(data_dir.clone(), http, endpoints),
             data_dir,
         }
     }
@@ -137,8 +138,11 @@ impl EpicApi for RealEpic {
     fn owned(&self) -> BoxFut<'_, Result<Vec<EpicGame>, StoreError>> {
         Box::pin(self.service.owned())
     }
+    fn set_owned(&self, games: Vec<EpicGame>) {
+        self.service.set_owned(games);
+    }
     fn tool_installed(&self) -> bool {
-        tools::installed_path(&self.data_dir, StoreTool::Legendary).is_some()
+        self.service.tool_installed()
     }
     fn tool_problem(&self) -> Option<String> {
         if self.tool_installed() {
@@ -166,16 +170,7 @@ impl EpicApi for RealEpic {
         &'a self,
         mut progress: Box<dyn FnMut(u64, u64) + Send + 'a>,
     ) -> BoxFut<'a, Result<(), StoreError>> {
-        Box::pin(async move {
-            tools::install_tool(
-                &self.http,
-                &self.data_dir,
-                StoreTool::Legendary,
-                &mut *progress,
-            )
-            .await
-            .map(|_| ())
-        })
+        Box::pin(async move { self.service.install_tool(&mut *progress).await.map(|_| ()) })
     }
     fn install_options<'a>(
         &'a self,
@@ -323,7 +318,6 @@ pub struct EpicStore {
 const TOOL_NAME: &str = "legendary";
 const STORE_NAME: &str = "Epic Games";
 const SOURCE: &str = "epic";
-const OWNED_CACHE_FILE: &str = "epic-owned.json";
 
 fn now() -> i64 {
     chrono::Utc::now().timestamp()
@@ -407,7 +401,10 @@ impl EpicStore {
             state.connection = StoreConnection::Connected;
             state.username = config.username.clone();
             if let Some(cache) = cache {
-                state.games = cache.games.into_iter().map(Into::into).collect();
+                // The service's kept list too: the jobs read titles, DLC
+                // and the expected build from it before a refresh answers.
+                self.api.set_owned(cache.games.clone());
+                state.games = cache.games;
                 state.refreshed_at = cache.refreshed_at;
                 state.owned = OwnedState::Ready;
             }
@@ -663,7 +660,9 @@ impl EpicStore {
         if let Err(e) = crate::store_auth::wipe_login_data(&self.data_dir, SOURCE) {
             tracing::warn!("stores: login window data not deleted: {e}");
         }
-        let _ = std::fs::remove_file(owned_cache_path(&self.data_dir));
+        if let Err(e) = epic_list::remove_owned_cache(&self.data_dir) {
+            tracing::warn!("stores: Epic owned cache not deleted: {e}");
+        }
         self.write_epic_config(|epic| {
             epic.connected = false;
             epic.username.clear();
@@ -955,7 +954,9 @@ impl EpicStore {
 
     /// legendary's launch ticket for an Epic row. Signed out (or offline)
     /// a game that may run offline starts with `--offline`; a network
-    /// failure retries that way once.
+    /// failure retries that way once. This is the only offline retry:
+    /// `EpicService::launch_prep` runs exactly what it is asked. Errors
+    /// take grid-core's words (`launch_ticket_error`).
     pub async fn launch_ticket(&self, row: &InstalledGame) -> Result<StoreLaunchPrep, LaunchError> {
         let meta = EpicMeta::from_json(&row.store_meta);
         let signed_in = self.connection() == StoreConnection::Connected;
@@ -980,9 +981,7 @@ impl EpicStore {
             if matches!(e, StoreError::LoginExpired) {
                 let _ = self.store_error(StoreError::LoginExpired);
             }
-            LaunchError::Validation(format!(
-                "Couldn\u{2019}t get a launch ticket from {STORE_NAME}: {e}"
-            ))
+            launch_ticket_error(&e)
         })
     }
 
@@ -1849,105 +1848,11 @@ pub fn cloud_state_ipc(state: &CloudState, meta: &EpicMeta, syncing: bool) -> St
 
 // --- owned cache ------------------------------------------------------------------
 
-/// One cached owned game: metadata only.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
-struct CachedGame {
-    app_name: String,
-    title: String,
-    cover: String,
-    screenshots: Vec<String>,
-    description: String,
-    developer: String,
-    year: String,
-    build_version: String,
-    third_party: Option<String>,
-    cloud_save_folder: String,
-    can_run_offline: bool,
-    dlc: Vec<(String, String)>,
-}
-
-impl From<&EpicGame> for CachedGame {
-    fn from(game: &EpicGame) -> Self {
-        CachedGame {
-            app_name: game.app_name.clone(),
-            title: game.title.clone(),
-            cover: game.cover.clone(),
-            screenshots: game.screenshots.clone(),
-            description: game.description.clone(),
-            developer: game.developer.clone(),
-            year: game.year.clone(),
-            build_version: game.build_version.clone(),
-            third_party: game.third_party.clone(),
-            cloud_save_folder: game.cloud_save_folder.clone(),
-            can_run_offline: game.can_run_offline,
-            dlc: game
-                .dlc
-                .iter()
-                .map(|dlc| (dlc.app_name.clone(), dlc.title.clone()))
-                .collect(),
-        }
-    }
-}
-
-impl From<CachedGame> for EpicGame {
-    fn from(cached: CachedGame) -> Self {
-        EpicGame {
-            app_name: cached.app_name,
-            title: cached.title,
-            cover: cached.cover,
-            screenshots: cached.screenshots,
-            description: cached.description,
-            developer: cached.developer,
-            year: cached.year,
-            build_version: cached.build_version,
-            third_party: cached.third_party,
-            cloud_save_folder: cached.cloud_save_folder,
-            can_run_offline: cached.can_run_offline,
-            dlc: cached
-                .dlc
-                .into_iter()
-                .map(|(app_name, title)| EpicGameDlc { app_name, title })
-                .collect(),
-        }
-    }
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(default)]
-struct OwnedCache {
-    refreshed_at: i64,
-    games: Vec<CachedGame>,
-}
-
-fn owned_cache_path(data_dir: &Path) -> PathBuf {
-    data_dir
-        .join(grid_core::stores::paths::STORES_DIR)
-        .join("cache")
-        .join(OWNED_CACHE_FILE)
-}
-
-fn read_owned_cache(data_dir: &Path) -> Option<OwnedCache> {
-    let text = std::fs::read_to_string(owned_cache_path(data_dir)).ok()?;
-    serde_json::from_str(&text).ok()
-}
-
+/// Writes the owned-list cache (grid-core's format,
+/// `stores::epic::list`). This backend is the cache's only writer;
+/// `EpicService::owned` never writes it.
 fn write_owned_cache(data_dir: &Path, games: &[EpicGame], refreshed_at: i64) {
-    let path = owned_cache_path(data_dir);
-    let cache = OwnedCache {
-        refreshed_at,
-        games: games.iter().map(CachedGame::from).collect(),
-    };
-    let write = || -> io::Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let text = serde_json::to_string(&cache).map_err(io::Error::other)?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, text)?;
-        std::fs::rename(&tmp, &path)
-    };
-    if let Err(e) = write() {
+    if let Err(e) = epic_list::write_owned_cache(data_dir, games, refreshed_at) {
         tracing::warn!("stores: Epic owned list not cached: {e}");
     }
 }
@@ -2447,7 +2352,7 @@ mod tests {
                 "Epic Games: 3 games found \u{b7} 2 to install".to_string(),
             ]
         );
-        let cache = std::fs::read_to_string(owned_cache_path(h.dir.path())).unwrap();
+        let cache = std::fs::read_to_string(epic_list::owned_cache_path(h.dir.path())).unwrap();
         assert!(cache.contains("Starlight Courier"));
         assert!(!cache.contains(FAKE));
     }
@@ -2561,7 +2466,7 @@ mod tests {
         assert_eq!(status.tool.state, ToolState::NotInstalled);
         assert!(status.cloud_saves);
         assert!(!h.config().connected);
-        assert!(!owned_cache_path(h.dir.path()).exists());
+        assert!(!epic_list::owned_cache_path(h.dir.path()).exists());
         assert!(!crate::store_auth::login_data_dir(h.dir.path(), "epic").exists());
     }
 

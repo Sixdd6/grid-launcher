@@ -37,6 +37,7 @@
   import type { DriveStoreGame, StoreGame } from '../../../api';
   import { isStoreRow } from '../../../gameKey';
   import { liveJobFor } from '../../../gamestores/jobs';
+  import { canBackup } from '../../../gamestores/marks';
   import { storeGameMatches } from '../../../gamestores/view';
   import { gameStores } from '../../../stores/gameStores.svelte';
   import TvStoreCover from '../../stores/TvStoreCover.svelte';
@@ -308,13 +309,13 @@
   }
 
   /** GOG › Installed: the one store view with select mode (user decision 2026-11-13). */
-  const gogInstalled = () => tvStores.view?.source === 'gog' && tvStores.view.part === 'installed';
+  const backupInstalled = () => !!tvStores.view && canBackup(tvStores.view.source) && tvStores.view.part === 'installed';
 
   useScreen({
     // A store view has Y Search, and RT Select in GOG › Installed
     // (tvstores.js `TABS.library.hints`); no sort.
     hints: () => {
-      if (tvStores.view) return gogInstalled() ? [{ button: 'Y', label: 'Search' }, { button: 'RT', label: 'Select' }] : [{ button: 'Y', label: 'Search' }];
+      if (tvStores.view) return backupInstalled() ? [{ button: 'Y', label: 'Search' }, { button: 'RT', label: 'Select' }] : [{ button: 'Y', label: 'Search' }];
       return [
         { button: 'Y', label: 'Search' },
         { button: 'LT', label: 'Sort' },
@@ -326,7 +327,7 @@
       return tvStores.view ? undefined : sortList;
     },
     get rt() {
-      return tvStores.view && !gogInstalled() ? undefined : selToggle;
+      return tvStores.view && !backupInstalled() ? undefined : selToggle;
     },
   });
 

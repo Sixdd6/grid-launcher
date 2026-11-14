@@ -40,7 +40,7 @@ describe('gog-library', () => {
     const card = (await storeCards())[0];
     await card.moveTo();
     const title = (await card.$('.label').getText()).trim();
-    await card.$(testId(`card-primary-${(await card.getAttribute('data-testid')).replace('library-store-card-', '')}`)).click();
+    await card.$(testId(`card-primary-${((await card.getAttribute('data-testid')) ?? '').replace('library-store-card-', '')}`)).click();
     await $(testId('store-install-dialog')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await expect($(testId('store-install-download'))).toHaveText(/ to download$/);
     await $(testId('store-install-go')).click();

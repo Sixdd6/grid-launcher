@@ -18,7 +18,7 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use super::launch::{legendary_command, run, tool_error};
+use super::launch::tool_error;
 use super::meta::EpicMeta;
 use super::EpicService;
 use crate::cloud::native::{compat_kind, prefix_user, CompatKind, STEAM_USER};
@@ -379,11 +379,9 @@ async fn context(svc: &EpicService, row: &InstalledGame) -> Result<Option<Contex
         .map(|path| local_side(std::slice::from_ref(path)))
         .unwrap_or_default();
     let app = row.store_id.trim();
-    let exit = run(legendary_command(
-        svc,
-        vec!["list-saves".to_string(), app.to_string()],
-    )?)
-    .await?;
+    let exit = svc
+        .run_blocking(svc.tool(vec!["list-saves".to_string(), app.to_string()])?)
+        .await?;
     if !exit.success()
         || exit.has(&ToolSignal::OtherError)
         || exit.has(&ToolSignal::NotLoggedIn)
@@ -481,11 +479,9 @@ pub(crate) async fn cloud_sync(
             ))
         })?;
     }
-    let exit = run(legendary_command(
-        svc,
-        sync_saves_args(&row.store_id, &save_path, upload),
-    )?)
-    .await?;
+    let exit = svc
+        .run_blocking(svc.tool(sync_saves_args(&row.store_id, &save_path, upload))?)
+        .await?;
     if !exit.success()
         || exit.has(&ToolSignal::OtherError)
         || exit.has(&ToolSignal::NotLoggedIn)

@@ -467,9 +467,12 @@ async fn install_with_a_dlc_then_update_repair_and_uninstall() {
 
     let repair = f.svc.repair_job(&row, f.ctx());
     assert_eq!(repair.runner.download_phase(), JobPhase::Verifying);
+    let runner = repair.runner.clone();
     let (result, reports) = run_job(repair).await;
+    // The repair's result is the Downloads row's detail, not a warning.
+    assert_eq!(result.unwrap(), "");
     assert_eq!(
-        result.unwrap(),
+        runner.detail(),
         "4 files repaired",
         "both transfers' counts"
     );

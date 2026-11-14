@@ -435,13 +435,15 @@ impl EpicService {
     }
 
     /// Signs out: `auth --delete` (best effort), then legendary's whole
-    /// folder (its token files with it) and the owned cache go. Blocking.
+    /// folder (its token files with it) goes, and the kept owned list is
+    /// cleared. Blocking. The owned cache file is the app's: its backend
+    /// (`stores_service::epic`) is its only writer and removes it on
+    /// Disconnect ([`list::remove_owned_cache`]).
     pub fn disconnect(&self) -> io::Result<()> {
         if let Ok(cmd) = self.tool(auth::logout_args()) {
             let _ = run_tool(&cmd, &AtomicBool::new(false), &mut |_| {});
         }
         self.owned.lock().unwrap_or_else(|e| e.into_inner()).clear();
-        let _ = list::remove_owned_cache(&self.data_dir);
         paths::remove_tool_dir(&self.data_dir, StoreTool::Legendary)
     }
 

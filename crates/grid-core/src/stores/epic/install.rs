@@ -593,18 +593,21 @@ impl StoreJobRunner for EpicJob {
         )?;
         self.ctx.registry.upsert_store(&row)?;
         sink.progress(1, 1);
-        let mut message = if self.op == StoreOp::Repair {
-            repair_detail(fetched.repaired)
-        } else {
-            String::new()
-        };
-        for warning in fetched.warnings {
-            if !message.is_empty() {
-                message.push('\n');
-            }
-            message.push_str(&warning);
+        // A repair's result is the row's detail line ([`Self::detail`]);
+        // the message holds only warnings.
+        Ok(fetched.warnings.join("\n"))
+    }
+
+    fn detail(&self) -> String {
+        if self.op != StoreOp::Repair {
+            return String::new();
         }
-        Ok(message)
+        self.fetched
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|fetched| repair_detail(fetched.repaired))
+            .unwrap_or_default()
     }
 }
 

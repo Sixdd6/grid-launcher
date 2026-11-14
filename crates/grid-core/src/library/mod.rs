@@ -4007,7 +4007,13 @@ impl InstallService {
                     id,
                     cancel: Some(cancel),
                 })
-                .map(|message| warning = message),
+                .map(|message| {
+                    warning = message;
+                    let detail = job.runner.detail();
+                    if !detail.is_empty() {
+                        self.queue.lock().unwrap().set_detail(id, &detail);
+                    }
+                }),
         };
         (result, warning)
     }

@@ -13,13 +13,12 @@
 //! `pre_launch_command` are ignored, because GRID's compat tool wraps the
 //! game (`launch::native::build_native_command`).
 //!
-//! This file also holds the small legendary invocation helper the launch
-//! and cloud code share ([`legendary_command`], [`run`], [`tool_error`]).
+//! Every legendary run goes through [`EpicService::tool`] (env, parser,
+//! private folder, the test override); [`tool_error`] maps a failed run to
+//! GRID's words for the launch and cloud code.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::AtomicBool;
-use std::sync::Mutex;
 
 use serde::Deserialize;
 
@@ -27,8 +26,8 @@ use super::meta::EpicMeta;
 use super::EpicService;
 use crate::launch::{LaunchError, StoreLaunchPrep};
 use crate::library::registry::InstalledGame;
-use crate::stores::runner::{run_tool, LineParser, ToolCommand, ToolExit, ToolSignal};
-use crate::stores::tools::{self, StoreTool};
+use crate::stores::runner::{ToolExit, ToolSignal};
+use crate::stores::tools::StoreTool;
 use crate::stores::StoreError;
 
 /// The words in front of every launch-ticket failure.
@@ -45,74 +44,6 @@ const COMPAT_ENV: [&str; 4] = [
 // ---------------------------------------------------------------------
 // The legendary invocation helper (shared with `cloud.rs`)
 // ---------------------------------------------------------------------
-
-/// Test-only fake legendary programs, by data folder. Integration tests
-/// (`tests/epic_cloud.rs`) cannot reach a `cfg(test)` builder, so this is
-/// the hook; nothing in the app sets it.
-static TOOL_OVERRIDES: Mutex<Option<HashMap<PathBuf, PathBuf>>> = Mutex::new(None);
-
-/// Runs `program` instead of the installed legendary for the service whose
-/// data folder is `data_dir`. For tests only.
-#[doc(hidden)]
-pub fn set_tool_override_for_tests(data_dir: &Path, program: PathBuf) {
-    let mut map = TOOL_OVERRIDES.lock().unwrap_or_else(|e| e.into_inner());
-    map.get_or_insert_with(HashMap::new)
-        .insert(data_dir.to_path_buf(), program);
-}
-
-fn tool_override(data_dir: &Path) -> Option<PathBuf> {
-    let map = TOOL_OVERRIDES.lock().unwrap_or_else(|e| e.into_inner());
-    map.as_ref()?.get(data_dir).cloned()
-}
-
-/// The environment every legendary run gets: its config folder, its cache
-/// (where the zipapp unpacks its native modules) and `BROWSER=true`, so no
-/// browser ever opens.
-pub(crate) fn legendary_env(tool_dir: &Path) -> Vec<(String, String)> {
-    vec![
-        (
-            "LEGENDARY_CONFIG_PATH".to_string(),
-            tool_dir.to_string_lossy().into_owned(),
-        ),
-        (
-            "XDG_CACHE_HOME".to_string(),
-            tool_dir.join("cache").to_string_lossy().into_owned(),
-        ),
-        ("BROWSER".to_string(), "true".to_string()),
-    ]
-}
-
-/// The legendary command for `args`: legendary's signal matcher, and its
-/// config folder made private when the run ends.
-pub(crate) fn legendary_command(
-    svc: &EpicService,
-    args: Vec<String>,
-) -> Result<ToolCommand, StoreError> {
-    let tool_dir = svc.tool_dir();
-    let env = legendary_env(&tool_dir);
-    let mut cmd = match tool_override(&svc.data_dir) {
-        Some(program) => ToolCommand {
-            program,
-            args,
-            env,
-            ..Default::default()
-        },
-        None => tools::tool_command(&svc.data_dir, StoreTool::Legendary, args, env)?,
-    };
-    cmd.parser = LineParser::Legendary;
-    cmd.private_tree = Some(tool_dir);
-    Ok(cmd)
-}
-
-/// Runs `cmd` on the blocking pool, not cancellable.
-pub(crate) async fn run(cmd: ToolCommand) -> Result<ToolExit, StoreError> {
-    tokio::task::spawn_blocking(move || run_tool(&cmd, &AtomicBool::new(false), &mut |_| {}))
-        .await
-        .map_err(|_| StoreError::ToolFailed {
-            tool: StoreTool::Legendary.name(),
-            reason: "it stopped unexpectedly".to_string(),
-        })?
-}
 
 /// GRID's error for a legendary run that failed, from its signals (the
 /// lines themselves are never kept). Specific signals win over
@@ -359,9 +290,11 @@ fn ticket_from(exit: &ToolExit) -> Result<LaunchTicket, StoreError> {
     Err(tool_error(exit))
 }
 
-/// [`EpicService::launch_prep`]: runs `launch --json`; when Epic can't be
-/// reached and the game may run offline, once more with `--offline` (no
-/// exchange code then).
+/// [`EpicService::launch_prep`]: runs `launch --json` once, with
+/// `--offline` when asked (no exchange code then). The one offline retry
+/// on a network failure is the app's launch hook's
+/// (`stores_service::epic::EpicStore::launch_ticket`), which also knows
+/// whether the store is signed in; this function never retries.
 pub(crate) async fn launch_prep(
     svc: &EpicService,
     row: &InstalledGame,
@@ -373,16 +306,10 @@ pub(crate) async fn launch_prep(
             "GRID doesn\u{2019}t know this game\u{2019}s Epic Games name.".to_string(),
         ));
     }
-    let meta = EpicMeta::from_json(&row.store_meta);
-    let exit = run(legendary_command(svc, launch_args(app, offline))?).await?;
-    let ticket = match ticket_from(&exit) {
-        Ok(ticket) => ticket,
-        Err(StoreError::Network(_)) if !offline && meta.can_run_offline => {
-            let exit = run(legendary_command(svc, launch_args(app, true))?).await?;
-            ticket_from(&exit)?
-        }
-        Err(error) => return Err(error),
-    };
+    let exit = svc
+        .run_blocking(svc.tool(launch_args(app, offline))?)
+        .await?;
+    let ticket = ticket_from(&exit)?;
     let installed = installed_launch_parameters(&svc.tool_dir(), app);
     Ok(prep_from_ticket(ticket, row, installed.as_deref()))
 }

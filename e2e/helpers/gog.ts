@@ -35,7 +35,7 @@ export async function openGog(part: 'installed' | 'available'): Promise<void> {
 }
 
 /** The store cards on screen, in grid order. */
-export async function storeCards(): Promise<WebdriverIO.ElementArray> {
+export function storeCards() {
   return $$(testIdPrefix('library-store-card-gog-'));
 }
 
