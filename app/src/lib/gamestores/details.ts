@@ -4,7 +4,7 @@
 // `stSettingsHTML`). Pure: which buttons, lines, chips, tabs and facts show.
 import type { DownloadEntry, DriveStoreGame, StoreCloudState, StoreGame, StoreStatus } from '../api';
 import { jobAct, jobPercent } from './jobs';
-import { canBackup, hasCloud, installedByTool, noBackupReason, storeLauncher, storeName } from './marks';
+import { canBackup, hasCloud, hasDlc, installedByTool, noBackupReason, shownVersion, storeLauncher, storeName, updateLabel } from './marks';
 import { agoText, changedAt, sizeGb } from './text';
 
 export type StoreButtonAct =
@@ -49,7 +49,8 @@ export type DetailsContext = {
 
 /**
  * The left column's buttons, top to bottom: Play / Stop / Cancel install ·
- * 45% / Install… / Not supported / Install from drive, then Update to 2.2,
+ * 45% / Install… / Not supported / Install from drive, then Update to 2.2
+ * ("Update" for Amazon, whose versions are opaque),
  * Game Settings, Backup to drive… (or Remove from drive…), Verify and repair,
  * Uninstall (two clicks).
  */
@@ -75,7 +76,7 @@ export function storeButtons(ctx: DetailsContext): StoreButton[] {
     out.push({ label: 'Install…', act: 'install', primary: true, disabled: !signedIn });
   }
   if (game.installed && game.update_version !== '' && job === null) {
-    out.push({ label: `Update to ${game.update_version}`, act: 'update', primary: false, disabled: !signedIn });
+    out.push({ label: updateLabel(game), act: 'update', primary: false, disabled: !signedIn });
   }
   if (game.installed) out.push({ label: 'Game Settings', act: 'settings', primary: false });
   if (ctx.drive) {
@@ -198,7 +199,9 @@ export type StoreDetailChip = { kind: StoreChipKind; text: string; testId: strin
 export function storeDetailChips(game: StoreGame, playing: boolean): StoreDetailChip[] {
   const out: StoreDetailChip[] = [{ kind: 'store', text: storeName(game.source), testId: 'store-details-chip-store' }];
   if (playing) out.push({ kind: 'playing', text: 'Playing', testId: 'store-details-chip-playing' });
-  if (game.installed && game.version.trim() !== '') out.push({ kind: 'plain', text: `v${game.version.trim()}`, testId: 'store-details-chip-version' });
+  // Amazon's version is an opaque id: no chip (user decision 2026-11-13).
+  const version = shownVersion(game);
+  if (game.installed && version !== '') out.push({ kind: 'plain', text: `v${version}`, testId: 'store-details-chip-version' });
   if (game.installed && game.installed_platform !== null) {
     out.push({
       kind: 'plain',
@@ -222,7 +225,7 @@ export const STORE_TAB_LABELS: Record<StoreTab, string> = { overview: 'Overview'
 
 export type Fact = { term: string; value: string; code?: boolean };
 
-/** Overview's facts: Store, Developer, Released, Genres, Size, Version ("v2.1 · GOG v2.2"), Folder. */
+/** Overview's facts: Store, Developer, Released, Genres, Size, Version ("v2.1 · GOG v2.2"; none for Amazon), Folder. */
 export function storeFacts(game: StoreGame): Fact[] {
   const name = storeName(game.source);
   const out: Fact[] = [{ term: 'Store', value: name }];
@@ -230,7 +233,7 @@ export function storeFacts(game: StoreGame): Fact[] {
   if (game.year.trim()) out.push({ term: 'Released', value: game.year });
   if (game.genres.length) out.push({ term: 'Genres', value: game.genres.join(', ') });
   out.push({ term: 'Size', value: game.installed ? `${sizeGb(game.disk_bytes)} on disk` : `${sizeGb(game.download_bytes)} download` });
-  if (game.installed && game.version.trim()) {
+  if (game.installed && shownVersion(game) !== '') {
     out.push({
       term: 'Version',
       value: game.update_version ? `v${game.version} · ${name} v${game.update_version}` : `v${game.version}`,
@@ -252,6 +255,7 @@ export type DlcRow = { id: string; title: string; size: string; installed: boole
 
 /** "DLC you own": each with its size, Installed, and Install / Remove when the game is installed. */
 export function dlcRows(game: StoreGame, entries: readonly DownloadEntry[]): DlcRow[] {
+  if (!hasDlc(game.source)) return [];
   return game.dlc.map((d) => ({
     id: d.id,
     title: d.title.startsWith(`${game.title} — `) ? d.title.slice(game.title.length + 3) : d.title,

@@ -1145,3 +1145,68 @@ Where package C differs from, or adds to, the plan. One frozen file changed, in 
    Phase 3, on Windows hosts too.
 
 Questions for the user: none open.
+
+## Package D outcome (UI, desktop and TV)
+
+- **Capabilities (`gamestores/marks.ts`).** `ENABLED_STORES = ['amazon', 'epic', 'gog']`.
+  `StoreCaps` gains `hasDlc` (GOG, Epic) and `readableVersions` (GOG, Epic; Amazon's
+  version ids are opaque), with `shownVersion(game)`, `updateLabel(game)` ("Update to 2.2",
+  or "Update" for Amazon) and `storeOfKey(key)` (first `:` only). Every "tool ⇒ cloud/DLC"
+  path now reads a capability:
+  - cloud: the SAVE CONFLICT cover tag (desktop `cover.ts`, TV `tvCoverTag`) and the
+    uninstalled card's sentence (`uninstalledNotice`) now also need `hasCloud`, whatever
+    the backend's `cloud` / `cloud_saves` say. The chip, tab, Details line, Game Settings
+    switch, Settings row, launch sync toasts and TV rows already did;
+  - DLC: `optionsForStore(source, opts)` drops DLC from the install options (desktop dialog
+    and TV install page), and `dlcRows` is empty, for a store without DLC;
+  - versions: the Details version chip, Overview's Version fact (desktop and TV), the
+    Update button, the TV update confirm ("Update Fogline?") and the Downloads "Updated to
+    …" line (now "Updated") follow `readableVersions`.
+- **TV fix (every no-cloud store):** `disconnectWords` read "they can’t install, update
+  until you connect again" for a store without cloud saves; it now reads "they can’t
+  install or update", as the desktop.
+- **Tool sizes.** New `toolSize(bytes)` (decimal MB, as the release page gives it) for the
+  tool panel, Settings tool row and not-connected ledes, desktop and TV, so nile's
+  11113264-byte asset reads "11 MB" (the plan's figure); legendary still reads "3 MB".
+  `sizeGb` is unchanged. One synthetic gogdl test size changed to decimal bytes.
+- **Lede:** "GRID installs GOG, Epic and Amazon games with the open-source tools…" (the
+  prototype's line without Steam). `e2e/specs/epic-library.spec.ts` asserted the Phase 2
+  lede; its expected text is updated (one line).
+- **Fake (`fakeApi.ts`, `devMock.ts`).** The prototype's a1–a3 (Fogline installed, played
+  last month; Kettle Drum and Lowsun available) under made-up `amzn1.adg.product.…` ids,
+  opaque fake version ids, `sam.plays`, nile 1.2.0 at 11113264 bytes, `cloud_saves:
+  false`, no DLC, `cloud: 'unknown'`, Game Settings with `<install>/prefix` and no cloud.
+  The fake starts Amazon **expired** (the prototype's default); `scenario('normal',
+  'amazon')` connects it. New scenario `needsGlibc` shows a tool error "nile needs a newer
+  system (glibc 2.35 or later)"; the tool-failed panel shows it as given. The fake's
+  Amazon update notice is "Fogline updated" and its verify notice "Fogline verified" (no
+  count); the real cards are package C's ("<game>: an update is available").
+- **Deviation from the prototype (user decision 1, extended):** the Details header has no
+  `v…` chip for Amazon (TV too), not just no Version fact: the id is unreadable there for
+  the same reason. Reversible by dropping `shownVersion` from `storeDetailChips` /
+  `tvDetailChips`.
+- **Kept shipped behaviour:** Verify and repair is disabled while signed out (all stores;
+  the prototype leaves it on). nile's verify needs the network and a login.
+- **E2E (pending integration with package C's harness):** `e2e/helpers/amazon.ts`,
+  `e2e/specs/amazon-library.spec.ts`, `e2e/specs/tv-amazon.spec.ts`, written against the
+  E2E plan (seed: `sam.plays`, Fogline installed, Kettle Drum and Lowsun owned; covers
+  found by title). For integration:
+  - `amazon-library` installs Kettle Drum, verifies Fogline (expects the row "Verified"),
+    runs the update step only when Fogline carries UPDATE (`.fake-update`), expects
+    "Updated", uninstalls Kettle Drum ("Kettle Drum uninstalled", no cloud sentence), and
+    cancels the Disconnect confirm;
+  - `tv-amazon` installs Lowsun, disconnects, then signs in over TV mode: nile is
+    installed again before the window opens, so the login-window wait uses
+    `INSTALL_TIMEOUT`, and every step after it runs in `MAIN_WINDOW`;
+  - both need `scripts/e2e.sh` groups `amazon-library` and `tv-amazon` (package C).
+- **Parity** (dev mock beside the prototype, screenshots in the worktree's
+  `ctr-out/parity-amazon/`, not committed). Desktop: rail group first with the `!` badge,
+  the expired Available panel (the default), Installed, Fogline Details (Overview and Media,
+  no cloud line, the backup refusal; no version chip or fact), Available with Kettle Drum
+  and Lowsun and the chips (no Cloud saves chip), the install dialog (no Version, Language
+  or DLC), the Settings card connected / expired / not connected and its Disconnect confirm
+  (no Cloud saves row), Game Settings (no cloud switch), Launch ("Launching Fogline…" only).
+  TV (960×540): the Amazon folder, Installed with the expired chip, the game page (Overview
+  and Media), Settings › Stores › Amazon Games (expired, no Cloud saves row). The only
+  differences are fixture data, the pin's real nile data (1.2.0, 11 MB) where the prototype
+  has 1.1.2 and 9 MB, the version decision, and the shipped app's own Sort and card size.

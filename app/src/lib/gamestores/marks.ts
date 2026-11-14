@@ -1,13 +1,14 @@
 // The external stores GRID knows, their marks and their tools (GameStores
 // README, designer decision 3: neutral monogram tiles in a store colour,
 // never a store's logo). Pure and UI-agnostic: the desktop and TV mode both
-// read it. Phase 2 shows GOG and Epic Games: Amazon and Steam have no rail
-// group, card or row until their phase (docs/stores-phase2-plan.md).
+// read it. Phase 3 shows GOG, Epic Games and Amazon Games: Steam has no rail
+// group, card or row until its phase (docs/stores-phase3-plan.md).
 //
 // What a store can do is a capability here (`storeCaps`), never a
-// `source === 'gog'` check in a view: GOG and Epic both have a tool and cloud
-// saves, but only GOG has offline installers, drive backups, a Linux build to
-// pick and install languages.
+// `source === 'gog'` check in a view: GOG, Epic and Amazon all have a tool,
+// but only GOG and Epic have cloud saves and DLC, only GOG has offline
+// installers, drive backups, a Linux build to pick and install languages, and
+// Amazon's versions are opaque ids GRID never shows.
 import type { StoreGame, StoreSource } from '../api';
 
 export type StoreMark = {
@@ -30,11 +31,17 @@ export const STORE_MARKS: Record<StoreSource, StoreMark> = {
 /** Every store, alphabetical by name (designer decision 2: the rail's order). */
 export const STORE_ORDER: readonly StoreSource[] = ['amazon', 'epic', 'gog', 'steam'];
 
-/** The stores this build shows. Phase 2: GOG and Epic Games (the others are hidden, not "coming soon"). */
-export const ENABLED_STORES: readonly StoreSource[] = ['epic', 'gog'];
+/** The stores this build shows. Phase 3: GOG, Epic Games and Amazon Games (Steam is hidden, not "coming soon"). */
+export const ENABLED_STORES: readonly StoreSource[] = ['amazon', 'epic', 'gog'];
 
 export function isEnabledStore(source: string): source is StoreSource {
   return (ENABLED_STORES as readonly string[]).includes(source);
+}
+
+/** The store a game key names (`amazon:amzn1.adg.product.…`: only the first `:` splits), else GOG. */
+export function storeOfKey(key: string): StoreSource {
+  const head = key.includes(':') ? key.slice(0, key.indexOf(':')) : key;
+  return (STORE_ORDER as readonly string[]).includes(head) ? (head as StoreSource) : 'gog';
 }
 
 export function storeMark(source: StoreSource): StoreMark {
@@ -73,13 +80,21 @@ export type StoreCaps = {
   hasVersions: boolean;
   /** A game can install in one of several languages: the install dialog's Language (GOG only). */
   hasLanguages: boolean;
+  /** A game can have DLC GRID installs and removes: "DLC you own" (GOG and Epic; nile has no DLC model). */
+  hasDlc: boolean;
+  /**
+   * Its versions are numbers a person reads ("2.2"): Update to 2.2, the v2.1
+   * chip and Overview's Version. Amazon's are opaque version ids, so its
+   * button reads "Update" and no version shows (user decision 2026-11-13).
+   */
+  readableVersions: boolean;
 };
 
 const CAPS: Record<StoreSource, StoreCaps> = {
-  gog: { hasTool: true, hasCloud: true, canBackup: true, hasInstaller: true, hasVersions: true, hasLanguages: true },
-  epic: { hasTool: true, hasCloud: true, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false },
-  amazon: { hasTool: true, hasCloud: false, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false },
-  steam: { hasTool: false, hasCloud: false, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false },
+  gog: { hasTool: true, hasCloud: true, canBackup: true, hasInstaller: true, hasVersions: true, hasLanguages: true, hasDlc: true, readableVersions: true },
+  epic: { hasTool: true, hasCloud: true, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: true, readableVersions: true },
+  amazon: { hasTool: true, hasCloud: false, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: false, readableVersions: false },
+  steam: { hasTool: false, hasCloud: false, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: false, readableVersions: false },
 };
 
 export function storeCaps(source: StoreSource): StoreCaps {
@@ -102,6 +117,25 @@ export function hasInstaller(source: StoreSource): boolean {
   return CAPS[source].hasInstaller;
 }
 
+export function hasDlc(source: StoreSource): boolean {
+  return CAPS[source].hasDlc;
+}
+
+export function readableVersions(source: StoreSource): boolean {
+  return CAPS[source].readableVersions;
+}
+
+/** The installed version a person can read ("2.1"), or `''` (none, or an opaque id: Amazon). */
+export function shownVersion(game: Pick<StoreGame, 'source' | 'version'>): string {
+  return readableVersions(game.source) ? game.version.trim() : '';
+}
+
+/** The update button: "Update to 2.2", or "Update" for a store whose versions are opaque (Amazon). */
+export function updateLabel(game: Pick<StoreGame, 'source' | 'update_version'>): string {
+  const v = game.update_version.trim();
+  return readableVersions(game.source) && v !== '' ? `Update to ${v}` : 'Update';
+}
+
 /** Whether the store keeps its own cloud saves GRID syncs (GOG and Epic). Same as `hasCloud`. */
 export function hasStoreCloud(source: StoreSource): boolean {
   return hasCloud(source);
@@ -109,7 +143,7 @@ export function hasStoreCloud(source: StoreSource): boolean {
 
 /**
  * Whether GRID installed the game with its store's tool (`origin` is
- * `gogdl` / `legendary`), so the tool can verify and repair it. An offline
+ * `gogdl` / `legendary` / `nile`), so the tool can verify and repair it. An offline
  * install or a drive copy can't be verified.
  */
 export function installedByTool(game: Pick<StoreGame, 'source' | 'origin'>): boolean {

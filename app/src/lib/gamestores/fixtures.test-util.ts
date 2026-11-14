@@ -1,7 +1,7 @@
 // Builders for the gamestores tests: a status, a game and a Downloads row with
 // sensible defaults (the fake's own data underneath). Fake markers only.
 import type { DownloadEntry, StoreGame, StoreStatus } from '../api';
-import { baseEpicStatus, baseStatus, FakeStores } from './fakeApi';
+import { baseAmazonStatus, baseEpicStatus, baseStatus, FakeStores } from './fakeApi';
 
 export function status(over: Partial<StoreStatus> = {}): StoreStatus {
   return { ...baseStatus(), ...over, tool: { ...baseStatus().tool, ...(over.tool ?? {}) } };
@@ -15,6 +15,17 @@ export function epicStatus(over: Partial<StoreStatus> = {}): StoreStatus {
 /** One of the fake's Epic Games games by app name (`Starlight`, `GlimmerDeep`, `IronOrchard`, …). */
 export function epicGame(appName: string, over: Partial<StoreGame> = {}): StoreGame {
   const base = new FakeStores().games.find((g) => g.key === `epic:${appName}`)!;
+  return { ...base, ...over };
+}
+
+/** An Amazon Games status: signed in as sam.plays, nile 1.2.0 installed, no cloud saves. */
+export function amazonStatus(over: Partial<StoreStatus> = {}): StoreStatus {
+  return { ...baseAmazonStatus(), ...over, tool: { ...baseAmazonStatus().tool, ...(over.tool ?? {}) } };
+}
+
+/** One of the fake's Amazon Games games by title (`Fogline`, `Kettle Drum`, `Lowsun`). */
+export function amazonGame(title: string, over: Partial<StoreGame> = {}): StoreGame {
+  const base = new FakeStores().games.find((g) => g.source === 'amazon' && g.title === title)!;
   return { ...base, ...over };
 }
 

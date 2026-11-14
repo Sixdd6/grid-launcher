@@ -4,17 +4,22 @@ import {
   canBackup,
   ENABLED_STORES,
   hasCloud,
+  hasDlc,
   hasInstaller,
   hasTool,
   installedByTool,
   isEnabledStore,
   noBackupReason,
+  readableVersions,
+  shownVersion,
   storeCaps,
   storeLauncher,
   storeName,
+  storeOfKey,
   storeOfPlatform,
   storesLede,
   storeTool,
+  updateLabel,
 } from './marks';
 import { availBlock, parseStoreRailKey, storeFlag, storeRailGroups, storeRailKey, storeShown } from './rail';
 import { coverPrimary, coverProgress, coverTags, showCoverCloud } from './cover';
@@ -48,19 +53,30 @@ describe('text', () => {
 });
 
 describe('marks', () => {
-  it('shows GOG and Epic Games in Phase 2', () => {
-    expect(ENABLED_STORES).toEqual(['epic', 'gog']);
+  it('shows GOG, Epic Games and Amazon Games in Phase 3', () => {
+    expect(ENABLED_STORES).toEqual(['amazon', 'epic', 'gog']);
     expect(isEnabledStore('epic')).toBe(true);
-    expect(isEnabledStore('amazon')).toBe(false);
+    expect(isEnabledStore('amazon')).toBe(true);
+    expect(isEnabledStore('steam')).toBe(false);
     expect(storeName('gog')).toBe('GOG');
     expect(storeName('epic')).toBe('Epic Games');
+    expect(storeName('amazon')).toBe('Amazon Games');
     expect(storeTool('gog')).toEqual({ name: 'gogdl', pkg: 'heroic-gogdl' });
     expect(storeTool('epic')).toEqual({ name: 'legendary', pkg: 'legendary' });
+    expect(storeTool('amazon')).toEqual({ name: 'nile', pkg: 'nile' });
     expect(storeTool('steam')).toBeNull();
   });
   it('gives each store its capabilities', () => {
-    expect(storeCaps('gog')).toEqual({ hasTool: true, hasCloud: true, canBackup: true, hasInstaller: true, hasVersions: true, hasLanguages: true });
-    expect(storeCaps('epic')).toEqual({ hasTool: true, hasCloud: true, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false });
+    expect(storeCaps('gog')).toEqual({
+      hasTool: true, hasCloud: true, canBackup: true, hasInstaller: true, hasVersions: true, hasLanguages: true, hasDlc: true, readableVersions: true,
+    });
+    expect(storeCaps('epic')).toEqual({
+      hasTool: true, hasCloud: true, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: true, readableVersions: true,
+    });
+    // Amazon is the first store with a tool but no cloud saves, no DLC and opaque versions.
+    expect(storeCaps('amazon')).toEqual({
+      hasTool: true, hasCloud: false, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: false, readableVersions: false,
+    });
     expect([hasTool('steam'), hasCloud('amazon'), canBackup('epic'), hasInstaller('epic')]).toEqual([false, false, false, false]);
     expect([hasTool('epic'), hasCloud('epic'), canBackup('gog'), hasInstaller('gog')]).toEqual([true, true, true, true]);
   });
@@ -69,11 +85,13 @@ describe('marks', () => {
     expect(installedByTool({ source: 'gog', origin: 'offline' })).toBe(false);
     expect(installedByTool({ source: 'epic', origin: 'legendary' })).toBe(true);
     expect(installedByTool({ source: 'epic', origin: 'gogdl' })).toBe(false);
+    expect(installedByTool({ source: 'amazon', origin: 'nile' })).toBe(true);
     expect(installedByTool({ source: 'steam', origin: null })).toBe(false);
   });
   it('names the launcher and reads store platforms', () => {
     expect(storeLauncher('epic')).toBe('Epic Games Launcher');
     expect(storeOfPlatform('Epic Games')).toBe('epic');
+    expect(storeOfPlatform('Amazon Games')).toBe('amazon');
     expect(storeOfPlatform('GOG')).toBe('gog');
     expect(storeOfPlatform('epic')).toBe('epic');
     expect(storeOfPlatform('PlayStation')).toBeNull();
@@ -84,8 +102,12 @@ describe('marks', () => {
     expect(storesLede(['gog'])).toBe(
       `${start} GRID installs GOG games with the open-source tool Heroic Games Launcher uses; its login stays in that tool’s files in GRID’s data folder.`,
     );
-    expect(storesLede()).toBe(
+    expect(storesLede(['epic', 'gog'])).toBe(
       `${start} GRID installs GOG and Epic games with the open-source tools Heroic Games Launcher uses; their logins stay in those tools’ files in GRID’s data folder.`,
+    );
+    // Phase 3: the prototype's line without Steam.
+    expect(storesLede()).toBe(
+      `${start} GRID installs GOG, Epic and Amazon games with the open-source tools Heroic Games Launcher uses; their logins stay in those tools’ files in GRID’s data folder.`,
     );
     // The prototype's full line, every store shown.
     expect(storesLede(['amazon', 'epic', 'gog', 'steam'])).toBe(
@@ -95,6 +117,21 @@ describe('marks', () => {
   it('says why Epic, Amazon and Steam games can’t be backed up', () => {
     expect(noBackupReason('gog')).toBe('');
     expect(noBackupReason('epic')).toContain('legendary installs only from Epic’s servers');
+    expect(noBackupReason('amazon')).toBe('Amazon Games games can’t be backed up: nile installs only from Amazon’s servers.');
+  });
+  it('reads a store from a game key, splitting at the first colon only', () => {
+    expect(storeOfKey('amazon:amzn1.adg.product.x')).toBe('amazon');
+    expect(storeOfKey('epic:Starlight')).toBe('epic');
+    expect(storeOfKey('gog:1001')).toBe('gog');
+    expect(storeOfKey('nonsense')).toBe('gog');
+  });
+  it('shows readable versions only: Amazon’s update reads “Update”', () => {
+    expect(updateLabel({ source: 'gog', update_version: '2.2' })).toBe('Update to 2.2');
+    expect(updateLabel({ source: 'epic', update_version: '1.13' })).toBe('Update to 1.13');
+    expect(updateLabel({ source: 'amazon', update_version: '9d2a6c31-fake' })).toBe('Update');
+    expect(shownVersion({ source: 'gog', version: ' 2.1 ' })).toBe('2.1');
+    expect(shownVersion({ source: 'amazon', version: '4b1f0e2c-fake' })).toBe('');
+    expect([hasDlc('gog'), hasDlc('epic'), hasDlc('amazon'), readableVersions('amazon')]).toEqual([true, true, false, false]);
   });
 });
 
@@ -133,7 +170,7 @@ describe('rail', () => {
     expect(storeRailGroups([status({ connection: 'expired' })])[0].rows[1].count).toEqual({ kind: 'attention' });
   });
   it('hides stores that are not enabled', () => {
-    expect(storeRailGroups([status({ source: 'amazon' }), status({ source: 'steam' })])).toEqual([]);
+    expect(storeRailGroups([status({ source: 'steam' })])).toEqual([]);
   });
 });
 
@@ -201,7 +238,7 @@ describe('store view', () => {
     expect(storePanel(status(), 'installed', [installedGame()])).toBeNull();
     expect(storePanel(status({ connection: 'not_connected' }), 'available', [])?.title).toBe('GOG isn’t connected');
     expect(storePanel(status({ connection: 'expired' }), 'available', [])).toMatchObject({ tone: 'warn', title: 'Your GOG login expired' });
-    const tool = storePanel(status({ tool: { state: 'not_installed', size_bytes: 12 * 1024 * 1024 } as never }), 'available', []);
+    const tool = storePanel(status({ tool: { state: 'not_installed', size_bytes: 12_000_000 } as never }), 'available', []);
     expect(tool?.title).toBe('GOG needs gogdl');
     expect(tool?.actions[0].label).toBe('Install gogdl (12 MB)');
     expect(storePanel(status({ tool: { state: 'installing' } as never }), 'available', [])?.actions[0]).toMatchObject({ label: 'Installing gogdl…', disabled: true });

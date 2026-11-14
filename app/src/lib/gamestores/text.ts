@@ -15,6 +15,15 @@ export function sizeGb(bytes: number): string {
   return '<1 MB';
 }
 
+/**
+ * A store tool's download size, in decimal megabytes as its release page
+ * gives it: nile's 11113264-byte asset is "11 MB", legendary's "3 MB",
+ * gogdl's "1 MB" (plan, package C: the pin's real size).
+ */
+export function toolSize(bytes: number): string {
+  return `${Math.max(1, Math.round(Math.max(0, bytes) / 1_000_000))} MB`;
+}
+
 /** "1 game", "3 games"; `many` defaults to `one` + "s". */
 export function plural(n: number, one: string, many: string = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;

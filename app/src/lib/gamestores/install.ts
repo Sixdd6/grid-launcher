@@ -2,7 +2,7 @@
 // `stInstallHTML`): Version (GOG, when both builds exist), Options
 // (compatibility tool, language, install folder), DLC you own, the space line
 // and the button. Epic Games has neither Version nor Language: its games are
-// Windows builds, in one language. Pure: the dialog keeps the choice; this
+// Windows builds, in one language. Amazon Games has no DLC either. Pure: the dialog keeps the choice; this
 // words it.
 import type { StoreGame, StoreInstallOptions, StoreInstallRequest, StorePlatform, StoreSource } from '../api';
 import { storeCaps } from './marks';
@@ -26,6 +26,14 @@ export function initialChoice(opts: StoreInstallOptions): InstallChoice {
     installDir: opts.install_dir,
     compatTool: opts.compat_tool,
   };
+}
+
+/**
+ * The options as this store's dialog uses them: no DLC for a store without
+ * DLC (Amazon), whatever the backend sends, so nothing is ticked or sent.
+ */
+export function optionsForStore(source: StoreSource, opts: StoreInstallOptions): StoreInstallOptions {
+  return storeCaps(source).hasDlc ? opts : { ...opts, dlc: [] };
 }
 
 export type VersionRow = { platform: StorePlatform; label: string; note: string; recommended: boolean };

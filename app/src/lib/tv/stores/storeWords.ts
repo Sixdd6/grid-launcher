@@ -17,9 +17,9 @@ import { failureReason, hasStoreBadge, storeBackupLine, storeEntryLine, storeKin
 import { cloudSwitchLabel, storeHeaderLine } from '../../gamestores/details';
 import { inspectionView, fileName, type InspectionView } from '../../gamestores/inspection';
 import { isLive, jobAct, jobPercent } from '../../gamestores/jobs';
-import { canBackup, hasCloud as hasStoreCloud, hasInstaller, noBackupReason, storeName, storeTool } from '../../gamestores/marks';
+import { canBackup, hasCloud as hasStoreCloud, hasInstaller, noBackupReason, shownVersion, storeName, storeTool, updateLabel } from '../../gamestores/marks';
 import { availBlock, type StorePart } from '../../gamestores/rail';
-import { agoText, changedAt, plural, sizeGb } from '../../gamestores/text';
+import { agoText, changedAt, plural, sizeGb, toolSize } from '../../gamestores/text';
 import { storePanel, type PanelAct, type StorePanel } from '../../gamestores/view';
 
 // ── Library: the header ─────────────────────────────────────────────────
@@ -88,7 +88,7 @@ export function tvNoMatch(search: string): { title: string; body: string } {
 /** One top-left tag, in the prototype's order: NOT SUPPORTED, SAVE CONFLICT, UPDATE (none while a job runs). */
 export function tvCoverTag(game: StoreGame, job: DownloadEntry | null): { text: string; cls: 'sns' | 'scf' | 'upd' } | null {
   if (game.not_supported !== '') return { text: 'NOT SUPPORTED', cls: 'sns' };
-  if (game.installed && game.cloud === 'conflict') return { text: 'SAVE CONFLICT', cls: 'scf' };
+  if (game.installed && hasStoreCloud(game.source) && game.cloud === 'conflict') return { text: 'SAVE CONFLICT', cls: 'scf' };
   if (game.installed && game.update_version !== '' && job === null) return { text: 'UPDATE', cls: 'upd' };
   return null;
 }
@@ -164,7 +164,7 @@ export function tvStoreButtons(o: {
           : `Your ${name} login expired. Sign in again in Settings › Stores.`;
     out.push({ act: 'install', label: 'Install…', primary: true, icon: 'download', disabled: why !== undefined, why });
   }
-  if (game.installed && game.update_version !== '' && job === null) out.push({ act: 'update', label: `Update to ${game.update_version}`, primary: false });
+  if (game.installed && game.update_version !== '' && job === null) out.push({ act: 'update', label: updateLabel(game), primary: false });
   if (game.installed) out.push({ act: 'settings', label: 'Game settings', primary: false });
   if (game.installed && job === null) {
     out.push({ act: 'verify', label: 'Verify and repair', primary: false });
@@ -241,11 +241,12 @@ export function tvHeaderLine(game: StoreGame, driveName: string | null): string 
   return driveName ? `From ${driveName} · ${line}` : line;
 }
 
-/** The chips after the store's: Installed, v1.0.4, Update available, Offline installer, Not supported. */
+/** The chips after the store's: Installed, v1.0.4 (none for Amazon's opaque ids), Update available, Offline installer, Not supported. */
 export function tvDetailChips(game: StoreGame): { text: string; bold?: boolean; warn?: boolean }[] {
   const out: { text: string; bold?: boolean; warn?: boolean }[] = [];
   if (game.installed) out.push({ text: 'Installed', bold: true });
-  if (game.installed && game.version.trim() !== '') out.push({ text: `v${game.version.trim()}` });
+  const version = shownVersion(game);
+  if (game.installed && version !== '') out.push({ text: `v${version}` });
   if (game.installed && game.update_version !== '') out.push({ text: 'Update available', warn: true });
   if (game.origin === 'offline') out.push({ text: 'Offline installer' });
   if (game.not_supported !== '') out.push({ text: 'Not supported', warn: true });
@@ -265,14 +266,14 @@ export function tvTabStep(tabs: readonly TvTab[], cur: TvTab, d: -1 | 1): TvTab 
   return tabs[(i + d + tabs.length) % tabs.length];
 }
 
-/** Overview's facts: Store, Developer, Release, Size, Version ("v2.1 · GOG v2.2"). */
+/** Overview's facts: Store, Developer, Release, Size, Version ("v2.1 · GOG v2.2"; none for Amazon). */
 export function tvFacts(game: StoreGame): { term: string; value: string }[] {
   const name = storeName(game.source);
   const out = [{ term: 'Store', value: name }];
   if (game.developer.trim()) out.push({ term: 'Developer', value: game.developer });
   if (game.year.trim()) out.push({ term: 'Release', value: game.year });
   out.push({ term: 'Size', value: sizeGb(game.installed && game.disk_bytes > 0 ? game.disk_bytes : game.download_bytes) });
-  if (game.installed && game.version.trim()) {
+  if (game.installed && shownVersion(game) !== '') {
     out.push({ term: 'Version', value: `v${game.version}${game.update_version ? ` · ${name} v${game.update_version}` : ''}` });
   }
   return out;
@@ -379,7 +380,8 @@ export function uninstallWords(game: StoreGame): { title: string; body: string; 
 }
 
 export function updateWords(game: StoreGame): { title: string; body: string; ok: string } {
-  return { title: `Update ${game.title} to ${game.update_version}?`, body: 'Saves and settings stay.', ok: 'Update' };
+  const to = updateLabel(game) === 'Update' ? '' : ` to ${game.update_version.trim()}`;
+  return { title: `Update ${game.title}${to}?`, body: 'Saves and settings stay.', ok: 'Update' };
 }
 
 export function cancelJobWords(title: string, job: DownloadEntry): { title: string; body: string; ok: string } {
@@ -463,7 +465,7 @@ export function notConnectedNote(status: StoreStatus): string {
   const tool = storeTool(status.source) ?? { name: 'its tool', pkg: '' };
   return `Sign in to ${name} to see the games you own in the Library and install them. GRID installs with ${tool.name} (${tool.pkg}, ${
     status.tool.license || 'GPL-3.0'
-  }, ${sizeGb(status.tool.size_bytes)}), which it downloads when you connect.${hasInstaller(status.source) ? ` You can install ${name} offline installers without signing in.` : ''}`;
+  }, ${toolSize(status.tool.size_bytes)}), which it downloads when you connect.${hasInstaller(status.source) ? ` You can install ${name} offline installers without signing in.` : ''}`;
 }
 
 /** "8 · 3 installed · updated 5 min ago" ("Loading…" while it loads). */
@@ -483,14 +485,15 @@ export function toolRow(status: StoreStatus): { info: true; value: string } | { 
     return { info: false, label: `Couldn’t install ${tool.name}`, sub, value: 'Try again', busy: false };
   }
   if (t.state === 'installing') return { info: false, label: 'Store tool', sub: 'Installing…', value: 'Install', busy: true };
-  return { info: false, label: 'Store tool', sub: `Not installed · ${sizeGb(t.size_bytes)}`, value: 'Install', busy: false };
+  return { info: false, label: 'Store tool', sub: `Not installed · ${toolSize(t.size_bytes)}`, value: 'Install', busy: false };
 }
 
 export function disconnectWords(status: StoreStatus): { title: string; body: string; ok: string } {
   const name = storeName(status.source);
   const tool = storeTool(status.source)?.name ?? 'its tool';
   const n = status.installed_count;
-  const stay = n > 0 ? ` The ${n} installed games stay and still play; they can’t install, update${hasStoreCloud(status.source) ? ' or sync cloud saves' : ''} until you connect again.` : '';
+  const cant = hasStoreCloud(status.source) ? 'install, update or sync cloud saves' : 'install or update';
+  const stay = n > 0 ? ` The ${n} installed games stay and still play; they can’t ${cant} until you connect again.` : '';
   return { title: `Disconnect ${name}?`, body: `GRID deletes your ${name} login and ${tool} from this computer.${stay}`, ok: 'Disconnect' };
 }
 

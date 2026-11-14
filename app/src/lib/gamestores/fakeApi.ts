@@ -1,5 +1,5 @@
 // A fake of the store commands and events, with the GameStores prototype's
-// GOG and Epic Games data (`stores.js` g1–g8 and e1–e6; placeholder titles
+// GOG, Epic Games and Amazon Games data (`stores.js` g1–g8, e1–e6 and a1–a3; placeholder titles
 // only; fake markers, never a real account or token). Used by the vitest
 // suites and, behind the dev-only VITE_FAKE_STORES flag (`devMock.ts`), to
 // click through every state in a browser. It answers
@@ -32,9 +32,21 @@ export const FAKE_USERNAME = 'sam_plays';
 /** The fake Epic Games account (the prototype's "Signed in as SamPlays"). */
 export const FAKE_EPIC_USERNAME = 'SamPlays';
 
-/** The stores the fake answers for. */
-export type FakeSource = 'gog' | 'epic';
-export const FAKE_SOURCES: readonly FakeSource[] = ['epic', 'gog'];
+/** The fake Amazon Games account (the prototype's "Signed in as sam.plays"). */
+export const FAKE_AMAZON_USERNAME = 'sam.plays';
+
+/** The stores the fake answers for, in the rail's order. */
+export type FakeSource = 'gog' | 'epic' | 'amazon';
+export const FAKE_SOURCES: readonly FakeSource[] = ['amazon', 'epic', 'gog'];
+
+function asFakeSource(src: string | undefined | null): FakeSource {
+  return src === 'epic' || src === 'amazon' ? src : 'gog';
+}
+
+/** Amazon Games keeps no cloud saves and has no DLC (nile has neither). */
+function fakeHasCloud(source: FakeSource): boolean {
+  return source !== 'amazon';
+}
 
 type Seed = Partial<StoreGame> & { id: string; title: string; hue: string; dl: number; disk: number; source?: FakeSource };
 
@@ -98,14 +110,37 @@ const EPIC_SEEDS: Seed[] = [
   { source: 'epic', id: 'RustbeltRally', title: 'Rustbelt Rally', hue: 'hsl(35 50% 34%)', dl: 12.5, disk: 16.0, platforms: ['windows'], developer: 'Gravel Works', year: '2020', genres: ['Racing'] },
 ];
 
+/**
+ * The prototype's Amazon Games games (`stores.js` a1–a3), keyed by a made-up
+ * product id (`amzn1.adg.product.<uuid>`, with dots, as nile's). Every Amazon
+ * game is a Windows build. Versions are opaque version ids, as nile's
+ * `installed.json` holds them: the UI never shows them.
+ */
+export const FAKE_AMAZON_VERSION = '4b1f0e2c-7a3d-4c55-9e10-fake-version-1';
+export const FAKE_AMAZON_UPDATE = '9d2a6c31-0f4e-4b7a-8c21-fake-version-2';
+const AMAZON_SEEDS: Seed[] = [
+  {
+    source: 'amazon', id: 'amzn1.adg.product.0f6c1d2e-f0a1-4a1e-9c3b-000000000a01', title: 'Fogline', hue: 'hsl(220 20% 34%)', installed: true, installed_platform: 'windows',
+    version: FAKE_AMAZON_VERSION, dl: 5.5, disk: 7.0, platforms: ['windows'], developer: 'Mistral', year: '2020', genres: ['Adventure'],
+  },
+  {
+    source: 'amazon', id: 'amzn1.adg.product.5a7e2b9c-e7a2-4d0f-8a61-000000000a02', title: 'Kettle Drum', hue: 'hsl(5 45% 36%)', dl: 2.2, disk: 3.0, platforms: ['windows'],
+    developer: 'Brass Band', year: '2019', genres: ['Rhythm'],
+  },
+  {
+    source: 'amazon', id: 'amzn1.adg.product.c3d84f10-10a3-47b2-b5e9-000000000a03', title: 'Lowsun', hue: 'hsl(45 55% 38%)', dl: 15.0, disk: 19.0, platforms: ['windows'],
+    developer: 'Dusk Yard', year: '2021', genres: ['Survival'],
+  },
+];
+
 /** The store tool's name and the origin its installs get. */
-function toolOf(source: FakeSource): 'gogdl' | 'legendary' {
-  return source === 'epic' ? 'legendary' : 'gogdl';
+function toolOf(source: FakeSource): 'gogdl' | 'legendary' | 'nile' {
+  return source === 'epic' ? 'legendary' : source === 'amazon' ? 'nile' : 'gogdl';
 }
 
 /** The store's name as the UI writes it (kept local: the fake imports no UI module). */
 function nameOf(source: FakeSource): string {
-  return source === 'epic' ? 'Epic Games' : 'GOG';
+  return source === 'epic' ? 'Epic Games' : source === 'amazon' ? 'Amazon Games' : 'GOG';
 }
 
 function folderOf(source: FakeSource, title: string): string {
@@ -121,6 +156,7 @@ export function fakeCover(title: string, hue: string): string {
 
 function game(s: Seed): StoreGame {
   const source = s.source ?? 'gog';
+  const cloudy = fakeHasCloud(source);
   return {
     key: `${source}:${s.id}`,
     source,
@@ -142,8 +178,8 @@ function game(s: Seed): StoreGame {
     origin: s.installed ? (s.origin ?? toolOf(source)) : null,
     not_supported: s.not_supported ?? '',
     dlc: (s.dlc ?? []).map((d) => ({ ...d, download_bytes: Math.round(d.download_bytes) })),
-    cloud: s.installed ? (s.cloud ?? 'synced') : 'unknown',
-    last_sync: s.installed ? NOW() - 2 * 3600 : 0,
+    cloud: s.installed && cloudy ? (s.cloud ?? 'synced') : 'unknown',
+    last_sync: s.installed && cloudy ? NOW() - 2 * 3600 : 0,
     install_dir: s.installed ? folderOf(source, s.title) : '',
     compat_tool: s.installed_platform === 'windows' ? 'GE-Proton10-17' : '',
   };
@@ -151,6 +187,7 @@ function game(s: Seed): StoreGame {
 
 export function baseStatus(source: FakeSource = 'gog'): StoreStatus {
   if (source === 'epic') return baseEpicStatus();
+  if (source === 'amazon') return baseAmazonStatus();
   return {
     source: 'gog',
     connection: 'connected',
@@ -209,6 +246,43 @@ export function baseEpicStatus(): StoreStatus {
   };
 }
 
+/**
+ * The Amazon Games status: signed in as sam.plays, nile installed (the pin's
+ * real data, plan package C: 1.2.0, the Linux x86_64 asset's 11 MB; the
+ * prototype's "1.1.2 · 9 MB" are placeholders). No cloud saves.
+ */
+export function baseAmazonStatus(): StoreStatus {
+  return {
+    source: 'amazon',
+    connection: 'connected',
+    username: FAKE_AMAZON_USERNAME,
+    tool: {
+      name: 'nile',
+      version: '1.2.0',
+      state: 'installed',
+      size_bytes: 11113264,
+      error: '',
+      license: 'GPL-3.0',
+      source_url: 'https://github.com/imLinguin/nile',
+      done: 0,
+      total: 0,
+    },
+    owned: 'ready',
+    owned_error: '',
+    owned_count: 3,
+    installed_count: 1,
+    installed_bytes: 0,
+    refreshed_at: NOW() - 3 * 86400,
+    cloud_saves: false,
+    install_dir: '~/Games/GRID/stores/amazon',
+    in_rail: true,
+    last_error: '',
+  };
+}
+
+/** The tool error nile gives on a computer older than its glibc floor (plan, spike 1). */
+export const FAKE_NILE_GLIBC_ERROR = 'nile needs a newer system (glibc 2.35 or later)';
+
 /** The prototype's dashed "Prototype" select, as named scenarios. */
 export type FakeScenario =
   | 'normal'
@@ -219,6 +293,7 @@ export type FakeScenario =
   | 'toolInstalling'
   | 'toolFailed'
   | 'needsPython'
+  | 'needsGlibc'
   | 'expired'
   | 'notConnected'
   | 'notConnectedNothing'
@@ -227,7 +302,7 @@ export type FakeScenario =
   | 'cloudConflict';
 
 export const FAKE_SCENARIOS: readonly FakeScenario[] = [
-  'normal', 'loading', 'emptyInstalled', 'everythingInstalled', 'toolMissing', 'toolInstalling', 'toolFailed', 'needsPython', 'expired', 'notConnected', 'notConnectedNothing',
+  'normal', 'loading', 'emptyInstalled', 'everythingInstalled', 'toolMissing', 'toolInstalling', 'toolFailed', 'needsPython', 'needsGlibc', 'expired', 'notConnected', 'notConnectedNothing',
   'ownedError', 'update', 'cloudConflict',
 ];
 
@@ -288,7 +363,7 @@ function entry(partial: Partial<DownloadEntry> & { kind: DownloadKind; title: st
 /** The store a command is for: its `source` argument, else its game key's store, else GOG. */
 function sourceOf(args: Record<string, unknown>, g: StoreGame | null): FakeSource {
   const src = typeof args.source === 'string' ? args.source : (g?.source ?? (typeof args.key === 'string' ? args.key.split(':')[0] : ''));
-  return src === 'epic' ? 'epic' : 'gog';
+  return asFakeSource(src);
 }
 
 /**
@@ -297,8 +372,8 @@ function sourceOf(args: Record<string, unknown>, g: StoreGame | null): FakeSourc
  * (the dev mock calls it on a timer; tests call it by hand).
  */
 export class FakeStores {
-  statuses: Record<FakeSource, StoreStatus> = { gog: baseStatus('gog'), epic: baseEpicStatus() };
-  games: StoreGame[] = [...SEEDS.map(game), ...EPIC_SEEDS.map(game)];
+  statuses: Record<FakeSource, StoreStatus> = { gog: baseStatus('gog'), epic: baseEpicStatus(), amazon: baseAmazonStatus() };
+  games: StoreGame[] = [...SEEDS.map(game), ...EPIC_SEEDS.map(game), ...AMAZON_SEEDS.map(game)];
   entries: DownloadEntry[] = [];
   driveGames: DriveStoreGame[] = [];
   cloud: Record<string, StoreCloudState> = {};
@@ -319,6 +394,8 @@ export class FakeStores {
 
   constructor(emit: FakeEmit = () => {}) {
     this.emit = emit;
+    // The prototype starts Amazon Games with its login expired (`ST.proto.amazon`).
+    this.statuses.amazon.connection = 'expired';
     this.cloud['gog:1002'] = {
       state: 'conflict',
       synced_at: NOW() - 3 * 86400,
@@ -400,6 +477,9 @@ export class FakeStores {
       case 'needsPython':
         status.tool = { ...status.tool, state: 'failed', error: 'needs Python 3.10' };
         break;
+      case 'needsGlibc':
+        status.tool = { ...status.tool, state: 'failed', error: FAKE_NILE_GLIBC_ERROR };
+        break;
       case 'expired':
         status.connection = 'expired';
         break;
@@ -422,10 +502,12 @@ export class FakeStores {
       case 'update': {
         keep();
         const first = this.gamesOf(source).find((g) => g.installed);
-        if (first) map((g) => (g.key === first.key ? { ...g, update_version: source === 'epic' ? '1.13' : '2.2' } : g));
+        const next = source === 'epic' ? '1.13' : source === 'amazon' ? FAKE_AMAZON_UPDATE : '2.2';
+        if (first) map((g) => (g.key === first.key ? { ...g, update_version: next } : g));
         break;
       }
       case 'cloudConflict': {
+        if (!fakeHasCloud(source)) break;
         keep();
         const first = this.gamesOf(source).find((g) => g.installed && g.cloud !== 'none' && g.cloud !== 'off');
         if (first) {
@@ -460,7 +542,7 @@ export class FakeStores {
     this.emitDownloads();
   }
 
-  /** Every store's status, in the rail's order (Epic Games, GOG). */
+  /** Every store's status, in the rail's order (Amazon Games, Epic Games, GOG). */
   allStatuses(): StoreStatus[] {
     return FAKE_SOURCES.map((src) => this.library(src).status);
   }
@@ -478,7 +560,7 @@ export class FakeStores {
     g: StoreGame | null,
     title?: string,
     extra: Partial<DownloadEntry> = {},
-    source: FakeSource = g?.source === 'epic' ? 'epic' : 'gog',
+    source: FakeSource = asFakeSource(g?.source),
   ): DownloadEntry {
     const busy = this.entries.some((e) => e.kind !== 'store_tool' && (e.status === 'downloading' || e.status === 'installing'));
     const e = entry({
@@ -536,7 +618,7 @@ export class FakeStores {
     e.status = 'completed';
     const g = this.games.find((x) => x.key === e.source_id);
     if (e.kind === 'store_tool') {
-      const src: FakeSource = e.source_id === 'epic' ? 'epic' : 'gog';
+      const src: FakeSource = asFakeSource(e.source_id);
       const version = baseStatus(src).tool.version;
       this.statuses[src].tool = { ...this.statuses[src].tool, state: 'installed', version };
       e.detail = version;
@@ -545,24 +627,29 @@ export class FakeStores {
       return;
     }
     if (!g) return;
-    const src: FakeSource = g.source === 'epic' ? 'epic' : 'gog';
+    const src: FakeSource = asFakeSource(g.source);
     if (e.kind === 'store_update') {
       g.version = g.update_version;
       g.update_version = '';
-      this.notice(`${g.title} updated to ${g.version}`, {}, src);
+      // Amazon's versions are opaque ids: "Fogline updated" (user decision 2026-11-13).
+      this.notice(src === 'amazon' ? `${g.title} updated` : `${g.title} updated to ${g.version}`, {}, src);
     } else if (e.kind === 'store_repair') {
-      e.detail = '2 files repaired';
-      this.notice(`${g.title}: 2 damaged files were downloaded again`, {}, src);
+      // nile's verify gives no repaired-file count: the row reads "Verified".
+      if (src === 'amazon') this.notice(`${g.title} verified`, {}, src);
+      else {
+        e.detail = '2 files repaired';
+        this.notice(`${g.title}: 2 damaged files were downloaded again`, {}, src);
+      }
     } else if (e.kind === 'store_dlc') {
       for (const d of g.dlc) if (e.title === d.title) d.installed = true;
       this.notice(`${e.title} installed`, {}, src);
     } else {
       g.installed = true;
       g.installed_platform = g.installed_platform ?? (g.platforms.includes('linux') ? 'linux' : 'windows');
-      g.version = g.version || '1.0';
+      g.version = g.version || (src === 'amazon' ? FAKE_AMAZON_VERSION : '1.0');
       g.origin = e.kind === 'store_installer' ? 'offline' : e.kind === 'store_restore' ? 'drive' : toolOf(src);
-      g.cloud = 'synced';
-      g.last_sync = NOW();
+      g.cloud = fakeHasCloud(src) ? 'synced' : 'unknown';
+      g.last_sync = fakeHasCloud(src) ? NOW() : 0;
       g.install_dir = folderOf(src, g.title);
       g.compat_tool = g.installed_platform === 'windows' ? 'GE-Proton10-17' : '';
       this.notice(
@@ -602,7 +689,7 @@ export class FakeStores {
         // The login window is the backend's own window; the fake finishes it at once.
         setTimeout(() => {
           const outcome = this.nextLogin;
-          const user = source === 'epic' ? FAKE_EPIC_USERNAME : FAKE_USERNAME;
+          const user = source === 'epic' ? FAKE_EPIC_USERNAME : source === 'amazon' ? FAKE_AMAZON_USERNAME : FAKE_USERNAME;
           if (outcome === 'connected') {
             status.connection = 'connected';
             status.username = user;
@@ -773,14 +860,15 @@ export class FakeStores {
   }
 
   installOptions(g: StoreGame | null): StoreInstallOptions {
-    if (g?.source === 'epic') {
-      // legendary installs the Windows build only, in one language: no Version, no Language.
+    if (g?.source === 'epic' || g?.source === 'amazon') {
+      // legendary and nile install the Windows build only, in one language:
+      // no Version, no Language; nile has no DLC.
       return {
         versions: [{ platform: 'windows', recommended: true, download_bytes: g.download_bytes, disk_bytes: g.disk_bytes }],
         languages: [],
         default_language: '',
         dlc: g.dlc.map((d) => ({ ...d })),
-        install_dir: folderOf('epic', g.title),
+        install_dir: folderOf(g.source, g.title),
         free_bytes: 412 * GB,
         volume: '/home',
         compat_tool: 'GE-Proton10-17',
@@ -814,13 +902,15 @@ export class FakeStores {
       exe_user_pinned: false,
       launch_parameters: '',
       compat_tool: win ? 'GE-Proton10-17' : '',
-      wineprefix: win ? `${g?.install_dir}/${g?.source === 'epic' ? 'prefix' : 'pfx'}` : '',
-      cloud_saves: g?.cloud !== 'off',
+      wineprefix: win ? `${g?.install_dir}/${g?.source === 'epic' || g?.source === 'amazon' ? 'prefix' : 'pfx'}` : '',
+      cloud_saves: g?.source === 'amazon' ? false : g?.cloud !== 'off',
     };
   }
 
   private cloudState(g: StoreGame | null): StoreCloudState {
     if (g && this.cloud[g.key]) return this.cloud[g.key];
+    // Amazon Games has no cloud saves (the backend answers `off`).
+    if (g?.source === 'amazon') return { state: 'off', synced_at: 0, locations: [], conflict: null };
     if (g?.source === 'epic') {
       const state = g.cloud === 'off' ? 'off' : g.cloud === 'none' ? 'none' : 'synced';
       return { state, synced_at: g.last_sync, locations: state === 'none' ? [] : [`${g.install_dir}/prefix/drive_c/users/steamuser/Saved Games/${g.title}`], conflict: null };

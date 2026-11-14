@@ -7,8 +7,8 @@
   // "22.0 GB to download · 412 GB free on /home" and Install, which Start
   // presses from anywhere.
   import { api, type StoreInstallOptions } from '../../api';
-  import { initialChoice, installRequest, installSizes, type InstallChoice } from '../../gamestores/install';
-  import { storeName } from '../../gamestores/marks';
+  import { initialChoice, installRequest, installSizes, optionsForStore, type InstallChoice } from '../../gamestores/install';
+  import { storeName, storeOfKey } from '../../gamestores/marks';
   import { sizeGb } from '../../gamestores/text';
   import { gameStores } from '../../stores/gameStores.svelte';
   import { openFolderBrowser } from '../gameActions';
@@ -31,8 +31,9 @@
   api
     .storeInstallOptions(gameKey)
     .then((o) => {
-      opts = o;
-      choice = initialChoice(o);
+      const shown = optionsForStore(storeOfKey(gameKey), o);
+      opts = shown;
+      choice = initialChoice(shown);
     })
     .catch((err) => (error = err instanceof Error ? err.message : String(err)));
 
