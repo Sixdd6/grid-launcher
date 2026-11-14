@@ -134,6 +134,18 @@ pub struct UiSettings {
     /// Settings › Appearance "Game card display".
     #[serde(default = "default_card_display")]
     pub card_display: String,
+    /// TV mode's own card size (TV Settings › Appearance › Card size):
+    /// `"small"`, `"medium"` or `"large"`, one size for every TV grid.
+    /// Independent of `card_size_library` and `card_size_server`: changing
+    /// one mode never changes the other (user decision 2026-11-14). A plain
+    /// string for the same reason as `theme`.
+    #[serde(default = "default_card_size")]
+    pub tv_card_size: String,
+    /// TV mode's own game labels (TV Settings › Appearance › Game labels):
+    /// `"always"` (the title under every cover) or `"focus"` (only the
+    /// focused cover's, as a floating pill). Independent of `card_labels`.
+    #[serde(default = "default_card_labels")]
+    pub tv_card_labels: String,
     /// Whether the webview renders on the GPU (Settings › Appearance ›
     /// Hardware acceleration). Read once at startup, before the window
     /// exists, so a change applies after a restart. `GRID_LAUNCHER_HW_ACCEL`
@@ -219,6 +231,8 @@ impl Default for UiSettings {
             card_size_server: default_card_size(),
             card_labels: default_card_labels(),
             card_display: default_card_display(),
+            tv_card_size: default_card_size(),
+            tv_card_labels: default_card_labels(),
             hardware_acceleration: default_hardware_acceleration(),
             open_on: default_open_on(),
             tv_prompts: default_tv_prompts(),
@@ -1706,6 +1720,8 @@ mod tests {
         assert_eq!(loaded.ui.card_size_server, "medium");
         assert_eq!(loaded.ui.card_labels, "always");
         assert_eq!(loaded.ui.card_display, "rows");
+        assert_eq!(loaded.ui.tv_card_size, "medium");
+        assert_eq!(loaded.ui.tv_card_labels, "always");
         assert!(
             loaded.ui.hardware_acceleration,
             "GPU rendering is on unless turned off"
@@ -1773,6 +1789,39 @@ mod tests {
         assert_eq!(loaded.ui.card_labels, "hover");
         assert_eq!(loaded.ui.card_display, "columns");
         assert!(!loaded.ui.hardware_acceleration);
+    }
+
+    /// TV mode's own card size and game labels are stored apart from the
+    /// desktop's: each round-trips without touching the other mode's keys
+    /// (user decision 2026-11-14).
+    #[test]
+    fn tv_card_size_and_labels_round_trip_apart_from_the_desktop_keys() {
+        let ui = UiSettings::default();
+        assert_eq!(ui.tv_card_size, "medium");
+        assert_eq!(ui.tv_card_labels, "always");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            ui: UiSettings {
+                tv_card_size: "large".to_string(),
+                tv_card_labels: "focus".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("tv_card_size = \"large\"")
+                && written.contains("tv_card_labels = \"focus\""),
+            "written config:\n{written}"
+        );
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.ui.tv_card_size, "large");
+        assert_eq!(loaded.ui.tv_card_labels, "focus");
+        assert_eq!(loaded.ui.card_size_library, "medium");
+        assert_eq!(loaded.ui.card_size_server, "medium");
+        assert_eq!(loaded.ui.card_labels, "always");
     }
 
     /// The TV mode keys and Open GRID on round-trip, the assignment map as a

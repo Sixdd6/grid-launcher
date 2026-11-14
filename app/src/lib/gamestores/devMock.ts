@@ -21,6 +21,8 @@ const UI = {
   card_size_server: 'medium',
   card_labels: 'always',
   card_display: 'rows',
+  tv_card_size: 'medium',
+  tv_card_labels: 'always',
   hardware_acceleration: true,
   open_on: 'library',
   tv_prompts: 'match',

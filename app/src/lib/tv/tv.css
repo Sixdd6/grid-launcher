@@ -164,8 +164,17 @@ html[data-ui='tv'] .tv .chip.warn { border-color: var(--warning-text); color: va
    covers still line up with the header while a grown, ringed cover in the
    first or last column has room (item 26). */
 html[data-ui='tv'] .tv .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0 -1.2rem; }
-html[data-ui='tv'] .tv .grid { display: grid; grid-template-columns: repeat(auto-fill, 10rem); justify-content: space-between; gap: 1.6rem 1.2rem; padding: 1.4rem 1.2rem 2.4rem; }
-html[data-ui='tv'] .tv .grid:not(.laid) .cv { --cw: 10rem; }
+/* TV mode's own Card size (Settings › Appearance, user decision 2026-11-14;
+   tvmode.css `--gcw`): one cover width for every TV grid (Library, Server, a
+   Backup drive, Search results), set on the root from `[ui] tv_card_size`.
+   Medium is the 10rem TV has always used. Discover's shelves (.track) and
+   Details keep their own sizes. A laid-out grid sizes its covers by its
+   layout (`ui/TvGrid.svelte`, `tv/gridSettings.ts`), from the same widths. */
+html[data-ui='tv'] .tv { --gcw: 10rem; }
+html[data-ui='tv'] .tv[data-size='small'] { --gcw: 8.5rem; }
+html[data-ui='tv'] .tv[data-size='large'] { --gcw: 12.5rem; }
+html[data-ui='tv'] .tv .grid { display: grid; grid-template-columns: repeat(auto-fill, var(--gcw)); justify-content: space-between; gap: 1.6rem 1.2rem; padding: 1.4rem 1.2rem 2.4rem; }
+html[data-ui='tv'] .tv .grid:not(.laid) .cv { --cw: var(--gcw); }
 /* A laid-out grid (`ui/TvGrid.svelte`): every cover the shape of its art,
    placed by its rectangle in a box as tall as the whole layout, with only
    the covers near the view rendered (risk R8). Each cell sets the cover's
@@ -176,6 +185,18 @@ html[data-ui='tv'] .tv .grid.laid .gbox { position: relative; }
 html[data-ui='tv'] .tv .grid.laid .gcell { position: absolute; }
 html[data-ui='tv'] .tv .grid.laid .gcell:has(.cv.f) { z-index: 1; }
 html[data-ui='tv'] .tv .grid.laid .cv-art { aspect-ratio: auto; height: var(--ch); }
+/* Game labels › Visible on focus (tvmode.css): covers only, so each row
+   loses its label line (the layout reserves none; the row gap stays 1.6rem).
+   The focused cover's title floats under it as a pill, clear of the scaled
+   cover and its focus ring (3.5% of the cover's height for the 1.07 scale,
+   plus the .42rem ring and a .2rem gap), over the gap and the top of the row
+   below: the layout never moves. It shows the whole title, wrapped. A laid
+   cover's height is its art's (`--ch`); elsewhere the portrait height. */
+html[data-ui='tv'] .tv[data-labels='focus'] .grid { padding-bottom: 3.6rem; }
+html[data-ui='tv'] .tv[data-labels='focus'] .grid .cv { gap: 0; }
+html[data-ui='tv'] .tv[data-labels='focus'] .grid .cv-l { position: absolute; top: calc(100% + var(--ch, var(--gcw) * 4 / 3) * .035 + .62rem); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% + 2rem); white-space: normal; text-align: center; padding: .25rem .7rem; border-radius: .5rem; background: var(--surface-2); box-shadow: var(--shadow-overlay); color: var(--text-h); font-weight: 600; opacity: 0; pointer-events: none; z-index: 1; }
+html[data-ui='tv'] .tv[data-labels='focus'] .grid .cv.f { z-index: 2; }
+html[data-ui='tv'] .tv[data-labels='focus'] .grid .cv.f .cv-l { opacity: 1; }
 /* Rows drawn in and out above must not make the browser shift the scroll. */
 html[data-ui='tv'] .tv .scroll.windowed { overflow-anchor: none; }
 html[data-ui='tv'] .tv .empty { color: var(--text-muted); font-size: 1.1rem; padding: 2rem .6rem; max-width: 40rem; }

@@ -30,19 +30,32 @@ const byKey = <T extends Row>(rows: Row[], key: string) => rows.find((r) => r.ke
 const noop = () => {};
 
 describe('Appearance pane (items 234–240, 527)', () => {
-  const acts = { open: vi.fn(), setOpenOn: vi.fn(), setTheme: vi.fn(), setCardDisplay: vi.fn(), setArt: vi.fn(), setFade: vi.fn(), setBlur: vi.fn(), setHardwareAcceleration: vi.fn() };
-  const rows = appearanceRows({ openOn: 'automatic', theme: 'system', cardDisplay: 'rows', fade: 50, blur: 8, hardwareAcceleration: true }, acts);
+  const acts = {
+    open: vi.fn(),
+    setOpenOn: vi.fn(),
+    setTheme: vi.fn(),
+    setCardDisplay: vi.fn(),
+    setTvCardSize: vi.fn(),
+    setTvCardLabels: vi.fn(),
+    setArt: vi.fn(),
+    setFade: vi.fn(),
+    setBlur: vi.fn(),
+    setHardwareAcceleration: vi.fn(),
+  };
+  const state = { openOn: 'automatic', theme: 'system', cardDisplay: 'rows', tvCardSize: 'medium', tvCardLabels: 'always', fade: 50, blur: 8, hardwareAcceleration: true } as const;
+  const rows = appearanceRows(state, acts);
 
-  it('lists the rows in order with their lines, ending with the desktop-only info row', () => {
+  it('lists the rows in order with their lines, with no row that points to desktop mode (2026-11-14)', () => {
     expect(summary(rows)).toEqual([
       ['choice', 'Open GRID on', 'Here and in desktop mode', 'automatic'],
       ['choice', 'Theme', THEME_LINE, 'system'],
       ['choice', 'Game card display', 'Here and in desktop mode', 'rows'],
+      ['choice', 'Card size', 'Every grid in TV mode', 'medium'],
+      ['choice', 'Game labels', 'The title under each cover', 'always'],
       ['switch', 'Background art', "The focused game's art, blurred, behind everything", true],
       ['slider', 'Background fade', '', '50%'],
       ['slider', 'Background blur', '', '20%'],
       ['switch', 'Hardware acceleration', 'Uses the graphics card. Restart to apply.', true],
-      ['info', 'More grid options', '', 'In desktop mode'],
     ]);
     expect(THEME_LINE).toBe('Dark in TV mode');
   });
@@ -69,6 +82,25 @@ describe('Appearance pane (items 234–240, 527)', () => {
     expect(acts.setCardDisplay).toHaveBeenCalledWith('columns');
   });
 
+  it("offers TV mode's own Card size and Game labels", () => {
+    const size = byKey<ChoiceRow>(rows, 'tv-card-size');
+    expect(size.options.map((o) => o[1])).toEqual(['Small', 'Medium', 'Large']);
+    size.choose();
+    let spec = acts.open.mock.calls.at(-1)?.[0] as ChoiceSpec;
+    expect(spec.title).toBe('Card size');
+    expect(spec.value).toBe('medium');
+    spec.pick('large');
+    expect(acts.setTvCardSize).toHaveBeenCalledWith('large');
+    const labels = byKey<ChoiceRow>(rows, 'tv-card-labels');
+    expect(labels.options.map((o) => o[1])).toEqual(['Always visible', 'Visible on focus']);
+    labels.choose();
+    spec = acts.open.mock.calls.at(-1)?.[0] as ChoiceSpec;
+    expect(spec.title).toBe('Game labels');
+    expect(spec.value).toBe('always');
+    spec.pick('focus');
+    expect(acts.setTvCardLabels).toHaveBeenCalledWith('focus');
+  });
+
   it('formats the sliders and maps blur to the stored 0–40 (items 237–238)', () => {
     const fade = byKey<SliderRow>(rows, 'fade');
     expect([fade.min, fade.max, fade.step]).toEqual([0, 100, 5]);
@@ -81,7 +113,7 @@ describe('Appearance pane (items 234–240, 527)', () => {
     blur.set(30);
     expect(acts.setBlur).toHaveBeenCalledWith(12);
     // Background art is off at a full fade (item 12).
-    const off = appearanceRows({ openOn: 'library', theme: 'dark', cardDisplay: 'columns', fade: 100, blur: 0, hardwareAcceleration: false }, acts);
+    const off = appearanceRows({ ...state, openOn: 'library', theme: 'dark', cardDisplay: 'columns', fade: 100, blur: 0, hardwareAcceleration: false }, acts);
     expect(byKey<SwitchRow>(off, 'art').on).toBe(false);
     // "Dark in TV mode" describes Follow system only.
     expect(byKey<ChoiceRow>(off, 'theme').sub).toBeUndefined();

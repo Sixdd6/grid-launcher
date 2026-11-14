@@ -25,6 +25,7 @@ import {
   type ResolvedTheme,
   type ThemeChoice,
 } from '../theme';
+import { normalizeTvCardLabels, normalizeTvCardSize, type TvCardLabels, type TvCardSize } from '../tv/gridSettings';
 import { tvTheme } from '../tv/theme';
 import { clampVolume, debounced, VOLUME_DEFAULT, VOLUME_SAVE_MS } from '../details/videoVolume';
 
@@ -37,6 +38,8 @@ const state = $state<{
   cardSizeServer: UiSettings['card_size_server'];
   cardLabels: CardLabels;
   cardDisplay: CardDisplay;
+  tvCardSize: TvCardSize;
+  tvCardLabels: TvCardLabels;
   hardwareAcceleration: boolean;
   openOn: OpenOn;
   tvPrompts: TvPrompts;
@@ -56,6 +59,8 @@ const state = $state<{
   cardSizeServer: 'medium',
   cardLabels: 'always',
   cardDisplay: 'rows',
+  tvCardSize: 'medium',
+  tvCardLabels: 'always',
   hardwareAcceleration: true,
   openOn: 'automatic',
   tvPrompts: 'match',
@@ -82,6 +87,8 @@ function payload(): UiSettings {
     card_size_server: state.cardSizeServer,
     card_labels: state.cardLabels,
     card_display: state.cardDisplay,
+    tv_card_size: state.tvCardSize,
+    tv_card_labels: state.tvCardLabels,
     hardware_acceleration: state.hardwareAcceleration,
     open_on: state.openOn,
     tv_prompts: state.tvPrompts,
@@ -115,6 +122,14 @@ export const uiSettings = {
   },
   get cardDisplay(): CardDisplay {
     return state.cardDisplay;
+  },
+  /** TV mode's own Card size (every TV grid). */
+  get tvCardSize(): TvCardSize {
+    return state.tvCardSize;
+  },
+  /** TV mode's own Game labels. */
+  get tvCardLabels(): TvCardLabels {
+    return state.tvCardLabels;
   },
   get hardwareAcceleration(): boolean {
     return state.hardwareAcceleration;
@@ -214,6 +229,8 @@ export async function initUiSettings(): Promise<() => void> {
     state.cardSizeServer = normalizeCardSize(stored.card_size_server);
     state.cardLabels = normalizeCardLabels(stored.card_labels ?? '');
     state.cardDisplay = normalizeCardDisplay(stored.card_display ?? '');
+    state.tvCardSize = normalizeTvCardSize(stored.tv_card_size ?? '');
+    state.tvCardLabels = normalizeTvCardLabels(stored.tv_card_labels ?? '');
     state.hardwareAcceleration = stored.hardware_acceleration ?? true;
     state.openOn = normalizeOpenOn(stored.open_on ?? '');
     state.tvPrompts = normalizeTvPrompts(stored.tv_prompts ?? '');
@@ -329,6 +346,20 @@ export async function setOpenOn(choice: OpenOn): Promise<void> {
 /** The "Game card display" select: applies at once, then persists. */
 export async function setCardDisplay(display: CardDisplay): Promise<void> {
   state.cardDisplay = display;
+  await api.setUiSettings(payload());
+}
+
+/** TV Settings › Appearance › Card size: applies at once to every TV grid
+ *  (focus and scroll stay), then persists. The desktop's sizes are apart. */
+export async function setTvCardSize(size: TvCardSize): Promise<void> {
+  state.tvCardSize = size;
+  await api.setUiSettings(payload());
+}
+
+/** TV Settings › Appearance › Game labels: applies at once, then persists.
+ *  The desktop's `card_labels` is apart. */
+export async function setTvCardLabels(mode: TvCardLabels): Promise<void> {
+  state.tvCardLabels = mode;
   await api.setUiSettings(payload());
 }
 

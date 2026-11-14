@@ -252,7 +252,7 @@
 
 <svelte:window onkeydown={onKeydown} onresize={onResize} />
 
-<div class="tv" data-tv-root data-testid="tv-shell">
+<div class="tv" data-tv-root data-size={uiSettings.tvCardSize} data-labels={uiSettings.tvCardLabels} data-testid="tv-shell">
   <TvBackground />
   <TvTopBar />
   <main class="stage" bind:this={stageEl} data-testid="tv-stage">

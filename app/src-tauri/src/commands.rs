@@ -726,6 +726,8 @@ pub fn normalize_ui_settings(settings: UiSettings) -> UiSettings {
         card_size_server: normalize_card_size(&settings.card_size_server),
         card_labels: normalize_card_labels(&settings.card_labels),
         card_display: normalize_card_display(&settings.card_display),
+        tv_card_size: normalize_card_size(&settings.tv_card_size),
+        tv_card_labels: normalize_tv_card_labels(&settings.tv_card_labels),
         hardware_acceleration: settings.hardware_acceleration,
         open_on: normalize_open_on(&settings.open_on),
         tv_prompts: normalize_tv_prompts(&settings.tv_prompts),
@@ -782,6 +784,17 @@ fn normalize_card_display(raw: &str) -> String {
 fn normalize_card_labels(raw: &str) -> String {
     match raw.trim() {
         "hover" => "hover",
+        _ => "always",
+    }
+    .to_string()
+}
+
+/// TV mode's Game labels: `"always"` or `"focus"`; anything else becomes
+/// `"always"`, the default. Apart from the desktop's `"hover"`: TV mode has
+/// no pointer, so a desktop value here is not a TV choice.
+fn normalize_tv_card_labels(raw: &str) -> String {
+    match raw.trim() {
+        "focus" => "focus",
         _ => "always",
     }
     .to_string()
@@ -3662,6 +3675,8 @@ mod ui_settings_tests {
                 card_size_server: "medium".to_string(),
                 card_labels: "always".to_string(),
                 card_display: "rows".to_string(),
+                tv_card_size: "medium".to_string(),
+                tv_card_labels: "always".to_string(),
                 hardware_acceleration: true,
                 open_on: "automatic".to_string(),
                 tv_prompts: "match".to_string(),
@@ -3778,6 +3793,61 @@ mod ui_settings_tests {
             });
             assert_eq!(out.card_labels, expected, "labels for {raw:?}");
         }
+    }
+
+    #[test]
+    fn the_tv_card_size_is_medium_unless_it_says_small_or_large() {
+        for (raw, expected) in [
+            ("small", "small"),
+            ("medium", "medium"),
+            (" large ", "large"),
+            ("Large", "medium"),
+            ("huge", "medium"),
+            ("", "medium"),
+        ] {
+            let out = normalize_ui_settings(UiSettings {
+                tv_card_size: raw.to_string(),
+                ..Default::default()
+            });
+            assert_eq!(out.tv_card_size, expected, "TV size for {raw:?}");
+        }
+    }
+
+    #[test]
+    fn the_tv_game_labels_are_always_unless_they_say_focus() {
+        for (raw, expected) in [
+            ("always", "always"),
+            ("focus", "focus"),
+            (" focus ", "focus"),
+            ("Focus", "always"),
+            ("hover", "always"),
+            ("", "always"),
+        ] {
+            let out = normalize_ui_settings(UiSettings {
+                tv_card_labels: raw.to_string(),
+                ..Default::default()
+            });
+            assert_eq!(out.tv_card_labels, expected, "TV labels for {raw:?}");
+        }
+    }
+
+    /// TV mode's keys and the desktop's are normalized apart: one never
+    /// stands in for the other (user decision 2026-11-14).
+    #[test]
+    fn the_tv_grid_keys_never_change_the_desktop_keys() {
+        let out = normalize_ui_settings(UiSettings {
+            card_size_library: "small".to_string(),
+            card_size_server: "large".to_string(),
+            card_labels: "hover".to_string(),
+            tv_card_size: "large".to_string(),
+            tv_card_labels: "focus".to_string(),
+            ..Default::default()
+        });
+        assert_eq!(out.card_size_library, "small");
+        assert_eq!(out.card_size_server, "large");
+        assert_eq!(out.card_labels, "hover");
+        assert_eq!(out.tv_card_size, "large");
+        assert_eq!(out.tv_card_labels, "focus");
     }
 
     #[test]
