@@ -193,5 +193,9 @@ Each phase ends when these pass:
   alike. On a Windows host all of a game's steps run in one elevated run, so there is one
   UAC prompt per install or repair, in TV mode too (never "finish in desktop mode"). If the
   prompt is declined, the Downloads row shows a warning with Retry.
+- Before running, GRID checks which redistributables are already installed (Windows:
+  registry and system files; Proton: the same files in the prefix, plus GRID's record of
+  what already ran there) and skips them. When nothing is missing, nothing runs and no UAC
+  prompt shows. Steps GRID can't recognise always run.
 - A failed or timed-out step is a warning on the Downloads row, never a failed install.
   Research notes: `docs/research/store-redistributables.md`.
