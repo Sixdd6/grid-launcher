@@ -24,9 +24,13 @@
  * Always: `stubs/bin` with `umu-run` and `wine` stand-ins that write their
  * argv (one argument per line, a `---` line after each run) to
  * `<data>/epic-game-argv.log` (`E2E_EPIC_ARGV_FILE`), so a spec sees the
- * launch ticket reach the game. Under `epic-secrets` the game exits at once
- * with code 3 (the early-exit warning, which must show `<redacted>`);
- * elsewhere it runs for two seconds and exits 0.
+ * launch ticket reach the game, and `WINEPREFIX`, `PROTONPATH` and a `CWD=`
+ * line to `<data>/epic-game-env.log`. A game's prerequisite (Glimmer Deep's
+ * `UE4PrereqSetup_x64.exe /quiet /norestart`, the fake legendary's) exits 0
+ * at once. Under `epic-secrets` the game exits at once with code 3 (the
+ * early-exit warning, which must show `<redacted>`); elsewhere it runs for
+ * two seconds and exits 0. Signed in, the default compatibility tool is
+ * `wine` (the stand-in), so a new install's prerequisite runs.
  */
 import { chmodSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -52,12 +56,24 @@ const sql = (s) => `'${String(s).replace(/'/g, "''")}'`;
 const stubs = path.join(dataDir, 'stubs', 'bin');
 mkdirSync(stubs, { recursive: true });
 const argvFile = path.join(dataDir, 'epic-game-argv.log');
+const envFile = path.join(dataDir, 'epic-game-env.log');
 const tail = spec === 'epic-secrets' ? 'exit 3' : 'sleep 2\nexit 0';
 for (const name of ['umu-run', 'wine']) {
   const file = path.join(stubs, name);
   writeFileSync(
     file,
-    `#!/bin/sh\n# e2e stand-in for ${name}: records the game's argv.\nfor a in "$@"; do printf '%s\\n' "$a" >> ${JSON.stringify(argvFile)}; done\nprintf -- '---\\n' >> ${JSON.stringify(argvFile)}\n${tail}\n`,
+    `#!/bin/sh
+# e2e stand-in for ${name}: records the argv, the prefix, the compat tool and
+# the folder it runs in.
+for a in "$@"; do printf '%s\\n' "$a" >> ${JSON.stringify(argvFile)}; done
+printf -- '---\\n' >> ${JSON.stringify(argvFile)}
+env | grep -E '^(WINEPREFIX|PROTONPATH)=' | sort >> ${JSON.stringify(envFile)}
+printf 'CWD=%s\\n' "$PWD" >> ${JSON.stringify(envFile)}
+printf -- '---\\n' >> ${JSON.stringify(envFile)}
+# A game's prerequisite (the fake UE4 prerequisites) installs at once.
+case "$1" in *PrereqSetup*) exit 0 ;; esac
+${tail}
+`,
   );
   chmodSync(file, 0o755);
 }
@@ -81,6 +97,7 @@ writeFileSync(
 library_path = ${tomlString(library)}
 library_layout_version = 2
 offline = true
+default_compat_tool = "wine"
 
 [stores.epic]
 connected = true

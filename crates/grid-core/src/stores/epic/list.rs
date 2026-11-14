@@ -1,5 +1,6 @@
 //! legendary's JSON answers, parsed: the owned list (`list --json -T`),
-//! the installed list (`list-installed --json`), one app's sizes
+//! the installed list (`list-installed --json`, and legendary's own
+//! `installed.json` for a game's prerequisite), one app's sizes
 //! (`info <app> --json`), and the owned-list cache GRID keeps between runs
 //! (`<data_dir>/stores/cache/epic-owned.json`, product metadata only).
 //!
@@ -16,7 +17,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{EpicGame, EpicGameDlc, EpicInstalled};
+use super::{EpicGame, EpicGameDlc, EpicInstalled, EpicPrereq};
 use crate::stores::paths::{self, STORES_DIR};
 
 // --- argv -------------------------------------------------------------------
@@ -303,6 +304,47 @@ pub fn parse_installed(stdout: &str) -> Option<Vec<EpicInstalled>> {
     serde_json::from_value(value).ok()
 }
 
+// --- prerequisites ----------------------------------------------------------
+
+/// A prerequisite object (`installed.json`'s `prereq_info`, `info`'s
+/// `manifest.prerequisites`: `{"ids", "name", "path", "args"[,
+/// "installed"]}`), `None` for `null` or anything else. `ids` may be a list
+/// or one string; a missing field reads as empty.
+pub fn parse_prereq(value: &Value) -> Option<EpicPrereq> {
+    let object = value.as_object()?;
+    let ids = match object.get("ids") {
+        Some(Value::Array(ids)) => ids
+            .iter()
+            .map(|id| text(Some(id)))
+            .filter(|id| !id.is_empty())
+            .collect(),
+        Some(one) => Some(text(Some(one)))
+            .filter(|id| !id.is_empty())
+            .into_iter()
+            .collect(),
+        None => Vec::new(),
+    };
+    Some(EpicPrereq {
+        ids,
+        name: text(object.get("name")),
+        path: text(object.get("path")),
+        args: text(object.get("args")),
+        installed: object
+            .get("installed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+/// `app`'s prerequisite as legendary keeps it in its `installed.json`
+/// (read directly: no legendary run, no login). `None` when legendary has
+/// no record of the game, or it lists none.
+pub fn installed_prereq(tool_dir: &Path, app: &str) -> Option<EpicPrereq> {
+    let text = fs::read_to_string(tool_dir.join("installed.json")).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    parse_prereq(value.get(app.trim())?.get("prereq_info")?)
+}
+
 // --- info -------------------------------------------------------------------
 
 /// What `info <app> --json` says about one app.
@@ -320,6 +362,8 @@ pub struct EpicInfo {
     pub cloud_save_folder: String,
     /// `game.owned_dlc` entries that install (have an app name).
     pub dlc: Vec<EpicGameDlc>,
+    /// `manifest.prerequisites`, `None` for `null`.
+    pub prerequisites: Option<EpicPrereq>,
 }
 
 /// Parses `info --json` (`{"game": …, "install": …, "manifest": …}`, an
@@ -361,6 +405,9 @@ pub fn parse_info(stdout: &str) -> Option<EpicInfo> {
         build_version: text(manifest.and_then(|m| m.get("build_version"))),
         cloud_save_folder: text(game.and_then(|g| g.get("cloud_save_folder"))),
         dlc,
+        prerequisites: manifest
+            .and_then(|m| m.get("prerequisites"))
+            .and_then(parse_prereq),
     })
 }
 
@@ -595,6 +642,46 @@ mod tests {
             "an unknown app"
         );
         assert_eq!(parse_info("[]"), None);
+        assert_eq!(info.prerequisites, None, "no prerequisites key");
+    }
+
+    #[test]
+    fn info_and_installed_json_give_the_prerequisite() {
+        let info = parse_info(
+            r#"{"game": {"app_name": "G"}, "install": null,
+                "manifest": {"download_size": 1, "prerequisites": {"ids": ["uepre"], "name": "UE4 Prerequisites (x64)",
+                  "path": "Engine\\Extras\\Redist\\en-us\\UE4PrereqSetup_x64.exe", "args": "/quiet /norestart"}}}"#,
+        )
+        .unwrap();
+        let prereq = info.prerequisites.unwrap();
+        assert_eq!(prereq.ids, ["uepre"]);
+        assert_eq!(
+            prereq.path,
+            "Engine\\Extras\\Redist\\en-us\\UE4PrereqSetup_x64.exe"
+        );
+        assert_eq!(prereq.args, "/quiet /norestart");
+        assert!(!prereq.installed);
+        let none =
+            parse_info(r#"{"game": {"app_name": "G"}, "manifest": {"prerequisites": null}}"#);
+        assert_eq!(none.unwrap().prerequisites, None);
+
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(installed_prereq(dir.path(), "G"), None, "no installed.json");
+        fs::write(
+            dir.path().join("installed.json"),
+            r#"{"G": {"app_name": "G", "prereq_info": {"ids": ["uepre"], "name": "n", "path": "p.exe",
+                       "args": "/q", "installed": true}},
+                "H": {"app_name": "H", "prereq_info": null}}"#,
+        )
+        .unwrap();
+        let g = installed_prereq(dir.path(), " G ").unwrap();
+        assert_eq!(
+            (g.path.as_str(), g.args.as_str(), g.installed),
+            ("p.exe", "/q", true)
+        );
+        assert_eq!(installed_prereq(dir.path(), "H"), None);
+        assert_eq!(installed_prereq(dir.path(), "X"), None);
+        assert_eq!(parse_prereq(&serde_json::json!([1])), None);
     }
 
     #[test]

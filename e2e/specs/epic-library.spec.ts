@@ -1,4 +1,6 @@
-import { INSTALL_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { dataDir, INSTALL_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import {
   closeWithEscape,
   coverTags,
@@ -11,7 +13,7 @@ import {
   startApp,
   testId,
 } from '../helpers/epic.js';
-import { openDownloads, openStoresSettings, waitForDownloadLine } from '../helpers/gog.js';
+import { downloadLines, openDownloads, openStoresSettings, waitForDownloadLine } from '../helpers/gog.js';
 import { waitForToast } from '../helpers/toasts.js';
 
 /**
@@ -23,8 +25,37 @@ import { waitForToast } from '../helpers/toasts.js';
  * through the dialog (no Version, no Language), update, verify, uninstall,
  * and the Settings card with its Disconnect confirm. Needs packages A–C (the
  * mock Epic server, fake legendary and seed): it goes green only after they
- * are merged.
+ * are merged. A new install runs the game's prerequisite (legendary's
+ * `prereq_info`) silently in its prefix; a game with none runs nothing.
  */
+
+/** The compat-tool stand-ins' runs (seed/epic-seed.mjs): each run's argv and env lines. */
+function standInRuns(): { argv: string[]; env: string[] }[] {
+  const read = (name: string) => {
+    const file = path.join(dataDir(), name);
+    return existsSync(file) ? readFileSync(file, 'utf8').split('---\n').slice(0, -1) : [];
+  };
+  const env = read('epic-game-env.log');
+  return read('epic-game-argv.log').map((run, i) => ({
+    argv: run.split('\n').slice(0, -1),
+    env: (env[i] ?? '').split('\n'),
+  }));
+}
+
+/** Installs an available game through the dialog, waiting for the toast. */
+async function installThroughDialog(title: string): Promise<void> {
+  await openEpic('available');
+  const { badge } = await epicCard(title);
+  await $(testId(`library-store-card-${badge}`)).moveTo();
+  await $(testId(`card-primary-${badge}`)).click();
+  await $(testId('store-install-dialog')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+  // The sizes load first; Install waits for them.
+  await expect($(testId('store-install-download'))).toHaveText(/ to download$/);
+  await $(testId('store-install-go')).waitForEnabled({ timeout: TRANSITION_TIMEOUT });
+  await $(testId('store-install-go')).click();
+  await waitForToast(`${title} added to download queue`);
+  await waitForToast(`${title} installed`, { timeout: INSTALL_TIMEOUT });
+}
 describe('epic-library', () => {
   before(async () => {
     await startApp();
@@ -113,6 +144,22 @@ describe('epic-library', () => {
     expect(await epicTitles()).toContain('Glimmer Deep');
   });
 
+  it('the install ran Glimmer Deep’s prerequisite with its arguments, in its prefix, from its own folder', async () => {
+    // The fake legendary lists `UE4PrereqSetup_x64.exe /quiet /norestart`;
+    // the seed's default compatibility tool is the `wine` stand-in.
+    const glimmer = path.join(dataDir(), 'library', 'Epic Games', 'Glimmer Deep');
+    const exe = path.join(glimmer, 'Engine', 'Extras', 'Redist', 'en-us', 'UE4PrereqSetup_x64.exe');
+    const runs = standInRuns().filter((run) => run.argv[0] === exe);
+    expect(runs.length).toBe(1);
+    expect(runs[0].argv.slice(1)).toEqual(['/quiet', '/norestart']);
+    expect(runs[0].env).toContain(`WINEPREFIX=${path.join(glimmer, 'prefix')}`);
+    expect(runs[0].env).toContain(`CWD=${path.dirname(exe)}`);
+    // The Downloads row ended without a setup-step warning.
+    await openDownloads();
+    await waitForDownloadLine(/^Installed · /, INSTALL_TIMEOUT);
+    expect((await downloadLines()).some((line) => /Couldn.t run|setup steps/i.test(line))).toBe(false);
+  });
+
   it('opens Details for an installed game: buttons without Backup to drive, the runs and backup lines, the tabs', async () => {
     await openEpic('installed');
     await openEpicDetails('Starlight Courier');
@@ -182,6 +229,14 @@ describe('epic-library', () => {
     await $(testId('store-details')).waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT }).catch(() => browser.keys('Escape'));
     await openEpic('available');
     expect(await epicTitles()).toContain('Glimmer Deep');
+  });
+
+  it('a game whose prerequisite is null runs nothing after its install', async () => {
+    const before = standInRuns().length;
+    await installThroughDialog('Rustbelt Rally');
+    expect(standInRuns().length).toBe(before);
+    await openEpic('installed');
+    expect(await epicTitles()).toContain('Rustbelt Rally');
   });
 
   it('Settings › Stores shows the Epic Games card and asks before Disconnect', async () => {

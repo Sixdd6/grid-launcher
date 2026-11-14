@@ -7,6 +7,12 @@
 //! `update` (the pure update check) are package A's; launch prep and cloud
 //! saves are package B's.
 //!
+//! A game's prerequisite (legendary's `prereq_info`, at most one) runs
+//! after its install through the store-neutral `stores::redist`, silently
+//! in the game's prefix (one elevated run on Windows); legendary itself
+//! never runs it (`-y` answers "no" on Windows, and it runs nothing on
+//! Linux). See `install.rs`.
+//!
 //! Every legendary run goes through [`EpicService::tool`]: its config
 //! folder (`LEGENDARY_CONFIG_PATH`), its cache (`XDG_CACHE_HOME`, where
 //! the Linux zipapp unpacks its native modules), `BROWSER=true` (so `auth`
@@ -39,6 +45,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use url::Url;
 
 use super::paths;
+use super::redist::RedistRunner;
 use super::runner::{run_tool, LineParser, ToolCommand, ToolExit, ToolSignal};
 use super::tools::{self, StoreTool};
 use super::{CloudState, StoreError, SyncMode};
@@ -160,6 +167,37 @@ pub struct EpicInstalled {
     pub can_run_offline: bool,
     #[serde(deserialize_with = "nullable")]
     pub save_path: String,
+    /// The game's prerequisite, `None` for `null` (or a shape GRID can't
+    /// read).
+    #[serde(deserialize_with = "prereq_value")]
+    pub prereq_info: Option<EpicPrereq>,
+}
+
+/// A game's prerequisite as legendary gives it (`installed.json`'s
+/// `prereq_info`, `info`'s `manifest.prerequisites`): a program inside the
+/// game folder with its arguments. No secret.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EpicPrereq {
+    /// Epic's ids for what it installs.
+    pub ids: Vec<String>,
+    /// Its name ("UE4 Prerequisites (x64)").
+    pub name: String,
+    /// Relative to the install folder, either separator.
+    pub path: String,
+    /// Its arguments as one string (split shell-style before it runs).
+    pub args: String,
+    /// legendary's own mark that it already ran (only on Windows, when the
+    /// user answered yes to legendary's prompt). GRID reads it and never
+    /// sets it.
+    pub installed: bool,
+}
+
+fn prereq_value<'de, D>(deserializer: D) -> Result<Option<EpicPrereq>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(list::parse_prereq(&value))
 }
 
 /// A value that may be JSON `null`, read as its default.
@@ -219,6 +257,8 @@ pub struct EpicService {
     owned: Arc<Mutex<Vec<EpicGame>>>,
     /// A program run in place of the installed legendary (tests only).
     tool_override: Option<PathBuf>,
+    /// What runs a game's prerequisite after a job.
+    redist: RedistRunner,
 }
 
 impl EpicService {
@@ -229,7 +269,16 @@ impl EpicService {
             ep,
             owned: Arc::new(Mutex::new(Vec::new())),
             tool_override: None,
+            redist: RedistRunner::system(),
         }
+    }
+
+    /// Runs a game's prerequisite with `runner` (a scripted spawner). For
+    /// tests; the app never calls it.
+    #[doc(hidden)]
+    pub fn with_redist_runner(mut self, runner: RedistRunner) -> Self {
+        self.redist = runner;
+        self
     }
 
     /// Runs `program` in place of the installed legendary, as is (no
@@ -539,6 +588,16 @@ impl EpicService {
         install::row_job(self.clone(), row, StoreOp::Dlc, Some(dlc), ctx)
     }
 
+    /// The job that runs only `row`'s prerequisite (no legendary run, no
+    /// login); refuses a game with none to run.
+    pub fn setup_steps_job(
+        &self,
+        row: &InstalledGame,
+        ctx: EpicJobCtx,
+    ) -> Result<StoreJob, StoreError> {
+        install::setup_steps_job(self, row, ctx)
+    }
+
     /// Removes one installed DLC (`uninstall <dlc>`). Blocking.
     pub fn remove_dlc(
         &self,
@@ -637,6 +696,36 @@ mod tests {
         assert_eq!(rows[0].install_size, 1234);
         assert!(rows[0].can_run_offline);
         assert_eq!(rows[0].save_path, "");
+        assert_eq!(rows[0].prereq_info, None);
+    }
+
+    #[test]
+    fn list_installed_reads_a_prerequisite_and_survives_an_odd_one() {
+        let json = r#"[
+          {"app_name": "A", "version": "1", "prereq_info": {"ids": ["p1", "p2"],
+             "name": "UE4 Prerequisites (x64)", "path": "Engine/Extras/Redist/en-us/UE4PrereqSetup_x64.exe",
+             "args": "/quiet /norestart"}},
+          {"app_name": "B", "version": "1", "prereq_info": {"ids": "one", "name": null, "path": "x.exe",
+             "args": null, "installed": true}},
+          {"app_name": "C", "version": "1", "prereq_info": "not an object"},
+          {"app_name": "D", "version": "1"}]"#;
+        let rows: Vec<EpicInstalled> = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            rows[0].prereq_info,
+            Some(EpicPrereq {
+                ids: vec!["p1".into(), "p2".into()],
+                name: "UE4 Prerequisites (x64)".into(),
+                path: "Engine/Extras/Redist/en-us/UE4PrereqSetup_x64.exe".into(),
+                args: "/quiet /norestart".into(),
+                installed: false,
+            })
+        );
+        let b = rows[1].prereq_info.clone().unwrap();
+        assert_eq!(b.ids, ["one"]);
+        assert_eq!((b.name.as_str(), b.args.as_str()), ("", ""));
+        assert!(b.installed);
+        assert_eq!(rows[2].prereq_info, None);
+        assert_eq!(rows[3].prereq_info, None);
     }
 
     fn service(data: &std::path::Path) -> EpicService {

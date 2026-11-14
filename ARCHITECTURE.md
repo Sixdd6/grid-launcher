@@ -280,7 +280,14 @@ Modules as declared in `src/lib.rs`:
   `list-installed`; the owned-cache format and its read/write/remove helpers), `install`
   (install, update, repair and DLC jobs; an update or repair also runs each installed
   DLC; a repair's "N files repaired" is the job's `StoreJobRunner::detail`, the
-  Downloads row's "Verified · …"), `update` (the pure build comparison), `launch`
+  Downloads row's "Verified · …"; after the row is written, the game's prerequisite,
+  legendary's `prereq_info` from `list-installed` (else `info`'s
+  `manifest.prerequisites`), becomes one `RedistStep` (`install::prereq_steps`: none for
+  `null`, a blank path, legendary's `installed` mark or another company's launcher;
+  arguments split shell-style; started in its own folder) and runs through
+  `stores::redist` when `redist::steps_due` says so, against `EpicMeta.prereq_ran`;
+  `install::setup_steps_job` reads legendary's `installed.json` directly for Retry),
+  `update` (the pure build comparison), `launch`
   (`launch --json`: the ticket's `egl_parameters` become redacted `secret_args`;
   `launch_ticket_error` gives GRID's words; it never retries by itself), `cloud`
   (`list-saves` / `sync-saves`, the save path GRID resolves from `CloudSaveFolder`, a copy
@@ -307,8 +314,10 @@ Modules as declared in `src/lib.rs`:
   so, against `AmazonMeta.post_install_ran`) and `launch` (`launch --json
   --no-wine` gives the five FUEL variables; `launch_error` gives GRID's words). Every parser ignores unknown JSON keys and non-JSON stdout lines. Nothing here may log or forward a store tool's stdout or
   stderr. `redist` is store-neutral: a game's redistributable steps (`RedistStep`), for
-  Amazon now and GOG and Epic next. It skips what is already installed (`redist_of`
-  maps an id or a file name to a known redistributable; `already_installed` checks the
+  Amazon and Epic now and GOG next. A step starts in the game folder, or with
+  `in_exe_folder` in its program's own folder (`step_dir`). It skips what is already
+  installed (`redist_of` maps an id or a file name to a known redistributable, Unreal's
+  prerequisites bundle by its parts; `already_installed` checks the
   Windows registry, or real, non-Wine-stub system files in the host or the prefix;
   `.grid-redist.json` in the prefix notes the steps that worked there). Then it runs the
   rest: under the compat tool in the game's prefix (`step_command`, through
@@ -320,7 +329,8 @@ Modules as declared in `src/lib.rs`:
   job (`StoreOp::SetupSteps`, kind `store_setup`) behind Retry on a setup-step warning: a
   store gives it the game row and a `SetupStepsStore` (re-read the step list, record it
   once every step worked), and it runs them through `redist::run_steps` with no download.
-  The app's `StoreBackend::setup_steps_job` builds it (Amazon now; the default refuses)
+  The app's `StoreBackend::setup_steps_job` builds it (Amazon and Epic now; the default
+  refuses)
   and the `store_setup_steps` command guards it (installed, not running, no other live
   job, no backup). `steam` is Steam (Phase 4, built 2026-11-14): no tool, no login window, no
   GRID-run job. `mod.rs` holds `SteamEndpoints`, `SteamId`, `SteamApiError` (whose words

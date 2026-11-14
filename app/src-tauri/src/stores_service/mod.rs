@@ -670,7 +670,7 @@ mod tests {
             store_id: "S".into(),
             ..Default::default()
         };
-        for kind in [StoreKind::Gog, StoreKind::Epic, StoreKind::Steam] {
+        for kind in [StoreKind::Gog, StoreKind::Steam] {
             let refusal = stores
                 .backend(kind)
                 .unwrap()
