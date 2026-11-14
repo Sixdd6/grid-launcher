@@ -64,7 +64,7 @@ use grid_core::stores::steam::meta::SteamMeta;
 use grid_core::stores::steam::row::{install_path, steam_row};
 use grid_core::stores::steam::{
     AppInfo, AppPhase, LocalAccount, ManifestState, OwnedGame, OwnedGames, SteamApiError,
-    SteamClient, SteamEndpoints, SteamId, SteamLink, SteamService,
+    SteamClient, SteamEndpoints, SteamId, SteamLink, SteamScan, SteamService,
 };
 use grid_core::stores::{GameKey, StoreError, StoreKind, SyncMode};
 use secrecy::SecretString;
@@ -107,10 +107,10 @@ pub const APPS_CACHE: &str = "steam-apps.json";
 /// The Web API's per-request deadline.
 const API_TIMEOUT: Duration = Duration::from_secs(20);
 /// How often a live install watch reads its manifest.
-const WATCH_POLL: Duration = Duration::from_secs(2);
+const WATCH_POLL: Duration = grid_core::stores::steam::watch::STEAM_INSTALL_POLL;
 /// How long an install watch waits for Steam to write the manifest (the
 /// user may leave Steam's install dialog open a while, or close it).
-pub const STEAM_INSTALL_START_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+pub use grid_core::stores::steam::watch::STEAM_INSTALL_START_TIMEOUT;
 /// How long an uninstall watch waits for the manifest to go.
 const UNINSTALL_WATCH_FOR: Duration = Duration::from_secs(10 * 60);
 /// The background scan's period.
@@ -175,7 +175,9 @@ pub trait SteamApi: Send + Sync {
     fn endpoints(&self) -> SteamEndpoints;
     fn find_client(&self) -> Option<SteamClient>;
     fn local_accounts(&self, client: &SteamClient) -> Vec<LocalAccount>;
-    fn scan(&self, client: &SteamClient) -> Vec<ManifestState>;
+    /// Every manifest in every library, the unreadable ones and the
+    /// libraries that couldn't be read.
+    fn scan(&self, client: &SteamClient) -> SteamScan;
     fn manifest(&self, client: &SteamClient, appid: u32) -> Option<ManifestState>;
     fn open(&self, client: &SteamClient, link: SteamLink) -> io::Result<()>;
     fn alive_check(&self, client: &SteamClient, appid: u32) -> AliveCheck;
@@ -205,8 +207,8 @@ impl SteamApi for RealSteam {
     fn local_accounts(&self, client: &SteamClient) -> Vec<LocalAccount> {
         self.0.local_accounts(client)
     }
-    fn scan(&self, client: &SteamClient) -> Vec<ManifestState> {
-        self.0.scan(client)
+    fn scan(&self, client: &SteamClient) -> SteamScan {
+        self.0.scan_report(client)
     }
     fn manifest(&self, client: &SteamClient, appid: u32) -> Option<ManifestState> {
         self.0.manifest(client, appid)
@@ -1073,16 +1075,22 @@ impl SteamStore {
                 .as_ref()
                 .map(|client| api.local_accounts(client))
                 .unwrap_or_default();
-            let manifests = client
+            let report = client
                 .as_ref()
                 .map(|client| api.scan(client))
                 .unwrap_or_default();
-            (client, accounts, manifests)
+            (client, accounts, report)
         })
         .await;
-        let Ok((client, accounts, manifests)) = found else {
+        let Ok((client, accounts, report)) = found else {
             return;
         };
+        let SteamScan {
+            manifests,
+            unreadable,
+            missing_libraries,
+        } = report;
+        let unreadable: HashSet<u32> = unreadable.into_iter().collect();
         let libraries: Vec<PathBuf> = {
             let mut libraries: Vec<PathBuf> = Vec::new();
             for m in &manifests {
@@ -1123,6 +1131,8 @@ impl SteamStore {
             let watched: HashSet<u32> = state.watches.keys().copied().collect();
             plan_scan(&ScanInput {
                 manifests: &manifests,
+                unreadable: &unreadable,
+                missing_libraries: &missing_libraries,
                 rows: &rows,
                 apps: &state.apps,
                 owned: &owned,
@@ -1636,6 +1646,11 @@ fn assemble_games(
 /// What [`plan_scan`] reads.
 struct ScanInput<'a> {
     manifests: &'a [ManifestState],
+    /// Manifests that didn't parse (Steam writing them): their rows stay.
+    unreadable: &'a HashSet<u32>,
+    /// Libraries that couldn't be read (an unplugged drive): their games'
+    /// rows stay.
+    missing_libraries: &'a [PathBuf],
     rows: &'a [InstalledGame],
     apps: &'a HashMap<u32, AppInfo>,
     owned: &'a HashMap<u32, &'a OwnedGame>,
@@ -1761,6 +1776,18 @@ fn plan_scan(input: &ScanInput<'_>) -> ScanPlan {
     }
     for row in input.rows {
         if keep.contains(&row.store_id) {
+            continue;
+        }
+        // Not known to be gone: a manifest Steam is writing, or a library
+        // that is unplugged.
+        let unreadable = row
+            .store_id
+            .parse::<u32>()
+            .is_ok_and(|appid| input.unreadable.contains(&appid));
+        let library = PathBuf::from(SteamMeta::from_json(&row.store_meta).library);
+        if unreadable
+            || (!library.as_os_str().is_empty() && input.missing_libraries.contains(&library))
+        {
             continue;
         }
         let card = row
@@ -2296,6 +2323,7 @@ mod tests {
         client: Mutex<Option<SteamClient>>,
         accounts: Mutex<Vec<LocalAccount>>,
         manifests: Mutex<Vec<ManifestState>>,
+        unreadable: Mutex<Vec<u32>>,
         owned: Mutex<Result<OwnedGames, SteamApiError>>,
         persona: Mutex<Result<String, SteamApiError>>,
         apps: Mutex<Vec<AppInfo>>,
@@ -2371,6 +2399,7 @@ mod tests {
                     manifest(2_805_730, "Proton 9.0", 4),
                     manifest(228_980, "Steamworks Common Redistributables", 4),
                 ]),
+                unreadable: Mutex::new(Vec::new()),
                 owned: Mutex::new(Ok(OwnedGames {
                     games: vec![
                         owned(3_000_040, "Quiet Comet", 1_700_100_000),
@@ -2409,8 +2438,12 @@ mod tests {
         fn local_accounts(&self, _client: &SteamClient) -> Vec<LocalAccount> {
             self.accounts.lock().unwrap().clone()
         }
-        fn scan(&self, _client: &SteamClient) -> Vec<ManifestState> {
-            self.manifests.lock().unwrap().clone()
+        fn scan(&self, _client: &SteamClient) -> SteamScan {
+            SteamScan {
+                manifests: self.manifests.lock().unwrap().clone(),
+                unreadable: self.unreadable.lock().unwrap().clone(),
+                missing_libraries: Vec::new(),
+            }
         }
         fn manifest(&self, _client: &SteamClient, appid: u32) -> Option<ManifestState> {
             self.manifests
@@ -3211,11 +3244,19 @@ mod tests {
             last_played_at: 1_800_000_000,
             ..Default::default()
         };
+        let mut unplugged_row = old("3000120", "Far Shore");
+        unplugged_row.store_meta = SteamMeta {
+            library: "/unplugged".into(),
+            ..Default::default()
+        }
+        .to_json();
         let rows = vec![
             old("3000010", "Moonlit Ferry"),
             old("3000030", "Old Brick Road"),
             old("3000090", "Lantern Row"),
             old("3000080", "Desk Lights"),
+            old("3000110", "Being Written"),
+            unplugged_row,
         ];
         let manifests = vec![
             manifest(3_000_010, "Moonlit Ferry", 4),
@@ -3228,8 +3269,12 @@ mod tests {
         let owned = HashMap::new();
         let seen: HashSet<u32> = [3_000_030].into_iter().collect();
         let watched: HashSet<u32> = [3_000_090].into_iter().collect();
+        let unreadable: HashSet<u32> = [3_000_110].into_iter().collect();
+        let unplugged = vec![PathBuf::from("/unplugged")];
         let plan = plan_scan(&ScanInput {
             manifests: &manifests,
+            unreadable: &unreadable,
+            missing_libraries: &unplugged,
             rows: &rows,
             apps: &apps,
             owned: &owned,

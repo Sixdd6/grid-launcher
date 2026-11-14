@@ -1,0 +1,55 @@
+"libraryfolders"
+{
+	"0"
+	{
+		"path"		"@ROOT@"
+		"label"		""
+		"contentid"		"1111111111111111111"
+		"totalsize"		"0"
+		"update_clean_bytes_tally"		"0"
+		"time_last_update_verified"		"1731000000"
+		"apps"
+		{
+			"228980"		"0"
+			"2805730"		"1197403136"
+			"1628350"		"717234176"
+			"9100001"		"2147483648"
+			"9100004"		"0"
+		}
+	}
+	"1"
+	{
+		"path"		"@LIB2@"
+		"label"		"Games SSD"
+		"contentid"		"2222222222222222222"
+		"totalsize"		"1000204886016"
+		"update_clean_bytes_tally"		"0"
+		"time_last_update_verified"		"1731000000"
+		"apps"
+		{
+			"9100002"		"5368709120"
+			"9100003"		"1073741824"
+		}
+	}
+	"2"
+	{
+		"path"		"@ODD@"
+		"label"		""
+		"contentid"		"3333333333333333333"
+		"totalsize"		"0"
+		"apps"
+		{
+		}
+	}
+	"3"
+	{
+		"path"		"@MISSING@"
+		"label"		"Unplugged"
+		"contentid"		"4444444444444444444"
+		"totalsize"		"0"
+		"apps"
+		{
+			"9100009"		"1"
+		}
+	}
+}

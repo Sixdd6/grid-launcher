@@ -17,6 +17,9 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # before it runs (stores::offline; spike 5). Apache-2.0, pure Rust.
 innospect = "0.2.0"
 keyring = "4.2.0"
+# Steam's text KeyValues files: loginusers.vdf, registry.vdf and a manifest's
+# LastPlayed (stores::steam::local; Phase 4 spike 1). MIT.
+keyvalues-parser = "0.2.4"
 liblzma = "0.4.9"
 md-5 = "0.11.0"
 mime_guess = "2.0.5"
@@ -29,6 +32,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 sevenz-rust2 = "0.24.1"
 sha2 = "0.11.1"
+# Steam's libraries and app manifests (stores::steam::local; Phase 4 spike 1). MIT.
+steamlocate = "2.1.1"
 tar = "0.4.46"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
@@ -53,6 +58,9 @@ libc = "0.2.191"
 # `library::user_data_links` creates on unix (a symlink needs a privilege a
 # normal user does not have).
 junction = "2.1.0"
+# Steam's HKCU/HKLM values (SteamPath, SteamExe, InstallPath, RunningAppID;
+# stores::steam). Already in the tree via steamlocate.
+winreg = "0.56.0"
 # NTFS sparse files for the FATX test image builder (FSCTL_SET_SPARSE), and
 # the allocated-size probe its test uses. Already in the tree via `junction`.
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl"] }
