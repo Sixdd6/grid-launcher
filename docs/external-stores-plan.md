@@ -189,8 +189,9 @@ Each phase ends when these pass:
     again. Offline installers already run their own.
   - Epic: legendary's `prereq_info`.
   - Steam: nothing; the Steam client runs them itself.
-- They run in the game's own prefix under umu/Proton. On a Windows host each one runs
-  elevated with one UAC prompt per item; in TV mode on Windows they are skipped and the
-  Downloads row says to finish them in desktop mode.
+- They run in the game's own prefix under umu/Proton, silently, in desktop and TV mode
+  alike. On a Windows host all of a game's steps run in one elevated run, so there is one
+  UAC prompt per install or repair, in TV mode too (never "finish in desktop mode"). If the
+  prompt is declined, the Downloads row shows a warning with Retry.
 - A failed or timed-out step is a warning on the Downloads row, never a failed install.
   Research notes: `docs/research/store-redistributables.md`.
