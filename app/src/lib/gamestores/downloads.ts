@@ -6,7 +6,7 @@
 // downloads formatter so that module can import this one.
 import type { DownloadEntry, DownloadKind, JobFailure, StoreSource } from '../api';
 import { jobPercent } from './jobs';
-import { isEnabledStore, STORE_ORDER, storeName, storeOfPlatform } from './marks';
+import { isEnabledStore, readableVersions, STORE_ORDER, storeName, storeOfPlatform } from './marks';
 
 /** The store a store row belongs to, from its game key (`gog:…`), tool source (`epic`) or platform ("Epic Games"). */
 export function entrySource(e: DownloadEntry): StoreSource | null {
@@ -154,8 +154,11 @@ function completedLine(e: DownloadEntry, ctx: LineContext, drive: string): strin
   switch (e.kind) {
     case 'store_tool':
       return e.detail.trim() ? `Installed · ${e.detail.trim()}` : 'Installed';
-    case 'store_update':
-      return ctx.version ? `Updated to ${ctx.version}` : 'Updated';
+    case 'store_update': {
+      // Amazon's versions are opaque ids: its row reads "Updated".
+      const src = entrySource(e);
+      return ctx.version && (src === null || readableVersions(src)) ? `Updated to ${ctx.version}` : 'Updated';
+    }
     case 'store_repair':
       return e.detail.trim() ? `Verified · ${e.detail.trim()}` : 'Verified';
     case 'store_dlc':

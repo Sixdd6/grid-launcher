@@ -15,7 +15,7 @@ export function coverTags(game: StoreGame, job: DownloadEntry | null): CoverTag[
   const tags: CoverTag[] = [];
   if (job !== null) tags.push({ text: job.status === 'queued' ? 'QUEUED' : `${jobPercent(job)}%`, tone: 'queue' });
   if (game.installed && game.update_version !== '' && job === null) tags.push({ text: 'UPDATE', tone: 'update' });
-  if (game.installed && game.cloud === 'conflict') tags.push({ text: 'SAVE CONFLICT', tone: 'conflict' });
+  if (game.installed && hasStoreCloud(game.source) && game.cloud === 'conflict') tags.push({ text: 'SAVE CONFLICT', tone: 'conflict' });
   if (game.not_supported !== '') tags.push({ text: 'NOT SUPPORTED', tone: 'unsupported' });
   return tags;
 }

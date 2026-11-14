@@ -1228,9 +1228,10 @@ testable statement.
 
 # Game stores
 Status: Phase 1, GOG with offline installers, built (2026-11-13); Phase 2, Epic Games
-Store through legendary, built (2026-11-13); Amazon and Steam are planned. The plan is
-`docs/external-stores-plan.md`, the work plans `docs/stores-phase1-plan.md` and
-`docs/stores-phase2-plan.md`. The approved design is
+Store through legendary, built (2026-11-13); Phase 3, Amazon Games through nile, built
+(2026-11-14); Steam is planned. The plan is `docs/external-stores-plan.md`, the work
+plans `docs/stores-phase1-plan.md`, `docs/stores-phase2-plan.md` and
+`docs/stores-phase3-plan.md`. The approved design is
 `docs/design/system/components/GameStores/README.md` and
 `docs/design/system/components/TVStores/README.md`.
 
@@ -1289,7 +1290,7 @@ What store games get:
 |---|---|
 | Play activity | Off |
 | RomM cloud saves | Off |
-| Store cloud saves | On, for GOG and Epic |
+| Store cloud saves | On, for GOG and Epic (Amazon has none) |
 | Drive backups | GOG on; Epic, Amazon, Steam off ("Store games are not backed up") |
 | Relink and server update checks | Off |
 | Each store's own update check | On |
@@ -1333,6 +1334,21 @@ Store screens (2026-11-13, matching the approved design):
   folder GRID resolves from the game's cloud folder; before a download replaces the local
   save, a copy goes to `<data_dir>/stores/save-backups/epic/<game>/` (the newest five
   kept). Epic games are never backed up to a drive.
+- **Amazon Games** (Phase 3, 2026-11-14). nile makes the sign-in URL, so on Connect GRID
+  installs nile first ("Installing nile (11 MB) for Amazon Games…"), then opens the login
+  window. The sign-in code goes to nile on its command line for the one short `register`
+  run (nile has no other way to take it); it is never logged or forwarded. Every Amazon
+  game is its Windows version, launched under Wine/Proton with nile's FUEL environment;
+  after a Disconnect, installed games still launch, as they are. Amazon games have no
+  cloud saves (no Cloud saves chip, tab, row or switch, and never a SAVE CONFLICT) and no
+  DLC. nile's versions are opaque ids, so no version is shown: the button reads
+  "Update", the cover keeps its UPDATE tag, the card reads "<game>: an update is
+  available", and Overview and the Details header leave the version out. A verify reads
+  "Verified" with no count. fuel.json `PostInstall` steps are skipped on every host. A
+  "Sign in again" that is cancelled leaves the store expired (nile's old login is deleted
+  before a new sign-in). On a Linux system older than glibc 2.35, nile can't run, and
+  Settings and the store panel say "nile can't run on this computer: it needs a newer
+  Linux system (glibc 2.35 or later)." Amazon games are never backed up to a drive.
 - **Play on installed cards.** Every "<game> installed" card for a RomM install has Play,
   which launches the game the normal way (TV mode opens Playing). A card that sums several
   installs has none. Store install cards already have Play.

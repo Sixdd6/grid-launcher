@@ -1,7 +1,8 @@
 # Game stores — Phase 3 (Amazon Games / Prime Gaming) work plan
 
 Status: planned 2026-11-13; spikes and Step 0 done 2026-11-13 (see "Spike results" and
-"Contract deviations — Step 0"); packages A, C and D not started. Read it with:
+"Contract deviations — Step 0"); package C delivered 2026-11-14, its `amazon` e2e group waiting for
+package A (see "Package C outcome"). Read it with:
 - `docs/external-stores-plan.md` for the user decisions;
 - `docs/stores-phase2-plan.md`, the template. Its spike results, contract deviations and
   integration outcome are the lessons this plan builds on;
@@ -929,6 +930,106 @@ it differs from, or adds to, the section A and Step 0 blocks:
   `stores::amazon::tests`. Package A has no e2e group of its own (`amazon*` belong to
   C/D).
 
+## Contract deviations — package C
+
+Where package C differs from, or adds to, the plan. One frozen file changed, in a test only
+(`stores_service/mod.rs`, see the launch hook).
+
+- **`AmazonStore` has a seam.** `AmazonStore::new(api: Arc<dyn AmazonApi>, data_dir,
+  config_path, shared)`; `RealAmazon` forwards to `AmazonService`, and the unit tests fake it
+  (as `EpicApi`). `AmazonStore::real(...)` keeps its Step 0 signature. Besides the service's
+  calls the seam has `owned_local_at()` (`library.json`'s mtime, for "Refreshed …" at startup).
+- **One owned-list owner.** Startup reads `owned_local()` when `[stores.amazon] connected`;
+  every refresh is `sync()`. GRID writes no owned-list file (no `stores/cache/amazon-*`); the
+  list lives in memory and goes with nile's folder on Disconnect.
+- **Login.** `prepare_login` sets the login phase, installs nile when it is missing (the
+  "Installing nile (11 MB) for Amazon Games…" card, then "nile installed", or the
+  `tool_failed` card with Install nile), runs `start_login` and keeps the `AmazonLoginStart`.
+  Any failure there returns `Err` (GRID's words) to `store_connect`, which the frontend shows
+  as "Couldn't open the sign-in window: …"; no window opens and no `store-login` event is sent.
+  `run_finish_login` takes the kept start (no start: `failed`, "Amazon Games returned an
+  error. Try again."), runs `complete_login`, emits `connected`, then syncs ("Amazon Games: N
+  games found · M to install"); a failure emits `failed` with the error's words. Cancel, a
+  window that fails to open and a code-less redirect drop the kept start. The inherent method
+  is `prepare_sign_in` (a same-named inherent method would shadow the trait's in tests).
+- **Login check.** `saved_account()` (local) decides signed in / signed out; an expired login
+  shows up in the sync after it (`LoginExpired` flips the card to Expired and raises the
+  background "Your Amazon Games login expired…" card). A network failure keeps the state.
+- **Disconnect** is sync on the trait (`store_disconnect` runs it in `spawn_blocking`), so
+  it blocks on the service's async `disconnect()` on that blocking thread (a runtime of its
+  own in unit tests). A `NotFound` is fine; any other error stops it with "Couldn't delete
+  Amazon Games's login: …". Then the login window data, the config (`connected`,
+  `username`) and the in-memory state go.
+- **Launch hook.** Not connected (after a Disconnect, when nile and its files are gone) or
+  nile missing: `Ok(None)`, the row launches as it is. Otherwise `launch_prep`, connected or
+  expired; an error is `LaunchError::Validation("Couldn't start <title> through nile: <error>")`,
+  with no retry. The frozen `stores_service/mod.rs` router test now expects `Ok(None)` for its
+  not-connected Amazon row (it expected Step 0's refusal).
+- **Installs.** `ensure_can_install` as Epic's. The install dialog asks `download_size` and
+  answers one Windows version with download = disk = that size (no languages, no DLC); the
+  size is kept for the Available card. `install_job` refuses a platform other than `windows`
+  and **passes the game's own folder** as `AmazonInstallRequest.install_dir`
+  (`<install base>/<sanitize_component(title)>`, or the dialog's folder), as Epic does; A's
+  `install --path` must use it as is (the Step 0 doc comment), not append the title again.
+- **Updates.** `StoreUpdateSource for AmazonStore`: ready when connected with nile ready;
+  `find` is `list-updates`, keeping ids that have a row; each update carries
+  `AMAZON_UPDATE_MARK` (`"latest"`) as its version and build, since nile's versions are
+  opaque. **`StoreGame.update_version` is `"latest"` for an Amazon game with an update** (D
+  only tests it for non-empty; User decisions 1: the button reads "Update"). A finished
+  update hides its UPDATE tag until the next check. The card is "Fogline: an update is
+  available" (User decisions 1, word for word).
+- **StoreGame / status.** `origin: nile`, `platforms: ['windows']`, `cloud: 'none'`, no DLC,
+  `not_supported` empty, `version` the installed version id; `in_rail` is "connected or
+  expired, or any installed game" (Epic's); `cloud_saves` always false. `cloud_state`
+  answers `none` (Step 0 said `off`), `cloud_sync` "Amazon Games has no cloud saves.", the DLC
+  calls "Amazon Games games have no DLC in GRID.".
+- **Notices** (`stores_service::amazon::notice`): Epic's words with "Amazon Games" / "nile",
+  no cloud cards; a verify reads "Verified <title>'s files" (nile gives no count).
+- **E2E harness.**
+  - The fake nile prints the token on stderr for every command, and on stdout as a text line,
+    a `fake_session` key in every JSON object, or a text line before a JSON array
+    (`list-updates`, `library list`). A's parsers must take the first JSON value on stdout.
+  - `register` succeeds only with `FAKE-E2E-AMAZON-CODE` **and** the `code_verifier`
+    (`FAKE-STORE-TOKEN-not-real`), `serial` and `client_id` that `auth --login` printed, so the
+    kept start's round trip is checked. It refuses `-d`, `--base-path`, a new install without
+    `--path` and the interactive `auth --login` with exit 2.
+  - It writes 0644 files and default-umask folders; markers in `stores/nile/nile/`:
+    `.fake-expired`, `.fake-download-fail`, `.fake-no-space`, `.fake-update`,
+    `.fake-logout-fail`.
+  - `fixtures-amazon/library.json` is nile's shape plus a `fake` key per entry (stripped from
+    the `library.json` it writes), with art at `{BASE}`; Fogline has a second entitlement of
+    the same product, so the owned list is 3 games only if A dedups.
+  - Product ids: Fogline `amzn1.adg.product.5b0f1a2c-3d4e-4f50-8a6b-0000000000a1`, Kettle Drum
+    `…a2`, Lowsun `…a3` (exported from `helpers/amazonLogin.ts`).
+  - The seed takes `E2E_AMAZON_URL` (e2e.sh passes it) for `library.json`'s art; its signed-in
+    profile sets `.fake-update` (an update for Fogline at startup); `--expired` or a spec name
+    ending in `-expired` adds `.fake-expired` (the prototype's default state). Exported for the
+    specs: `E2E_AMAZON_URL`, `E2E_FAKE_NILE`, `E2E_AMAZON_ARGV_FILE`, `E2E_AMAZON_ENV_FILE`
+    (the compat-tool stand-ins' argv and FUEL env logs).
+  - The display name is the account name GRID shows (status, config), so the secrets spec
+    checks that no log or payload names `AMAZON_GAMES_FUEL_DISPLAY_NAME`, and that the
+    variable reached the game.
+  - `e2e/package.json` `test:mock` runs the two new harness tests (outside the Owns list).
+
+## Package C outcome (2026-11-14)
+
+- `scripts/ctr.sh gate`: PASS. New unit tests: `stores_service::amazon` (17: login with
+  nile installed first, failures, cancel, startup from `library.json`, expired sync,
+  Disconnect, install guards and options, library mapping, status, launch hook, Downloads
+  cards, notices, refresh counts), `update_service` (`amazon_updates`).
+- Harness tests (`node --test`, in the container): `nile.test.mjs` 13/13,
+  `mock-amazon.test.mjs` 4/4.
+- `scripts/ctr.sh e2e amazon gog tv-gog epic tv-epic`: `gog`, `tv-gog`, `epic` and `tv-epic`
+  pass (GOG and Epic are unchanged with Amazon registered; `epic-login` still runs through the
+  router hook). `amazon` on package A's Step 0 stubs: `amazon-login` 3 of 12 pass (not
+  connected, Install nile, Disconnect). The other 9 wait for A: every login-window step needs
+  `start_login`, since `store_connect` gets "not implemented" before the window opens. The
+  refused code and the sign-in also need `complete_login`, and the owned list needs `sync`.
+  `amazon-secrets` is not reached (the group stops at the first failing spec). It needs A's
+  sign-in, install, update, verify, launch prep and disconnect.
+- Not run: `wincheck` (no `cfg(windows)`/`cfg(unix)` code touched). `amazon-library` and
+  `tv-amazon` are package D's specs; their groups skip until those files exist.
+
 ## E2E plan
 
 - **Mock Amazon** (`mock-romm/mock-amazon.mjs`, one base for login and art):
@@ -1044,3 +1145,124 @@ it differs from, or adds to, the section A and Step 0 blocks:
    Phase 3, on Windows hosts too.
 
 Questions for the user: none open.
+
+## Package D outcome (UI, desktop and TV)
+
+- **Capabilities (`gamestores/marks.ts`).** `ENABLED_STORES = ['amazon', 'epic', 'gog']`.
+  `StoreCaps` gains `hasDlc` (GOG, Epic) and `readableVersions` (GOG, Epic; Amazon's
+  version ids are opaque), with `shownVersion(game)`, `updateLabel(game)` ("Update to 2.2",
+  or "Update" for Amazon) and `storeOfKey(key)` (first `:` only). Every "tool ⇒ cloud/DLC"
+  path now reads a capability:
+  - cloud: the SAVE CONFLICT cover tag (desktop `cover.ts`, TV `tvCoverTag`) and the
+    uninstalled card's sentence (`uninstalledNotice`) now also need `hasCloud`, whatever
+    the backend's `cloud` / `cloud_saves` say. The chip, tab, Details line, Game Settings
+    switch, Settings row, launch sync toasts and TV rows already did;
+  - DLC: `optionsForStore(source, opts)` drops DLC from the install options (desktop dialog
+    and TV install page), and `dlcRows` is empty, for a store without DLC;
+  - versions: the Details version chip, Overview's Version fact (desktop and TV), the
+    Update button, the TV update confirm ("Update Fogline?") and the Downloads "Updated to
+    …" line (now "Updated") follow `readableVersions`.
+- **TV fix (every no-cloud store):** `disconnectWords` read "they can’t install, update
+  until you connect again" for a store without cloud saves; it now reads "they can’t
+  install or update", as the desktop.
+- **Tool sizes.** New `toolSize(bytes)` (decimal MB, as the release page gives it) for the
+  tool panel, Settings tool row and not-connected ledes, desktop and TV, so nile's
+  11113264-byte asset reads "11 MB" (the plan's figure); legendary still reads "3 MB".
+  `sizeGb` is unchanged. One synthetic gogdl test size changed to decimal bytes.
+- **Lede:** "GRID installs GOG, Epic and Amazon games with the open-source tools…" (the
+  prototype's line without Steam). `e2e/specs/epic-library.spec.ts` asserted the Phase 2
+  lede; its expected text is updated (one line).
+- **Fake (`fakeApi.ts`, `devMock.ts`).** The prototype's a1–a3 (Fogline installed, played
+  last month; Kettle Drum and Lowsun available) under made-up `amzn1.adg.product.…` ids,
+  opaque fake version ids, `sam.plays`, nile 1.2.0 at 11113264 bytes, `cloud_saves:
+  false`, no DLC, `cloud: 'unknown'`, Game Settings with `<install>/prefix` and no cloud.
+  The fake starts Amazon **expired** (the prototype's default); `scenario('normal',
+  'amazon')` connects it. New scenario `needsGlibc` shows a tool error "nile needs a newer
+  system (glibc 2.35 or later)"; the tool-failed panel shows it as given. The fake's
+  Amazon update notice is "Fogline updated" and its verify notice "Fogline verified" (no
+  count); the real cards are package C's ("<game>: an update is available").
+- **Deviation from the prototype (user decision 1, extended):** the Details header has no
+  `v…` chip for Amazon (TV too), not just no Version fact: the id is unreadable there for
+  the same reason. Reversible by dropping `shownVersion` from `storeDetailChips` /
+  `tvDetailChips`.
+- **Kept shipped behaviour:** Verify and repair is disabled while signed out (all stores;
+  the prototype leaves it on). nile's verify needs the network and a login.
+- **E2E (pending integration with package C's harness):** `e2e/helpers/amazon.ts`,
+  `e2e/specs/amazon-library.spec.ts`, `e2e/specs/tv-amazon.spec.ts`, written against the
+  E2E plan (seed: `sam.plays`, Fogline installed, Kettle Drum and Lowsun owned; covers
+  found by title). For integration:
+  - `amazon-library` installs Kettle Drum, verifies Fogline (expects the row "Verified"),
+    runs the update step only when Fogline carries UPDATE (`.fake-update`), expects
+    "Updated", uninstalls Kettle Drum ("Kettle Drum uninstalled", no cloud sentence), and
+    cancels the Disconnect confirm;
+  - `tv-amazon` installs Lowsun, disconnects, then signs in over TV mode: nile is
+    installed again before the window opens, so the login-window wait uses
+    `INSTALL_TIMEOUT`, and every step after it runs in `MAIN_WINDOW`;
+  - both need `scripts/e2e.sh` groups `amazon-library` and `tv-amazon` (package C).
+- **Parity** (dev mock beside the prototype, screenshots in the worktree's
+  `ctr-out/parity-amazon/`, not committed). Desktop: rail group first with the `!` badge,
+  the expired Available panel (the default), Installed, Fogline Details (Overview and Media,
+  no cloud line, the backup refusal; no version chip or fact), Available with Kettle Drum
+  and Lowsun and the chips (no Cloud saves chip), the install dialog (no Version, Language
+  or DLC), the Settings card connected / expired / not connected and its Disconnect confirm
+  (no Cloud saves row), Game Settings (no cloud switch), Launch ("Launching Fogline…" only).
+  TV (960×540): the Amazon folder, Installed with the expired chip, the game page (Overview
+  and Media), Settings › Stores › Amazon Games (expired, no Cloud saves row). The only
+  differences are fixture data, the pin's real nile data (1.2.0, 11 MB) where the prototype
+  has 1.1.2 and 9 MB, the version decision, and the shipped app's own Sort and card size.
+
+## Integration outcome (2026-11-14)
+
+Packages C (2d32ad2) and D (8de361d) merged onto Step 0 + A (dd929ea), in that order. The
+plan's per-package sections were additive and are all kept (one textual conflict, between
+the A and C deviation sections). The merged tree passed the gate as it was; C's
+`RealAmazon` already forwarded to A's real `AmazonService` (Step 0's signatures held).
+Items:
+
+- **One nile helper.** Every nile run goes through `AmazonService::tool()` and
+  `AmazonService::run` (A); the app adds none. `AmazonApi` gains `has_login()`
+  (forwarding to A's); the futures are `Send` (`BoxFut`).
+- **Cancelled "Sign in again".** A's `start_login` deletes nile's saved login first. The
+  backend now shows that as the expired state: after `start_login` (success or failure),
+  a store connected in the config whose nile has no saved login is Expired, and stays so
+  when the window is cancelled or the redirect has no code. `check_login`'s
+  `saved_account() == None` with `[stores.amazon] connected` is Expired too (it was "not
+  connected" and cleared the config). A first Connect that is cancelled stays not
+  connected. New unit test `a_cancelled_sign_in_again_leaves_the_expired_state`.
+- **Launch after Disconnect.** C's hook already launches the row as it is when not
+  connected or nile is gone; A's `launch::launch_error` now words a failed launch prep
+  (same text as C's: "Couldn't start <title> through nile: …"), so there is one source.
+- **glibc floor.** A's `NILE_SYSTEM_TOO_OLD` wins ("nile can't run on this computer: it
+  needs a newer Linux system (glibc 2.35 or later)."); the prototype has no text for it.
+  Any nile run that returns it (sign-in start, login check, sync, install options, launch
+  prep) sets nile's tool state to failed with that text, so Settings and the store panel
+  show it as given. D's fake (`FAKE_NILE_GLIBC_ERROR`) and its vitest now use the same
+  words. New unit test `nile_too_old_for_this_system_shows_as_the_tool_error`.
+- **Install folder.** C built `<base>/<sanitize_component(title)>`; it now uses A's
+  `install::folder_name(title, id)` (nile's own folder rule, falling back to the id), in
+  both the install dialog's folder and the job. `install --path` takes it as is.
+- **Update marker.** C's `update_version = "latest"` is only tested for non-empty by the UI:
+  `updateLabel` gives "Update", `shownVersion`, the Version fact (desktop and TV) and the
+  Downloads line ("Updated") never show it for Amazon. Cards: "<game>: an update is
+  available", "<game> updated", and the Downloads row reads "Verified" with no count.
+- **Parsers.** A's JSON readers take the first JSON value on stdout and ignore unknown
+  keys; the owned list dedups by product id and ASIN. The fake's token lines and
+  `fake_session` keys pass `amazon`; the owned count is 3; `register` round-trips the
+  printed values (the fake refuses anything else).
+- **cloud_state.** C's `none` is kept (the game has no cloud saves; `off` means "turned
+  off"). The UI never asks: every cloud path reads `hasCloud`, false for Amazon, so no
+  Cloud saves tab, chip, row or SAVE CONFLICT shows.
+- **D's specs on C's seed.** `amazon-library` and `tv-amazon` ran as written against C's
+  seed (covers by title, `sam.plays`, `.fake-update`). One spec change: the
+  `amazon-library` update step returned early when Fogline had no UPDATE tag; C's seed
+  always sets `.fake-update`, so it now waits for the tag and fails without it.
+- **Details version chip.** D's hidden chip for Amazon (desktop and TV) is kept.
+- **Owned list.** No `amazon-owned.json` anywhere; nile's `library.json` is the only copy.
+
+Failures found and fixed at integration: none in the e2e suite. One new unit test of
+mine expected the glibc text from `ensure_can_install` while signed out (the signed-out
+refusal comes first); the test now connects first.
+
+Results: `scripts/ctr.sh gate` PASS (`== gate: PASS`); `scripts/ctr.sh wincheck` PASS
+(`== wincheck: PASS`); full `scripts/ctr.sh e2e`: 49 stage groups, 82 spec files, every
+one on its first attempt, `== e2e: all stages passed`.

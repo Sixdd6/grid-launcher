@@ -97,6 +97,16 @@ const appEnv: Record<string, string> = {
   // for its art URLs).
   GRID_LAUNCHER_E2E_EPIC_BASE: process.env.E2E_EPIC_URL ?? 'http://127.0.0.1:9',
   ...(process.env.E2E_FAKE_LEGENDARY ? { GRID_LAUNCHER_E2E_TOOL_LEGENDARY: process.env.E2E_FAKE_LEGENDARY } : {}),
+  // The same for Amazon Games: GRID_LAUNCHER_E2E_AMAZON_BASE is the sign-in
+  // page's origin (the fake nile prints <base>/ap/signin?… as the login
+  // URL), the finish redirect (<base>/?openid.assoc_handle=…) and the art
+  // origin (app stores_service/amazon.rs `amazon_endpoints`, e2e feature
+  // only): the mock Amazon for the amazon groups (e2e.sh
+  // group_needs_amazon), else the dead loopback address.
+  // GRID_LAUNCHER_E2E_TOOL_NILE is the fake nile (fake-tools/nile.mjs, run
+  // directly; it reads the base above for the login URL and the art).
+  GRID_LAUNCHER_E2E_AMAZON_BASE: process.env.E2E_AMAZON_URL ?? 'http://127.0.0.1:9',
+  ...(process.env.E2E_FAKE_NILE ? { GRID_LAUNCHER_E2E_TOOL_NILE: process.env.E2E_FAKE_NILE } : {}),
   // E2E_HOME (the tv-gog stage only) is the app's HOME: a folder in the
   // stage's data dir whose Downloads holds the fake GOG installers.
   ...(process.env.E2E_HOME ? { HOME: process.env.E2E_HOME } : {}),

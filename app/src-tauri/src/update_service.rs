@@ -592,29 +592,58 @@ impl StoreUpdateSource for EpicStore {
     }
 }
 
-/// Amazon (Step 0): never ready, so its check never runs and it reports no
-/// updates until package C fills in `list-updates`.
+/// Amazon: nile's `list-updates` (installed games only). nile's versions
+/// are opaque ids, so an update carries no version to show
+/// (`AMAZON_UPDATE_MARK`; User decisions 1: the button reads "Update").
 impl StoreUpdateSource for AmazonStore {
     fn kind(&self) -> StoreKind {
         StoreKind::Amazon
     }
     fn ready(&self) -> bool {
-        false
+        self.connection() == StoreConnection::Connected && self.tool_ready()
     }
     fn registry(&self) -> Option<Arc<Registry>> {
         AmazonStore::registry(self)
     }
     fn find(
         self: Arc<Self>,
-        _rows: Vec<InstalledGame>,
+        rows: Vec<InstalledGame>,
     ) -> BoxFut<'static, Result<Vec<StoreUpdate>, StoreError>> {
-        Box::pin(async { Ok(Vec::new()) })
+        Box::pin(async move {
+            let found = self.find_updates().await?;
+            Ok(amazon_updates(&rows, found))
+        })
     }
-    fn failed(&self, _error: StoreError) {}
-    fn update_notice(&self, _title: &str, _version: &str) {}
+    fn failed(&self, error: StoreError) {
+        let _ = self.store_error(error);
+    }
+    fn update_notice(&self, title: &str, _version: &str) {
+        self.notice(crate::stores_service::amazon::notice::update_available(
+            title,
+        ));
+    }
     fn changed(&self) {
-        crate::stores_service::StoreBackend::changed(self)
+        AmazonStore::changed(self)
     }
+}
+
+/// nile's updates for the installed `rows` (nile lists only installed
+/// games; a row GRID doesn't have is dropped), each with the mark for its
+/// version and build.
+fn amazon_updates(
+    rows: &[InstalledGame],
+    found: Vec<grid_core::stores::amazon::AmazonUpdate>,
+) -> Vec<StoreUpdate> {
+    let mark = crate::stores_service::amazon::AMAZON_UPDATE_MARK;
+    found
+        .into_iter()
+        .filter(|update| rows.iter().any(|row| row.store_id == update.product_id))
+        .map(|update| StoreUpdate {
+            store_id: update.product_id,
+            version: mark.to_string(),
+            build_id: mark.to_string(),
+        })
+        .collect()
 }
 
 /// The updates in `found` (one store's) that `known` does not already hold
@@ -739,6 +768,39 @@ mod tests {
             .is_empty());
         assert_eq!(service.store_updates().len(), 1, "Epic's update stays");
         assert!(service.store_versions(StoreKind::Gog).is_empty());
+    }
+
+    #[test]
+    fn amazon_updates_keep_installed_rows_and_carry_the_mark() {
+        use grid_core::stores::amazon::AmazonUpdate;
+        let rows = vec![InstalledGame {
+            store_id: "amzn1.adg.product.fog".into(),
+            ..Default::default()
+        }];
+        let found = vec![
+            AmazonUpdate {
+                product_id: "amzn1.adg.product.fog".into(),
+            },
+            AmazonUpdate {
+                product_id: "amzn1.adg.product.gone".into(),
+            },
+        ];
+        let updates = amazon_updates(&rows, found);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].store_id, "amzn1.adg.product.fog");
+        assert_eq!(updates[0].version, "latest");
+        assert_eq!(updates[0].build_id, "latest");
+        // The same update found again gets no second card.
+        let service = UpdateService::new();
+        assert_eq!(
+            service
+                .commit_store_updates(StoreKind::Amazon, updates.clone())
+                .len(),
+            1
+        );
+        assert!(service
+            .commit_store_updates(StoreKind::Amazon, updates)
+            .is_empty());
     }
 
     use super::*;
