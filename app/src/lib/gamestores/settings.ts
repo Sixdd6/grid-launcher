@@ -1,12 +1,13 @@
 // Settings › Stores (GameStores README, "Settings › Stores"; prototype
 // `stStoreCard`, `stToolLine`, `renderStoresPane`). Pure: the card's pill,
-// lines, rows and the Disconnect confirm. Phase 1: the GOG card only.
+// lines, rows and the Disconnect confirm, for every store with a tool (GOG,
+// Epic Games).
 import type { StoreStatus } from '../api';
-import { hasStoreCloud, storeName, storeTool } from './marks';
+import { hasCloud, hasInstaller, storeName, storesLede, storeTool } from './marks';
 import { agoText, plural, sizeGb } from './text';
 
-export const STORES_LEDE =
-  'Connect the stores you buy games from. Each connected store gets a group in the Library with its Installed and Available games. GRID installs GOG games with the open-source tool Heroic Games Launcher uses; its login stays in that tool’s files in GRID’s data folder.';
+/** The pane's lede, naming the stores this build shows (`storesLede`). */
+export const STORES_LEDE = storesLede();
 
 export type Pill = { text: string; tone: 'ok' | 'warn' | 'off' };
 
@@ -19,7 +20,8 @@ export function storePill(status: StoreStatus): Pill {
 /** The line under the store's name. */
 export function accountLine(status: StoreStatus): string {
   if (status.connection !== 'not_connected') return `Signed in as ${status.username}`;
-  if (status.source === 'gog' && status.installed_count > 0) {
+  // A store with offline installers can have games here with no login (the prototype's GOG card).
+  if (hasInstaller(status.source) && status.installed_count > 0) {
     return `Not signed in · ${plural(status.installed_count, 'game')} installed here`;
   }
   return 'Not signed in';
@@ -41,7 +43,7 @@ export type ToolLine =
   | { kind: 'python'; text: string }
   | { kind: 'pending'; text: string };
 
-/** The failure the tool row shows when the host's Python is too old for gogdl's zipapp. */
+/** The failure the tool row shows when the host's Python is too old for the tool (gogdl's zipapp, legendary). */
 export function needsPython(error: string): boolean {
   return /python/i.test(error);
 }
@@ -71,7 +73,7 @@ export function toolLine(status: StoreStatus): ToolLine {
   }
 }
 
-/** "heroic-gogdl · GPL-3.0" and the source link (shown without its scheme). */
+/** "heroic-gogdl · GPL-3.0" / "legendary · GPL-3.0" and the source link (shown without its scheme). */
 export function licenseLine(status: StoreStatus): { text: string; url: string; label: string } {
   const tool = storeTool(status.source) ?? { name: '', pkg: '' };
   const url = status.tool.source_url;
@@ -83,7 +85,7 @@ export function notConnectedLede(status: StoreStatus): string {
   const name = storeName(status.source);
   const tool = storeTool(status.source) ?? { name: 'its tool', pkg: '' };
   return `Sign in to ${name} to see the games you own in the Library and install them. ${
-    status.source === 'gog' ? 'You can install GOG offline installers without signing in. ' : ''
+    hasInstaller(status.source) ? `You can install ${name} offline installers without signing in. ` : ''
   }GRID installs with ${tool.name} (${tool.pkg}, ${status.tool.license || 'GPL-3.0'}, ${sizeGb(status.tool.size_bytes)}), which it downloads when you connect.`;
 }
 
@@ -100,7 +102,7 @@ export function disconnectConfirm(status: StoreStatus): { bold: string; rest: st
   const stay =
     n > 0
       ? ` The ${plural(n, 'installed game')} stay and still play; ${
-          hasStoreCloud(status.source) ? 'they can’t install, update or sync cloud saves' : 'they can’t install or update'
+          hasCloud(status.source) ? 'they can’t install, update or sync cloud saves' : 'they can’t install or update'
         } until you connect again.`
       : '';
   return { bold: `Disconnect ${name}?`, rest: `GRID deletes your ${name} login and ${tool} from this computer.${stay}` };

@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { agoText, plural, sizeGb, dlcShortTitle } from './text';
-import { ENABLED_STORES, noBackupReason, storeName, storeTool } from './marks';
+import {
+  canBackup,
+  ENABLED_STORES,
+  hasCloud,
+  hasInstaller,
+  hasTool,
+  installedByTool,
+  isEnabledStore,
+  noBackupReason,
+  storeCaps,
+  storeLauncher,
+  storeName,
+  storeOfPlatform,
+  storesLede,
+  storeTool,
+} from './marks';
 import { availBlock, parseStoreRailKey, storeFlag, storeRailGroups, storeRailKey, storeShown } from './rail';
 import { coverPrimary, coverProgress, coverTags, showCoverCloud } from './cover';
 import { jobPercent, liveJobFor, liveToolJob } from './jobs';
@@ -33,11 +48,49 @@ describe('text', () => {
 });
 
 describe('marks', () => {
-  it('shows GOG only in Phase 1', () => {
-    expect(ENABLED_STORES).toEqual(['gog']);
+  it('shows GOG and Epic Games in Phase 2', () => {
+    expect(ENABLED_STORES).toEqual(['epic', 'gog']);
+    expect(isEnabledStore('epic')).toBe(true);
+    expect(isEnabledStore('amazon')).toBe(false);
     expect(storeName('gog')).toBe('GOG');
+    expect(storeName('epic')).toBe('Epic Games');
     expect(storeTool('gog')).toEqual({ name: 'gogdl', pkg: 'heroic-gogdl' });
+    expect(storeTool('epic')).toEqual({ name: 'legendary', pkg: 'legendary' });
     expect(storeTool('steam')).toBeNull();
+  });
+  it('gives each store its capabilities', () => {
+    expect(storeCaps('gog')).toEqual({ hasTool: true, hasCloud: true, canBackup: true, hasInstaller: true, hasVersions: true, hasLanguages: true });
+    expect(storeCaps('epic')).toEqual({ hasTool: true, hasCloud: true, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false });
+    expect([hasTool('steam'), hasCloud('amazon'), canBackup('epic'), hasInstaller('epic')]).toEqual([false, false, false, false]);
+    expect([hasTool('epic'), hasCloud('epic'), canBackup('gog'), hasInstaller('gog')]).toEqual([true, true, true, true]);
+  });
+  it('knows which installs the store tool made', () => {
+    expect(installedByTool({ source: 'gog', origin: 'gogdl' })).toBe(true);
+    expect(installedByTool({ source: 'gog', origin: 'offline' })).toBe(false);
+    expect(installedByTool({ source: 'epic', origin: 'legendary' })).toBe(true);
+    expect(installedByTool({ source: 'epic', origin: 'gogdl' })).toBe(false);
+    expect(installedByTool({ source: 'steam', origin: null })).toBe(false);
+  });
+  it('names the launcher and reads store platforms', () => {
+    expect(storeLauncher('epic')).toBe('Epic Games Launcher');
+    expect(storeOfPlatform('Epic Games')).toBe('epic');
+    expect(storeOfPlatform('GOG')).toBe('gog');
+    expect(storeOfPlatform('epic')).toBe('epic');
+    expect(storeOfPlatform('PlayStation')).toBeNull();
+    expect(storeOfPlatform('')).toBeNull();
+  });
+  it('words the Settings › Stores lede from the stores shown', () => {
+    const start = 'Connect the stores you buy games from. Each connected store gets a group in the Library with its Installed and Available games.';
+    expect(storesLede(['gog'])).toBe(
+      `${start} GRID installs GOG games with the open-source tool Heroic Games Launcher uses; its login stays in that tool’s files in GRID’s data folder.`,
+    );
+    expect(storesLede()).toBe(
+      `${start} GRID installs GOG and Epic games with the open-source tools Heroic Games Launcher uses; their logins stay in those tools’ files in GRID’s data folder.`,
+    );
+    // The prototype's full line, every store shown.
+    expect(storesLede(['amazon', 'epic', 'gog', 'steam'])).toBe(
+      `${start} GRID installs GOG, Epic and Amazon games with the open-source tools Heroic Games Launcher uses; their logins stay in those tools’ files in GRID’s data folder. Steam games install and start through the Steam client.`,
+    );
   });
   it('says why Epic, Amazon and Steam games can’t be backed up', () => {
     expect(noBackupReason('gog')).toBe('');
@@ -80,7 +133,7 @@ describe('rail', () => {
     expect(storeRailGroups([status({ connection: 'expired' })])[0].rows[1].count).toEqual({ kind: 'attention' });
   });
   it('hides stores that are not enabled', () => {
-    expect(storeRailGroups([status({ source: 'epic' })])).toEqual([]);
+    expect(storeRailGroups([status({ source: 'amazon' }), status({ source: 'steam' })])).toEqual([]);
   });
 });
 

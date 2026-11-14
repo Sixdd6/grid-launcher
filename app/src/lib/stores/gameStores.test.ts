@@ -26,7 +26,7 @@ function harness() {
   configureGameStores({
     api: {
       storesStatus: async () => fake.handle('stores_status', {}) as never,
-      storeLibrary: async () => fake.handle('store_library', {}) as StoreLibrary,
+      storeLibrary: async (source) => fake.handle('store_library', { source }) as StoreLibrary,
     },
     listen: (async (event: string, h: Handler) => {
       handlers.set(event, h);
@@ -43,7 +43,7 @@ afterEach(() => {
 
 describe('pure helpers', () => {
   it('keeps enabled stores only', () => {
-    expect(enabledStatuses([status(), status({ source: 'epic' })]).map((s) => s.source)).toEqual(['gog']);
+    expect(enabledStatuses([status(), status({ source: 'epic' }), status({ source: 'amazon' })]).map((s) => s.source)).toEqual(['gog', 'epic']);
   });
   it('finds a game in any library', () => {
     const fake = new FakeStores();

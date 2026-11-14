@@ -5,7 +5,7 @@
   // "not linked", no Achievements, no Related row. Buttons, lines, chips,
   // tabs and facts come from `gamestores/details.ts`.
   import { untrack } from 'svelte';
-  import { api, type DriveStoreGame, type StoreCloudState, type StoreGame } from '../../api';
+  import { api, type DriveStoreGame, type StoreCloudState, type StoreGame, type StoreSource } from '../../api';
   import Icon from '../../Icon.svelte';
   import Image from '../../Image.svelte';
   import { downloads } from '../../stores/downloads.svelte';
@@ -31,7 +31,8 @@
     type StoreTab,
   } from '../details';
   import { liveJobFor } from '../jobs';
-  import { storeName } from '../marks';
+  import { canBackup, storeName } from '../marks';
+  import { parseGameKey } from '../../gameKey';
   import { removedFromDriveNotice, uninstalledNotice } from '../notices';
   import StoreMark from './StoreMark.svelte';
   import ConflictSides from './ConflictSides.svelte';
@@ -58,11 +59,17 @@
 
   let { open, onClose }: { open: DetailsOpen; onClose: () => void } = $props();
 
+  /** The store a game key names (GOG for a key that names none). */
+  function sourceOfKey(key: string): StoreSource {
+    const k = parseGameKey(key);
+    return k !== null && k.source !== 'romm' ? k.source : 'gog';
+  }
+
   /** A drive game the store doesn't list (signed out): enough to show it. */
   function fromDrive(g: DriveStoreGame): StoreGame {
     return {
       key: g.key,
-      source: 'gog',
+      source: sourceOfKey(g.key),
       store_id: g.key.slice(g.key.indexOf(':') + 1),
       title: g.name,
       installed: g.installed,
@@ -141,7 +148,7 @@
 
   // "On Couch kit": the connected drives that hold this GOG game.
   $effect(() => {
-    if (!game || game.source !== 'gog' || open.drive) return;
+    if (!game || !canBackup(game.source) || open.drive) return;
     const key = game.key;
     const list = drives.withPack;
     let cancelled = false;
@@ -425,7 +432,7 @@
         </section>
       </div>
     {:else}
-      <p class="note">This game isn’t in your {storeName('gog')} library any more.</p>
+      <p class="note">This game isn’t in your {storeName(sourceOfKey(open.key))} library any more.</p>
     {/if}
   </div>
 </div>

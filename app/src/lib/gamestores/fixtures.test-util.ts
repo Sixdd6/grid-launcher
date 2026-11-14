@@ -1,10 +1,21 @@
 // Builders for the gamestores tests: a status, a game and a Downloads row with
 // sensible defaults (the fake's own data underneath). Fake markers only.
 import type { DownloadEntry, StoreGame, StoreStatus } from '../api';
-import { baseStatus, FakeStores } from './fakeApi';
+import { baseEpicStatus, baseStatus, FakeStores } from './fakeApi';
 
 export function status(over: Partial<StoreStatus> = {}): StoreStatus {
   return { ...baseStatus(), ...over, tool: { ...baseStatus().tool, ...(over.tool ?? {}) } };
+}
+
+/** An Epic Games status: signed in as SamPlays, legendary installed. */
+export function epicStatus(over: Partial<StoreStatus> = {}): StoreStatus {
+  return { ...baseEpicStatus(), ...over, tool: { ...baseEpicStatus().tool, ...(over.tool ?? {}) } };
+}
+
+/** One of the fake's Epic Games games by app name (`Starlight`, `GlimmerDeep`, `IronOrchard`, …). */
+export function epicGame(appName: string, over: Partial<StoreGame> = {}): StoreGame {
+  const base = new FakeStores().games.find((g) => g.key === `epic:${appName}`)!;
+  return { ...base, ...over };
 }
 
 export function storeGame(over: Partial<StoreGame> = {}): StoreGame {

@@ -6,15 +6,15 @@
 // downloads formatter so that module can import this one.
 import type { DownloadEntry, DownloadKind, JobFailure, StoreSource } from '../api';
 import { jobPercent } from './jobs';
-import { isEnabledStore, STORE_ORDER, storeName } from './marks';
+import { isEnabledStore, STORE_ORDER, storeName, storeOfPlatform } from './marks';
 
-/** The store a store row belongs to, from its game key (`gog:…`) or tool source (`gog`). */
+/** The store a store row belongs to, from its game key (`gog:…`), tool source (`epic`) or platform ("Epic Games"). */
 export function entrySource(e: DownloadEntry): StoreSource | null {
   const id = e.source_id.trim();
   const head = id.includes(':') ? id.slice(0, id.indexOf(':')) : id;
   if ((STORE_ORDER as readonly string[]).includes(head)) return head as StoreSource;
-  if (e.platform.trim().toLowerCase() === 'gog') return 'gog';
-  return null;
+  const byName = storeOfPlatform(e.platform);
+  return byName !== null && isEnabledStore(byName) ? byName : null;
 }
 
 /** Whether the row is a store game, store tool, or GOG backup row (it gets the store's badge). */
