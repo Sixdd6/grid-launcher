@@ -11,7 +11,7 @@
   import { api, type DriveStoreGame, type StoreCloudState, type StoreGame } from '../../api';
   import { descriptionParagraphs } from '../../gamestores/details';
   import { liveJobFor } from '../../gamestores/jobs';
-  import { hasStoreCloud, storeName } from '../../gamestores/marks';
+  import { canBackup, hasStoreCloud, storeName } from '../../gamestores/marks';
   import { sizeGb } from '../../gamestores/text';
   import { downloads } from '../../stores/downloads.svelte';
   import { drives } from '../../stores/drives.svelte';
@@ -85,7 +85,7 @@
   let onDrives = $state<string[]>([]);
   $effect(() => {
     void tvStores.driveVersion;
-    if (drive || !game || game.source !== 'gog') return;
+    if (drive || !game || !canBackup(game.source)) return;
     const ready = drives.withPack;
     let cancelled = false;
     Promise.all(

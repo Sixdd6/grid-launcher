@@ -5,7 +5,8 @@
   // Available under it with their counts. The folder shows `!` when the
   // store needs attention and `off` when it isn't connected but still has
   // games installed; Available's count is a spinner while the owned list
-  // loads and `!` while it can't list games. Phase 1: GOG only.
+  // loads and `!` while it can't list games. One folder per store shown
+  // (`storeRailGroups`: Epic Games, GOG).
   import { availBlock, storeRailGroups, type StorePart } from '../../gamestores/rail';
   import { storeName } from '../../gamestores/marks';
   import type { StoreSource, StoreStatus } from '../../api';

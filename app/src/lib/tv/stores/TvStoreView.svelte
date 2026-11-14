@@ -33,6 +33,7 @@
     showAvailable,
     startLogin,
   } from './storeActions';
+  import { canBackup } from '../../gamestores/marks';
   import { gogSelSummary, tvChips, tvCountLine, tvHeaderActions, tvNoMatch, tvPanel, tvQuick, tvViewTitle, type PanelAct } from './storeWords';
 
   let { source, part, query }: { source: StoreSource; part: StorePart; query: string } = $props();
@@ -48,8 +49,9 @@
   let acts = $derived(status ? tvHeaderActions(status, part, all.length) : null);
   let title = $derived(status ? tvViewTitle(status, part) : null);
 
-  // ---- Select mode in GOG › Installed (user decision 2026-11-13).
-  let gogInstalled = $derived(source === 'gog' && part === 'installed');
+  // ---- Select mode in GOG › Installed (user decision 2026-11-13): a
+  // store whose games can go on a backup drive (GOG; not Epic Games).
+  let gogInstalled = $derived(canBackup(source) && part === 'installed');
   let selGames = $derived(games.map((g) => ({ id: g.key, size: g.disk_bytes })));
   let selAll = $derived(all.map((g) => ({ id: g.key, size: g.disk_bytes })));
   $effect(() => {

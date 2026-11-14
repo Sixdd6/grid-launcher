@@ -6,9 +6,10 @@
   // Install from installer… (GOG), Refresh games and Disconnect…
   // (confirmed). Login expired adds the warning note and Sign in again… as
   // the main button (Start); not connected says what connecting does, with
-  // Connect GOG… (Start), and GOG keeps Install from installer….
+  // Connect GOG… (Start), and GOG keeps Install from installer…. Epic
+  // Games has no installer row (`hasInstaller`).
   import { api, type StoreSource } from '../../api';
-  import { hasStoreCloud, storeName, storeTool } from '../../gamestores/marks';
+  import { hasInstaller, hasStoreCloud, storeName, storeTool } from '../../gamestores/marks';
   import { expiredWarning, licenseLine } from '../../gamestores/settings';
   import { gameStores } from '../../stores/gameStores.svelte';
   import { openFolderBrowser } from '../gameActions';
@@ -20,7 +21,7 @@
   import TvPageRows from '../ui/TvPageRows.svelte';
   import TvStoreMark from './TvStoreMark.svelte';
   import { card, fail, installTool, openInstaller, refreshStore, showStoreInLibrary, startLogin } from './storeActions';
-  import { disconnectWords, notConnectedNote, ownedValue, toolRow } from './storeWords';
+  import { disconnectedCard, disconnectWords, notConnectedNote, ownedValue, toolRow } from './storeWords';
   import { CLOUD_SWITCH_TEXT } from '../../gamestores/settings';
 
   let { source }: { source: StoreSource } = $props();
@@ -40,7 +41,7 @@
     const R: PageRow[] = [];
     if (st.connection === 'not_connected') {
       R.push({ kind: 'note', key: 'off', text: notConnectedNote(st) });
-      if (source === 'gog') R.push(installerRow());
+      if (hasInstaller(source)) R.push(installerRow());
       return R;
     }
     if (st.connection === 'expired') {
@@ -93,14 +94,21 @@
       });
     }
     R.push({ kind: 'row', key: 'library', label: 'Show in Library', run: () => showStoreInLibrary(source) });
-    if (source === 'gog') R.push(installerRow());
+    if (hasInstaller(source)) R.push(installerRow());
     R.push({ kind: 'row', key: 'refresh', label: 'Refresh games', run: () => refreshStore(source) });
     R.push({
       kind: 'row',
       key: 'disconnect',
       label: 'Disconnect…',
       danger: true,
-      run: () => void confirmBox({ ...disconnectWords(st), danger: true, onOk: () => void api.storeDisconnect(source).then(() => void popPage(), fail) }),
+      run: () => void confirmBox({ ...disconnectWords(st), danger: true, onOk: () =>
+            void api.storeDisconnect(source).then(() => {
+              // A command's own outcome gets no backend card: the page raises it.
+              const c = disconnectedCard(source);
+              card(c.text, 'success', c.sub);
+              void popPage();
+            }, fail),
+        }),
     });
     return R;
   });
