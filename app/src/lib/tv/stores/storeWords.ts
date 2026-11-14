@@ -16,7 +16,7 @@ import type {
 import { failureReason, hasStoreBadge, silentFailureReason, storeBackupLine, storeEntryLine, storeKindLabel, entrySource } from '../../gamestores/downloads';
 import { cloudSwitchLabel, storeHeaderLine } from '../../gamestores/details';
 import { inspectionView, fileName, type InspectionView } from '../../gamestores/inspection';
-import { isLive, isManagedRow, jobAct, jobPercent } from '../../gamestores/jobs';
+import { isLive, isManagedRow, isWaitingForStore, jobAct, jobPercent } from '../../gamestores/jobs';
 import {
   canBackup,
   hasCloud as hasStoreCloud,
@@ -36,8 +36,14 @@ import {
   OUTSIDE_GRID,
   steamPill,
   steamRowSub,
+  STOP_WAITING,
+  STOP_WAITING_FOR_STEAM,
   UNINSTALL_IN_STEAM,
   VERIFY_IN_STEAM,
+  WAITING_FOR_STEAM,
+  WAITING_NOTE,
+  WAITING_SHEET_SUB,
+  WAITING_TAG_TV,
 } from '../../gamestores/steam';
 import { availBlock, type StorePart } from '../../gamestores/rail';
 import { agoText, changedAt, plural, sizeGb, toolSize } from '../../gamestores/text';
@@ -134,6 +140,8 @@ export function tvCoverTag(game: StoreGame, job: DownloadEntry | null): { text: 
 export function tvJobTag(job: DownloadEntry | null): { text: string; pct: number } | null {
   if (job === null) return null;
   if (job.status === 'queued') return { text: 'Queued', pct: 0 };
+  // Steam hasn't started the download: "Waiting" over an empty bar.
+  if (isWaitingForStore(job)) return { text: WAITING_TAG_TV, pct: 0 };
   const pct = jobPercent(job);
   return { text: `${pct}%`, pct };
 }
@@ -171,7 +179,9 @@ export type TvStoreAct =
   | 'verify'
   | 'uninstall'
   | 'remove_drive'
-  | 'backup';
+  | 'backup'
+  // Steam hasn't started the download: GRID stops watching (`steam_stop_waiting`).
+  | 'stop_waiting';
 
 export type TvStoreButton = { act: TvStoreAct; label: string; primary: boolean; danger?: boolean; disabled?: boolean; why?: string; icon?: 'play' | 'download' };
 
@@ -222,13 +232,15 @@ export function tvStoreButtons(o: {
 }
 
 /**
- * Steam's buttons (prototype `sdetails`' Steam branches): "Installing in Steam
- * · 52%" (disabled; A says why), Play, or Install in Steam, then Verify in
- * Steam and Uninstall in Steam…. No Game settings, Update or drive buttons.
+ * Steam's buttons (prototype `sdetails`' Steam branches): "Stop waiting for
+ * Steam" while Steam hasn't started the download, "Installing in Steam · 52%"
+ * (disabled; A says why), Play, or Install in Steam, then Verify in Steam and
+ * Uninstall in Steam…. No Game settings, Update or drive buttons.
  */
 function tvClientButtons(game: StoreGame, job: DownloadEntry | null): TvStoreButton[] {
   const out: TvStoreButton[] = [];
-  if (job !== null && isManagedRow(job)) out.push({ act: 'install', label: installingInSteam(jobPercent(job)), primary: true, disabled: true, why: MANAGED_NOTE });
+  if (job !== null && isWaitingForStore(job)) out.push({ act: 'stop_waiting', label: STOP_WAITING_FOR_STEAM, primary: true });
+  else if (job !== null && isManagedRow(job)) out.push({ act: 'install', label: installingInSteam(jobPercent(job)), primary: true, disabled: true, why: MANAGED_NOTE });
   else if (game.installed) out.push({ act: 'play', label: 'Play', primary: true, icon: 'play' });
   else out.push({ act: 'install', label: INSTALL_IN_STEAM, primary: true, icon: 'download' });
   if (game.installed && job === null) {
@@ -238,9 +250,15 @@ function tvClientButtons(game: StoreGame, job: DownloadEntry | null): TvStoreBut
   return out;
 }
 
-/** The left column's box while Steam installs: "**Managed by Steam.** Pause or cancel it in Steam." over its bar. */
-export function tvManagedBox(job: DownloadEntry | null): { bold: string; rest: string; pct: number } | null {
+/**
+ * The left column's box while Steam installs: "**Managed by Steam.** Pause or
+ * cancel it in Steam." over its bar; while Steam hasn't started the download,
+ * "**Waiting for Steam to start the download.** Steam’s install window is
+ * open. If you cancelled it there, stop waiting." with no bar (`pct` `null`).
+ */
+export function tvManagedBox(job: DownloadEntry | null): { bold: string; rest: string; pct: number | null } | null {
   if (job === null || !isManagedRow(job)) return null;
+  if (isWaitingForStore(job)) return { bold: `${WAITING_FOR_STEAM}.`, rest: ` ${WAITING_NOTE}`, pct: null };
   return { bold: 'Managed by Steam.', rest: ' Pause or cancel it in Steam.', pct: jobPercent(job) };
 }
 
@@ -645,7 +663,7 @@ export function tvStoreKind(e: DownloadEntry): string {
   return storeKindLabel(e.kind) ?? '';
 }
 
-export type StoreRowAct = 'cancel' | 'retry' | 'delete_installer' | 'dismiss' | 'open';
+export type StoreRowAct = 'cancel' | 'retry' | 'delete_installer' | 'dismiss' | 'open' | 'stop_waiting';
 
 /**
  * Whether a failed row offers Delete installer: a local installer (the
@@ -666,6 +684,12 @@ export function deleteInstallerWords(e: DownloadEntry): { title: string; body: s
 /** A on a store row (prototype `ACT.dlrow`): Cancel, Retry, Delete installer, Dismiss, Open <game>. */
 export function tvStoreActions(e: DownloadEntry, gameTitle: string | null): { act: StoreRowAct; label: string; danger?: boolean }[] {
   const out: { act: StoreRowAct; label: string; danger?: boolean }[] = [];
+  // Waiting for Steam to start: Stop waiting, then Open <game>.
+  if (isWaitingForStore(e)) {
+    out.push({ act: 'stop_waiting', label: STOP_WAITING });
+    if (gameTitle) out.push({ act: 'open', label: `Open ${gameTitle}` });
+    return out;
+  }
   // Steam owns pause, cancel and retry of its installs: no Cancel, no Retry.
   const managed = isManagedRow(e);
   if (isLive(e) && e.status !== 'cancelling' && !managed) out.push({ act: 'cancel', label: 'Cancel', danger: true });
@@ -676,8 +700,9 @@ export function tvStoreActions(e: DownloadEntry, gameTitle: string | null): { ac
   return out;
 }
 
-/** The row's A hint: Cancel, Retry or dismiss, Dismiss. */
+/** The row's A hint: Cancel, Stop waiting (Steam hasn't started), Open (Steam runs it), Retry or dismiss, Dismiss. */
 export function tvStoreRowA(e: DownloadEntry): string {
+  if (isWaitingForStore(e)) return STOP_WAITING;
   if (isLive(e)) return isManagedRow(e) ? 'Open' : 'Cancel';
   if (e.status === 'failed') return 'Retry or dismiss';
   return 'Dismiss';
@@ -685,6 +710,7 @@ export function tvStoreRowA(e: DownloadEntry): string {
 
 /** The list's line: "GOG · Update". */
 export function tvStoreListSub(e: DownloadEntry): string {
+  if (isWaitingForStore(e)) return WAITING_SHEET_SUB;
   const src = entrySource(e);
   const parts = [src ? storeName(src) : e.platform.trim(), tvStoreKind(e)];
   // A live Steam row says who owns it (prototype `ACT.dlrow`).

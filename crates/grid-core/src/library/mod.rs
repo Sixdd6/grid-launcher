@@ -3151,31 +3151,49 @@ impl InstallService {
     /// drives (Steam; [`queue::QueueState::admit_store_external`]). It takes
     /// no slot and is not behind the library gate: the store writes into
     /// its own libraries, never GRID's. `None` while a live row for the
-    /// product exists.
+    /// product exists. `waiting`: the row waits for the store to start
+    /// ([`queue::JobPhase::WaitingForStore`]) until its first progress.
     pub fn admit_store_external(
         &self,
         source: crate::stores::StoreKind,
         store_id: &str,
         title: &str,
+        waiting: bool,
     ) -> Option<u64> {
         let id = self
             .queue
             .lock()
             .unwrap()
-            .admit_store_external(source, store_id, title);
+            .admit_store_external(source, store_id, title, waiting);
         if id.is_some() {
             self.notify_now();
         }
         id
     }
 
-    /// The progress of a store-external row, as the store reports it.
+    /// The progress of a store-external row, as the store reports it (the
+    /// row no longer waits).
     pub fn store_external_progress(&self, id: u64, done: u64, total: u64) {
         self.queue
             .lock()
             .unwrap()
-            .set_progress(id, done, total, 0.0);
+            .store_external_progress(id, done, total);
         self.notify_now();
+    }
+
+    /// Stop waiting on a store-external row of `source` that still waits
+    /// for the store ([`queue::QueueState::stop_waiting_store_external`]).
+    /// `false`, and nothing changes, for any other row.
+    pub fn stop_waiting_store_external(&self, id: u64, source: crate::stores::StoreKind) -> bool {
+        let stopped = self
+            .queue
+            .lock()
+            .unwrap()
+            .stop_waiting_store_external(id, source);
+        if stopped {
+            self.notify_now();
+        }
+        stopped
     }
 
     /// Ends a store-external row.

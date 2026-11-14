@@ -3,11 +3,11 @@
 // the install page, the login window, the offline installer, the backup page,
 // and the store's Settings page. Each goes through `api` and the shared
 // `gameStores` store; refusals are error cards.
-import { api, type StoreGame, type StoreSource } from '../../api';
+import { api, type DownloadEntry, type StoreGame, type StoreSource } from '../../api';
 import { childPath } from '../pages/folderBrowser';
 import { toolNeededNotice } from '../../gamestores/notices';
 import { managedByClient, storeName, storeTool } from '../../gamestores/marks';
-import { steamClientMissing } from '../../gamestores/steam';
+import { steamClientMissing, STOPPED_WAITING_TV, stoppedWaitingSub } from '../../gamestores/steam';
 import { gameStores, refreshLibrary } from '../../stores/gameStores.svelte';
 import { pushToast, TOAST_DURATION_MS } from '../../stores/toasts.svelte';
 import { toLaunchFailure } from '../../launchError';
@@ -97,6 +97,23 @@ export async function steamInstall(game: StoreGame): Promise<void> {
     return;
   }
   card(`Steam opened to install ${game.title}`, 'success', 'Choose the library folder there; GRID shows the progress. Steam’s window opens over TV mode.');
+}
+
+/**
+ * Stop waiting (prototype `sStopWait`): a Steam row that still waits for
+ * Steam to start the download ends "Not installed · you stopped waiting for
+ * Steam" and GRID stops watching. Focus stays where it was pressed: the row
+ * (now in Completed, found again by its key) or, on the game page, the
+ * button now in its place, Install in Steam.
+ */
+export async function steamStopWaiting(e: DownloadEntry): Promise<void> {
+  try {
+    await api.steamStopWaiting(e.id);
+  } catch (err) {
+    fail(err);
+    return;
+  }
+  card(STOPPED_WAITING_TV, 'success', stoppedWaitingSub(e.title));
 }
 
 /** Verify in Steam (prototype `ACT.sverify`). */

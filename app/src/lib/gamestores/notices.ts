@@ -7,7 +7,7 @@
 // Pure and UI-agnostic: the desktop's cards and TV mode's both use it.
 import type { DownloadEntry, StoreNotice, StoreNoticeAction, StoreSource } from '../api';
 import { hasCloud, managedByClient, storeName, storeTool } from './marks';
-import { CLIENT_FOUND, STEAM_NOT_INSTALLED } from './steam';
+import { CLIENT_FOUND, STEAM_NOT_INSTALLED, stoppedWaitingText } from './steam';
 
 /** One card: its text, whether it is an error, and at most one action. */
 export type StoreCard = { text: string; error: boolean; action: StoreNoticeAction | null; sub?: string };
@@ -169,4 +169,6 @@ export const steamUninstallNotice = (title: string) =>
 /** "Running in Steam" pressed: GRID can't stop a game Steam runs. */
 export const steamRunningNotice = (title: string) => ok(`${title} is running in Steam. Quit it from the game.`);
 export const steamClientFoundNotice = () => ok(CLIENT_FOUND);
+/** Stop waiting pressed (desktop, one line): "Stopped waiting for Steam. If Steam installs Signal Lost later, GRID adds it." */
+export const stoppedWaitingNotice = (title: string) => ok(stoppedWaitingText(title));
 export const steamKeyRemovedNotice = () => ok('Web API key removed from the keyring. Steam’s Available list needs it.');

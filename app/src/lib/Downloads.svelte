@@ -17,6 +17,9 @@
   import { storeName } from './gamestores/marks';
   import StoreMark from './gamestores/desktop/StoreMark.svelte';
   import type { LineContext } from './downloads/format';
+  import { isWaitingForStore } from './gamestores/jobs';
+  import { STOP_WAITING, STOP_WAITING_TITLE } from './gamestores/steam';
+  import { steamStopWaiting } from './gamestores/desktop/ui.svelte';
 
   /** What a store or installer row's line needs beyond the row (GameStores README). */
   function lineCtx(e: DownloadEntry): LineContext {
@@ -55,6 +58,15 @@
   const cancel = (e: DownloadEntry) => runRowAction(e.id, () => cancelEntry(e), track);
   const retry = (e: DownloadEntry) => runRowAction(e.id, () => retryEntry(e), track);
   const dismiss = (id: number) => runRowAction(id, () => dismissEntry(id), track);
+  // The card says what happened (or why it was refused), so no row error.
+  async function stopWaiting(e: DownloadEntry) {
+    track.setPending(e.id, true);
+    try {
+      await steamStopWaiting(e);
+    } finally {
+      track.setPending(e.id, false);
+    }
+  }
 
   type Progress = { pct: number; indeterminate: boolean };
 
@@ -107,6 +119,7 @@
         {#each rows as e (e.id)}
           {@const action = rowAction(e, libraryMove.phase)}
           {@const progress = rowProgress(e)}
+          {@const waiting = isWaitingForStore(e)}
           <div data-testid={`download-row-${e.id}`} class="row" class:move={e.kind === 'library_move'}>
             <div class="row-text">
               <span class="title-row">
@@ -128,9 +141,11 @@
                 class:err={e.status === 'failed' && (e.job === 'store' || e.failure !== null)}
                 title={entryDetail(e, lineCtx(e))}>{entryDetail(e, lineCtx(e))}</span
               >
-              <span class="bar-track" class:indeterminate={progress.indeterminate}>
-                <span class="bar-fill" style={progress.indeterminate ? '' : `width: ${progress.pct}%`}></span>
-              </span>
+              {#if !waiting}
+                <span class="bar-track" class:indeterminate={progress.indeterminate}>
+                  <span class="bar-fill" style={progress.indeterminate ? '' : `width: ${progress.pct}%`}></span>
+                </span>
+              {/if}
               {#if errors[e.id]}
                 <p class="row-error">{errors[e.id]}</p>
               {/if}
@@ -138,6 +153,10 @@
 
             <!-- Design §8: the 120×38 sparkline panel beside the buttons —
                  network in primary, disk in teal, 60 one-second samples. -->
+            {#if waiting}
+              <!-- GameStores README: a Steam row waiting for Steam to start has no bar and no sparkline. -->
+              <span class="graph" aria-hidden="true"></span>
+            {:else}
             <div class="graph">
               <Sparkline
                 samples={downloads.samplesFor(e.id)}
@@ -150,6 +169,7 @@
                 {graphCaption(e)}
               </span>
             </div>
+            {/if}
 
             <div class="row-actions">
               {#if action === 'cancel'}
@@ -164,6 +184,15 @@
               {:else if action === 'managed'}
                 <!-- GameStores README: Steam owns pause and cancel of its installs. -->
                 <button data-testid={`download-action-cancel-${e.id}`} disabled title="Managed by Steam">Cancel</button>
+              {:else if action === 'stop-waiting'}
+                <!-- Steam writes nothing when its install window is cancelled: the user ends the wait. -->
+                <button
+                  data-testid={`download-action-stop-waiting-${e.id}`}
+                  class="secondary small"
+                  title={STOP_WAITING_TITLE}
+                  disabled={pending[e.id]}
+                  onclick={() => stopWaiting(e)}
+                >{STOP_WAITING}</button>
               {:else if action === 'retry-dismiss'}
                 <button data-testid={`download-action-retry-${e.id}`} disabled={pending[e.id]} onclick={() => retry(e)}>Retry</button>
                 <button data-testid={`download-action-dismiss-${e.id}`} class="secondary" disabled={pending[e.id]} onclick={() => dismiss(e.id)}>Dismiss</button>
@@ -430,6 +459,11 @@
     background: transparent;
     border-color: var(--border);
     color: var(--text-h);
+  }
+
+  /* The app's small button (GameStores README): 6px corners, 10px sides. */
+  .row-actions button.small {
+    padding: 5px 10px;
   }
 
   .row-actions button.secondary:hover:not(:disabled) {

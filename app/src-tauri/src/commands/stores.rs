@@ -1073,6 +1073,17 @@ pub async fn steam_open(
         .map_err(err)?
 }
 
+/// Stop waiting: ends the Downloads row `entry_id` of an Install in Steam
+/// that still waits for Steam to start the download, and stops watching
+/// for it. Refused once Steam has started, and for any other row.
+#[tauri::command]
+pub async fn steam_stop_waiting(state: State<'_, AppState>, entry_id: u64) -> Result<(), String> {
+    let steam = state.stores.steam.clone();
+    tokio::task::spawn_blocking(move || steam.stop_waiting(entry_id))
+        .await
+        .map_err(err)?
+}
+
 /// Reads an installer file.
 async fn inspect(state: &AppState, path: &str) -> Result<offline::Inspection, String> {
     let install = install_service(state)?;

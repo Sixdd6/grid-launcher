@@ -32,8 +32,9 @@ pub const STEAM_START_GRACE: Duration = Duration::from_secs(180);
 pub const STEAM_END_MISSES: u8 = 2;
 
 /// How long an install watch waits for Steam's manifest to appear (the
-/// user may have closed Steam's install dialog).
-pub const STEAM_INSTALL_START_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// user may have closed Steam's install dialog). 5 minutes since user
+/// decision 4 (`docs/stores-phase4-plan.md`); the row's words say so.
+pub const STEAM_INSTALL_START_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// How often the app polls a live install watch.
 pub const STEAM_INSTALL_POLL: Duration = Duration::from_secs(2);
@@ -240,10 +241,12 @@ pub enum WatchEvent {
     Progress(u64, u64),
     /// Steam finished the install.
     Installed,
-    /// The user closed Steam's dialog (no manifest in time), or the
-    /// install went away before it finished.
+    /// The install went away before it finished.
     Cancelled,
-    /// No manifest yet.
+    /// No manifest within the start timeout: Steam never started (the user
+    /// closed Steam's dialog, or left it open).
+    TimedOut,
+    /// No manifest yet, or one poll missed it after it was seen.
     Waiting,
 }
 
@@ -303,7 +306,7 @@ impl InstallWatch {
     /// - missing or gone after it was seen installing: waiting once, then
     ///   cancelled after [`STEAM_INSTALL_END_MISSES`] polls in a row;
     /// - missing or gone before that: waiting, until the start timeout
-    ///   ([`STEAM_INSTALL_START_TIMEOUT`]), then cancelled.
+    ///   ([`STEAM_INSTALL_START_TIMEOUT`]), then timed out.
     pub fn step(&mut self, read: &ManifestRead, elapsed: Duration) -> WatchEvent {
         match read {
             ManifestRead::Found(m) => match filter::phase(m.flags) {
@@ -335,7 +338,7 @@ impl InstallWatch {
                 WatchEvent::Waiting
             }
         } else if elapsed >= self.start_timeout {
-            WatchEvent::Cancelled
+            WatchEvent::TimedOut
         } else {
             WatchEvent::Waiting
         }
@@ -523,19 +526,21 @@ mod tests {
     }
 
     #[test]
-    fn an_install_that_never_starts_or_goes_away_is_cancelled() {
+    fn an_install_that_never_starts_times_out_and_one_that_goes_away_is_cancelled() {
+        // Five minutes since user decision 4 (was 15).
+        assert_eq!(STEAM_INSTALL_START_TIMEOUT, S(5 * 60));
         let mut never = InstallWatch::default();
         assert_eq!(
             never.step(&ManifestRead::Unreadable, S(5)),
             WatchEvent::Waiting
         );
         assert_eq!(
-            never.step(&ManifestRead::Missing, STEAM_INSTALL_START_TIMEOUT - S(1)),
+            never.step(&ManifestRead::Missing, S(5 * 60 - 1)),
             WatchEvent::Waiting
         );
         assert_eq!(
-            never.step(&ManifestRead::Missing, STEAM_INSTALL_START_TIMEOUT),
-            WatchEvent::Cancelled
+            never.step(&ManifestRead::Missing, S(5 * 60)),
+            WatchEvent::TimedOut
         );
 
         let mut short = InstallWatch::default().with_start_timeout(S(60));
@@ -545,8 +550,30 @@ mod tests {
         );
         assert_eq!(
             short.step(&ManifestRead::Missing, S(61)),
-            WatchEvent::Cancelled,
+            WatchEvent::TimedOut,
             "the dialog was closed"
+        );
+
+        // Seen under way before the timeout: the timeout no longer applies.
+        let mut late = InstallWatch::default();
+        assert_eq!(late.step(&ManifestRead::Missing, S(2)), WatchEvent::Waiting);
+        assert_eq!(
+            late.step(&manifest(1026, 0, 10), S(4 * 60)),
+            WatchEvent::Progress(0, 10),
+            "waiting, then progress"
+        );
+        assert_eq!(
+            late.step(&manifest(1026, 5, 10), S(10 * 60)),
+            WatchEvent::Progress(5, 10)
+        );
+        assert_eq!(
+            late.step(&ManifestRead::Missing, S(11 * 60)),
+            WatchEvent::Waiting
+        );
+        assert_eq!(
+            late.step(&ManifestRead::Missing, S(11 * 60 + 2)),
+            WatchEvent::Cancelled,
+            "gone after it was seen is Cancelled, never TimedOut"
         );
 
         let mut gone = InstallWatch::default();

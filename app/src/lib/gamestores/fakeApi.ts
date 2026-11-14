@@ -452,6 +452,10 @@ function sourceOf(args: Record<string, unknown>, g: StoreGame | null): FakeSourc
  * Tauri's mocked event bus; tests pass a spy). `tick()` moves running jobs on
  * (the dev mock calls it on a timer; tests call it by hand).
  */
+/** The backend's ended Steam rows (`queue::ExternalOutcome::line`). */
+export const FAKE_STOPPED_WAITING = 'Not installed · you stopped waiting for Steam';
+export const FAKE_TIMED_OUT = 'Not installed · Steam didn’t start the download in 5 minutes';
+
 export class FakeStores {
   statuses: Record<FakeSource, StoreStatus> = { gog: baseStatus('gog'), epic: baseEpicStatus(), amazon: baseAmazonStatus(), steam: baseSteamStatus() };
   games: StoreGame[] = [...SEEDS.map(game), ...EPIC_SEEDS.map(game), ...AMAZON_SEEDS.map(game), ...STEAM_SEEDS.map(game)];
@@ -505,22 +509,37 @@ export class FakeStores {
     // The prototype's Steam install that Steam runs, at 52% (`stBoot`'s jboot3).
     const qc = this.games.find((g) => g.key === 'steam:9100004')!;
     this.entries.push(this.externalRow(qc, 0.52));
+    // Steam's install window for Signal Lost was cancelled: it waits until
+    // Stop waiting (`stBoot`'s jboot4); Rime Assembly shows the timeout row.
+    const sl = this.games.find((g) => g.key === 'steam:9100007')!;
+    this.entries.push(this.externalRow(sl, 0, -1));
+    const ra = this.games.find((g) => g.key === 'steam:9100006')!;
+    this.entries.push({ ...this.externalRow(ra), status: 'cancelled', detail: FAKE_TIMED_OUT });
   }
 
-  /** A Steam install row: no slot, "Managed by Steam" (`queue::admit_store_external`). */
-  externalRow(g: StoreGame, pct = 0): DownloadEntry {
+  /**
+   * A Steam install row: no slot, "Managed by Steam" (`queue::admit_store_external`).
+   * `wait`: ticks until Steam "writes the manifest" (the row reads "Waiting for
+   * Steam to start the download" until then); `-1` waits until Stop waiting.
+   */
+  externalRow(g: StoreGame, pct = 0, wait = 0): DownloadEntry {
     const total = g.disk_bytes || 6 * GB;
-    return entry({
+    const e = entry({
       kind: 'store_external',
       title: g.title,
       source_id: g.key,
       platform: 'Steam',
       status: 'downloading',
-      phase: 'none',
+      phase: wait !== 0 ? 'waiting_for_store' : 'none',
       total_bytes: total,
       downloaded_bytes: Math.round(total * pct),
     });
+    if (wait !== 0) this.waits.set(e.id, wait);
+    return e;
   }
+
+  /** Ticks left before a waiting Steam row starts (`-1`: never). */
+  private waits = new Map<number, number>();
 
   /** One store's games. */
   gamesOf(source: FakeSource): StoreGame[] {
@@ -706,6 +725,15 @@ export class FakeStores {
     for (const e of this.entries) {
       if (e.status !== 'downloading' && e.status !== 'installing') continue;
       moved = true;
+      // A Steam row waits until Steam writes the manifest.
+      const wait = this.waits.get(e.id);
+      if (wait !== undefined) {
+        if (wait > 0 && wait - 1 === 0) {
+          this.waits.delete(e.id);
+          e.phase = 'none';
+        } else if (wait > 0) this.waits.set(e.id, wait - 1);
+        continue;
+      }
       const step = e.kind === 'store_tool' ? 0.22 : e.kind === 'store_repair' ? 0.06 : e.kind === 'store_external' ? 0.003 : 0.02;
       if (e.status === 'downloading') {
         const total = e.total_bytes || GB;
@@ -866,6 +894,9 @@ export class FakeStores {
         return null;
       case 'steam_open':
         this.steamOpen(g, String(args.action ?? ''));
+        return null;
+      case 'steam_stop_waiting':
+        this.stopWaiting(Number(args.entryId));
         return null;
       case 'store_install_tool':
         this.installTool(source);
@@ -1040,13 +1071,26 @@ export class FakeStores {
     return result;
   }
 
+  /** `steam_stop_waiting`: only a Steam row that still waits (`steam.rs` `stop_waiting`). */
+  private stopWaiting(id: number): void {
+    const e = this.entries.find((x) => x.id === id);
+    if (!e || e.kind !== 'store_external' || e.status !== 'downloading') throw new Error('That download isn’t waiting for Steam.');
+    if (e.phase !== 'waiting_for_store') throw new Error('Steam has started the download. Pause or cancel it in Steam.');
+    this.waits.delete(id);
+    e.status = 'cancelled';
+    e.phase = 'none';
+    e.detail = FAKE_STOPPED_WAITING;
+    this.emitDownloads();
+  }
+
   /** `steam_open`: install admits a Steam row the client "runs"; uninstall removes the game a moment later; validate only opens Steam. */
   private steamOpen(g: StoreGame | null, action: string): void {
     if (!g || g.source !== 'steam') throw new Error('That isn’t a Steam game.');
     if (this.statuses.steam.steam?.client_path === '') throw new Error(FAKE_STEAM_NOT_INSTALLED);
     if (action === 'install') {
       if (this.entries.some((e) => e.source_id === g.key && e.kind === 'store_external' && e.status === 'downloading')) return;
-      this.entries.push(this.externalRow(g));
+      // Steam starts the download after about 10 s (the prototype's wait).
+      this.entries.push(this.externalRow(g, 0, 10));
       this.emitDownloads();
     } else if (action === 'uninstall') {
       setTimeout(() => {

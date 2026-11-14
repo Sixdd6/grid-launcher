@@ -43,6 +43,16 @@ export function isManagedRow(e: DownloadEntry): boolean {
   return e.kind === 'store_external';
 }
 
+/**
+ * A managed row (Steam) that still waits for the store's client to start
+ * the download: GRID's Install in Steam opened Steam's install window and no
+ * manifest exists yet (`JobPhase::WaitingForStore`). It has no bar and offers
+ * Stop waiting; once Steam starts, it never waits again.
+ */
+export function isWaitingForStore(e: DownloadEntry): boolean {
+  return isManagedRow(e) && isLive(e) && e.phase === 'waiting_for_store';
+}
+
 /** The live row of a RomM game (an install that may run a GOG installer), or `null`. */
 export function liveRommJobFor(entries: readonly DownloadEntry[], romId: number): DownloadEntry | null {
   const mine = entries.filter((e) => e.job === 'game' && e.rom_id === romId && isLive(e));

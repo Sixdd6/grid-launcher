@@ -991,6 +991,7 @@ pub fn run() {
             commands::stores::steam_remove_key,
             commands::stores::steam_recheck_client,
             commands::stores::steam_open,
+            commands::stores::steam_stop_waiting,
             commands::stores::store_install_tool,
             commands::stores::store_login_type,
             commands::stores::store_set_install_dir,

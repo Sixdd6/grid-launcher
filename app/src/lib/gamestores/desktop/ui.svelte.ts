@@ -24,6 +24,7 @@ import { hasStoreCloud, managedByClient } from '../marks';
 import { steamClientMissing } from '../steam';
 import {
   cancelledNotice,
+  stoppedWaitingNotice,
   connectedNotice,
   dlcQueuedNotice,
   dlcRemovedNotice,
@@ -360,6 +361,15 @@ export async function steamInstall(game: StoreGame): Promise<void> {
   }
   await run(`Couldn’t install ${game.title}`, () => api.steamOpen(game.key, 'install'), steamInstallNotice(game.title));
 }
+
+/**
+ * Stop waiting (a Steam row that still waits for Steam to start the
+ * download): the row ends "Not installed · you stopped waiting for Steam" and
+ * GRID stops watching; the background scan still adopts the game if Steam
+ * installs it later.
+ */
+export const steamStopWaiting = (e: DownloadEntry) =>
+  run(`Couldn’t stop waiting for ${e.title}`, () => api.steamStopWaiting(e.id), stoppedWaitingNotice(e.title));
 
 export const steamVerify = (g: StoreGame) => run(`Couldn’t verify ${g.title}`, () => api.steamOpen(g.key, 'validate'), steamVerifyNotice(g.title));
 export const steamUninstall = (g: StoreGame) => run(`Couldn’t uninstall ${g.title}`, () => api.steamOpen(g.key, 'uninstall'), steamUninstallNotice(g.title));

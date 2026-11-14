@@ -3,7 +3,7 @@
 // from a drive"; prototype `stRenderDetails`, `stCloudHTML`, `stConflictHTML`,
 // `stSettingsHTML`). Pure: which buttons, lines, chips, tabs and facts show.
 import type { DownloadEntry, DriveStoreGame, StoreCloudState, StoreGame, StoreStatus } from '../api';
-import { isManagedRow, jobAct, jobPercent } from './jobs';
+import { isManagedRow, isWaitingForStore, jobAct, jobPercent } from './jobs';
 import { canBackup, hasCloud, hasDlc, installedByTool, managedByClient, noBackupReason, shownVersion, storeLauncher, storeName, updateLabel } from './marks';
 import {
   INSTALL_IN_STEAM,
@@ -12,8 +12,11 @@ import {
   MANAGED_NOTE,
   OUTSIDE_GRID,
   RUNNING_IN_STEAM,
+  STOP_WAITING,
   UNINSTALL_IN_STEAM,
   VERIFY_IN_STEAM,
+  WAITING_FOR_STEAM,
+  WAITING_NOTE,
 } from './steam';
 import { agoText, changedAt, sizeGb } from './text';
 
@@ -30,7 +33,9 @@ export type StoreButtonAct =
   | 'remove_drive_confirm'
   | 'verify'
   | 'uninstall'
-  | 'uninstall_confirm';
+  | 'uninstall_confirm'
+  // Steam hasn't started the download: GRID stops watching (`steam_stop_waiting`).
+  | 'stop_waiting';
 
 export type StoreButton = {
   label: string;
@@ -121,7 +126,9 @@ export function storeButtons(ctx: DetailsContext): StoreButton[] {
 function clientButtons(ctx: DetailsContext): StoreButton[] {
   const { game, job, playing } = ctx;
   const out: StoreButton[] = [];
-  if (job !== null && isManagedRow(job)) {
+  if (job !== null && isWaitingForStore(job)) {
+    out.push({ label: STOP_WAITING, act: 'stop_waiting', primary: false });
+  } else if (job !== null && isManagedRow(job)) {
     out.push({ label: 'Cancel', act: 'cancel', primary: false, disabled: true, title: MANAGED_BY_STEAM });
   } else if (game.installed) {
     out.push(playing ? { label: RUNNING_IN_STEAM, act: 'stop', primary: true } : { label: 'Play', act: 'play', primary: true });
@@ -135,11 +142,17 @@ function clientButtons(ctx: DetailsContext): StoreButton[] {
   return out;
 }
 
-/** The box above the disabled Cancel while the store's client installs: "Installing in Steam · 52%", its bar and note. */
-export type ManagedBox = { title: string; pct: number; note: string };
+/**
+ * The box above the disabled Cancel while the store's client installs:
+ * "Installing in Steam · 52%", its bar and note. While Steam hasn't started
+ * the download: "Waiting for Steam to start the download" and its note, with
+ * no bar (`pct` `null`), above Stop waiting.
+ */
+export type ManagedBox = { title: string; pct: number | null; note: string };
 
 export function managedBox(job: DownloadEntry | null): ManagedBox | null {
   if (job === null || !isManagedRow(job)) return null;
+  if (isWaitingForStore(job)) return { title: WAITING_FOR_STEAM, pct: null, note: WAITING_NOTE };
   const pct = jobPercent(job);
   return { title: installingInSteam(pct), pct, note: MANAGED_NOTE };
 }

@@ -37,11 +37,11 @@
     type RowAction,
   } from './downloadRows';
   import { entrySource, rommInstallerLine } from '../../../gamestores/downloads';
-  import { jobPercent } from '../../../gamestores/jobs';
+  import { isWaitingForStore, jobPercent } from '../../../gamestores/jobs';
   import { storeName } from '../../../gamestores/marks';
   import { gameStores } from '../../../stores/gameStores.svelte';
   import TvStoreMark from '../../stores/TvStoreMark.svelte';
-  import { defaultCompat, openStoreGame } from '../../stores/storeActions';
+  import { defaultCompat, openStoreGame, steamStopWaiting } from '../../stores/storeActions';
   import { deleteInstallerWords, deletesInstaller, isStoreRow, tvStoreActions, tvStoreCancelWords, tvStoreKind, tvStoreLine, tvStoreListSub, tvStoreRowA, type StoreRowAct } from '../../stores/storeWords';
   import { api } from '../../../api';
 
@@ -110,6 +110,9 @@
         return;
       case 'dismiss':
         void dismissEntry(e.id).catch(fail);
+        return;
+      case 'stop_waiting':
+        void steamStopWaiting(e);
         return;
       case 'open': {
         const g = storeGame(e);
@@ -182,6 +185,7 @@
               {@const src = store ? entrySource(e) : null}
               {@const a = store ? tvStoreRowA(e) : rowA(e, libraryMove.phase)}
               {@const pct = store ? jobPercent(e) : progress(e)}
+              {@const live = s.seg === 'active' && !isWaitingForStore(e)}
               <div
                 class="lrow dl"
                 data-k={`dl-${e.id}`}
@@ -196,9 +200,10 @@
                     {e.title}{#if src}<span class="kind" style="display:inline-flex;align-items:center;gap:.3rem" data-testid={`tv-dl-store-${e.id}`}><TvStoreMark source={src} />{storeName(src)}</span>{/if}{#if store ? tvStoreKind(e) : kindBadge(e)}<span class="kind">{store ? tvStoreKind(e) : kindBadge(e)}</span>{/if}
                   </div>
                   <div class="s" class:err={isFailed(e)} data-testid={`tv-dl-line-${e.id}`}>{line(e)}</div>
-                  {#if s.seg === 'active'}<div class="pbar"><b style={`width:${pct ?? 0}%`}></b></div>{/if}
+                  {#if live}<div class="pbar"><b style={`width:${pct ?? 0}%`}></b></div>{/if}
                 </div>
-                {#if s.seg === 'active'}
+                <!-- TVStores README: a Steam row waiting for Steam to start has no bar and no sparkline. -->
+                {#if live}
                   {@const paths = sparklinePaths(downloads.samplesFor(e.id), SPARK)}
                   <div class="spark">
                     <svg viewBox="0 0 120 38" preserveAspectRatio="none" aria-hidden="true">

@@ -507,7 +507,10 @@ export type JobPhase =
   | 'copying_installer'
   | 'running_installer'
   | 'copying_from_drive'
-  | 'checksum';
+  | 'checksum'
+  // A Steam row waits for Steam to start the download (no manifest yet):
+  // "Waiting for Steam to start the download", with Stop waiting.
+  | 'waiting_for_store';
 
 /** Why a failed row failed, when it is worded from parts (`queue::JobFailure`). */
 export type JobFailure = {
@@ -1821,4 +1824,6 @@ export const api = {
   steamRecheckClient: () => invoke<void>('steam_recheck_client'),
   /** `key` is a Steam game key (`steam:620`). */
   steamOpen: (key: string, action: 'install' | 'uninstall' | 'validate') => invoke<void>('steam_open', { key, action }),
+  /** Stop waiting: ends a Steam Downloads row that still waits for Steam to start (refused for any other row). */
+  steamStopWaiting: (entryId: number) => invoke<void>('steam_stop_waiting', { entryId }),
 };

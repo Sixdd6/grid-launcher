@@ -46,6 +46,40 @@ export function installingInSteam(pct: number): string {
   return `${INSTALLING_IN_STEAM} · ${pct}%`;
 }
 
+// ── Waiting for Steam to start (GameStores / TVStores READMEs, 2026-11-14) ──
+// The ended rows' lines ("Not installed · you stopped waiting for Steam", the
+// 5-minute timeout's) come from the backend as the row's detail.
+
+/** A Steam row's line, and Details' box title, until Steam writes the manifest. */
+export const WAITING_FOR_STEAM = 'Waiting for Steam to start the download';
+/** The desktop row's small button and Details' secondary button. */
+export const STOP_WAITING = 'Stop waiting';
+/** The desktop row's Stop waiting tooltip. */
+export const STOP_WAITING_TITLE = 'Cancelled it in Steam? GRID stops watching for this install.';
+/** Details' waiting box note (desktop) and the TV left column's text after its bold line. */
+export const WAITING_NOTE = 'Steam’s install window is open. If you cancelled it there, stop waiting.';
+/** The cover's disabled hover button while waiting. */
+export const WAITING_BUTTON = 'Waiting for Steam';
+/** The cover's tag while waiting (desktop; TV writes "Waiting"). */
+export const WAITING_TAG = 'WAITING';
+export const WAITING_TAG_TV = 'Waiting';
+/** TV's game page primary while waiting. */
+export const STOP_WAITING_FOR_STEAM = 'Stop waiting for Steam';
+/** TV's row list subtitle while waiting. */
+export const WAITING_SHEET_SUB =
+  'Steam · Waiting for Steam to start the download. If you cancelled it in Steam, stop waiting. If Steam installs it later, GRID still adds it.';
+
+/** The card after Stop waiting: one line on the desktop. */
+export function stoppedWaitingText(title: string): string {
+  return `Stopped waiting for Steam. ${stoppedWaitingSub(title)}`;
+}
+
+/** TV's card after Stop waiting: its title, with {@link stoppedWaitingSub} as the subtitle. */
+export const STOPPED_WAITING_TV = 'Stopped waiting for Steam';
+export function stoppedWaitingSub(title: string): string {
+  return `If Steam installs ${title} later, GRID adds it.`;
+}
+
 // ── Settings › Stores › Steam ───────────────────────────────────────────
 
 /** The card's lede (prototype `stSteamCard`; TV's page sub). */

@@ -1,30 +1,36 @@
 // A store cover's tags, progress bar and hover action (GameStores README,
 // "Store covers"; prototype `stCard`, `stPrimary`, `stProgress`). Pure.
 import type { DownloadEntry, StoreGame, StoreStatus } from '../api';
-import { isManagedRow, jobAct, jobPercent } from './jobs';
+import { isManagedRow, isWaitingForStore, jobAct, jobPercent } from './jobs';
 import { hasStoreCloud, managedByClient } from './marks';
-import { INSTALL_IN_STEAM, INSTALLING_IN_STEAM, MANAGED_BY_STEAM } from './steam';
+import { INSTALL_IN_STEAM, INSTALLING_IN_STEAM, MANAGED_BY_STEAM, WAITING_BUTTON, WAITING_FOR_STEAM, WAITING_TAG } from './steam';
 
 export type CoverTagTone = 'queue' | 'update' | 'conflict' | 'unsupported';
 export type CoverTag = { text: string; tone: CoverTagTone };
 
+/** The job's tag: "38%", "QUEUED", or "WAITING" while Steam hasn't started the download. */
+function jobTag(job: DownloadEntry): string {
+  if (isWaitingForStore(job)) return WAITING_TAG;
+  return job.status === 'queued' ? 'QUEUED' : `${jobPercent(job)}%`;
+}
+
 /**
  * Top-left tags, in the prototype's order: the job's percentage ("38%",
- * "QUEUED"), UPDATE, SAVE CONFLICT (red), NOT SUPPORTED.
+ * "QUEUED", "WAITING"), UPDATE, SAVE CONFLICT (red), NOT SUPPORTED.
  */
 export function coverTags(game: StoreGame, job: DownloadEntry | null): CoverTag[] {
   const tags: CoverTag[] = [];
-  if (job !== null) tags.push({ text: job.status === 'queued' ? 'QUEUED' : `${jobPercent(job)}%`, tone: 'queue' });
+  if (job !== null) tags.push({ text: jobTag(job), tone: 'queue' });
   if (game.installed && game.update_version !== '' && job === null) tags.push({ text: 'UPDATE', tone: 'update' });
   if (game.installed && hasStoreCloud(game.source) && game.cloud === 'conflict') tags.push({ text: 'SAVE CONFLICT', tone: 'conflict' });
   if (game.not_supported !== '') tags.push({ text: 'NOT SUPPORTED', tone: 'unsupported' });
   return tags;
 }
 
-/** The bar along the cover's bottom edge: the job's percentage, 0 while queued; `null` with no job. */
+/** The bar along the cover's bottom edge: the job's percentage, 0 while queued or waiting for Steam; `null` with no job. */
 export function coverProgress(job: DownloadEntry | null): number | null {
   if (job === null) return null;
-  return job.status === 'queued' ? 0 : jobPercent(job);
+  return job.status === 'queued' || isWaitingForStore(job) ? 0 : jobPercent(job);
 }
 
 /** The bar's colour: teal (the disk graph's) for an install the store's client runs (Steam), else the primary. */
@@ -33,7 +39,7 @@ export function coverProgressTone(job: DownloadEntry | null): 'primary' | 'manag
 }
 
 export type CoverAct = 'play' | 'install' | 'details';
-/** `disabled` with its `title`: Steam's "Installing in Steam" ("Managed by Steam"). */
+/** `disabled` with its `title`: Steam's "Installing in Steam" ("Managed by Steam"), or "Waiting for Steam". */
 export type CoverPrimary = { label: string; act: CoverAct; disabled?: boolean; title?: string };
 
 /**
@@ -43,6 +49,7 @@ export type CoverPrimary = { label: string; act: CoverAct; disabled?: boolean; t
  * install dialog).
  */
 export function coverPrimary(game: StoreGame, status: StoreStatus | null, job: DownloadEntry | null): CoverPrimary {
+  if (job !== null && isWaitingForStore(job)) return { label: WAITING_BUTTON, act: 'details', disabled: true, title: WAITING_FOR_STEAM };
   if (job !== null && isManagedRow(job)) return { label: INSTALLING_IN_STEAM, act: 'details', disabled: true, title: MANAGED_BY_STEAM };
   if (job !== null) {
     if (job.status === 'queued') return { label: 'Queued', act: 'details' };

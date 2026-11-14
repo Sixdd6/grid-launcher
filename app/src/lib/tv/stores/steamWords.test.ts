@@ -12,6 +12,7 @@ import {
   tvChips,
   tvCountLine,
   tvFacts,
+  tvJobTag,
   tvLeftLines,
   tvManagedBox,
   tvPanel,
@@ -115,6 +116,61 @@ describe('TV: Steam in Downloads', () => {
   it('the top bar shows a job GRID runs before Steam’s install', () => {
     expect(activeDownload([steamRow({ id: 1 }), row({ id: 2, title: 'Copper Saints' })])?.title).toBe('Copper Saints');
     expect(activeDownload([steamRow({ id: 1 })])?.title).toBe('Quiet Comet');
+  });
+});
+
+describe('TV: waiting for Steam to start the download (2026-11-14)', () => {
+  const waiting = (over: Parameters<typeof steamRow>[0] = {}) =>
+    steamRow({ id: 5, source_id: 'steam:9100005', title: 'Harbor of Bells', phase: 'waiting_for_store', downloaded_bytes: 0, ...over });
+
+  it('the row: the desktop’s line, A "Stop waiting", and its list', () => {
+    expect(tvStoreLine(waiting(), '')).toBe('Waiting for Steam to start the download');
+    expect(tvStoreRowA(waiting())).toBe('Stop waiting');
+    expect(tvStoreListSub(waiting())).toBe(
+      'Steam · Waiting for Steam to start the download. If you cancelled it in Steam, stop waiting. If Steam installs it later, GRID still adds it.',
+    );
+    expect(tvStoreActions(waiting(), 'Harbor of Bells')).toEqual([
+      { act: 'stop_waiting', label: 'Stop waiting' },
+      { act: 'open', label: 'Open Harbor of Bells' },
+    ]);
+  });
+
+  it('ended: the backend’s line, A Dismiss, no Retry and no "Managed by Steam"', () => {
+    for (const detail of ['Not installed · you stopped waiting for Steam', 'Not installed · Steam didn’t start the download in 5 minutes']) {
+      const e = waiting({ status: 'cancelled', phase: 'none', detail });
+      expect(tvStoreLine(e, '')).toBe(detail);
+      expect(tvStoreRowA(e)).toBe('Dismiss');
+      expect(tvStoreActions(e, 'Harbor of Bells')).toEqual([
+        { act: 'dismiss', label: 'Dismiss' },
+        { act: 'open', label: 'Open Harbor of Bells' },
+      ]);
+      expect(tvStoreListSub(e)).toBe('Steam');
+    }
+  });
+
+  it('the game page: primary "Stop waiting for Steam" and the waiting box with no bar', () => {
+    const job = waiting();
+    expect(tvStoreButtons({ game: steamGame('Harbor of Bells'), status: steamStatus(), job, fromDrive: false })).toEqual([
+      { act: 'stop_waiting', label: 'Stop waiting for Steam', primary: true },
+    ]);
+    expect(tvManagedBox(job)).toEqual({
+      bold: 'Waiting for Steam to start the download.',
+      rest: ' Steam’s install window is open. If you cancelled it there, stop waiting.',
+      pct: null,
+    });
+  });
+
+  it('the game page shows "Installing in Steam" once Steam has started (the prototype’s skind fix)', () => {
+    const job = waiting({ phase: 'none', downloaded_bytes: 20 });
+    const [b] = tvStoreButtons({ game: steamGame('Harbor of Bells'), status: steamStatus(), job, fromDrive: false });
+    expect(b).toMatchObject({ label: 'Installing in Steam · 20%', disabled: true });
+    expect(tvManagedBox(job)?.bold).toBe('Managed by Steam.');
+  });
+
+  it('the cover: "Waiting" over an empty bar, no X', () => {
+    expect(tvJobTag(waiting({ downloaded_bytes: 40 }))).toEqual({ text: 'Waiting', pct: 0 });
+    expect(tvJobTag(steamRow())).toEqual({ text: '52%', pct: 52 });
+    expect(tvQuick(steamGame('Harbor of Bells'), steamStatus(), waiting())).toBeNull();
   });
 });
 

@@ -144,7 +144,12 @@ Modules as declared in `src/lib.rs`:
   drives (Steam) is a `JobKey::StoreExternal` row (`kind: "store_external"`,
   `admit_store_external` / `finish_store_external` with an `ExternalOutcome`): no slot, no
   waiting, never cancelled or retried by GRID, one live row per product, and a library
-  path change does not wait for it. A failed row's `failure` (`JobFailure::from_error`)
+  path change does not wait for it. A row GRID asked for starts in
+  `JobPhase::WaitingForStore` until its first `store_external_progress`;
+  `stop_waiting_store_external` ends only such a row (`ExternalOutcome::StoppedWaiting`),
+  and `ExternalOutcome::TimedOut` is the start timeout's end. Both are muted `cancelled`
+  rows whose `detail` carries the line `ExternalOutcome::line` builds ("Not installed ·
+  …"); a vanished install stays a plain `Cancelled`. A failed row's `failure` (`JobFailure::from_error`)
   gives the installer failures a code (`installer_unrecognised`,
   `installer_dlc_base_missing`, `installer_exit`, `installer_silent_failed` with its
   reason's words), so the UI and the store notifiers know them by code, not by the error
@@ -453,9 +458,14 @@ The shell owns *when* things run; grid-core owns *what* they do.
   the client line, the SteamID64, the key's state, the local accounts; never the key). It
   holds the keyring's `SteamKeyStore` slot (`StoresService::real` takes it from
   `lib.rs`). The Steam commands (`steam_test`, `steam_save`, `steam_remove_key`,
-  `steam_recheck_client`, `steam_open`) are in `commands/stores.rs`; `steam_open`'s
-  install admits the queue's store-external Downloads row
-  (`InstallService::admit_store_external`: no slot, no cancel or retry, Steam owns them).
+  `steam_recheck_client`, `steam_open`, `steam_stop_waiting`) are in
+  `commands/stores.rs`; `steam_open`'s install admits the queue's store-external
+  Downloads row (`InstallService::admit_store_external`: no slot, no cancel or retry,
+  Steam owns them), waiting for Steam to start the download until the manifest shows
+  (`watch::STEAM_INSTALL_START_TIMEOUT`, 5 minutes). `steam_stop_waiting(entry_id)` ends
+  such a row while it still waits and stops its watch (refused once Steam has started,
+  and for any other row); the background scan still adopts the game if Steam installs it
+  later. The frontend raises its card.
   The UI words every Steam sentence in `app/src/lib/gamestores/steam.ts` (desktop and
   TV), reads `managedByClient` rather than the store's name, and keeps the key out of
   every Svelte store (the desktop field is read once on Test or Save; TV's masked

@@ -70,8 +70,33 @@ pub enum ExternalOutcome {
     Completed { detail: String },
     /// The store's install went away before it finished.
     Cancelled,
+    /// The user pressed Stop waiting while the row still waited for the
+    /// store to start (no manifest yet). Muted, with no Retry.
+    StoppedWaiting,
+    /// The store never started the download within its start timeout
+    /// (Steam: `STEAM_INSTALL_START_TIMEOUT`). Muted, with no Retry.
+    TimedOut,
     /// It failed, with GRID's words.
     Failed(String),
+}
+
+impl ExternalOutcome {
+    /// The ended row's line for `source` (its `detail`), for the outcomes
+    /// that carry one; `None` for the rest. The one place these words are
+    /// built (GameStores README, "Steam: waiting for Steam to start").
+    pub fn line(&self, source: StoreKind) -> Option<String> {
+        let store = source.platform_name();
+        match self {
+            ExternalOutcome::Completed { detail } => Some(detail.clone()),
+            ExternalOutcome::StoppedWaiting => Some(format!(
+                "Not installed \u{b7} you stopped waiting for {store}"
+            )),
+            ExternalOutcome::TimedOut => Some(format!(
+                "Not installed \u{b7} {store} didn\u{2019}t start the download in 5 minutes"
+            )),
+            ExternalOutcome::Cancelled | ExternalOutcome::Failed(_) => None,
+        }
+    }
 }
 
 /// What a store job does.
@@ -124,6 +149,10 @@ pub enum JobPhase {
     RunningInstaller,
     CopyingFromDrive,
     Checksum,
+    /// A store-external row (Steam) waits for the store's client to start
+    /// the download: no manifest yet. Cleared by the first progress
+    /// ([`QueueState::store_external_progress`]).
+    WaitingForStore,
 }
 
 /// Why a job failed, when the Downloads row words it from parts rather than
@@ -672,12 +701,16 @@ impl QueueState {
     /// `source_id` the game key, `Downloading` from the start. Like
     /// [`Self::admit_external`] it takes no slot and never enters
     /// `waiting`. `None` when a live row for the same product exists.
-    /// [`Self::set_progress`] works on it as on any row.
+    /// `waiting`: GRID asked the store to install and the store hasn't
+    /// started yet, so the row starts in [`JobPhase::WaitingForStore`]
+    /// until [`Self::store_external_progress`]; an install already under
+    /// way starts in [`JobPhase::None`].
     pub fn admit_store_external(
         &mut self,
         source: StoreKind,
         store_id: &str,
         title: &str,
+        waiting: bool,
     ) -> Option<u64> {
         let key = JobKey::StoreExternal {
             source,
@@ -711,11 +744,54 @@ impl QueueState {
             drive_name: String::new(),
             drive_label: String::new(),
             batch: 0,
-            phase: JobPhase::None,
+            phase: if waiting {
+                JobPhase::WaitingForStore
+            } else {
+                JobPhase::None
+            },
             failure: None,
             key,
         });
         Some(id)
+    }
+
+    /// The progress of a live store-external row, as the store reports it.
+    /// The store has started, so the row no longer waits. Ignores an id
+    /// that is unknown, not a store-external row, or already ended.
+    pub fn store_external_progress(&mut self, id: u64, done: u64, total: u64) {
+        let Some(entry) = self.entry_mut(id) else {
+            return;
+        };
+        if !matches!(entry.key, JobKey::StoreExternal { .. }) || !entry.status.is_live() {
+            return;
+        }
+        entry.downloaded_bytes = done;
+        entry.total_bytes = total;
+        entry.speed_bps = 0.0;
+        entry.phase = JobPhase::None;
+    }
+
+    /// Whether `id` is a live store-external row of `source` that still
+    /// waits for the store to start ([`JobPhase::WaitingForStore`]).
+    pub fn is_waiting_store_external(&self, id: u64, source: StoreKind) -> bool {
+        self.entry(id).is_some_and(|entry| {
+            matches!(&entry.key, JobKey::StoreExternal { source: s, .. } if *s == source)
+                && entry.status.is_live()
+                && entry.phase == JobPhase::WaitingForStore
+        })
+    }
+
+    /// Stop waiting: ends a store-external row of `source` that still waits
+    /// for the store ([`Self::is_waiting_store_external`]) as
+    /// [`ExternalOutcome::StoppedWaiting`]. `false`, and nothing changes,
+    /// for any other row: the store has started, or the id is unknown, not
+    /// that store's, or already ended.
+    pub fn stop_waiting_store_external(&mut self, id: u64, source: StoreKind) -> bool {
+        if !self.is_waiting_store_external(id, source) {
+            return false;
+        }
+        self.finish_store_external(id, ExternalOutcome::StoppedWaiting);
+        true
     }
 
     /// Ends a live [`Self::admit_store_external`] row. Ignores an id that
@@ -724,19 +800,28 @@ impl QueueState {
         let Some(entry) = self.entry_mut(id) else {
             return;
         };
-        if !matches!(entry.key, JobKey::StoreExternal { .. }) || !entry.status.is_live() {
-            return;
-        }
+        let source = match &entry.key {
+            JobKey::StoreExternal { source, .. } if entry.status.is_live() => *source,
+            _ => return,
+        };
         entry.speed_bps = 0.0;
+        entry.phase = JobPhase::None;
+        let line = outcome.line(source);
         match outcome {
-            ExternalOutcome::Completed { detail } => {
+            ExternalOutcome::Completed { .. } => {
                 entry.status = DownloadStatus::Completed;
                 entry.error.clear();
-                entry.detail = detail;
+                entry.detail = line.unwrap_or_default();
             }
             ExternalOutcome::Cancelled => {
                 entry.status = DownloadStatus::Cancelled;
                 entry.error.clear();
+            }
+            // Not an error: a muted Cancelled row with its line, no Retry.
+            ExternalOutcome::StoppedWaiting | ExternalOutcome::TimedOut => {
+                entry.status = DownloadStatus::Cancelled;
+                entry.error.clear();
+                entry.detail = line.unwrap_or_default();
             }
             ExternalOutcome::Failed(error) => {
                 entry.status = DownloadStatus::Failed;
@@ -2168,7 +2253,7 @@ mod tests {
     fn a_store_external_row_takes_no_slot_and_is_never_cancelled_or_retried() {
         let mut state = QueueState::default();
         let id = state
-            .admit_store_external(StoreKind::Steam, "620", "Portal 2")
+            .admit_store_external(StoreKind::Steam, "620", "Portal 2", false)
             .unwrap();
         let entry = state.entry(id).unwrap();
         assert_eq!(entry.job, "store");
@@ -2179,11 +2264,11 @@ mod tests {
 
         // One live row per product; another product is fine.
         assert_eq!(
-            state.admit_store_external(StoreKind::Steam, "620", "Portal 2"),
+            state.admit_store_external(StoreKind::Steam, "620", "Portal 2", false),
             None
         );
         assert!(state
-            .admit_store_external(StoreKind::Steam, "400", "Portal")
+            .admit_store_external(StoreKind::Steam, "400", "Portal", false)
             .is_some());
 
         // It took no slot: a real install starts at once, and the external
@@ -2199,7 +2284,7 @@ mod tests {
         state.set_progress(id, 50, 100, 0.0);
         assert_eq!(state.entry(id).unwrap().downloaded_bytes, 50);
         let mut alone = QueueState::default();
-        alone.admit_store_external(StoreKind::Steam, "620", "Portal 2");
+        alone.admit_store_external(StoreKind::Steam, "620", "Portal 2", false);
         assert!(!alone.snapshot().has_live_entry());
 
         // Steam owns pause and cancel.
@@ -2222,7 +2307,7 @@ mod tests {
 
         // Once ended, the product may be admitted again.
         let again = state
-            .admit_store_external(StoreKind::Steam, "620", "Portal 2")
+            .admit_store_external(StoreKind::Steam, "620", "Portal 2", false)
             .unwrap();
         state.finish_store_external(again, ExternalOutcome::Cancelled);
         assert_eq!(
@@ -2231,7 +2316,7 @@ mod tests {
         );
         assert_eq!(state.retryable(again), None);
         let failed = state
-            .admit_store_external(StoreKind::Steam, "620", "Portal 2")
+            .admit_store_external(StoreKind::Steam, "620", "Portal 2", false)
             .unwrap();
         state.finish_store_external(failed, ExternalOutcome::Failed("boom".into()));
         assert_eq!(state.entry(failed).unwrap().status, DownloadStatus::Failed);
@@ -2249,6 +2334,120 @@ mod tests {
             DownloadStatus::Downloading
         );
         state.finish_store_external(9999, ExternalOutcome::Cancelled);
+    }
+
+    #[test]
+    fn a_waiting_steam_row_waits_until_the_first_progress() {
+        let mut state = QueueState::default();
+        let id = state
+            .admit_store_external(StoreKind::Steam, "620", "Portal 2", true)
+            .unwrap();
+        assert_eq!(state.entry(id).unwrap().phase, JobPhase::WaitingForStore);
+        assert!(state.is_waiting_store_external(id, StoreKind::Steam));
+        assert!(!state.is_waiting_store_external(id, StoreKind::Gog));
+
+        // Steam wrote the manifest: the row is under way and never waits again.
+        state.store_external_progress(id, 10, 100);
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.phase, JobPhase::None);
+        assert_eq!((entry.downloaded_bytes, entry.total_bytes), (10, 100));
+        assert!(!state.is_waiting_store_external(id, StoreKind::Steam));
+
+        // An install found under way never waits.
+        let resumed = state
+            .admit_store_external(StoreKind::Steam, "400", "Portal", false)
+            .unwrap();
+        assert_eq!(state.entry(resumed).unwrap().phase, JobPhase::None);
+
+        // Progress on an ended row, or on another row, changes nothing.
+        state.finish_store_external(resumed, ExternalOutcome::Cancelled);
+        state.store_external_progress(resumed, 5, 10);
+        assert_eq!(state.entry(resumed).unwrap().downloaded_bytes, 0);
+        let firmware = state.admit_external("PS3 Firmware", "PS3");
+        state.store_external_progress(firmware, 5, 10);
+        assert_eq!(state.entry(firmware).unwrap().downloaded_bytes, 0);
+    }
+
+    #[test]
+    fn stop_waiting_applies_only_to_a_steam_row_that_still_waits() {
+        let mut state = QueueState::default();
+        let id = state
+            .admit_store_external(StoreKind::Steam, "620", "Portal 2", true)
+            .unwrap();
+        // Another store, an unknown id and a firmware row are refused.
+        assert!(!state.stop_waiting_store_external(id, StoreKind::Gog));
+        assert!(!state.stop_waiting_store_external(9999, StoreKind::Steam));
+        let firmware = state.admit_external("PS3 Firmware", "PS3");
+        assert!(!state.stop_waiting_store_external(firmware, StoreKind::Steam));
+        let gog = match state.admit(
+            store_key("1207664643", StoreOp::Install),
+            "The Witcher",
+            "GOG",
+            StoreOp::Install.kind(),
+        ) {
+            Admission::Start(id) | Admission::Queued(id) => id,
+            other => panic!("{other:?}"),
+        };
+        assert!(!state.stop_waiting_store_external(gog, StoreKind::Steam));
+
+        assert!(state.stop_waiting_store_external(id, StoreKind::Steam));
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.status, DownloadStatus::Cancelled);
+        assert_eq!(
+            entry.detail,
+            "Not installed · you stopped waiting for Steam"
+        );
+        assert_eq!(entry.error, "");
+        assert_eq!(entry.phase, JobPhase::None);
+        assert_eq!(state.retryable(id), None);
+        // Already ended: refused.
+        assert!(!state.stop_waiting_store_external(id, StoreKind::Steam));
+
+        // Refused once Steam has started.
+        let started = state
+            .admit_store_external(StoreKind::Steam, "620", "Portal 2", true)
+            .unwrap();
+        state.store_external_progress(started, 0, 100);
+        assert!(!state.stop_waiting_store_external(started, StoreKind::Steam));
+        assert_eq!(
+            state.entry(started).unwrap().status,
+            DownloadStatus::Downloading
+        );
+    }
+
+    #[test]
+    fn the_external_outcomes_words() {
+        let steam = StoreKind::Steam;
+        assert_eq!(
+            ExternalOutcome::StoppedWaiting.line(steam).as_deref(),
+            Some("Not installed · you stopped waiting for Steam")
+        );
+        assert_eq!(
+            ExternalOutcome::TimedOut.line(steam).as_deref(),
+            Some("Not installed · Steam didn’t start the download in 5 minutes")
+        );
+        assert_eq!(ExternalOutcome::Cancelled.line(steam), None);
+        assert_eq!(ExternalOutcome::Failed("boom".into()).line(steam), None);
+
+        // The timeout ends a waiting row muted, with its line and no Retry;
+        // a vanished install stays plain Cancelled.
+        let mut state = QueueState::default();
+        let late = state
+            .admit_store_external(StoreKind::Steam, "620", "Portal 2", true)
+            .unwrap();
+        state.finish_store_external(late, ExternalOutcome::TimedOut);
+        let entry = state.entry(late).unwrap();
+        assert_eq!(entry.status, DownloadStatus::Cancelled);
+        assert_eq!(
+            entry.detail,
+            "Not installed · Steam didn’t start the download in 5 minutes"
+        );
+        assert_eq!(state.retryable(late), None);
+        let gone = state
+            .admit_store_external(StoreKind::Steam, "620", "Portal 2", false)
+            .unwrap();
+        state.finish_store_external(gone, ExternalOutcome::Cancelled);
+        assert_eq!(state.entry(gone).unwrap().detail, "");
     }
 
     #[test]

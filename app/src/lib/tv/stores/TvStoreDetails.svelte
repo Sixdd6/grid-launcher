@@ -7,8 +7,9 @@
   // drive…) and the tabs (LB / RB): Overview with DLC you own, Media, and
   // Cloud saves for an installed GOG game. From a drive's grid the header
   // line starts "From Couch kit". A Steam game's page goes through the Steam
-  // client: Install in Steam, the disabled "Installing in Steam · 52%" with
-  // its Managed by Steam box, Verify in Steam and Uninstall in Steam….
+  // client: Install in Steam, Stop waiting for Steam (with its waiting box)
+  // until Steam starts the download, the disabled "Installing in Steam · 52%"
+  // with its Managed by Steam box, Verify in Steam and Uninstall in Steam….
   import { tick } from 'svelte';
   import { api, type DriveStoreGame, type StoreCloudState, type StoreGame } from '../../api';
   import { descriptionParagraphs } from '../../gamestores/details';
@@ -43,6 +44,7 @@
     playStore,
     resolveCloud,
     restoreFromDrive,
+    steamStopWaiting,
     steamUninstall,
     steamVerify,
     toDownloads,
@@ -245,6 +247,9 @@
       case 'backup':
         openStoreBackup([g.key], storeBackupTitle({ kind: 'game', name: g.title }));
         return;
+      case 'stop_waiting':
+        if (job) void steamStopWaiting(job);
+        return;
     }
   }
 
@@ -313,7 +318,7 @@
       <TvStoreCover k="dc" {game} {job} quick={null} label={false} width="17rem" testId="tv-store-det-cover" />
       <div class="lp" data-testid="tv-det-left">
         {#if managed}
-          <div class="smanaged" data-testid="tv-store-managed"><b>{managed.bold}</b>{managed.rest}<div class="pbar"><b style={`width:${managed.pct}%`}></b></div></div>
+          <div class="smanaged" data-testid="tv-store-managed"><b>{managed.bold}</b>{managed.rest}{#if managed.pct !== null}<div class="pbar"><b style={`width:${managed.pct}%`}></b></div>{/if}</div>
         {/if}
         {#each lines as line (line.key)}
           <div data-testid={`tv-store-line-${line.key}`}>{#each line.segs as s, j (j)}{#if s.b}<b class:warn={s.warn}>{s.text}</b>{:else}{s.text}{/if}{/each}</div>

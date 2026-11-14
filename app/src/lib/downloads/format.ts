@@ -12,6 +12,7 @@ import {
   storeStripLine,
   type LineContext,
 } from '../gamestores/downloads';
+import { isWaitingForStore } from '../gamestores/jobs';
 
 export type { LineContext } from '../gamestores/downloads';
 
@@ -240,6 +241,9 @@ export type DownloadAction =
   // A row the store's own client runs (Steam): a disabled Cancel titled
   // "Managed by Steam" while it is live.
   | 'managed'
+  // A Steam row that still waits for Steam to start the download: a small
+  // Stop waiting button (`steam_stop_waiting`).
+  | 'stop-waiting'
   | 'none';
 
 /**
@@ -301,6 +305,7 @@ export function actionFor(
  * warning came from its setup steps (Retry runs only those again).
  */
 export function rowAction(e: DownloadEntry, movePhase: MovePhase | null = null): DownloadAction {
+  if (isWaitingForStore(e)) return 'stop-waiting';
   return retriesSetupSteps(e) ? 'retry-dismiss' : actionFor(e.status, e.kind, movePhase);
 }
 

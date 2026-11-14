@@ -51,6 +51,7 @@
     showCard,
     signIn,
     steamUninstall,
+    steamStopWaiting,
     steamVerify,
     stopStore,
     syncNow,
@@ -251,6 +252,9 @@
         if (managedByClient(g.source)) await steamUninstall(g);
         else confirm = 'uninstall';
         break;
+      case 'stop_waiting':
+        if (job) await steamStopWaiting(job);
+        break;
       case 'uninstall_confirm':
         confirm = null;
         if (await uninstallStore(g)) showCard(uninstalledNotice(g.source, g.title, (status?.cloud_saves ?? false) && g.cloud !== 'none'));
@@ -332,7 +336,9 @@
               <!-- Steam installs it: the progress, and why GRID can't pause or cancel it. -->
               <div class="managed" data-testid="store-details-managed">
                 <span><b>{managed.title}</b></span>
-                <div class="mbar"><b style:width={`${managed.pct}%`}></b></div>
+                {#if managed.pct !== null}
+                  <div class="mbar"><b style:width={`${managed.pct}%`}></b></div>
+                {/if}
                 <span>{managed.note}</span>
               </div>
             {/if}

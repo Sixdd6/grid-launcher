@@ -5,8 +5,8 @@
 // row's `kind`, `status`, `phase` and `failure`. Pure, and free of the
 // downloads formatter so that module can import this one.
 import type { DownloadEntry, DownloadKind, JobFailure, StoreSource } from '../api';
-import { isManagedRow, jobPercent } from './jobs';
-import { INSTALLED_BY_STEAM, INSTALLING_IN_STEAM, MANAGED_BY_STEAM } from './steam';
+import { isManagedRow, isWaitingForStore, jobPercent } from './jobs';
+import { INSTALLED_BY_STEAM, INSTALLING_IN_STEAM, MANAGED_BY_STEAM, WAITING_FOR_STEAM } from './steam';
 import { isEnabledStore, readableVersions, STORE_ORDER, storeName, storeOfPlatform } from './marks';
 
 /** The store a store row belongs to, from its game key (`gog:…`), tool source (`epic`) or platform ("Epic Games"). */
@@ -218,14 +218,19 @@ export function storeEntryLine(e: DownloadEntry, ctx: LineContext = {}): string 
 }
 
 /**
- * A row the store's client runs (Steam): "Installing in Steam 52% · Managed
- * by Steam", then "Installed by Steam" (the row's detail) or "Cancelled".
+ * A row the store's client runs (Steam): "Waiting for Steam to start the
+ * download" until Steam writes the manifest, then "Installing in Steam 52% ·
+ * Managed by Steam", then "Installed by Steam" (the row's detail) or
+ * "Cancelled". A wait that ended (Stop waiting, the 5-minute timeout) reads
+ * the backend's detail ("Not installed · you stopped waiting for Steam").
  */
 function managedLine(e: DownloadEntry): string {
+  if (isWaitingForStore(e)) return WAITING_FOR_STEAM;
   switch (e.status) {
     case 'completed':
       return e.detail.trim() || INSTALLED_BY_STEAM;
     case 'cancelled':
+      return e.detail.trim() || 'Cancelled';
     case 'cancelling':
       return 'Cancelled';
     case 'failed':
@@ -348,7 +353,11 @@ export function storeStripLine(e: DownloadEntry, ctx: LineContext = {}): string 
   const source = entrySource(e);
   const name = source !== null && isEnabledStore(source) ? storeName(source) : e.platform.trim() || 'GOG';
   // The strip leaves out a Steam row's "· Managed by Steam" (prototype `stJobLine`).
-  const line = isManagedRow(e) && isLiveStatus(e) ? `${INSTALLING_IN_STEAM} ${jobPercent(e)}%` : storeEntryLine(e, ctx);
+  const line = isWaitingForStore(e)
+    ? WAITING_FOR_STEAM
+    : isManagedRow(e) && isLiveStatus(e)
+      ? `${INSTALLING_IN_STEAM} ${jobPercent(e)}%`
+      : storeEntryLine(e, ctx);
   return `${e.title} · ${name} · ${line}`;
 }
 

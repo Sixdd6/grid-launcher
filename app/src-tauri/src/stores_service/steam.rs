@@ -100,6 +100,13 @@ pub const PASTE_KEY_FIRST: &str = "Paste your key first.";
 /// A finished install's Downloads line.
 pub const INSTALLED_BY_STEAM: &str = "Installed by Steam";
 
+/// Stop waiting on a row that isn't a Steam row waiting for Steam
+/// (unknown, another store's, or already ended).
+pub const NOT_WAITING: &str = "That download isn\u{2019}t waiting for Steam.";
+
+/// Stop waiting after Steam started the download: Steam owns it now.
+pub const STEAM_STARTED: &str = "Steam has started the download. Pause or cancel it in Steam.";
+
 /// The owned-list cache (`<data_dir>/stores/cache/`).
 pub const OWNED_CACHE: &str = "steam-owned.json";
 /// The `GetItems` metadata cache (`<data_dir>/stores/cache/`).
@@ -920,7 +927,9 @@ impl SteamStore {
         // Outside the state lock: admitting notifies the Downloads
         // observers, which read every store's status.
         let entry = self.install.get().and_then(|install| {
-            install.admit_store_external(StoreKind::Steam, &appid.to_string(), &title)
+            // GRID's Install in Steam waits for Steam to start the download;
+            // an install Steam already runs is under way.
+            install.admit_store_external(StoreKind::Steam, &appid.to_string(), &title, by_grid)
         });
         {
             let mut state = self.state.lock().unwrap();
@@ -970,7 +979,12 @@ impl SteamStore {
                         return;
                     }
                     WatchEvent::Cancelled => {
-                        this.watch_cancelled(appid);
+                        this.watch_ended(appid, ExternalOutcome::Cancelled);
+                        return;
+                    }
+                    // No card: the row says it (GameStores README).
+                    WatchEvent::TimedOut => {
+                        this.watch_ended(appid, ExternalOutcome::TimedOut);
                         return;
                     }
                 }
@@ -1023,14 +1037,63 @@ impl SteamStore {
         self.notify(notice::installed(&title, &key));
     }
 
-    fn watch_cancelled(&self, appid: u32) {
+    fn watch_ended(&self, appid: u32, outcome: ExternalOutcome) {
         let entry = {
             let mut state = self.state.lock().unwrap();
             state.watches.remove(&appid).and_then(|watch| watch.entry)
         };
         if let (Some(install), Some(entry)) = (self.install.get(), entry) {
-            install.finish_store_external(entry, ExternalOutcome::Cancelled);
+            install.finish_store_external(entry, outcome);
         }
+    }
+
+    /// `steam_stop_waiting`: the user ends the wait for Steam to start an
+    /// install GRID asked for (Steam writes nothing when its install window
+    /// is cancelled). Only for a Steam row that still waits: refused once
+    /// Steam has started the download, and for any other row. The row ends
+    /// "Not installed · you stopped waiting for Steam" and the watch stops;
+    /// the background scan still adopts the game if Steam installs it
+    /// later. The frontend raises the card.
+    pub fn stop_waiting(&self, entry_id: u64) -> Result<(), String> {
+        let install = self.install.get().ok_or_else(|| NOT_WAITING.to_string())?;
+        let appid = {
+            let state = self.state.lock().unwrap();
+            state
+                .watches
+                .iter()
+                .find(|(_, watch)| watch.entry == Some(entry_id))
+                .map(|(appid, _)| *appid)
+        };
+        let Some(appid) = appid else {
+            return Err(NOT_WAITING.to_string());
+        };
+        // Outside the state lock (it notifies the Downloads observers).
+        // Atomic in the queue: a first progress that lands first wins.
+        if !install.stop_waiting_store_external(entry_id, StoreKind::Steam) {
+            return Err(
+                if install
+                    .snapshot()
+                    .entries
+                    .iter()
+                    .any(|e| e.id == entry_id && e.status.is_live())
+                {
+                    STEAM_STARTED.to_string()
+                } else {
+                    NOT_WAITING.to_string()
+                },
+            );
+        }
+        let mut state = self.state.lock().unwrap();
+        if state
+            .watches
+            .get(&appid)
+            .is_some_and(|watch| watch.entry == Some(entry_id))
+        {
+            if let Some(watch) = state.watches.remove(&appid) {
+                watch.stop.store(true, Ordering::SeqCst);
+            }
+        }
+        Ok(())
     }
 
     /// After Uninstall in Steam: polls the manifest every 2 s (for up to 10
@@ -2270,7 +2333,7 @@ impl StoreJobRunner for RefusedRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use grid_core::library::queue::DownloadStatus;
+    use grid_core::library::queue::{DownloadStatus, JobPhase};
     use grid_core::secrets::MemoryStore;
     use std::sync::atomic::AtomicUsize;
 
@@ -2968,6 +3031,7 @@ mod tests {
         let row = entry().expect("the Downloads row");
         assert_eq!(row.kind, "store_external");
         assert_eq!(row.title, "Quiet Comet");
+        assert_eq!(row.phase, JobPhase::WaitingForStore, "waiting for Steam");
         // Steam writes the manifest, then the bytes come in.
         let mut m = manifest(3_000_040, "Quiet Comet", 1026);
         m.bytes_to_download = 100;
@@ -2979,6 +3043,10 @@ mod tests {
         )
         .await;
         assert_eq!(entry().unwrap().total_bytes, 100);
+        assert_eq!(entry().unwrap().phase, JobPhase::None, "under way");
+        // Stop waiting is refused once Steam has started.
+        assert_eq!(h.store.stop_waiting(row.id), Err(STEAM_STARTED.to_string()));
+        assert_eq!(entry().unwrap().status, DownloadStatus::Downloading);
         for m in h.fake.manifests.lock().unwrap().iter_mut() {
             if m.appid == 3_000_040 {
                 m.flags = 4;
@@ -3053,6 +3121,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stop_waiting_ends_a_waiting_row_and_the_scan_still_adopts_the_game() {
+        let h = harness();
+        h.store.load();
+        h.connect().await;
+        h.store.open("3000050", SteamOpenAction::Install).unwrap();
+        let entry = || {
+            h.install
+                .snapshot()
+                .entries
+                .into_iter()
+                .filter(|e| e.source_id == "steam:3000050")
+                .max_by_key(|e| e.id)
+        };
+        let row = entry().expect("the Downloads row");
+        assert_eq!(row.phase, JobPhase::WaitingForStore);
+        // Unknown and non-Steam rows are refused.
+        assert_eq!(h.store.stop_waiting(9999), Err(NOT_WAITING.to_string()));
+        let firmware = h
+            .install
+            .admit_external("PS3 Firmware", "PlayStation 3")
+            .unwrap();
+        assert_eq!(h.store.stop_waiting(firmware), Err(NOT_WAITING.to_string()));
+
+        h.store.stop_waiting(row.id).unwrap();
+        let ended = entry().unwrap();
+        assert_eq!(ended.status, DownloadStatus::Cancelled);
+        assert_eq!(
+            ended.detail,
+            "Not installed \u{b7} you stopped waiting for Steam"
+        );
+        assert_eq!(ended.error, "");
+        assert!(h.store.state.lock().unwrap().watches.is_empty(), "no watch");
+        assert_eq!(h.store.stop_waiting(row.id), Err(NOT_WAITING.to_string()));
+        // The watch is gone: a manifest now does not touch the ended row...
+        let mut m = manifest(3_000_050, "Harbor of Bells", 1026);
+        m.bytes_to_download = 10;
+        m.bytes_downloaded = 3;
+        h.fake.manifests.lock().unwrap().push(m);
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert_eq!(
+            h.install
+                .snapshot()
+                .entries
+                .iter()
+                .filter(|e| e.source_id == "steam:3000050")
+                .count(),
+            1
+        );
+        // ...but the scan adopts Steam's install as one under way.
+        h.store.state.lock().unwrap().fingerprint = None;
+        h.store.scan_now().await;
+        let adopted = entry().unwrap();
+        assert_ne!(adopted.id, row.id);
+        assert_eq!(adopted.status, DownloadStatus::Downloading);
+        assert_eq!(adopted.phase, JobPhase::None);
+    }
+
+    #[tokio::test]
+    async fn an_install_steam_never_starts_times_out_without_a_card() {
+        let h = harness();
+        h.store.load();
+        h.connect().await;
+        *h.store.start_timeout.lock().unwrap() = Duration::from_millis(60);
+        let cards = h.notices().len();
+        h.store.open("3000050", SteamOpenAction::Install).unwrap();
+        let entry = || {
+            h.install
+                .snapshot()
+                .entries
+                .into_iter()
+                .find(|e| e.source_id == "steam:3000050")
+        };
+        wait_for(
+            || entry().is_some_and(|e| e.status == DownloadStatus::Cancelled),
+            "the timeout",
+        )
+        .await;
+        assert_eq!(
+            entry().unwrap().detail,
+            "Not installed \u{b7} Steam didn\u{2019}t start the download in 5 minutes"
+        );
+        assert_eq!(h.notices().len(), cards, "no card");
+        assert!(h.store.state.lock().unwrap().watches.is_empty());
+    }
+
+    #[tokio::test]
     async fn an_install_steam_runs_by_itself_gets_a_downloads_row() {
         let h = harness();
         h.store.load();
@@ -3067,6 +3221,7 @@ mod tests {
             .find(|e| e.source_id == "steam:3000060")
             .expect("re-admitted");
         assert_eq!(row.kind, "store_external");
+        assert_eq!(row.phase, JobPhase::None, "under way: never waits");
         assert!(h.rows().iter().all(|r| r.store_id != "3000060"));
     }
 
@@ -3279,7 +3434,7 @@ mod tests {
         assert_eq!(w.step(&missing, at), WatchEvent::Waiting);
         assert_eq!(
             w.step(&missing, Duration::from_secs(61)),
-            WatchEvent::Cancelled,
+            WatchEvent::TimedOut,
             "the dialog was closed"
         );
         let mut w = new();
