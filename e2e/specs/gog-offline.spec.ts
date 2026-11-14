@@ -42,6 +42,8 @@ describe('gog-offline', () => {
     await $(testId('store-installer-found')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await expect($(testId('store-installer-found'))).toHaveText(expect.stringContaining('Linux version'));
     await expect($(testId('store-installer-how'))).toHaveText('GRID unpacks the game files from it. The installer script isn’t run.');
+    // What it needs, and the free space on the volume it installs to.
+    await expect($(testId('store-installer-space'))).toHaveText(/^Needs (\d+(\.\d)? GB|\d+ MB|<1 MB) · \d+(\.\d)? GB free$/);
     await $(testId('store-installer-install')).click();
     await openDownloads();
     await waitForDownloadLine(/^(Unpacking the game files \d+%|Installed from its installer|Waiting for a slot)$/);

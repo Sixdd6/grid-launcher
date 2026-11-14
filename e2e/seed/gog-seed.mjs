@@ -131,6 +131,12 @@ const grey = path.join(gogDir, 'Grey Meridian');
 mkdirSync(path.join(grey, 'saves'), { recursive: true });
 mkdirSync(path.join(grey, 'prefix'), { recursive: true });
 writeFileSync(path.join(grey, 'game.exe'), 'MZ fake');
+// Game Settings › Executable lists game.exe and Launcher.exe, never the
+// uninstaller or anything in the Wine prefix.
+writeFileSync(path.join(grey, 'Launcher.exe'), 'MZ fake');
+writeFileSync(path.join(grey, 'unins000.exe'), 'MZ fake');
+mkdirSync(path.join(grey, 'prefix', 'drive_c', 'windows'), { recursive: true });
+writeFileSync(path.join(grey, 'prefix', 'drive_c', 'windows', 'notepad.exe'), 'MZ fake');
 writeFileSync(
   path.join(grey, 'goggame-1580232252.info'),
   JSON.stringify({

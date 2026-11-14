@@ -124,6 +124,19 @@ function dlcName(title: string, base: string): string {
   return t || 'DLC';
 }
 
+/**
+ * What installing an installer needs on disk: about 1.4 times the
+ * installer's size (the prototype's 9.4 GB installer needs 13.2 GB).
+ */
+export function installerNeedBytes(installerBytes: number): number {
+  return Math.round(installerBytes * 1.4);
+}
+
+/** The installer card's space line: "Needs 13.2 GB · 412 GB free" (just "Needs …" when free space is unknown). */
+export function installerSpaceNote(insp: Pick<InstallerInspection, 'bytes'>, freeBytes: number | null): string {
+  return spaceNote(installerNeedBytes(insp.bytes), freeBytes);
+}
+
 /** The footer's space note: "Needs 13.2 GB · 412 GB free". */
 export function spaceNote(needBytes: number, freeBytes: number | null): string {
   return freeBytes === null ? `Needs ${sizeGb(needBytes)}` : `Needs ${sizeGb(needBytes)} · ${sizeGb(freeBytes)} free`;

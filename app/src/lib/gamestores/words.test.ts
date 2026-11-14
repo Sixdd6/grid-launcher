@@ -1,9 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { rommInstallerLine, storeBackupLine, storeEntryLine, storeKindLabel, storeStripLine } from './downloads';
 import { installerFailedNotice, loginFailedNotice, noticeActionLabel, uninstalledNotice, wizardNotice } from './notices';
-import { inspectionView, readingLine } from './inspection';
+import { inspectionView, installerNeedBytes, installerSpaceNote, readingLine } from './inspection';
 import { initialChoice, installDialogView, installRequest } from './install';
-import { cloudPanel, conflictSides, storeButtons, storeDetailChips, storeFacts, storeLines, storeTabs, driveRestoreLine } from './details';
+import {
+  chosenExecutable,
+  cloudPanel,
+  conflictSides,
+  executableChoices,
+  storeButtons,
+  storeDetailChips,
+  storeFacts,
+  storeLines,
+  storeTabs,
+  driveRestoreLine,
+} from './details';
 import { accountLine, disconnectConfirm, ownedLine, storePill, toolLine } from './settings';
 import { storeBackupTitle, storeBackupView } from './backup';
 import { FakeStores } from './fakeApi';
@@ -154,6 +165,12 @@ describe('offline installer card', () => {
     const dlc = inspectionView(insp('/home/player/Downloads/ashen_tide_digital_artbook_71299.sh'), { compat: '', gogConnected: true });
     expect(dlc).toMatchObject({ heading: 'Install DLC for Ashen Tide', what: 'Digital Artbook · DLC for Ashen Tide · 118 MB', button: 'Install DLC' });
   });
+  it('says what it needs and what is free, as the prototype’s footer', () => {
+    const win = insp('/home/player/Downloads/setup_quarry_nine_1.4_(64bit)_(69001).exe');
+    expect(installerSpaceNote(win, win.free_bytes)).toBe('Needs 13.2 GB · 412 GB free');
+    expect(installerSpaceNote(win, null)).toBe('Needs 13.2 GB');
+    expect(installerNeedBytes(100)).toBe(140);
+  });
   it('passes refusals through', () => {
     const r = inspectionView(insp('/home/player/Downloads/ashen_tide_1.0.4_71234.pkg'), { compat: '', gogConnected: true });
     expect(r).toMatchObject({ kind: 'refused', heading: 'Can’t install this file', title: 'This is a macOS installer' });
@@ -256,11 +273,18 @@ describe('Details', () => {
     expect(cloudPanel(g, { state: 'syncing', synced_at: 0, locations: [], conflict: null }, now)).toMatchObject({ title: 'Syncing…', busy: true });
     expect(cloudPanel(g, { state: 'off', synced_at: 0, locations: [], conflict: null }, now).title).toBe('Cloud saves are off for this game');
     expect(cloudPanel(g, { state: 'none', synced_at: 0, locations: [], conflict: null }, now).title).toBe('This game has no cloud saves');
-    const sides = conflictSides('gog', { local_at: now - 60, local_files: 3, local_bytes: 2.1 * 1024 * 1024, cloud_at: now - 7200 }, now);
+    const c = { local_at: now - 60, local_files: 3, local_bytes: 2.1 * 1024 * 1024, cloud_at: now - 7200, cloud_files: 3, cloud_bytes: 2.0 * 1024 * 1024 };
+    const sides = conflictSides('gog', c, now);
     expect(sides[0]).toMatchObject({ label: 'This computer', button: 'Keep this computer’s save', after: 'Uploads it to GOG.', newer: true });
     expect(sides[0].note).toMatch(/· 3 files · 2.1 MB$/);
     expect(sides[1]).toMatchObject({ label: 'GOG cloud', button: 'Use the cloud save', newer: false });
-    expect(sides[1].note).toMatch(/ on another computer$/);
+    expect(sides[1].note).toMatch(/ on another computer · 3 files · 2.0 MB$/);
+    // The prompt shows the size only, as the prototype's conflict prompt does.
+    expect(conflictSides('gog', c, now, true)[1].note).toMatch(/ on another computer · 2.0 MB$/);
+    // A size GOG's listing didn't give is left out.
+    const unsized = { ...c, cloud_files: 1, cloud_bytes: null };
+    expect(conflictSides('gog', unsized, now)[1].note).toMatch(/ on another computer · 1 file$/);
+    expect(conflictSides('gog', unsized, now, true)[1].note).toMatch(/ on another computer$/);
   });
 });
 
@@ -323,5 +347,29 @@ describe('GOG backups', () => {
   it('titles the dialog', () => {
     expect(storeBackupTitle({ kind: 'all', count: 3 })).toBe('Backup GOG · 3 games');
     expect(storeBackupTitle({ kind: 'game', name: 'Ashen Tide' })).toBe('Backup Ashen Tide');
+  });
+});
+
+describe('Game Settings › Executable', () => {
+  const dir = '/games/GOG/Lanternfall';
+  const found = [`${dir}/Lanternfall.exe`, `${dir}/bin/Launcher.exe`];
+  it('lists the folder’s executables by their path inside it', () => {
+    expect(executableChoices(`${dir}/Lanternfall.exe`, found, dir)).toEqual([
+      { value: `${dir}/Lanternfall.exe`, label: 'Lanternfall.exe' },
+      { value: `${dir}/bin/Launcher.exe`, label: 'bin/Launcher.exe' },
+    ]);
+  });
+  it('keeps a pinned file the list doesn’t hold, first', () => {
+    const got = executableChoices('/elsewhere/Mod.exe', found, dir);
+    expect(got[0]).toEqual({ value: '/elsewhere/Mod.exe', label: '/elsewhere/Mod.exe' });
+    expect(got).toHaveLength(3);
+    expect(executableChoices('', [], dir)).toEqual([]);
+  });
+  it('matches the current file across separators', () => {
+    const win = ['C:\\Games\\Lanternfall\\Lanternfall.exe'];
+    expect(executableChoices('C:/Games/Lanternfall/Lanternfall.exe', win, 'C:\\Games\\Lanternfall')).toEqual([
+      { value: win[0], label: 'Lanternfall.exe' },
+    ]);
+    expect(chosenExecutable('C:/Games/Lanternfall/Lanternfall.exe', executableChoices('', win, ''))).toBe(win[0]);
   });
 });

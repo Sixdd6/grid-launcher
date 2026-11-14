@@ -198,6 +198,9 @@ pub struct StoreSaveConflict {
     pub local_files: u32,
     pub local_bytes: u64,
     pub cloud_at: i64,
+    pub cloud_files: u32,
+    /// `None` when GOG's cloud listing gives no sizes.
+    pub cloud_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -237,6 +240,10 @@ pub struct InstallerInspection {
     pub version: String,
     pub bytes: u64,
     pub verdict: InstallerVerdict,
+    /// Free bytes on the volume it installs to (the new game's folder, the
+    /// installed game's for an update, the base game's for a DLC); `None`
+    /// when unknown.
+    pub free_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -768,6 +775,41 @@ pub async fn store_game_settings(
     })
 }
 
+/// The executables in an installed store game's folder that Game Settings ›
+/// Executable lists, best first, as full paths
+/// (`native::store_executables`: a few folders deep, the Wine prefix,
+/// uninstallers, installers and redistributables left out).
+#[tauri::command]
+pub async fn store_game_executables(
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<Vec<String>, String> {
+    let install = install_service(&state)?;
+    let row = gog_row(&install, &key).await?;
+    let windows = GogMeta::from_json(&row.store_meta).platform == GogPlatform::Windows;
+    let dir = [row.native_game_dir.trim(), row.extracted_dir.trim()]
+        .into_iter()
+        .find(|dir| !dir.is_empty())
+        .map(PathBuf::from);
+    let Some(dir) = dir else {
+        return Ok(Vec::new());
+    };
+    let skip: Vec<PathBuf> = Some(row.native_wineprefix.trim())
+        .filter(|prefix| !prefix.is_empty())
+        .map(PathBuf::from)
+        .into_iter()
+        .collect();
+    let title = row.title.clone();
+    tokio::task::spawn_blocking(move || {
+        grid_core::library::specials::native::store_executables(&dir, &title, windows, &skip)
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect()
+    })
+    .await
+    .map_err(err)
+}
+
 /// The row after Game settings' Save: a new executable becomes the user's
 /// choice (GOG updates leave it alone); the install folder and the Wine
 /// prefix are read-only, and only a Windows version takes a compat tool.
@@ -947,6 +989,7 @@ fn inspection_ipc(insp: &offline::Inspection, product: Option<&GogProduct>) -> I
         version: insp.version.clone(),
         bytes: insp.bytes,
         verdict,
+        free_bytes: None,
     }
 }
 
@@ -975,7 +1018,43 @@ pub async fn offline_inspect(
         .info
         .as_ref()
         .and_then(|info| state.stores.product(&info.game_id));
-    Ok(inspection_ipc(&insp, product.as_ref()))
+    let mut ipc = inspection_ipc(&insp, product.as_ref());
+    if !matches!(insp.verdict, offline::Verdict::Refused { .. }) {
+        let registry = install_service(&state)?.registry();
+        let base = state.stores.install_base_dir();
+        ipc.free_bytes = tokio::task::spawn_blocking(move || {
+            let fresh = if base.is_empty() {
+                PathBuf::new()
+            } else {
+                PathBuf::from(&base).join(grid_core::library::paths::sanitize_component(
+                    &insp.title(),
+                    "game",
+                ))
+            };
+            let target = offline::target_dir(&insp, &registry, &fresh);
+            if target.as_os_str().is_empty() {
+                None
+            } else {
+                grid_core::library::relocate::free_space(&target)
+            }
+        })
+        .await
+        .map_err(err)?;
+    }
+    Ok(ipc)
+}
+
+/// Free bytes on the volume holding `path` (its nearest existing folder),
+/// for a space line after the install folder changes; `None` when unknown.
+#[tauri::command]
+pub async fn store_free_space(path: String) -> Result<Option<u64>, String> {
+    let path = PathBuf::from(path.trim());
+    if path.as_os_str().is_empty() {
+        return Ok(None);
+    }
+    tokio::task::spawn_blocking(move || grid_core::library::relocate::free_space(&path))
+        .await
+        .map_err(err)
 }
 
 #[tauri::command]

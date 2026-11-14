@@ -386,6 +386,24 @@ pub fn inspect(
     Ok(insp)
 }
 
+/// The folder installing `insp` writes into, for its free-space line: the
+/// installed game's for an update, the base game's for a DLC, else `fresh`
+/// (the new game's folder, which need not exist yet).
+pub fn target_dir(insp: &Inspection, registry: &Registry, fresh: &Path) -> PathBuf {
+    let id = match (&insp.verdict, &insp.info) {
+        (Verdict::Update { .. }, Some(info)) => info.game_id.as_str(),
+        (Verdict::Dlc { .. }, Some(info)) => info.root_game_id.as_str(),
+        _ => return fresh.to_path_buf(),
+    };
+    gog_row_for(registry, id)
+        .ok()
+        .flatten()
+        .map(|row| row.extracted_dir.trim().to_string())
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| fresh.to_path_buf())
+}
+
 // --- RomM archives ------------------------------------------------------------
 
 /// Files that may sit beside an installer in an archive without making it

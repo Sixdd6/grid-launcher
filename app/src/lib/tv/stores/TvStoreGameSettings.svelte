@@ -1,14 +1,14 @@
 <script lang="ts">
   // Game settings for a store game (TVStores README § The game page › Game
   // settings page; prototype `sGameSettings`): Install folder, Launch file
-  // ("Set by GOG" / "Your choice"; the folder browser in file mode), Launch
+  // ("Set by GOG" / "Your choice"; a list of the game's executables), Launch
   // parameters (the keyboard), Compatibility tool and Wine prefix for the
   // Windows version or "Linux games run directly.", the Cloud saves switch,
   // and Save, which Start presses from anywhere.
   import { api, type StoreGameSettings } from '../../api';
   import { hasStoreCloud } from '../../gamestores/marks';
   import { gameStores, refreshLibrary } from '../../stores/gameStores.svelte';
-  import { openFolderBrowser } from '../gameActions';
+  import { chosenExecutable, executableChoices, type ExecutableChoice } from '../../gamestores/details';
   import { popPage } from '../nav.svelte';
   import { openKeyboard, openList } from '../overlays/overlays.svelte';
   import TvRowsPage from '../pages/TvRowsPage.svelte';
@@ -22,11 +22,19 @@
   let game = $derived(gameStores.game(gameKey));
   let s = $state<StoreGameSettings | null>(null);
   let error = $state<string | null>(null);
+  let exeChoices = $state<ExecutableChoice[]>([]);
+  /** The executable exactly as the row had it, sent back when the list is untouched. */
+  let exeOriginal = '';
+  let exePicked = $state(false);
 
   // svelte-ignore state_referenced_locally
-  api
-    .storeGameSettings(gameKey)
-    .then((x) => (s = x))
+  Promise.all([api.storeGameSettings(gameKey), api.storeGameExecutables(gameKey).catch(() => [] as string[])])
+    .then(([x, exes]) => {
+      exeChoices = executableChoices(x.executable, exes, x.install_dir);
+      exeOriginal = x.executable;
+      const exe = x.executable.trim() === '' && exeChoices.length > 0 ? exeChoices[0].value : chosenExecutable(x.executable, exeChoices);
+      s = { ...x, executable: exe };
+    })
     .catch((err) => (error = err instanceof Error ? err.message : String(err)));
 
   let windows = $derived(game?.installed_platform === 'windows');
@@ -44,16 +52,20 @@
         key: 'exe',
         label: 'Launch file',
         sub: launchFileSub(g.source, x.exe_user_pinned),
-        value: fileName(x.executable) || 'None',
+        value: exeChoices.find((c) => c.value === x.executable)?.label ?? (fileName(x.executable) || 'None'),
         run: () =>
-          openFolderBrowser({
+          void openList({
             title: 'Launch file',
-            start: x.install_dir,
-            files: true,
-            onPick: (p) => {
-              x.executable = p;
-              x.exe_user_pinned = true;
-            },
+            items: exeChoices.map((c) => ({
+              label: c.label,
+              checked: c.value === x.executable,
+              onPick: () => {
+                if (c.value === x.executable) return;
+                x.executable = c.value;
+                x.exe_user_pinned = true;
+                exePicked = true;
+              },
+            })),
           }),
       },
       {
@@ -91,7 +103,8 @@
     if (!s || !game) return;
     const g = game;
     try {
-      await api.storeSetGameSettings(gameKey, $state.snapshot(s));
+      const snap = $state.snapshot(s);
+      await api.storeSetGameSettings(gameKey, exePicked ? snap : { ...snap, executable: exeOriginal });
     } catch (err) {
       fail(err);
       return;

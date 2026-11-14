@@ -290,6 +290,10 @@ function bytesShort(b: number): string {
   return b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : `${(b / MB).toFixed(1)} MB`;
 }
 
+function filesText(n: number): string {
+  return n === 1 ? '1 file' : `${n} files`;
+}
+
 /** The two sides of a conflict: This computer (newer when its change is later) and the store's cloud. */
 export function conflictSides(
   source: StoreGame['source'],
@@ -298,7 +302,15 @@ export function conflictSides(
   prompt = false,
 ): ConflictSide[] {
   const name = storeName(source);
-  const files = c.local_files === 1 ? '1 file' : `${c.local_files} files`;
+  const files = filesText(c.local_files);
+  // The cloud side as the prototype words it: "· 3 files · 2.0 MB" on the
+  // Cloud saves tab, "· 2.0 MB" in the prompt. A size GOG's listing didn't
+  // give is left out, never guessed.
+  const cloudParts = [
+    ...(prompt ? [] : [filesText(c.cloud_files)]),
+    ...(c.cloud_bytes === null ? [] : [bytesShort(c.cloud_bytes)]),
+  ];
+  const cloudTail = cloudParts.length > 0 ? ` · ${cloudParts.join(' · ')}` : '';
   return [
     {
       which: 'local',
@@ -313,7 +325,7 @@ export function conflictSides(
     {
       which: 'cloud',
       label: `${name} cloud`,
-      note: `Changed ${changedAt(c.cloud_at, nowSeconds)} on another computer`,
+      note: `Changed ${changedAt(c.cloud_at, nowSeconds)} on another computer${cloudTail}`,
       button: 'Use the cloud save',
       after: prompt ? '' : 'Replaces the save on this computer.',
       newer: c.cloud_at > c.local_at,
@@ -356,6 +368,42 @@ export function conflictPromptTitle(title: string): string {
 }
 
 // ── Game Settings ───────────────────────────────────────────────────────
+
+export type ExecutableChoice = { value: string; label: string };
+
+/**
+ * Game Settings › Executable's list (prototype `stSettingsHTML`): the game's
+ * executables, labelled from its folder (`Launcher.exe`, `game/run`), with
+ * the current one first when the list doesn't hold it (a file the user
+ * pinned elsewhere, or one the folder no longer has).
+ */
+export function executableChoices(current: string, candidates: readonly string[], installDir: string): ExecutableChoice[] {
+  const label = (path: string) => relativeTo(path, installDir);
+  const cur = current.trim();
+  const out: ExecutableChoice[] = candidates.map((value) => ({ value, label: label(value) }));
+  if (cur !== '' && !candidates.some((c) => samePath(c, cur))) out.unshift({ value: cur, label: label(cur) });
+  return out;
+}
+
+/** The choice in `choices` that is `current`, so a list keeps its selection across separators. */
+export function chosenExecutable(current: string, choices: readonly ExecutableChoice[]): string {
+  return choices.find((c) => samePath(c.value, current))?.value ?? current;
+}
+
+function norm(path: string): string {
+  return path.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function samePath(a: string, b: string): boolean {
+  return norm(a) === norm(b);
+}
+
+/** `path` below `dir` with `/` separators, else `path` itself. */
+function relativeTo(path: string, dir: string): string {
+  const p = norm(path);
+  const d = norm(dir);
+  return d !== '' && p.startsWith(`${d}/`) ? p.slice(d.length + 1) : path.trim();
+}
 
 export function executableHelp(source: StoreGame['source']): string {
   const name = storeName(source);

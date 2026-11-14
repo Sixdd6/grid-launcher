@@ -825,9 +825,11 @@ pub struct CloudFile {
     pub hash: String,
     /// Epoch seconds.
     pub modified: i64,
+    /// The file's size, `None` when the listing leaves `bytes` out.
+    pub bytes: Option<u64>,
 }
 
-/// The cloudstorage listing (`[{name, hash, last_modified, ...}]`),
+/// The cloudstorage listing (`[{name, hash, last_modified, bytes, ...}]`),
 /// deleted-file markers dropped.
 pub fn parse_cloud_listing(value: &Value) -> Vec<CloudFile> {
     value
@@ -839,6 +841,7 @@ pub fn parse_cloud_listing(value: &Value) -> Vec<CloudFile> {
                     name: text(item.get("name")),
                     hash: text(item.get("hash")),
                     modified: parse_time(&text(item.get("last_modified"))),
+                    bytes: item.get("bytes").and_then(Value::as_u64),
                 })
                 .filter(|f| !f.name.is_empty() && f.hash != EMPTY_CLOUD_MD5)
                 .collect()
@@ -880,14 +883,31 @@ pub async fn cloud_files(
         .unwrap_or_default())
 }
 
-/// The cloud files grouped by location name: `(newest time, count)`.
-pub fn cloud_by_location(files: &[CloudFile]) -> BTreeMap<String, (i64, u32)> {
-    let mut out: BTreeMap<String, (i64, u32)> = BTreeMap::new();
+/// One save location's files in the cloud.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CloudLocation {
+    /// The newest file time, epoch seconds.
+    pub newest: i64,
+    pub files: u32,
+    /// Every file's bytes together, `None` when any file's size is unknown.
+    pub bytes: Option<u64>,
+}
+
+/// The cloud files grouped by location name.
+pub fn cloud_by_location(files: &[CloudFile]) -> BTreeMap<String, CloudLocation> {
+    let mut out: BTreeMap<String, CloudLocation> = BTreeMap::new();
     for file in files {
         let location = file.name.split('/').next().unwrap_or("").to_string();
-        let entry = out.entry(location).or_insert((0, 0));
-        entry.0 = entry.0.max(file.modified);
-        entry.1 += 1;
+        let entry = out.entry(location).or_insert(CloudLocation {
+            bytes: Some(0),
+            ..CloudLocation::default()
+        });
+        entry.newest = entry.newest.max(file.modified);
+        entry.files += 1;
+        entry.bytes = entry
+            .bytes
+            .zip(file.bytes)
+            .map(|(sum, size)| sum.saturating_add(size));
     }
     out
 }
@@ -1124,15 +1144,24 @@ mod tests {
         assert!(parse_remote_config(&json!({}), "Windows").is_none());
 
         let files = parse_cloud_listing(&json!([
-            {"name": "saves/slot1.sav", "hash": "abc", "last_modified": "2024-01-02T03:04:05+00:00"},
+            {"name": "saves/slot1.sav", "hash": "abc", "last_modified": "2024-01-02T03:04:05+00:00", "bytes": 2048},
             {"name": "saves/old.sav", "hash": EMPTY_CLOUD_MD5, "last_modified": "2024-01-01T00:00:00+00:00"},
             {"name": "config/a.ini", "hash": "def", "last_modified": "2023-01-01T00:00:00.000000+00:00"}
         ]));
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].modified, 1_704_164_645);
         let by = cloud_by_location(&files);
-        assert_eq!(by["saves"], (1_704_164_645, 1));
-        assert_eq!(by["config"].1, 1);
+        assert_eq!(
+            by["saves"],
+            CloudLocation {
+                newest: 1_704_164_645,
+                files: 1,
+                bytes: Some(2048)
+            }
+        );
+        assert_eq!(by["config"].files, 1);
+        // A listing without sizes leaves the total unknown.
+        assert_eq!(by["config"].bytes, None);
     }
 
     #[test]

@@ -682,6 +682,90 @@ fn title_match_tier(stem: &str, title: &str) -> u8 {
     }
 }
 
+/// How many path parts below a store game's folder Game Settings looks for
+/// executables (`a/b/c/game.exe` is four).
+pub const STORE_EXE_MAX_DEPTH: usize = 4;
+
+/// The executables Game Settings › Executable lists for an installed store
+/// game (GameStores prototype `stSettingsHTML`), best first by
+/// [`executable_candidates`]' order (depth, then title match, then path).
+///
+/// It looks at most [`STORE_EXE_MAX_DEPTH`] parts deep under `install_dir`,
+/// never inside `skip` (the game's Wine prefix) or a [`JUNK_DIRS`] folder,
+/// and leaves out uninstallers (`unins000.exe`), installers (`setup*`),
+/// crash reporters and redistributables. A Windows build lists its `.exe`
+/// files; a Linux build its `.sh` scripts and ELF binaries, shared
+/// libraries (`*.so*`) left out. Links are not followed.
+pub fn store_executables(
+    install_dir: &Path,
+    title: &str,
+    windows: bool,
+    skip: &[PathBuf],
+) -> Vec<PathBuf> {
+    fn walk(dir: &Path, depth: usize, skip: &[PathBuf], out: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                let name = entry.file_name().to_string_lossy().to_lowercase();
+                if depth + 1 < STORE_EXE_MAX_DEPTH
+                    && !JUNK_DIRS.contains(&name.as_str())
+                    && !skip.iter().any(|s| s == &path)
+                {
+                    walk(&path, depth + 1, skip, out);
+                }
+            } else if kind.is_file() {
+                out.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(install_dir, 0, skip, &mut files);
+    files.retain(|path| {
+        let rel = path.strip_prefix(install_dir).unwrap_or(path);
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if is_junk(rel, &stem) || normalize(&stem).starts_with("setup") {
+            return false;
+        }
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if windows {
+            ext == "exe"
+        } else {
+            !name.contains(".so")
+                && !matches!(ext.as_str(), "exe" | "dll" | "bat" | "cmd" | "ps1")
+                && (ext == "sh" || is_elf(path))
+        }
+    });
+    files.sort_by_cached_key(|path| {
+        let rel = path.strip_prefix(install_dir).unwrap_or(path);
+        let stem = rel
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        (
+            rel.components().count(),
+            title_match_tier(&stem, title),
+            rel.to_string_lossy().to_lowercase(),
+        )
+    });
+    files
+}
+
 /// Recursively collects every regular file under `dir` into `out`.
 /// Unreadable directories are skipped rather than causing an error.
 fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -1315,6 +1399,71 @@ mod tests {
         assert_eq!(
             launch_origin_after_save(&row, "/g/bin/start.bat", "/g/bin/start.bat", "-other"),
             ("user".to_string(), "bin".to_string())
+        );
+    }
+
+    // -- store_executables -------------------------------------------------------
+
+    fn rel_names(root: &Path, paths: &[PathBuf]) -> Vec<String> {
+        paths
+            .iter()
+            .map(|p| {
+                p.strip_prefix(root)
+                    .unwrap()
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn store_executables_list_a_windows_games_exes_without_its_uninstaller_or_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        for file in [
+            "Lanternfall.exe",
+            "Launcher.exe",
+            "unins000.exe",
+            "setup_lanternfall.exe",
+            "readme.txt",
+            "_CommonRedist/vcredist_x64.exe",
+            "bin/x64/Tool.exe",
+            "a/b/c/d/TooDeep.exe",
+            "prefix/drive_c/windows/notepad.exe",
+        ] {
+            let path = dir.path().join(file);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"MZ").unwrap();
+        }
+        let prefix = dir.path().join("prefix");
+        let got = store_executables(dir.path(), "Lanternfall", true, &[prefix]);
+        assert_eq!(
+            rel_names(dir.path(), &got),
+            vec!["Lanternfall.exe", "Launcher.exe", "bin/x64/Tool.exe"]
+        );
+    }
+
+    #[test]
+    fn store_executables_list_a_linux_games_scripts_and_binaries() {
+        let dir = tempfile::tempdir().unwrap();
+        let files: [(&str, &[u8]); 6] = [
+            ("start.sh", b"#!/bin/sh"),
+            ("uninstall-paper.sh", b"#!/bin/sh"),
+            ("game/paperlanterns", b"\x7fELF...."),
+            ("game/lib/libSDL2.so.0", b"\x7fELF...."),
+            ("game/data.pak", b"data"),
+            ("support/postinst.sh", b"#!/bin/sh"),
+        ];
+        for (file, bytes) in files {
+            let path = dir.path().join(file);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+        let got = store_executables(dir.path(), "Paper Lanterns", false, &[]);
+        assert_eq!(
+            rel_names(dir.path(), &got),
+            vec!["start.sh", "game/paperlanterns"]
         );
     }
 

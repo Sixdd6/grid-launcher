@@ -159,11 +159,11 @@ export const FAKE_INSTALLERS: readonly { path: string; insp: () => InstallerInsp
 
 function found(kind: InstallerInspection['kind'], id: string, title: string, version: string, gb: number, verdict: InstallerInspection['verdict']): InstallerInspection {
   const seed = SEEDS.find((s) => s.id === id);
-  return { path: '', kind, key: `gog:${id}`, title, cover: seed ? fakeCover(seed.title, seed.hue) : '', version, bytes: Math.round(gb * GB), verdict };
+  return { path: '', kind, key: `gog:${id}`, title, cover: seed ? fakeCover(seed.title, seed.hue) : '', version, bytes: Math.round(gb * GB), verdict, free_bytes: 412 * GB };
 }
 
 function refused(kind: InstallerInspection['kind'], title: string, body: string): InstallerInspection {
-  return { path: '', kind, key: null, title: '', cover: '', version: '', bytes: 0, verdict: { kind: 'refused', title, body } };
+  return { path: '', kind, key: null, title: '', cover: '', version: '', bytes: 0, verdict: { kind: 'refused', title, body }, free_bytes: null };
 }
 
 export type FakeEmit = (event: string, payload: unknown) => void;
@@ -222,7 +222,7 @@ export class FakeStores {
       state: 'conflict',
       synced_at: NOW() - 3 * 86400,
       locations: ['~/Games/GRID/stores/gog/Lanternfall/pfx/drive_c/users/steamuser/Saved Games/Lanternfall'],
-      conflict: { local_at: NOW() - 3600, local_files: 3, local_bytes: Math.round(2.1 * MB), cloud_at: NOW() - 3 * 3600 },
+      conflict: { local_at: NOW() - 3600, local_files: 3, local_bytes: Math.round(2.1 * MB), cloud_at: NOW() - 3 * 3600, cloud_files: 3, cloud_bytes: Math.round(2.0 * MB) },
     };
   }
 
@@ -498,6 +498,14 @@ export class FakeStores {
       }
       case 'store_game_settings':
         return this.settings[key] ?? this.gameSettings(g);
+      case 'store_game_executables': {
+        // The prototype's two choices (`stSettingsHTML`).
+        const dir = g?.install_dir ?? '';
+        const name = (g?.title ?? '').replace(/[^A-Za-z]+/g, '');
+        return g?.installed_platform === 'windows'
+          ? [`${dir}/${name}.exe`, `${dir}/Launcher.exe`]
+          : [`${dir}/start.sh`, `${dir}/game/${name.toLowerCase()}`];
+      }
       case 'store_set_game_settings': {
         this.settings[key] = args.settings as StoreGameSettings;
         if (g) g.cloud = (args.settings as StoreGameSettings).cloud_saves ? (g.cloud === 'off' ? 'synced' : g.cloud) : 'off';
@@ -526,6 +534,8 @@ export class FakeStores {
         const insp = hit ? hit.insp() : refused('windows_exe', 'This isn’t a GOG installer', `${path.split('/').pop()} has no GOG game info in it. GRID reads GOG’s own setup_….exe and ….sh installers.`);
         return { ...insp, path };
       }
+      case 'store_free_space':
+        return 412 * GB;
       case 'offline_install': {
         const path = String(args.path ?? '');
         const hit = FAKE_INSTALLERS.find((f) => f.path === path);
@@ -609,7 +619,7 @@ export class FakeStores {
     const name = (g?.title ?? '').replace(/[^A-Za-z]+/g, '');
     return {
       install_dir: g?.install_dir ?? '',
-      executable: win ? `${name}.exe` : 'start.sh',
+      executable: win ? `${g?.install_dir ?? ''}/${name}.exe` : `${g?.install_dir ?? ''}/start.sh`,
       exe_user_pinned: false,
       launch_parameters: '',
       compat_tool: win ? 'GE-Proton10-17' : '',

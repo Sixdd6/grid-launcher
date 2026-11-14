@@ -1524,6 +1524,8 @@ fn conflict_ipc(conflict: &grid_core::stores::gog::SaveConflict) -> StoreSaveCon
         local_files: conflict.local_files,
         local_bytes: conflict.local_bytes,
         cloud_at: conflict.cloud_at,
+        cloud_files: conflict.cloud_files,
+        cloud_bytes: conflict.cloud_bytes,
     }
 }
 
@@ -2389,6 +2391,8 @@ mod tests {
                 local_files: 2,
                 local_bytes: 3,
                 cloud_at: 4,
+                cloud_files: 5,
+                cloud_bytes: Some(6),
             }),
         );
         let (installed, _) = assemble_games(&state, &config, &rows, &updates, &HashSet::new());
@@ -2482,12 +2486,16 @@ mod tests {
                 local_files: 2,
                 local_bytes: 3,
                 cloud_at: 4,
+                cloud_files: 5,
+                cloud_bytes: Some(6),
             }),
             &meta,
             false,
         );
         assert_eq!(conflict.state, "conflict");
-        assert_eq!(conflict.conflict.unwrap().cloud_at, 4);
+        let sides = conflict.conflict.unwrap();
+        assert_eq!(sides.cloud_at, 4);
+        assert_eq!((sides.cloud_files, sides.cloud_bytes), (5, Some(6)));
         assert_eq!(cloud_state_ipc(&CloudState::Off, &meta, true).state, "off");
     }
 
@@ -2506,6 +2514,8 @@ mod tests {
             local_files: 1,
             local_bytes: 1,
             cloud_at: 2,
+            cloud_files: 1,
+            cloud_bytes: None,
         }));
         let result = rt().block_on(h.service.sync_before_launch(&registry, &game));
         assert_eq!(result.unwrap_err().cloud_at, 2);
@@ -2519,6 +2529,8 @@ mod tests {
             local_files: 1,
             local_bytes: 1,
             cloud_at: 2,
+            cloud_files: 1,
+            cloud_bytes: None,
         }));
         rt().block_on(h.service.sync_before_launch(&registry, &off))
             .unwrap();

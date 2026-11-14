@@ -1281,7 +1281,16 @@ export type StoreCloudState = {
   state: 'off' | 'none' | 'synced' | 'syncing' | 'conflict';
   synced_at: number;
   locations: string[];
-  conflict: { local_at: number; local_files: number; local_bytes: number; cloud_at: number } | null;
+  conflict: {
+    local_at: number;
+    local_files: number;
+    local_bytes: number;
+    cloud_at: number;
+    /** The cloud files in the game's save locations (GOG's cloud listing). */
+    cloud_files: number;
+    /** Their bytes; `null` when the listing gives no sizes. */
+    cloud_bytes: number | null;
+  } | null;
 };
 export type InstallerInspection = {
   path: string;
@@ -1296,6 +1305,8 @@ export type InstallerInspection = {
     | { kind: 'update'; installed_version: string }
     | { kind: 'dlc'; base_title: string }
     | { kind: 'refused'; title: string; body: string };
+  /** Free bytes on the volume it installs to (the new game's folder, the installed game's for an update, the base game's for DLC); `null` when unknown or refused. */
+  free_bytes: number | null;
 };
 export type StoreNoticeAction = {
   kind:
@@ -1732,6 +1743,8 @@ export const api = {
   storeInstallDlc: (key: string, dlcId: string) => invoke<void>('store_install_dlc', { key, dlcId }),
   storeRemoveDlc: (key: string, dlcId: string) => invoke<void>('store_remove_dlc', { key, dlcId }),
   storeGameSettings: (key: string) => invoke<StoreGameSettings>('store_game_settings', { key }),
+  /** The executables in an installed store game's folder, best first, as full paths. */
+  storeGameExecutables: (key: string) => invoke<string[]>('store_game_executables', { key }),
   storeSetGameSettings: (key: string, settings: StoreGameSettings) =>
     invoke<void>('store_set_game_settings', { key, settings }),
   storeCloudState: (key: string) => invoke<StoreCloudState>('store_cloud_state', { key }),
@@ -1739,6 +1752,8 @@ export const api = {
   storeCloudResolve: (key: string, choice: 'upload' | 'download') =>
     invoke<StoreCloudState>('store_cloud_resolve', { key, choice }),
   offlineInspect: (path: string) => invoke<InstallerInspection>('offline_inspect', { path }),
+  /** Free bytes on the volume holding `path` (its nearest existing folder); `null` when unknown. */
+  storeFreeSpace: (path: string) => invoke<number | null>('store_free_space', { path }),
   offlineInstall: (path: string, compatTool: string, installDir?: string) =>
     invoke<void>('offline_install', { path, compatTool, installDir: installDir ?? null }),
   /** `key` is the drive key; `gameKeys` the store games' keys. */

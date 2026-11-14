@@ -395,7 +395,8 @@ export async function startMockGog({ port = 0, logPath = DEFAULT_LOG_PATH, fixtu
     // Grey Meridian's cloud save, newer than the seeded install's last sync
     // (seed/gog-seed.mjs): its next sync is a conflict.
     const grey = state.fixtures.products.find((g) => g.id === "1580232252");
-    const data = Buffer.from("cloud save", "utf8");
+    // 2.0 MB, so the conflict's cloud side reads "· 1 file · 2.0 MB".
+    const data = Buffer.alloc(2 * 1024 * 1024, "cloud save ");
     state.cloud.set(`${state.fixtures.user.user_id}/${grey.client_id}`, new Map([
       ["saves/slot1.sav", { data, hash: createHash("md5").update(data).digest("hex"), at: new Date().toISOString().replace("Z", "") }],
     ]));
