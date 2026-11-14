@@ -29,6 +29,9 @@
  * `<data>/amazon-game-env.log` (`E2E_AMAZON_ENV_FILE`), so a spec sees nile's
  * launch prep reach the game. Under `amazon-secrets` the game exits at once
  * with code 3 (the early-exit warning); elsewhere it runs for two seconds.
+ * The env log also gets WINEPREFIX, PROTONPATH and a `CWD=` line, and a run
+ * of fuel.json's PostInstall step (`oalinst.exe /silent`, the fake nile's)
+ * exits 0 at once, so a spec sees the step run in the game's prefix.
  */
 import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -67,11 +70,15 @@ for (const name of ['umu-run', 'wine']) {
   writeFileSync(
     file,
     `#!/bin/sh
-# e2e stand-in for ${name}: records the game's argv and its FUEL environment.
+# e2e stand-in for ${name}: records the argv, the FUEL environment, the prefix,
+# the compat tool and the folder it runs in.
 for a in "$@"; do printf '%s\\n' "$a" >> ${JSON.stringify(argvFile)}; done
 printf -- '---\\n' >> ${JSON.stringify(argvFile)}
-env | grep -E '^(FUEL_DIR|AMAZON_GAMES_[A-Z_]+)=' | sort >> ${JSON.stringify(envFile)}
+env | grep -E '^(FUEL_DIR|AMAZON_GAMES_[A-Z_]+|WINEPREFIX|PROTONPATH)=' | sort >> ${JSON.stringify(envFile)}
+printf 'CWD=%s\\n' "$PWD" >> ${JSON.stringify(envFile)}
 printf -- '---\\n' >> ${JSON.stringify(envFile)}
+# A PostInstall step (the fake OpenAL installer) installs at once.
+case "$1" in *oalinst.exe) exit 0 ;; esac
 ${tail}
 `,
   );

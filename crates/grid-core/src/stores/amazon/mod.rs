@@ -6,7 +6,8 @@
 //! account, logout), `list` (nile's `library.json` and `installed.json`,
 //! the download size and the update list), `install` (the install, update
 //! and verify jobs, and uninstall) and `launch` (the dry-run launch prep)
-//! are package A's.
+//! are package A's. After a job, `install` runs the game's fuel.json
+//! `PostInstall` steps through the store-neutral `stores::redist`.
 //!
 //! Every nile run goes through [`AmazonService::tool`]: its config folder
 //! (`NILE_CONFIG_PATH=<data_dir>/stores/nile`; nile appends `/nile`, so its
@@ -46,6 +47,7 @@ use url::Url;
 
 use super::paths;
 use super::progress::ToolProgress;
+use super::redist::RedistRunner;
 use super::runner::{run_tool, LineParser, ToolCommand, ToolExit, ToolSignal};
 use super::tools::{self, StoreTool};
 use super::StoreError;
@@ -256,6 +258,8 @@ pub struct AmazonService {
     ep: AmazonEndpoints,
     /// A program run in place of the installed nile (tests only).
     tool_override: Option<PathBuf>,
+    /// What runs a game's fuel.json `PostInstall` steps after a job.
+    redist: RedistRunner,
 }
 
 impl AmazonService {
@@ -265,7 +269,16 @@ impl AmazonService {
             http,
             ep,
             tool_override: None,
+            redist: RedistRunner::system(),
         }
+    }
+
+    /// Runs the `PostInstall` steps with `runner` (a scripted spawner).
+    /// For tests; the app never calls it.
+    #[doc(hidden)]
+    pub fn with_redist_runner(mut self, runner: RedistRunner) -> Self {
+        self.redist = runner;
+        self
     }
 
     /// Runs `program` in place of the installed nile, as is (no pin

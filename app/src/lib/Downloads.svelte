@@ -3,7 +3,7 @@
   import { libraryMove } from './stores/libraryMove.svelte';
   import type { DownloadEntry } from './api';
   import { cancelEntry, dismissEntry, retryEntry, runRowAction } from './downloads/actions';
-  import { actionFor, entryDetail, graphCaption, kindLabel, percent } from './downloads/format';
+  import { entryDetail, graphCaption, kindLabel, percent, rowAction } from './downloads/format';
   import {
     groupBySegment,
     segmentEmptyText,
@@ -105,7 +105,7 @@
         <p class="seg-empty">{segmentEmptyText(seg)}</p>
       {:else}
         {#each rows as e (e.id)}
-          {@const action = actionFor(e.status, e.kind, libraryMove.phase)}
+          {@const action = rowAction(e, libraryMove.phase)}
           {@const progress = rowProgress(e)}
           <div data-testid={`download-row-${e.id}`} class="row" class:move={e.kind === 'library_move'}>
             <div class="row-text">

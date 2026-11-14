@@ -4,6 +4,7 @@
 // so this module stays import-cycle-free.
 import type { DownloadEntry, DownloadKind, DownloadStatus, MovePhase } from '../api';
 import {
+  retriesSetupSteps,
   rommInstallerLine,
   storeBackupLine,
   storeEntryLine,
@@ -293,6 +294,14 @@ export function actionFor(
     default:
       return 'dismiss';
   }
+}
+
+/**
+ * A row's action ([`actionFor`]), plus Retry on a finished store row whose
+ * setup steps didn't run because Windows' permission prompt was declined.
+ */
+export function rowAction(e: DownloadEntry, movePhase: MovePhase | null = null): DownloadAction {
+  return retriesSetupSteps(e) ? 'retry-dismiss' : actionFor(e.status, e.kind, movePhase);
 }
 
 /**

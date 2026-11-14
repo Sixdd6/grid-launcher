@@ -45,8 +45,6 @@ is `None`); `'amazon'` in `ENABLED_STORES`; `'nile'` in the `ToolStatus.name` /
 - drive backups (user decision; Details says why);
 - DLC (nile has no DLC model; an add-on entitlement is just another product);
 - `nile import` of existing installs;
-- running fuel.json `PostInstall` steps (Heroic runs them on Windows hosts only; see
-  Question 2);
 - macOS (GRID ships no macOS build);
 - offers delivered as third-party keys (they are not Amazon entitlements and never reach
   nile's list).
@@ -1141,8 +1139,61 @@ Where package C differs from, or adds to, the plan. One frozen file changed, in 
 1. **Update wording.** For Amazon only, the button reads **"Update"** with no version;
    the cover keeps its UPDATE tag, the update card reads "<game>: an update is
    available", and Overview leaves out the Version fact.
-2. **Post-install steps.** fuel.json `PostInstall` steps are skipped everywhere in
-   Phase 3, on Windows hosts too.
+2. **Post-install steps (2026-11-14; replaces "skipped everywhere").** GRID runs a
+   game's fuel.json `PostInstall` steps silently. Why: the user's first real test found
+   Hotline Miami closing on Start. Its fuel.json lists `oalinst.exe /silent` (OpenAL,
+   which `HotlineGL.exe` imports) and `DirectX\DXSETUP.exe /silent`, and GRID had
+   skipped them. The rules, from the user through the lead (2026-11-14):
+   - **When.** After an install. After an update or a verify, only when the game's list
+     differs from the list that last worked (`AmazonMeta.post_install_ran`; no secret).
+     A list with a failed, declined or cancelled step is not recorded, so the next
+     update or verify runs it again.
+   - **How.** `Command` is resolved inside the game folder (`\` or `/`; a path out of
+     the folder, by `..`, a drive letter, an absolute path or a link, is skipped with a
+     warning). `Args` are used as given. The working folder is the game folder. A `.msi`
+     runs as `msiexec /i <package> <args>`. Exit codes 0, 3010 and 1638 mean it worked,
+     unless fuel.json gives `ValidReturns`.
+   - **Linux and macOS.** Each step runs under the row's compat tool (umu-run and its
+     Proton, or Wine) in the game's own prefix (`<install dir>/prefix`), with the
+     environment a launch of the game uses but no FUEL variables. No prompt, TV mode
+     or not.
+   - **Windows host.** Every step of one job runs in one elevated PowerShell runner:
+     one Windows permission (UAC) prompt per install or repair, in desktop and TV mode
+     alike. Steps are never skipped in TV mode. The runner runs the steps in order and
+     writes each one's exit code to a result file that GRID reads back (no secrets in
+     it). A declined prompt is a warning on the Downloads row with Retry, never a
+     failed install.
+   - **Skip what is already there.** Before anything runs, a step whose redistributable
+     is already installed is skipped, so nobody sees a prompt or waits for nothing.
+     If every step is satisfied, nothing runs and no prompt shows. The detection table
+     is keyed by the store's id (GOG's `MSVC2015_x64`, `DirectX`, `openAL`; Epic's
+     prerequisite ids) or, for Amazon, by the file name (`oalinst.exe` → OpenAL;
+     `vc_redist.x64.exe` and `vcredist_x64.exe` → VC++ 2015–2022 x64, or the year in
+     the path for 2010, 2012 and 2013; `DXSETUP.exe` → DirectX June 2010; `ndp48-*` →
+     .NET 4.8). On Windows, the check reads the registry (`VisualStudio\<ver>\VC\Runtimes\<arch>`
+     `Installed`, .NET's `NDP\v4\Full` `Release`) or the system files (`OpenAL32.dll`;
+     `d3dx9_43.dll`, `XAudio2_7.dll` and `d3dcompiler_43.dll` for DirectX). In a prefix,
+     it reads the same files under `drive_c/windows/system32|syswow64`. Wine's own
+     builtin and placeholder DLLs don't count. GRID also notes in the prefix
+     (`.grid-redist.json`) each step that worked there, and skips it next time unless
+     its program changed (by size). A step with no rule always runs.
+   - **Limits and timing.** Each step has a 10-minute limit. Under a compat tool, a step
+     whose prefix hasn't grown for 5 minutes is stopped. On Windows the runner gets 10
+     minutes per step. A failed, timed-out or unstartable step becomes a warning on the
+     Downloads row ("Couldn't run oalinst.exe: …"), never a failed install. The steps'
+     output is never read, logged or forwarded.
+   - **Cancel.** A cancel during the steps stops them and leaves the game installed.
+   - **Shared.** The runner is store-neutral (`grid-core` `stores::redist`), so GOG and
+     Epic can call it next with their own step lists and ids.
+   - **Built as (choices taken, reversible).** The Downloads row shows the existing
+     "Running the installer silently · N%" phase (`installer_silent`, the cancellable
+     one) while the steps run; the prototype has no words of its own for this. A
+     finished store row now shows its warnings after its line, one ` · ` each ("Installed
+     · 2.1 MB · Couldn't run oalinst.exe: …"). Before this, no completed row showed its
+     warning. Retry on the declined-prompt warning runs the game's Verify and repair,
+     which runs the steps again because they weren't recorded. It also re-checks the
+     files through nile, so it needs the network and the login. A job of its own that
+     runs only the steps would avoid that, but needs a new Downloads kind.
 
 Questions for the user: none open.
 
@@ -1266,3 +1317,38 @@ refusal comes first); the test now connects first.
 Results: `scripts/ctr.sh gate` PASS (`== gate: PASS`); `scripts/ctr.sh wincheck` PASS
 (`== wincheck: PASS`); full `scripts/ctr.sh e2e`: 49 stage groups, 82 spec files, every
 one on its first attempt, `== e2e: all stages passed`.
+
+## PostInstall steps outcome (2026-11-14)
+
+User decision 2 (2026-11-14) is built: the store-neutral `grid-core` `stores::redist`
+(steps, detection table, prefix marker, umu and elevated-Windows runners) and Amazon's
+use of it in `stores/amazon/install.rs`, reading fuel.json `PostInstall` in
+`row::read_post_install` and keeping the list that last worked in
+`AmazonMeta.post_install_ran`. The frontend shows a finished store row's warnings after
+its line and offers Retry (Verify and repair) on `REDIST_DECLINED`.
+
+- Tests: 15 `stores::redist` unit tests cover step resolution (escapes refused,
+  backslashes, a missing file, a link out), the changed-list rule, command building for
+  umu, Wine, `.msi` and the Windows runner script, result files, `reg query` parsing,
+  the detection table, prefix files (Wine stubs ignored) and the registry, the marker,
+  timeouts and stalls, cancel, and a declined prompt. Also an Amazon `row` test for
+  fuel.json's `PostInstall`, and 2 new `amazon_store` integration tests with a fake
+  runner (failing step → warning then re-run on verify; changed list runs only the new
+  step; no compat tool; cancel leaves the game installed). The main integration test
+  checks the umu argv, prefix and folder, and that the step doesn't run again. Vitest
+  covers the row line, Retry only on the declined warning, and that the TS and Rust
+  words match.
+- e2e: the fake nile's fuel.json lists `oalinst.exe /silent`. The seed's `umu-run`/`wine`
+  stand-ins also log `WINEPREFIX`, `PROTONPATH` and `CWD`, and exit 0 at once for that
+  step. `amazon-library` checks that Fogline's verify ran it with `/silent` under
+  GE-Proton9-20 in `<Fogline>/prefix` from the game folder with no FUEL variables, and
+  that Kettle Drum's install (no compat tool) ends "Installed · … · Couldn't run
+  oalinst.exe: choose a compatibility tool…".
+- Not checked on a real Windows host: the elevated runner (one UAC prompt, the result
+  file, a declined prompt's exit 1223) is unit-tested as text and with a scripted
+  process only. A cancel can't kill the elevated child from the non-elevated parent;
+  GRID stops waiting and leaves the game installed.
+
+Results: `scripts/ctr.sh gate` PASS; `scripts/ctr.sh wincheck` PASS;
+`scripts/ctr.sh e2e amazon amazon-library tv-amazon gog-offline launch`: all stages
+passed; `node --test e2e/fake-tools/nile.test.mjs` 13/13.

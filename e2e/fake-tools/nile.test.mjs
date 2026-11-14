@@ -181,6 +181,9 @@ test("install --info, install, update and verify keep installed.json, the manife
   assert.match(fuel, /\/\/ written by the fake nile/);
   assert.match(fuel, /"Command": "bin\\\\Fogline\.exe"/);
   assert.match(fuel, /"WorkingSubdirOverride": "bin",/);
+  // Hotline Miami's shape: a PostInstall step GRID runs silently.
+  assert.match(fuel, /"PostInstall": \[\n\s+\{"Command": "oalinst\.exe", "Args": \["\/silent"\],\},/);
+  assert.ok(existsSync(path.join(fogDir, "oalinst.exe")));
   let installed = JSON.parse(readFileSync(path.join(cfg(dir), "installed.json"), "utf8"));
   assert.deepEqual(installed, [{ id: FOG, version: "e2e-fogline-version-1", path: fogDir, size: 7000000 }]);
   assert.ok(existsSync(path.join(cfg(dir), "manifests", `${FOG}.raw`)));

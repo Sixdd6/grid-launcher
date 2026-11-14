@@ -13,7 +13,8 @@
 //!
 //! `fuel.json` is JSON5 in the wild (nile reads it with `json5.loads`):
 //! [`parse_fuel`] drops comments and trailing commas, then reads it as
-//! JSON.
+//! JSON. [`parse_post_install`] reads its `PostInstall` steps (the
+//! redistributable installers `stores::redist` runs after a job).
 
 use std::path::Path;
 
@@ -188,6 +189,68 @@ pub fn join_args(args: &[String]) -> String {
         .join(" ")
 }
 
+/// One `fuel.json` `PostInstall` step (`{"Command": "oalinst.exe", "Args":
+/// ["/silent"], "ValidReturns": [0]}`): the store-neutral
+/// [`crate::stores::redist::RedistStep`], with no `id` (Amazon gives none).
+/// No secret: [`AmazonMeta`] keeps the list that last worked.
+pub use crate::stores::redist::RedistStep as FuelStep;
+
+/// The `PostInstall` steps of the `fuel.json` in `install`, in order;
+/// empty when the file is missing or unreadable or lists none.
+pub fn read_post_install(install: &Path) -> Vec<FuelStep> {
+    std::fs::read_to_string(install.join(FUEL_FILE))
+        .map(|text| parse_post_install(&text))
+        .unwrap_or_default()
+}
+
+/// A `fuel.json` text's `PostInstall` steps, in order. JSON5 as
+/// [`parse_fuel`]. A step with no `Command` (or a blank one) is left out;
+/// a number or `true`/`false` in `Args` is kept as its text, anything else
+/// there is dropped.
+pub fn parse_post_install(text: &str) -> Vec<FuelStep> {
+    let json = strip_json5(text.trim_start_matches('\u{feff}'));
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) else {
+        return Vec::new();
+    };
+    let Some(steps) = value.get("PostInstall").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    steps
+        .iter()
+        .filter_map(|step| {
+            let command = step.get("Command")?.as_str()?.trim().to_string();
+            if command.is_empty() {
+                return None;
+            }
+            let args = step
+                .get("Args")
+                .and_then(|v| v.as_array())
+                .map(|args| {
+                    args.iter()
+                        .filter_map(|arg| match arg {
+                            serde_json::Value::String(text) => Some(text.clone()),
+                            serde_json::Value::Number(n) => Some(n.to_string()),
+                            serde_json::Value::Bool(b) => Some(b.to_string()),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let valid_returns = step
+                .get("ValidReturns")
+                .and_then(|v| v.as_array())
+                .map(|codes| codes.iter().filter_map(|c| c.as_i64()).collect())
+                .unwrap_or_default();
+            Some(FuelStep {
+                id: String::new(),
+                command,
+                args,
+                valid_returns,
+            })
+        })
+        .collect()
+}
+
 /// A relative path's parts joined with `/`.
 fn slash_path(rel: &Path) -> String {
     rel.components()
@@ -306,6 +369,7 @@ mod tests {
             product_id: ID.into(),
             version: "fake-version-id".into(),
             exe_user_pinned: false,
+            ..Default::default()
         };
         let game = AmazonGame {
             product_id: ID.into(),
@@ -446,6 +510,63 @@ mod tests {
         ] {
             assert_eq!(parse_fuel(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn post_install_steps_read_in_order_with_json5_and_odd_values() {
+        // Hotline Miami's shape: OpenAL, then DirectX.
+        let text = r#"{
+  // a comment
+  "Main": {"Command": "HotlineGL.exe"},
+  "PostInstall": [
+    {"Command": "oalinst.exe", "Args": ["/silent"],},
+    {"Command": "DirectX\\DXSETUP.exe", "Args": ["/silent"], "ValidReturns": [0, 3010], "AlwaysRun": false},
+    {"Command": "  "},
+    {"Args": ["/x"]},
+    {"Command": "v.exe", "Args": ["/q", 2, true, null, {}]},
+  ],
+}"#;
+        assert_eq!(
+            parse_post_install(text),
+            vec![
+                FuelStep {
+                    id: String::new(),
+                    command: "oalinst.exe".into(),
+                    args: vec!["/silent".into()],
+                    valid_returns: vec![],
+                },
+                FuelStep {
+                    id: String::new(),
+                    command: "DirectX\\DXSETUP.exe".into(),
+                    args: vec!["/silent".into()],
+                    valid_returns: vec![0, 3010],
+                },
+                FuelStep {
+                    id: String::new(),
+                    command: "v.exe".into(),
+                    args: vec!["/q".into(), "2".into(), "true".into()],
+                    valid_returns: vec![],
+                },
+            ]
+        );
+        for none in [
+            "",
+            "{",
+            "{}",
+            r#"{"PostInstall": []}"#,
+            r#"{"PostInstall": null}"#,
+            r#"{"PostInstall": {"Command": "a.exe"}}"#,
+        ] {
+            assert!(parse_post_install(none).is_empty(), "{none:?}");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        assert!(read_post_install(dir.path()).is_empty());
+        std::fs::write(
+            dir.path().join(FUEL_FILE),
+            r#"{"PostInstall": [{"Command": "a.exe", "Args": ["/S",],},],}"#,
+        )
+        .unwrap();
+        assert_eq!(read_post_install(dir.path())[0].args, ["/S"]);
     }
 
     #[test]

@@ -2,7 +2,7 @@
 // `TABS.downloads`, `ACT.dlrow`; ruling 8). Pure: TvDownloads draws them over
 // the downloads store and runs the actions through `downloads/actions.ts`.
 import type { DownloadEntry, MovePhase } from '../../../api';
-import { actionFor, copiesFromDrive, entryDetail, etaText, formatSize, kindLabel, percent } from '../../../downloads/format';
+import { copiesFromDrive, rowAction, entryDetail, etaText, formatSize, kindLabel, percent } from '../../../downloads/format';
 import { groupBySegment, type Segment } from '../../../downloads/segments';
 import { CANCEL_EXTRACTING, cancelConfirm } from '../../pages/details';
 
@@ -111,12 +111,12 @@ export function opensGame(e: DownloadEntry): boolean {
  * The row's actions (item 217), in the prototype's order: Cancel (danger)
  * while it can be stopped, Retry when failed or cancelled, Dismiss when
  * finished, failed or cancelled, then "Open <title>" for a game. Which of
- * them a row offers follows the desktop's `actionFor` (a firmware row and an
+ * them a row offers follows the desktop's `rowAction` (a firmware row and an
  * extracting install can't be cancelled; a library move's Cancel and Retry
  * are the move's own).
  */
 export function rowActions(e: DownloadEntry, movePhase: MovePhase | null): RowAction[] {
-  const act = actionFor(e.status, e.kind, movePhase);
+  const act = rowAction(e, movePhase);
   const out: RowAction[] = [];
   if (act === 'cancel' || act === 'retry-cancel') out.push({ kind: 'cancel', label: 'Cancel', danger: true });
   if (act === 'retry-dismiss' || act === 'retry-cancel' || act === 'retry') out.push({ kind: 'retry', label: 'Retry' });
