@@ -1287,6 +1287,32 @@ Where package C differs from, or adds to, the plan. No Step 0 frozen file change
   - `steam-secrets` runs with `E2E_RUST_LOG=debug` (`RUST_LOG` wins over `debug_prints`).
   - `e2e/package.json` `test:mock` runs the two new harness tests (outside the Owns list,
     as in Phase 3).
+- **Package A's scan report.** After merging A (2c57d88) the seam's `scan` answers A's
+  `SteamScan` (`scan_report`): a row whose manifest is unreadable (`unreadable`) or whose
+  library could not be read (`missing_libraries`, from the row's `SteamMeta.library`) is
+  kept, never treated as uninstalled. The watch poll and start timeout are A's
+  `watch::STEAM_INSTALL_POLL` / `STEAM_INSTALL_START_TIMEOUT`. The unit-test harness keeps
+  its fake `SteamApi` (no network at all), which replaces A's dead-loopback edit there.
+
+## Package C outcome (2026-11-14)
+
+- Commits: a8208ad (package C on Step 0), 1a8bc7d (merge of package A, with the
+  `SteamScan` adoption above).
+- `scripts/ctr.sh gate`: PASS on Step 0 (`== gate: PASS`), and on the merged tree 1a8bc7d (`== gate: PASS`).
+  New unit tests: `stores_service::steam` (24: status, Test, Connect,
+  manual SteamID64, rejected/no network/private, Save without a key, refresh states,
+  startup caches, Remove key, missing client, removal card, install watch to Completed and
+  Cancelled, Steam-run install re-admitted, verify/uninstall links, Disconnect, watched
+  launch, refusals, the pure scan plan and watch step, caches, notice words).
+- Harness tests (`node --test`, in the container): `mock-steam.test.mjs` 6/6,
+  `steam.test.mjs` 8/8.
+- `scripts/ctr.sh e2e steam` on the merged tree (C + A): `steam-connect` 15/15,
+  `steam-secrets` 7/7, each on the first attempt. On Step 0's stubs alone only the local
+  checks could pass; with A nothing waits.
+- `scripts/ctr.sh e2e library launch gog epic amazon tv-gog tv-amazon`: every stage passed on
+  its first attempt (Steam registered, not connected, no root).
+- Not run: `wincheck` (C touched no `cfg(windows)`/`cfg(unix)` code); `steam-library` and
+  `tv-steam` are package D's specs (skipped until they exist).
 
 ## Contract deviations — package A
 
