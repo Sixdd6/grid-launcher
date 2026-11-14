@@ -739,7 +739,8 @@ pub fn run() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     stores.check_login().await;
-                    updates.spawn_store_check(handle, stores.gog.clone());
+                    updates.spawn_store_check(handle.clone(), stores.gog.clone());
+                    updates.spawn_store_check(handle, stores.epic.clone());
                 });
             }
             if let Ok(launch) = &state.launch {

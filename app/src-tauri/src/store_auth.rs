@@ -21,6 +21,12 @@
 //!   straight to the backend's `finish_login`
 //!   ([`crate::stores_service::StoreBackend::finish_login`]) as a
 //!   [`SecretString`]. It never crosses IPC, a log line or an error.
+//! - Nothing else on this computer is reachable from the login page: any
+//!   other navigation to a loopback host (`localhost`, `*.localhost`,
+//!   `127.0.0.0/8`, `::1`) is refused, unless it is the login page's own
+//!   origin (the e2e mock). A page's pop-up (`window.open`, a third-party
+//!   sign-in such as Google or Apple) opens in the same login window, under
+//!   the same rules; no second window is ever made.
 //! - Chrome: a plain decorated window. Its title is "Sign in to GOG — GRID"
 //!   followed by the page's address (a lock when it is https), so the user
 //!   can check the store's domain; GRID draws nothing inside the store's
@@ -68,8 +74,10 @@ pub enum Redirect {
     Other,
     /// The finish redirect with its login code.
     Code(SecretString),
-    /// The finish redirect without a code (GOG reported an error).
+    /// The finish redirect without a code (the store reported an error).
     Failed,
+    /// A loopback address that is not the finish URL: refused, silently.
+    Refused,
 }
 
 /// Whether `url` is the login's finish URL: the scheme, host, port and path
@@ -96,9 +104,38 @@ fn code_param(url: &Url, name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// Whether `url`'s host is this computer: `localhost`, a `*.localhost`
+/// name, or a loopback IP address (`127.0.0.0/8`, `::1`, and the
+/// unspecified `0.0.0.0` / `::`, which reach it too).
+pub fn is_loopback(url: &Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => ip.is_loopback() || ip.is_unspecified(),
+        Ok(std::net::IpAddr::V6(ip)) => {
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || ip
+                    .to_ipv4_mapped()
+                    .is_some_and(|v4| v4.is_loopback() || v4.is_unspecified())
+        }
+        Err(_) => {
+            let name = host.trim_end_matches('.').to_ascii_lowercase();
+            name == "localhost" || name.ends_with(".localhost")
+        }
+    }
+}
+
 /// Classifies a URL the login window is about to load (see [`Redirect`]).
 pub fn classify(url: &Url, spec: &LoginSpec) -> Redirect {
     if !is_login_redirect(url, &spec.finish) {
+        // Nothing on this computer but the finish URL, and the login
+        // page's own origin when that is local (the e2e mock).
+        if is_loopback(url) && url.origin() != spec.login_url.origin() {
+            return Redirect::Refused;
+        }
         return Redirect::Other;
     }
     match code_param(url, spec.code_param) {
@@ -268,28 +305,39 @@ struct Once<S: LoginSink> {
     sink: S,
 }
 
+/// What the window does with a URL ([`Once::on_url`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    /// Load it.
+    Load,
+    /// The finish redirect: refused, and the window closes.
+    Finished,
+    /// Refused; the window stays.
+    Refused,
+}
+
 impl<S: LoginSink> Once<S> {
     /// `true` the first time only.
     fn take(&self) -> bool {
         !self.done.swap(true, Ordering::SeqCst)
     }
 
-    /// Handles a URL the window is about to load or has loaded. Returns
-    /// whether the window may load it.
-    fn on_url(&self, url: &Url, spec: &LoginSpec) -> bool {
+    /// Handles a URL the window is about to load or has loaded.
+    fn on_url(&self, url: &Url, spec: &LoginSpec) -> Verdict {
         match classify(url, spec) {
-            Redirect::Other => true,
+            Redirect::Other => Verdict::Load,
+            Redirect::Refused => Verdict::Refused,
             Redirect::Code(code) => {
                 if self.take() {
                     self.sink.code(code);
                 }
-                false
+                Verdict::Finished
             }
             Redirect::Failed => {
                 if self.take() {
                     self.sink.failed();
                 }
-                false
+                Verdict::Finished
             }
         }
     }
@@ -321,6 +369,9 @@ pub fn open_login_window<S: LoginSink>(
     let load_once = once.clone();
     let load_spec = login.clone();
     let load_app = app.clone();
+    let popup_once = once.clone();
+    let popup_spec = login.clone();
+    let popup_app = app.clone();
     let store_name = login.store_name.clone();
     let mut builder = WebviewWindowBuilder::new(
         app,
@@ -333,19 +384,42 @@ pub fn open_login_window<S: LoginSink>(
     .focused(true)
     .incognito(true)
     .data_directory(data)
-    .on_navigation(move |url| {
-        let allow = nav_once.on_url(url, &nav_spec);
-        if !allow {
+    .on_navigation(move |url| match nav_once.on_url(url, &nav_spec) {
+        Verdict::Load => true,
+        Verdict::Finished => {
             tracing::info!("store login: finish redirect caught (navigation)");
             close_soon(&nav_app);
+            false
         }
-        allow
+        Verdict::Refused => {
+            tracing::info!("store login: a navigation to this computer was refused");
+            false
+        }
+    })
+    // A pop-up (a third-party sign-in) opens in this same window, under
+    // the same rules: never a second window.
+    .on_new_window(move |url, _features| {
+        match popup_once.on_url(&url, &popup_spec) {
+            Verdict::Load if matches!(url.scheme(), "https" | "http") => {
+                navigate_soon(&popup_app, url);
+            }
+            Verdict::Finished => {
+                tracing::info!("store login: finish redirect caught (pop-up)");
+                close_soon(&popup_app);
+            }
+            _ => tracing::info!("store login: a pop-up was refused"),
+        }
+        tauri::webview::NewWindowResponse::Deny
     })
     .on_page_load(move |window, payload| {
-        if !load_once.on_url(payload.url(), &load_spec) {
-            tracing::info!("store login: finish redirect caught (page load)");
-            close_soon(&load_app);
-            return;
+        match load_once.on_url(payload.url(), &load_spec) {
+            Verdict::Load => {}
+            Verdict::Finished => {
+                tracing::info!("store login: finish redirect caught (page load)");
+                close_soon(&load_app);
+                return;
+            }
+            Verdict::Refused => return,
         }
         if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
             let _ = window.set_title(&window_title(&store_name, Some(payload.url())));
@@ -384,6 +458,17 @@ fn close_soon(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         if let Some(window) = app.get_webview_window(LOGIN_WINDOW_LABEL) {
             let _ = window.close();
+        }
+    });
+}
+
+/// Loads `url` in the login window (a pop-up's page), from outside the
+/// WebKit signal that asked for it.
+fn navigate_soon(app: &AppHandle, url: Url) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(window) = app.get_webview_window(LOGIN_WINDOW_LABEL) {
+            let _ = window.navigate(url);
         }
     });
 }
@@ -593,19 +678,37 @@ mod tests {
         ));
         for other in [
             "https://www.epicgames.com/id/login?responseType=code",
-            "http://localhost/launcher/authorized?code=x",
-            "https://localhost:8443/launcher/authorized?code=x",
-            "https://localhost/launcher/authorized-not?code=x",
-            "https://127.0.0.1/launcher/authorized?code=x",
             "https://www.epicgames.com/id/api/redirect?clientId=x&responseType=code",
+            "https://appleid.apple.com/auth/authorize?client_id=x",
         ] {
             assert!(
                 matches!(classify(&url(other), &spec), Redirect::Other),
                 "{other}"
             );
         }
+        // Anything else on this computer is refused, code or not.
+        for local in [
+            "http://localhost/launcher/authorized?code=x",
+            "https://localhost:8443/launcher/authorized?code=x",
+            "https://localhost/launcher/authorized-not?code=x",
+            "https://127.0.0.1/launcher/authorized?code=x",
+            "http://127.0.0.2:8080/",
+            "http://[::1]/launcher/authorized?code=x",
+            "http://[::ffff:127.0.0.1]/x",
+            "http://0.0.0.0/x",
+            "http://app.localhost/x",
+            "http://LOCALHOST./x",
+        ] {
+            assert!(
+                matches!(classify(&url(local), &spec), Redirect::Refused),
+                "{local}"
+            );
+        }
         // e2e: the mock serves both the page and the finish path.
-        let e2e = epic("http://127.0.0.1:4300/launcher/authorized");
+        let e2e = LoginSpec {
+            login_url: url("http://127.0.0.1:4300/id/login?responseType=code"),
+            ..epic("http://127.0.0.1:4300/launcher/authorized")
+        };
         assert!(matches!(
             classify(
                 &url("http://127.0.0.1:4300/launcher/authorized?code=c"),
@@ -617,6 +720,31 @@ mod tests {
             classify(&url("http://127.0.0.1:4300/id/login"), &e2e),
             Redirect::Other
         ));
+        // Another port on this computer is not the mock.
+        assert!(matches!(
+            classify(&url("http://127.0.0.1:4301/id/login"), &e2e),
+            Redirect::Refused
+        ));
+    }
+
+    #[test]
+    fn loopback_hosts_are_this_computer_only() {
+        for local in [
+            "http://localhost/",
+            "http://a.b.localhost/",
+            "http://127.255.0.1/",
+            "http://[::1]/",
+        ] {
+            assert!(is_loopback(&url(local)), "{local}");
+        }
+        for remote in [
+            "https://localhost.example.com/",
+            "https://epicgames.com/",
+            "http://10.0.0.1/",
+            "http://[2001:db8::1]/",
+        ] {
+            assert!(!is_loopback(&url(remote)), "{remote}");
+        }
     }
 
     #[test]
@@ -702,10 +830,23 @@ mod tests {
             sink: rec.clone(),
         };
         let embed = gog("http://127.0.0.1:1/");
-        assert!(once.on_url(&url("http://127.0.0.1:1/auth"), &embed));
-        assert!(!once.on_url(&url("http://127.0.0.1:1/on_login_success?code=c"), &embed));
+        assert_eq!(
+            once.on_url(&url("http://127.0.0.1:1/auth"), &embed),
+            Verdict::Load
+        );
+        assert_eq!(
+            once.on_url(&url("http://localhost:2/x"), &embed),
+            Verdict::Refused
+        );
+        assert_eq!(
+            once.on_url(&url("http://127.0.0.1:1/on_login_success?code=c"), &embed),
+            Verdict::Finished
+        );
         // The page-load fallback sees the same URL again; the close after it.
-        assert!(!once.on_url(&url("http://127.0.0.1:1/on_login_success?code=c"), &embed));
+        assert_eq!(
+            once.on_url(&url("http://127.0.0.1:1/on_login_success?code=c"), &embed),
+            Verdict::Finished
+        );
         assert!(!once.take());
         assert_eq!(*rec.0.lock().unwrap(), vec!["code"]);
     }

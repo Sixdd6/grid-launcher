@@ -228,6 +228,22 @@ STAGE_GROUPS=(
   # their `// e2e-app-args:` line) on the same seeded profile. The app's HOME
   # is the stage's `home/`, so TV mode's folder browser opens its Downloads.
   "tv-gog:specs/tv-gog-a.spec.ts specs/tv-gog-b.spec.ts"
+  # Game stores, Epic (docs/stores-phase2-plan.md "E2E plan") against the
+  # mock Epic (mock-romm/mock-epic.mjs: the sign-in page, the launcher
+  # redirect and the art at one base through GRID_LAUNCHER_E2E_EPIC_BASE)
+  # and the fake legendary (fake-tools/legendary.mjs,
+  # GRID_LAUNCHER_E2E_TOOL_LEGENDARY), on a profile used without a server,
+  # seeded per spec by seed/epic-seed.mjs: (login) the login window signs
+  # in, is cancelled, fails on the page and on the code, shows a network
+  # error, refuses localhost and keeps pop-ups in itself; (secrets) after a
+  # sign-in, an install, a launch and a cloud sync no log, payload or file
+  # holds the fake store token. Package D's desktop specs and package E's TV
+  # spec start signed in with two installed games (`epic-cloud` with a newer
+  # cloud save). A spec file that is not in this checkout yet is skipped.
+  "epic:specs/epic-login.spec.ts specs/epic-secrets.spec.ts"
+  "epic-library:specs/epic-library.spec.ts"
+  "epic-cloud:specs/epic-cloud.spec.ts"
+  "tv-epic:specs/tv-epic.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -400,6 +416,7 @@ mkdir -p "$LOG_DIR"
 mock_pid=""
 forge_pid=""
 gog_pid=""
+epic_pid=""
 # Set by the INT/TERM handler below so cleanup() can force a nonzero exit
 # even when the interrupted command itself happened to leave $? at 0.
 signal_caught=""
@@ -484,6 +501,13 @@ stop_gog() {
   gog_pid=""
 }
 
+stop_epic() {
+  [[ -n "$epic_pid" ]] || return 0
+  kill -TERM "$epic_pid" 2>/dev/null
+  wait "$epic_pid" 2>/dev/null
+  epic_pid=""
+}
+
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM
@@ -500,6 +524,7 @@ cleanup() {
   stop_mock
   stop_forge
   stop_gog
+  stop_epic
   if run_dir_is_safe; then
     kill_run_processes TERM
     sleep 1
@@ -673,6 +698,12 @@ group_needs_gog() {
   [[ "$1" == "gog" || "$1" == gog-* || "$1" == tv-gog* ]]
 }
 
+# Stage groups that run the mock Epic (mock-romm/mock-epic.mjs) and the fake
+# legendary. Every other group points Epic at the dead loopback address.
+group_needs_epic() {
+  [[ "$1" == "epic" || "$1" == epic-* || "$1" == tv-epic* ]]
+}
+
 group_needs_forge() {
   [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" || "$1" == "tv-startup" || "$1" == "tv-layout" ]]
 }
@@ -706,6 +737,7 @@ seed_script_for_group() {
     tv-large-platform) printf '%s' "$E2E_DIR/seed/tv-large-platform-seed.mjs" ;;
     tv-startup) printf '%s' "$E2E_DIR/seed/tv-startup-seed.mjs" ;;
     gog|gog-*|tv-gog) printf '%s' "$E2E_DIR/seed/gog-seed.mjs" ;;
+    epic|epic-*|tv-epic) printf '%s' "$E2E_DIR/seed/epic-seed.mjs" ;;
     *) printf '' ;;
   esac
 }
@@ -716,7 +748,7 @@ seed_script_for_group() {
 # the run's keyring, but each starts the app on the state its own seed
 # variant writes.
 group_seeds_per_spec() {
-  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == gog || "$1" == gog-* || "$1" == tv-gog ]]
+  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == gog || "$1" == gog-* || "$1" == tv-gog || "$1" == epic || "$1" == epic-* || "$1" == tv-epic ]]
 }
 
 # Runs every spec of one group against a freshly created data dir and mock.
@@ -886,6 +918,33 @@ EOF
     printf 'e2e: mock GOG at %s\n' "$gog_url"
   fi
 
+  # The mock Epic, for the Epic groups. Same lifecycle as the mock GOG.
+  local epic_url=""
+  attempt_epic_log=""
+  if group_needs_epic "$name"; then
+    attempt_epic_log="$LOG_DIR/$name-attempt-$attempt.epic.log"
+    rm -f "$attempt_epic_log" "$E2E_DIR/last-run-epic-requests.log"
+    ( cd "$E2E_DIR" && exec node mock-romm/mock-epic.mjs --port 0 ) >"$attempt_epic_log" 2>&1 &
+    epic_pid=$!
+    for _ in $(seq 1 100); do
+      epic_url="$(sed -n 's/^MOCK_EPIC_URL=\(http[^ ]*\).*/\1/p' "$attempt_epic_log" 2>/dev/null | head -n1)"
+      [[ -n "$epic_url" ]] && break
+      kill -0 "$epic_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if [[ -z "$epic_url" ]]; then
+      printf 'e2e: mock Epic did not report a URL\n' >&2
+      tail -n 40 "$attempt_epic_log" >&2
+      stop_epic
+      stop_gog
+      stop_forge
+      stop_mock
+      attempt_failed_stage="$name (mock Epic)"
+      return 1
+    fi
+    printf 'e2e: mock Epic at %s\n' "$epic_url"
+  fi
+
   local spec stage wdio_log out_dir rc
   for spec in $specs; do
     stage="$name/$(basename "$spec")"
@@ -902,7 +961,7 @@ EOF
     # earlier spec saved in this run's private keyring must go too, or the
     # app would restore that session. Same best-effort clear as the
     # python-import group.
-    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */gog-*.spec.ts || "$spec" == */tv-gog-*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
+    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */gog-*.spec.ts || "$spec" == */tv-gog-*.spec.ts || "$spec" == */epic-*.spec.ts || "$spec" == */tv-epic*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
       secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
     fi
     if [[ -n "$seed_script" ]] && group_seeds_per_spec "$name"; then
@@ -949,6 +1008,18 @@ EOF
         fi
       else
         export E2E_GOG_URL="$DEAD_FORGE_URL"
+      fi
+      # The Epic base (wdio.conf.ts turns it into GRID_LAUNCHER_E2E_EPIC_BASE):
+      # the mock Epic for the Epic groups, else the dead loopback address.
+      # The fake legendary stands in for the tool there.
+      if [[ -n "$epic_url" ]]; then
+        export E2E_EPIC_URL="$epic_url"
+        export E2E_FAKE_LEGENDARY="$E2E_DIR/fake-tools/legendary.mjs"
+        # What the Epic specs read (seed/epic-seed.mjs, fixtures-epic).
+        export E2E_EPIC_CONFLICT_KEY="epic:Starlight"
+        export E2E_EPIC_ARGV_FILE="$data_dir/epic-game-argv.log"
+      else
+        export E2E_EPIC_URL="$DEAD_FORGE_URL"
       fi
       if [[ -n "$forge_url" ]]; then
         # wdio.conf.ts forwards both into the app process: the first is what
@@ -1041,8 +1112,11 @@ EOF
   stop_mock
   stop_forge
   stop_gog
+  stop_epic
   [[ -n "$attempt_gog_log" && -f "$E2E_DIR/last-run-gog-requests.log" ]] &&
     cp "$E2E_DIR/last-run-gog-requests.log" "$LOG_DIR/$name-attempt-$attempt.gog-requests.log"
+  [[ -n "$attempt_epic_log" && -f "$E2E_DIR/last-run-epic-requests.log" ]] &&
+    cp "$E2E_DIR/last-run-epic-requests.log" "$LOG_DIR/$name-attempt-$attempt.epic-requests.log"
   [[ -f "$attempt_request_log" ]] && cp "$attempt_request_log" "$LOG_DIR/$name-attempt-$attempt.requests.log"
   [[ -n "$attempt_forge_request_log" && -f "$attempt_forge_request_log" ]] &&
     cp "$attempt_forge_request_log" "$LOG_DIR/$name-attempt-$attempt.forge-requests.log"

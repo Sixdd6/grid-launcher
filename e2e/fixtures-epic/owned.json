@@ -1,0 +1,44 @@
+{
+  "user": { "account_id": "7f3e9c2a1b4d4e5f8a6b0c1d2e3f4a5b", "display_name": "SamPlays" },
+  "games": [
+    {
+      "app_name": "Starlight", "title": "Starlight Courier", "developer": "Northstar", "year": 2022,
+      "namespace": "starlight", "build_version": "1.12", "download_size": 24000000, "disk_size": 31200000,
+      "cloud_save_folder": "{AppData}/StarlightCourier/Saved/SaveGames", "can_run_offline": true,
+      "executable": "Binaries/Win64/Starlight.exe", "dlcs": []
+    },
+    {
+      "app_name": "Vector", "title": "Vector Bloom", "developer": "Petal Logic", "year": 2021,
+      "namespace": "vector", "build_version": "3.0.2", "download_size": 8800000, "disk_size": 11000000,
+      "cloud_save_folder": "", "can_run_offline": false,
+      "executable": "VectorBloom.exe", "dlcs": []
+    },
+    {
+      "app_name": "Glimmer", "title": "Glimmer Deep", "developer": "Abyssal", "year": 2023,
+      "namespace": "glimmer", "build_version": "2.4", "download_size": 45000000, "disk_size": 60000000,
+      "cloud_save_folder": "{UserDir}/My Games/GlimmerDeep", "can_run_offline": true,
+      "executable": "Game/Glimmer.exe",
+      "dlcs": [
+        { "app_name": "GlimmerAbyss", "title": "Glimmer Deep — The Abyssal Trench", "download_size": 3200000 }
+      ]
+    },
+    {
+      "app_name": "IronOrchard", "title": "Iron Orchard", "developer": "Forge North", "year": 2022,
+      "namespace": "iron", "build_version": "1.0", "download_size": 52000000, "disk_size": 70000000,
+      "cloud_save_folder": "", "can_run_offline": false, "third_party": "Origin",
+      "executable": "IronOrchard.exe", "dlcs": []
+    },
+    {
+      "app_name": "NorthernStatic", "title": "Northern Static", "developer": "Polar Line", "year": 2021,
+      "namespace": "northern", "build_version": "1.0", "download_size": 38000000, "disk_size": 50000000,
+      "cloud_save_folder": "", "can_run_offline": false, "third_party": "UbisoftConnect",
+      "executable": "NorthernStatic.exe", "dlcs": []
+    },
+    {
+      "app_name": "Rustbelt", "title": "Rustbelt Rally", "developer": "Gravel Works", "year": 2020,
+      "namespace": "rustbelt", "build_version": "0.9.8", "download_size": 12500000, "disk_size": 16000000,
+      "cloud_save_folder": "", "can_run_offline": true,
+      "executable": "Rustbelt.exe", "dlcs": []
+    }
+  ]
+}

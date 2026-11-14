@@ -949,6 +949,90 @@ already there, and the session record holds no argv.
 - Local save folder copies go to `<data>/stores/save-backups/epic/<app>/<epoch-ms>/`.
   The newest five are kept.
 
+## Contract deviations — package C
+
+No frozen file changed. Where package C differs from, or adds to, the plan:
+
+- **`EpicStore` has a seam.** `EpicStore::new(api: Arc<dyn EpicApi>, data_dir, config_path,
+  shared)`; `RealEpic` forwards to `EpicService` and `tools::install_tool`, and the unit
+  tests fake it (as `GogApi`). `EpicStore::real(...)` is unchanged, so `stores_service/mod.rs`
+  is untouched.
+- **legendary installs before the code is redeemed.** legendary itself redeems the code
+  (`auth`, the code on stdin), so `finish_login` installs legendary first when it is missing
+  (with the "Installing legendary (3 MB) for Epic Games…" card), then signs in, then loads the
+  owned list. GOG signs in first. A legendary that can't install fails the sign-in with its
+  own words (`store-login` `failed`) and keeps the Try again card.
+- **The owned cache is the app's.** `EpicStore` writes `<data>/stores/cache/epic-owned.json`
+  (metadata only), as `GogStore` writes `gog-owned.json`. Package A's `owned()` should not
+  write a cache of its own at that path.
+- **Status and games.** `in_rail` is "connected or expired, or any installed game" (a
+  not-connected Epic with nothing installed has no rail group). A game with no
+  `CloudSaveFolder` (and no resolved save path) has the cloud column `none` and never syncs.
+  Available games carry `info`'s sizes once the install dialog has asked for them.
+  `not_supported` is the launcher's name ("the EA app"); the frontend words the sentence.
+  An install of a third-party title is refused with Details' sentence ("Needs the EA app.
+  GRID can't install …"). The install request's platform must be `windows` or empty.
+- **Launch hook.** Signed out (or expired), a game with `can_run_offline` asks for
+  `launch_prep(row, offline = true)`; any other game is refused with "Sign in to Epic Games
+  to play <title>." (or the expired words). Signed in, a `StoreError::Network` from
+  `launch_prep(row, false)` retries once with `offline = true` when the game may. So package
+  B's `launch_prep` need not retry itself (a second retry inside it is harmless). Every other
+  failure is `LaunchError::Validation("Couldn't get a launch ticket from Epic Games: …")`,
+  and `LoginExpired` also flips the card.
+- **Updates by store.** `UpdateService.store_updates` is keyed by `GameKey` (Integration
+  item 4). A `StoreUpdateSource` trait (in `update_service.rs`, implemented there for
+  `GogStore` and `EpicStore`) gives the check its store; `spawn_store_check` is generic and
+  runs one check per store at a time. `forget_store_update` and `clear_store_updates` take
+  the `StoresService` facade and touch only their store's keys. Epic's check is the pure
+  `epic::updates` over the owned list (fetched once per run if needed). `lib.rs` starts
+  both stores' checks after the startup login check.
+- **Commands.** `store_update` and `store_repair` refuse while the game runs ("Quit <title>
+  before updating it." / "… before verifying its files."), for every store.
+- **Notices.** Epic has its own `stores_service::epic::notice` (the GOG module's words with
+  "Epic Games" and "legendary"). A repair's card reads the finished row's detail: "Starlight
+  Courier: 2 damaged files were downloaded again", or "Verified …'s files" when none was.
+- **Login window (`store_auth.rs`).** Besides refusing the finish URL, `classify` refuses
+  (silently, `Redirect::Refused`) any navigation to a loopback host (`localhost`,
+  `*.localhost`, `127.0.0.0/8`, `::1`, the unspecified addresses, IPv4-mapped forms) unless
+  it is the login page's own origin (the e2e mock). This applies to GOG too. A pop-up
+  (`window.open`, `on_new_window`) is denied and its http(s) page opens in the same login
+  window, under the same rules; a pop-up to the finish URL finishes the sign-in. Spike 3
+  (a real Epic sign-in) is still the user's manual check.
+- **E2E harness.**
+  - The fake legendary prints the token on stderr for every command, and on stdout as a
+    text line or a `fake_session` key inside every JSON object it prints (an empty JSON
+    array, e.g. `list-installed` with nothing installed, has nowhere to carry it).
+    Package A's and B's parsers must ignore unknown keys and non-matching stdout lines.
+  - It writes its files 0644, as legendary does; `epic-secrets` checks every file under
+    `stores/legendary/` is private afterwards (`ToolCommand.private_tree`, package A).
+  - Marker files in its config dir: `.fake-expired`, `.fake-download-fail`,
+    `.fake-launch-network` (see the file's header). Its cloud is
+    `stores/legendary/fake-cloud/<app>/` (`files/`, `manifests.json`).
+  - Third-party values in the fixtures are `Origin` and `UbisoftConnect` (lowercased:
+    `origin`, `ubisoftconnect`).
+  - `e2e/fixtures-epic/owned.json` holds the six games; sizes are in MB, not the
+    prototype's GB, so installs fit in the container.
+  - Exported for the specs: `E2E_EPIC_URL`, `E2E_FAKE_LEGENDARY`, `E2E_EPIC_CONFLICT_KEY`
+    (`epic:Starlight`) and `E2E_EPIC_ARGV_FILE` (the compat-tool stand-ins' argv log).
+  - `.gitignore` gains the GOG and Epic mock request logs.
+
+## Package C outcome (2026-11-13)
+
+- `scripts/ctr.sh gate`: PASS. New unit tests: `stores_service::epic` (17), `store_auth`
+  (the localhost rule, loopback hosts, the sink's verdicts), `update_service` (stores keyed
+  by `GameKey`).
+- Harness tests (`npm run test:mock` in `e2e/`, node --test): `mock-epic.test.mjs` 4/4,
+  `legendary.test.mjs` 11/11.
+- `scripts/ctr.sh e2e gog gog-library gog-cloud tv-gog`: every group passes (11 + 4, 7, 3,
+  8 + 6).
+- `scripts/ctr.sh e2e epic` on the Step 0 stubs: `epic-login` 10 of 13 pass (not connected,
+  the user agent, Cancel, ✕, the network error, the localhost refusal, the pop-up in the same
+  window, a denied sign-in, Install legendary, Disconnect). Blocked on package A
+  (`complete_login`, `owned`): "a code legendary refuses", "signs in" and "lists the owned
+  games". `epic-secrets` is not reached (the group stops at the first failing spec); it needs
+  A (sign-in, install) and B (`launch_prep`, cloud saves).
+- Not run: `wincheck` (no `cfg(windows)`/`cfg(unix)` code touched).
+
 ## E2E plan
 
 - **Mock Epic** (`mock-romm/mock-epic.mjs`, one base for login and art).

@@ -31,6 +31,8 @@ graphify-out/
 # appended live by mock-forge as requests arrive
 e2e/last-run-requests.log
 e2e/last-run-forge-requests.log
+e2e/last-run-gog-requests.log
+e2e/last-run-epic-requests.log
 
 # Superpowers scratch (SDD ledgers, brainstorm mockups)
 .superpowers/

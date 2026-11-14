@@ -563,9 +563,7 @@ pub async fn store_disconnect(
     tokio::task::spawn_blocking(move || backend.disconnect())
         .await
         .map_err(err)??;
-    state
-        .updates
-        .clear_store_updates(&app, &state.stores.gog, kind);
+    state.updates.clear_store_updates(&app, &state.stores, kind);
     Ok(())
 }
 
@@ -644,6 +642,9 @@ pub async fn store_update(state: State<'_, AppState>, key: String) -> Result<(),
     backend.ensure_can_install()?;
     let row = store_row(&install, &key).await?;
     refuse_while_backing_up(&install, kind, &row)?;
+    if running(&state, &GameKey::store(kind, row.store_id.clone())) {
+        return Err(format!("Quit {} before updating it.", row.title));
+    }
     let job = backend.update_job(&row, job_ctx(&install)?);
     enqueue(&install, job)
 }
@@ -656,6 +657,9 @@ pub async fn store_repair(state: State<'_, AppState>, key: String) -> Result<(),
     backend.ensure_can_install()?;
     let row = store_row(&install, &key).await?;
     refuse_while_backing_up(&install, kind, &row)?;
+    if running(&state, &GameKey::store(kind, row.store_id.clone())) {
+        return Err(format!("Quit {} before verifying its files.", row.title));
+    }
     let job = backend.repair_job(&row, job_ctx(&install)?);
     enqueue(&install, job)
 }
@@ -684,7 +688,7 @@ pub async fn store_uninstall(
         .map_err(err)?;
     state
         .updates
-        .forget_store_update(&app, &state.stores.gog, kind, &row.store_id);
+        .forget_store_update(&app, &state.stores, kind, &row.store_id);
     let _ = app.emit(crate::relink_service::INSTALLED_CHANGED_EVENT, 1usize);
     backend.changed();
     Ok(())
