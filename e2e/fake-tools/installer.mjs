@@ -6,17 +6,26 @@
 //                 /NOCANCEL /NOICONS /LANG=<l> /DIR="<path>" /LOG="<path>"
 //
 // It is started through the `wine` / `umu-run` stubs next to it (on PATH in
-// the stage's data dir), which pass the .exe path first. The "exe" is a JSON
-// file the e2e seeds write:
-//   { "gogGameInfo": { goggame-*.info fields }, "mode": "silent" | "needs-wizard" | "fail" }
+// the stage's data dir), which pass the .exe path first. The "exe" is a file
+// the e2e seeds write (gog-installers.mjs `buildWindowsExe`): an Inno-looking
+// head GRID can't read before the run, then `FAKE_MARKER` and JSON:
+//   { "gogGameInfo": { goggame-*.info fields }, "mode": <mode> }
+// (a file that is all JSON works too). Modes:
 // - silent: writes goggame-<id>.info, game.exe and the log into /DIR, exits 0;
-// - needs-wizard: with /VERYSILENT it hangs (no output, nothing grows), as
-//   an installer that needs its setup window does; without it, it installs;
-// - fail: exits 1.
+// - needs-wizard: any silent run (/VERYSILENT or /SILENT) hangs (no output,
+//   nothing grows); the setup window (no silent flag) installs;
+// - fail: exits 1;
+// - fail-first: the first, /VERYSILENT run logs "Access is denied." and a
+//   roll-back and exits 1; the milder /SILENT run installs;
+// - fail-silent: every silent run logs "There is not enough space on the
+//   disk." and a roll-back and exits 1; the setup window installs.
 // A path may be given as Z:\… (Wine's view of /); it is mapped back.
 
 import { mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import path from "node:path";
+
+/** Where the JSON starts in a seeded fake `.exe`. */
+export const FAKE_MARKER = "\nGRID-E2E-FAKE-INSTALLER\n";
 
 export function unwinePath(p) {
   const trimmed = p.replace(/^"|"$/g, "");
@@ -33,25 +42,51 @@ export function parseFlags(args) {
   return flags;
 }
 
+/** The JSON a fake `.exe` carries. */
+export function readSpec(bytes) {
+  const text = bytes.toString("latin1");
+  const at = text.indexOf(FAKE_MARKER);
+  const json = at < 0 ? bytes.toString("utf8") : bytes.subarray(at + FAKE_MARKER.length).toString("utf8");
+  return JSON.parse(json);
+}
+
+/** Whether this run fails, and what it logs first ("" when it doesn't fail). */
+export function failure(mode, flags) {
+  const verysilent = flags.VERYSILENT === true;
+  const silent = verysilent || flags.SILENT === true;
+  if (mode === "fail-first" && verysilent) return "Access is denied.\nRolling back changes.\n";
+  if (mode === "fail-silent" && silent) return "There is not enough space on the disk.\nRolling back changes.\n";
+  return "";
+}
+
+function log(flags, text) {
+  if (flags.LOG) appendFileSync(unwinePath(flags.LOG), text);
+}
+
 export async function main(argv) {
   const [exe, ...rest] = argv;
   if (!exe) {
     process.stderr.write("usage: installer.mjs <setup.exe> [flags]\n");
     return 2;
   }
-  const spec = JSON.parse(readFileSync(unwinePath(exe), "utf8"));
+  const spec = readSpec(readFileSync(unwinePath(exe)));
   const flags = parseFlags(rest);
   const silent = flags.VERYSILENT === true || flags.SILENT === true;
   if (spec.mode === "fail") return 1;
   if (spec.mode === "needs-wizard" && silent) {
     await new Promise(() => {});
   }
+  const failed = failure(spec.mode, flags);
+  if (failed !== "") {
+    log(flags, failed);
+    return 1;
+  }
   const dir = flags.DIR ? unwinePath(flags.DIR) : path.join(process.cwd(), spec.gogGameInfo.name);
   mkdirSync(dir, { recursive: true });
   const info = spec.gogGameInfo;
   writeFileSync(path.join(dir, `goggame-${info.gameId}.info`), JSON.stringify(info));
   if (info.gameId === info.rootGameId) writeFileSync(path.join(dir, "game.exe"), "MZ fake");
-  if (flags.LOG) appendFileSync(unwinePath(flags.LOG), `Installed ${info.name}\n`);
+  log(flags, `Installed ${info.name}\nInstallation process succeeded.\n`);
   return 0;
 }
 

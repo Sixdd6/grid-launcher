@@ -1444,6 +1444,8 @@ export const api = {
   installGame: (romId: number) => invoke<void>('install_game', { romId }),
   cancelInstall: (entryId: number) => invoke<void>('cancel_install', { entryId }),
   retryInstall: (entryId: number) => invoke<void>('retry_install', { entryId }),
+  /** TV mode's Delete installer on a row whose installer couldn't run silently: deletes the installer files GRID kept and dismisses the row. */
+  deleteFailedInstaller: (entryId: number) => invoke<void>('delete_failed_installer', { entryId }),
   dismissDownload: (entryId: number) => invoke<void>('dismiss_download', { entryId }),
   uninstallGame: (romId: number) => invoke<UninstallReport>('uninstall_game', { romId }),
   listDownloads: () => invoke<DownloadsSnapshot>('list_downloads'),

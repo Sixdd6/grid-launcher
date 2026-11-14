@@ -1109,13 +1109,18 @@ pub async fn offline_install(
             .map(PathBuf::from),
         compat_tool,
     };
+    let files = insp.files();
     let job = offline::install_job(
         insp,
         opts,
         job_ctx(&install)?.gog(),
         install.wizard_allowed(),
     );
-    enqueue(&install, job)
+    // What Delete installer removes if its silent runs fail (TV mode).
+    let key = GameKey::store(job.source, job.store_id.clone()).to_string();
+    enqueue(&install, job)?;
+    install.remember_installer(key, files);
+    Ok(())
 }
 
 /// `key` is the drive key; `game_keys` the store games' keys

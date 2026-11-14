@@ -1,6 +1,7 @@
 //! GOG offline installers: a Linux `.sh` (read as a zip; `data/noarch/` is
 //! copied and the script never runs), a Windows `setup_*.exe` (silent under
-//! Wine/umu, native on Windows, the wizard only when allowed) and a macOS
+//! Wine/umu, native on Windows, a milder silent run when that fails, the
+//! wizard only when allowed) and a macOS
 //! `.pkg` (refused). Shared by the offline-installer flow, RomM archives
 //! that hold an installer (`library::specials::gog_installer`), and drive
 //! restores.
@@ -27,10 +28,12 @@ use crate::library::LibraryError;
 
 pub mod exe;
 pub mod exec;
+pub mod inno_log;
 mod job;
 pub mod sh;
 
 pub use exec::{InstallerCommand, InstallerProcess, InstallerSpawner, SystemSpawner, Watch};
+pub use inno_log::InstallerReason;
 pub use job::GOG_FOLDER;
 pub(crate) use job::{linux_launch, remove_install};
 
@@ -487,9 +490,10 @@ fn is_extra(lower_name: &str) -> bool {
 ///
 /// A `.sh` is unpacked (phase `Unpacking`); a `.exe` runs silently
 /// (`InstallerSilent`) under `compat` with `prefix` (natively on a Windows
-/// host), and when that fails or stalls, with its setup window
-/// (`InstallerWizard`) if `wizard_allowed`, else
-/// [`LibraryError::InstallerNeedsWizard`] `{ kept: true }`. The returned
+/// host); when that fails or stalls, once more with milder silent flags;
+/// and when that fails too, with its setup window (`InstallerWizard`) if
+/// `wizard_allowed`, else [`LibraryError::InstallerSilentFailed`] with the
+/// reason its log gave ([`exec::run_exe`]). The returned
 /// info is read from `dest` after the run (the inspected product's file
 /// when `dest` holds several); none there is
 /// [`LibraryError::InstallerUnrecognised`]. A cancel (`sink.cancelled()`)

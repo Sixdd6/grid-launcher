@@ -52,5 +52,12 @@ describe('the Downloads formatter with store rows', () => {
     const fake = new FakeStores();
     const failed = fake.failedInstallerRow('Iron Lullaby', 'Windows', { code: 'installer_unrecognised', base_title: '', base_gog_id: '', kept: false }, 'x');
     expect(noticesFor({ entry: failed, from: 'installing' }, { setupActive: false })).toEqual([]);
+    // Nor one whose installer couldn't run silently (TV mode words it).
+    const silent: DownloadEntry = {
+      ...failed,
+      failure: null,
+      error: "Couldn't run the installer silently: the installer cancelled itself. The installer was kept.",
+    };
+    expect(noticesFor({ entry: silent, from: 'installing' }, { setupActive: false })).toEqual([]);
   });
 });

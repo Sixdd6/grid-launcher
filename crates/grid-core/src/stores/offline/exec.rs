@@ -1,13 +1,15 @@
-//! Running a Windows GOG installer: the Inno Setup argv (silent, then the
-//! wizard), the process supervisor with its stall rule, and the kill on
-//! cancel. No output line of the installer is read or logged: it writes
-//! only to its own log file, whose size is the progress signal.
+//! Running a Windows GOG installer: the Inno Setup argv (silent, then a
+//! milder silent run, then — desktop only — the wizard), the process
+//! supervisor with its stall rule, and the kill on cancel. No output line
+//! of the installer is read or logged: it writes only to its own log file,
+//! whose size is the progress signal and which [`super::inno_log`] matches
+//! for a known reason when a run fails.
 //!
 //! Spike results (docs/stores-phase1-plan.md): exit 0 is success; 2 and 5
-//! mean the user cancelled; 1, 3, 4, 7 and 8 mean it failed and may work
-//! with its setup window. "Needs a wizard" mostly shows as a hang, so a
-//! silent run whose log and target folder have not grown for 120 s is
-//! killed and treated as needing the wizard. There is no overall timeout.
+//! mean it was cancelled; 1, 3, 4, 7 and 8 mean it failed. A failing
+//! silent run mostly shows as a hang, so a silent run whose log and target
+//! folder have not grown for 120 s is killed and counts as failed. There is
+//! no overall timeout.
 
 use std::cell::RefCell;
 use std::fs;
@@ -25,6 +27,8 @@ use crate::launch::umu;
 use crate::library::queue::{JobPhase, StoreProgressSink};
 use crate::library::LibraryError;
 
+use super::inno_log::{self, InstallerReason};
+
 /// The Inno Setup flags of a silent run (spike 5).
 pub const SILENT_FLAGS: [&str; 6] = [
     "/SP-",
@@ -35,7 +39,13 @@ pub const SILENT_FLAGS: [&str; 6] = [
     "/NOICONS",
 ];
 
-/// The installer log's file name, inside a folder GRID owns.
+/// The Inno Setup flags of the milder silent run GRID tries when the first
+/// one fails: a progress window but still no question (no `/VERYSILENT`,
+/// no `/NOCANCEL`, no `/NOICONS`).
+pub const MILDER_FLAGS: [&str; 4] = ["/SP-", "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"];
+
+/// The installer log's file name, inside a folder GRID owns. Later runs of
+/// the same install write `grid-install-2.log`, `grid-install-3.log`.
 pub const LOG_NAME: &str = "grid-install.log";
 
 /// The Inno language a run asks for when the installer's own list is
@@ -120,10 +130,96 @@ pub fn silent_args(dir: &str, log: &str, lang: &str) -> Vec<String> {
     args
 }
 
+/// The milder silent run's arguments: [`MILDER_FLAGS`], `/LANG`, `/DIR`
+/// and `/LOG`.
+pub fn milder_args(dir: &str, log: &str, lang: &str) -> Vec<String> {
+    let mut args: Vec<String> = MILDER_FLAGS.iter().map(|flag| flag.to_string()).collect();
+    args.extend(common_args(dir, log, lang));
+    args
+}
+
 /// The wizard run's arguments: the same `/LANG`, `/DIR` and `/LOG`, so the
 /// setup window opens on GRID's folder, with none of the silent flags.
 pub fn wizard_args(dir: &str, log: &str, lang: &str) -> Vec<String> {
     common_args(dir, log, lang)
+}
+
+/// One run of a Windows installer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Attempt {
+    /// [`SILENT_FLAGS`].
+    Silent,
+    /// [`MILDER_FLAGS`]: still silent, no input needed.
+    Milder,
+    /// The installer's own setup window (desktop only).
+    Wizard,
+}
+
+/// The runs GRID tries, in order, until one succeeds: the silent run, the
+/// milder silent run, and the setup window only where it may open
+/// (`wizard_allowed`: desktop mode).
+pub fn attempts(wizard_allowed: bool) -> &'static [Attempt] {
+    if wizard_allowed {
+        &[Attempt::Silent, Attempt::Milder, Attempt::Wizard]
+    } else {
+        &[Attempt::Silent, Attempt::Milder]
+    }
+}
+
+impl Attempt {
+    /// This run's arguments.
+    pub fn args(self, dir: &str, log: &str, lang: &str) -> Vec<String> {
+        match self {
+            Attempt::Silent => silent_args(dir, log, lang),
+            Attempt::Milder => milder_args(dir, log, lang),
+            Attempt::Wizard => wizard_args(dir, log, lang),
+        }
+    }
+}
+
+/// The log file name of the `n`th run (0-based).
+pub fn log_name(n: usize) -> String {
+    if n == 0 {
+        LOG_NAME.to_string()
+    } else {
+        format!("grid-install-{}.log", n + 1)
+    }
+}
+
+/// How a silent run went, from how it ended and its log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SilentOutcome {
+    Installed,
+    /// GRID cancelled it.
+    Cancelled,
+    /// It failed, for this reason.
+    Failed(InstallerReason),
+}
+
+/// Judges a silent run: exit 0 is installed unless its log says it rolled
+/// back; any other end is a failure whose reason the log names (an exit 2
+/// or 5 with no other reason: the installer cancelled itself). A cancel
+/// from GRID is [`SilentOutcome::Cancelled`].
+pub fn judge_silent(end: RunEnd, log: &str) -> SilentOutcome {
+    let found = inno_log::reason(log);
+    match end {
+        RunEnd::Cancelled => SilentOutcome::Cancelled,
+        RunEnd::Exited(Some(0)) => {
+            if inno_log::says_failed(log) {
+                SilentOutcome::Failed(found.unwrap_or(InstallerReason::Unknown))
+            } else {
+                SilentOutcome::Installed
+            }
+        }
+        RunEnd::Exited(code) => SilentOutcome::Failed(found.unwrap_or(
+            if exit_meaning(code) == ExitMeaning::Cancelled {
+                InstallerReason::Cancelled
+            } else {
+                InstallerReason::Unknown
+            },
+        )),
+        RunEnd::Stalled => SilentOutcome::Failed(found.unwrap_or(InstallerReason::Unknown)),
+    }
 }
 
 fn common_args(dir: &str, log: &str, lang: &str) -> Vec<String> {
@@ -144,7 +240,7 @@ fn common_args(dir: &str, log: &str, lang: &str) -> Vec<String> {
 pub enum ExitMeaning {
     Success,
     Cancelled,
-    /// May work with the setup window.
+    /// May work with the milder run or the setup window.
     NeedsWizard,
     Failed,
 }
@@ -234,50 +330,54 @@ pub struct ExeRun<'a> {
     pub watch: Watch,
 }
 
-/// Runs a Windows installer silently, then (desktop only) with its setup
-/// window. `Ok` when it exited 0; the caller reads the installed
-/// `goggame-*.info`.
+/// Runs a Windows installer through [`attempts`]: silently, then with the
+/// milder silent flags, then (desktop only) with its setup window. `Ok`
+/// when a run installed; the caller reads the installed `goggame-*.info`.
 ///
-/// Errors: [`LibraryError::Cancelled`] (GRID's cancel, or the installer's
-/// own exit 2/5), [`LibraryError::InstallerNeedsWizard`] `{ kept: true }`
-/// when the silent run failed or stalled and the wizard isn't allowed,
-/// [`LibraryError::InstallerExit`] for any other failure, and
-/// [`LibraryError::InstallerRefused`] when no command can be built (no
-/// compat tool, umu-run missing).
+/// A silent run that exits non-zero, stalls, or exits 0 with a log that
+/// says it rolled back is followed by the next run. Each run writes its
+/// own log; a failed run's log is matched for a known reason
+/// ([`super::inno_log`]) and never read otherwise.
+///
+/// Errors: [`LibraryError::Cancelled`] (GRID's cancel, or the user's in the
+/// setup window), [`LibraryError::InstallerSilentFailed`] `{ kept: true }`
+/// when both silent runs failed and the wizard isn't allowed (the reason
+/// of the last run that named one), [`LibraryError::InstallerExit`] when
+/// the setup window failed, and [`LibraryError::InstallerRefused`] when no
+/// command can be built (no compat tool, umu-run missing).
 pub fn run_exe(run: &ExeRun<'_>, sink: &mut dyn StoreProgressSink) -> Result<(), LibraryError> {
     let native = host_os().starts_with("win");
     fs::create_dir_all(run.dest)?;
     let logs = log_dir(run.dest)?;
-    let log = logs.path().join(LOG_NAME);
     let dir_arg = windows_path(run.dest, native);
-    let log_arg = windows_path(&log, native);
-
-    let silent = command(run, silent_args(&dir_arg, &log_arg, run.lang))?;
-    sink.phase(JobPhase::InstallerSilent);
-    let end = run_one(run, &silent, &log, true, sink)?;
-    // Falls through only when the run needs its setup window.
-    match end {
-        RunEnd::Exited(code) => match exit_meaning(code) {
-            ExitMeaning::Success => return Ok(()),
-            ExitMeaning::Cancelled => return Err(LibraryError::Cancelled),
-            ExitMeaning::NeedsWizard => {}
-            ExitMeaning::Failed => return Err(LibraryError::InstallerExit(code.unwrap_or(-1))),
-        },
-        RunEnd::Stalled => {}
-        RunEnd::Cancelled => return Err(LibraryError::Cancelled),
+    let mut reason = InstallerReason::Unknown;
+    for (n, attempt) in attempts(run.wizard_allowed).iter().enumerate() {
+        let log = logs.path().join(log_name(n));
+        let log_arg = windows_path(&log, native);
+        let cmd = command(run, attempt.args(&dir_arg, &log_arg, run.lang))?;
+        if *attempt == Attempt::Wizard {
+            sink.phase(JobPhase::InstallerWizard);
+            return match run_one(run, &cmd, &log, false, sink)? {
+                RunEnd::Exited(Some(0)) => Ok(()),
+                RunEnd::Exited(Some(2 | 5)) | RunEnd::Cancelled => Err(LibraryError::Cancelled),
+                RunEnd::Exited(code) => Err(LibraryError::InstallerExit(code.unwrap_or(-1))),
+                // Never: the wizard has no stall check.
+                RunEnd::Stalled => Err(LibraryError::InstallerExit(-1)),
+            };
+        }
+        sink.phase(JobPhase::InstallerSilent);
+        let end = run_one(run, &cmd, &log, true, sink)?;
+        match judge_silent(end, &inno_log::read(&log)) {
+            SilentOutcome::Installed => return Ok(()),
+            SilentOutcome::Cancelled => return Err(LibraryError::Cancelled),
+            SilentOutcome::Failed(found) => {
+                if found != InstallerReason::Unknown {
+                    reason = found;
+                }
+            }
+        }
     }
-    if !run.wizard_allowed {
-        return Err(LibraryError::InstallerNeedsWizard { kept: true });
-    }
-    let wizard = command(run, wizard_args(&dir_arg, &log_arg, run.lang))?;
-    sink.phase(JobPhase::InstallerWizard);
-    match run_one(run, &wizard, &log, false, sink)? {
-        RunEnd::Exited(Some(0)) => Ok(()),
-        RunEnd::Exited(Some(2 | 5)) | RunEnd::Cancelled => Err(LibraryError::Cancelled),
-        RunEnd::Exited(code) => Err(LibraryError::InstallerExit(code.unwrap_or(-1))),
-        // Never: the wizard has no stall check.
-        RunEnd::Stalled => Err(LibraryError::InstallerNeedsWizard { kept: true }),
-    }
+    Err(LibraryError::InstallerSilentFailed { reason, kept: true })
 }
 
 /// The folder the installer log goes to: a fresh one beside `dest`, so the
@@ -667,6 +767,218 @@ mod tests {
         .unwrap();
         assert_eq!(end, RunEnd::Cancelled);
         assert_eq!(killed.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn the_milder_run_drops_verysilent_nocancel_and_noicons() {
+        let args = milder_args("Z:\\g", "Z:\\l\\grid-install-2.log", "");
+        assert_eq!(
+            args,
+            vec![
+                "/SP-",
+                "/SILENT",
+                "/SUPPRESSMSGBOXES",
+                "/NORESTART",
+                "/LANG=english",
+                "/DIR=Z:\\g",
+                "/LOG=Z:\\l\\grid-install-2.log",
+            ]
+        );
+        for flag in ["/VERYSILENT", "/NOCANCEL", "/NOICONS"] {
+            assert!(!args.iter().any(|a| a == flag));
+        }
+        assert_eq!(log_name(0), "grid-install.log");
+        assert_eq!(log_name(1), "grid-install-2.log");
+    }
+
+    #[test]
+    fn tv_mode_never_reaches_the_wizard() {
+        assert_eq!(attempts(false), &[Attempt::Silent, Attempt::Milder]);
+        assert_eq!(
+            attempts(true),
+            &[Attempt::Silent, Attempt::Milder, Attempt::Wizard]
+        );
+    }
+
+    #[test]
+    fn a_silent_run_is_judged_by_its_end_and_its_log() {
+        let rolled_back = "Rolling back changes.\nThere is not enough space on the disk.\n";
+        assert_eq!(
+            judge_silent(RunEnd::Exited(Some(0)), "Installation process succeeded.\n"),
+            SilentOutcome::Installed
+        );
+        assert_eq!(
+            judge_silent(RunEnd::Exited(Some(0)), rolled_back),
+            SilentOutcome::Failed(InstallerReason::DiskFull)
+        );
+        assert_eq!(
+            judge_silent(RunEnd::Exited(Some(1)), ""),
+            SilentOutcome::Failed(InstallerReason::Unknown)
+        );
+        assert_eq!(
+            judge_silent(RunEnd::Exited(Some(5)), ""),
+            SilentOutcome::Failed(InstallerReason::Cancelled)
+        );
+        assert_eq!(
+            judge_silent(RunEnd::Exited(Some(5)), "Access is denied.\n"),
+            SilentOutcome::Failed(InstallerReason::FileInUse)
+        );
+        assert_eq!(
+            judge_silent(RunEnd::Stalled, ""),
+            SilentOutcome::Failed(InstallerReason::Unknown)
+        );
+        assert_eq!(
+            judge_silent(RunEnd::Cancelled, rolled_back),
+            SilentOutcome::Cancelled
+        );
+    }
+
+    // A Windows host runs the installer natively: these script Wine's
+    // `Z:` paths.
+    #[cfg(not(windows))]
+    mod sequence {
+        use super::*;
+
+        /// Exits each run with the next scripted code, writing the scripted
+        /// log text to the run's `/LOG` first; records every argv.
+        struct Runs {
+            script: Vec<(Option<i32>, &'static str)>,
+            argvs: std::sync::Mutex<Vec<Vec<String>>>,
+        }
+
+        impl InstallerSpawner for Runs {
+            fn spawn(&self, cmd: &InstallerCommand) -> io::Result<Box<dyn InstallerProcess>> {
+                let mut argvs = self.argvs.lock().unwrap();
+                let (exit, log) = self.script[argvs.len().min(self.script.len() - 1)];
+                if let Some(path) = cmd.argv.iter().find_map(|a| a.strip_prefix("/LOG=")) {
+                    let path = path.strip_prefix("Z:").unwrap_or(path).replace('\\', "/");
+                    fs::write(path, log)?;
+                }
+                argvs.push(cmd.argv.clone());
+                Ok(Box::new(Scripted {
+                    polls_left: 0,
+                    exit,
+                    killed: Arc::new(AtomicUsize::new(0)),
+                }))
+            }
+        }
+
+        struct Sink {
+            phases: Vec<JobPhase>,
+        }
+
+        impl StoreProgressSink for Sink {
+            fn progress(&mut self, _done: u64, _total: u64) {}
+            fn phase(&mut self, phase: JobPhase) {
+                self.phases.push(phase);
+            }
+        }
+
+        fn run_with(
+            script: Vec<(Option<i32>, &'static str)>,
+            wizard_allowed: bool,
+        ) -> (Result<(), LibraryError>, Vec<Vec<String>>, Vec<JobPhase>) {
+            let dir = tempfile::tempdir().unwrap();
+            let setup = dir.path().join("setup_quarry_nine.exe");
+            fs::write(&setup, b"MZ").unwrap();
+            let dest = dir.path().join("GOG").join("Quarry Nine");
+            let runs = Runs {
+                script,
+                argvs: std::sync::Mutex::new(Vec::new()),
+            };
+            let mut sink = Sink { phases: Vec::new() };
+            let result = run_exe(
+                &ExeRun {
+                    setup: &setup,
+                    dest: &dest,
+                    prefix: None,
+                    compat: "wine",
+                    lang: "",
+                    wizard_allowed,
+                    expected_bytes: 1,
+                    spawner: &runs,
+                    watch: fast(),
+                },
+                &mut sink,
+            );
+            let argvs = runs.argvs.into_inner().unwrap();
+            (result, argvs, sink.phases)
+        }
+
+        fn has(argv: &[String], flag: &str) -> bool {
+            argv.iter().any(|a| a == flag)
+        }
+
+        #[test]
+        fn a_failed_silent_run_is_retried_with_milder_flags() {
+            let (result, argvs, phases) = run_with(
+                vec![
+                    (Some(1), "Rolling back changes.\n"),
+                    (Some(0), "Log closed.\n"),
+                ],
+                false,
+            );
+            assert!(result.is_ok(), "{result:?}");
+            assert_eq!(argvs.len(), 2);
+            assert!(has(&argvs[0], "/VERYSILENT"));
+            assert!(has(&argvs[1], "/SILENT") && !has(&argvs[1], "/VERYSILENT"));
+            assert!(argvs[1].iter().any(|a| a.ends_with("grid-install-2.log")));
+            assert_eq!(
+                phases,
+                vec![JobPhase::InstallerSilent, JobPhase::InstallerSilent]
+            );
+        }
+
+        #[test]
+        fn tv_mode_fails_with_the_logs_reason_after_two_silent_runs() {
+            let (result, argvs, phases) = run_with(
+                vec![
+                    (Some(1), "Access is denied.\n"),
+                    (Some(1), "There is not enough space on the disk.\n"),
+                ],
+                false,
+            );
+            assert_eq!(argvs.len(), 2, "no setup window in TV mode");
+            assert!(!phases.contains(&JobPhase::InstallerWizard));
+            match result {
+                Err(LibraryError::InstallerSilentFailed { reason, kept }) => {
+                    assert_eq!(reason, InstallerReason::DiskFull, "the last run's reason");
+                    assert!(kept);
+                }
+                other => panic!("{other:?}"),
+            }
+            // The last run named none: the first run's reason stays.
+            let (result, _, _) =
+                run_with(vec![(Some(1), "Access is denied.\n"), (None, "")], false);
+            assert!(matches!(
+                result,
+                Err(LibraryError::InstallerSilentFailed {
+                    reason: InstallerReason::FileInUse,
+                    ..
+                })
+            ));
+            let (result, _, _) = run_with(vec![(Some(1), "")], false);
+            let text = result.unwrap_err().to_string();
+            assert_eq!(
+            text,
+            "Couldn't run the installer silently: the installer stopped without saying why. The installer was kept."
+        );
+            assert!(!text.contains("desktop"));
+        }
+
+        #[test]
+        fn desktop_mode_opens_the_setup_window_after_both_silent_runs() {
+            let (result, argvs, phases) =
+                run_with(vec![(Some(1), ""), (Some(3), ""), (Some(0), "")], true);
+            assert!(result.is_ok(), "{result:?}");
+            assert_eq!(argvs.len(), 3);
+            assert!(!has(&argvs[2], "/SILENT") && !has(&argvs[2], "/VERYSILENT"));
+            assert_eq!(phases.last(), Some(&JobPhase::InstallerWizard));
+            let (result, _, _) = run_with(vec![(Some(1), ""), (Some(1), ""), (Some(5), "")], true);
+            assert!(matches!(result, Err(LibraryError::Cancelled)));
+            let (result, _, _) = run_with(vec![(Some(1), ""), (Some(1), ""), (Some(6), "")], true);
+            assert!(matches!(result, Err(LibraryError::InstallerExit(6))));
+        }
     }
 
     #[test]

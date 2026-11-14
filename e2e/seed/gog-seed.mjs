@@ -16,16 +16,19 @@
  *   sync; the mock GOG holds a newer cloud save too, so launching it
  *   conflicts: `E2E_GOG_CONFLICT_KEY`). Lanternfall stays available.
  *
- * Always: `home/Downloads` with the same two installers (tv-gog's HOME), and
+ * Always: `home/Downloads` with the same installers (tv-gog's HOME), and
  * `stubs/bin` with `wine` and `umu-run` stand-ins that run the fake
  * GOG installer (e2e/fake-tools/installer.mjs), and `installers/` with a
- * GOG Linux `.sh` (`E2E_GOG_INSTALLER_SH`) and a macOS `.pkg`
- * (`E2E_GOG_INSTALLER_PKG`).
+ * GOG Linux `.sh` (`E2E_GOG_INSTALLER_SH`), a macOS `.pkg`
+ * (`E2E_GOG_INSTALLER_PKG`) and two fake Windows `.exe`s (`WINDOWS_INSTALLERS`):
+ * Foxglove's fails every silent run, Bramble's fails the first one only. The
+ * `tv-gog-b` profile's default compatibility tool is `wine` (the stub), so TV mode's
+ * offline install page has one to run the Windows installers under.
  */
 import { chmodSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildLinuxSh, buildMacPkg } from '../fake-tools/gog-installers.mjs';
+import { BRAMBLE, buildLinuxSh, buildMacPkg, buildWindowsExe, FOXGLOVE } from '../fake-tools/gog-installers.mjs';
 import { writeRegistry } from './registry-schema.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -59,12 +62,19 @@ const installers = path.join(dataDir, 'installers');
 mkdirSync(installers, { recursive: true });
 writeFileSync(path.join(installers, 'wren_hollow_1_0_3_12345.sh'), buildLinuxSh());
 writeFileSync(path.join(installers, 'quarry_nine_1_2_0_54321.pkg'), buildMacPkg());
+/** The fake Windows installers, by file name (the specs find them by these names). */
+export const WINDOWS_INSTALLERS = {
+  'setup_foxglove_1.0_(55001).exe': buildWindowsExe(FOXGLOVE, 'fail-silent'),
+  'setup_bramble_1.0_(55002).exe': buildWindowsExe(BRAMBLE, 'fail-first'),
+};
+for (const [name, bytes] of Object.entries(WINDOWS_INSTALLERS)) writeFileSync(path.join(installers, name), bytes);
 // The same two in the stage's own home folder's Downloads (`home/`, the
 // app's HOME for the tv-gog stage: TV mode's folder browser opens there).
 const downloads = path.join(dataDir, 'home', 'Downloads');
 mkdirSync(downloads, { recursive: true });
 writeFileSync(path.join(downloads, 'wren_hollow_1_0_3_12345.sh'), buildLinuxSh());
 writeFileSync(path.join(downloads, 'quarry_nine_1_2_0_54321.pkg'), buildMacPkg());
+for (const [name, bytes] of Object.entries(WINDOWS_INSTALLERS)) writeFileSync(path.join(downloads, name), bytes);
 
 const signedOut = spec === 'gog-login' || spec === 'gog-secrets';
 if (signedOut) {
@@ -85,6 +95,7 @@ writeFileSync(
   `schema_version = 1
 library_path = ${tomlString(library)}
 library_layout_version = 2
+${spec === 'tv-gog-b' ? 'default_compat_tool = "wine"\n' : ''}
 
 [stores.gog]
 connected = true

@@ -148,7 +148,7 @@ export function installerFailedNotice(e: DownloadEntry): StoreCard | null {
     case 'installer_exit':
       return err(`Couldn’t install ${e.title}: the installer stopped with an error`, { kind: 'open_downloads' });
     case 'installer_needs_wizard':
-      return err(`Couldn’t install ${e.title}: its installer needs its setup window. Install it in desktop mode.`, { kind: 'open_downloads' });
+      return err(`Couldn’t install ${e.title}: its installer couldn’t run silently`, { kind: 'open_downloads' });
     default:
       return null;
   }
