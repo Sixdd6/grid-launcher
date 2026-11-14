@@ -373,10 +373,17 @@ pub fn parse_nile_line(line: &str) -> Option<ToolProgress> {
 /// - `No games installed` (`list-updates` with nothing installed) is no
 ///   signal: its `[]` on stdout is the answer.
 /// - The `WARNING` that the FuelSDK download failed is no signal either.
+/// - A loader error naming a missing glibc version (the bootloader's, or
+///   PyInstaller's `[PYI-…:ERROR] Failed to load Python shared library`
+///   line) is [`ToolSignal::SystemTooOld`]: the frozen build needs glibc
+///   2.35.
 pub fn nile_signal(line: &str) -> Option<ToolSignal> {
     let line = line.trim_end_matches(['\r', '\n', '\t', ' ']).trim_start();
     if line.is_empty() || line.contains("No games installed") {
         return None;
+    }
+    if line.contains("GLIBC_") && line.contains("not found") {
+        return Some(ToolSignal::SystemTooOld);
     }
     if let Some(at) = line.find("Failed to refresh the token") {
         let rest = line[at + "Failed to refresh the token".len()..].trim_start();
@@ -694,6 +701,15 @@ mod tests {
             ("{\"Username\": \"<not logged in>\", \"LoggedIn\": false}", None),
             ("FAKE-STORE-TOKEN-not-real", None),
             ("", None),
+            // An old glibc: the bootloader's and PyInstaller's loader errors.
+            (
+                "[PYI-4242:ERROR] Failed to load Python shared library '/tmp/_MEIabc/libpython3.8.so.1.0': /lib64/libc.so.6: version `GLIBC_2.35' not found (required by /tmp/_MEIabc/libpython3.8.so.1.0)",
+                Some(SystemTooOld),
+            ),
+            (
+                "./nile_linux_x86_64: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.14' not found (required by ./nile_linux_x86_64)",
+                Some(SystemTooOld),
+            ),
         ];
         for (line, want) in cases {
             assert_eq!(&nile_signal(line), want, "{line:?}");

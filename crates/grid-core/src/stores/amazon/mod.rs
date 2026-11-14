@@ -1,20 +1,21 @@
 //! Amazon Games (Prime Gaming claims and Amazon Games purchases), through
 //! nile 1.2.0 (`docs/stores-phase3-plan.md`).
 //!
-//! Step 0 holds the contracts every work package builds on: the types, the
-//! `store_meta` JSON ([`meta`]), the registry row and the `fuel.json`
-//! reader ([`row`]), the tool helpers ([`AmazonService::tool`], the one
-//! nile command builder) and the [`AmazonService`] surface. The rest of the
-//! service's bodies are package A's (login, owned list, install, update,
-//! verify, uninstall, launch prep); until they land every such call fails
-//! with [`StoreError::not_implemented`].
+//! `meta` (the `store_meta` JSON) and `row` (the registry row and the
+//! `fuel.json` reader) are Step 0's shared contracts; `auth` (login,
+//! account, logout), `list` (nile's `library.json` and `installed.json`,
+//! the download size and the update list), `install` (the install, update
+//! and verify jobs, and uninstall) and `launch` (the dry-run launch prep)
+//! are package A's.
 //!
 //! Every nile run goes through [`AmazonService::tool`]: its config folder
 //! (`NILE_CONFIG_PATH=<data_dir>/stores/nile`; nile appends `/nile`, so its
 //! files land in `<data_dir>/stores/nile/nile/`), nile's line parser, and
 //! the folder made owner-only before and after the run (nile writes every
 //! file with the default umask). Never `-d`: at DEBUG nile logs response
-//! bodies.
+//! bodies. Every run goes through [`AmazonService::run`], which turns a
+//! nile that can't start on this system (its frozen Linux build needs
+//! glibc 2.35) into [`NILE_SYSTEM_TOO_OLD`], never its raw output.
 //!
 //! Secrets: the login code arrives as a [`SecretString`];
 //! [`AmazonLoginStart`] keeps nile's `client_id`, `code_verifier` and
@@ -26,6 +27,10 @@
 //! `AMAZON_GAMES_FUEL_DISPLAY_NAME` is the user's given name: personal data,
 //! never logged.
 
+pub mod auth;
+pub mod install;
+pub mod launch;
+pub mod list;
 pub mod meta;
 pub mod row;
 
@@ -40,13 +45,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 use url::Url;
 
 use super::paths;
-use super::runner::{LineParser, ToolCommand};
+use super::progress::ToolProgress;
+use super::runner::{run_tool, LineParser, ToolCommand, ToolExit, ToolSignal};
 use super::tools::{self, StoreTool};
-use super::{StoreError, StoreKind};
+use super::StoreError;
 use crate::launch::StoreLaunchPrep;
-use crate::library::queue::{StoreJob, StoreJobRunner, StoreOp, StoreProgressSink};
+use crate::library::queue::{StoreJob, StoreOp};
 use crate::library::registry::{InstalledGame, Registry};
-use crate::library::LibraryError;
 
 /// The finish URL's query parameter that carries the code.
 pub const AMAZON_CODE_PARAM: &str = "openid.oa2.authorization_code";
@@ -66,6 +71,19 @@ pub const AMAZON_SIGNIN_PATH: &str = "/ap/signin";
 /// it has it, so on a network that drops packets any command can hang for
 /// ever (spike 1). Jobs (install, update, verify) have no deadline.
 pub const QUICK_RUN_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// The deadline for `library sync` (a network call that pages through the
+/// whole library on a first sync).
+pub const SYNC_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// The deadline for Disconnect's best-effort `auth --logout`.
+pub const LOGOUT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// GRID's words when nile can't start on this computer: its frozen Linux
+/// build needs glibc 2.35 or later (spike 1). Settings and the store panel
+/// show it as it is.
+pub const NILE_SYSTEM_TOO_OLD: &str =
+    "nile can't run on this computer: it needs a newer Linux system (glibc 2.35 or later).";
 
 /// The Amazon addresses GRID uses. Tests and e2e point them at a mock.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -338,130 +356,263 @@ impl AmazonService {
         Ok(cmd)
     }
 
-    // --- login and account (package A) ------------------------------------------
+    // --- running nile ---------------------------------------------------------
+
+    /// Runs `cmd` (a [`Self::tool`] command) through the runner. A nile
+    /// that can't start on this system fails with [`NILE_SYSTEM_TOO_OLD`]:
+    /// on Linux an exec error for the installed file (a missing loader), or
+    /// a loader line naming a missing glibc version
+    /// ([`ToolSignal::SystemTooOld`]). nile's own lines are never in the
+    /// error. Blocking.
+    pub(crate) fn run(
+        &self,
+        cmd: &ToolCommand,
+        cancel: &AtomicBool,
+        on_progress: &mut dyn FnMut(ToolProgress),
+    ) -> Result<ToolExit, StoreError> {
+        match run_tool(cmd, cancel, on_progress) {
+            Ok(exit) if exit.has(&ToolSignal::SystemTooOld) => Err(system_too_old()),
+            Err(StoreError::ToolFailed { reason, .. })
+                if cfg!(target_os = "linux")
+                    && reason.starts_with(START_FAILED)
+                    && cmd.program.is_file() =>
+            {
+                Err(system_too_old())
+            }
+            other => other,
+        }
+    }
+
+    /// [`Self::run`] on the blocking pool, not cancellable.
+    pub(crate) async fn run_blocking(&self, cmd: ToolCommand) -> Result<ToolExit, StoreError> {
+        let svc = self.clone();
+        tokio::task::spawn_blocking(move || svc.run(&cmd, &AtomicBool::new(false), &mut |_| {}))
+            .await
+            .map_err(|_| StoreError::ToolFailed {
+                tool: StoreTool::Nile.name(),
+                reason: "it stopped unexpectedly".to_string(),
+            })?
+    }
+
+    /// A [`Self::tool`] command with [`QUICK_RUN_TIMEOUT`].
+    fn quick(&self, args: Vec<String>) -> Result<ToolCommand, StoreError> {
+        let mut cmd = self.tool(args)?;
+        cmd.timeout = Some(QUICK_RUN_TIMEOUT);
+        Ok(cmd)
+    }
+
+    /// Whether nile has a saved login (`current_user.json` names a user).
+    pub fn has_login(&self) -> bool {
+        auth::has_saved_login(&self.config_dir())
+    }
+
+    /// A failed run of a command that needs the login, in GRID's words:
+    /// signed out or expired, Amazon unreachable, else nile's failure.
+    fn command_error(&self, exit: &ToolExit) -> StoreError {
+        if exit.has(&ToolSignal::NotLoggedIn) || exit.has(&ToolSignal::LoginFailed) {
+            return if self.has_login() {
+                StoreError::LoginExpired
+            } else {
+                StoreError::NotSignedIn
+            };
+        }
+        if exit.has(&ToolSignal::Network) {
+            return StoreError::Network("Amazon Games".to_string());
+        }
+        if !self.has_login() {
+            // Signed out, nile crashes reading the token.
+            return StoreError::NotSignedIn;
+        }
+        install::step_failure(exit).unwrap_or_else(not_understood)
+    }
+
+    // --- login and account -------------------------------------------------------
 
     /// `auth --login --non-interactive`: the login URL (checked with
     /// [`AmazonEndpoints::allows_login_url`]) and the values `register`
-    /// needs.
+    /// needs. nile's saved login is removed first: nile refuses a new
+    /// sign-in while one is saved, even an expired one.
     pub async fn start_login(&self) -> Result<AmazonLoginStart, StoreError> {
-        Err(StoreError::not_implemented())
+        let cmd = self.quick(auth::login_args())?;
+        self.clear_login()?;
+        let exit = self.run_blocking(cmd).await?;
+        match exit.read_stdout(|stdout| auth::parse_login_start(stdout, &self.ep)) {
+            Ok(start) => Ok(start),
+            Err(error @ StoreError::Refused(_)) => Err(error),
+            Err(error) => Err(install::step_failure(&exit).unwrap_or(error)),
+        }
     }
 
-    /// `register` with the code and the kept values, then the account.
+    fn clear_login(&self) -> Result<(), StoreError> {
+        auth::clear_saved_login(&self.config_dir()).map_err(|e| {
+            StoreError::Refused(format!(
+                "Couldn't clear the old Amazon Games login ({}).",
+                e.kind()
+            ))
+        })
+    }
+
+    /// `register` with the code and the kept values, then the account
+    /// from `auth --status`.
     pub async fn complete_login(
         &self,
         start: AmazonLoginStart,
         code: SecretString,
     ) -> Result<AmazonAccount, StoreError> {
+        let args = auth::register_args(&start, &code)
+            .ok_or_else(|| StoreError::Refused(auth::LOGIN_REFUSED.to_string()))?;
         drop((start, code));
-        Err(StoreError::not_implemented())
+        let cmd = self.quick(args)?;
+        self.clear_login()?;
+        let exit = self.run_blocking(cmd).await?;
+        auth::login_outcome(&exit, self.has_login())?;
+        let exit = self.run_blocking(self.quick(auth::status_args())?).await?;
+        match exit.read_stdout(auth::parse_status) {
+            Some(Some(account)) => Ok(account),
+            Some(None) => Err(StoreError::Refused(auth::LOGIN_REFUSED.to_string())),
+            None => Err(not_understood()),
+        }
     }
 
     /// The account nile has saved (`auth --status`, local only): `None`
-    /// when signed out.
+    /// when signed out. It does not check the token with Amazon
+    /// ([`Self::sync`] does).
     pub async fn saved_account(&self) -> Result<Option<AmazonAccount>, StoreError> {
-        Err(StoreError::not_implemented())
+        if !self.has_login() {
+            return Ok(None);
+        }
+        let exit = self.run_blocking(self.quick(auth::status_args())?).await?;
+        exit.read_stdout(auth::parse_status)
+            .ok_or_else(|| self.command_error(&exit))
     }
 
-    /// Signs out: `auth --logout` (best effort, short timeout), then nile's
-    /// whole folder (its token files with it) goes. Step 0 only removes the
-    /// folder.
+    /// Signs out: `auth --logout` (best effort, [`LOGOUT_TIMEOUT`]), then
+    /// nile's whole folder (its token files with it) goes, whatever Amazon
+    /// answered.
     pub async fn disconnect(&self) -> io::Result<()> {
-        paths::remove_tool_dir(&self.data_dir, StoreTool::Nile)
+        let svc = self.clone();
+        tokio::task::spawn_blocking(move || {
+            if svc.has_login() {
+                if let Ok(mut cmd) = svc.tool(auth::logout_args()) {
+                    cmd.timeout = Some(LOGOUT_TIMEOUT);
+                    let _ = svc.run(&cmd, &AtomicBool::new(false), &mut |_| {});
+                }
+            }
+            paths::remove_tool_dir(&svc.data_dir, StoreTool::Nile)
+        })
+        .await
+        .map_err(io::Error::other)?
     }
 
-    // --- owned and installed (package A) --------------------------------------
+    // --- owned and installed --------------------------------------------------
 
     /// `library sync`, then nile's `library.json`.
-    /// [`StoreError::LoginExpired`] when Amazon refuses the saved login,
-    /// [`StoreError::Network`] when it can't be reached.
+    /// [`StoreError::NotSignedIn`] with no saved login,
+    /// [`StoreError::LoginExpired`] when Amazon refuses the saved login
+    /// (or nile's token file is gone), [`StoreError::Network`] when it
+    /// can't be reached.
     pub async fn sync(&self) -> Result<Vec<AmazonGame>, StoreError> {
-        Err(StoreError::not_implemented())
+        if !self.has_login() {
+            return Err(StoreError::NotSignedIn);
+        }
+        let mut cmd = self.tool(list::sync_args())?;
+        cmd.timeout = Some(SYNC_TIMEOUT);
+        let exit = self.run_blocking(cmd).await?;
+        if exit.has(&ToolSignal::NotLoggedIn) || !auth::has_token_file(&self.config_dir()) {
+            return Err(StoreError::LoginExpired);
+        }
+        if exit.has(&ToolSignal::Network) {
+            return Err(StoreError::Network("Amazon Games".to_string()));
+        }
+        if let Some(error) = install::step_failure(&exit) {
+            return Err(error);
+        }
+        list::read_library(&self.config_dir()).ok_or_else(not_understood)
     }
 
-    /// nile's `library.json` as it is (startup, offline).
+    /// nile's `library.json` as it is (startup, offline); empty when there
+    /// is none.
     pub fn owned_local(&self) -> Vec<AmazonGame> {
-        Vec::new()
+        list::read_library(&self.config_dir()).unwrap_or_default()
     }
 
     /// nile's `installed.json`.
     pub fn installed(&self) -> Vec<AmazonInstalled> {
-        Vec::new()
+        list::read_installed(&self.config_dir())
     }
 
     /// `install --info --json <id>`: the download size in bytes (also the
     /// disk size).
     pub async fn download_size(&self, id: &str) -> Result<u64, StoreError> {
-        let _ = id;
-        Err(StoreError::not_implemented())
+        let exit = self.run_blocking(self.quick(list::info_args(id))?).await?;
+        match exit.read_stdout(list::parse_info) {
+            Some(size) if install::step_failure(&exit).is_none() => Ok(size),
+            _ => Err(self.command_error(&exit)),
+        }
     }
 
-    // --- jobs (package A) ------------------------------------------------------
+    // --- jobs --------------------------------------------------------------------
 
     pub fn install_job(&self, req: AmazonInstallRequest, ctx: AmazonJobCtx) -> StoreJob {
-        let _ = ctx;
-        not_implemented_job(req.product_id, req.title, StoreOp::Install)
+        install::install_job(self.clone(), req, ctx)
     }
 
     pub fn update_job(&self, row: &InstalledGame, ctx: AmazonJobCtx) -> StoreJob {
-        let _ = ctx;
-        not_implemented_job(row.store_id.clone(), row.title.clone(), StoreOp::Update)
+        install::row_job(self.clone(), row, StoreOp::Update, ctx)
     }
 
     /// Verify and repair (`verify <id>`).
     pub fn verify_job(&self, row: &InstalledGame, ctx: AmazonJobCtx) -> StoreJob {
-        let _ = ctx;
-        not_implemented_job(row.store_id.clone(), row.title.clone(), StoreOp::Repair)
+        install::row_job(self.clone(), row, StoreOp::Repair, ctx)
     }
 
-    /// `uninstall <id>`, then the leftover folder and its prefix.
+    /// `uninstall <id>`, then the leftover folder and its prefix. Blocking.
     pub fn uninstall(&self, registry: &Registry, id: &str) -> Result<(), StoreError> {
-        let _ = (registry, id);
-        Err(StoreError::not_implemented())
+        install::uninstall(self, registry, id)
     }
 
-    /// `list-updates --json`, installed ids only.
+    /// `list-updates --json`, installed ids only. Nothing installed needs
+    /// no run.
     pub async fn updates(&self) -> Result<Vec<AmazonUpdate>, StoreError> {
-        Err(StoreError::not_implemented())
+        let installed = self.installed();
+        if installed.is_empty() {
+            return Ok(Vec::new());
+        }
+        let exit = self.run_blocking(self.quick(list::updates_args())?).await?;
+        let ids = match exit.read_stdout(list::parse_updates) {
+            Some(ids) if install::step_failure(&exit).is_none() => ids,
+            _ => return Err(self.command_error(&exit)),
+        };
+        let mut updates: Vec<AmazonUpdate> = Vec::new();
+        for id in ids {
+            let known = installed.iter().any(|row| row.id.trim() == id);
+            if known && !updates.iter().any(|u| u.product_id == id) {
+                updates.push(AmazonUpdate { product_id: id });
+            }
+        }
+        Ok(updates)
     }
 
     /// `launch --json --no-wine <id>`: the executable, arguments and the
-    /// five FUEL variables. No network, no token.
+    /// five FUEL variables. No network, no token. A failure reads as the
+    /// launch's words through [`launch::launch_error`].
     pub async fn launch_prep(&self, row: &InstalledGame) -> Result<StoreLaunchPrep, StoreError> {
-        let _ = row;
-        Err(StoreError::not_implemented())
+        launch::launch_prep(self, row).await
     }
 }
 
-/// A job that fails with [`StoreError::not_implemented`] (Step 0).
-fn not_implemented_job(store_id: String, title: String, op: StoreOp) -> StoreJob {
-    StoreJob {
-        source: StoreKind::Amazon,
-        store_id,
-        op,
-        title,
-        drive: None,
-        runner: Arc::new(NotImplemented),
-    }
+/// The runner's reason when a tool could not be spawned.
+const START_FAILED: &str = "couldn't start it";
+
+fn system_too_old() -> StoreError {
+    StoreError::Refused(NILE_SYSTEM_TOO_OLD.to_string())
 }
 
-struct NotImplemented;
-
-impl StoreJobRunner for NotImplemented {
-    fn download(
-        &self,
-        _cancel: &AtomicBool,
-        _progress: &mut dyn FnMut(u64, u64, f64),
-    ) -> Result<(), LibraryError> {
-        Err(LibraryError::Extract(
-            StoreError::not_implemented().to_string(),
-        ))
-    }
-
-    fn finalize(&self, _sink: &mut dyn StoreProgressSink) -> Result<String, LibraryError> {
-        Err(LibraryError::Extract(
-            StoreError::not_implemented().to_string(),
-        ))
+/// nile printed something GRID can't read.
+fn not_understood() -> StoreError {
+    StoreError::ToolFailed {
+        tool: StoreTool::Nile.name(),
+        reason: "it gave an answer GRID doesn't understand".to_string(),
     }
 }
 
@@ -559,21 +710,41 @@ mod tests {
         assert_eq!(mode, 0o700, "made private before the run");
     }
 
-    #[tokio::test]
-    async fn step_0_calls_say_not_implemented() {
+    #[test]
+    fn signed_out_calls_need_no_nile_and_a_missing_nile_is_tool_missing() {
+        #[cfg(feature = "e2e")]
+        let _lock = crate::test_env::lock();
         let dir = tempfile::tempdir().unwrap();
         let svc = AmazonService::new(
             dir.path().to_path_buf(),
             reqwest::Client::new(),
             AmazonEndpoints::real(),
         );
-        let error = svc.start_login().await.unwrap_err();
-        assert_eq!(error.to_string(), crate::stores::NOT_IMPLEMENTED);
-        assert!(svc.sync().await.is_err());
-        assert!(svc.saved_account().await.is_err());
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        assert!(!svc.has_login());
+        assert_eq!(rt.block_on(svc.saved_account()).unwrap(), None);
+        assert!(matches!(
+            rt.block_on(svc.sync()),
+            Err(StoreError::NotSignedIn)
+        ));
+        assert!(
+            rt.block_on(svc.updates()).unwrap().is_empty(),
+            "nothing installed"
+        );
         assert!(svc.owned_local().is_empty());
         assert!(svc.installed().is_empty());
-        svc.disconnect().await.unwrap();
+        if tools::host_asset(StoreTool::Nile).is_some() {
+            assert!(!svc.tool_installed());
+            assert!(matches!(
+                rt.block_on(svc.start_login()),
+                Err(StoreError::ToolMissing("nile"))
+            ));
+        }
+        rt.block_on(svc.disconnect()).unwrap();
+        assert!(!svc.tool_dir().exists());
         let job = svc.update_job(
             &InstalledGame {
                 store_id: "amzn1.adg.product.1".into(),
@@ -585,10 +756,87 @@ mod tests {
                 default_compat_tool: String::new(),
             },
         );
-        assert_eq!(job.source, StoreKind::Amazon);
-        assert!(job
+        assert_eq!(job.source, crate::stores::StoreKind::Amazon);
+        assert_eq!(job.op, StoreOp::Update);
+        let error = job
             .runner
             .download(&AtomicBool::new(false), &mut |_, _, _| {})
-            .is_err());
+            .unwrap_err();
+        assert_eq!(error.to_string(), "not signed in");
+    }
+
+    #[tokio::test]
+    async fn a_nile_download_that_fails_its_checksum_is_deleted() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/nile"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"not nile".to_vec()))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("nile_linux_x86_64");
+        let pin = tools::host_asset(StoreTool::Nile)
+            .map(|asset| asset.sha256)
+            .unwrap_or("d73519514df9d52c50c6feec629373cc3a0d9504e087b6c7372a8ca8a95e7bfe");
+        let error = tools::download_verified(
+            &reqwest::Client::new(),
+            &format!("{}/nile", server.uri()),
+            &dest,
+            pin,
+            8,
+            StoreTool::Nile,
+            &mut |_, _| {},
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, StoreError::Refused(_)), "{error}");
+        assert_eq!(
+            error.to_string(),
+            "The nile download didn't match its checksum, so GRID deleted it."
+        );
+        assert!(!dest.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_nile_that_cant_start_says_it_needs_a_newer_system() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = |name: &str, body: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, body).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        // PyInstaller's loader line on an old glibc, after the token marker.
+        let loader = fake(
+            "loader.sh",
+            "#!/bin/sh\necho FAKE-STORE-TOKEN-not-real\necho FAKE-STORE-TOKEN-not-real >&2\n\
+             echo \"[PYI-4242:ERROR] Failed to load Python shared library '/tmp/_MEIx/libpython3.8.so.1.0': \
+             /lib64/libc.so.6: version \\`GLIBC_2.35' not found (required by /tmp/_MEIx/libpython3.8.so.1.0)\" >&2\n\
+             exit 255\n",
+        );
+        // An exec error: the interpreter (like a missing ELF loader) isn't there.
+        let exec = fake("exec.sh", "#!/nonexistent/ld-linux-x86-64.so.2\n");
+        for program in [loader, exec] {
+            let svc = AmazonService::new(
+                dir.path().join("data"),
+                reqwest::Client::new(),
+                AmazonEndpoints::real(),
+            )
+            .with_tool_override(program.clone());
+            let cmd = svc.tool(auth::status_args()).unwrap();
+            let result = svc.run(&cmd, &AtomicBool::new(false), &mut |_| {});
+            if program.ends_with("exec.sh") && !cfg!(target_os = "linux") {
+                assert!(result.is_err());
+                continue;
+            }
+            let error = result.unwrap_err();
+            assert_eq!(error.to_string(), NILE_SYSTEM_TOO_OLD, "{program:?}");
+            assert!(!error.to_string().contains("FAKE"));
+            assert!(!error.to_string().contains("PYI"));
+        }
     }
 }

@@ -123,6 +123,10 @@ pub enum ToolSignal {
     DownloadSize(u64),
     /// Any other `ERROR`/`CRITICAL` line, or a Python traceback.
     OtherError,
+    /// The tool's binary can't load on this system: a dynamic loader
+    /// error such as ``version `GLIBC_2.35' not found`` (nile's frozen
+    /// Linux build needs glibc 2.35).
+    SystemTooOld,
 }
 
 /// One tool invocation. Its `Debug` form never prints the arguments, the

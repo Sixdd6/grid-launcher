@@ -856,6 +856,79 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
   12 spec files passed, `== e2e: all stages passed`. GOG and Epic are unchanged through
   `prepare_login`, the `finish_query` rule and the launch router.
 
+## Contract deviations — package A
+
+Package A filled `stores/amazon/{mod,auth,list,install,launch}.rs` and added
+`crates/grid-core/tests/amazon_store.rs` (a `cfg(unix)` fake nile that prints
+`FAKE-STORE-TOKEN-not-real` on both streams and exits 0 on failures, as nile does). Where
+it differs from, or adds to, the section A and Step 0 blocks:
+
+- **Frozen files (the glibc floor).** `runner.rs` gains `ToolSignal::SystemTooOld`, and
+  `progress.rs`'s `nile_signal` maps any line naming `GLIBC_…` plus `not found` to it,
+  before every other rule (PyInstaller's `[PYI-…:ERROR] Failed to load Python shared
+  library …` line and the bootloader's own loader error). Nothing else changed there.
+- **`AmazonService::run` (crate-private) is every nile run's one path.** It wraps
+  `run_tool` and turns a nile that can't start into
+  `StoreError::Refused(NILE_SYSTEM_TOO_OLD)`, "nile can't run on this computer: it needs
+  a newer Linux system (glibc 2.35 or later)." That covers a `SystemTooOld` signal, and on
+  Linux an exec error for the installed file (for example a missing ELF loader). nile's
+  raw stderr is never in it. Settings and the store panel can show the text as it is, or
+  match the public constant.
+- **New public items:** `NILE_SYSTEM_TOO_OLD`, `SYNC_TIMEOUT` (300 s, `library sync`),
+  `LOGOUT_TIMEOUT` (30 s), `AmazonService::has_login()` (`current_user.json` names a user
+  id), `install::folder_name(title, id)`, `install::UNINSTALL_TIMEOUT` (600 s),
+  `launch::launch_error(title, &err)` and `launch::FUEL_ENV`, plus `auth::LOGIN_REFUSED`
+  ("Amazon didn't accept the sign-in. Try again.") and `auth::CURRENT_USER_FILE`.
+- **`start_login` first deletes nile's saved login** (`current_user.json` and the
+  `*.enc` token file). nile refuses both `auth --login` and `register` with "You are
+  already logged in" while a user id is saved, even after it has expired (`N/nile/cli.py`
+  `handle_auth`, `handle_register`). The library, `installed.json` and the manifests
+  stay. So a "Sign in again" that the user cancels leaves nile signed out:
+  `saved_account()` answers `None`, while `[stores.amazon] connected` is still true.
+  Package C shows that as the expired state.
+- **`complete_login` success** = no `LoginFailed` signal, and nile wrote
+  `current_user.json` with a user id (the folder was cleared before the run), then
+  `auth --status` says `LoggedIn`. An `OtherError` from nile's library sync after a good
+  registration does not fail the login (it departs from section A's "no `OtherError`"):
+  GRID's own sync comes next and reports it. `Network` counts only when no user was
+  saved.
+- **Signed out, nothing runs.** `saved_account()` is `None` without running nile when
+  there is no saved login; `sync()` is `NotSignedIn`; `updates()` with nothing installed
+  is empty without a run; every job fails with `NotSignedIn` ("not signed in") before
+  nile starts.
+- **`sync()`** also answers `LoginExpired` when nile's token file is gone (nile then
+  crashes with a traceback). Its timeout is `SYNC_TIMEOUT`, not `QUICK_RUN_TIMEOUT`,
+  because a first sync pages through the whole library. Every other short command uses
+  `QUICK_RUN_TIMEOUT`.
+- **Jobs.** The success rule, the #51 verify-once, the update rule and "Verified" are as
+  planned. The bar's total is `install --info`'s size until nile's first `= Progress`
+  line, then nile's own byte total. A cancelled first install removes its new folder
+  through the removal guard inside the job (`download`), because grid-core has no
+  other hook for it. fuel.json `PostInstall` is never read.
+- **Uninstall** also deletes `manifests/<id>.raw` whenever GRID has to drop the id from
+  `installed.json` itself. Otherwise a reinstall would download only the files that
+  changed against the stale manifest. A non-zero exit (nile's traceback for a missing
+  manifest), `NotInstalled`, a missing nile and `NILE_SYSTEM_TOO_OLD` all still remove
+  the files. Exit 0 with any other error line, or the timeout, stops before a file is
+  touched.
+- **Launch prep** leaves `working_dir` empty (spike 3), and the executable empty when it
+  falls outside `game_directory`. After Disconnect, nile's folder is gone, so
+  `launch_prep` fails (nile has no `library.json`). Package C's hook should then launch
+  without the FUEL env ("stay and still play"), not refuse the launch.
+- **Install folder.** `AmazonInstallRequest.install_dir` stays the game's own folder.
+  Package C builds it as `<install base>/<install::folder_name(title, id)>`: nile's
+  banned characters removed, then outer spaces and dots, falling back to the id.
+- **Disconnect** runs `auth --logout` only when a login is saved, then always deletes
+  `stores/nile/`.
+
+- **Results.** `scripts/ctr.sh gate` PASS (`== gate: PASS`), and `scripts/ctr.sh wincheck`
+  PASS. That includes 37 Amazon/nile unit tests and the 7 `amazon_store` tests: login,
+  sync and expiry, install/update/verify/launch/uninstall, failed installs and #51, a
+  cancelled first install, uninstall after nile forgot the game and after Disconnect, and
+  the launch-prep error. The fake glibc-loader and exec-error binaries are in
+  `stores::amazon::tests`. Package A has no e2e group of its own (`amazon*` belong to
+  C/D).
+
 ## E2E plan
 
 - **Mock Amazon** (`mock-romm/mock-amazon.mjs`, one base for login and art):
