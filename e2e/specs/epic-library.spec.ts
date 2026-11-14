@@ -187,7 +187,9 @@ describe('epic-library', () => {
   it('Settings › Stores shows the Epic Games card and asks before Disconnect', async () => {
     await openStoresSettings();
     await expect($(testId('settings-stores-pane'))).toHaveText(
-      expect.stringContaining('GRID installs GOG, Epic and Amazon games with the open-source tools Heroic Games Launcher uses'),
+      expect.stringContaining(
+        'GRID installs GOG, Epic and Amazon games with the open-source tools Heroic Games Launcher uses; their logins stay in those tools’ files in GRID’s data folder. Steam games install and start through the Steam client.',
+      ),
     );
     await expect($(testId('store-card-pill-epic'))).toHaveText(expect.stringContaining('Connected'));
     await expect($(testId('store-card-tool-epic'))).toHaveText(/^legendary .+ · installed$/);

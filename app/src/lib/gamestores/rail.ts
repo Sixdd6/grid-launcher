@@ -3,7 +3,8 @@
 // heading, then Installed and Available with counts. Pure: Library.svelte and
 // TV mode render these.
 import type { StoreLibrary, StoreSource, StoreStatus } from '../api';
-import { ENABLED_STORES, STORE_ORDER, storeName } from './marks';
+import { ENABLED_STORES, STORE_ORDER, hasTool, managedByClient, storeName } from './marks';
+import { steamClientMissing, steamKeyState } from './steam';
 
 export type StorePart = 'installed' | 'available';
 
@@ -24,14 +25,19 @@ export function parseStoreRailKey(key: string): { source: StoreSource; part: Sto
 
 /**
  * Why Available can't list games right now (the prototype's `stAvailBlock`),
- * or `''` when it can. `error` is an owned list that failed to load.
+ * or `''` when it can. `error` is an owned list that failed to load. Steam
+ * has no tool; its Web API key blocks instead: `none` (no key saved), `bad`
+ * (Steam rejected it), `private` (the profile's game details are private).
  */
-export type AvailBlock = '' | 'off' | 'expired' | 'tool' | 'loading' | 'error';
+export type AvailBlock = '' | 'off' | 'expired' | 'tool' | 'loading' | 'error' | 'none' | 'bad' | 'private';
 
 export function availBlock(status: StoreStatus): AvailBlock {
   if (status.connection === 'not_connected') return 'off';
   if (status.connection === 'expired') return 'expired';
-  if (status.tool.state !== 'installed') return 'tool';
+  if (managedByClient(status.source)) {
+    const key = steamKeyState(status);
+    if (key !== 'ok') return key;
+  } else if (hasTool(status.source) && status.tool.state !== 'installed') return 'tool';
   if (status.owned === 'loading' || status.owned === 'idle') return 'loading';
   if (status.owned === 'error') return 'error';
   return '';
@@ -44,6 +50,9 @@ export function availBlock(status: StoreStatus): AvailBlock {
  * status from before that field was filled.
  */
 export function storeShown(status: StoreStatus): boolean {
+  // Steam leaves the rail on Disconnect, even with games still installed in
+  // Steam (design decision 5's Steam exception).
+  if (managedByClient(status.source)) return status.in_rail || status.connection !== 'not_connected';
   return status.in_rail || status.connection !== 'not_connected' || status.installed_count > 0;
 }
 
@@ -53,7 +62,9 @@ export type StoreFlag = { text: '!' | 'off'; title: string } | null;
 export function storeFlag(status: StoreStatus): StoreFlag {
   if (status.connection === 'expired') return { text: '!', title: 'Login expired' };
   if (status.connection === 'not_connected') return { text: 'off', title: 'Not connected' };
-  if (status.tool.state !== 'installed') return { text: '!', title: 'Needs attention' };
+  // Steam: the client missing or a key that doesn't list games.
+  if (managedByClient(status.source)) return steamClientMissing(status) || steamKeyState(status) !== 'ok' ? { text: '!', title: 'Needs attention' } : null;
+  if (hasTool(status.source) && status.tool.state !== 'installed') return { text: '!', title: 'Needs attention' };
   return null;
 }
 
@@ -116,7 +127,8 @@ export function storeRailGroups(
           key: storeRailKey(source, 'installed'),
           part: 'installed',
           label: 'Installed',
-          count: { kind: 'number', n: counts.installed },
+          // Steam's Installed count is `!` while the Steam client is missing.
+          count: steamClientMissing(status) ? { kind: 'attention' } : { kind: 'number', n: counts.installed },
           testId: `library-rail-store-${source}-installed`,
         },
         {

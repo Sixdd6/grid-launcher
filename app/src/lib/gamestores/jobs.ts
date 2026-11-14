@@ -22,6 +22,8 @@ const GAME_KINDS: ReadonlySet<DownloadKind> = new Set([
   'store_dlc',
   'store_installer',
   'store_restore',
+  // An install the store's own client runs (Steam): GRID only shows it.
+  'store_external',
 ]);
 
 /**
@@ -31,6 +33,14 @@ const GAME_KINDS: ReadonlySet<DownloadKind> = new Set([
 export function liveJobFor(entries: readonly DownloadEntry[], key: string): DownloadEntry | null {
   const mine = entries.filter((e) => isStoreJob(e) && GAME_KINDS.has(e.kind) && e.source_id === key && isLive(e));
   return mine.find((e) => e.status !== 'queued') ?? mine[0] ?? null;
+}
+
+/**
+ * A row the store's own client runs (Steam's installs): it takes no slot,
+ * and GRID offers no Cancel or Retry for it ("Managed by Steam").
+ */
+export function isManagedRow(e: DownloadEntry): boolean {
+  return e.kind === 'store_external';
 }
 
 /** The live row of a RomM game (an install that may run a GOG installer), or `null`. */
@@ -67,10 +77,12 @@ export function jobPercent(e: DownloadEntry): number {
 }
 
 /** What a game's live row does, for the words on its cover and in Details. */
-export type JobAct = 'install' | 'update' | 'repair' | 'dlc' | 'restore';
+export type JobAct = 'install' | 'update' | 'repair' | 'dlc' | 'restore' | 'external';
 
 export function jobAct(e: DownloadEntry): JobAct {
   switch (e.kind) {
+    case 'store_external':
+      return 'external';
     case 'store_update':
       return 'update';
     case 'store_repair':

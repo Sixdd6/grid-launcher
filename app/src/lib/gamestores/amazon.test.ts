@@ -33,7 +33,7 @@ describe('Amazon Games fake data', () => {
   });
   it('lists Amazon first and has no cloud conflict to make', () => {
     const fake = new FakeStores();
-    expect((fake.handle('stores_status', {}) as { source: string }[]).map((s) => s.source)).toEqual(['amazon', 'epic', 'gog']);
+    expect((fake.handle('stores_status', {}) as { source: string }[]).map((s) => s.source)).toEqual(['amazon', 'epic', 'gog', 'steam']);
     fake.scenario('cloudConflict', 'amazon');
     expect(fake.gamesOf('amazon').every((g) => g.cloud !== 'conflict')).toBe(true);
     fake.scenario('update', 'amazon');

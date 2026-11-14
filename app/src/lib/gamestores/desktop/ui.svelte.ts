@@ -14,13 +14,14 @@ import {
   type StoreSource,
 } from '../../api';
 import { toLaunchFailure } from '../../launchError';
-import { gameStores, clearLoginError, onStoreLogin, onStoreNotice } from '../../stores/gameStores.svelte';
+import { gameStores, clearLoginError, onStoreLogin, onStoreNotice, refreshLibrary } from '../../stores/gameStores.svelte';
 import { sessions } from '../../stores/sessions.svelte';
 import { navigation } from '../../stores/navigation.svelte';
 import { selectRail } from '../../library/selection.svelte';
 import { pushToast, TOAST_DURATION_MS } from '../../stores/toasts.svelte';
 import { downloads, onSnapshot } from '../../stores/downloads.svelte';
-import { hasStoreCloud } from '../marks';
+import { hasStoreCloud, managedByClient } from '../marks';
+import { steamClientMissing, steamKeyState } from '../steam';
 import {
   cancelledNotice,
   connectedNotice,
@@ -37,6 +38,15 @@ import {
   refusedNotice,
   restoredCloudNotice,
   signInToInstallNotice,
+  steamClientFoundNotice,
+  steamInstallNotice,
+  steamKeyRemovedNotice,
+  steamMissingNotice,
+  steamRunningNotice,
+  steamStartNotice,
+  steamStillPrivateNotice,
+  steamUninstallNotice,
+  steamVerifyNotice,
   stoppedNotice,
   syncingNotice,
   toolNeededNotice,
@@ -192,8 +202,12 @@ export function showInLibrary(source: StoreSource, part: 'installed' | 'availabl
 
 // ── Actions ────────────────────────────────────────────────────────────
 
-/** Install / Install…: the dialog, or the card that says why it can't open. */
+/** Install / Install…: the dialog, or the card that says why it can't open. Steam has no dialog: Steam's own window opens. */
 export function openInstall(game: StoreGame): void {
+  if (managedByClient(game.source)) {
+    void steamInstall(game);
+    return;
+  }
   const status = gameStores.status(game.source);
   if (game.not_supported !== '') {
     openStoreDetails(game.key);
@@ -220,6 +234,10 @@ export function isCloudConflict(err: unknown): boolean {
  * "Which save should … use?" before the game starts.
  */
 export async function playStore(game: StoreGame): Promise<void> {
+  if (managedByClient(game.source)) {
+    await playSteam(game);
+    return;
+  }
   const status = gameStores.status(game.source);
   const cloudOn = hasStoreCloud(game.source) && (status?.cloud_saves ?? false) && game.cloud !== 'off' && game.cloud !== 'none';
   if (cloudOn && game.cloud !== 'conflict') showCard(syncingNotice(game.title));
@@ -241,6 +259,11 @@ export async function playStore(game: StoreGame): Promise<void> {
 }
 
 export async function stopStore(game: StoreGame): Promise<void> {
+  // "Running in Steam": GRID can't stop a game Steam runs.
+  if (managedByClient(game.source)) {
+    showCard(steamRunningNotice(game.title));
+    return;
+  }
   const s = sessions.sessionForKey(game.key);
   if (!s) return;
   try {
@@ -318,7 +341,52 @@ export async function signIn(source: StoreSource): Promise<void> {
 }
 
 export const installTool = (source: StoreSource) => run('Couldn’t install the store tool', () => api.storeInstallTool(source));
-export const refreshStore = (source: StoreSource) => run('Couldn’t refresh the store', () => api.storeRefresh(source));
+
+/** Refresh; Steam's private profile still lists nothing, so it says so instead (prototype `data-st-refresh`). */
+export async function refreshStore(source: StoreSource): Promise<boolean> {
+  if (managedByClient(source) && steamKeyState(gameStores.status(source)) === 'private') {
+    showCard(steamStillPrivateNotice(), source);
+    return false;
+  }
+  return run('Couldn’t refresh the store', () => api.storeRefresh(source));
+}
+
+// ── Steam: everything goes through the Steam client ─────────────────────
+
+/** Install in Steam: Steam's window opens; the Downloads row follows Steam's install. */
+export async function steamInstall(game: StoreGame): Promise<void> {
+  if (steamClientMissing(gameStores.status(game.source))) {
+    showCard(steamMissingNotice(), game.source);
+    return;
+  }
+  await run(`Couldn’t install ${game.title}`, () => api.steamOpen(game.key, 'install'), steamInstallNotice(game.title));
+}
+
+export const steamVerify = (g: StoreGame) => run(`Couldn’t verify ${g.title}`, () => api.steamOpen(g.key, 'validate'), steamVerifyNotice(g.title));
+export const steamUninstall = (g: StoreGame) => run(`Couldn’t uninstall ${g.title}`, () => api.steamOpen(g.key, 'uninstall'), steamUninstallNotice(g.title));
+
+/** Play: "Starting … through Steam…"; Steam starts it, and GRID watches the session. */
+async function playSteam(game: StoreGame): Promise<void> {
+  try {
+    await api.launchGameKey(game.key);
+    showCard(steamStartNotice(game.title), game.source);
+  } catch (err) {
+    const why = toLaunchFailure(err).message.trim();
+    showCard(why === '' ? launchFailedNotice(game.title, '') : refusedNotice(why, ''), game.source);
+  }
+}
+
+/** Check again: finds the Steam client again; "Steam client found" when it is there now. */
+export async function steamRecheck(): Promise<void> {
+  if (!(await run('Couldn’t look for Steam', () => api.steamRecheckClient()))) return;
+  await refreshLibrary('steam');
+  if (!steamClientMissing(gameStores.status('steam'))) showCard(steamClientFoundNotice(), 'steam');
+}
+
+/** Remove (the saved key): the store stays connected with its installed games only. */
+export async function steamRemoveKey(): Promise<boolean> {
+  return run('Couldn’t remove your Web API key', () => api.steamRemoveKey(), steamKeyRemovedNotice());
+}
 
 export async function queueInstall(game: StoreGame, fn: () => Promise<void>): Promise<boolean> {
   return run(`Couldn’t install ${game.title}`, fn, queuedNotice(game.title));

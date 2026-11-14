@@ -1,8 +1,9 @@
 // A store cover's tags, progress bar and hover action (GameStores README,
 // "Store covers"; prototype `stCard`, `stPrimary`, `stProgress`). Pure.
 import type { DownloadEntry, StoreGame, StoreStatus } from '../api';
-import { jobAct, jobPercent } from './jobs';
-import { hasStoreCloud } from './marks';
+import { isManagedRow, jobAct, jobPercent } from './jobs';
+import { hasStoreCloud, managedByClient } from './marks';
+import { INSTALL_IN_STEAM, INSTALLING_IN_STEAM, MANAGED_BY_STEAM } from './steam';
 
 export type CoverTagTone = 'queue' | 'update' | 'conflict' | 'unsupported';
 export type CoverTag = { text: string; tone: CoverTagTone };
@@ -26,8 +27,14 @@ export function coverProgress(job: DownloadEntry | null): number | null {
   return job.status === 'queued' ? 0 : jobPercent(job);
 }
 
+/** The bar's colour: teal (the disk graph's) for an install the store's client runs (Steam), else the primary. */
+export function coverProgressTone(job: DownloadEntry | null): 'primary' | 'managed' {
+  return job !== null && isManagedRow(job) ? 'managed' : 'primary';
+}
+
 export type CoverAct = 'play' | 'install' | 'details';
-export type CoverPrimary = { label: string; act: CoverAct };
+/** `disabled` with its `title`: Steam's "Installing in Steam" ("Managed by Steam"). */
+export type CoverPrimary = { label: string; act: CoverAct; disabled?: boolean; title?: string };
 
 /**
  * The hover bar's main button: Installing… / Queued / Updating… / Verifying…
@@ -36,6 +43,7 @@ export type CoverPrimary = { label: string; act: CoverAct };
  * install dialog).
  */
 export function coverPrimary(game: StoreGame, status: StoreStatus | null, job: DownloadEntry | null): CoverPrimary {
+  if (job !== null && isManagedRow(job)) return { label: INSTALLING_IN_STEAM, act: 'details', disabled: true, title: MANAGED_BY_STEAM };
   if (job !== null) {
     if (job.status === 'queued') return { label: 'Queued', act: 'details' };
     const act = jobAct(job);
@@ -44,6 +52,8 @@ export function coverPrimary(game: StoreGame, status: StoreStatus | null, job: D
   }
   if (game.installed) return { label: 'Play', act: 'play' };
   if (game.not_supported !== '') return { label: 'Details', act: 'details' };
+  // Steam installs through its client: no dialog (GameStores README, "Steam").
+  if (managedByClient(game.source)) return { label: INSTALL_IN_STEAM, act: 'install' };
   if (status === null || status.connection !== 'connected') return { label: 'Details', act: 'details' };
   return { label: 'Install', act: 'install' };
 }

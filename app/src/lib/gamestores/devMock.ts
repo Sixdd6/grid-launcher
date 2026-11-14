@@ -3,10 +3,11 @@
 // `FakeStores` and everything else by a small offline stand-in, so every
 // GameStores state can be clicked through and screenshot without a backend.
 // `main.ts` imports this only when the flag is set; a production build never
-// contains it. `window.__gridFake` exposes the fake and its scenarios.
+// contains it. `window.__gridFake` exposes the fake, its scenarios and the
+// next Steam Test result. `?tv` in the address starts TV mode instead.
 import { emit } from '@tauri-apps/api/event';
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks';
-import type { DownloadEntry, DriveInfo, InstalledGame } from '../api';
+import type { DownloadEntry, DriveInfo, GameSession, InstalledGame, SteamTestResult } from '../api';
 import { FAKE_INSTALLERS, FakeStores, NOT_HANDLED, type FakeScenario, type FakeSource } from './fakeApi';
 
 const GB = 1024 ** 3;
@@ -28,13 +29,13 @@ const UI = {
   video_volume: 50,
 };
 
-function installedRow(title: string, source: 'gog' | 'epic' | 'amazon' | 'romm', storeId: string, platform: string, played: number): InstalledGame {
+function installedRow(title: string, source: 'gog' | 'epic' | 'amazon' | 'steam' | 'romm', storeId: string, platform: string, played: number): InstalledGame {
   return {
     title,
     platform,
     source,
     store_id: storeId,
-    platform_slug: source === 'gog' ? 'gog' : source === 'epic' || source === 'amazon' ? 'win' : platform.toLowerCase(),
+    platform_slug: source === 'gog' ? 'gog' : source === 'epic' || source === 'amazon' ? 'win' : source === 'steam' ? 'steam' : platform.toLowerCase(),
     rom_id: source === 'romm' ? Number(storeId) : null,
     rom_file_name: '',
     archive_path: '',
@@ -71,6 +72,7 @@ const DRIVE: DriveInfo = {
 
 export function installDevMock(): void {
   mockWindows('main');
+  const tvMode = new URLSearchParams(window.location.search).has('tv');
   const fake = new FakeStores((event, payload) => {
     void emit(event, payload);
   });
@@ -80,6 +82,9 @@ export function installDevMock(): void {
     { key: 'gog:1007', name: 'Paper Lanterns', platform: 'linux', layout: 'installed', version: '1.1.0', size: 1.6 * GB, cover: fake.games[6].cover, installed: false, added: '2026-11-12', summary: '' },
   ];
   const rommRows: DownloadEntry[] = [];
+  // Running games (a Steam game "runs" until stopped from the console: `__gridFake.endSession()`).
+  const sessions: GameSession[] = [];
+  const emitSessions = () => void emit('sessions-changed', { sessions: [...sessions], warning: null });
   const installed = (): InstalledGame[] => [
     ...fake
       .gamesOf('gog')
@@ -95,16 +100,30 @@ export function installDevMock(): void {
       .gamesOf('amazon')
       .filter((g) => g.installed)
       .map((g) => installedRow(g.title, 'amazon', g.store_id, 'Amazon Games', g.title === 'Fogline' ? now() - 30 * 86400 : 0)),
+    // Moonlit Ferry was played today, Deep Field Radio a week ago, Old Brick Road never (the prototype's s1–s3).
+    ...fake
+      .gamesOf('steam')
+      .filter((g) => g.installed)
+      .map((g) => installedRow(g.title, 'steam', g.store_id, 'Steam', g.title === 'Moonlit Ferry' ? now() - 3600 : g.title === 'Deep Field Radio' ? now() - 7 * 86400 : 0)),
     installedRow('Velvet Static', 'romm', '11', 'PlayStation', now() - 3600),
     installedRow('Cinder Peaks', 'romm', '12', 'Super Nintendo', 0),
   ];
   const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
     restore_session: () => ({ kind: 'offline', server_url: 'https://romm.example.test', username: 'player' }),
-    get_ui_mode: () => ({ mode: 'desktop', started_with_tv: false, fullscreen: false }),
+    get_ui_mode: () => ({ mode: tvMode ? 'tv' : 'desktop', started_with_tv: tvMode, fullscreen: false }),
+    setup_status: () => ({ needed: false }),
+    clipboard_has_text: () => false,
+    list_pads: () => [],
+    list_sessions: () => ({ sessions: [...sessions], warning: null }),
+    stop_game: (args) => {
+      const i = sessions.findIndex((x) => x.id === Number(args.sessionId));
+      if (i >= 0) sessions.splice(i, 1);
+      emitSessions();
+      return null;
+    },
     get_ui_settings: () => UI,
     list_installed: () => installed(),
     list_downloads: () => ({ entries: [...fake.entries, ...rommRows].reverse() }),
-    list_sessions: () => ({ sessions: [], warning: null }),
     list_updates: () => [],
     list_compat_tools: () => ({ tools: [{ name: 'GE-Proton10-17', kind: 'proton', path: '/x', source: 'managed' }], default_tool: 'GE-Proton10-17', umu_run: { source: 'system', path: '/usr/bin/umu-run', release_tag: '', source_id: '' } }),
     list_drives: () => ({ connected: [DRIVE], remembered: [] }),
@@ -129,7 +148,11 @@ export function installDevMock(): void {
         if (fake.cloud[key]?.state === 'conflict') {
           throw { code: 'store_cloud_conflict', message: 'These saves changed in two places' };
         }
-        return { id: 1, key, rom_id: null, title: fake.games.find((g) => g.key === key)?.title ?? '', emulator_name: '', started_at: now(), pid: 1 };
+        if (key.startsWith('steam:') && fake.statuses.steam.steam?.client_path === '') throw { code: 'store', message: 'Steam isn’t installed. Install Steam, then try again.' };
+        const s: GameSession = { id: sessions.length + 1, key, rom_id: null, title: fake.games.find((g) => g.key === key)?.title ?? '', emulator_name: key.startsWith('steam:') ? 'Steam' : '', started_at: now(), pid: key.startsWith('steam:') ? 0 : 1 };
+        sessions.push(s);
+        emitSessions();
+        return s;
       }
       if (cmd === 'cancel_install' || cmd === 'dismiss_download' || cmd === 'retry_install') {
         const id = Number(args.entryId);
@@ -164,6 +187,11 @@ export function installDevMock(): void {
   (window as unknown as { __gridFake: unknown }).__gridFake = {
     fake,
     scenario: (s: FakeScenario, source: FakeSource = 'gog') => fake.scenario(s, source),
+    nextSteamTest: (r: SteamTestResult) => (fake.nextSteamTest = r),
+    endSession: () => {
+      sessions.splice(0, sessions.length);
+      emitSessions();
+    },
     installers: FAKE_INSTALLERS.map((f) => f.path),
   };
 }

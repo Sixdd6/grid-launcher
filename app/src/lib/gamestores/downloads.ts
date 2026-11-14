@@ -5,7 +5,8 @@
 // row's `kind`, `status`, `phase` and `failure`. Pure, and free of the
 // downloads formatter so that module can import this one.
 import type { DownloadEntry, DownloadKind, JobFailure, StoreSource } from '../api';
-import { jobPercent } from './jobs';
+import { isManagedRow, jobPercent } from './jobs';
+import { INSTALLED_BY_STEAM, INSTALLING_IN_STEAM, MANAGED_BY_STEAM } from './steam';
 import { isEnabledStore, readableVersions, STORE_ORDER, storeName, storeOfPlatform } from './marks';
 
 /** The store a store row belongs to, from its game key (`gog:…`), tool source (`epic`) or platform ("Epic Games"). */
@@ -28,6 +29,7 @@ export function storeKindLabel(kind: DownloadKind): string | null {
   switch (kind) {
     case 'store_install':
     case 'store_restore':
+    case 'store_external':
       return '';
     case 'store_update':
       return 'Update';
@@ -105,6 +107,7 @@ export function failureReason(e: DownloadEntry, failure: JobFailure | null = e.f
  * slot", and the completed and failed lines).
  */
 export function storeEntryLine(e: DownloadEntry, ctx: LineContext = {}): string {
+  if (isManagedRow(e)) return managedLine(e);
   const p = jobPercent(e);
   const drive = e.drive_label.trim() || e.drive_name.trim() || 'the drive';
   switch (e.status) {
@@ -148,6 +151,24 @@ export function storeEntryLine(e: DownloadEntry, ctx: LineContext = {}): string 
   if (e.kind === 'store_restore') return `Copying from ${drive} ${p}%`;
   if (e.status === 'installing') return `Installing ${p}%`;
   return `Downloading ${p}% · ${rateText(e.speed_bps)}`;
+}
+
+/**
+ * A row the store's client runs (Steam): "Installing in Steam 52% · Managed
+ * by Steam", then "Installed by Steam" (the row's detail) or "Cancelled".
+ */
+function managedLine(e: DownloadEntry): string {
+  switch (e.status) {
+    case 'completed':
+      return e.detail.trim() || INSTALLED_BY_STEAM;
+    case 'cancelled':
+    case 'cancelling':
+      return 'Cancelled';
+    case 'failed':
+      return `Failed · ${failureReason(e)}`;
+    default:
+      return `${INSTALLING_IN_STEAM} ${jobPercent(e)}% · ${MANAGED_BY_STEAM}`;
+  }
 }
 
 function completedLine(e: DownloadEntry, ctx: LineContext, drive: string): string {
@@ -261,7 +282,13 @@ export function storeBackupLine(e: DownloadEntry): string {
 export function storeStripLine(e: DownloadEntry, ctx: LineContext = {}): string {
   const source = entrySource(e);
   const name = source !== null && isEnabledStore(source) ? storeName(source) : e.platform.trim() || 'GOG';
-  return `${e.title} · ${name} · ${storeEntryLine(e, ctx)}`;
+  // The strip leaves out a Steam row's "· Managed by Steam" (prototype `stJobLine`).
+  const line = isManagedRow(e) && isLiveStatus(e) ? `${INSTALLING_IN_STEAM} ${jobPercent(e)}%` : storeEntryLine(e, ctx);
+  return `${e.title} · ${name} · ${line}`;
+}
+
+function isLiveStatus(e: DownloadEntry): boolean {
+  return e.status === 'queued' || e.status === 'downloading' || e.status === 'installing';
 }
 
 /** Whether the row's line is an error (red, with Retry and Dismiss). */

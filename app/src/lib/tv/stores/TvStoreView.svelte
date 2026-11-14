@@ -32,6 +32,7 @@
     goStoreSettings,
     showAvailable,
     startLogin,
+    steamRecheck,
   } from './storeActions';
   import { canBackup } from '../../gamestores/marks';
   import { gogSelSummary, tvChips, tvCountLine, tvHeaderActions, tvNoMatch, tvPanel, tvQuick, tvViewTitle, type PanelAct } from './storeWords';
@@ -91,6 +92,9 @@
         return;
       case 'open_settings':
         goStoreSettings();
+        return;
+      case 'recheck':
+        void steamRecheck();
     }
   }
 

@@ -6,7 +6,8 @@
 // runs, and the RomM installer-archive cards it reads from Downloads rows).
 // Pure and UI-agnostic: the desktop's cards and TV mode's both use it.
 import type { DownloadEntry, StoreNotice, StoreNoticeAction, StoreSource } from '../api';
-import { hasCloud, storeName, storeTool } from './marks';
+import { hasCloud, managedByClient, storeName, storeTool } from './marks';
+import { CLIENT_FOUND, STEAM_NOT_INSTALLED } from './steam';
 
 /** One card: its text, whether it is an error, and at most one action. */
 export type StoreCard = { text: string; error: boolean; action: StoreNoticeAction | null; sub?: string };
@@ -110,6 +111,7 @@ export function loginFailedNotice(source: StoreSource, error: string): StoreCard
 }
 
 export function disconnectedNotice(source: StoreSource): StoreCard {
+  if (managedByClient(source)) return ok(`${storeName(source)} disconnected. Your key was deleted from the keyring.`);
   const tool = storeTool(source);
   return ok(`${storeName(source)} disconnected. Its login and ${tool?.name ?? 'its tool'} were deleted; installed games stay.`);
 }
@@ -151,3 +153,22 @@ export function installerFailedNotice(e: DownloadEntry): StoreCard | null {
       return null;
   }
 }
+
+// ── Steam: everything goes through the Steam client ────────────────────
+// The cards for what the user pressed; Steam's background cards (installed
+// · Play, connected, uninstalled) come from the backend's `store-notice`.
+
+/** Install in Steam pressed: Steam's window opens; GRID follows the install. */
+export const steamInstallNotice = (title: string) =>
+  ok(`Steam opened to install ${title}. Choose the library folder there; GRID shows the progress.`);
+/** Install in Steam (or Play) with no Steam on this computer. */
+export const steamMissingNotice = () => err(STEAM_NOT_INSTALLED);
+export const steamVerifyNotice = (title: string) => ok(`Steam is verifying ${title}’s files. Watch it in Steam.`);
+export const steamUninstallNotice = (title: string) =>
+  ok(`Steam opened its uninstall window for ${title}. It leaves the Library once Steam removes it.`);
+/** "Running in Steam" pressed: GRID can't stop a game Steam runs. */
+export const steamRunningNotice = (title: string) => ok(`${title} is running in Steam. Quit it from the game.`);
+/** Refresh while the profile's game details are still private. */
+export const steamStillPrivateNotice = () => err('Steam still lists no games: the profile’s game details are private');
+export const steamClientFoundNotice = () => ok(CLIENT_FOUND);
+export const steamKeyRemovedNotice = () => ok('Web API key removed from the keyring. Steam’s Available list needs it.');

@@ -16,8 +16,29 @@ import type {
 import { failureReason, hasStoreBadge, storeBackupLine, storeEntryLine, storeKindLabel, entrySource } from '../../gamestores/downloads';
 import { cloudSwitchLabel, storeHeaderLine } from '../../gamestores/details';
 import { inspectionView, fileName, type InspectionView } from '../../gamestores/inspection';
-import { isLive, jobAct, jobPercent } from '../../gamestores/jobs';
-import { canBackup, hasCloud as hasStoreCloud, hasInstaller, noBackupReason, shownVersion, storeName, storeTool, updateLabel } from '../../gamestores/marks';
+import { isLive, isManagedRow, jobAct, jobPercent } from '../../gamestores/jobs';
+import {
+  canBackup,
+  hasCloud as hasStoreCloud,
+  hasInstaller,
+  managedByClient,
+  noBackupReason,
+  shownVersion,
+  storeName,
+  storeTool,
+  updateLabel,
+} from '../../gamestores/marks';
+import {
+  INSTALL_IN_STEAM,
+  installingInSteam,
+  IN_STEAM_LIBRARIES,
+  MANAGED_NOTE,
+  OUTSIDE_GRID,
+  steamPill,
+  steamRowSub,
+  UNINSTALL_IN_STEAM,
+  VERIFY_IN_STEAM,
+} from '../../gamestores/steam';
 import { availBlock, type StorePart } from '../../gamestores/rail';
 import { agoText, changedAt, plural, sizeGb, toolSize } from '../../gamestores/text';
 import { storePanel, type PanelAct, type StorePanel } from '../../gamestores/view';
@@ -35,7 +56,7 @@ export function tvViewTitle(status: StoreStatus, part: StorePart): { name: strin
  * line while Available can't list them.
  */
 export function tvCountLine(status: StoreStatus, part: StorePart, n: number, nowSeconds: number): string {
-  if (part === 'installed') return plural(n, 'game');
+  if (part === 'installed') return managedByClient(status.source) ? `${plural(n, 'game')} · ${IN_STEAM_LIBRARIES}` : plural(n, 'game');
   if (availBlock(status) !== '') return 'Games you own and haven’t installed';
   return `${plural(n, 'game')} you own and haven’t installed · updated ${agoText(status.refreshed_at, nowSeconds)}`;
 }
@@ -46,7 +67,9 @@ export type TvChip = { key: string; text: string; bold?: string; warn?: boolean;
 /** "Signed in as **sam_plays**", "Login expired · Sign in again" (focusable), "Not connected", then "Cloud saves: **on**". */
 export function tvChips(status: StoreStatus): TvChip[] {
   const out: TvChip[] = [];
-  if (status.connection === 'connected') out.push({ key: 'account', text: 'Signed in as ', bold: status.username });
+  if (status.connection === 'connected') {
+    out.push({ key: 'account', text: managedByClient(status.source) ? 'Steam account: ' : 'Signed in as ', bold: status.username });
+  }
   else if (status.connection === 'expired') out.push({ key: 'login', text: 'Login expired · Sign in again', warn: true, signIn: true });
   else out.push({ key: 'off', text: 'Not connected' });
   if (hasStoreCloud(status.source) && status.cloud_saves && status.connection !== 'not_connected') {
@@ -74,7 +97,21 @@ export function tvHeaderActions(status: StoreStatus, part: StorePart, installedC
 export function tvPanel(status: StoreStatus, part: StorePart, games: readonly StoreGame[]): StorePanel | null {
   const p = storePanel(status, part, games);
   if (p === null || p.kind !== 'panel') return p;
-  return { ...p, actions: p.actions.map((a, i) => ({ ...a, primary: i === 0 })) };
+  return { ...tvSteamWords(p), actions: tvSteamWords(p).actions.map((a, i) => ({ ...a, primary: i === 0 })) };
+}
+
+/** Where TV's Steam panels say it their own way (prototype `tvstores.js` L111–119): desktop mode, no paste. */
+function tvSteamWords(p: StorePanel): StorePanel {
+  switch (p.testId) {
+    case 'store-state-noclient':
+      return { ...p, body: 'GRID installs, starts and uninstalls Steam games through the Steam client. Install Steam in desktop mode, sign in once, then come back.' };
+    case 'store-state-nokey':
+      return { ...p, actions: p.actions.map((a) => ({ ...a, label: 'Open Settings › Stores' })) };
+    case 'store-state-badkey':
+      return { ...p, body: 'The key may have been revoked. Make a new key, then enter it in Settings › Stores › Steam.' };
+    default:
+      return p;
+  }
 }
 export type { PanelAct, StorePanel };
 
@@ -101,11 +138,19 @@ export function tvJobTag(job: DownloadEntry | null): { text: string; pct: number
   return { text: `${pct}%`, pct };
 }
 
-/** X on a store cover (prototype `sQuick`): Play, Install…, or nothing while a job runs, for a game GRID can't install, or signed out. */
-export function tvQuick(game: StoreGame, status: StoreStatus | null, job: DownloadEntry | null): 'Play' | 'Install…' | null {
+/** What X does on a store cover. */
+export type TvQuick = 'Play' | 'Install…' | 'Install in Steam';
+
+/**
+ * X on a store cover (prototype `sQuick`): Play, Install… (Install in Steam
+ * for Steam, which has no install page), or nothing while a job runs, for a
+ * game GRID can't install, or signed out.
+ */
+export function tvQuick(game: StoreGame, status: StoreStatus | null, job: DownloadEntry | null): TvQuick | null {
   if (job !== null || game.not_supported !== '') return null;
   if (game.installed) return 'Play';
-  return status?.connection === 'connected' ? 'Install…' : null;
+  if (status?.connection !== 'connected') return null;
+  return managedByClient(game.source) ? INSTALL_IN_STEAM : 'Install…';
 }
 
 /** X on a drive's GOG cover: Play when installed here, else Install from drive; none while a job runs. */
@@ -145,6 +190,7 @@ export function tvStoreButtons(o: {
 }): TvStoreButton[] {
   const { game, status, job } = o;
   const name = storeName(game.source);
+  if (managedByClient(game.source)) return tvClientButtons(game, job);
   const out: TvStoreButton[] = [];
   if (job !== null) {
     const a = jobAct(job);
@@ -173,6 +219,29 @@ export function tvStoreButtons(o: {
   if (o.fromDrive) out.push({ act: 'remove_drive', label: 'Remove from drive…', primary: false });
   else if (canBackup(game.source) && game.installed) out.push({ act: 'backup', label: 'Backup to drive…', primary: false });
   return out;
+}
+
+/**
+ * Steam's buttons (prototype `sdetails`' Steam branches): "Installing in Steam
+ * · 52%" (disabled; A says why), Play, or Install in Steam, then Verify in
+ * Steam and Uninstall in Steam…. No Game settings, Update or drive buttons.
+ */
+function tvClientButtons(game: StoreGame, job: DownloadEntry | null): TvStoreButton[] {
+  const out: TvStoreButton[] = [];
+  if (job !== null && isManagedRow(job)) out.push({ act: 'install', label: installingInSteam(jobPercent(job)), primary: true, disabled: true, why: MANAGED_NOTE });
+  else if (game.installed) out.push({ act: 'play', label: 'Play', primary: true, icon: 'play' });
+  else out.push({ act: 'install', label: INSTALL_IN_STEAM, primary: true, icon: 'download' });
+  if (game.installed && job === null) {
+    out.push({ act: 'verify', label: VERIFY_IN_STEAM, primary: false });
+    out.push({ act: 'uninstall', label: UNINSTALL_IN_STEAM, primary: false, danger: true });
+  }
+  return out;
+}
+
+/** The left column's box while Steam installs: "**Managed by Steam.** Pause or cancel it in Steam." over its bar. */
+export function tvManagedBox(job: DownloadEntry | null): { bold: string; rest: string; pct: number } | null {
+  if (job === null || !isManagedRow(job)) return null;
+  return { bold: 'Managed by Steam.', rest: ' Pause or cancel it in Steam.', pct: jobPercent(job) };
 }
 
 /** A line segment of the left column: plain, bold, or the warning colour. */
@@ -210,6 +279,7 @@ export function tvLeftLines(o: {
     out.push({ key: 'cloud', segs });
   }
   if (game.origin === 'offline') out.push({ key: 'offline', segs: [{ text: 'Installed from an offline installer' }] });
+  if (game.installed && game.origin === 'steam_outside') out.push({ key: 'outside', segs: [{ text: OUTSIDE_GRID }] });
   if (o.drive) {
     const how =
       o.drive.game.layout === 'installer'
@@ -225,7 +295,7 @@ export function tvLeftLines(o: {
 }
 
 function runsSegs(game: StoreGame, compat: string): Seg[] {
-  if (game.source === 'steam') return [{ text: 'Launches through ' }, { text: 'Steam', b: true }];
+  if (managedByClient(game.source)) return [{ text: 'Launches through ' }, { text: 'Steam', b: true }];
   if (!game.installed) {
     return game.platforms.includes('linux')
       ? [{ text: 'Has a ' }, { text: 'Linux version', b: true }]
@@ -272,7 +342,10 @@ export function tvFacts(game: StoreGame): { term: string; value: string }[] {
   const out = [{ term: 'Store', value: name }];
   if (game.developer.trim()) out.push({ term: 'Developer', value: game.developer });
   if (game.year.trim()) out.push({ term: 'Release', value: game.year });
-  out.push({ term: 'Size', value: sizeGb(game.installed && game.disk_bytes > 0 ? game.disk_bytes : game.download_bytes) });
+  // Steam's API gives no download size: a Steam game not installed has no Size (never guessed).
+  if (game.installed || !managedByClient(game.source)) {
+    out.push({ term: 'Size', value: sizeGb(game.installed && game.disk_bytes > 0 ? game.disk_bytes : game.download_bytes) });
+  }
   if (game.installed && shownVersion(game) !== '') {
     out.push({ term: 'Version', value: `v${game.version}${game.update_version ? ` · ${name} v${game.update_version}` : ''}` });
   }
@@ -364,12 +437,14 @@ export function launchingCard(game: StoreGame): { text: string; sub?: string } {
 
 /** Playing's line: "GOG · Native · 0:12" or "GOG · GE-Proton9-20 · 0:12". */
 export function tvPlayingLine(game: StoreGame, compat: string, time: string): string {
+  if (managedByClient(game.source)) return `${storeName(game.source)} · running in Steam · ${time}`;
   const how = game.installed_platform === 'windows' ? game.compat_tool || compat || 'Proton' : 'Native';
   return `${storeName(game.source)} · ${how} · ${time}`;
 }
 
 /** Playing's note while the game's saves sync. */
 export function tvPlayingNote(game: StoreGame): string | null {
+  if (managedByClient(game.source)) return 'Steam runs this game. Quit it from the game; GRID notices when it closes.';
   if (!hasStoreCloud(game.source) || game.cloud === 'off' || game.cloud === 'none') return null;
   return `Your saves sync with ${storeName(game.source)} when the game closes.`;
 }
@@ -446,6 +521,7 @@ export const STORES_PANE_NOTE = 'Each connected store gets a group in the Librar
 
 /** The pane's row: "Signed in as sam_plays" (with "· gogdl not installed"), or "Not signed in". */
 export function storeRowSub(status: StoreStatus): string {
+  if (managedByClient(status.source)) return steamRowSub(status);
   if (status.connection === 'not_connected') return 'Not signed in';
   const tool = storeTool(status.source);
   const missing = tool !== null && status.tool.state !== 'installed' ? ` · ${tool.name} not installed` : '';
@@ -454,6 +530,10 @@ export function storeRowSub(status: StoreStatus): string {
 
 /** The row's status: Connected, Login expired, Not connected. */
 export function storeRowPill(status: StoreStatus): { text: string; tone: 'ok' | 'warn' | '' } {
+  if (managedByClient(status.source)) {
+    const p = steamPill(status);
+    return { text: p.text, tone: p.tone === 'off' ? '' : p.tone };
+  }
   if (status.connection === 'connected') return { text: 'Connected', tone: 'ok' };
   if (status.connection === 'expired') return { text: 'Login expired', tone: 'warn' };
   return { text: 'Not connected', tone: '' };
@@ -499,6 +579,7 @@ export function disconnectWords(status: StoreStatus): { title: string; body: str
 
 /** The card after Disconnect (prototype `sStorePage`): "Epic Games disconnected" / "Its login and legendary were deleted; installed games stay." */
 export function disconnectedCard(source: StoreGame['source']): { text: string; sub: string } {
+  if (managedByClient(source)) return { text: `${storeName(source)} disconnected`, sub: 'Your key was deleted from the keyring' };
   const tool = storeTool(source)?.name ?? 'its tool';
   return { text: `${storeName(source)} disconnected`, sub: `Its login and ${tool} were deleted; installed games stay.` };
 }
@@ -569,8 +650,10 @@ export type StoreRowAct = 'cancel' | 'retry' | 'dismiss' | 'open';
 /** A on a store row (prototype `ACT.dlrow`): Cancel, Retry, Dismiss, Open <game>. */
 export function tvStoreActions(e: DownloadEntry, gameTitle: string | null): { act: StoreRowAct; label: string; danger?: boolean }[] {
   const out: { act: StoreRowAct; label: string; danger?: boolean }[] = [];
-  if (isLive(e) && e.status !== 'cancelling') out.push({ act: 'cancel', label: 'Cancel', danger: true });
-  if (e.status === 'failed' || e.status === 'cancelled') out.push({ act: 'retry', label: 'Retry' });
+  // Steam owns pause, cancel and retry of its installs: no Cancel, no Retry.
+  const managed = isManagedRow(e);
+  if (isLive(e) && e.status !== 'cancelling' && !managed) out.push({ act: 'cancel', label: 'Cancel', danger: true });
+  if ((e.status === 'failed' || e.status === 'cancelled') && !managed) out.push({ act: 'retry', label: 'Retry' });
   if (e.status === 'completed' || e.status === 'failed' || e.status === 'cancelled') out.push({ act: 'dismiss', label: 'Dismiss' });
   if (gameTitle) out.push({ act: 'open', label: `Open ${gameTitle}` });
   return out;
@@ -578,7 +661,7 @@ export function tvStoreActions(e: DownloadEntry, gameTitle: string | null): { ac
 
 /** The row's A hint: Cancel, Retry or dismiss, Dismiss. */
 export function tvStoreRowA(e: DownloadEntry): string {
-  if (isLive(e)) return 'Cancel';
+  if (isLive(e)) return isManagedRow(e) ? 'Open' : 'Cancel';
   if (e.status === 'failed') return 'Retry or dismiss';
   return 'Dismiss';
 }
@@ -586,7 +669,10 @@ export function tvStoreRowA(e: DownloadEntry): string {
 /** The list's line: "GOG · Update". */
 export function tvStoreListSub(e: DownloadEntry): string {
   const src = entrySource(e);
-  return [src ? storeName(src) : e.platform.trim(), tvStoreKind(e)].filter((s) => s !== '').join(' · ');
+  const parts = [src ? storeName(src) : e.platform.trim(), tvStoreKind(e)];
+  // A live Steam row says who owns it (prototype `ACT.dlrow`).
+  if (isManagedRow(e) && isLive(e)) parts.push('Managed by Steam: pause or cancel it in Steam');
+  return parts.filter((s) => s !== '').join(' · ');
 }
 
 /** Cancel on a store row asks first, in the prototype's words. */
