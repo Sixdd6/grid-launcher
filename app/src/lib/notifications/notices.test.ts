@@ -79,6 +79,21 @@ describe('diffSnapshot / noticesFor', () => {
     ).toEqual(['Chrono Trigger added to download queue', 'Chrono Trigger installed']);
   });
 
+  it('gives a RomM game’s installed card Play, and a summary of several none', () => {
+    const [done] = noticesFor({ entry: entry({ rom_id: 7, status: 'completed' }), from: 'installing' }, { setupActive: false });
+    expect(done).toEqual({
+      group: 'game-installed',
+      text: 'Chrono Trigger installed',
+      level: 'success',
+      action: { play: { romId: 7, title: 'Chrono Trigger', platform: 'SNES' } },
+    });
+    const [other] = noticesFor({ entry: entry({ id: 2, rom_id: 8, title: 'Zelda', status: 'completed' }), from: 'installing' }, { setupActive: false });
+    expect(coalesce([done, other])).toEqual([{ group: 'game-installed', text: '2 games installed', level: 'success' }]);
+    // An update's card and a failure's carry no Play.
+    const [updated] = noticesFor({ entry: entry({ kind: 'update', status: 'completed' }), from: 'installing' }, { setupActive: false });
+    expect(updated.action).toBeUndefined();
+  });
+
   it('reports a failure with its reason, and a cancel', () => {
     expect(
       texts([
@@ -331,9 +346,9 @@ describe('actions (TV mode: View runs them, items 144, 148)', () => {
     expect(emu).toMatchObject({ text: 'Installing PCSX2…', action: 'downloads' });
   });
 
-  it('a finished install, a launch or a refused queue offers nothing', () => {
+  it('a finished install offers Play; a launch or a refused queue offers nothing', () => {
     const [, done] = cards([[], [entry({})], [entry({ status: 'completed' })]]);
-    expect(done.action).toBeUndefined();
+    expect(done.action).toEqual({ play: { romId: 1, title: 'Chrono Trigger', platform: 'SNES' } });
     expect(launchingNotice('Zelda').action).toBeUndefined();
     expect(queueRefusedNotice('Zelda', 'offline').action).toBeUndefined();
   });

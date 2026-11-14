@@ -111,6 +111,17 @@ describe('install (a): connect, set library path, install', () => {
     await waitForToast('Super Mario World installed', {
       timeoutMsg: 'no "installed" card once the install completed',
     });
+    // The card offers Play (user decision 2026-11-13), which launches
+    // through the normal launch path: its "Launching …" card comes first
+    // (this group seeds no emulator, so the launch itself is refused after).
+    const play = $(
+      '//aside[.//p[@data-testid="toast" and normalize-space()="Super Mario World installed"]]//button[@data-testid="toast-action"]',
+    );
+    await expect(play).toHaveText('Play');
+    await play.click();
+    await waitForToast('Launching Super Mario World…', {
+      timeoutMsg: 'Play on the installed card never launched the game',
+    });
 
     await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({
       timeout: INSTALL_TIMEOUT,
