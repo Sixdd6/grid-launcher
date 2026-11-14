@@ -244,6 +244,22 @@ STAGE_GROUPS=(
   "epic-library:specs/epic-library.spec.ts"
   "epic-cloud:specs/epic-cloud.spec.ts"
   "tv-epic:specs/tv-epic.spec.ts"
+  # Game stores, Amazon Games (docs/stores-phase3-plan.md "E2E plan") against
+  # the mock Amazon (mock-romm/mock-amazon.mjs: the sign-in page nile's login
+  # URL names, the finish redirect and the art at one base through
+  # GRID_LAUNCHER_E2E_AMAZON_BASE) and the fake nile (fake-tools/nile.mjs,
+  # GRID_LAUNCHER_E2E_TOOL_NILE), on a profile used without a server, seeded
+  # per spec by seed/amazon-seed.mjs: (login) the window opens nile's login
+  # URL, signs in, is cancelled, fails on the page and on the code, shows a
+  # network error and loads Amazon's home page as an ordinary page;
+  # (secrets) after a sign-in, an install, an update, a verify, a launch and
+  # a Disconnect no log, payload or file holds the fake store token, and
+  # nile's folder is owner-only. Package D's desktop and TV specs start
+  # signed in with Fogline installed. A spec file that is not in this
+  # checkout yet is skipped.
+  "amazon:specs/amazon-login.spec.ts specs/amazon-secrets.spec.ts"
+  "amazon-library:specs/amazon-library.spec.ts"
+  "tv-amazon:specs/tv-amazon.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -417,6 +433,7 @@ mock_pid=""
 forge_pid=""
 gog_pid=""
 epic_pid=""
+amazon_pid=""
 # Set by the INT/TERM handler below so cleanup() can force a nonzero exit
 # even when the interrupted command itself happened to leave $? at 0.
 signal_caught=""
@@ -508,6 +525,13 @@ stop_epic() {
   epic_pid=""
 }
 
+stop_amazon() {
+  [[ -n "$amazon_pid" ]] || return 0
+  kill -TERM "$amazon_pid" 2>/dev/null
+  wait "$amazon_pid" 2>/dev/null
+  amazon_pid=""
+}
+
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM
@@ -525,6 +549,7 @@ cleanup() {
   stop_forge
   stop_gog
   stop_epic
+  stop_amazon
   if run_dir_is_safe; then
     kill_run_processes TERM
     sleep 1
@@ -704,6 +729,12 @@ group_needs_epic() {
   [[ "$1" == "epic" || "$1" == epic-* || "$1" == tv-epic* ]]
 }
 
+# Stage groups that run the mock Amazon (mock-romm/mock-amazon.mjs) and the
+# fake nile. Every other group points Amazon at the dead loopback address.
+group_needs_amazon() {
+  [[ "$1" == "amazon" || "$1" == amazon-* || "$1" == tv-amazon* ]]
+}
+
 group_needs_forge() {
   [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" || "$1" == "tv-startup" || "$1" == "tv-layout" ]]
 }
@@ -738,6 +769,7 @@ seed_script_for_group() {
     tv-startup) printf '%s' "$E2E_DIR/seed/tv-startup-seed.mjs" ;;
     gog|gog-*|tv-gog) printf '%s' "$E2E_DIR/seed/gog-seed.mjs" ;;
     epic|epic-*|tv-epic) printf '%s' "$E2E_DIR/seed/epic-seed.mjs" ;;
+    amazon|amazon-*|tv-amazon) printf '%s' "$E2E_DIR/seed/amazon-seed.mjs" ;;
     *) printf '' ;;
   esac
 }
@@ -748,7 +780,7 @@ seed_script_for_group() {
 # the run's keyring, but each starts the app on the state its own seed
 # variant writes.
 group_seeds_per_spec() {
-  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == gog || "$1" == gog-* || "$1" == tv-gog || "$1" == epic || "$1" == epic-* || "$1" == tv-epic ]]
+  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == gog || "$1" == gog-* || "$1" == tv-gog || "$1" == epic || "$1" == epic-* || "$1" == tv-epic || "$1" == amazon || "$1" == amazon-* || "$1" == tv-amazon ]]
 }
 
 # Runs every spec of one group against a freshly created data dir and mock.
@@ -945,6 +977,34 @@ EOF
     printf 'e2e: mock Epic at %s\n' "$epic_url"
   fi
 
+  # The mock Amazon, for the Amazon groups. Same lifecycle as the mock Epic.
+  local amazon_url=""
+  attempt_amazon_log=""
+  if group_needs_amazon "$name"; then
+    attempt_amazon_log="$LOG_DIR/$name-attempt-$attempt.amazon.log"
+    rm -f "$attempt_amazon_log" "$E2E_DIR/last-run-amazon-requests.log"
+    ( cd "$E2E_DIR" && exec node mock-romm/mock-amazon.mjs --port 0 ) >"$attempt_amazon_log" 2>&1 &
+    amazon_pid=$!
+    for _ in $(seq 1 100); do
+      amazon_url="$(sed -n 's/^MOCK_AMAZON_URL=\(http[^ ]*\).*/\1/p' "$attempt_amazon_log" 2>/dev/null | head -n1)"
+      [[ -n "$amazon_url" ]] && break
+      kill -0 "$amazon_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if [[ -z "$amazon_url" ]]; then
+      printf 'e2e: mock Amazon did not report a URL\n' >&2
+      tail -n 40 "$attempt_amazon_log" >&2
+      stop_amazon
+      stop_epic
+      stop_gog
+      stop_forge
+      stop_mock
+      attempt_failed_stage="$name (mock Amazon)"
+      return 1
+    fi
+    printf 'e2e: mock Amazon at %s\n' "$amazon_url"
+  fi
+
   local spec stage wdio_log out_dir rc
   for spec in $specs; do
     stage="$name/$(basename "$spec")"
@@ -961,12 +1021,13 @@ EOF
     # earlier spec saved in this run's private keyring must go too, or the
     # app would restore that session. Same best-effort clear as the
     # python-import group.
-    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */gog-*.spec.ts || "$spec" == */tv-gog-*.spec.ts || "$spec" == */epic-*.spec.ts || "$spec" == */tv-epic*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
+    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */gog-*.spec.ts || "$spec" == */tv-gog-*.spec.ts || "$spec" == */epic-*.spec.ts || "$spec" == */tv-epic*.spec.ts || "$spec" == */amazon-*.spec.ts || "$spec" == */tv-amazon*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
       secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
     fi
     if [[ -n "$seed_script" ]] && group_seeds_per_spec "$name"; then
       # Appended to the mock log, which the failure dump already shows.
-      if ! node "$seed_script" "$data_dir" "$(basename "$spec" .spec.ts)" >>"$attempt_mock_log" 2>&1; then
+      # The Amazon seed writes nile's library.json with the art at the mock.
+      if ! E2E_AMAZON_URL="$amazon_url" node "$seed_script" "$data_dir" "$(basename "$spec" .spec.ts)" >>"$attempt_mock_log" 2>&1; then
         printf 'e2e: seed script failed for stage %s\n' "$stage" >&2
         tail -n 40 "$attempt_mock_log" >&2
         attempt_failed_stage="$stage (seed script)"
@@ -1020,6 +1081,18 @@ EOF
         export E2E_EPIC_ARGV_FILE="$data_dir/epic-game-argv.log"
       else
         export E2E_EPIC_URL="$DEAD_FORGE_URL"
+      fi
+      # The Amazon base (wdio.conf.ts turns it into
+      # GRID_LAUNCHER_E2E_AMAZON_BASE): the mock Amazon for the Amazon groups,
+      # else the dead loopback address. The fake nile stands in for the tool.
+      if [[ -n "$amazon_url" ]]; then
+        export E2E_AMAZON_URL="$amazon_url"
+        export E2E_FAKE_NILE="$E2E_DIR/fake-tools/nile.mjs"
+        # What the Amazon specs read (seed/amazon-seed.mjs, fixtures-amazon).
+        export E2E_AMAZON_ARGV_FILE="$data_dir/amazon-game-argv.log"
+        export E2E_AMAZON_ENV_FILE="$data_dir/amazon-game-env.log"
+      else
+        export E2E_AMAZON_URL="$DEAD_FORGE_URL"
       fi
       if [[ -n "$forge_url" ]]; then
         # wdio.conf.ts forwards both into the app process: the first is what
@@ -1113,10 +1186,13 @@ EOF
   stop_forge
   stop_gog
   stop_epic
+  stop_amazon
   [[ -n "$attempt_gog_log" && -f "$E2E_DIR/last-run-gog-requests.log" ]] &&
     cp "$E2E_DIR/last-run-gog-requests.log" "$LOG_DIR/$name-attempt-$attempt.gog-requests.log"
   [[ -n "$attempt_epic_log" && -f "$E2E_DIR/last-run-epic-requests.log" ]] &&
     cp "$E2E_DIR/last-run-epic-requests.log" "$LOG_DIR/$name-attempt-$attempt.epic-requests.log"
+  [[ -n "$attempt_amazon_log" && -f "$E2E_DIR/last-run-amazon-requests.log" ]] &&
+    cp "$E2E_DIR/last-run-amazon-requests.log" "$LOG_DIR/$name-attempt-$attempt.amazon-requests.log"
   [[ -f "$attempt_request_log" ]] && cp "$attempt_request_log" "$LOG_DIR/$name-attempt-$attempt.requests.log"
   [[ -n "$attempt_forge_request_log" && -f "$attempt_forge_request_log" ]] &&
     cp "$attempt_forge_request_log" "$LOG_DIR/$name-attempt-$attempt.forge-requests.log"

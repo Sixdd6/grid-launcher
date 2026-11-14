@@ -1,0 +1,119 @@
+[
+  {
+    "id": "0d3e5b2a-7c41-4f0e-9a11-a1f0911e0001",
+    "product": {
+      "id": "amzn1.adg.product.5b0f1a2c-3d4e-4f50-8a6b-0000000000a1",
+      "sku": "FAKE-SKU-FOGLINE",
+      "asin": "B0FAKEA001",
+      "title": "Fogline",
+      "productDetail": {
+        "iconUrl": "{BASE}/art/fogline-icon.jpg",
+        "details": {
+          "shortDescription": "A lighthouse keeper charts the fog that swallowed her coast.",
+          "developer": "Mistral",
+          "publisher": "Mistral",
+          "genres": ["Adventure"],
+          "releaseDate": "2020-05-12T00:00:00Z",
+          "backgroundUrl1": "{BASE}/art/fogline-bg1.jpg",
+          "backgroundUrl2": "{BASE}/art/fogline-bg2.jpg",
+          "logoUrl": "{BASE}/art/fogline-logo.png",
+          "screenshots": ["{BASE}/art/fogline-shot1.jpg", "{BASE}/art/fogline-shot2.jpg"],
+          "videos": []
+        }
+      }
+    },
+    "fake": {
+      "download_size": 7000000,
+      "version": "e2e-fogline-version-1",
+      "update_version": "e2e-fogline-version-2",
+      "executable": "bin\\Fogline.exe",
+      "working_dir": "bin",
+      "args": ["-fuel-e2e"]
+    }
+  },
+  {
+    "id": "0d3e5b2a-7c41-4f0e-9a11-a1f0911e0009",
+    "product": {
+      "id": "amzn1.adg.product.5b0f1a2c-3d4e-4f50-8a6b-0000000000a1",
+      "sku": "FAKE-SKU-FOGLINE",
+      "asin": "B0FAKEA001",
+      "title": "Fogline",
+      "productDetail": {
+        "iconUrl": "{BASE}/art/fogline-icon.jpg",
+        "details": { "developer": "Mistral", "genres": ["Adventure"], "releaseDate": "2020-05-12T00:00:00Z" }
+      }
+    },
+    "fake": {
+      "download_size": 7000000,
+      "version": "e2e-fogline-version-1",
+      "update_version": "e2e-fogline-version-2",
+      "executable": "bin\\Fogline.exe",
+      "working_dir": "bin",
+      "args": ["-fuel-e2e"]
+    }
+  },
+  {
+    "id": "0d3e5b2a-7c41-4f0e-9a11-a1f0911e0002",
+    "product": {
+      "id": "amzn1.adg.product.5b0f1a2c-3d4e-4f50-8a6b-0000000000a2",
+      "sku": "FAKE-SKU-KETTLE",
+      "asin": "B0FAKEA002",
+      "title": "Kettle Drum",
+      "productDetail": {
+        "iconUrl": "{BASE}/art/kettle-icon.jpg",
+        "details": {
+          "shortDescription": "Keep the tea warm and the beat steady.",
+          "developer": "Brass Band",
+          "publisher": "Brass Band",
+          "genres": ["Rhythm"],
+          "releaseDate": "2019-09-03T00:00:00Z",
+          "backgroundUrl1": "{BASE}/art/kettle-bg1.jpg",
+          "backgroundUrl2": "{BASE}/art/kettle-bg2.jpg",
+          "logoUrl": null,
+          "screenshots": ["{BASE}/art/kettle-shot1.jpg"],
+          "videos": []
+        }
+      }
+    },
+    "fake": {
+      "download_size": 2200000,
+      "version": "e2e-kettle-version-1",
+      "update_version": "e2e-kettle-version-1",
+      "executable": "KettleDrum.exe",
+      "working_dir": "",
+      "args": []
+    }
+  },
+  {
+    "id": "0d3e5b2a-7c41-4f0e-9a11-a1f0911e0003",
+    "product": {
+      "id": "amzn1.adg.product.5b0f1a2c-3d4e-4f50-8a6b-0000000000a3",
+      "sku": "FAKE-SKU-LOWSUN",
+      "asin": "B0FAKEA003",
+      "title": "Lowsun",
+      "productDetail": {
+        "iconUrl": "{BASE}/art/lowsun-icon.jpg",
+        "details": {
+          "shortDescription": "Survive the long dusk at the edge of the world.",
+          "developer": "Dusk Yard",
+          "publisher": "Dusk Yard",
+          "genres": ["Survival"],
+          "releaseDate": "2021-02-18T00:00:00Z",
+          "backgroundUrl1": "{BASE}/art/lowsun-bg1.jpg",
+          "backgroundUrl2": "{BASE}/art/lowsun-bg2.jpg",
+          "logoUrl": "{BASE}/art/lowsun-logo.png",
+          "screenshots": [],
+          "videos": []
+        }
+      }
+    },
+    "fake": {
+      "download_size": 15000000,
+      "version": "e2e-lowsun-version-1",
+      "update_version": "e2e-lowsun-version-1",
+      "executable": "Lowsun\\Binaries\\Lowsun.exe",
+      "working_dir": "Lowsun",
+      "args": []
+    }
+  }
+]
