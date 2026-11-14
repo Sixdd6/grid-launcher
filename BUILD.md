@@ -75,8 +75,11 @@ starts on Ubuntu 22.04/24.04, distributions built on them, or Debian 12.
     scripts/ctr.sh shell             # interactive shell
     scripts/ctr.sh clean [--all]     # drop this checkout's volumes (--all: caches too)
 
-`CTR_CPUS` and `CTR_MEMORY` (e.g. `2`, `4g`) can lower the cap, never raise it. Only one
-grid-launcher container runs at a time; another call waits for the lock. Only the repo is
+`CTR_CPUS` and `CTR_MEMORY` (e.g. `2`, `4g`) can lower the cap, never raise it. At most two
+containers run at once, counted across grid-launcher and free-budget (they share the slot
+locks in `$XDG_RUNTIME_DIR/ctr-slots`), each within the 4 CPU / 8 GB cap; a third call
+waits for a free slot. Two runs of the same checkout never overlap, because they share
+its volumes. Only the repo is
 mounted. `target/`, `app/node_modules` and `e2e/node_modules` are Podman volumes per
 checkout (the Debian 13 image has its own `target/` volume), so a container build never mixes
 with a host build in the same tree. `appimage` builds, then repacks with the same

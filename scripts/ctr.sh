@@ -37,7 +37,7 @@ RELEASE_TAG=debian13
 RELEASE_BASE=docker.io/library/debian:13
 IMAGE_REPO=localhost/grid-launcher-build
 IMAGE=$IMAGE_REPO:$CHECK_TAG
-# Owner limit (2026-10-20): at most 4 CPUs and 8 GB for grid-launcher containers, in total.
+# Owner limit (2026-10-20): at most 4 CPUs and 8 GB per container.
 # CTR_CPUS / CTR_MEMORY (in MB or with a g/m suffix) may lower the limit, never raise it.
 MAX_CPUS=4
 MAX_MEMORY_MB=8192
@@ -47,16 +47,34 @@ MEMORY_MB=$(to_mb "${CTR_MEMORY:-${MAX_MEMORY_MB}m}")
 [ "$MEMORY_MB" -gt 0 ] 2>/dev/null && [ "$MEMORY_MB" -le "$MAX_MEMORY_MB" ] || MEMORY_MB=$MAX_MEMORY_MB
 MEMORY=${MEMORY_MB}m
 JOBS=$(awk -v c="$CPUS" 'BEGIN { j = int(c); print (j < 1) ? 1 : j }')
-# One grid-launcher container at a time across every checkout and worktree, so the total
-# stays within the limit. Parallel agents queue here instead of sharing the machine.
-LOCK=${XDG_RUNTIME_DIR:-/tmp}/grid-launcher-ctr.lock
+# Owner limit (2026-11-14): at most two containers at once across every project that uses
+# this pattern (grid-launcher and free-budget share the slots), each within the cap above.
+# A second run of the same checkout waits for the first, because they share its volumes.
+SLOT_DIR=${XDG_RUNTIME_DIR:-/tmp}/ctr-slots
+CHECKOUT_LOCK=${XDG_RUNTIME_DIR:-/tmp}/grid-launcher-ctr-$(printf %s "$repo" | sha256sum | cut -c1-8).lock
 locked() {
-  exec 9>"$LOCK"
-  if ! flock -n 9; then
-    echo "ctr.sh: another grid-launcher container is running; waiting for it to finish" >&2
-    flock 9
+  mkdir -p "$SLOT_DIR"
+  exec 8>"$CHECKOUT_LOCK"
+  if ! flock -n 8; then
+    echo "ctr.sh: this checkout already has a container running; waiting for it to finish" >&2
+    flock 8
   fi
-  "$@"
+  local waited=0 slot
+  while :; do
+    for slot in 1 2; do
+      exec 9>"$SLOT_DIR/slot-$slot.lock"
+      if flock -n 9; then
+        local rc=0
+        "$@" || rc=$?
+        exec 9>&- 8>&-
+        return "$rc"
+      fi
+      exec 9>&-
+    done
+    [ "$waited" = 1 ] || echo "ctr.sh: two containers are already running; waiting for a free slot" >&2
+    waited=1
+    sleep 3
+  done
 }
 # target and node_modules are per checkout (a short hash of the repo path), so git worktrees
 # can run containers without sharing build output. CTR_VOL_PREFIX overrides the prefix.
