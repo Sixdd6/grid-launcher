@@ -1210,3 +1210,59 @@ Questions for the user: none open.
   and Media), Settings › Stores › Amazon Games (expired, no Cloud saves row). The only
   differences are fixture data, the pin's real nile data (1.2.0, 11 MB) where the prototype
   has 1.1.2 and 9 MB, the version decision, and the shipped app's own Sort and card size.
+
+## Integration outcome (2026-11-14)
+
+Packages C (2d32ad2) and D (8de361d) merged onto Step 0 + A (dd929ea), in that order. The
+plan's per-package sections were additive and are all kept (one textual conflict, between
+the A and C deviation sections). The merged tree passed the gate as it was; C's
+`RealAmazon` already forwarded to A's real `AmazonService` (Step 0's signatures held).
+Items:
+
+- **One nile helper.** Every nile run goes through `AmazonService::tool()` and
+  `AmazonService::run` (A); the app adds none. `AmazonApi` gains `has_login()`
+  (forwarding to A's); the futures are `Send` (`BoxFut`).
+- **Cancelled "Sign in again".** A's `start_login` deletes nile's saved login first. The
+  backend now shows that as the expired state: after `start_login` (success or failure),
+  a store connected in the config whose nile has no saved login is Expired, and stays so
+  when the window is cancelled or the redirect has no code. `check_login`'s
+  `saved_account() == None` with `[stores.amazon] connected` is Expired too (it was "not
+  connected" and cleared the config). A first Connect that is cancelled stays not
+  connected. New unit test `a_cancelled_sign_in_again_leaves_the_expired_state`.
+- **Launch after Disconnect.** C's hook already launches the row as it is when not
+  connected or nile is gone; A's `launch::launch_error` now words a failed launch prep
+  (same text as C's: "Couldn't start <title> through nile: …"), so there is one source.
+- **glibc floor.** A's `NILE_SYSTEM_TOO_OLD` wins ("nile can't run on this computer: it
+  needs a newer Linux system (glibc 2.35 or later)."); the prototype has no text for it.
+  Any nile run that returns it (sign-in start, login check, sync, install options, launch
+  prep) sets nile's tool state to failed with that text, so Settings and the store panel
+  show it as given. D's fake (`FAKE_NILE_GLIBC_ERROR`) and its vitest now use the same
+  words. New unit test `nile_too_old_for_this_system_shows_as_the_tool_error`.
+- **Install folder.** C built `<base>/<sanitize_component(title)>`; it now uses A's
+  `install::folder_name(title, id)` (nile's own folder rule, falling back to the id), in
+  both the install dialog's folder and the job. `install --path` takes it as is.
+- **Update marker.** C's `update_version = "latest"` is only tested for non-empty by the UI:
+  `updateLabel` gives "Update", `shownVersion`, the Version fact (desktop and TV) and the
+  Downloads line ("Updated") never show it for Amazon. Cards: "<game>: an update is
+  available", "<game> updated", and the Downloads row reads "Verified" with no count.
+- **Parsers.** A's JSON readers take the first JSON value on stdout and ignore unknown
+  keys; the owned list dedups by product id and ASIN. The fake's token lines and
+  `fake_session` keys pass `amazon`; the owned count is 3; `register` round-trips the
+  printed values (the fake refuses anything else).
+- **cloud_state.** C's `none` is kept (the game has no cloud saves; `off` means "turned
+  off"). The UI never asks: every cloud path reads `hasCloud`, false for Amazon, so no
+  Cloud saves tab, chip, row or SAVE CONFLICT shows.
+- **D's specs on C's seed.** `amazon-library` and `tv-amazon` ran as written against C's
+  seed (covers by title, `sam.plays`, `.fake-update`). One spec change: the
+  `amazon-library` update step returned early when Fogline had no UPDATE tag; C's seed
+  always sets `.fake-update`, so it now waits for the tag and fails without it.
+- **Details version chip.** D's hidden chip for Amazon (desktop and TV) is kept.
+- **Owned list.** No `amazon-owned.json` anywhere; nile's `library.json` is the only copy.
+
+Failures found and fixed at integration: none in the e2e suite. One new unit test of
+mine expected the glibc text from `ensure_can_install` while signed out (the signed-out
+refusal comes first); the test now connects first.
+
+Results: `scripts/ctr.sh gate` PASS (`== gate: PASS`); `scripts/ctr.sh wincheck` PASS
+(`== wincheck: PASS`); full `scripts/ctr.sh e2e`: 49 stage groups, 82 spec files, every
+one on its first attempt, `== e2e: all stages passed`.

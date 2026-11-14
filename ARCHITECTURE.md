@@ -280,8 +280,8 @@ Modules as declared in `src/lib.rs`:
   (`list-saves` / `sync-saves`, the save path GRID resolves from `CloudSaveFolder`, a copy
   of the local saves under `stores/save-backups/epic/` before a download), `meta`
   (`EpicMeta`) and `row` (`epic_row`; every Epic row is a Windows version with its
-  prefix at `<install dir>/prefix`). `amazon` is Amazon Games through nile (Phase 3;
-  Step 0 so far): `AmazonService` (`mod.rs`) builds every nile run (`tool()`: the pinned
+  prefix at `<install dir>/prefix`). `amazon` is Amazon Games through nile (Phase 3,
+  built 2026-11-14): `AmazonService` (`mod.rs`) builds every nile run (`tool()`: the pinned
   PyInstaller binary or the test/e2e override, `NILE_CONFIG_PATH=<data_dir>/stores/nile`
   (nile keeps its files in `stores/nile/nile/`), `LineParser::Nile`, the folder made
   owner-only before and after each run; short commands set `QUICK_RUN_TIMEOUT`), the
@@ -289,8 +289,15 @@ Modules as declared in `src/lib.rs`:
   `client_id`/`code_verifier`/`serial` in a `SecretString`, read only by `auth.rs`),
   `meta` (`AmazonMeta`) and `row` (`amazon_row` and the JSON5 `fuel.json` reader
   `read_fuel`; every Amazon row is a Windows version with its prefix at
-  `<install dir>/prefix`). Login, owned list, jobs, uninstall, updates and launch prep
-  are package A's. Every parser ignores unknown JSON keys and non-JSON stdout lines. Nothing here may log or forward a store tool's stdout or
+  `<install dir>/prefix`). `AmazonService::run` is every nile run's one path: a nile
+  that can't start (its glibc 2.35 floor) fails with `NILE_SYSTEM_TOO_OLD`. `auth`
+  (`auth --login --non-interactive` for the URL and PKCE values after deleting nile's
+  saved login, `register` with the code on argv, `auth --status`, `auth --logout`),
+  `list` (nile's own `library.json` is the only owned list, deduplicated by product id
+  and ASIN; `installed.json`; `install --info`; `list-updates`), `install` (install with
+  `--path <the game's folder>` exactly, `install::folder_name` as nile names it; update,
+  verify, uninstall; fuel.json `PostInstall` is never run) and `launch` (`launch --json
+  --no-wine` gives the five FUEL variables; `launch_error` gives GRID's words). Every parser ignores unknown JSON keys and non-JSON stdout lines. Nothing here may log or forward a store tool's stdout or
   stderr.
 - `romm` — the RomM HTTP client: `RommClient`, platforms, games, ROM detail, firmware,
   byte fetches, the cloud save/state endpoints, and the play-session ingest. All request construction lives here;
@@ -352,10 +359,16 @@ The shell owns *when* things run; grid-core owns *what* they do.
   `StoreLaunchHook` that adds Epic's launch ticket. The hook owns the one offline retry:
   signed out, a game that may run offline asks for an `--offline` ticket; signed in, a
   network failure retries once with `--offline` for such a game. `amazon.rs` is
-  `AmazonStore` around `stores::amazon::AmazonService` (Phase 3; Step 0 is a stub: always
-  "not connected", every action `not implemented`, real login spec and Game Settings,
-  a launch hook that refuses Amazon rows until nile's launch prep exists); it keeps nile's
-  `AmazonLoginStart` between `prepare_login` and `run_finish_login`. Store updates are keyed
+  `AmazonStore` around `stores::amazon::AmazonService` (Phase 3, behind the `AmazonApi`
+  seam its tests fake): `prepare_login` installs nile when it is missing, then asks it
+  for the per-attempt login URL, and keeps nile's `AmazonLoginStart` until
+  `run_finish_login`. The connection state (connected in the config but nile has no
+  saved login, as after a cancelled "Sign in again", is the expired state), the owned
+  list in memory only (read from nile's `library.json` at startup, replaced by each
+  `library sync`; GRID writes no copy), the background `store-notice` cards, the install
+  guards, nile's glibc floor shown as the tool's error, and the `StoreLaunchHook` that
+  adds nile's FUEL environment (not connected or no nile, as after a Disconnect: the row
+  launches as it is). No cloud saves (`cloud_state` answers `none`) and no DLC. Store updates are keyed
   by `GameKey` in `update_service.rs` (`StoreUpdateSource`, one per store). `store_auth.rs` is the login window: a separate, unprivileged, incognito webview
   whose finish URL (a store's `LoginSpec`: scheme, host, port and path, plus a required
   query pair when `finish_query` is set, as Amazon's `openid.assoc_handle`, so Amazon's

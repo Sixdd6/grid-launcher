@@ -75,7 +75,7 @@ describe('Amazon Games rail and view', () => {
     });
     // nile's glibc floor: the tool error shows as given.
     expect(storePanel(amazonStatus({ tool: { state: 'failed', error: FAKE_NILE_GLIBC_ERROR } as never }), 'available', [])?.body).toBe(
-      'nile needs a newer system (glibc 2.35 or later)',
+      "nile can't run on this computer: it needs a newer Linux system (glibc 2.35 or later).",
     );
     expect(storePanel(amazonStatus({ owned: 'loading' }), 'available', [])).toMatchObject({ kind: 'loading', title: 'Loading your Amazon Games games…' });
   });

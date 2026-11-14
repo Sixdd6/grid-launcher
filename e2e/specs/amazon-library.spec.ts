@@ -148,7 +148,10 @@ describe('amazon-library', () => {
     await openAmazon('installed');
     // The fake nile lists Fogline in list-updates when the seed sets `.fake-update`.
     const { badge } = await amazonCard('Fogline');
-    if (!(await coverTags(badge)).includes('UPDATE')) return; // No update in this seed: covered by the vitest suite.
+    await browser.waitUntil(async () => (await coverTags(badge)).includes('UPDATE'), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Fogline never carried UPDATE (the seed sets .fake-update)',
+    });
     await openAmazonDetails('Fogline');
     const btn = $(testId('store-details-update'));
     await expect(btn).toHaveText('Update');

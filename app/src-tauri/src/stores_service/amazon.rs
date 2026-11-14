@@ -43,11 +43,14 @@ use grid_core::config::{AmazonConfig, Config};
 use grid_core::launch::{LaunchError, StoreLaunchHook, StoreLaunchPrep};
 use grid_core::library::queue::{DownloadStatus, DownloadsSnapshot, StoreJob};
 use grid_core::library::registry::{InstalledGame, Registry};
+use grid_core::stores::amazon::install as amazon_install;
+use grid_core::stores::amazon::launch::launch_error;
+use grid_core::stores::amazon::list::LIBRARY_FILE;
 use grid_core::stores::amazon::meta::AmazonMeta;
 use grid_core::stores::amazon::{
     AmazonAccount, AmazonEndpoints, AmazonGame, AmazonInstallRequest, AmazonJobCtx,
     AmazonLoginStart, AmazonService, AmazonUpdate, AMAZON_ASSOC_HANDLE, AMAZON_CODE_PARAM,
-    AMAZON_SIGNIN_PATH,
+    AMAZON_SIGNIN_PATH, NILE_SYSTEM_TOO_OLD,
 };
 use grid_core::stores::tools::{self, StoreTool};
 use grid_core::stores::{GameKey, GameSource, StoreError, StoreKind, SyncMode};
@@ -78,6 +81,10 @@ pub trait AmazonApi: Send + Sync {
         start: AmazonLoginStart,
         code: SecretString,
     ) -> BoxFut<'_, Result<AmazonAccount, StoreError>>;
+    /// Whether nile has a saved login (`current_user.json`; no run).
+    /// `start_login` deletes it first, so a cancelled "Sign in again"
+    /// leaves none.
+    fn has_login(&self) -> bool;
     /// `auth --status` (local only).
     fn saved_account(&self) -> BoxFut<'_, Result<Option<AmazonAccount>, StoreError>>;
     /// `library sync`, then nile's `library.json`.
@@ -136,6 +143,9 @@ impl AmazonApi for RealAmazon {
     ) -> BoxFut<'_, Result<AmazonAccount, StoreError>> {
         Box::pin(self.service.complete_login(start, code))
     }
+    fn has_login(&self) -> bool {
+        self.service.has_login()
+    }
     fn saved_account(&self) -> BoxFut<'_, Result<Option<AmazonAccount>, StoreError>> {
         Box::pin(self.service.saved_account())
     }
@@ -146,7 +156,7 @@ impl AmazonApi for RealAmazon {
         self.service.owned_local()
     }
     fn owned_local_at(&self) -> i64 {
-        std::fs::metadata(self.service.config_dir().join("library.json"))
+        std::fs::metadata(self.service.config_dir().join(LIBRARY_FILE))
             .and_then(|meta| meta.modified())
             .ok()
             .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
@@ -415,8 +425,13 @@ impl AmazonStore {
                     }
                     true
                 }
+                // Connected in GRID's config, but nile has no login: a
+                // "Sign in again" was cancelled after nile's saved login
+                // went (`start_login` deletes it first). That is the
+                // expired state: installed games still launch, and Sign
+                // in again brings the login back.
                 Ok(None) => {
-                    state.connection = StoreConnection::NotConnected;
+                    state.connection = StoreConnection::Expired;
                     false
                 }
                 Err(e) => {
@@ -425,8 +440,8 @@ impl AmazonStore {
                 }
             }
         };
-        if let Ok(None) = result {
-            self.write_amazon_config(|amazon| amazon.connected = false);
+        if let Err(e) = &result {
+            self.note_system_too_old(e);
         }
         self.changed();
         if refresh && self.tool_ready() {
@@ -515,16 +530,49 @@ impl AmazonStore {
                 _ => StoreError::ToolMissing(TOOL_NAME).to_string(),
             });
         }
-        match self.api.start_login().await {
+        let result = self.api.start_login().await;
+        // nile's saved login is gone now (it refuses a new sign-in while
+        // one is saved): a connected store shows as expired until the
+        // sign-in finishes, and stays so when it is cancelled.
+        self.mark_expired_without_login();
+        match result {
             Ok(start) => {
                 *self.login.lock().unwrap() = Some(start);
                 Ok(self.login_spec())
             }
             Err(error) => {
                 self.state.lock().unwrap().login = LoginPhase::Idle;
+                self.note_system_too_old(&error);
                 Err(error.to_string())
             }
         }
+    }
+
+    /// Connected in GRID's config while nile has no saved login: the
+    /// expired state ([`Self::check_login`]).
+    fn mark_expired_without_login(&self) {
+        if !self.amazon_config().connected || self.api.has_login() {
+            return;
+        }
+        let changed = {
+            let mut state = self.state.lock().unwrap();
+            let changed = state.connection != StoreConnection::Expired;
+            state.connection = StoreConnection::Expired;
+            changed
+        };
+        if changed {
+            self.changed();
+        }
+    }
+
+    /// nile can't run on this computer (its glibc floor): the tool shows
+    /// as failed with grid-core's words, in Settings and the store panel.
+    fn note_system_too_old(&self, error: &StoreError) {
+        if !matches!(error, StoreError::Refused(text) if text == NILE_SYSTEM_TOO_OLD) {
+            return;
+        }
+        self.state.lock().unwrap().tool = ToolPhase::Failed(NILE_SYSTEM_TOO_OLD.to_string());
+        self.changed();
     }
 
     /// The window could not open.
@@ -755,9 +803,12 @@ impl AmazonStore {
                 self.notify(notice::login_expired());
             }
             Err(error) => {
-                let mut state = self.state.lock().unwrap();
-                state.owned = OwnedState::Error;
-                state.owned_error = error.to_string();
+                {
+                    let mut state = self.state.lock().unwrap();
+                    state.owned = OwnedState::Error;
+                    state.owned_error = error.to_string();
+                }
+                self.note_system_too_old(&error);
             }
         }
         self.changed();
@@ -813,12 +864,13 @@ impl AmazonStore {
         if self.connection() == StoreConnection::NotConnected || !self.api.tool_installed() {
             return Ok(None);
         }
-        self.api.launch_prep(row).await.map(Some).map_err(|e| {
-            LaunchError::Validation(format!(
-                "Couldn\u{2019}t start {} through {TOOL_NAME}: {e}",
-                row.title
-            ))
-        })
+        match self.api.launch_prep(row).await {
+            Ok(prep) => Ok(Some(prep)),
+            Err(e) => {
+                self.note_system_too_old(&e);
+                Err(launch_error(&row.title, &e))
+            }
+        }
     }
 
     // --- Downloads ------------------------------------------------------------------
@@ -919,6 +971,7 @@ impl AmazonStore {
     /// The `StoreError` a command returns, with the login state kept in
     /// step: an expired login flips the card to Login expired.
     pub fn store_error(&self, error: StoreError) -> String {
+        self.note_system_too_old(&error);
         if matches!(error, StoreError::LoginExpired) {
             let changed = {
                 let mut state = self.state.lock().unwrap();
@@ -993,7 +1046,8 @@ impl AmazonStore {
             .map(|config| config.default_compat_tool)
             .unwrap_or_default();
         let base = self.install_base_dir();
-        tokio::task::spawn_blocking(move || install_options_ipc(size, &title, &base, &compat))
+        let id = product_id.to_string();
+        tokio::task::spawn_blocking(move || install_options_ipc(size, &title, &id, &base, &compat))
             .await
             .map_err(|e| e.to_string())
     }
@@ -1021,7 +1075,7 @@ impl AmazonStore {
             if base.is_empty() {
                 return Err("Choose a library folder in Settings › Library first.".to_string());
             }
-            game_folder(&base, &title)
+            game_folder(&base, &title, &product_id)
         } else {
             PathBuf::from(request.install_dir.trim())
         };
@@ -1038,9 +1092,10 @@ impl AmazonStore {
 }
 
 /// A game's own folder under the store's install folder:
-/// `<base>/<title, made safe>`.
-fn game_folder(base: &str, title: &str) -> PathBuf {
-    Path::new(base).join(grid_core::library::paths::sanitize_component(title, "game"))
+/// `<base>/<the folder name nile would give the title>` (grid-core's
+/// `install::folder_name`; `install --path` uses it as it is).
+fn game_folder(base: &str, title: &str, product_id: &str) -> PathBuf {
+    Path::new(base).join(amazon_install::folder_name(title, product_id))
 }
 
 impl StoreBackend for AmazonStore {
@@ -1477,13 +1532,16 @@ fn assemble_games(
 pub fn install_options_ipc(
     size: u64,
     title: &str,
+    product_id: &str,
     base_dir: &str,
     compat_tool: &str,
 ) -> StoreInstallOptions {
     let install_dir = if base_dir.is_empty() {
         String::new()
     } else {
-        game_folder(base_dir, title).to_string_lossy().into_owned()
+        game_folder(base_dir, title, product_id)
+            .to_string_lossy()
+            .into_owned()
     };
     let probe = (!install_dir.is_empty()).then(|| PathBuf::from(&install_dir));
     let free_bytes = probe
@@ -1675,12 +1733,15 @@ mod tests {
         prep_calls: Mutex<u32>,
         disconnects: Mutex<u32>,
         disconnect_error: Mutex<Option<io::ErrorKind>>,
+        /// nile's saved login (`current_user.json`).
+        saved: Mutex<bool>,
     }
 
     fn err_of(text: &str) -> StoreError {
         match text {
             "expired" => StoreError::LoginExpired,
             "network" => StoreError::Network("Amazon Games".into()),
+            "too_old" => StoreError::Refused(NILE_SYSTEM_TOO_OLD.to_string()),
             other => StoreError::ToolFailed {
                 tool: "nile",
                 reason: other.to_string(),
@@ -1720,6 +1781,8 @@ mod tests {
             *self.starts.lock().unwrap() += 1;
             let n = *self.starts.lock().unwrap();
             let result = self.start.lock().unwrap().take().unwrap_or(Ok(()));
+            // nile's saved login goes first, as grid-core's `start_login`.
+            *self.saved.lock().unwrap() = false;
             Box::pin(async move {
                 result.map_err(err_of)?;
                 Ok(AmazonLoginStart::new(
@@ -1744,7 +1807,13 @@ mod tests {
                 .unwrap()
                 .take()
                 .unwrap_or(Err("no script"));
+            if result.is_ok() {
+                *self.saved.lock().unwrap() = true;
+            }
             Box::pin(async move { result.map_err(err_of) })
+        }
+        fn has_login(&self) -> bool {
+            *self.saved.lock().unwrap()
         }
         fn saved_account(&self) -> BoxFut<'_, Result<Option<AmazonAccount>, StoreError>> {
             let result = self.account.lock().unwrap().take().unwrap_or(Ok(None));
@@ -2152,15 +2221,59 @@ mod tests {
             StoreError::LoginExpired.to_string()
         );
 
-        // Network trouble keeps the state; no saved login signs out.
+        // Network trouble keeps the state; connected with no saved login
+        // (a cancelled "Sign in again") is the expired state.
         h.service.state.lock().unwrap().connection = StoreConnection::Connected;
         *h.fake.account.lock().unwrap() = Some(Err("network"));
         rt().block_on(h.service.check_login());
         assert_eq!(h.service.status().connection, StoreConnection::Connected);
         *h.fake.account.lock().unwrap() = Some(Ok(None));
         rt().block_on(h.service.check_login());
+        assert_eq!(h.service.status().connection, StoreConnection::Expired);
+        assert!(h.config().connected);
+    }
+
+    #[test]
+    fn a_cancelled_sign_in_again_leaves_the_expired_state() {
+        let h = harness();
+        h.connect_config();
+        *h.fake.tool.lock().unwrap() = true;
+        *h.fake.saved.lock().unwrap() = true;
+        *h.fake.local.lock().unwrap() = three();
+        h.service.load();
+        assert_eq!(h.service.status().connection, StoreConnection::Connected);
+        // start_login deletes nile's saved login before it prints the URL.
+        rt().block_on(h.service.prepare_sign_in()).unwrap();
+        assert_eq!(h.service.status().connection, StoreConnection::Expired);
+        h.service.login_cancelled();
+        let status = h.service.status();
+        assert_eq!(status.connection, StoreConnection::Expired);
+        assert_eq!(status.username, "sam.plays");
+        assert!(status.in_rail);
+        assert!(h.config().connected);
+        // A first Connect that is cancelled stays not connected.
+        let h = harness();
+        *h.fake.tool.lock().unwrap() = true;
+        rt().block_on(h.service.prepare_sign_in()).unwrap();
+        h.service.login_cancelled();
         assert_eq!(h.service.status().connection, StoreConnection::NotConnected);
-        assert!(!h.config().connected);
+    }
+
+    #[test]
+    fn nile_too_old_for_this_system_shows_as_the_tool_error() {
+        let h = harness();
+        *h.fake.tool.lock().unwrap() = true;
+        *h.fake.start.lock().unwrap() = Some(Err("too_old"));
+        let error = rt().block_on(h.service.prepare_sign_in()).unwrap_err();
+        assert_eq!(error, NILE_SYSTEM_TOO_OLD);
+        let status = h.service.status();
+        assert_eq!(status.tool.state, ToolState::Failed);
+        assert_eq!(status.tool.error, NILE_SYSTEM_TOO_OLD);
+        h.service.state.lock().unwrap().connection = StoreConnection::Connected;
+        assert_eq!(
+            h.service.ensure_can_install().unwrap_err(),
+            NILE_SYSTEM_TOO_OLD
+        );
     }
 
     #[test]
@@ -2292,10 +2405,12 @@ mod tests {
             .unwrap();
         assert_eq!(kettle.download_bytes, 2_200_000);
         assert_eq!(kettle.disk_bytes, 2_200_000);
-        let ipc = install_options_ipc(5, "Kettle: Drum?", "/games/Amazon Games", "");
-        assert!(ipc.install_dir.starts_with("/games/Amazon Games/"));
-        assert!(!ipc.install_dir.contains('?'));
-        assert_eq!(install_options_ipc(5, "K", "", "").install_dir, "");
+        let ipc = install_options_ipc(5, "Kettle: Drum?", KETTLE, "/games/Amazon Games", "");
+        assert_eq!(ipc.install_dir, "/games/Amazon Games/Kettle Drum");
+        // Nothing left of the title: nile's folder is the product id.
+        let ipc = install_options_ipc(5, "???", KETTLE, "/games/Amazon Games", "");
+        assert_eq!(ipc.install_dir, format!("/games/Amazon Games/{KETTLE}"));
+        assert_eq!(install_options_ipc(5, "K", KETTLE, "", "").install_dir, "");
     }
 
     fn row(id: &str, title: &str, version: &str) -> InstalledGame {

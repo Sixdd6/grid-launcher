@@ -280,8 +280,8 @@ export function baseAmazonStatus(): StoreStatus {
   };
 }
 
-/** The tool error nile gives on a computer older than its glibc floor (plan, spike 1). */
-export const FAKE_NILE_GLIBC_ERROR = 'nile needs a newer system (glibc 2.35 or later)';
+/** The tool error on a computer older than nile's glibc floor: grid-core's `NILE_SYSTEM_TOO_OLD`, word for word (plan, spike 1). */
+export const FAKE_NILE_GLIBC_ERROR = "nile can't run on this computer: it needs a newer Linux system (glibc 2.35 or later).";
 
 /** The prototype's dashed "Prototype" select, as named scenarios. */
 export type FakeScenario =
