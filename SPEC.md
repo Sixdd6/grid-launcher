@@ -1246,7 +1246,8 @@ User decisions (2026-11-13):
   Steam.
 - **Tools.** GRID uses Heroic's CLI tools as they are: legendary (Epic), heroic-gogdl
   (GOG) and nile (Amazon). They are GRID-managed downloads with a pinned version and
-  SHA-256 per OS and architecture, installed the first time their store is connected.
+  SHA-256 per OS and architecture, installed the first time their store is connected, before the sign-in (each tool
+  redeems its store's login code), so Connect never fails for a missing tool.
   Settings shows each tool's license and a source link.
 - **Tokens.** The tools keep their own token files under `<data_dir>/stores/<tool>/`
   (folder 0700, files 0600). Disconnect deletes them. This is a narrow, documented

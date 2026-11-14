@@ -539,6 +539,30 @@ impl GogStore {
         }
     }
 
+    /// Before the login window opens: gogdl redeems the login code
+    /// (`gogdl auth --code`), so it is installed first when it is missing,
+    /// as Epic and Amazon install their tools before the code. `Err` (and
+    /// no window) when gogdl can't be installed or can't run here.
+    pub async fn prepare_sign_in(self: &Arc<Self>) -> Result<LoginSpec, String> {
+        self.begin_login()?;
+        if !self.api.tool_installed() {
+            self.install_tool_then(false, true).await;
+        } else {
+            let phase = self.tool_phase_now();
+            self.state.lock().unwrap().tool = phase;
+        }
+        let tool = self.state.lock().unwrap().tool.clone();
+        if tool != ToolPhase::Installed {
+            self.state.lock().unwrap().login = LoginPhase::Idle;
+            self.changed();
+            return Err(match tool {
+                ToolPhase::Failed(problem) => problem,
+                _ => StoreError::ToolMissing(TOOL_NAME).to_string(),
+            });
+        }
+        Ok(self.login_spec())
+    }
+
     /// The window could not open.
     pub fn login_window_failed(&self, error: &str) {
         self.state.lock().unwrap().login = LoginPhase::Idle;
@@ -1263,6 +1287,9 @@ impl StoreBackend for GogStore {
     }
     fn begin_login(&self) -> Result<(), String> {
         GogStore::begin_login(self)
+    }
+    fn prepare_login(self: Arc<Self>) -> BoxFut<'static, Result<LoginSpec, String>> {
+        Box::pin(async move { GogStore::prepare_sign_in(&self).await })
     }
     fn login_window_failed(&self, error: &str) {
         GogStore::login_window_failed(self, error)
@@ -2439,6 +2466,38 @@ mod tests {
         let h = harness();
         h.service.state.lock().unwrap().login = LoginPhase::Completing;
         assert!(h.service.begin_login().is_err());
+    }
+
+    #[test]
+    fn connect_installs_gogdl_before_the_login_window() {
+        let h = harness();
+        assert!(!h.service.api.tool_installed());
+        let spec = rt().block_on(h.service.prepare_sign_in());
+        assert!(spec.is_ok(), "{:?}", spec.err());
+        assert!(h.service.api.tool_installed(), "gogdl installed first");
+        assert_eq!(h.service.status().tool.state, ToolState::Installed);
+        assert_eq!(h.service.login_phase(), LoginPhase::Open);
+    }
+
+    #[test]
+    fn connect_opens_no_window_when_gogdl_cannot_install() {
+        let h = harness();
+        *h.fake.tool_result.lock().unwrap() = Some(Err(
+            "the download didn't match its checksum, so GRID deleted it.".into(),
+        ));
+        let error = rt().block_on(h.service.prepare_sign_in()).unwrap_err();
+        assert!(error.contains("checksum"), "{error}");
+        assert_eq!(h.service.login_phase(), LoginPhase::Idle);
+        assert_eq!(h.service.status().tool.state, ToolState::Failed);
+
+        // Installed but unable to run (no Python 3.10): no window either.
+        let h = harness();
+        *h.fake.tool.lock().unwrap() = true;
+        *h.fake.problem.lock().unwrap() =
+            Some("gogdl needs Python 3.10 or newer, and python3 was not found.".into());
+        let error = rt().block_on(h.service.prepare_sign_in()).unwrap_err();
+        assert!(error.contains("Python 3.10"), "{error}");
+        assert_eq!(h.service.login_phase(), LoginPhase::Idle);
     }
 
     #[test]
