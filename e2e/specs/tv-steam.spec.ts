@@ -4,7 +4,7 @@ import { connectPad, focused, hints, key, waitFocused, XBOX_PAD } from '../helpe
 import { captureErrors, pageErrors, testId, text, typeKeys, waitGone, waitOskClosed, waitText } from '../helpers/tvDetails.js';
 import { byK, confirmDialog, dlLines, focusOn, listOptions, pageRow, tap, tapK, waitNotice } from '../helpers/tvBackups.js';
 import { MAIN_WINDOW } from '../helpers/gogLogin.js';
-import { STEAM, waitArgv } from '../helpers/steam.js';
+import { setMarker, STEAM, waitArgv } from '../helpers/steam.js';
 import { ensureSteamKey } from '../helpers/steamSetup.js';
 
 /**
@@ -113,6 +113,11 @@ describe('tv-steam: Steam in TV mode', () => {
     // While Steam installs, X does nothing on the cover.
     await browser.waitUntil(async () => !(await hints()).some((h) => h.startsWith('X ')), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'X stayed on a cover Steam installs' });
     expect(await $(`${byK(k)} [data-testid="tv-store-cover-bar"]`).getAttribute('class')).toContain('managed');
+    // Steam's download has started: the cover's percentage, never "Waiting".
+    await browser.waitUntil(async () => /^\d+%$/.test(((await $(`${byK(k)} [data-testid="tv-store-cover-job"]`).getText().catch(() => '')) as string).trim()), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the cover never showed the install’s percentage',
+    });
     await key('Enter');
     await $(testId('tv-store-details')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await waitText('tv-det-title', INSTALL);
@@ -153,6 +158,107 @@ describe('tv-steam: Steam in TV mode', () => {
       timeout: 30_000,
       timeoutMsg: `${INSTALL} never read Installed by Steam`,
     });
+  });
+
+  it('a cancelled Steam window: the row waits for Steam; A "Stop waiting" lists Stop waiting and Open; focus stays on the ended row', async () => {
+    // The user closes Steam's install window: the fake writes no manifest
+    // (TVStores README "Steam: waiting for Steam to start", 2026-11-14).
+    const WAIT = 'Signal Lost';
+    setMarker('.fake-install-cancel');
+    try {
+      await tap(testId('tv-tab-library'));
+      await tap(testId('tv-lib-rail-store-steam-available'));
+      const k = await coverK(WAIT);
+      await focusOn(byK(k));
+      await browser.waitUntil(async () => (await hints()).includes('X Install in Steam'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'X Install in Steam never showed' });
+      await key('x');
+      await waitNotice(`Steam opened to install ${WAIT} | Choose the library folder there; GRID shows the progress. Steam’s window opens over TV mode.`, 10_000);
+      await browser.waitUntil(async () => ((await $(`${byK(k)} [data-testid="tv-store-cover-job"]`).getText().catch(() => '')) as string).trim() === 'Waiting', {
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg: 'the cover never read Waiting',
+      });
+      await tap(testId('tv-tab-downloads'));
+      await browser.waitUntil(async () => (await dlLines()).some((r) => r.title.startsWith(WAIT)), { timeout: TRANSITION_TIMEOUT, timeoutMsg: `${WAIT} has no Downloads row` });
+      const rowK = (await browser.execute(
+        (t: string) => Array.from(document.querySelectorAll('[data-testid^="tv-dl-row-"]')).find((r) => (r.textContent ?? '').includes(t))?.getAttribute('data-k') ?? null,
+        WAIT,
+      )) as string;
+      expect((await dlLines()).find((r) => r.title.startsWith(WAIT))!.line).toBe('Waiting for Steam to start the download');
+      // No bar and no sparkline while it waits.
+      expect(await $(`${byK(rowK)} .pbar`).isExisting()).toBe(false);
+      expect(await $(`${byK(rowK)} .spark`).isExisting()).toBe(false);
+      await focusOn(byK(rowK));
+      await browser.waitUntil(async () => (await hints()).includes('A Stop waiting'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'A never read Stop waiting' });
+      await key('Enter');
+      await $(testId('tv-list')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+      expect(await listOptions()).toEqual({ title: WAIT, options: ['Stop waiting', `Open ${WAIT}`] });
+      expect(await $(testId('tv-list')).$('.sub').getText()).toBe(
+        'Steam · Waiting for Steam to start the download. If you cancelled it in Steam, stop waiting. If Steam installs it later, GRID still adds it.',
+      );
+      await tap(testId('tv-dl-act-stop_waiting'));
+      await waitNotice(`Stopped waiting for Steam | If Steam installs ${WAIT} later, GRID adds it.`);
+      await browser.waitUntil(async () => (await dlLines()).some((r) => r.title.startsWith(WAIT) && r.line === 'Not installed · you stopped waiting for Steam'), {
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg: `${WAIT}’s row never ended "Not installed"`,
+      });
+      // Focus stays on the row, now in Completed, with A: Dismiss.
+      expect(await $(`[data-testid="tv-dl-seg-completed"] [data-k="${rowK}"]`).isExisting()).toBe(true);
+      await waitFocused(rowK, 'focus left the ended row');
+      await browser.waitUntil(async () => (await hints()).includes('A Dismiss'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'A never read Dismiss' });
+      expect(await $(`${byK(rowK)} .s.err`).isExisting()).toBe(false);
+      await key('Enter');
+      await $(testId('tv-list')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+      expect((await listOptions()).options).toEqual(['Dismiss', `Open ${WAIT}`]);
+      expect(await $(testId('tv-list')).$('.sub').getText()).toBe('Steam');
+      await key('Escape');
+      await waitGone('tv-list');
+    } finally {
+      setMarker('.fake-install-cancel', false);
+    }
+  });
+
+  it('the game page while Steam waits: primary Stop waiting for Steam and the box; after it, focus lands on Install in Steam', async () => {
+    const WAIT = 'Quiet Comet';
+    setMarker('.fake-install-cancel');
+    try {
+      await tap(testId('tv-tab-library'));
+      await tap(testId('tv-lib-rail-store-steam-available'));
+      const k = await coverK(WAIT);
+      await focusOn(byK(k));
+      await browser.waitUntil(async () => (await hints()).includes('X Install in Steam'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'X Install in Steam never showed' });
+      await key('x');
+      await waitNotice(`Steam opened to install ${WAIT} | Choose the library folder there; GRID shows the progress. Steam’s window opens over TV mode.`, 10_000);
+      await key('Enter');
+      await $(testId('tv-store-details')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+      await waitText('tv-det-title', WAIT);
+      await browser.waitUntil(async () => (await buttons())[0] === 'Stop waiting for Steam', {
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg: 'the first button never read Stop waiting for Steam',
+      });
+      expect(await buttons()).toEqual(['Stop waiting for Steam']);
+      expect(await text('tv-store-managed')).toBe(
+        'Waiting for Steam to start the download. Steam’s install window is open. If you cancelled it there, stop waiting.',
+      );
+      expect(await $('[data-testid="tv-store-managed"] .pbar').isExisting()).toBe(false);
+      expect(((await $('[data-testid="tv-store-det-cover"] [data-testid="tv-store-cover-job"]').getText()) as string).trim()).toBe('Waiting');
+      await tap(testId('tv-store-det-stop_waiting'));
+      await waitNotice(`Stopped waiting for Steam | If Steam installs ${WAIT} later, GRID adds it.`);
+      await browser.waitUntil(async () => (await buttons())[0] === 'Install in Steam', {
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg: 'Install in Steam never came back',
+      });
+      await waitFocused('sd-install', 'focus never landed on Install in Steam');
+      expect(await $(testId('tv-store-managed')).isExisting()).toBe(false);
+      await key('Escape');
+      await waitGone('tv-store-details');
+      await tap(testId('tv-tab-downloads'));
+      await browser.waitUntil(async () => (await dlLines()).some((r) => r.title.startsWith(WAIT) && r.line === 'Not installed · you stopped waiting for Steam'), {
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg: `${WAIT}’s row never ended "Not installed"`,
+      });
+    } finally {
+      setMarker('.fake-install-cancel', false);
+    }
   });
 
   it('an installed game’s page: Play, Verify in Steam, Uninstall in Steam…; no Game settings or Cloud saves', async () => {

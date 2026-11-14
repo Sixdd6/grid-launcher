@@ -217,7 +217,7 @@ describe('steam-library', () => {
 
   it('a Steam install that goes away ends Cancelled, with Dismiss only', async () => {
     // Cancelled in Steam halfway (the manifest goes). `.fake-install-cancel`
-    // (no manifest ever) would wait out the 15-minute start timeout.
+    // (no manifest ever) is the waiting row, ended with Stop waiting below.
     setMarker('.fake-install-abort');
     try {
       await openSteam('available');
@@ -238,6 +238,89 @@ describe('steam-library', () => {
       await expect(row.$('[data-testid^="download-action-dismiss-"]')).toExist();
     } finally {
       setMarker('.fake-install-abort', false);
+    }
+  });
+
+  it('a cancelled Steam install window: the row waits for Steam, and Stop waiting ends it muted with Dismiss', async () => {
+    // The user closes Steam's install window: the fake writes no manifest.
+    // GameStores README "Steam: waiting for Steam to start" (2026-11-14).
+    const WAIT = 'Signal Lost';
+    setMarker('.fake-install-cancel');
+    try {
+      await openSteam('available');
+      const { badge } = await steamCard(WAIT);
+      await $(testId(`library-store-card-${badge}`)).moveTo();
+      await $(testId(`card-primary-${badge}`)).click();
+      await waitForToast(`Steam opened to install ${WAIT}. Choose the library folder there; GRID shows the progress.`);
+      // The cover: WAITING over an empty bar, and a disabled "Waiting for Steam".
+      await browser.waitUntil(async () => (await coverTags(badge)).includes('WAITING'), {
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg: 'the cover never showed WAITING',
+      });
+      await $(testId(`library-store-card-${badge}`)).moveTo();
+      const primary = $(testId(`card-primary-${badge}`));
+      expect(String(await primary.getProperty('textContent')).trim()).toBe('Waiting for Steam');
+      await expect(primary).toBeDisabled();
+      expect(await primary.getAttribute('title')).toBe('Waiting for Steam to start the download');
+      // Details: the waiting box with no bar, and a secondary Stop waiting.
+      await $(testId(`library-store-card-${badge}`)).click();
+      await $(testId('store-details')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+      const box = $(testId('store-details-managed'));
+      await expect(box).toHaveText(/^Waiting for Steam to start the download\s*Steam’s install window is open\. If you cancelled it there, stop waiting\.$/);
+      await expect(box.$('.mbar')).not.toExist();
+      await expect($(testId('store-details-stop-waiting'))).toHaveText('Stop waiting');
+      expect(await $(testId('store-details-stop-waiting')).getAttribute('class')).toContain('secondary');
+      await expect($(testId('store-details-cancel'))).not.toExist();
+      await closeWithEscape('store-details');
+      // Downloads: the waiting line, no bar or sparkline, and the small Stop waiting.
+      await openDownloads();
+      await waitForDownloadLine(/^Waiting for Steam to start the download$/);
+      const row = (await downloadRow(WAIT))!;
+      await expect(row.$('.bar-track')).not.toExist();
+      await expect(row.$('[data-testid^="download-graph-"]')).not.toExist();
+      await expect(row.$('[data-testid^="download-action-cancel-"]')).not.toExist();
+      const stop = await row.$('[data-testid^="download-action-stop-waiting-"]');
+      await expect(stop).toHaveText('Stop waiting');
+      expect(await stop.getAttribute('title')).toBe('Cancelled it in Steam? GRID stops watching for this install.');
+      await stop.click();
+      await waitForToast(`Stopped waiting for Steam. If Steam installs ${WAIT} later, GRID adds it.`);
+      await waitForDownloadLine(/^Not installed · you stopped waiting for Steam$/);
+      const ended = (await downloadRow(WAIT))!;
+      await expect(ended.$('[data-testid^="download-action-dismiss-"]')).toExist();
+      await expect(ended.$('[data-testid^="download-action-retry-"]')).not.toExist();
+      await expect(ended.$('[data-testid^="download-action-stop-waiting-"]')).not.toExist();
+      expect(await ended.$('[data-testid^="download-detail-"]').getAttribute('class')).not.toContain('err');
+      // The game is still available, with Install in Steam to try again.
+      await openSteam('available');
+      await steamCard(WAIT);
+
+      // Stop waiting from Details: the row ends the same way.
+      const OTHER = 'Quiet Comet';
+      const other = await steamCard(OTHER);
+      await $(testId(`library-store-card-${other.badge}`)).moveTo();
+      await $(testId(`card-primary-${other.badge}`)).click();
+      await waitForToast(`Steam opened to install ${OTHER}. Choose the library folder there; GRID shows the progress.`);
+      await browser.waitUntil(async () => (await coverTags(other.badge)).includes('WAITING'), {
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg: `${OTHER}’s cover never showed WAITING`,
+      });
+      await $(testId(`library-store-card-${other.badge}`)).click();
+      await $(testId('store-details')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+      await $(testId('store-details-stop-waiting')).click();
+      await waitForToast(`Stopped waiting for Steam. If Steam installs ${OTHER} later, GRID adds it.`);
+      await expect($(testId('store-details-install'))).toHaveText('Install in Steam');
+      await expect($(testId('store-details-managed'))).not.toExist();
+      await closeWithEscape('store-details');
+      await openDownloads();
+      await browser.waitUntil(
+        async () => {
+          const r = await downloadRow(OTHER);
+          return r !== null && /Not installed · you stopped waiting for Steam/.test(await r.getText());
+        },
+        { timeout: TRANSITION_TIMEOUT, timeoutMsg: `${OTHER}’s row never ended "Not installed"` },
+      );
+    } finally {
+      setMarker('.fake-install-cancel', false);
     }
   });
 
