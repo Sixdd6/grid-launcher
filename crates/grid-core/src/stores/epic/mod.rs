@@ -21,7 +21,9 @@
 //! only and travels as a redacted launch argument.
 
 pub mod auth;
+pub mod cloud;
 pub mod install;
+pub mod launch;
 pub mod list;
 pub mod meta;
 pub mod row;
@@ -567,13 +569,12 @@ impl EpicService {
         row: &InstalledGame,
         offline: bool,
     ) -> Result<StoreLaunchPrep, StoreError> {
-        let _ = (row, offline);
-        Err(StoreError::not_implemented())
+        launch::launch_prep(self, row, offline).await
     }
 
+    /// The game's cloud save state, without syncing (`list-saves`).
     pub async fn cloud_state(&self, row: &InstalledGame) -> Result<CloudState, StoreError> {
-        let _ = row;
-        Err(StoreError::not_implemented())
+        cloud::cloud_state(self, row).await
     }
 
     pub async fn cloud_sync(
@@ -582,8 +583,7 @@ impl EpicService {
         row: &InstalledGame,
         mode: SyncMode,
     ) -> Result<CloudState, StoreError> {
-        let _ = (registry, row, mode);
-        Err(StoreError::not_implemented())
+        cloud::cloud_sync(self, registry, row, mode).await
     }
 }
 

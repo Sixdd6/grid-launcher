@@ -888,6 +888,67 @@ frontend reads `DownloadEntry.detail` (`Verified · <detail>`). One line in
 `library/mod.rs` (store finalize: a completed `StoreOp::Repair` message goes to
 `detail`) closes this. GOG's repair would also use it.
 
+## Contract deviations — package B
+
+Package B (launch and cloud saves) lives in `stores/epic/{launch,cloud}.rs` and
+`tests/epic_cloud.rs`. No frozen file changed. `launch/{mod,native}.rs` needed nothing
+beyond Step 0: the hook, the redacted positions and the `<redacted>` early-exit argv were
+already there, and the session record holds no argv.
+
+- **`epic/mod.rs`**, kept to what merges trivially with A: `pub mod cloud; pub mod
+  launch;` and the bodies of `launch_prep`, `cloud_state` and `cloud_sync` (one-line
+  delegations).
+- **Its own legendary helper.** `launch.rs` has `legendary_command`, `run` and
+  `tool_error`. They hold the env (`LEGENDARY_CONFIG_PATH`, `XDG_CACHE_HOME=<tool>/cache`,
+  `BROWSER=true`), `LineParser::Legendary` and `private_tree`. `cloud.rs` shares them.
+  **Integration:** swap them for A's helper, and its test override, when both are merged.
+- **Test hook.** `epic::launch::set_tool_override_for_tests(data_dir, program)` is
+  `#[doc(hidden)]` and keyed by data folder. The integration test needs it because it
+  cannot reach a `cfg(test)` builder, and nothing in the app sets it. If A adds a public
+  override, use A's and delete this one.
+- **`launch_ticket_error(&StoreError) -> LaunchError`** gives GRID's words, "Couldn't get
+  a launch ticket from Epic Games: …":
+  - login expired: "your Epic Games login expired. Sign in again.";
+  - network: "Epic Games didn't answer. Check your connection and try again.";
+  - anything else: the error's own text.
+
+  Package C's `StoreLaunchHook` should map `launch_prep` errors through it.
+- **Launch prep details.**
+  - legendary puts the installed launch parameters first in `game_parameters`, but the row
+    already carries them. GRID drops that leading copy. It compares against legendary's
+    `installed.json` value, or the row's when that is missing, so a parameter the user
+    edited is not doubled.
+  - The executable and working folder are legendary's. They are left empty, so the row's
+    are used, when the user pinned an executable or legendary's path climbs out of the
+    game folder.
+  - legendary's `environment` is passed on without `WINEPREFIX`, `CX_BOTTLE`,
+    `STEAM_COMPAT_DATA_PATH` and `PROTONPATH`.
+  - The offline retry happens only on `StoreError::Network`. That comes from the
+    `Network` signal, which wins over the `LoginFailed` line that follows it.
+- **Save path.**
+  - `resolve_save_path(folder, install_dir, epic_id, prefix, host, prefix_user)` takes
+    `SaveHost::{Windows{profile, local_appdata, roaming, documents}, Wine}`.
+  - Besides the plan's tokens it accepts `{UserProfile}` (legendary has it).
+  - `..` may climb, because Epic writes `{AppData}/../LocalLow/…`, but never out of the
+    user folder (or the game folder for `{InstallDir}`).
+  - `{EpicID}` is the `account_id` from legendary's `user.json`. Only that field is read.
+  - The Wine user comes from `save_prefix_user`:
+    - an existing prefix says which user it has (`cloud::native::prefix_user`);
+    - a prefix not made yet gets `steamuser` only under Proton (umu);
+    - under plain Wine it stays unknown, so the path is `None`.
+  - If GRID can't resolve the path, it uses `meta.save_path` from the last sync.
+  - The row's compat kind uses the config's default only when the row names no tool
+    (`Config::default_path()`).
+- **The prefix-missing rule**, as implemented: with no save path, an Auto sync never
+  downloads and returns the current state. An explicit "use the cloud save" is refused
+  with "Start the game once so its Windows folder exists; then GRID can download its cloud
+  saves."
+- **Sync time.** `last_sync` is the later of now (after the run) and the newest local file,
+  so the save just written never counts as a later change. A conflict's `cloud_files` and
+  `cloud_bytes` are `None`.
+- Local save folder copies go to `<data>/stores/save-backups/epic/<app>/<epoch-ms>/`.
+  The newest five are kept.
+
 ## E2E plan
 
 - **Mock Epic** (`mock-romm/mock-epic.mjs`, one base for login and art).
