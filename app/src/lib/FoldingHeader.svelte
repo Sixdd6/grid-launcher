@@ -42,8 +42,14 @@
     return () => sc.removeEventListener('scroll', onScroll);
   });
 
+  // Through a `$derived`, so the reset follows the key's VALUE. Read straight
+  // from the prop, the effect also tracked whatever the caller's expression
+  // reads: Library passes `selected.key`, and `selected` is a new object on
+  // every `installed.list` refresh (a store Details refreshes it as it
+  // opens), which sent the grid back to the top under the popup.
+  let key = $derived(resetKey);
   $effect(() => {
-    void resetKey;
+    void key;
     untrack(() => {
       if (scroller) scroller.scrollTop = 0;
       folded = false;
