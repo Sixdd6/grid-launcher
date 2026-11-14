@@ -272,8 +272,8 @@ pub fn run() {
     let install = registry
         .clone()
         .map(|registry| InstallService::new(registry, config_path.clone()));
-    // External game stores (GOG). Reads its config section and the owned
-    // cache now; the login check runs from `.setup()`.
+    // External game stores (GOG, Epic). Reads their config sections and the
+    // owned caches now; the login checks run from `.setup()`.
     let stores = stores_service::StoresService::real(config_path.clone());
     if let Ok(registry) = &registry {
         stores.set_registry(registry.clone());
@@ -731,13 +731,15 @@ pub fn run() {
                 }
                 if let Ok(launch) = &state.launch {
                     state.stores.install_session_finished_hook(launch);
+                    // Epic's launch ticket (`StoreLaunchHook`).
+                    state.stores.install_launch_hook(launch);
                 }
                 let stores = state.stores.clone();
                 let updates = state.updates.clone();
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     stores.check_login().await;
-                    updates.spawn_store_check(handle, stores);
+                    updates.spawn_store_check(handle, stores.gog.clone());
                 });
             }
             if let Ok(launch) = &state.launch {

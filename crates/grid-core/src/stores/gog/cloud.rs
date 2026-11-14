@@ -396,7 +396,7 @@ fn state_for(ctx: &Context, decision: Decision) -> CloudState {
             local_files: ctx.local.files,
             local_bytes: ctx.local.bytes,
             cloud_at: ctx.cloud.newest,
-            cloud_files: ctx.cloud.files,
+            cloud_files: Some(ctx.cloud.files),
             cloud_bytes: ctx.cloud.bytes,
         }),
         _ if ctx.meta.last_sync > 0 => CloudState::Synced {

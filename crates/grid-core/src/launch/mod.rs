@@ -47,7 +47,7 @@ use spawn::{
 };
 use template::{host_os, retroarch_core_argument_path, Placeholders};
 
-pub use native::redact_argv;
+pub use native::{redact_argv, StoreLaunchPrep};
 pub use platform_slugs::{set_platform_slugs, slug_for_platform};
 pub use selection::NO_EMULATOR;
 pub use sessions::{AliveCheck, GameSession, SessionsSnapshot};
@@ -105,6 +105,20 @@ type SessionFinishedHook = Arc<dyn Fn(GameSession) + Send + Sync>;
 /// game is spawned — see [`LaunchService::set_pre_launch_hook`].
 pub type PreLaunchHook = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
+/// A store's part in launching one of its games, installed once by the app
+/// layer ([`LaunchService::set_store_launch_hook`]). For a native store row,
+/// `prepare` runs before the command is built: `Ok(Some(prep))` feeds
+/// [`native::build_native_command`] (Epic: legendary's launch ticket, its
+/// exchange code a redacted argument); `Ok(None)` launches the row as it
+/// is (GOG, and every store without a hook of its own); `Err` stops the
+/// launch with that error.
+pub trait StoreLaunchHook: Send + Sync {
+    fn prepare<'a>(
+        &'a self,
+        game: &'a InstalledGame,
+    ) -> futures_util::future::BoxFuture<'a, Result<Option<StoreLaunchPrep>, LaunchError>>;
+}
+
 /// Owns the running-game sessions: resolves a launch, spawns the emulator,
 /// tracks the child, and reaps it when it exits.
 ///
@@ -128,6 +142,9 @@ pub struct LaunchService {
     /// grid-core's launch path holds. `None` in every grid-core test that
     /// does not opt in.
     pre_launch_hook: RwLock<Option<PreLaunchHook>>,
+    /// The store launch hook ([`StoreLaunchHook`]), installed once by the
+    /// app layer; `None` launches every store row from its columns alone.
+    store_launch_hook: RwLock<Option<Arc<dyn StoreLaunchHook>>>,
     next_id: AtomicU64,
     /// Guards [`Self::spawn_poll_loop`] so at most one loop ever runs.
     poll_started: AtomicBool,
@@ -179,6 +196,7 @@ impl LaunchService {
             notify: RwLock::new(None),
             session_finished_hooks: RwLock::new(Vec::new()),
             pre_launch_hook: RwLock::new(None),
+            store_launch_hook: RwLock::new(None),
             next_id: AtomicU64::new(1),
             poll_started: AtomicBool::new(false),
             poll_interval,
@@ -237,6 +255,12 @@ impl LaunchService {
     /// [`Self::run_pre_launch_hook`]).
     pub fn set_pre_launch_hook(&self, f: PreLaunchHook) {
         *self.pre_launch_hook.write().unwrap() = Some(f);
+    }
+
+    /// Installs the store launch hook ([`StoreLaunchHook`]). Called once by
+    /// the app layer; a second call replaces the first.
+    pub fn set_store_launch_hook(&self, hook: Arc<dyn StoreLaunchHook>) {
+        *self.store_launch_hook.write().unwrap() = Some(hook);
     }
 
     /// Runs the pre-launch hook to completion, if one is installed. It goes
@@ -314,75 +338,91 @@ impl LaunchService {
 
         let config = Config::load(&self.config_path)?;
 
-        let (emulator_name, argv, redact, working_dir, extra_env, pre_launch_sync) = if game
-            .is_native()
-        {
-            // Blank on a Windows host: no compat tool makes sense there.
-            // `build_native_command` applies the same gate on `default_compat_tool`
-            // itself (and blanks the tool entirely for a linux-platform row),
-            // so this is belt-and-suspenders, not load-bearing.
-            let default_compat_tool = if host_os().starts_with("win") {
-                ""
-            } else {
-                config.default_compat_tool.as_str()
-            };
-            let library = expand_home(&config.library_path);
-            // `umu-run` resolves through `umu::locate` (the system one, else
-            // GRID's managed copy); `used_umu` records which one this launch
-            // took. A plain block: the `Cell` must not live across an await.
-            let managed_umu = umu::managed_umu_run(&config);
-            let (native, used_umu) = {
-                let used_umu = Cell::new(None);
-                let which = |name: &str| {
-                    if name != umu::UMU_RUN {
-                        return which_on_path(name);
-                    }
-                    let found = umu::locate(&which_on_path, managed_umu.as_deref());
-                    used_umu.set(found.as_ref().map(|(_, source)| *source));
-                    found.map(|(path, _)| path)
+        let (emulator_name, argv, redact, working_dir, extra_env, pre_launch_sync) =
+            if game.is_native() {
+                // Blank on a Windows host: no compat tool makes sense there.
+                // `build_native_command` applies the same gate on `default_compat_tool`
+                // itself (and blanks the tool entirely for a linux-platform row),
+                // so this is belt-and-suspenders, not load-bearing.
+                let default_compat_tool = if host_os().starts_with("win") {
+                    ""
+                } else {
+                    config.default_compat_tool.as_str()
                 };
-                let native =
-                    build_native_command(&game, &library, default_compat_tool, host_os(), &which)?;
-                (native, used_umu.get())
-            };
-            // The managed copy is a Python zipapp: check the interpreter the
-            // child will find before spawning it, every launch.
-            if used_umu == Some(umu::UmuSource::Managed) {
-                let found = tokio::task::spawn_blocking(|| umu::probe_python(&clean_env()))
-                    .await
-                    .unwrap_or(None);
-                umu::python_requirement(found).map_err(LaunchError::Validation)?;
-            }
-            let emulator_name = if native.tool_label.is_empty() {
-                "native".to_string()
+                let library = expand_home(&config.library_path);
+                // A store row asks its store first (Epic's launch ticket). The
+                // hook is cloned out so no lock is held across the await.
+                let hook = if game.is_store() {
+                    self.store_launch_hook.read().unwrap().clone()
+                } else {
+                    None
+                };
+                let prep = match hook {
+                    Some(hook) => hook.prepare(&game).await?,
+                    None => None,
+                };
+                // `umu-run` resolves through `umu::locate` (the system one, else
+                // GRID's managed copy); `used_umu` records which one this launch
+                // took. A plain block: the `Cell` must not live across an await.
+                let managed_umu = umu::managed_umu_run(&config);
+                let (native, used_umu) = {
+                    let used_umu = Cell::new(None);
+                    let which = |name: &str| {
+                        if name != umu::UMU_RUN {
+                            return which_on_path(name);
+                        }
+                        let found = umu::locate(&which_on_path, managed_umu.as_deref());
+                        used_umu.set(found.as_ref().map(|(_, source)| *source));
+                        found.map(|(path, _)| path)
+                    };
+                    let native = build_native_command(
+                        &game,
+                        &library,
+                        default_compat_tool,
+                        host_os(),
+                        &which,
+                        prep.as_ref(),
+                    )?;
+                    (native, used_umu.get())
+                };
+                // The managed copy is a Python zipapp: check the interpreter the
+                // child will find before spawning it, every launch.
+                if used_umu == Some(umu::UmuSource::Managed) {
+                    let found = tokio::task::spawn_blocking(|| umu::probe_python(&clean_env()))
+                        .await
+                        .unwrap_or(None);
+                    umu::python_requirement(found).map_err(LaunchError::Validation)?;
+                }
+                let emulator_name = if native.tool_label.is_empty() {
+                    "native".to_string()
+                } else {
+                    native.tool_label
+                };
+                (
+                    emulator_name,
+                    native.argv,
+                    native.redact,
+                    native.cwd,
+                    native.env,
+                    None,
+                )
             } else {
-                native.tool_label
+                let plan = resolve_launch(&game, &config)?;
+                // `Some` only for a RetroArch or RPCS3 entry: the settings sync's
+                // one call site, matching Python's pre-launch
+                // `_ensure_emulator_sync_settings` (details_view_mixin.py:1457).
+                let sync = plan
+                    .needs_pre_launch_sync
+                    .then(|| (plan.emulator_name.clone(), plan.emulator_path));
+                (
+                    plan.emulator_name,
+                    plan.argv,
+                    Vec::new(),
+                    plan.working_dir,
+                    Vec::new(),
+                    sync,
+                )
             };
-            (
-                emulator_name,
-                native.argv,
-                native.redact,
-                native.cwd,
-                native.env,
-                None,
-            )
-        } else {
-            let plan = resolve_launch(&game, &config)?;
-            // `Some` only for a RetroArch or RPCS3 entry: the settings sync's
-            // one call site, matching Python's pre-launch
-            // `_ensure_emulator_sync_settings` (details_view_mixin.py:1457).
-            let sync = plan
-                .needs_pre_launch_sync
-                .then(|| (plan.emulator_name.clone(), plan.emulator_path));
-            (
-                plan.emulator_name,
-                plan.argv,
-                Vec::new(),
-                plan.working_dir,
-                Vec::new(),
-                sync,
-            )
-        };
 
         // Before the spawn, so a changed RetroAchievements credential or
         // RomM username reaches retroarch.cfg, and RPCS3's VFS folders
@@ -1042,6 +1082,58 @@ mod tests {
         assert!(service.snapshot().sessions.is_empty());
     }
 
+    /// The store launch hook runs for a native store row before anything
+    /// is built or spawned, and its error stops the launch.
+    #[tokio::test]
+    async fn the_store_launch_hook_prepares_store_rows_only() {
+        use crate::stores::{GameSource, StoreKind};
+        struct Hook(std::sync::Mutex<Vec<String>>);
+        impl StoreLaunchHook for Hook {
+            fn prepare<'a>(
+                &'a self,
+                game: &'a InstalledGame,
+            ) -> futures_util::future::BoxFuture<'a, Result<Option<StoreLaunchPrep>, LaunchError>>
+            {
+                self.0.lock().unwrap().push(game.store_id.clone());
+                Box::pin(async {
+                    Err(LaunchError::Validation(
+                        "Couldn't get a launch ticket from Epic Games: test".to_string(),
+                    ))
+                })
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let registry = Arc::new(Registry::open(&dir.path().join("registry.db")).unwrap());
+        registry
+            .upsert_store(&InstalledGame {
+                title: "Starlight Courier".into(),
+                platform: "Epic Games".into(),
+                platform_slug: "win".into(),
+                source: GameSource::Store(StoreKind::Epic),
+                store_id: "Starlight".into(),
+                installed_at: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        let service = LaunchService::new(registry, dir.path().join("config.toml"));
+        let hook = Arc::new(Hook(Default::default()));
+        service.set_store_launch_hook(hook.clone());
+        match service
+            .launch_key(&GameKey::store(StoreKind::Epic, "Starlight"))
+            .await
+        {
+            Err(LaunchError::Validation(message)) => {
+                assert!(
+                    message.starts_with("Couldn't get a launch ticket"),
+                    "{message}"
+                )
+            }
+            other => panic!("expected the hook's error, got {other:?}"),
+        }
+        assert_eq!(*hook.0.lock().unwrap(), vec!["Starlight".to_string()]);
+        assert!(service.snapshot().sessions.is_empty());
+    }
+
     #[test]
     fn entry_is_retroarch_uses_the_matched_profile_name() {
         let profiles = load_profiles();
@@ -1116,7 +1208,8 @@ mod tests {
             native_working_dir: ".".to_string(),
             ..Default::default()
         };
-        let launch = build_native_command(&row, &root, "", "windows", &which_on_path).unwrap();
+        let launch =
+            build_native_command(&row, &root, "", "windows", &which_on_path, None).unwrap();
         assert_eq!(launch.cwd, install);
         let mut child = spawn_child(launch.argv, launch.cwd, launch.env)
             .await

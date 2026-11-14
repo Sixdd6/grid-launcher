@@ -47,6 +47,68 @@ pub fn make_private_executable(path: &Path) -> io::Result<()> {
     set_mode(path, 0o700)
 }
 
+/// Makes everything under `dir` owner-only on unix: `dir` and every folder
+/// in it 0700, every file 0600 (a file that was executable keeps its
+/// owner execute bit: 0700). legendary sets no file mode on its token and
+/// state files (`user.json`, `tmp/*.ovt`, `version.json`), so GRID runs
+/// this after every legendary run. Symbolic links are not followed and
+/// keep their own mode. A missing `dir` is not an error. No-op off unix.
+pub fn make_tree_private(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let meta = match fs::symlink_metadata(dir) {
+            Ok(meta) => meta,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        if !meta.is_dir() {
+            return Ok(());
+        }
+        let mut pending = vec![dir.to_path_buf()];
+        let mut first_error = None;
+        while let Some(folder) = pending.pop() {
+            if let Err(error) = set_mode(&folder, 0o700) {
+                first_error.get_or_insert(error);
+            }
+            let entries = match fs::read_dir(&folder) {
+                Ok(entries) => entries,
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                    continue;
+                }
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Ok(meta) = fs::symlink_metadata(&path) else {
+                    continue;
+                };
+                if meta.is_dir() {
+                    pending.push(path);
+                } else if meta.is_file() {
+                    let mode = if meta.permissions().mode() & 0o100 != 0 {
+                        0o700
+                    } else {
+                        0o600
+                    };
+                    if let Err(error) = set_mode(&path, mode) {
+                        first_error.get_or_insert(error);
+                    }
+                }
+            }
+        }
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
+    }
+}
+
 #[cfg(unix)]
 fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -97,5 +159,42 @@ mod tests {
         assert!(!dir.exists());
         remove_tool_dir(data.path(), StoreTool::Gogdl).unwrap();
         make_private_file(&dir.join("gone")).unwrap();
+    }
+
+    #[test]
+    fn a_tree_is_made_owner_only() {
+        let data = tempfile::tempdir().unwrap();
+        let dir = tool_dir(data.path(), StoreTool::Legendary);
+        fs::create_dir_all(dir.join("tmp").join("deep")).unwrap();
+        fs::write(dir.join("user.json"), "{}").unwrap();
+        fs::write(dir.join("tmp").join("a.ovt"), "x").unwrap();
+        fs::write(dir.join("tmp").join("deep").join("tool"), "x").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let set = |p: &Path, m: u32| fs::set_permissions(p, fs::Permissions::from_mode(m));
+            set(&dir, 0o755).unwrap();
+            set(&dir.join("tmp"), 0o755).unwrap();
+            set(&dir.join("user.json"), 0o644).unwrap();
+            set(&dir.join("tmp").join("a.ovt"), 0o666).unwrap();
+            set(&dir.join("tmp").join("deep").join("tool"), 0o755).unwrap();
+            let outside = data.path().join("outside.txt");
+            fs::write(&outside, "x").unwrap();
+            set(&outside, 0o644).unwrap();
+            std::os::unix::fs::symlink(&outside, dir.join("link")).unwrap();
+
+            make_tree_private(&dir).unwrap();
+            let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&dir), 0o700);
+            assert_eq!(mode(&dir.join("tmp")), 0o700);
+            assert_eq!(mode(&dir.join("tmp").join("deep")), 0o700);
+            assert_eq!(mode(&dir.join("user.json")), 0o600);
+            assert_eq!(mode(&dir.join("tmp").join("a.ovt")), 0o600);
+            assert_eq!(mode(&dir.join("tmp").join("deep").join("tool")), 0o700);
+            assert_eq!(mode(&outside), 0o644, "a link's target is left alone");
+        }
+        #[cfg(not(unix))]
+        make_tree_private(&dir).unwrap();
+        make_tree_private(&data.path().join("missing")).unwrap();
     }
 }

@@ -333,6 +333,9 @@ pub struct RememberedDrive {
 pub struct StoresConfig {
     #[serde(default)]
     pub gog: GogConfig,
+    /// Not written while default, so a GOG-only config keeps its shape.
+    #[serde(default, skip_serializing_if = "EpicConfig::is_default")]
+    pub epic: EpicConfig,
 }
 
 impl StoresConfig {
@@ -369,6 +372,42 @@ impl Default for GogConfig {
             install_dir: String::new(),
             cloud_saves: true,
         }
+    }
+}
+
+/// Epic Games Store (`[stores.epic]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EpicConfig {
+    /// The user connected Epic (legendary's `user.json` decides whether
+    /// the login is still good).
+    #[serde(default)]
+    pub connected: bool,
+    /// The Epic display name, for Settings. Not a secret.
+    #[serde(default)]
+    pub username: String,
+    /// Where Epic games install; `""` = `<library>/Epic Games`.
+    #[serde(default)]
+    pub install_dir: String,
+    /// Whether Epic cloud saves sync before launch and after exit.
+    #[serde(default = "default_true")]
+    pub cloud_saves: bool,
+}
+
+impl Default for EpicConfig {
+    fn default() -> Self {
+        Self {
+            connected: false,
+            username: String::new(),
+            install_dir: String::new(),
+            cloud_saves: true,
+        }
+    }
+}
+
+impl EpicConfig {
+    /// Whether nothing differs from the defaults.
+    pub fn is_default(&self) -> bool {
+        self == &EpicConfig::default()
     }
 }
 
@@ -840,6 +879,12 @@ mod tests {
         assert!(!loaded.stores.gog.connected);
         assert!(loaded.stores.gog.cloud_saves, "cloud saves default on");
         assert_eq!(loaded.stores.gog.install_dir, "");
+        assert!(!loaded.stores.epic.connected);
+        assert!(
+            loaded.stores.epic.cloud_saves,
+            "Epic cloud saves default on"
+        );
+        assert_eq!(loaded.stores.epic.install_dir, "");
         loaded.save(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(!written.contains("stores"), "written:\n{written}");
@@ -867,12 +912,38 @@ mod tests {
                     install_dir: "/games/GOG".into(),
                     cloud_saves: false,
                 },
+                epic: EpicConfig::default(),
             },
             ..Default::default()
         };
         cfg.save(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(written.contains("[stores.gog]"), "written:\n{written}");
+        assert!(
+            !written.contains("epic"),
+            "a default Epic is not written:\n{written}"
+        );
+        assert!(
+            !written.to_lowercase().contains("token"),
+            "written:\n{written}"
+        );
+        assert_eq!(Config::load(&path).unwrap(), cfg);
+
+        let cfg = Config {
+            stores: StoresConfig {
+                epic: EpicConfig {
+                    connected: true,
+                    username: "SamPlays".into(),
+                    install_dir: String::new(),
+                    cloud_saves: false,
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("[stores.epic]"), "written:\n{written}");
         assert!(
             !written.to_lowercase().contains("token"),
             "written:\n{written}"

@@ -118,7 +118,9 @@ Modules as declared in `src/lib.rs`:
   by rom id or a store row by its key (`launch(rom_id)` is a thin wrapper), and a GOG,
   Epic or Amazon row always takes the native branch (`build_native_command`; the row sets
   `extracted_dir`, `native_game_dir`, `native_executable_path` and a `win`/`linux`
-  `platform_slug`). `GameSession` carries `key` and an optional `rom_id`; one live session
+  `platform_slug`). Before it builds, a store row asks the app's `StoreLaunchHook` for a
+  `StoreLaunchPrep` (Epic: legendary's executable, folder, arguments, and the exchange
+  code as `secret_args`, every one a redacted position). `GameSession` carries `key` and an optional `rom_id`; one live session
   per key. `LaunchService::register_watched` adds a session GRID did not spawn (Steam,
   later): no child, liveness from a polled `AliveCheck`, never signalled by `stop`.
   `NativeLaunch::redact` lists argv positions (an Epic exchange code) that print as
@@ -240,15 +242,19 @@ Modules as declared in `src/lib.rs`:
   after each batch.
 - `retroachievements` — the RetroAchievements login client. Login only.
 - `stores` — external game stores (SPEC "Game stores", `docs/external-stores-plan.md`,
-  `docs/stores-phase1-plan.md`). The shared identity types: `StoreKind` (gog, epic,
+  `docs/stores-phase1-plan.md`, `docs/stores-phase2-plan.md`). The shared identity types: `StoreKind` (gog, epic,
   amazon, steam, with their platform names "GOG", "Epic Games", "Amazon Games", "Steam"),
   `GameSource` (the registry `source`) and `GameKey` (`Rom(i64)` or `Store { source,
   store_id }`, string and serde form `romm:123` / `gog:1207664643`). Beside them:
-  `tools` (the pinned heroic-gogdl release, its SHA-256 check and the command that starts
-  it), `runner` (the only place a store tool is spawned; its output is never logged or
-  forwarded), `progress` (tool progress lines), `paths` (`<data_dir>/stores/<tool>/`,
-  0700/0600) and `art` (store image URLs, the token-free art cache under
-  `<data_dir>/stores/art/`, and `is_store_art_url`, the host rule `ensure_image` uses).
+  `tools` (the pinned heroic-gogdl and legendary releases, their SHA-256 check and the
+  command that starts one), `runner` (the only place a store tool is spawned; its output
+  is never logged or forwarded; it writes a stdin secret, reads a `LineParser`'s progress
+  and legendary's known lines as `ToolSignal`s, and makes legendary's folder owner-only
+  after each run), `progress` (tool progress lines and `legendary_signal`), `paths`
+  (`<data_dir>/stores/<tool>/`, 0700/0600, `make_tree_private`) and `art` (store image
+  URLs, the token-free art cache under `<data_dir>/stores/art/`, and `is_store_art_url`,
+  the GOG and Epic host rule `ensure_image` uses). The cloud save types every store
+  shares (`CloudState`, `SyncMode`, `SaveConflict`) live in `stores` itself.
   `gog` is GOG's HTTP APIs (`api`), sign-in (`auth`), gogdl install, update, repair, DLC
   and uninstall jobs (`install`), cloud saves (`cloud`), the update check (`update`), and
   the parts every install path shares: `goggame` (`goggame-*.info`), `meta` (a row's
@@ -256,8 +262,10 @@ Modules as declared in `src/lib.rs`:
   `.sh` read as a zip, a Windows Inno Setup `.exe` run silently or, outside TV mode, with
   its wizard; a macOS `.pkg` refused) and their Downloads job. Every GOG Wine prefix is
   `<install dir>/prefix` (gogdl, offline installers, drive restores), so uninstall
-  removes it and a backup leaves it out. Nothing here may log or forward a store tool's
-  stdout or stderr.
+  removes it and a backup leaves it out. `epic` is the Epic Games Store through legendary
+  (Phase 2): `EpicService`, `meta` (`EpicMeta`) and `row` (`epic_row`; every Epic row
+  is a Windows version with its prefix at `<install dir>/prefix`). Nothing here may log
+  or forward a store tool's stdout or stderr.
 - `romm` — the RomM HTTP client: `RommClient`, platforms, games, ROM detail, firmware,
   byte fetches, the cloud save/state endpoints, and the play-session ingest. All request construction lives here;
   check `openapi.json` before changing any of it. `RommClient::recent_games` is one
@@ -289,15 +297,25 @@ The shell owns *when* things run; grid-core owns *what* they do.
   layout migration and its relinked resync (skipped while the root is unreachable) →
   `relocate::recover` (finishes a Commit) → gates handed to the services → `.setup()`,
   which resumes a Copy or Cleanup in the background.
-- `stores_service.rs` — `StoresService` (Phase 1: GOG) around grid-core's
+- `stores_service/` — the stores in the app, one backend per store behind the
+  `StoreBackend` trait (`mod.rs`), which has every method a store command calls (login,
+  disconnect, tool install, refresh, library, updates, install options and jobs, DLC,
+  uninstall, game settings, cloud state and sync, the syncs around a session, art).
+  `StoresService` is the facade the app holds: `backend(StoreKind)`, `statuses()` (every
+  store, in the frontend's `STORE_ORDER`), and the fan-outs (startup, Downloads
+  snapshots, the session-finished upload, art, the launch hook). `StoreShared` carries the
+  emitter, the registry and the art client. `gog.rs` is `GogStore` around grid-core's
   `stores::gog::GogService`: the store status and library the UI reads (owned list cached
   at `<data_dir>/stores/cache/gog-owned.json`), the gogdl install, the cloud sync before a
-  launch and after a session, the update check, the `store-notice` cards for what
+  launch and after a session, the update check, and the `store-notice` cards for what
   happens in the background (`observe_downloads`; a frontend command's own outcome is
-  worded by the frontend, never sent twice), and store art (`art`). `store_auth.rs` is the
-  login window: a separate, unprivileged, incognito webview whose final redirect is
-  caught in Rust (the code goes to `GogService` as a `SecretString`). The commands are
-  `commands/stores.rs` and, for GOG backups, `commands/store_backups.rs`.
+  worded by the frontend, never sent twice); its GOG-only extras (offline installers,
+  drive backups) are reached as `StoresService::gog`. `epic.rs` is `EpicStore` around
+  `stores::epic::EpicService` (Phase 2), and the `StoreLaunchHook` that adds Epic's launch
+  ticket. `store_auth.rs` is the login window: a separate, unprivileged, incognito webview
+  whose finish URL (a store's `LoginSpec`) is caught in Rust and refused (the code goes to
+  the backend as a `SecretString`). The commands are `commands/stores.rs` (`backend_for`,
+  `backend_for_key`) and, for GOG backups, `commands/store_backups.rs`.
 - `commands.rs` — also `launch_game_key`: a RomM key takes `launch_game`'s path, a store
   key skips the RomM-only steps (cloud restore, firmware, session stamps) and stamps
   `last_played_at` by key.

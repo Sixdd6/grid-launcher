@@ -110,8 +110,8 @@ pub struct AppState {
     pub gamepad: Arc<crate::gamepad::GamepadService>,
     /// Desktop or TV mode, never persisted. See `commands/tv.rs`.
     pub ui_mode: tv::UiModeState,
-    /// External game stores (GOG): connection, login window, owned list,
-    /// notices. See `stores_service.rs` and `commands/stores.rs`.
+    /// External game stores (GOG, Epic): one backend each behind the
+    /// facade. See `stores_service/` and `commands/stores.rs`.
     pub stores: Arc<crate::stores_service::StoresService>,
 }
 
@@ -422,7 +422,7 @@ pub async fn sync_ra_username_to_romm(
 
 #[tauri::command]
 pub async fn ensure_image(state: State<'_, AppState>, url: String) -> Result<String, String> {
-    // A store's art (GOG covers and screenshots) comes from the store's own
+    // A store's art (GOG and Epic covers and screenshots) comes from the store's own
     // image hosts, never the RomM server, and goes without a credential.
     if state.stores.is_art_url(&url) {
         return match state.stores.art(&url).await {
@@ -1230,12 +1230,13 @@ pub async fn launch_game_key(
     let launch = state.launch.as_ref().map_err(Clone::clone)?.clone();
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
 
-    // GOG cloud saves sync before the process spawns. A conflict stops the
-    // launch with `store_cloud_conflict` (the UI asks which save to keep,
-    // then calls `store_cloud_resolve`); any other sync failure only logs.
-    // The upload after the session is `StoresService`'s session-finished
-    // listener.
-    if key.store_kind() == Some(grid_core::stores::StoreKind::Gog) {
+    // A store game's cloud saves sync before the process spawns, through
+    // its store's backend. A conflict stops the launch with
+    // `store_cloud_conflict` (the UI asks which save to keep, then calls
+    // `store_cloud_resolve`); any other sync failure only logs. The upload
+    // after the session is `StoresService`'s session-finished listener.
+    let backend = key.store_kind().and_then(|kind| state.stores.backend(kind));
+    if let Some(backend) = backend {
         let registry = install.registry();
         let lookup = registry.clone();
         let lookup_key = key.clone();
@@ -1244,12 +1245,7 @@ pub async fn launch_game_key(
             .map_err(|e| format!("launch did not finish: {e}"))?
             .map_err(err)?;
         if let Some(row) = row {
-            if state
-                .stores
-                .sync_before_launch(&registry, &row)
-                .await
-                .is_err()
-            {
+            if backend.sync_before_launch(&registry, &row).await.is_err() {
                 return Err(LaunchCommandError {
                     code: STORE_CLOUD_CONFLICT,
                     message: format!(

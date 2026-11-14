@@ -204,7 +204,7 @@ After it lands these files are frozen, and changes go through the lead: `api.ts`
 // stores/tools.rs
 pub enum StoreTool { Gogdl, Legendary }             // name "legendary", e2e env GRID_LAUNCHER_E2E_TOOL_LEGENDARY
 static LEGENDARY_PIN: ToolPin;                       // 0.21.1, GPL-3.0, github.com/legendary-gl/legendary, the six assets above
-                                                     // (linux Python3, windows/macos Direct); package A fills, Step 0 may leave empty
+                                                     // (linux Python3, windows/macos Direct); filled in Step 0
 
 // stores/runner.rs  (implemented in Step 0)
 pub enum LineParser { #[default] Gogdl, Legendary }  // picks the stderr progress parser and the signal matcher
@@ -596,6 +596,223 @@ installed / legendary install failed".
      sentinel URL that `on_navigation` catches and refuses.
 4. **Art hosts.** From recorded `list --json` shapes (legendary test data / Heroic issues),
    confirm the keyImages hosts beyond `cdn1.epicgames.com` and `cdn2.unrealengine.com`.
+
+## Spike results (2026-11-13)
+
+All six downloaded assets (and `legendary_macOS.zip`) matched the SHA-256s in Research.
+The Linux x86_64 zipapp was copied to a fresh folder and run only inside the build
+container (`scripts/ctr.sh run`; Ubuntu 24.04, Python 3.12.3), with a scratch
+`LEGENDARY_CONFIG_PATH`, `XDG_CACHE_HOME` and `HOME`, `BROWSER=true`, and every request
+sent to a dead proxy (`HTTPS_PROXY=http://127.0.0.1:9`). No Epic account and no network
+login were used.
+
+### Spike 1 — the asset, offline
+
+- `--version` prints `legendary version "0.21.1", codename "Lowlife"` (exit 0). The
+  wheel's METADATA says `Requires-Python: >=3.10`, so the Python 3.10 floor stands. The
+  zipapp also carries a mypyc `.so` built for CPython 3.14 (charset_normalizer); on 3.12 it
+  falls back to pure Python and runs.
+- The `--help` output confirms every flag in the table above:
+  - `auth`: `--import --code --token --sid --delete --disable-webview`;
+  - `launch`: `--offline --skip-version-check --json --dry-run --wrapper --wine
+    --wine-prefix --no-wine --override-exe --language --override-username`;
+  - `sync-saves`: `--skip-upload --skip-download --force-upload --force-download
+    --save-path --disable-filters`;
+  - `install` (aliases `download`, `update`, `repair`): `--base-path --game-folder
+    --max-shared-memory --skip-sdl --skip-dlcs --with-dlcs --platform --repair
+    --update-only --ignore-free-space --save-path`;
+  - `list`: `--platform --include-ue -T --json --force-refresh`; `list-installed`:
+    `--check-updates --json --show-dirs`; `info`: `--offline --json --platform`;
+    `status`: `--offline --json`; `uninstall`: `--keep-files --skip-uninstaller`;
+    `list-saves [<App Name>]`.
+- `LEGENDARY_CONFIG_PATH` is used as is. The first command writes `config.ini`,
+  `aliases.json`, `manifests/`, `metadata/` and `tmp/` there (`version.json` after an
+  update check). **Every folder is 0755 and every file 0644**, so GRID must make the tree
+  private after each run.
+- The vendored native modules unpack on the first run of any command (even `--help`) into
+  `$XDG_CACHE_HOME/legendary/vendored/Cryptodome/` (42 `.so` files), with
+  `vendored.lock` beside it.
+- The first run writes `config.ini` with `disable_update_check = false` and
+  `disable_update_notice = true`. The notice default is `true` only for the Linux zipapp:
+  it is `false` on the Windows and macOS PyInstaller builds (`is_windows_mac_or_pyi()`),
+  so GRID's first-run `disable_update_notice = true` still matters there. The notice is
+  also off whenever `--json` is used. `auth` forces it on, but it goes to stdout, which
+  GRID does not read for `auth`. The flag itself could not be exercised offline: the
+  notice needs a successful update check.
+- Signed out, `status --json --offline` prints
+  `{"account": "<not logged in>", "games_available": 0, "games_installed": 0,
+  "egl_sync_enabled": false, "config_directory": "…"}` (exit 0). Without `--offline` it
+  runs the update check first; with no network that is an uncaught
+  `requests.exceptions.ProxyError` traceback and exit 1. So the signed-out check always
+  uses `--offline`.
+- `list-installed --json` prints `[]` (exit 0). `info <unknown> --json` prints
+  `{"game": null, "install": null, "manifest": null}` (exit 0, no login needed).
+- **Not logged in:** `list`, `list-saves`, `install`, `repair` and `sync-saves` die with
+  an uncaught `ValueError: No saved credentials` traceback, exit 1, and no `ERROR:` line.
+- **Not installed:** `launch` logs `[cli] ERROR: Game X is not currently installed!` and
+  exits 1. `uninstall` logs `[cli] ERROR: Game X not installed, cannot uninstall!` and
+  exits **0**.
+- With no `LANG`, every run logs `[Core] WARNING: Getting locale failed: …, falling back
+  to using en-US.` This is harmless and not a signal.
+- From the 0.21.1 source (read, not run):
+  - an install's space failure goes to **stdout**
+    (` ! Failure: Not enough available disk space! …`), followed by
+    `[cli] CRITICAL: Installation cannot proceed, exiting.` on stderr, exit 1;
+  - a `MemoryError` from the download manager is uncaught (a traceback);
+  - the verify step logs one `ERROR` line per bad file (`File does not match hash: …`,
+    `File is missing: …`) before its result line;
+  - the download manager's logger is `DLManager`.
+
+### Spike 2 — stdin login, no network
+
+- **stdin works; the `--code` fallback is not used.** With `auth --disable-webview` and
+  `BROWSER=true`, legendary prints its prompt on stdout ("Please login via the epic web
+  login!", the legendary.gl URL, then `Please enter the "authorizationCode" value from
+  the JSON response: `) and reads one line. A bare code, the JSON blob, and a code with
+  no trailing newline (stdin then closed) are all accepted. No browser opens. The zipapp
+  has no pywebview, so it takes the stdin path even without `--disable-webview`.
+- A fake code with Epic unreachable gives two lines, then **exit 0**:
+  `[Core] ERROR: Logging in failed with ProxyError(…)` (or
+  `ConnectionError(… NameResolutionError …)` for a host that doesn't resolve), then
+  `[cli] ERROR: Login attempt failed, please see log for details.` No `user.json` is
+  written. In every case the code appeared in neither stream (checked with grep).
+- Empty stdin (EOF) gives an `EOFError` traceback and exit 1.
+- **Before it reads stdin**, `auth` runs `check_for_updates(force=True)` with no error
+  handling. With api.legendary.gl unreachable it dies with a
+  `requests.exceptions.ProxyError` traceback, exit 1, and stdin is never read. So:
+  - a login needs api.legendary.gl;
+  - the runner must not fail when the tool closes stdin unread;
+  - package A treats a non-zero exit, `OtherError` or `Network` as a failed login, not
+    only `LoginFailed`.
+- Method for cases 2b–2f: a wrapper script ran the zipapp with
+  `LGDAPI.get_version_information` stubbed (and, for the DNS case, `EPCAPI._oauth_host`
+  pointed at an unresolvable host). legendary's own `auth` code ran unchanged.
+- `auth --delete` while signed out logs `[cli] INFO: User data deleted.` (exit 0).
+- From the source: a code that the real Epic refuses logs
+  `[EPCAPI] ERROR: Login to EGS API failed with errorCode: …`, then
+  `[Core] ERROR: Logging in failed with InvalidCredentialsError(…)`, then the
+  `Login attempt failed` line. None of these lines carries the code (it goes in the POST
+  body). A success logs `[cli] INFO: Successfully logged in as "<name>"`.
+
+### Spike 3 — not run
+
+The Tauri login window with Epic's real page needs a manual check by the user with a real
+account. Package C keeps the structural rule (the finish URL is refused, and so is any
+other navigation to localhost).
+
+### Spike 4 — art hosts
+
+- One GET of Epic's public promotions feed (no credentials) found these keyImages hosts:
+  `cdn1.epicgames.com` (115 images) and `cdn2.unrealengine.com` (36). Video thumbnails
+  are on `media-cdn.epicgames.com`.
+- Video entries (`featuredMedia`, `heroCarouselVideo`) use a non-http
+  `com.epicgames.video://` scheme. The owned-list parser must skip them, and the art
+  check refuses them.
+- Image types seen: `OfferImageWide`, `OfferImageTall`, `Thumbnail`,
+  `DieselStoreFrontWide`/`Tall`, `CodeRedemption_340x440`, `GalleryImage`.
+- A HEAD of one `cdn1` and one `cdn2` image both answered 200 `image/jpeg` with no
+  credentials.
+- **Rule:** https on `epicgames.com` and `unrealengine.com` and their subdomains. This
+  covers all three hosts. The library's `list --json` keyImages could not be seen without
+  an account; they come from the same catalog service, and the rule admits any
+  subdomain.
+
+## Contract deviations — Step 0
+
+Where the skeleton differs from, or adds to, the Step 0 block above:
+
+- **grid-core runner.**
+  - `ToolSignal::Network` is added. A network failure is either a `requests.exceptions.*`
+    traceback line or `Logging in failed with ConnectionError/ProxyError/…`
+    (`HTTP request for login failed` too). Package B's offline launch retry keys on it.
+  - `ToolCommand.private_tree: Option<PathBuf>`: the runner itself makes that folder
+    private (`make_tree_private`) when a run ends, however it ends, so no caller can
+    forget it. Epic commands set it to `<data>/stores/legendary`.
+  - `ToolExit::has(&signal)` is added. So is `ToolExit::read_stdout(parse)`: `runner.rs`
+    is an allowed `expose_secret` file, so the Epic code (except `launch.rs`) reads stdout
+    through it.
+  - `LineParser::tool()` names the tool in errors ("legendary stopped: …").
+  - With `LineParser::Legendary`, the signal matcher reads **stdout's lines as well as
+    stderr's**, because the space failure is on stdout. Each signal is kept once, in
+    arrival order. A stdout line over 8 KiB (a JSON answer) is skipped for matching; the
+    whole stdout is still kept. Specific signals win: a caller checks them before
+    `OtherError`, which also comes for any traceback and for any other `ERROR`/`CRITICAL`
+    line (the per-file verify lines excepted).
+  - Writing stdin tolerates a tool that exits first (spike 2a).
+- **Progress.** legendary's counts are chunks or files, so `parse_legendary_line` reports
+  a **fraction**: `done` out of `LEGENDARY_PROGRESS_TOTAL` (10 000), in hundredths of a
+  percent. The job turns it into bytes with `info`'s `download_size`, or with the
+  `DownloadSize` signal (`Download size is 0, …` gives `DownloadSize(0)`). The
+  `Downloaded` line is not used. Verify progress gives a `Verifying` fraction with its
+  speed. `ProgressMerger` also keeps a non-zero speed from a progress report.
+- `tools::python_problem(tool, found)` takes the tool, so it says "legendary needs
+  Python 3.10…".
+- `LEGENDARY_PIN` is filled with all six assets (Linux `Python3`, Windows and macOS
+  `Direct`).
+- `EpicConfig` is not written while it is default (`skip_serializing_if`), so a GOG-only
+  `config.toml` keeps its shape.
+- `is_store_art_url(url, extra_origins)`: the GOG app passes its gamesdb origin, the Epic
+  app passes `EpicEndpoints.art_origins` (empty for real Epic, the mock in e2e).
+- `stores::epic`:
+  - adds `EpicUpdate { app_name, version }` and the pure `epic::updates()` (implemented:
+    `build_version` ≠ `meta.version`, and neither blank);
+  - adds `EpicService::endpoints()` and `tool_dir()`, and the constants
+    `EPIC_LOGIN_USER_AGENT` and `EPIC_CODE_PARAM`;
+  - `EpicInstalled` deserializes from `list-installed --json` (unknown keys ignored, a
+    `null` read as the default; `save_path` is a `String`);
+  - the Step 0 `disconnect` only removes the tool folder;
+  - every other body returns `not implemented`, and its jobs fail with it.
+- `epic_row`:
+  - `native_working_dir` is the executable's folder, relative (legendary's own
+    `working_directory`);
+  - `filesize_bytes` is legendary's `install_size`;
+  - `first_release_date` is `EpicGame.year`.
+- **Launch.**
+  - `StoreLaunchPrep` lives in `launch::native` and is re-exported as
+    `launch::StoreLaunchPrep`.
+  - An empty `executable` or `working_dir` falls back to the row.
+  - The hook is asked only for store rows (`game.is_store()`); `Ok(None)` launches the
+    row as it is.
+- **App backend trait (`stores_service::StoreBackend`).**
+  - Errors are `String`: GRID's words, as the commands answer.
+  - The methods that load the owned list take `self: Arc<Self>` and return a `'static`
+    future: `install_options`, `install_job`, `dlc_job`.
+  - The background starters are named `run_login_check`, `run_finish_login`,
+    `run_install_tool` and `run_refresh`, so that they don't shadow `GogStore`'s own
+    `&Arc<Self>` methods.
+  - `library(updates)` takes store id → version. `UpdateService::store_versions(kind)`
+    gives GOG's, and nothing for Epic until package C. `forget_store_update` and
+    `clear_store_updates` take the store kind and only touch GOG's set.
+  - The trait also carries `kind`, `status`, `load`, `observe_downloads`,
+    `ensure_can_install`, `game_settings`, `apply_game_settings` (moved from
+    `commands/stores.rs` into `gog.rs`), `windows_version`, `cloud_enabled` and
+    `is_art_url`.
+  - `StoreShared` holds the emitter, the registry, the art client and the backends
+    (weakly), so any backend's `changed()` emits every store's status. Statuses come in
+    the frontend's `STORE_ORDER` (epic, gog).
+  - `JobCtx` is the neutral job context, with `.gog()` and `.epic()`.
+  - `default_install_dir(config, configured, name)` is shared.
+- **`store_auth`.**
+  - `LoginWindowSpec { login: LoginSpec, source, data_dir, tv }`.
+  - `GOG_LOGIN_SUCCESS_PATH` is public, and the GOG finish URL is `embed.join(it)`.
+  - `is_login_redirect(url, finish)` matches the finish path exactly (a trailing `/`
+    aside).
+  - The window applies `LoginSpec.user_agent`.
+- **`commands/stores.rs`.** `store_kind`, `store_key` and `store_row` work for any
+  supported store (`UNSUPPORTED_STORE` otherwise). `launch_game_key` syncs through
+  `stores.backend(kind)` for any store key.
+- **Epic stub (`stores_service/epic.rs`).**
+  - The status is always "not connected", with the legendary pin, and `in_rail` only
+    with installed rows.
+  - These answer `not implemented`: `begin_login`, `ensure_can_install`, `disconnect`,
+    install options and install jobs, DLC, cloud state and sync.
+  - `sync_before_launch` is `Ok`. Game Settings are real (every Epic game takes a compat
+    tool). The login spec is real.
+  - Its `StoreLaunchHook`, installed in `lib.rs`, refuses an Epic row with "Couldn't get
+    a launch ticket from Epic Games: not implemented".
+  - `GRID_LAUNCHER_E2E_EPIC_BASE` (feature `e2e`) feeds `EpicEndpoints::e2e`.
+- **TypeScript.** Besides the three `api.ts` types, `gamestores/details.ts` leaves out
+  the cloud file count when it is `null` (a one-line type fix, so that the check passes).
 
 ## E2E plan
 

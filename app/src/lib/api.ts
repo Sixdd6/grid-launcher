@@ -1196,7 +1196,7 @@ export type LayoutMigrationNotice = { message: string };
 export type StoreSource = Exclude<GameSource, 'romm'>;
 export type StorePlatform = 'linux' | 'windows';
 export type ToolStatus = {
-  name: 'gogdl';
+  name: 'gogdl' | 'legendary';
   version: string;
   state: 'not_installed' | 'installing' | 'installed' | 'failed';
   size_bytes: number;
@@ -1241,7 +1241,7 @@ export type StoreGame = {
   disk_bytes: number;
   version: string;
   update_version: string;
-  origin: 'gogdl' | 'offline' | 'drive' | null;
+  origin: 'gogdl' | 'offline' | 'drive' | 'legendary' | null;
   not_supported: string;
   dlc: StoreDlc[];
   cloud: 'off' | 'none' | 'synced' | 'conflict' | 'unknown';
@@ -1286,8 +1286,9 @@ export type StoreCloudState = {
     local_files: number;
     local_bytes: number;
     cloud_at: number;
-    /** The cloud files in the game's save locations (GOG's cloud listing). */
-    cloud_files: number;
+    /** The cloud files in the game's save locations (GOG's cloud listing);
+     *  `null` when the store gives no file list (Epic's `list-saves`). */
+    cloud_files: number | null;
     /** Their bytes; `null` when the listing gives no sizes. */
     cloud_bytes: number | null;
   } | null;

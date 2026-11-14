@@ -31,7 +31,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::Semaphore;
 
 use crate::commands::stores::StoreConnection;
-use crate::stores_service::StoresService;
+use crate::stores_service::GogStore;
 
 pub const UPDATES_CHANGED_EVENT: &str = "updates-changed";
 /// Verbatim (details_view_mixin.py:1818).
@@ -349,8 +349,23 @@ impl UpdateService {
     // --- store updates (GOG) ---------------------------------------------------
 
     /// GOG's newer builds, by GOG product id.
+    #[cfg(test)]
     pub fn store_updates(&self) -> HashMap<String, GogUpdate> {
         self.store_updates.lock().unwrap().clone()
+    }
+
+    /// One store's newer versions by store id (`StoreGame.update_version`).
+    /// Only GOG's are tracked so far (Epic's land with package C).
+    pub fn store_versions(&self, kind: StoreKind) -> HashMap<String, String> {
+        if kind != StoreKind::Gog {
+            return HashMap::new();
+        }
+        self.store_updates
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(id, update)| (id.clone(), update.version.clone()))
+            .collect()
     }
 
     /// Replaces the store set with one check's result and answers the
@@ -367,7 +382,7 @@ impl UpdateService {
 
     /// Emits `updates-changed` with the current RomM rows (the payload is
     /// the whole RomM set; store updates are read through `store_library`).
-    fn emit_current(&self, app: &AppHandle, stores: &StoresService) {
+    fn emit_current(&self, app: &AppHandle, stores: &GogStore) {
         let installed = stores
             .registry()
             .and_then(|registry| registry.all().ok())
@@ -375,21 +390,33 @@ impl UpdateService {
         let _ = app.emit(UPDATES_CHANGED_EVENT, self.rows(&installed));
     }
 
-    /// Drops one game's store update (it was uninstalled).
-    pub fn forget_store_update(&self, app: &AppHandle, stores: &StoresService, store_id: &str) {
-        if self
-            .store_updates
-            .lock()
-            .unwrap()
-            .remove(store_id)
-            .is_some()
+    /// Drops one game's store update (it was uninstalled). Only GOG's set
+    /// is tracked so far; another store's game changes nothing.
+    pub fn forget_store_update(
+        &self,
+        app: &AppHandle,
+        stores: &GogStore,
+        kind: StoreKind,
+        store_id: &str,
+    ) {
+        if kind == StoreKind::Gog
+            && self
+                .store_updates
+                .lock()
+                .unwrap()
+                .remove(store_id)
+                .is_some()
         {
             self.emit_current(app, stores);
         }
     }
 
-    /// Drops every store update (Disconnect).
-    pub fn clear_store_updates(&self, app: &AppHandle, stores: &StoresService) {
+    /// Drops every update of the store that disconnected (GOG's set is the
+    /// only one tracked so far).
+    pub fn clear_store_updates(&self, app: &AppHandle, stores: &GogStore, kind: StoreKind) {
+        if kind != StoreKind::Gog {
+            return;
+        }
         let had = !std::mem::take(&mut *self.store_updates.lock().unwrap()).is_empty();
         if had {
             self.emit_current(app, stores);
@@ -401,7 +428,7 @@ impl UpdateService {
     /// when signed in: at startup, after a connect and on demand. A new
     /// update gets the "update 2.2 is available on GOG" card; the Library
     /// re-reads on `updates-changed` and `stores-changed`.
-    pub fn spawn_store_check(self: &Arc<Self>, app: AppHandle, stores: Arc<StoresService>) {
+    pub fn spawn_store_check(self: &Arc<Self>, app: AppHandle, stores: Arc<GogStore>) {
         if self.store_check_running.swap(true, Ordering::SeqCst) {
             return;
         }
@@ -412,7 +439,7 @@ impl UpdateService {
         });
     }
 
-    async fn store_check(&self, app: &AppHandle, stores: &Arc<StoresService>) {
+    async fn store_check(&self, app: &AppHandle, stores: &Arc<GogStore>) {
         if stores.connection() != StoreConnection::Connected || !stores.tool_ready() {
             return;
         }

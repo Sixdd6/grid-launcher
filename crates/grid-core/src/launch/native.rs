@@ -27,7 +27,8 @@ pub struct NativeLaunch {
     /// Positions in `argv` that hold a secret (an Epic exchange code) and
     /// must never be printed: logs, error messages and anything a session
     /// record carries show them as [`REDACTED_ARG`] ([`Self::printable_argv`],
-    /// [`redact_argv`]). Empty for every launch GRID builds today.
+    /// [`redact_argv`]). Set from a store launch hook's
+    /// [`StoreLaunchPrep::secret_args`]; empty for every other launch.
     pub redact: Vec<usize>,
 }
 
@@ -56,6 +57,46 @@ pub fn redact_argv(argv: &[String], redact: &[usize]) -> Vec<String> {
             }
         })
         .collect()
+}
+
+/// What a store's launch hook adds to a native launch (Epic: legendary's
+/// `launch --json`). [`build_native_command`] takes the executable and the
+/// working folder from it, puts `game_args` after the executable and the
+/// row's own launch parameters after those, and appends `secret_args`
+/// last, every one of them a redacted position ([`NativeLaunch::redact`]).
+///
+/// `secret_args` hold a short-lived credential (Epic's exchange code in
+/// `-AUTH_PASSWORD=`), so `Debug` prints only counts.
+#[derive(Clone, Default)]
+pub struct StoreLaunchPrep {
+    /// The game's executable, absolute. Empty: resolve it from the row.
+    pub executable: PathBuf,
+    /// The folder the game starts in. Empty: the executable's folder.
+    pub working_dir: PathBuf,
+    /// The store's own arguments for the game.
+    pub game_args: Vec<String>,
+    /// Arguments that carry a credential: appended last, never printed.
+    pub secret_args: Vec<String>,
+    /// Extra environment for the game.
+    pub env: Vec<(String, String)>,
+}
+
+impl std::fmt::Debug for StoreLaunchPrep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoreLaunchPrep")
+            .field("executable", &self.executable)
+            .field("working_dir", &self.working_dir)
+            .field(
+                "game_args",
+                &format_args!("<{} args>", self.game_args.len()),
+            )
+            .field(
+                "secret_args",
+                &format_args!("<{} redacted>", self.secret_args.len()),
+            )
+            .field("env", &format_args!("<{} vars>", self.env.len()))
+            .finish()
+    }
 }
 
 /// Why [`build_native_command`] could not build a launch.
@@ -124,12 +165,19 @@ impl From<String> for NativeCommandError {
 /// file that launches ([`sidecar_working_dir`]); otherwise the executable's
 /// parent directory (`.` when it has none, mirrors
 /// [`super::spawn::prepare_emulator_launch`]'s fallback).
+///
+/// `prep` is a store launch hook's answer ([`StoreLaunchPrep`]): its
+/// executable and working folder win, its `game_args` come right after the
+/// executable (before the row's launch parameters), its `env` is added,
+/// and its `secret_args` go last as redacted positions. The compat tool
+/// rules above are unchanged.
 pub fn build_native_command(
     row: &InstalledGame,
     library: &Path,
     default_compat_tool: &str,
     host: &str,
     which: &dyn Fn(&str) -> Option<PathBuf>,
+    prep: Option<&StoreLaunchPrep>,
 ) -> Result<NativeLaunch, NativeCommandError> {
     let name = archive_name(&row.rom_file_name, &row.title, &row.platform);
     let archives = candidate_archives(
@@ -140,10 +188,16 @@ pub fn build_native_command(
         &row.native_game_dir,
     );
     let game_dir = install_dir(row, &archives);
-    let executable = game_dir
-        .as_ref()
-        .map(|dir| executable_candidates(dir, &row.title))
-        .and_then(|candidates| resolved_executable(row, &candidates));
+    let prep_executable = prep
+        .map(|prep| prep.executable.clone())
+        .filter(|path| !path.as_os_str().is_empty());
+    let executable = match prep_executable {
+        Some(path) => Some(path),
+        None => game_dir
+            .as_ref()
+            .map(|dir| executable_candidates(dir, &row.title))
+            .and_then(|candidates| resolved_executable(row, &candidates)),
+    };
     let Some(executable) = executable else {
         return Err(NativeCommandError::Message(
             "No launchable native executable is configured for this game. Use Game Settings to select one."
@@ -151,8 +205,10 @@ pub fn build_native_command(
         ));
     };
 
-    let args = split_template(row.native_launch_parameters.trim())
+    let row_args = split_template(row.native_launch_parameters.trim())
         .map_err(|e| format!("Invalid custom launch parameters: {e}"))?;
+    let mut args = prep.map(|prep| prep.game_args.clone()).unwrap_or_default();
+    args.extend(row_args);
 
     let default_compat_tool = if host.trim().to_lowercase().starts_with("win") {
         ""
@@ -212,7 +268,11 @@ pub fn build_native_command(
         tool_label = String::new();
     }
 
-    let cwd = match sidecar_working_dir(row, game_dir.as_deref(), &executable) {
+    let prep_cwd = prep
+        .map(|prep| prep.working_dir.clone())
+        .filter(|dir| !dir.as_os_str().is_empty());
+    let cwd = match prep_cwd.or_else(|| sidecar_working_dir(row, game_dir.as_deref(), &executable))
+    {
         Some(dir) => dir,
         None => match executable.parent() {
             Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
@@ -220,12 +280,21 @@ pub fn build_native_command(
         },
     };
 
+    let mut redact = Vec::new();
+    if let Some(prep) = prep {
+        env.extend(prep.env.iter().cloned());
+        for secret in &prep.secret_args {
+            redact.push(command.len());
+            command.push(secret.clone());
+        }
+    }
+
     Ok(NativeLaunch {
         argv: command,
         cwd,
         env,
         tool_label,
-        redact: Vec::new(),
+        redact,
     })
 }
 
@@ -393,6 +462,101 @@ mod tests {
         assert_eq!(redact_argv(&launch.argv, &[]), launch.argv);
     }
 
+    fn epic_prep(dir: &Path) -> StoreLaunchPrep {
+        StoreLaunchPrep {
+            executable: dir.join("Binaries").join("Game.exe"),
+            working_dir: dir.join("Binaries"),
+            game_args: vec!["-epicportal".into()],
+            secret_args: vec![
+                "-AUTH_LOGIN=unused".into(),
+                "-AUTH_PASSWORD=FAKE-STORE-TOKEN-not-real".into(),
+                "-AUTH_TYPE=exchangecode".into(),
+            ],
+            env: vec![("EPIC_X".into(), "1".into())],
+        }
+    }
+
+    /// A store launch hook's prep: its executable and folder win, its
+    /// arguments come first, the row's next, and every secret argument
+    /// goes last as a redacted position, under the compat tool too.
+    #[test]
+    fn a_store_prep_builds_the_command_and_redacts_its_secrets() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("Binaries");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("Game.exe"), b"MZ").unwrap();
+        let mut g = row("Starlight", dir.path());
+        g.platform_slug = "win".into();
+        g.native_game_dir = dir.path().to_string_lossy().into_owned();
+        g.native_launch_parameters = "-windowed".into();
+        let prep = epic_prep(dir.path());
+        let launch = build_native_command(
+            &g,
+            dir.path(),
+            "wine",
+            "linux",
+            &|_: &str| None,
+            Some(&prep),
+        )
+        .unwrap();
+        assert_eq!(
+            launch.argv,
+            vec![
+                "wine".to_string(),
+                bin.join("Game.exe").to_string_lossy().into_owned(),
+                "-epicportal".into(),
+                "-windowed".into(),
+                "-AUTH_LOGIN=unused".into(),
+                "-AUTH_PASSWORD=FAKE-STORE-TOKEN-not-real".into(),
+                "-AUTH_TYPE=exchangecode".into(),
+            ]
+        );
+        assert_eq!(launch.redact, vec![4, 5, 6]);
+        assert_eq!(launch.cwd, bin);
+        assert!(launch
+            .env
+            .contains(&("EPIC_X".to_string(), "1".to_string())));
+        assert_eq!(launch.tool_label, "wine");
+        let printable = launch.printable_argv().join(" ");
+        assert!(!printable.contains("FAKE-STORE-TOKEN"), "{printable}");
+        assert_eq!(printable.matches(REDACTED_ARG).count(), 3);
+
+        // On a Windows host the game runs directly; the positions follow.
+        let direct =
+            build_native_command(&g, dir.path(), "", "windows", &|_: &str| None, Some(&prep))
+                .unwrap();
+        assert_eq!(direct.redact, vec![3, 4, 5]);
+        assert!(!direct
+            .printable_argv()
+            .join(" ")
+            .contains("FAKE-STORE-TOKEN"));
+    }
+
+    #[test]
+    fn a_prep_prints_only_counts() {
+        let prep = epic_prep(Path::new("/g"));
+        let text = format!("{prep:?}");
+        assert!(!text.contains("FAKE-STORE-TOKEN"), "{text}");
+        assert!(text.contains("<3 redacted>"), "{text}");
+        assert!(!text.contains("EPIC_X"), "{text}");
+    }
+
+    /// An empty prep executable falls back to the row's own resolution.
+    #[test]
+    fn a_prep_without_an_executable_uses_the_rows() {
+        let (dir, install, exe) = fixture();
+        let g = row("Game", &install);
+        let prep = StoreLaunchPrep {
+            secret_args: vec!["-AUTH_PASSWORD=FAKE-STORE-TOKEN-not-real".into()],
+            ..Default::default()
+        };
+        let launch =
+            build_native_command(&g, dir.path(), "", "linux", &|_: &str| None, Some(&prep))
+                .unwrap();
+        assert_eq!(launch.argv[0], exe.to_string_lossy());
+        assert_eq!(launch.redact, vec![launch.argv.len() - 1]);
+    }
+
     fn row(title: &str, extracted_dir: &Path) -> InstalledGame {
         InstalledGame {
             title: title.to_string(),
@@ -427,7 +591,7 @@ mod tests {
         fs::create_dir_all(&empty_install).unwrap();
         let g = row("Empty", &empty_install);
 
-        let error = build_native_command(&g, dir.path(), "", "linux", &no_which).unwrap_err();
+        let error = build_native_command(&g, dir.path(), "", "linux", &no_which, None).unwrap_err();
         assert_eq!(
             error,
             NativeCommandError::Message(
@@ -457,7 +621,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = build_native_command(&g, dir.path(), "", "linux", &no_which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "linux", &no_which, None).unwrap();
         assert_eq!(result.argv[0], exe.to_string_lossy());
         assert_eq!(result.cwd, legacy_dir);
     }
@@ -470,7 +634,7 @@ mod tests {
         let mut g = row("Game", &install);
         g.native_launch_parameters = "--fullscreen \"extra arg\"".to_string();
 
-        let result = build_native_command(&g, dir.path(), "", "linux", &no_which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "linux", &no_which, None).unwrap();
         assert_eq!(
             result.argv,
             vec![
@@ -489,7 +653,8 @@ mod tests {
         let (dir, install, exe) = fixture();
         let g = row("Game", &install);
 
-        let result = build_native_command(&g, dir.path(), "wine", "linux", &no_which).unwrap();
+        let result =
+            build_native_command(&g, dir.path(), "wine", "linux", &no_which, None).unwrap();
         assert_eq!(result.argv[0], "wine");
         assert_eq!(result.argv[1], exe.to_string_lossy());
         assert_eq!(result.tool_label, "wine");
@@ -502,7 +667,7 @@ mod tests {
         g.native_compat_tool = "wine".to_string();
 
         let result =
-            build_native_command(&g, dir.path(), "/opt/proton", "linux", &no_which).unwrap();
+            build_native_command(&g, dir.path(), "/opt/proton", "linux", &no_which, None).unwrap();
         assert_eq!(
             result.argv,
             vec!["wine".to_string(), exe.to_string_lossy().into_owned()]
@@ -521,7 +686,7 @@ mod tests {
         let which = |name: &str| -> Option<PathBuf> {
             (name == "wine").then(|| PathBuf::from("/usr/bin/wine"))
         };
-        let result = build_native_command(&g, dir.path(), "", "linux", &which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "linux", &which, None).unwrap();
         assert_eq!(
             result.argv,
             vec![
@@ -539,7 +704,7 @@ mod tests {
         let mut g = row("Game", &install);
         g.native_compat_tool = "wine".to_string();
 
-        let result = build_native_command(&g, dir.path(), "", "linux", &no_which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "linux", &no_which, None).unwrap();
         assert_eq!(result.argv[0], "wine");
     }
 
@@ -554,7 +719,7 @@ mod tests {
         let which = |name: &str| -> Option<PathBuf> {
             (name == "umu-run").then(|| PathBuf::from("/usr/bin/umu-run"))
         };
-        let result = build_native_command(&g, dir.path(), "", "linux", &which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "linux", &which, None).unwrap();
         assert_eq!(
             result.argv,
             vec![
@@ -578,7 +743,7 @@ mod tests {
         let mut g = row("Game", &install);
         g.native_compat_tool = "GE-Proton9".to_string();
 
-        let error = build_native_command(&g, dir.path(), "", "linux", &no_which).unwrap_err();
+        let error = build_native_command(&g, dir.path(), "", "linux", &no_which, None).unwrap_err();
         assert_eq!(error, NativeCommandError::UmuMissing);
         assert_eq!(error.to_string(), UMU_MISSING_MESSAGE);
         assert!(error.to_string().contains("Settings › Systems › Windows"));
@@ -594,7 +759,7 @@ mod tests {
         g.native_compat_tool = "wine".to_string();
         g.native_wineprefix = prefix.to_string_lossy().into_owned();
 
-        let result = build_native_command(&g, dir.path(), "", "linux", &no_which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "linux", &no_which, None).unwrap();
         assert!(prefix.is_dir(), "WINEPREFIX directory was not created");
         assert_eq!(
             result.env,
@@ -616,7 +781,7 @@ mod tests {
         let which = |name: &str| -> Option<PathBuf> {
             (name == "umu-run").then(|| PathBuf::from("/usr/bin/umu-run"))
         };
-        let result = build_native_command(&g, dir.path(), "", "linux", &which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "linux", &which, None).unwrap();
         assert!(prefix.is_dir(), "WINEPREFIX directory was not created");
         assert_eq!(
             result.env,
@@ -636,7 +801,7 @@ mod tests {
         let mut g = row("Game", &install);
         g.native_wineprefix = dir.path().join("prefix").to_string_lossy().into_owned();
 
-        let result = build_native_command(&g, dir.path(), "", "linux", &no_which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "linux", &no_which, None).unwrap();
         assert!(result.env.is_empty());
     }
 
@@ -647,7 +812,8 @@ mod tests {
         let (dir, install, exe) = fixture();
         let g = row("Game", &install);
 
-        let result = build_native_command(&g, dir.path(), "wine", "windows", &no_which).unwrap();
+        let result =
+            build_native_command(&g, dir.path(), "wine", "windows", &no_which, None).unwrap();
         assert_eq!(result.argv, vec![exe.to_string_lossy().into_owned()]);
         assert_eq!(result.tool_label, "");
     }
@@ -665,7 +831,8 @@ mod tests {
         let which = |name: &str| -> Option<PathBuf> {
             panic!("a linux-platform row must not look up {name}");
         };
-        let result = build_native_command(&g, dir.path(), "GE-Proton9", "linux", &which).unwrap();
+        let result =
+            build_native_command(&g, dir.path(), "GE-Proton9", "linux", &which, None).unwrap();
         assert_eq!(result.argv, vec![exe.to_string_lossy().into_owned()]);
         assert!(result.env.is_empty());
         assert_eq!(result.tool_label, "");
@@ -681,7 +848,8 @@ mod tests {
         let mut g = row("Game", &install);
         g.platform = "Windows 10".to_string();
 
-        let result = build_native_command(&g, dir.path(), "wine", "linux", &no_which).unwrap();
+        let result =
+            build_native_command(&g, dir.path(), "wine", "linux", &no_which, None).unwrap();
         assert_eq!(
             result.argv,
             vec!["wine".to_string(), exe.to_string_lossy().into_owned()]
@@ -738,12 +906,14 @@ mod tests {
         assert_eq!(candidates, vec![exe.clone()]);
 
         // Launch on a Windows host: the executable runs directly.
-        let on_windows = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        let on_windows =
+            build_native_command(&g, dir.path(), "", "windows", &no_which, None).unwrap();
         assert_eq!(on_windows.argv, vec![exe.to_string_lossy().into_owned()]);
         assert_eq!(on_windows.cwd, extracted);
         // On Linux the slug makes it a Windows game, so the default compat
         // tool applies.
-        let on_linux = build_native_command(&g, dir.path(), "wine", "linux", &no_which).unwrap();
+        let on_linux =
+            build_native_command(&g, dir.path(), "wine", "linux", &no_which, None).unwrap();
         assert_eq!(on_linux.tool_label, "wine");
     }
 
@@ -773,20 +943,20 @@ mod tests {
     #[test]
     fn a_sidecar_working_dir_is_the_cwd() {
         let (dir, install, g) = sidecar_fixture("bin/start.bat", "data");
-        let result = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "windows", &no_which, None).unwrap();
         assert_eq!(result.cwd, install.join("data"));
         let (dir, install, g) = sidecar_fixture("bin/start.bat", ".");
-        let result = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "windows", &no_which, None).unwrap();
         assert_eq!(result.cwd, install);
     }
 
     #[test]
     fn a_blank_or_missing_working_dir_falls_back_to_the_executables_folder() {
         let (dir, install, g) = sidecar_fixture("bin/start.bat", "");
-        let result = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "windows", &no_which, None).unwrap();
         assert_eq!(result.cwd, install.join("bin"));
         let (dir, install, g) = sidecar_fixture("bin/start.bat", "gone");
-        let result = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "windows", &no_which, None).unwrap();
         assert_eq!(result.cwd, install.join("bin"));
     }
 
@@ -798,7 +968,7 @@ mod tests {
             .join("gone.bat")
             .to_string_lossy()
             .into_owned();
-        let result = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "windows", &no_which, None).unwrap();
         // The ranking picks Game.exe at the root; the sidecar dir belonged
         // to the pinned file, not to it.
         assert_eq!(
@@ -814,7 +984,7 @@ mod tests {
         // own batch-argument escaping, so no wrapper is added here.
         let (dir, install, mut g) = sidecar_fixture("bin/start.bat", "");
         g.native_launch_parameters = "--mode \"two words\"".to_string();
-        let result = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "windows", &no_which, None).unwrap();
         assert_eq!(
             result.argv,
             vec![
@@ -836,7 +1006,7 @@ mod tests {
         let which = |name: &str| -> Option<PathBuf> {
             (name == "powershell.exe").then(|| PathBuf::from("C:\\PS\\powershell.exe"))
         };
-        let result = build_native_command(&g, dir.path(), "", "windows", &which).unwrap();
+        let result = build_native_command(&g, dir.path(), "", "windows", &which, None).unwrap();
         let script = install
             .join("bin")
             .join("run.ps1")
@@ -858,14 +1028,16 @@ mod tests {
         assert_eq!(result.cwd, install.join("bin"));
 
         // Not on PATH: the bare name, resolved by the OS at spawn.
-        let fallback = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        let fallback =
+            build_native_command(&g, dir.path(), "", "windows", &no_which, None).unwrap();
         assert_eq!(fallback.argv[0], "powershell.exe");
     }
 
     #[test]
     fn a_powershell_script_under_wine_is_left_to_wine() {
         let (dir, install, g) = sidecar_fixture("bin/run.ps1", "");
-        let result = build_native_command(&g, dir.path(), "wine", "linux", &no_which).unwrap();
+        let result =
+            build_native_command(&g, dir.path(), "wine", "linux", &no_which, None).unwrap();
         assert_eq!(
             result.argv,
             vec![

@@ -11,12 +11,14 @@
 //!   for a store product — with a stable string form (`romm:123`,
 //!   `gog:1207664643`) that is also its serde form.
 //!
-//! Phase 1 adds, under this folder: `tools` (the pinned heroic-gogdl
-//! download; legendary and nile later), `runner` (the only place a tool
-//! process is spawned), `progress` (tool progress parsing), `paths`
-//! (`<data_dir>/stores/<tool>/`, 0700/0600), `art`, and one folder per
-//! source: `gog`, `offline` (GOG offline installers); `epic`, `amazon` and
-//! `steam` later. [`StoreError`] is every store operation's error.
+//! Phases 1 and 2 add, under this folder: `tools` (the pinned heroic-gogdl
+//! and legendary downloads; nile later), `runner` (the only place a tool
+//! process is spawned), `progress` (tool progress and legendary's known
+//! lines), `paths` (`<data_dir>/stores/<tool>/`, 0700/0600), `art`, the
+//! cloud save types every store shares ([`CloudState`], [`SyncMode`],
+//! [`SaveConflict`]), and one folder per source: `gog`, `offline` (GOG
+//! offline installers), `epic` (Phase 2); `amazon` and `steam` later.
+//! [`StoreError`] is every store operation's error.
 //!
 //! Secrets: the tools' own token files live under `<data_dir>/stores/` (the
 //! narrow, documented exception in AGENTS.md). Nothing in this module tree
@@ -29,6 +31,7 @@ use std::str::FromStr;
 use crate::library::LibraryError;
 
 pub mod art;
+pub mod epic;
 pub mod gog;
 pub mod offline;
 pub mod paths;
@@ -141,6 +144,45 @@ impl<'de> serde::Deserialize<'de> for StoreKind {
         StoreKind::parse(&value)
             .ok_or_else(|| serde::de::Error::custom(format!("unknown store {value:?}")))
     }
+}
+
+// --- cloud saves (shared by every store with a cloud) ----------------------
+
+/// How a cloud save sync decides its direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncMode {
+    /// GRID decides from timestamps; a conflict stops the sync.
+    Auto,
+    PreferUpload,
+    PreferDownload,
+}
+
+/// A game's cloud save state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloudState {
+    /// Cloud saves are off for the game (or the store has none for it).
+    Off,
+    /// On, never synced.
+    None,
+    Synced {
+        at: i64,
+    },
+    Conflict(SaveConflict),
+}
+
+/// Both sides of a save conflict.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveConflict {
+    pub local_at: i64,
+    pub local_files: u32,
+    pub local_bytes: u64,
+    pub cloud_at: i64,
+    /// The cloud files in the game's save locations (GOG's cloudstorage
+    /// listing); `None` when the store gives no file list (Epic's
+    /// `list-saves` names one manifest per save, not its files).
+    pub cloud_files: Option<u32>,
+    /// Their bytes, `None` when the listing leaves a file's size out.
+    pub cloud_bytes: Option<u64>,
 }
 
 /// The registry `source` value for a RomM row.

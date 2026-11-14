@@ -304,10 +304,10 @@ export function conflictSides(
   const name = storeName(source);
   const files = filesText(c.local_files);
   // The cloud side as the prototype words it: "· 3 files · 2.0 MB" on the
-  // Cloud saves tab, "· 2.0 MB" in the prompt. A size GOG's listing didn't
-  // give is left out, never guessed.
+  // Cloud saves tab, "· 2.0 MB" in the prompt. A file count or size the
+  // store's listing didn't give is left out, never guessed.
   const cloudParts = [
-    ...(prompt ? [] : [filesText(c.cloud_files)]),
+    ...(prompt || c.cloud_files === null ? [] : [filesText(c.cloud_files)]),
     ...(c.cloud_bytes === null ? [] : [bytesShort(c.cloud_bytes)]),
   ];
   const cloudTail = cloudParts.length > 0 ? ` · ${cloudParts.join(' · ')}` : '';

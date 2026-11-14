@@ -13,7 +13,11 @@ cd "$(dirname "$0")/.."
 # `stores/gog/auth.rs` and `stores/gog/api.rs` are on it for the GOG login
 # code and the in-memory bearer the GOG HTTP APIs take (the store-token
 # exception in AGENTS.md).
-allowed_files=("crates/grid-core/src/secrets.rs" "crates/grid-core/src/romm/mod.rs" "crates/grid-core/src/autoconfig/mod.rs" "crates/grid-core/src/retroachievements.rs" "crates/grid-core/tests/ra_login.rs" "crates/grid-core/src/stores/gog/auth.rs" "crates/grid-core/src/stores/gog/api.rs")
+# `stores/runner.rs` is on it for writing a tool's stdin secret (legendary's
+# login code) and for handing a tool's kept stdout to a JSON parse.
+# `stores/epic/launch.rs` is on it for Epic's exchange code, which goes into
+# the game's argv as a redacted argument.
+allowed_files=("crates/grid-core/src/secrets.rs" "crates/grid-core/src/romm/mod.rs" "crates/grid-core/src/autoconfig/mod.rs" "crates/grid-core/src/retroachievements.rs" "crates/grid-core/tests/ra_login.rs" "crates/grid-core/src/stores/gog/auth.rs" "crates/grid-core/src/stores/gog/api.rs" "crates/grid-core/src/stores/runner.rs" "crates/grid-core/src/stores/epic/launch.rs")
 allowed_args=()
 for f in "${allowed_files[@]}"; do
   allowed_args+=(-e "$f")
@@ -49,7 +53,7 @@ fi
 # and println!/eprintln!/dbg! are refused outright. The app-side store files
 # are checked too once they exist.
 store_paths=()
-for p in crates/grid-core/src/stores app/src-tauri/src/stores_service.rs \
+for p in crates/grid-core/src/stores app/src-tauri/src/stores_service \
          app/src-tauri/src/store_auth.rs app/src-tauri/src/commands/stores.rs; do
   if [ -e "$p" ]; then
     store_paths+=("$p")

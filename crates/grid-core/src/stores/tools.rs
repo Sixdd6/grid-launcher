@@ -1,11 +1,13 @@
-//! The GRID-managed store tools (heroic-gogdl in Phase 1): their pinned
-//! releases and SHA-256s, the install that checks them, and the command
-//! that starts one.
+//! The GRID-managed store tools (heroic-gogdl for GOG, legendary for Epic):
+//! their pinned releases and SHA-256s, the install that checks them, and
+//! the command that starts one.
 //!
-//! The pins come from GitHub's published asset digests for heroic-gogdl
-//! v1.4.0 (`docs/stores-phase1-plan.md` "Spike results"). The Linux assets
-//! are Python zipapps, run as `python3 <file>` with the same Python 3.10
-//! floor as GRID's umu-launcher ([`crate::launch::umu::MIN_PYTHON`]).
+//! The gogdl pins come from GitHub's published asset digests for
+//! heroic-gogdl v1.4.0 (`docs/stores-phase1-plan.md` "Spike results"); the
+//! legendary pins from the 0.21.1 assets themselves, which match GitHub's
+//! digests (`docs/stores-phase2-plan.md` "Research"). Both tools' Linux
+//! assets are Python zipapps, run as `python3 <file>` with the same Python
+//! 3.10 floor as GRID's umu-launcher ([`crate::launch::umu::MIN_PYTHON`]).
 
 use std::fs;
 use std::io::Write as _;
@@ -24,6 +26,7 @@ use super::StoreError;
 #[serde(rename_all = "lowercase")]
 pub enum StoreTool {
     Gogdl,
+    Legendary,
 }
 
 impl StoreTool {
@@ -32,15 +35,18 @@ impl StoreTool {
     pub fn name(self) -> &'static str {
         match self {
             StoreTool::Gogdl => "gogdl",
+            StoreTool::Legendary => "legendary",
         }
     }
 
     /// The e2e override variable naming a fake tool
-    /// (`GRID_LAUNCHER_E2E_TOOL_GOGDL`), read only with the `e2e` feature.
+    /// (`GRID_LAUNCHER_E2E_TOOL_GOGDL`, `GRID_LAUNCHER_E2E_TOOL_LEGENDARY`),
+    /// read only with the `e2e` feature.
     #[cfg(feature = "e2e")]
     pub fn e2e_env(self) -> &'static str {
         match self {
             StoreTool::Gogdl => "GRID_LAUNCHER_E2E_TOOL_GOGDL",
+            StoreTool::Legendary => "GRID_LAUNCHER_E2E_TOOL_LEGENDARY",
         }
     }
 }
@@ -50,7 +56,8 @@ impl StoreTool {
 pub enum AssetLauncher {
     /// A native executable, run as itself.
     Direct,
-    /// A Python zipapp, run as `python3 <file>` (gogdl on Linux).
+    /// A Python zipapp, run as `python3 <file>` (gogdl and legendary on
+    /// Linux).
     Python3,
 }
 
@@ -152,10 +159,90 @@ static GOGDL_PIN: ToolPin = ToolPin {
     assets: &GOGDL_ASSETS,
 };
 
+macro_rules! legendary_asset {
+    ($os:literal, $arch:literal, $file:literal, $sha:literal, $size:literal, $launcher:expr) => {
+        PinnedAsset {
+            os: $os,
+            arch: $arch,
+            url: concat!(
+                "https://github.com/legendary-gl/legendary/releases/download/0.21.1/",
+                $file
+            ),
+            file_name: $file,
+            sha256: $sha,
+            size: $size,
+            launcher: $launcher,
+        }
+    };
+}
+
+/// legendary 0.21.1 "Lowlife" (2026-09-08). The project publishes no
+/// SHA256SUMS: these were computed from the downloaded assets and match
+/// GitHub's per-asset digests (the Windows arm64 one is the API's digest).
+static LEGENDARY_ASSETS: [PinnedAsset; 6] = [
+    legendary_asset!(
+        "linux",
+        "x86_64",
+        "legendary_linux_x64",
+        "dbed33bbe96031e65858233e4badf0a1d401bb6cb0cc995d1237cf3a0c826a45",
+        3093622,
+        AssetLauncher::Python3
+    ),
+    legendary_asset!(
+        "linux",
+        "aarch64",
+        "legendary_linux_arm64",
+        "e901cb52ada10d5cef6ffb2a0985099958124457bfb455a571023d1e042143d9",
+        2999455,
+        AssetLauncher::Python3
+    ),
+    legendary_asset!(
+        "windows",
+        "x86_64",
+        "legendary_windows_x64.exe",
+        "6be77857dc0a6dd33ea7442ce8b5291944ec6da53757f81ca95b57ce794baf5b",
+        17654404,
+        AssetLauncher::Direct
+    ),
+    legendary_asset!(
+        "windows",
+        "aarch64",
+        "legendary_windows_arm64.exe",
+        "5ca178d75713cb92ee24daa5df1905c75f05b8b403383669ca7aa32a5809fba3",
+        17147114,
+        AssetLauncher::Direct
+    ),
+    legendary_asset!(
+        "macos",
+        "x86_64",
+        "legendary_macOS_x64",
+        "3dfab50277284b5bb0104f8710e4ff1d9ff00c992e44f5843fd0c977c5cc99c4",
+        15566864,
+        AssetLauncher::Direct
+    ),
+    legendary_asset!(
+        "macos",
+        "aarch64",
+        "legendary_macOS_arm64",
+        "d87978321dba9cb731fab40c72f0a30bed55baca8b5341ab21024c5733cd837e",
+        15275984,
+        AssetLauncher::Direct
+    ),
+];
+
+static LEGENDARY_PIN: ToolPin = ToolPin {
+    tool: StoreTool::Legendary,
+    version: "0.21.1",
+    license: "GPL-3.0",
+    source_url: "https://github.com/legendary-gl/legendary",
+    assets: &LEGENDARY_ASSETS,
+};
+
 /// The tool's pinned release.
 pub fn pin(tool: StoreTool) -> &'static ToolPin {
     match tool {
         StoreTool::Gogdl => &GOGDL_PIN,
+        StoreTool::Legendary => &LEGENDARY_PIN,
     }
 }
 
@@ -319,18 +406,19 @@ fn mismatch(tool: StoreTool) -> StoreError {
     ))
 }
 
-/// The words for a Python that can't run the Linux gogdl, `None` when
-/// `found` (`(major, minor)`, `None` = no `python3`) meets
+/// The words for a Python that can't run `tool`'s Linux zipapp, `None`
+/// when `found` (`(major, minor)`, `None` = no `python3`) meets
 /// [`crate::launch::umu::MIN_PYTHON`].
-pub fn python_problem(found: Option<(u32, u32)>) -> Option<String> {
+pub fn python_problem(tool: StoreTool, found: Option<(u32, u32)>) -> Option<String> {
     let (major_min, minor_min) = crate::launch::umu::MIN_PYTHON;
+    let name = tool.name();
     match found {
         Some(version) if version >= crate::launch::umu::MIN_PYTHON => None,
         Some((major, minor)) => Some(format!(
-            "gogdl needs Python {major_min}.{minor_min} or newer, but python3 is {major}.{minor}."
+            "{name} needs Python {major_min}.{minor_min} or newer, but python3 is {major}.{minor}."
         )),
         None => Some(format!(
-            "gogdl needs Python {major_min}.{minor_min} or newer, and python3 was not found."
+            "{name} needs Python {major_min}.{minor_min} or newer, and python3 was not found."
         )),
     }
 }
@@ -355,7 +443,7 @@ pub fn tool_command(
             program: path,
             args,
             env,
-            cwd: None,
+            ..Default::default()
         }),
         AssetLauncher::Python3 => {
             let child_env = crate::launch::spawn::clean_env();
@@ -365,7 +453,7 @@ pub fn tool_command(
             let found = python
                 .as_ref()
                 .and_then(|_| crate::launch::umu::probe_python(&child_env));
-            if let Some(problem) = python_problem(found) {
+            if let Some(problem) = python_problem(tool, found) {
                 return Err(StoreError::Refused(problem));
             }
             let mut full = Vec::with_capacity(args.len() + 1);
@@ -375,7 +463,7 @@ pub fn tool_command(
                 program: python.unwrap_or_else(|| PathBuf::from("python3")),
                 args: full,
                 env,
-                cwd: None,
+                ..Default::default()
             })
         }
     }
@@ -408,13 +496,56 @@ mod tests {
     }
 
     #[test]
+    fn legendary_is_pinned_to_0_21_1() {
+        let pin = pin(StoreTool::Legendary);
+        assert_eq!(pin.version, "0.21.1");
+        assert_eq!(pin.license, "GPL-3.0");
+        assert_eq!(pin.source_url, "https://github.com/legendary-gl/legendary");
+        assert_eq!(pin.assets.len(), 6);
+        for asset in pin.assets {
+            assert_eq!(asset.sha256.len(), 64, "{}", asset.file_name);
+            assert!(asset.sha256.chars().all(|c| c.is_ascii_hexdigit()));
+            assert!(asset.url.ends_with(asset.file_name));
+            assert!(asset
+                .url
+                .contains("/legendary-gl/legendary/releases/download/0.21.1/"));
+            assert!(asset.size > 0);
+        }
+        let linux = asset_for(StoreTool::Legendary, "linux", "x86_64").unwrap();
+        assert_eq!(linux.file_name, "legendary_linux_x64");
+        assert_eq!(linux.size, 3093622);
+        assert_eq!(linux.launcher, AssetLauncher::Python3);
+        let arm = asset_for(StoreTool::Legendary, "linux", "aarch64").unwrap();
+        assert_eq!(arm.launcher, AssetLauncher::Python3);
+        for (os, arch) in [
+            ("windows", "x86_64"),
+            ("windows", "aarch64"),
+            ("macos", "x86_64"),
+            ("macos", "aarch64"),
+        ] {
+            let asset = asset_for(StoreTool::Legendary, os, arch).unwrap();
+            assert_eq!(asset.launcher, AssetLauncher::Direct, "{os} {arch}");
+        }
+        assert_eq!(StoreTool::Legendary.name(), "legendary");
+        assert_eq!(
+            serde_json::to_string(&StoreTool::Legendary).unwrap(),
+            r#""legendary""#
+        );
+    }
+
+    #[test]
     fn python_floor_words() {
-        assert_eq!(python_problem(Some((3, 10))), None);
-        assert_eq!(python_problem(Some((3, 13))), None);
-        assert!(python_problem(Some((3, 9)))
+        assert_eq!(python_problem(StoreTool::Gogdl, Some((3, 10))), None);
+        assert_eq!(python_problem(StoreTool::Gogdl, Some((3, 13))), None);
+        assert!(python_problem(StoreTool::Gogdl, Some((3, 9)))
             .unwrap()
             .contains("python3 is 3.9"));
-        assert!(python_problem(None).unwrap().contains("not found"));
+        assert!(python_problem(StoreTool::Gogdl, None)
+            .unwrap()
+            .contains("not found"));
+        assert!(python_problem(StoreTool::Legendary, None)
+            .unwrap()
+            .starts_with("legendary needs Python 3.10"));
     }
 
     fn sha_hex(bytes: &[u8]) -> String {

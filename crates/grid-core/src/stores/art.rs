@@ -1,6 +1,7 @@
 //! Store art: the image URLs GOG gives (protocol-relative links, gamesdb
 //! `url_format` templates, api.gog.com `formatter_template_url`s) made
-//! into plain `https` URLs, and a small on-disk cache under
+//! into plain `https` URLs, the store image hosts GRID fetches from (GOG's
+//! and Epic's, [`is_store_art_url`]), and a small on-disk cache under
 //! `<data_dir>/stores/art/` keyed by the URL's SHA-256, like the RomM art
 //! cache. Only `http(s)` URLs are fetched.
 
@@ -70,19 +71,31 @@ pub fn cache_path(data_dir: &Path, url: &str) -> PathBuf {
     art_dir(data_dir).join(format!("{digest}.{ext}"))
 }
 
-/// GOG's image hosts: these domains and their subdomains.
-const GOG_ART_DOMAINS: [&str; 2] = ["gog-statics.com", "gog.com"];
+/// The stores' image hosts: these domains and their subdomains. GOG's,
+/// then Epic's (keyImages come from `cdn1.epicgames.com`,
+/// `cdn2.unrealengine.com` and `media-cdn.epicgames.com`;
+/// `docs/stores-phase2-plan.md` "Spike results", spike 4).
+const STORE_ART_DOMAINS: [&str; 4] = [
+    "gog-statics.com",
+    "gog.com",
+    "epicgames.com",
+    "unrealengine.com",
+];
 
 /// Whether `url` is store art GRID may fetch for the UI: an `https` address
-/// on GOG's image hosts ([`GOG_ART_DOMAINS`]), or any address on the
-/// `gamesdb` endpoint's own origin (where an e2e build's mock serves art).
-/// Store art is fetched with no credential, so this never admits the RomM
-/// server just because it is connected.
-pub fn is_store_art_url(url: &str, gamesdb: &url::Url) -> bool {
+/// on a store's image hosts ([`STORE_ART_DOMAINS`]), or any address on one
+/// of `extra_origins` (the e2e build's mock servers, which serve art over
+/// plain http). Store art is fetched with no credential, so this never
+/// admits the RomM server just because it is connected.
+pub fn is_store_art_url(url: &str, extra_origins: &[url::Url]) -> bool {
     let Ok(parsed) = url::Url::parse(&absolute_url(url)) else {
         return false;
     };
-    if parsed.origin() == gamesdb.origin() && !parsed.cannot_be_a_base() {
+    if !parsed.cannot_be_a_base()
+        && extra_origins
+            .iter()
+            .any(|origin| parsed.origin() == origin.origin())
+    {
         return true;
     }
     if parsed.scheme() != "https" {
@@ -92,7 +105,7 @@ pub fn is_store_art_url(url: &str, gamesdb: &url::Url) -> bool {
         return false;
     };
     let host = host.to_ascii_lowercase();
-    GOG_ART_DOMAINS
+    STORE_ART_DOMAINS
         .iter()
         .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
 }
@@ -174,7 +187,7 @@ mod tests {
 
     #[test]
     fn store_art_is_gogs_image_hosts_or_the_gamesdb_origin() {
-        let gamesdb = url::Url::parse("https://gamesdb.gog.com/").unwrap();
+        let gamesdb = [url::Url::parse("https://gamesdb.gog.com/").unwrap()];
         assert!(is_store_art_url(
             "https://images.gog-statics.com/a_196.jpg",
             &gamesdb
@@ -197,12 +210,42 @@ mod tests {
         ));
         assert!(!is_store_art_url("https://romm.example/a.jpg", &gamesdb));
         assert!(!is_store_art_url("file:///etc/passwd", &gamesdb));
-        let mock = url::Url::parse("http://127.0.0.1:4100/").unwrap();
+        let mock = [url::Url::parse("http://127.0.0.1:4100/").unwrap()];
         assert!(is_store_art_url(
             "http://127.0.0.1:4100/art/a_cover.png",
             &mock
         ));
         assert!(!is_store_art_url("http://127.0.0.1:4200/art/a.png", &mock));
+        assert!(!is_store_art_url("http://127.0.0.1:4100/art/a.png", &[]));
+    }
+
+    #[test]
+    fn store_art_includes_epics_cdns_over_https() {
+        for url in [
+            "https://cdn1.epicgames.com/df37f065c3f14eadbf011177396e2966/offer/EGS_x-1920x1080-1cf3.jpg",
+            "https://cdn2.unrealengine.com/egs-x-g1a-01-1920x1080-b65e51b6fb2e.jpg",
+            "https://media-cdn.epicgames.com/5e50/5e50-00001-thumb.png",
+            "https://CDN1.EpicGames.com/a.jpg",
+        ] {
+            assert!(is_store_art_url(url, &[]), "{url}");
+        }
+        for url in [
+            "http://cdn1.epicgames.com/a.jpg",
+            "https://cdn1.epicgames.com.evil.example/a.jpg",
+            "https://notepicgames.com/a.jpg",
+            "com.epicgames.video://db158029-97be-45f7-9a3f-c89f95c9b532",
+            "https://unrealengine.co/a.jpg",
+        ] {
+            assert!(!is_store_art_url(url, &[]), "{url}");
+        }
+        // Two e2e origins: the GOG mock and the Epic mock.
+        let mocks = [
+            url::Url::parse("http://127.0.0.1:4100/").unwrap(),
+            url::Url::parse("http://127.0.0.1:4300/").unwrap(),
+        ];
+        assert!(is_store_art_url("http://127.0.0.1:4300/art/e1.jpg", &mocks));
+        assert!(is_store_art_url("http://127.0.0.1:4100/art/g1.jpg", &mocks));
+        assert!(!is_store_art_url("http://127.0.0.1:4400/art/x.jpg", &mocks));
     }
 
     #[tokio::test]

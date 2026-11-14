@@ -1,7 +1,10 @@
-//! External game stores (Phase 1: GOG) commands and events
-//! (`docs/stores-phase1-plan.md` "Tauri commands and events"). Thin
-//! wrappers: `stores_service.rs` and grid-core's `stores` module own every
-//! rule.
+//! External game stores (GOG, Epic) commands and events
+//! (`docs/stores-phase1-plan.md` "Tauri commands and events",
+//! `docs/stores-phase2-plan.md` "App"). Thin wrappers: each store command
+//! finds its store's backend (`backend_for`, `backend_for_key`) and calls
+//! the `stores_service::StoreBackend` trait; `stores_service/` and
+//! grid-core's `stores` module own every rule. The offline installer and
+//! store backup commands are GOG-only (`StoresService::gog`).
 //!
 //! camelCase arguments, snake_case JSON. A `key` argument is a game key
 //! string (`gog:1207664643`); for the backup commands it is the drive key.
@@ -22,16 +25,15 @@ use grid_core::config::Config;
 use grid_core::library::queue::StoreJob;
 use grid_core::library::registry::InstalledGame;
 use grid_core::library::InstallService;
-use grid_core::stores::gog::meta::{GogMeta, GogPlatform};
-use grid_core::stores::gog::{CloudState, GogInstallRequest, GogJobCtx, GogProduct, SyncMode};
+use grid_core::stores::gog::GogProduct;
 use grid_core::stores::offline;
-use grid_core::stores::{GameKey, StoreKind};
+use grid_core::stores::{GameKey, StoreKind, SyncMode};
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 use super::{ensure_library_idle, err, AppState};
-use crate::stores_service::{cloud_state_ipc, StoresService};
+use crate::stores_service::{JobCtx, StoreBackend};
 
 /// Emitted with the full `StoreStatus[]` whenever a store's status changes.
 pub const STORES_CHANGED_EVENT: &str = "stores-changed";
@@ -54,7 +56,7 @@ pub enum ToolState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ToolStatus {
-    /// `gogdl`.
+    /// `gogdl` | `legendary`.
     pub name: String,
     pub version: String,
     pub state: ToolState,
@@ -85,7 +87,7 @@ pub enum OwnedState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StoreStatus {
-    /// `gog`.
+    /// `gog` | `epic`.
     pub source: String,
     pub connection: StoreConnection,
     pub username: String,
@@ -131,7 +133,8 @@ pub struct StoreGame {
     pub disk_bytes: u64,
     pub version: String,
     pub update_version: String,
-    /// `gogdl` | `offline` | `drive`, `None` when not installed.
+    /// `gogdl` | `offline` | `drive` | `legendary`, `None` when not
+    /// installed.
     pub origin: Option<String>,
     pub not_supported: String,
     pub dlc: Vec<StoreDlc>,
@@ -198,8 +201,9 @@ pub struct StoreSaveConflict {
     pub local_files: u32,
     pub local_bytes: u64,
     pub cloud_at: i64,
-    pub cloud_files: u32,
-    /// `None` when GOG's cloud listing gives no sizes.
+    /// `None` when the store gives no file list (Epic's `list-saves`).
+    pub cloud_files: Option<u32>,
+    /// `None` when the store's cloud listing gives no sizes.
     pub cloud_bytes: Option<u64>,
 }
 
@@ -316,46 +320,71 @@ pub struct StoreBackupPlan {
 
 // --- commands -----------------------------------------------------------------
 
-/// The one store Phase 1 ships.
-fn require_gog(source: &str) -> Result<(), String> {
+/// What every store command answers for a store GRID doesn't support.
+const UNSUPPORTED_STORE: &str = "GRID doesn't support that store yet.";
+
+/// The store a `source` argument names: GOG or Epic.
+fn store_kind(source: &str) -> Result<StoreKind, String> {
     match StoreKind::parse(source.trim()) {
-        Some(StoreKind::Gog) => Ok(()),
-        _ => Err("GRID doesn't support that store yet.".to_string()),
+        Some(kind @ (StoreKind::Gog | StoreKind::Epic)) => Ok(kind),
+        _ => Err(UNSUPPORTED_STORE.to_string()),
     }
 }
 
-/// A GOG game key's product id.
-fn gog_id(key: &str) -> Result<String, String> {
+/// The backend for a `source` argument.
+fn backend_for(state: &AppState, source: &str) -> Result<Arc<dyn StoreBackend>, String> {
+    let kind = store_kind(source)?;
+    state
+        .stores
+        .backend(kind)
+        .ok_or_else(|| UNSUPPORTED_STORE.to_string())
+}
+
+/// A store game key's store and product id (GOG product id, Epic app name).
+fn store_key(key: &str) -> Result<(StoreKind, String), String> {
     match key.parse::<GameKey>().map_err(err)? {
-        GameKey::Store {
-            source: StoreKind::Gog,
-            store_id,
-        } => Ok(store_id),
-        _ => Err("GRID doesn't support that store yet.".to_string()),
+        GameKey::Store { source, store_id } => {
+            store_kind(source.as_str())?;
+            Ok((source, store_id))
+        }
+        GameKey::Rom(_) => Err(UNSUPPORTED_STORE.to_string()),
     }
+}
+
+/// The backend and product id for a store game key.
+fn backend_for_key(
+    state: &AppState,
+    key: &str,
+) -> Result<(Arc<dyn StoreBackend>, StoreKind, String), String> {
+    let (kind, id) = store_key(key)?;
+    let backend = state
+        .stores
+        .backend(kind)
+        .ok_or_else(|| UNSUPPORTED_STORE.to_string())?;
+    Ok((backend, kind, id))
 }
 
 fn install_service(state: &AppState) -> Result<Arc<InstallService>, String> {
     state.install.as_ref().map_err(Clone::clone).cloned()
 }
 
-/// The installed row for a GOG key.
-async fn gog_row(install: &Arc<InstallService>, key: &str) -> Result<InstalledGame, String> {
-    let id = gog_id(key)?;
+/// The installed row for a store game key.
+async fn store_row(install: &Arc<InstallService>, key: &str) -> Result<InstalledGame, String> {
+    let (kind, id) = store_key(key)?;
     let registry = install.registry();
-    tokio::task::spawn_blocking(move || registry.find_key(&GameKey::store(StoreKind::Gog, id)))
+    tokio::task::spawn_blocking(move || registry.find_key(&GameKey::store(kind, id)))
         .await
         .map_err(err)?
         .map_err(err)?
         .ok_or_else(|| grid_core::library::NOT_INSTALLED.to_string())
 }
 
-/// What every GOG job needs from the app.
-fn job_ctx(install: &Arc<InstallService>) -> Result<GogJobCtx, String> {
+/// What every store job needs from the app.
+fn job_ctx(install: &Arc<InstallService>) -> Result<JobCtx, String> {
     let config = Config::load(&Config::default_path()).map_err(err)?;
     let library = grid_core::library::paths::library_root(&config)
         .ok_or_else(|| "Choose a library folder in Settings › Library first.".to_string())?;
-    Ok(GogJobCtx {
+    Ok(JobCtx {
         registry: install.registry(),
         library,
         default_compat_tool: config.default_compat_tool,
@@ -371,8 +400,12 @@ fn enqueue(install: &Arc<InstallService>, job: StoreJob) -> Result<(), String> {
 }
 
 /// Refuses to change a store game while a backup copies it.
-fn refuse_while_backing_up(install: &InstallService, row: &InstalledGame) -> Result<(), String> {
-    let key = GameKey::store(StoreKind::Gog, row.store_id.clone());
+fn refuse_while_backing_up(
+    install: &InstallService,
+    kind: StoreKind,
+    row: &InstalledGame,
+) -> Result<(), String> {
+    let key = GameKey::store(kind, row.store_id.clone());
     if install.store_backup_busy(&key) {
         return Err(format!(
             "{} is being backed up. Try again when the backup is done.",
@@ -390,7 +423,7 @@ fn running(state: &AppState, key: &GameKey) -> bool {
         .is_ok_and(|launch| launch.snapshot().sessions.iter().any(|s| &s.key == key))
 }
 
-/// Every store's status (GOG only in Phase 1).
+/// Every store's status.
 #[tauri::command]
 pub async fn stores_status(state: State<'_, AppState>) -> Result<Vec<StoreStatus>, String> {
     let stores = state.stores.clone();
@@ -404,10 +437,9 @@ pub async fn store_library(
     state: State<'_, AppState>,
     source: String,
 ) -> Result<StoreLibrary, String> {
-    require_gog(&source)?;
-    let stores = state.stores.clone();
-    let updates = state.updates.store_updates();
-    tokio::task::spawn_blocking(move || stores.library(&updates))
+    let backend = backend_for(&state, &source)?;
+    let updates = state.updates.store_versions(backend.kind());
+    tokio::task::spawn_blocking(move || backend.library(&updates))
         .await
         .map_err(err)
 }
@@ -415,9 +447,8 @@ pub async fn store_library(
 /// Refreshes the owned list; the result comes as events.
 #[tauri::command]
 pub async fn store_refresh(state: State<'_, AppState>, source: String) -> Result<(), String> {
-    require_gog(&source)?;
-    let stores = state.stores.clone();
-    tauri::async_runtime::spawn(async move { stores.refresh_owned(true).await });
+    let backend = backend_for(&state, &source)?;
+    tauri::async_runtime::spawn(backend.run_refresh(true));
     Ok(())
 }
 
@@ -428,45 +459,41 @@ pub async fn store_check_updates(
     app: AppHandle,
     source: String,
 ) -> Result<(), String> {
-    require_gog(&source)?;
-    state.updates.spawn_store_check(app, state.stores.clone());
+    let backend = backend_for(&state, &source)?;
+    backend.check_updates(app);
     Ok(())
 }
 
-/// What the login window reports, handed to the stores service.
+/// What the login window reports, handed to the store's backend.
 struct LoginSink {
-    stores: Arc<StoresService>,
+    backend: Arc<dyn StoreBackend>,
     app: AppHandle,
 }
 
 impl crate::store_auth::LoginSink for LoginSink {
     fn code(&self, code: SecretString) {
-        let stores = self.stores.clone();
+        let backend = self.backend.clone();
         let app = self.app.clone();
         tauri::async_runtime::spawn(async move {
-            stores.finish_login(code).await;
-            if stores.connection() == StoreConnection::Connected {
-                app.state::<AppState>()
-                    .updates
-                    .spawn_store_check(app.clone(), stores.clone());
+            backend.clone().run_finish_login(code).await;
+            if backend.connection() == StoreConnection::Connected {
+                backend.check_updates(app);
             }
         });
     }
     fn failed(&self) {
-        self.stores.login_redirect_failed();
+        self.backend.login_redirect_failed();
     }
     fn cancelled(&self) {
-        self.stores.login_cancelled();
+        self.backend.login_cancelled();
     }
 }
 
-fn login_spec(state: &AppState, stores: &StoresService) -> crate::store_auth::LoginWindowSpec {
+fn login_spec(state: &AppState, backend: &dyn StoreBackend) -> crate::store_auth::LoginWindowSpec {
     crate::store_auth::LoginWindowSpec {
-        store_name: StoreKind::Gog.platform_name().to_string(),
-        source: StoreKind::Gog.as_str().to_string(),
-        login_url: stores.api().login_url(),
-        embed: stores.embed_url().clone(),
-        data_dir: stores.data_dir().to_path_buf(),
+        login: backend.login_spec(),
+        source: backend.kind().as_str().to_string(),
+        data_dir: state.stores.data_dir().to_path_buf(),
         tv: state.ui_mode.mode() == super::tv::UiMode::Tv,
     }
 }
@@ -479,15 +506,14 @@ pub async fn store_connect(
     app: AppHandle,
     source: String,
 ) -> Result<(), String> {
-    require_gog(&source)?;
-    let stores = state.stores.clone();
+    let backend = backend_for(&state, &source)?;
     let already_open = crate::store_auth::login_window_open(&app);
     if !already_open {
-        stores.begin_login()?;
+        backend.begin_login()?;
     }
-    let spec = login_spec(&state, &stores);
+    let spec = login_spec(&state, backend.as_ref());
     let sink = LoginSink {
-        stores: stores.clone(),
+        backend: backend.clone(),
         app: app.clone(),
     };
     // Windows are built on the main thread.
@@ -503,7 +529,7 @@ pub async fn store_connect(
     };
     if let Err(e) = &result {
         if !already_open {
-            stores.login_window_failed(e);
+            backend.login_window_failed(e);
         }
     }
     result
@@ -516,11 +542,11 @@ pub async fn store_cancel_login(
     app: AppHandle,
     source: String,
 ) -> Result<(), String> {
-    require_gog(&source)?;
+    let backend = backend_for(&state, &source)?;
     if crate::store_auth::login_window_open(&app) {
         crate::store_auth::close_login_window(&app);
     } else {
-        state.stores.login_cancelled();
+        backend.login_cancelled();
     }
     Ok(())
 }
@@ -531,21 +557,22 @@ pub async fn store_disconnect(
     app: AppHandle,
     source: String,
 ) -> Result<(), String> {
-    require_gog(&source)?;
+    let backend = backend_for(&state, &source)?;
     crate::store_auth::close_login_window(&app);
-    let stores = state.stores.clone();
-    tokio::task::spawn_blocking(move || stores.disconnect())
+    let kind = backend.kind();
+    tokio::task::spawn_blocking(move || backend.disconnect())
         .await
         .map_err(err)??;
-    state.updates.clear_store_updates(&app, &state.stores);
+    state
+        .updates
+        .clear_store_updates(&app, &state.stores.gog, kind);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn store_install_tool(state: State<'_, AppState>, source: String) -> Result<(), String> {
-    require_gog(&source)?;
-    let stores = state.stores.clone();
-    tauri::async_runtime::spawn(async move { stores.install_tool().await });
+    let backend = backend_for(&state, &source)?;
+    tauri::async_runtime::spawn(backend.run_install_tool());
     Ok(())
 }
 
@@ -568,9 +595,8 @@ pub async fn store_set_install_dir(
     source: String,
     path: String,
 ) -> Result<(), String> {
-    require_gog(&source)?;
-    let stores = state.stores.clone();
-    tokio::task::spawn_blocking(move || stores.set_install_dir(&path))
+    let backend = backend_for(&state, &source)?;
+    tokio::task::spawn_blocking(move || backend.set_install_dir(&path))
         .await
         .map_err(err)
 }
@@ -581,9 +607,8 @@ pub async fn store_set_cloud_saves(
     source: String,
     on: bool,
 ) -> Result<(), String> {
-    require_gog(&source)?;
-    let stores = state.stores.clone();
-    tokio::task::spawn_blocking(move || stores.set_cloud_saves(on))
+    let backend = backend_for(&state, &source)?;
+    tokio::task::spawn_blocking(move || backend.set_cloud_saves(on))
         .await
         .map_err(err)
 }
@@ -593,33 +618,8 @@ pub async fn store_install_options(
     state: State<'_, AppState>,
     key: String,
 ) -> Result<StoreInstallOptions, String> {
-    let id = gog_id(&key)?;
-    let stores = state.stores.clone();
-    stores.ensure_can_install()?;
-    stores.ensure_owned_fetched().await;
-    let options = stores
-        .api()
-        .install_options(&id)
-        .await
-        .map_err(|e| stores.store_error(e))?;
-    let title = stores.product(&id).map(|p| p.title).unwrap_or(id);
-    let compat = Config::load(&Config::default_path())
-        .map(|config| config.default_compat_tool)
-        .unwrap_or_default();
-    let base = stores.install_base_dir();
-    tokio::task::spawn_blocking(move || {
-        crate::stores_service::install_options_ipc(&options, &title, &base, &compat)
-    })
-    .await
-    .map_err(err)
-}
-
-fn parse_platform(platform: &str) -> Result<GogPlatform, String> {
-    match platform {
-        "linux" => Ok(GogPlatform::Linux),
-        "windows" => Ok(GogPlatform::Windows),
-        _ => Err("GRID installs the Linux or Windows version only.".to_string()),
-    }
+    let (backend, _, id) = backend_for_key(&state, &key)?;
+    backend.install_options(id).await
 }
 
 #[tauri::command]
@@ -628,62 +628,35 @@ pub async fn store_install(
     request: StoreInstallRequest,
 ) -> Result<(), String> {
     ensure_library_idle(&state)?;
-    let id = gog_id(&request.key)?;
+    let (backend, _, id) = backend_for_key(&state, &request.key)?;
     let install = install_service(&state)?;
-    let stores = state.stores.clone();
-    stores.ensure_can_install()?;
-    let platform = parse_platform(&request.platform)?;
-    stores.ensure_owned_fetched().await;
-    let title = stores
-        .product(&id)
-        .map(|p| p.title)
-        .unwrap_or_else(|| id.clone());
-    let install_dir = if request.install_dir.trim().is_empty() {
-        let base = stores.install_base_dir();
-        if base.is_empty() {
-            return Err("Choose a library folder in Settings › Library first.".to_string());
-        }
-        std::path::Path::new(&base).join(grid_core::library::paths::sanitize_component(
-            &title, "game",
-        ))
-    } else {
-        PathBuf::from(request.install_dir.trim())
-    };
+    backend.ensure_can_install()?;
     let ctx = job_ctx(&install)?;
-    let job = stores.api().install_job(
-        GogInstallRequest {
-            store_id: id,
-            title: title.clone(),
-            platform,
-            language: request.language,
-            dlc_ids: request.dlc_ids,
-            install_dir,
-            compat_tool: request.compat_tool,
-        },
-        ctx,
-    );
+    let job = backend.install_job(id, request, ctx).await?;
     enqueue(&install, job)
 }
 
 #[tauri::command]
 pub async fn store_update(state: State<'_, AppState>, key: String) -> Result<(), String> {
     ensure_library_idle(&state)?;
+    let (backend, kind, _) = backend_for_key(&state, &key)?;
     let install = install_service(&state)?;
-    state.stores.ensure_can_install()?;
-    let row = gog_row(&install, &key).await?;
-    refuse_while_backing_up(&install, &row)?;
-    let job = state.stores.api().update_job(&row, job_ctx(&install)?);
+    backend.ensure_can_install()?;
+    let row = store_row(&install, &key).await?;
+    refuse_while_backing_up(&install, kind, &row)?;
+    let job = backend.update_job(&row, job_ctx(&install)?);
     enqueue(&install, job)
 }
 
 #[tauri::command]
 pub async fn store_repair(state: State<'_, AppState>, key: String) -> Result<(), String> {
     ensure_library_idle(&state)?;
+    let (backend, kind, _) = backend_for_key(&state, &key)?;
     let install = install_service(&state)?;
-    state.stores.ensure_can_install()?;
-    let row = gog_row(&install, &key).await?;
-    refuse_while_backing_up(&install, &row)?;
-    let job = state.stores.api().repair_job(&row, job_ctx(&install)?);
+    backend.ensure_can_install()?;
+    let row = store_row(&install, &key).await?;
+    refuse_while_backing_up(&install, kind, &row)?;
+    let job = backend.repair_job(&row, job_ctx(&install)?);
     enqueue(&install, job)
 }
 
@@ -694,26 +667,26 @@ pub async fn store_uninstall(
     key: String,
 ) -> Result<(), String> {
     ensure_library_idle(&state)?;
+    let (backend, kind, _) = backend_for_key(&state, &key)?;
     let install = install_service(&state)?;
-    let row = gog_row(&install, &key).await?;
-    let game_key = GameKey::store(StoreKind::Gog, row.store_id.clone());
+    let row = store_row(&install, &key).await?;
+    let game_key = GameKey::store(kind, row.store_id.clone());
     if running(&state, &game_key) {
         return Err(format!("Quit {} before uninstalling it.", row.title));
     }
-    refuse_while_backing_up(&install, &row)?;
-    let stores = state.stores.clone();
+    refuse_while_backing_up(&install, kind, &row)?;
     let registry = install.registry();
     let id = row.store_id.clone();
-    let api = stores.api().clone();
-    tokio::task::spawn_blocking(move || api.uninstall(&registry, &id))
+    let blocking = backend.clone();
+    tokio::task::spawn_blocking(move || blocking.uninstall(&registry, &id))
         .await
         .map_err(err)?
         .map_err(err)?;
     state
         .updates
-        .forget_store_update(&app, &stores, &row.store_id);
+        .forget_store_update(&app, &state.stores.gog, kind, &row.store_id);
     let _ = app.emit(crate::relink_service::INSTALLED_CHANGED_EVENT, 1usize);
-    stores.changed();
+    backend.changed();
     Ok(())
 }
 
@@ -724,14 +697,12 @@ pub async fn store_install_dlc(
     dlc_id: String,
 ) -> Result<(), String> {
     ensure_library_idle(&state)?;
+    let (backend, _, _) = backend_for_key(&state, &key)?;
     let install = install_service(&state)?;
-    state.stores.ensure_can_install()?;
-    state.stores.ensure_owned_fetched().await;
-    let row = gog_row(&install, &key).await?;
-    let job = state
-        .stores
-        .api()
-        .dlc_job(&row, &dlc_id, job_ctx(&install)?);
+    backend.ensure_can_install()?;
+    let row = store_row(&install, &key).await?;
+    let ctx = job_ctx(&install)?;
+    let job = backend.dlc_job(row, dlc_id, ctx).await?;
     enqueue(&install, job)
 }
 
@@ -743,12 +714,11 @@ pub async fn store_remove_dlc(
     dlc_id: String,
 ) -> Result<(), String> {
     ensure_library_idle(&state)?;
+    let (backend, _, _) = backend_for_key(&state, &key)?;
     let install = install_service(&state)?;
-    let row = gog_row(&install, &key).await?;
-    let api = state.stores.api().clone();
+    let row = store_row(&install, &key).await?;
     let registry = install.registry();
-    let blocking_row = row.clone();
-    tokio::task::spawn_blocking(move || api.remove_dlc(&registry, &blocking_row, &dlc_id))
+    tokio::task::spawn_blocking(move || backend.remove_dlc(&registry, &row, &dlc_id))
         .await
         .map_err(err)?
         .map_err(err)?;
@@ -761,18 +731,10 @@ pub async fn store_game_settings(
     state: State<'_, AppState>,
     key: String,
 ) -> Result<StoreGameSettings, String> {
+    let (backend, _, _) = backend_for_key(&state, &key)?;
     let install = install_service(&state)?;
-    let row = gog_row(&install, &key).await?;
-    let meta = GogMeta::from_json(&row.store_meta);
-    Ok(StoreGameSettings {
-        install_dir: row.native_game_dir.clone(),
-        executable: row.native_executable_path.clone(),
-        exe_user_pinned: meta.exe_user_pinned,
-        launch_parameters: row.native_launch_parameters.clone(),
-        compat_tool: row.native_compat_tool.clone(),
-        wineprefix: row.native_wineprefix.clone(),
-        cloud_saves: meta.cloud_saves,
-    })
+    let row = store_row(&install, &key).await?;
+    Ok(backend.game_settings(&row))
 }
 
 /// The executables in an installed store game's folder that Game Settings ›
@@ -784,9 +746,10 @@ pub async fn store_game_executables(
     state: State<'_, AppState>,
     key: String,
 ) -> Result<Vec<String>, String> {
+    let (backend, _, _) = backend_for_key(&state, &key)?;
     let install = install_service(&state)?;
-    let row = gog_row(&install, &key).await?;
-    let windows = GogMeta::from_json(&row.store_meta).platform == GogPlatform::Windows;
+    let row = store_row(&install, &key).await?;
+    let windows = backend.windows_version(&row);
     let dir = [row.native_game_dir.trim(), row.extracted_dir.trim()]
         .into_iter()
         .find(|dir| !dir.is_empty())
@@ -810,28 +773,6 @@ pub async fn store_game_executables(
     .map_err(err)
 }
 
-/// The row after Game settings' Save: a new executable becomes the user's
-/// choice (GOG updates leave it alone); the install folder and the Wine
-/// prefix are read-only, and only a Windows version takes a compat tool.
-fn apply_game_settings(mut row: InstalledGame, settings: &StoreGameSettings) -> InstalledGame {
-    let mut meta = GogMeta::from_json(&row.store_meta);
-    let executable = settings.executable.trim();
-    if !executable.is_empty() && executable != row.native_executable_path {
-        row.native_executable_path = executable.to_string();
-        meta.exe_user_pinned = true;
-    }
-    if meta.exe_user_pinned {
-        row.native_launch_source = "user".to_string();
-    }
-    row.native_launch_parameters = settings.launch_parameters.trim().to_string();
-    if meta.platform == GogPlatform::Windows {
-        row.native_compat_tool = settings.compat_tool.trim().to_string();
-    }
-    meta.cloud_saves = settings.cloud_saves;
-    row.store_meta = meta.to_json();
-    row
-}
-
 #[tauri::command]
 pub async fn store_set_game_settings(
     state: State<'_, AppState>,
@@ -839,16 +780,17 @@ pub async fn store_set_game_settings(
     key: String,
     settings: StoreGameSettings,
 ) -> Result<(), String> {
+    let (backend, _, _) = backend_for_key(&state, &key)?;
     let install = install_service(&state)?;
-    let row = gog_row(&install, &key).await?;
+    let row = store_row(&install, &key).await?;
     let registry = install.registry();
-    let updated = apply_game_settings(row, &settings);
+    let updated = backend.apply_game_settings(row, &settings);
     tokio::task::spawn_blocking(move || registry.upsert_store(&updated))
         .await
         .map_err(err)?
         .map_err(err)?;
     let _ = app.emit(crate::relink_service::INSTALLED_CHANGED_EVENT, 1usize);
-    state.stores.changed();
+    backend.changed();
     Ok(())
 }
 
@@ -857,60 +799,25 @@ pub async fn store_cloud_state(
     state: State<'_, AppState>,
     key: String,
 ) -> Result<StoreCloudState, String> {
+    let (backend, _, _) = backend_for_key(&state, &key)?;
     let install = install_service(&state)?;
-    let row = gog_row(&install, &key).await?;
-    let stores = state.stores.clone();
-    let meta = GogMeta::from_json(&row.store_meta);
-    if !stores.cloud_enabled(&row) {
-        return Ok(cloud_state_ipc(&CloudState::Off, &meta, false));
-    }
-    if stores.is_syncing(&row.store_id) {
-        return Ok(cloud_state_ipc(
-            &CloudState::Synced { at: meta.last_sync },
-            &meta,
-            true,
-        ));
-    }
-    let cloud = stores
-        .api()
-        .cloud_state(&row)
-        .await
-        .map_err(|e| stores.store_error(e))?;
-    stores.remember_cloud(&row.store_id, &cloud);
-    Ok(cloud_state_ipc(&cloud, &meta, false))
+    let row = store_row(&install, &key).await?;
+    backend.cloud_state(&row).await
 }
 
-/// Syncs one game's saves in `mode`; answers the row (re-read, its
-/// `last_sync` moved) and the new state.
-async fn sync_now(
-    state: &AppState,
-    key: &str,
-    mode: SyncMode,
-) -> Result<(InstalledGame, CloudState), String> {
+/// Syncs one game's saves in `mode` and answers the new state.
+async fn sync_now(state: &AppState, key: &str, mode: SyncMode) -> Result<StoreCloudState, String> {
+    let (backend, kind, _) = backend_for_key(state, key)?;
     let install = install_service(state)?;
-    let row = gog_row(&install, key).await?;
-    let stores = state.stores.clone();
-    if !stores.cloud_enabled(&row) {
-        return Ok((row, CloudState::Off));
-    }
-    if running(state, &GameKey::store(StoreKind::Gog, row.store_id.clone())) {
+    let row = store_row(&install, key).await?;
+    if backend.cloud_enabled(&row) && running(state, &GameKey::store(kind, row.store_id.clone())) {
         return Err(format!(
             "Quit {} before syncing its cloud saves.",
             row.title
         ));
     }
     let registry = install.registry();
-    stores.set_syncing(&row.store_id, true);
-    stores.changed();
-    let result = stores.api().cloud_sync(&registry, &row, mode).await;
-    stores.set_syncing(&row.store_id, false);
-    let cloud = result.map_err(|e| stores.store_error(e));
-    if let Ok(cloud) = &cloud {
-        stores.remember_cloud(&row.store_id, cloud);
-    }
-    stores.changed();
-    let row = gog_row(&install, key).await.unwrap_or(row);
-    Ok((row, cloud?))
+    backend.cloud_sync(&registry, &row, mode).await
 }
 
 #[tauri::command]
@@ -918,12 +825,7 @@ pub async fn store_cloud_sync(
     state: State<'_, AppState>,
     key: String,
 ) -> Result<StoreCloudState, String> {
-    let (row, cloud) = sync_now(&state, &key, SyncMode::Auto).await?;
-    Ok(cloud_state_ipc(
-        &cloud,
-        &GogMeta::from_json(&row.store_meta),
-        false,
-    ))
+    sync_now(&state, &key, SyncMode::Auto).await
 }
 
 #[tauri::command]
@@ -936,12 +838,7 @@ pub async fn store_cloud_resolve(
         CloudChoice::Upload => SyncMode::PreferUpload,
         CloudChoice::Download => SyncMode::PreferDownload,
     };
-    let (row, cloud) = sync_now(&state, &key, mode).await?;
-    Ok(cloud_state_ipc(
-        &cloud,
-        &GogMeta::from_json(&row.store_meta),
-        false,
-    ))
+    sync_now(&state, &key, mode).await
 }
 
 /// An `offline::Inspection` as the UI sees it.
@@ -1017,11 +914,11 @@ pub async fn offline_inspect(
     let product = insp
         .info
         .as_ref()
-        .and_then(|info| state.stores.product(&info.game_id));
+        .and_then(|info| state.stores.gog.product(&info.game_id));
     let mut ipc = inspection_ipc(&insp, product.as_ref());
     if !matches!(insp.verdict, offline::Verdict::Refused { .. }) {
         let registry = install_service(&state)?.registry();
-        let base = state.stores.install_base_dir();
+        let base = state.stores.gog.install_base_dir();
         ipc.free_bytes = tokio::task::spawn_blocking(move || {
             let fresh = if base.is_empty() {
                 PathBuf::new()
@@ -1077,7 +974,12 @@ pub async fn offline_install(
             .map(PathBuf::from),
         compat_tool,
     };
-    let job = offline::install_job(insp, opts, job_ctx(&install)?, install.wizard_allowed());
+    let job = offline::install_job(
+        insp,
+        opts,
+        job_ctx(&install)?.gog(),
+        install.wizard_allowed(),
+    );
     enqueue(&install, job)
 }
 
@@ -1138,54 +1040,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keys_and_sources_are_gog_only() {
-        assert_eq!(gog_id("gog:1207664643").unwrap(), "1207664643");
-        assert!(gog_id("epic:Fortnite").is_err());
-        assert!(gog_id("romm:5").is_err());
-        assert!(gog_id("nonsense").is_err());
-        assert!(require_gog("gog").is_ok());
-        assert!(require_gog("steam").is_err());
-        assert_eq!(parse_platform("linux").unwrap(), GogPlatform::Linux);
-        assert!(parse_platform("mac").is_err());
-    }
-
-    #[test]
-    fn game_settings_pin_a_new_executable_and_keep_the_folder() {
-        let meta = GogMeta {
-            platform: GogPlatform::Windows,
-            cloud_saves: true,
-            ..GogMeta::default()
-        };
-        let row = InstalledGame {
-            native_game_dir: "/g/Ashen".into(),
-            native_executable_path: "/g/Ashen/game.exe".into(),
-            native_launch_source: "sidecar".into(),
-            native_wineprefix: "/p".into(),
-            store_meta: meta.to_json(),
-            ..Default::default()
-        };
-        let mut settings = StoreGameSettings {
-            install_dir: "/elsewhere".into(),
-            executable: "/g/Ashen/game.exe".into(),
-            exe_user_pinned: false,
-            launch_parameters: " -windowed ".into(),
-            compat_tool: "GE-Proton9-20".into(),
-            wineprefix: "/other".into(),
-            cloud_saves: false,
-        };
-        let same = apply_game_settings(row.clone(), &settings);
-        assert_eq!(same.native_launch_source, "sidecar");
-        assert_eq!(same.native_launch_parameters, "-windowed");
-        assert_eq!(same.native_compat_tool, "GE-Proton9-20");
-        assert_eq!(same.native_game_dir, "/g/Ashen");
-        assert_eq!(same.native_wineprefix, "/p");
-        assert!(!GogMeta::from_json(&same.store_meta).cloud_saves);
-
-        settings.executable = "/g/Ashen/launcher.exe".into();
-        let pinned = apply_game_settings(row, &settings);
-        assert_eq!(pinned.native_executable_path, "/g/Ashen/launcher.exe");
-        assert_eq!(pinned.native_launch_source, "user");
-        assert!(GogMeta::from_json(&pinned.store_meta).exe_user_pinned);
+    fn keys_and_sources_route_to_gog_and_epic() {
+        assert_eq!(
+            store_key("gog:1207664643").unwrap(),
+            (StoreKind::Gog, "1207664643".to_string())
+        );
+        assert_eq!(
+            store_key("epic:Fortnite").unwrap(),
+            (StoreKind::Epic, "Fortnite".to_string())
+        );
+        assert!(store_key("steam:620").is_err());
+        assert!(store_key("amazon:x").is_err());
+        assert!(store_key("romm:5").is_err());
+        assert!(store_key("nonsense").is_err());
+        assert_eq!(store_kind("gog").unwrap(), StoreKind::Gog);
+        assert_eq!(store_kind(" epic ").unwrap(), StoreKind::Epic);
+        assert_eq!(store_kind("steam").unwrap_err(), UNSUPPORTED_STORE);
+        assert!(store_kind("romm").is_err());
     }
 
     #[test]

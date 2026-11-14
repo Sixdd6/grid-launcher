@@ -879,6 +879,7 @@ fn run_uninstaller(row: &InstalledGame, dir: &Path) {
         "",
         std::env::consts::OS,
         &which,
+        None,
     ) else {
         return;
     };
@@ -891,6 +892,7 @@ fn run_uninstaller(row: &InstalledGame, dir: &Path) {
         args: argv.collect(),
         env: launch.env,
         cwd: Some(launch.cwd),
+        ..Default::default()
     };
     let cancel = AtomicBool::new(false);
     std::thread::scope(|scope| {

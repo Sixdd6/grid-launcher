@@ -1,5 +1,7 @@
-//! Store tool progress lines, parsed into [`ToolProgress`]. A line that is
-//! not progress is dropped, never logged.
+//! Store tool progress lines, parsed into [`ToolProgress`], and legendary's
+//! known lines, read as a [`ToolSignal`] ([`legendary_signal`]). A line
+//! that is neither is dropped, never logged; legendary's format is under
+//! [`parse_legendary_line`].
 //!
 //! gogdl (v1.4.0) reports on stderr about once a second, through Python
 //! logging (`[PROGRESS] INFO: <msg>`):
@@ -17,6 +19,7 @@
 //! `speed_bps` ([`ToolProgress::is_speed_only`]); [`ProgressMerger`] folds
 //! the two into one running picture.
 
+use super::runner::ToolSignal;
 use crate::library::queue::JobPhase;
 
 /// One progress report from a tool.
@@ -83,7 +86,227 @@ fn after<'a>(line: &'a str, marker: &str) -> Option<&'a str> {
     Some(&line[at + marker.len()..])
 }
 
-/// Folds gogdl's separate byte and speed reports into one running report.
+/// The `total` of a legendary progress report: legendary's `done` is a
+/// fraction in hundredths of a percent (`12.34%` is `1234` of `10_000`),
+/// because its counts are chunks or files, not bytes. The job turns it into
+/// bytes with the size `info` (or [`super::runner::ToolSignal::DownloadSize`])
+/// gave.
+pub const LEGENDARY_PROGRESS_TOTAL: u64 = 10_000;
+
+/// The progress a legendary output line reports, `None` for any other line.
+///
+/// legendary 0.21.1 logs its download progress on stderr about once a
+/// second (`downloader/mp/manager.py`), and writes the verify step's
+/// progress to stdout with `\r` (`cli.py` `verify_game`):
+///
+/// ```text
+/// [DLManager] INFO: = Progress: 12.34% (123/1000), Running for 00:01:02, ETA: 00:08:10
+/// [DLManager] INFO:  - Downloaded: 512.00 MiB, Written: 1024.00 MiB
+/// [DLManager] INFO:  + Download<TAB>- 20.00 MiB/s (raw) / 40.00 MiB/s (decompressed)
+/// Verification progress: 12/100 (12.0%) [3.4 MiB/s]
+/// ```
+///
+/// (`<TAB>` is a tab.) `= Progress` gives a [`JobPhase::Downloading`] fraction (of
+/// [`LEGENDARY_PROGRESS_TOTAL`]); `+ Download` a speed-only report;
+/// `Verification progress` a [`JobPhase::Verifying`] fraction with its
+/// speed. The `Downloaded` and `Written` lines are not used: the fraction
+/// times the known download size is the byte count.
+pub fn parse_legendary_line(line: &str) -> Option<ToolProgress> {
+    let line = line.trim_end_matches(['\r', '\n', '\t', ' ']);
+    if line.contains("[DLManager]") {
+        if let Some(at) = line.find("= Progress:") {
+            let rest = &line[at + "= Progress:".len()..];
+            let percent = rest.trim_start().split('%').next()?.trim();
+            return Some(ToolProgress {
+                done: permyriad(percent)?,
+                total: LEGENDARY_PROGRESS_TOTAL,
+                speed_bps: 0.0,
+                phase: JobPhase::Downloading,
+            });
+        }
+        if let Some(at) = line.find("+ Download") {
+            let rest = line[at + "+ Download".len()..]
+                .trim_start()
+                .trim_start_matches('-')
+                .trim_start();
+            let mib = rest.split_whitespace().next()?;
+            let speed_bps = mib_per_second(mib)?;
+            return Some(ToolProgress {
+                done: 0,
+                total: 0,
+                speed_bps,
+                phase: JobPhase::Downloading,
+            });
+        }
+        return None;
+    }
+    let rest = line.trim_start().strip_prefix("Verification progress:")?;
+    // " 12/100 (12.0%) [3.4 MiB/s]"
+    let open = rest.find('(')?;
+    let close = rest[open..].find('%')? + open;
+    let done = permyriad(rest[open + 1..close].trim())?;
+    let speed_bps = rest
+        .find('[')
+        .and_then(|at| rest[at + 1..].split_whitespace().next())
+        .and_then(|mib| mib.parse::<f64>().ok())
+        .filter(|mib| mib.is_finite() && *mib > 0.0)
+        .map_or(0.0, |mib| mib * MIB);
+    Some(ToolProgress {
+        done,
+        total: LEGENDARY_PROGRESS_TOTAL,
+        speed_bps,
+        phase: JobPhase::Verifying,
+    })
+}
+
+/// `"12.34"` (a percentage) as hundredths of a percent, clamped to
+/// `0..=10_000`; `None` when it is not a number.
+fn permyriad(percent: &str) -> Option<u64> {
+    let value: f64 = percent.parse().ok()?;
+    if !value.is_finite() {
+        return None;
+    }
+    Some(
+        (value * 100.0)
+            .round()
+            .clamp(0.0, LEGENDARY_PROGRESS_TOTAL as f64) as u64,
+    )
+}
+
+/// `"20.00"` MiB/s as bytes per second, `None` for zero or not a number.
+fn mib_per_second(text: &str) -> Option<f64> {
+    let mib: f64 = text.parse().ok()?;
+    (mib.is_finite() && mib > 0.0).then_some(mib * MIB)
+}
+
+/// The [`ToolSignal`] a legendary output line (stderr or stdout) means,
+/// `None` for a line GRID has no word for. The raw line is dropped either
+/// way; only the signal (GRID's own words) travels.
+///
+/// legendary's exit codes are unreliable (many failures log `ERROR:` and
+/// exit 0, a missing login is an uncaught `ValueError` and exit 1), so a
+/// job reads these. Specific signals win over [`ToolSignal::OtherError`],
+/// which also comes for any other `ERROR`/`CRITICAL` log line and for a
+/// Python traceback; a caller checks the specific ones first. Lines and
+/// sources: `docs/stores-phase2-plan.md` "Spike results".
+pub fn legendary_signal(line: &str) -> Option<ToolSignal> {
+    let line = line.trim_end_matches(['\r', '\n', '\t', ' ']).trim_start();
+    if line.is_empty() {
+        return None;
+    }
+    // The verify step names each bad file at ERROR; the counts come in its
+    // result line, so the per-file lines say nothing more.
+    for per_file in [
+        "File does not match hash:",
+        "File is missing:",
+        "Other failure (see log), treating file as missing:",
+    ] {
+        if line.contains(per_file) {
+            return None;
+        }
+    }
+    if line.contains("Verification finished successfully.") {
+        return Some(ToolSignal::VerifyOk);
+    }
+    if let Some(at) = line.find("Verification failed, ") {
+        return verify_failed(&line[at + "Verification failed, ".len()..]);
+    }
+    if let Some(at) = line.find("INFO: Download size: ") {
+        let rest = &line[at + "INFO: Download size: ".len()..];
+        let mib: f64 = rest.split_whitespace().next()?.parse().ok()?;
+        if !mib.is_finite() || mib < 0.0 {
+            return None;
+        }
+        return Some(ToolSignal::DownloadSize((mib * MIB).round() as u64));
+    }
+    if line.contains("INFO: Download size is 0,") {
+        return Some(ToolSignal::DownloadSize(0));
+    }
+    if line.contains("Logging in failed with ") {
+        return Some(if NETWORK_ERRORS.iter().any(|name| line.contains(name)) {
+            ToolSignal::Network
+        } else {
+            ToolSignal::LoginFailed
+        });
+    }
+    if line.contains("Login attempt failed")
+        || line.contains("Login to EGS API failed")
+        || line.contains("ERROR: Login failed")
+    {
+        return Some(ToolSignal::LoginFailed);
+    }
+    if line.contains("No saved credentials")
+        || line.contains("Stored credentials are no longer valid")
+        || line.contains("Stored credentials were found but were no longer valid")
+    {
+        return Some(ToolSignal::NotLoggedIn);
+    }
+    if line.contains("HTTP request for login failed") {
+        return Some(ToolSignal::Network);
+    }
+    if line.starts_with("requests.exceptions.")
+        && NETWORK_ERRORS
+            .iter()
+            .any(|name| line["requests.exceptions.".len()..].starts_with(name))
+    {
+        return Some(ToolSignal::Network);
+    }
+    if line.starts_with("MemoryError")
+        || line.contains("Current shared memory cache is smaller than required")
+    {
+        return Some(ToolSignal::MemoryError);
+    }
+    // Case matters: "Potentially not enough available disk space!" is only
+    // a warning.
+    if line.contains("Not enough available disk space") {
+        return Some(ToolSignal::NotEnoughSpace);
+    }
+    if line.contains("has to be installed via a third-party store") {
+        return Some(ToolSignal::ThirdPartyManaged);
+    }
+    if line.contains("is not currently installed")
+        || line.contains("not installed, cannot uninstall")
+        || line.contains("but app not installed")
+        || line.contains("Game not installed:")
+        || line.contains("Game is not installed")
+        || (line.contains("ERROR: ") && line.contains(" is not installed"))
+        || (line.contains("CRITICAL: ") && line.contains(" is not installed"))
+    {
+        return Some(ToolSignal::NotInstalled);
+    }
+    if line.starts_with("Traceback (most recent call last)")
+        || line.contains("] ERROR: ")
+        || line.contains("] CRITICAL: ")
+    {
+        return Some(ToolSignal::OtherError);
+    }
+    None
+}
+
+/// The `requests` errors that mean the network, not the request, failed.
+const NETWORK_ERRORS: [&str; 7] = [
+    "ConnectionError",
+    "ProxyError",
+    "ConnectTimeout",
+    "ReadTimeout",
+    "Timeout",
+    "SSLError",
+    "ChunkedEncodingError",
+];
+
+/// `"2 file(s) corrupted, 1 file(s) are missing."` as the counts.
+fn verify_failed(rest: &str) -> Option<ToolSignal> {
+    let mut numbers = rest
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .map(|part| part.parse::<u32>().ok());
+    let corrupted = numbers.next()??;
+    let missing = numbers.next()??;
+    Some(ToolSignal::VerifyFailed { corrupted, missing })
+}
+
+/// Folds a tool's separate progress and speed reports into one running
+/// report.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ProgressMerger {
     current: ToolProgress,
@@ -97,6 +320,9 @@ impl ProgressMerger {
         } else {
             self.current.done = report.done;
             self.current.total = report.total;
+            if report.speed_bps > 0.0 {
+                self.current.speed_bps = report.speed_bps;
+            }
         }
         if report.phase != JobPhase::None {
             self.current.phase = report.phase;
@@ -140,6 +366,134 @@ mod tests {
             "New/changed files 3",
         ] {
             assert_eq!(parse_gogdl_line(line), None, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn legendary_progress_lines() {
+        let p = parse_legendary_line(
+            "[DLManager] INFO: = Progress: 12.34% (123/1000), Running for 00:01:02, ETA: 00:08:10\n",
+        )
+        .unwrap();
+        assert_eq!((p.done, p.total), (1234, LEGENDARY_PROGRESS_TOTAL));
+        assert_eq!(p.phase, JobPhase::Downloading);
+        assert!(!p.is_speed_only());
+        let full = parse_legendary_line(
+            "[DLManager] INFO: = Progress: 100.00% (1000/1000), Running for 00:10:00, ETA: 00:00:00",
+        )
+        .unwrap();
+        assert_eq!(full.done, LEGENDARY_PROGRESS_TOTAL);
+
+        let s = parse_legendary_line(
+            "[DLManager] INFO:  + Download\t- 20.00 MiB/s (raw) / 40.00 MiB/s (decompressed)",
+        )
+        .unwrap();
+        assert!(s.is_speed_only());
+        assert!((s.speed_bps - 20.0 * MIB).abs() < 1.0);
+
+        let v =
+            parse_legendary_line("Verification progress: 12/100 (12.5%) [3.4 MiB/s]\t").unwrap();
+        assert_eq!((v.done, v.total), (1250, LEGENDARY_PROGRESS_TOTAL));
+        assert_eq!(v.phase, JobPhase::Verifying);
+        assert!((v.speed_bps - 3.4 * MIB).abs() < 1.0);
+        let v0 = parse_legendary_line("Verification progress: 1/100 (0.0%) [0.0 MiB/s]\t").unwrap();
+        assert_eq!(v0.done, 0);
+        assert_eq!(v0.speed_bps, 0.0);
+    }
+
+    #[test]
+    fn other_lines_are_not_legendary_progress() {
+        for line in [
+            "",
+            "[DLManager] INFO:  - Downloaded: 512.00 MiB, Written: 1024.00 MiB",
+            "[DLManager] INFO:  - Cache usage: 10.00 MiB, active tasks: 4",
+            "[DLManager] INFO:  + Disk\t- 7.00 MiB/s (write) / 0.00 MiB/s (read)",
+            "[DLManager] INFO:  + Download\t- 0.00 MiB/s (raw) / 0.00 MiB/s (decompressed)",
+            "[cli] INFO: = Progress: 12.34% (1/2)",
+            "[PROGRESS] INFO: = Progress: 12.34 123456/1000000, Running for: 00:01:02, ETA: 00:07:30",
+            "{\"egl_parameters\": [\"-AUTH_PASSWORD=FAKE-STORE-TOKEN-not-real\"]}",
+            "Verification progress: nope",
+        ] {
+            assert_eq!(parse_legendary_line(line), None, "{line:?}");
+        }
+        // gogdl's parser leaves legendary's lines alone too.
+        assert_eq!(
+            parse_gogdl_line(
+                "[DLManager] INFO: = Progress: 12.34% (123/1000), Running for 00:01:02"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn legendary_signals_from_recorded_lines() {
+        use ToolSignal::*;
+        let cases: &[(&str, Option<ToolSignal>)] = &[
+            // Spike 2: a code legendary could not redeem (Epic unreachable).
+            (
+                "[Core] ERROR: Logging in failed with ConnectionError(MaxRetryError(\"HTTPSConnectionPool(host='oauth.unreachable.invalid', port=443)\")), please try again.",
+                Some(Network),
+            ),
+            (
+                "[Core] ERROR: Logging in failed with ProxyError(MaxRetryError('x')), please try again.",
+                Some(Network),
+            ),
+            (
+                "[Core] ERROR: Logging in failed with InvalidCredentialsError('errors.com.epicgames.account.oauth.authorization_code_not_found'), please try again.",
+                Some(LoginFailed),
+            ),
+            ("[cli] ERROR: Login attempt failed, please see log for details.", Some(LoginFailed)),
+            ("[EPCAPI] ERROR: Login to EGS API failed with errorCode: errors.com.epicgames.x", Some(LoginFailed)),
+            ("[cli] ERROR: Login failed, cannot continue!", Some(LoginFailed)),
+            ("[cli] ERROR: Login failed! Cannot continue with download process.", Some(LoginFailed)),
+            // Spike 1: signed out, a command that needs the login.
+            ("ValueError: No saved credentials", Some(NotLoggedIn)),
+            ("[Core] ERROR: Stored credentials are no longer valid! Please login again.", Some(NotLoggedIn)),
+            (
+                "[Core] ERROR: HTTP request for login failed: ConnectionError(x), please try again later.",
+                Some(Network),
+            ),
+            (
+                "requests.exceptions.ProxyError: HTTPSConnectionPool(host='api.legendary.gl', port=443): Max retries exceeded",
+                Some(Network),
+            ),
+            ("requests.exceptions.ConnectionError: x", Some(Network)),
+            ("requests.exceptions.HTTPError: 404", None),
+            ("Traceback (most recent call last):", Some(OtherError)),
+            ("MemoryError: Current shared memory cache is smaller than required: 1024 < 2048.", Some(MemoryError)),
+            (" ! Failure: Not enough available disk space! 1.00 GiB < 2.00 GiB", Some(NotEnoughSpace)),
+            (" - Warning: Potentially not enough available disk space! x", None),
+            (
+                "[cli] ERROR: The selected title has to be installed via a third-party store: Origin",
+                Some(ThirdPartyManaged),
+            ),
+            ("[cli] ERROR: Game Fortnite is not currently installed!", Some(NotInstalled)),
+            ("[cli] ERROR: Game Fortnite not installed, cannot uninstall!", Some(NotInstalled)),
+            ("[cli] CRITICAL: Base game \"Fortnite\" is not installed!", Some(NotInstalled)),
+            ("[cli] INFO: Verification finished successfully.", Some(VerifyOk)),
+            (
+                "[cli] ERROR: Verification failed, 2 file(s) corrupted, 1 file(s) are missing.",
+                Some(VerifyFailed { corrupted: 2, missing: 1 }),
+            ),
+            ("[cli] ERROR: File does not match hash: \"Game/x.pak\"", None),
+            ("[cli] ERROR: File is missing: \"Game/y.pak\"", None),
+            ("[cli] INFO: Download size: 1.50 MiB (Compression savings: 12.3%)", Some(DownloadSize(1_572_864))),
+            (
+                "[cli] INFO: Download size is 0, the game is either already up to date or has not changed. Exiting...",
+                Some(DownloadSize(0)),
+            ),
+            ("[cli] CRITICAL: Installation cannot proceed, exiting.", Some(OtherError)),
+            ("[Core] ERROR: Getting exchange code failed: {}", Some(OtherError)),
+            // Lines GRID has no word for.
+            ("[Core] WARNING: Getting locale failed: ValueError('x'), falling back to using en-US.", None),
+            ("[cli] INFO: Testing existing login data if present...", None),
+            ("[cli] INFO: Successfully logged in as \"SamPlays\"", None),
+            ("Please enter the \"authorizationCode\" value from the JSON response: ", None),
+            ("{\"access_token\": \"FAKE-STORE-TOKEN-not-real\"}", None),
+            ("", None),
+        ];
+        for (line, want) in cases {
+            assert_eq!(&legendary_signal(line), want, "{line:?}");
         }
     }
 

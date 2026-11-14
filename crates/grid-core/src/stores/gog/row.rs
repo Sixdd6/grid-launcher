@@ -105,7 +105,7 @@ pub fn gog_row(
 
 /// A play-task path as a relative path, either separator; `None` when it
 /// is blank, absolute, or climbs out with `..`.
-fn relative_path(text: &str) -> Option<PathBuf> {
+pub(crate) fn relative_path(text: &str) -> Option<PathBuf> {
     let mut rel = PathBuf::new();
     for part in text.trim().split(['/', '\\']) {
         if part.is_empty() || part == "." {

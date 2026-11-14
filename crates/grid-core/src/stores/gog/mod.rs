@@ -31,6 +31,7 @@ use super::paths;
 use super::runner::{run_tool, ToolCommand};
 use super::tools::{self, StoreTool};
 use super::StoreError;
+pub use super::{CloudState, SaveConflict, SyncMode};
 use crate::library::queue::StoreJob;
 use crate::library::registry::{InstalledGame, Registry};
 use crate::library::LibraryError;
@@ -172,41 +173,6 @@ pub struct GogJobCtx {
     pub registry: Arc<Registry>,
     pub library: PathBuf,
     pub default_compat_tool: String,
-}
-
-/// How a cloud save sync decides its direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyncMode {
-    /// GRID decides from timestamps; a conflict stops the sync.
-    Auto,
-    PreferUpload,
-    PreferDownload,
-}
-
-/// A game's cloud save state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CloudState {
-    /// Cloud saves are off for the game (or GOG has none for it).
-    Off,
-    /// On, never synced.
-    None,
-    Synced {
-        at: i64,
-    },
-    Conflict(SaveConflict),
-}
-
-/// Both sides of a save conflict.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SaveConflict {
-    pub local_at: i64,
-    pub local_files: u32,
-    pub local_bytes: u64,
-    pub cloud_at: i64,
-    /// The cloud files in the game's save locations (cloudstorage's listing).
-    pub cloud_files: u32,
-    /// Their bytes, `None` when the listing leaves a file's size out.
-    pub cloud_bytes: Option<u64>,
 }
 
 /// How many seconds before expiry a cached bearer is refreshed.
@@ -475,7 +441,7 @@ impl GogService {
                 program: program.clone(),
                 args,
                 env: self.tool_env(),
-                cwd: None,
+                ..Default::default()
             });
         }
         tools::tool_command(&self.data_dir, StoreTool::Gogdl, args, self.tool_env())

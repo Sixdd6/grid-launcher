@@ -1,5 +1,5 @@
-//! External game stores in the app (Phase 1: GOG). grid-core's
-//! `stores::gog::GogService` does the store work; this service owns what
+//! GOG in the app: the GOG [`StoreBackend`]. grid-core's
+//! `stores::gog::GogService` does the store work; this backend owns what
 //! the app adds around it:
 //!
 //! - the connection state machine (not connected → login window open →
@@ -9,10 +9,13 @@
 //!   `StoreStatus.tool`;
 //! - the owned-list cache (`<data_dir>/stores/cache/gog-owned.json`,
 //!   product metadata only, never a token) and its refresh;
-//! - the `StoreStatus` assembly and every `stores-changed` emit;
+//! - GOG's `StoreStatus` (the facade emits every store's in
+//!   `stores-changed`);
 //! - the `store-notice` cards (GameStores card "Downloads and
 //!   notifications"), worded in [`notice`];
-//! - the IPC shapes of store games, install options, cloud states.
+//! - the IPC shapes of store games, install options, cloud states;
+//! - the GOG-only extras the commands reach through
+//!   `StoresService::gog`: offline installers and drive backups.
 //!
 //! The store calls go through [`GogApi`], a seam the unit tests fake.
 //!
@@ -22,11 +25,9 @@
 //! `StoreError`'s Display (GRID's own words).
 
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 
 use grid_core::config::{Config, GogConfig};
 use grid_core::library::queue::{DownloadStatus, DownloadsSnapshot, StoreJob};
@@ -42,14 +43,13 @@ use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use tauri::Url;
 
+use super::{default_install_dir, BoxFut, JobCtx, StoreBackend, StoreEvent, StoreShared};
 use crate::commands::stores::{
-    OwnedState, StoreCloudState, StoreConnection, StoreDlc, StoreGame, StoreInstallOptions,
-    StoreLibrary, StoreLoginEvent, StoreNotice, StoreNoticeAction, StoreSaveConflict, StoreStatus,
-    StoreVersionOption, ToolState, ToolStatus,
+    OwnedState, StoreCloudState, StoreConnection, StoreDlc, StoreGame, StoreGameSettings,
+    StoreInstallOptions, StoreInstallRequest, StoreLibrary, StoreLoginEvent, StoreNotice,
+    StoreNoticeAction, StoreSaveConflict, StoreStatus, StoreVersionOption, ToolState, ToolStatus,
 };
-
-/// A boxed, sendable future: [`GogApi`]'s async methods.
-pub type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+use crate::store_auth::LoginSpec;
 
 /// What the app asks of GOG. [`RealGog`] forwards to grid-core's
 /// `GogService` and the tool installer; the unit tests fake it.
@@ -151,7 +151,7 @@ impl GogApi for RealGog {
             return None;
         }
         let env = grid_core::launch::spawn::clean_env();
-        tools::python_problem(grid_core::launch::umu::probe_python(&env))
+        tools::python_problem(StoreTool::Gogdl, grid_core::launch::umu::probe_python(&env))
     }
     fn install_tool<'a>(
         &'a self,
@@ -231,18 +231,6 @@ pub fn gog_endpoints() -> GogEndpoints {
 #[cfg(feature = "e2e")]
 pub const E2E_GOG_BASE_ENV: &str = "GRID_LAUNCHER_E2E_GOG_BASE";
 
-// --- events -------------------------------------------------------------------
-
-/// What the service tells the frontend.
-#[derive(Debug, Clone, PartialEq)]
-pub enum StoreEvent {
-    Changed(Vec<StoreStatus>),
-    Login(StoreLoginEvent),
-    Notice(StoreNotice),
-}
-
-type Emitter = Arc<dyn Fn(StoreEvent) + Send + Sync>;
-
 // --- state --------------------------------------------------------------------
 
 /// Where the login stands.
@@ -296,23 +284,21 @@ impl Default for GogState {
     }
 }
 
-/// The external stores: GOG in Phase 1.
-pub struct StoresService {
+/// The GOG backend.
+pub struct GogStore {
     api: Arc<dyn GogApi>,
     endpoints: GogEndpoints,
     data_dir: PathBuf,
     config_path: PathBuf,
     state: Mutex<GogState>,
-    emitter: RwLock<Option<Emitter>>,
-    registry: RwLock<Option<Arc<Registry>>>,
+    /// The emitter and registry every store shares.
+    shared: Arc<StoreShared>,
     /// Games whose cloud saves are syncing right now.
     syncing: Mutex<HashSet<String>>,
     /// Downloads entries whose finish already had its card.
     announced: Mutex<HashSet<u64>>,
     /// `owned()` answered this run.
     owned_fetched: std::sync::atomic::AtomicBool,
-    /// The client store art is fetched with (no credential, ever).
-    art_http: std::sync::OnceLock<reqwest::Client>,
 }
 
 /// The tool's name in GRID's words.
@@ -325,92 +311,56 @@ fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
-impl StoresService {
+impl GogStore {
     pub fn new(
         api: Arc<dyn GogApi>,
         endpoints: GogEndpoints,
         data_dir: PathBuf,
         config_path: PathBuf,
+        shared: Arc<StoreShared>,
     ) -> Arc<Self> {
-        Arc::new(StoresService {
+        Arc::new(GogStore {
             api,
             endpoints,
             data_dir,
             config_path,
             state: Mutex::new(GogState::default()),
-            emitter: RwLock::new(None),
-            registry: RwLock::new(None),
+            shared,
             syncing: Mutex::new(HashSet::new()),
             announced: Mutex::new(HashSet::new()),
             owned_fetched: std::sync::atomic::AtomicBool::new(false),
-            art_http: std::sync::OnceLock::new(),
         })
     }
 
-    /// The real service for this run.
-    pub fn real(config_path: PathBuf) -> Arc<Self> {
-        let data_dir = config_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
+    /// The real GOG backend for this run.
+    pub fn real(
+        data_dir: PathBuf,
+        config_path: PathBuf,
+        http: reqwest::Client,
+        shared: Arc<StoreShared>,
+    ) -> Arc<Self> {
         let endpoints = gog_endpoints();
-        let http = reqwest::Client::builder()
-            .user_agent(concat!("grid-launcher/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .unwrap_or_default();
         let api = Arc::new(RealGog::new(data_dir.clone(), http, endpoints.clone()));
-        StoresService::new(api, endpoints, data_dir, config_path)
+        GogStore::new(api, endpoints, data_dir, config_path, shared)
     }
 
     pub fn api(&self) -> &Arc<dyn GogApi> {
         &self.api
     }
 
-    pub fn data_dir(&self) -> &Path {
-        &self.data_dir
-    }
-
-    pub fn embed_url(&self) -> &Url {
-        &self.endpoints.embed
-    }
-
-    /// Whether `url` is store art the UI may load ([`art::is_store_art_url`]).
+    /// Whether `url` is store art the UI may load
+    /// ([`grid_core::stores::art::is_store_art_url`]; the gamesdb origin is
+    /// the e2e mock's).
     pub fn is_art_url(&self, url: &str) -> bool {
-        grid_core::stores::art::is_store_art_url(url, &self.endpoints.gamesdb)
-    }
-
-    /// The cached copy of a store art `url`, fetched with no credential on a
-    /// miss; `None` for an address that isn't store art or a failed fetch.
-    pub async fn art(&self, url: &str) -> Option<PathBuf> {
-        if !self.is_art_url(url) {
-            return None;
-        }
-        let http = self.art_http.get_or_init(|| {
-            reqwest::Client::builder()
-                .user_agent(concat!("grid-launcher/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .unwrap_or_default()
-        });
-        grid_core::stores::art::cached(http, &self.data_dir, url).await
-    }
-
-    pub fn set_emitter(&self, emitter: Emitter) {
-        *self.emitter.write().unwrap() = Some(emitter);
-    }
-
-    pub fn set_registry(&self, registry: Arc<Registry>) {
-        *self.registry.write().unwrap() = Some(registry);
+        grid_core::stores::art::is_store_art_url(url, std::slice::from_ref(&self.endpoints.gamesdb))
     }
 
     pub fn registry(&self) -> Option<Arc<Registry>> {
-        self.registry.read().unwrap().clone()
+        self.shared.registry()
     }
 
     fn emit(&self, event: StoreEvent) {
-        let emitter = self.emitter.read().unwrap().clone();
-        if let Some(emitter) = emitter {
-            emitter(event);
-        }
+        self.shared.emit(event);
     }
 
     fn notify(&self, notice: StoreNotice) {
@@ -419,7 +369,7 @@ impl StoresService {
 
     /// Emits `stores-changed` with every store's status.
     pub fn changed(&self) {
-        self.emit(StoreEvent::Changed(self.statuses()));
+        self.shared.changed();
     }
 
     fn gog_config(&self) -> GogConfig {
@@ -531,11 +481,6 @@ impl StoresService {
 
     // --- status -----------------------------------------------------------------
 
-    /// Every store's status (GOG only in Phase 1).
-    pub fn statuses(&self) -> Vec<StoreStatus> {
-        vec![self.status()]
-    }
-
     /// GOG's status.
     pub fn status(&self) -> StoreStatus {
         let config = self.gog_config();
@@ -553,14 +498,7 @@ impl StoresService {
     /// Where GOG games install: the configured folder, else
     /// `<library>/GOG`. `""` when neither is set.
     fn default_install_dir(&self, gog: &GogConfig) -> String {
-        if !gog.install_dir.trim().is_empty() {
-            return gog.install_dir.clone();
-        }
-        Config::load(&self.config_path)
-            .ok()
-            .and_then(|config| grid_core::library::paths::library_root(&config))
-            .map(|root| root.join("GOG").to_string_lossy().into_owned())
-            .unwrap_or_default()
+        default_install_dir(&self.config_path, &gog.install_dir, "GOG")
     }
 
     pub fn install_base_dir(&self) -> String {
@@ -882,7 +820,7 @@ impl StoresService {
 
     /// GOG's Installed and Available lists. `updates`: newer versions by
     /// store id ([`crate::update_service`]).
-    pub fn library(&self, updates: &HashMap<String, GogUpdate>) -> StoreLibrary {
+    pub fn library(&self, updates: &HashMap<String, String>) -> StoreLibrary {
         let config = self.gog_config();
         let rows = self.installed_rows();
         let state = self.state.lock().unwrap().clone();
@@ -979,37 +917,6 @@ impl StoresService {
             }
         }
         self.changed();
-    }
-
-    /// After a GOG game's session ends: upload its cloud saves (a listener
-    /// on the launch service's session-finished hook, beside the RomM
-    /// cloud upload, which skips store sessions).
-    pub fn install_session_finished_hook(
-        self: &Arc<Self>,
-        launch: &grid_core::launch::LaunchService,
-    ) {
-        let this = self.clone();
-        launch.add_session_finished_hook(Arc::new(move |session| {
-            let GameKey::Store {
-                source: StoreKind::Gog,
-                store_id,
-            } = session.key.clone()
-            else {
-                return;
-            };
-            let this = this.clone();
-            tauri::async_runtime::spawn(async move {
-                let Some(registry) = this.registry() else {
-                    return;
-                };
-                let lookup = registry.clone();
-                let key = GameKey::store(StoreKind::Gog, store_id);
-                let row = tokio::task::spawn_blocking(move || lookup.find_key(&key)).await;
-                if let Ok(Ok(Some(row))) = row {
-                    this.sync_after_session(&registry, &row).await;
-                }
-            });
-        }));
     }
 
     /// Every Downloads snapshot: a GOG job that just finished gets its card
@@ -1150,7 +1057,351 @@ impl StoresService {
     }
 }
 
-/// The parts of a Downloads entry [`StoresService::observe_downloads`]
+// --- the commands' GOG work (StoreBackend) ---------------------------------------
+
+/// The GOG version a request names.
+pub(crate) fn parse_platform(platform: &str) -> Result<GogPlatform, String> {
+    match platform {
+        "linux" => Ok(GogPlatform::Linux),
+        "windows" => Ok(GogPlatform::Windows),
+        _ => Err("GRID installs the Linux or Windows version only.".to_string()),
+    }
+}
+
+/// The row after Game settings' Save: a new executable becomes the user's
+/// choice (GOG updates leave it alone); the install folder and the Wine
+/// prefix are read-only, and only a Windows version takes a compat tool.
+pub(crate) fn apply_game_settings(
+    mut row: InstalledGame,
+    settings: &StoreGameSettings,
+) -> InstalledGame {
+    let mut meta = GogMeta::from_json(&row.store_meta);
+    let executable = settings.executable.trim();
+    if !executable.is_empty() && executable != row.native_executable_path {
+        row.native_executable_path = executable.to_string();
+        meta.exe_user_pinned = true;
+    }
+    if meta.exe_user_pinned {
+        row.native_launch_source = "user".to_string();
+    }
+    row.native_launch_parameters = settings.launch_parameters.trim().to_string();
+    if meta.platform == GogPlatform::Windows {
+        row.native_compat_tool = settings.compat_tool.trim().to_string();
+    }
+    meta.cloud_saves = settings.cloud_saves;
+    row.store_meta = meta.to_json();
+    row
+}
+
+impl GogStore {
+    /// The login window's GOG spec: GOG's login page, ended by the
+    /// `embed.gog.com/on_login_success?code=` redirect.
+    pub fn login_spec(&self) -> LoginSpec {
+        let finish = self
+            .endpoints
+            .embed
+            .join(crate::store_auth::GOG_LOGIN_SUCCESS_PATH)
+            .unwrap_or_else(|_| self.endpoints.embed.clone());
+        LoginSpec {
+            store_name: StoreKind::Gog.platform_name().to_string(),
+            login_url: self.api.login_url(),
+            finish,
+            code_param: "code",
+            user_agent: None,
+        }
+    }
+
+    /// `store_install_options` for GOG.
+    async fn install_options_for(
+        self: &Arc<Self>,
+        id: &str,
+    ) -> Result<StoreInstallOptions, String> {
+        self.ensure_can_install()?;
+        self.ensure_owned_fetched().await;
+        let options = self
+            .api
+            .install_options(id)
+            .await
+            .map_err(|e| self.store_error(e))?;
+        let title = self
+            .product(id)
+            .map(|p| p.title)
+            .unwrap_or_else(|| id.to_string());
+        let compat = Config::load(&self.config_path)
+            .map(|config| config.default_compat_tool)
+            .unwrap_or_default();
+        let base = self.install_base_dir();
+        tokio::task::spawn_blocking(move || install_options_ipc(&options, &title, &base, &compat))
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// `store_install` for GOG: the job for a confirmed install.
+    async fn install_job_for(
+        self: &Arc<Self>,
+        id: String,
+        request: StoreInstallRequest,
+        ctx: JobCtx,
+    ) -> Result<StoreJob, String> {
+        self.ensure_can_install()?;
+        let platform = parse_platform(&request.platform)?;
+        self.ensure_owned_fetched().await;
+        let title = self
+            .product(&id)
+            .map(|p| p.title)
+            .unwrap_or_else(|| id.clone());
+        let install_dir = if request.install_dir.trim().is_empty() {
+            let base = self.install_base_dir();
+            if base.is_empty() {
+                return Err("Choose a library folder in Settings › Library first.".to_string());
+            }
+            Path::new(&base).join(grid_core::library::paths::sanitize_component(
+                &title, "game",
+            ))
+        } else {
+            PathBuf::from(request.install_dir.trim())
+        };
+        Ok(self.api.install_job(
+            GogInstallRequest {
+                store_id: id,
+                title,
+                platform,
+                language: request.language,
+                dlc_ids: request.dlc_ids,
+                install_dir,
+                compat_tool: request.compat_tool,
+            },
+            ctx.gog(),
+        ))
+    }
+
+    /// `store_cloud_state` for GOG.
+    async fn cloud_state_for(&self, row: &InstalledGame) -> Result<StoreCloudState, String> {
+        let meta = GogMeta::from_json(&row.store_meta);
+        if !self.cloud_enabled(row) {
+            return Ok(cloud_state_ipc(&CloudState::Off, &meta, false));
+        }
+        if self.is_syncing(&row.store_id) {
+            return Ok(cloud_state_ipc(
+                &CloudState::Synced { at: meta.last_sync },
+                &meta,
+                true,
+            ));
+        }
+        let cloud = self
+            .api
+            .cloud_state(row)
+            .await
+            .map_err(|e| self.store_error(e))?;
+        self.remember_cloud(&row.store_id, &cloud);
+        Ok(cloud_state_ipc(&cloud, &meta, false))
+    }
+
+    /// `store_cloud_sync` / `store_cloud_resolve` for GOG: syncs in `mode`,
+    /// then answers the state with the row re-read (its `last_sync` moved).
+    async fn cloud_sync_for(
+        &self,
+        registry: &Registry,
+        row: &InstalledGame,
+        mode: SyncMode,
+    ) -> Result<StoreCloudState, String> {
+        if !self.cloud_enabled(row) {
+            return Ok(cloud_state_ipc(
+                &CloudState::Off,
+                &GogMeta::from_json(&row.store_meta),
+                false,
+            ));
+        }
+        self.set_syncing(&row.store_id, true);
+        self.changed();
+        let result = self.api.cloud_sync(registry, row, mode).await;
+        self.set_syncing(&row.store_id, false);
+        let cloud = result.map_err(|e| self.store_error(e));
+        if let Ok(cloud) = &cloud {
+            self.remember_cloud(&row.store_id, cloud);
+        }
+        self.changed();
+        let key = GameKey::store(StoreKind::Gog, row.store_id.clone());
+        let fresh = registry
+            .find_key(&key)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| row.clone());
+        Ok(cloud_state_ipc(
+            &cloud?,
+            &GogMeta::from_json(&fresh.store_meta),
+            false,
+        ))
+    }
+}
+
+impl StoreBackend for GogStore {
+    fn kind(&self) -> StoreKind {
+        StoreKind::Gog
+    }
+    fn status(&self) -> StoreStatus {
+        GogStore::status(self)
+    }
+    fn connection(&self) -> StoreConnection {
+        GogStore::connection(self)
+    }
+    fn changed(&self) {
+        GogStore::changed(self)
+    }
+    fn load(&self) {
+        GogStore::load(self)
+    }
+    fn run_login_check(self: Arc<Self>) -> BoxFut<'static, ()> {
+        Box::pin(async move { GogStore::check_login(&self).await })
+    }
+    fn observe_downloads(&self, snapshot: &DownloadsSnapshot) {
+        GogStore::observe_downloads(self, snapshot)
+    }
+    fn login_spec(&self) -> LoginSpec {
+        GogStore::login_spec(self)
+    }
+    fn begin_login(&self) -> Result<(), String> {
+        GogStore::begin_login(self)
+    }
+    fn login_window_failed(&self, error: &str) {
+        GogStore::login_window_failed(self, error)
+    }
+    fn login_cancelled(&self) {
+        GogStore::login_cancelled(self)
+    }
+    fn login_redirect_failed(&self) {
+        GogStore::login_redirect_failed(self)
+    }
+    fn run_finish_login(self: Arc<Self>, code: SecretString) -> BoxFut<'static, ()> {
+        Box::pin(async move { GogStore::finish_login(&self, code).await })
+    }
+    fn disconnect(&self) -> Result<(), String> {
+        GogStore::disconnect(self)
+    }
+    fn run_install_tool(self: Arc<Self>) -> BoxFut<'static, ()> {
+        Box::pin(async move { GogStore::install_tool(&self).await })
+    }
+    fn run_refresh(self: Arc<Self>, announce: bool) -> BoxFut<'static, ()> {
+        Box::pin(async move { GogStore::refresh_owned(&self, announce).await })
+    }
+    fn library(&self, updates: &HashMap<String, String>) -> StoreLibrary {
+        GogStore::library(self, updates)
+    }
+    fn check_updates(self: Arc<Self>, app: tauri::AppHandle) {
+        use tauri::Manager as _;
+        let updates = app.state::<crate::commands::AppState>().updates.clone();
+        updates.spawn_store_check(app, self);
+    }
+    fn set_install_dir(&self, path: &str) {
+        GogStore::set_install_dir(self, path)
+    }
+    fn set_cloud_saves(&self, on: bool) {
+        GogStore::set_cloud_saves(self, on)
+    }
+    fn ensure_can_install(&self) -> Result<(), String> {
+        GogStore::ensure_can_install(self)
+    }
+    fn install_options(
+        self: Arc<Self>,
+        store_id: String,
+    ) -> BoxFut<'static, Result<StoreInstallOptions, String>> {
+        Box::pin(async move { self.install_options_for(&store_id).await })
+    }
+    fn install_job(
+        self: Arc<Self>,
+        store_id: String,
+        request: StoreInstallRequest,
+        ctx: JobCtx,
+    ) -> BoxFut<'static, Result<StoreJob, String>> {
+        Box::pin(async move { self.install_job_for(store_id, request, ctx).await })
+    }
+    fn update_job(&self, row: &InstalledGame, ctx: JobCtx) -> StoreJob {
+        self.api.update_job(row, ctx.gog())
+    }
+    fn repair_job(&self, row: &InstalledGame, ctx: JobCtx) -> StoreJob {
+        self.api.repair_job(row, ctx.gog())
+    }
+    fn dlc_job(
+        self: Arc<Self>,
+        row: InstalledGame,
+        dlc_id: String,
+        ctx: JobCtx,
+    ) -> BoxFut<'static, Result<StoreJob, String>> {
+        Box::pin(async move {
+            self.ensure_owned_fetched().await;
+            Ok(self.api.dlc_job(&row, &dlc_id, ctx.gog()))
+        })
+    }
+    fn remove_dlc(
+        &self,
+        registry: &Registry,
+        row: &InstalledGame,
+        dlc_id: &str,
+    ) -> Result<(), StoreError> {
+        self.api.remove_dlc(registry, row, dlc_id)
+    }
+    fn uninstall(&self, registry: &Registry, store_id: &str) -> Result<(), StoreError> {
+        self.api.uninstall(registry, store_id)
+    }
+    fn game_settings(&self, row: &InstalledGame) -> StoreGameSettings {
+        let meta = GogMeta::from_json(&row.store_meta);
+        StoreGameSettings {
+            install_dir: row.native_game_dir.clone(),
+            executable: row.native_executable_path.clone(),
+            exe_user_pinned: meta.exe_user_pinned,
+            launch_parameters: row.native_launch_parameters.clone(),
+            compat_tool: row.native_compat_tool.clone(),
+            wineprefix: row.native_wineprefix.clone(),
+            cloud_saves: meta.cloud_saves,
+        }
+    }
+    fn apply_game_settings(
+        &self,
+        row: InstalledGame,
+        settings: &StoreGameSettings,
+    ) -> InstalledGame {
+        apply_game_settings(row, settings)
+    }
+    fn windows_version(&self, row: &InstalledGame) -> bool {
+        GogMeta::from_json(&row.store_meta).platform == GogPlatform::Windows
+    }
+    fn cloud_enabled(&self, row: &InstalledGame) -> bool {
+        GogStore::cloud_enabled(self, row)
+    }
+    fn cloud_state<'a>(
+        &'a self,
+        row: &'a InstalledGame,
+    ) -> BoxFut<'a, Result<StoreCloudState, String>> {
+        Box::pin(self.cloud_state_for(row))
+    }
+    fn cloud_sync<'a>(
+        &'a self,
+        registry: &'a Registry,
+        row: &'a InstalledGame,
+        mode: SyncMode,
+    ) -> BoxFut<'a, Result<StoreCloudState, String>> {
+        Box::pin(self.cloud_sync_for(registry, row, mode))
+    }
+    fn sync_before_launch<'a>(
+        &'a self,
+        registry: &'a Registry,
+        row: &'a InstalledGame,
+    ) -> BoxFut<'a, Result<(), StoreSaveConflict>> {
+        Box::pin(GogStore::sync_before_launch(self, registry, row))
+    }
+    fn sync_after_session<'a>(
+        &'a self,
+        registry: &'a Registry,
+        row: &'a InstalledGame,
+    ) -> BoxFut<'a, ()> {
+        Box::pin(GogStore::sync_after_session(self, registry, row))
+    }
+    fn is_art_url(&self, url: &str) -> bool {
+        GogStore::is_art_url(self, url)
+    }
+}
+
+/// The parts of a Downloads entry [`GogStore::observe_downloads`]
 /// reads.
 struct JobRow {
     id: u64,
@@ -1298,7 +1549,7 @@ fn assemble_games(
     state: &GogState,
     config: &GogConfig,
     rows: &[InstalledGame],
-    updates: &HashMap<String, GogUpdate>,
+    updates: &HashMap<String, String>,
     syncing: &HashSet<String>,
 ) -> (Vec<StoreGame>, Vec<StoreGame>) {
     let products: HashMap<&str, &GogProduct> = state
@@ -1365,10 +1616,7 @@ fn assemble_games(
                 download_bytes: 0,
                 disk_bytes: row.filesize_bytes.max(0) as u64,
                 version: meta.version.clone(),
-                update_version: updates
-                    .get(&row.store_id)
-                    .map(|update| update.version.clone())
-                    .unwrap_or_default(),
+                update_version: updates.get(&row.store_id).cloned().unwrap_or_default(),
                 origin: Some(origin_name(meta.origin).to_string()),
                 not_supported: String::new(),
                 dlc,
@@ -1518,7 +1766,7 @@ pub fn cloud_state_ipc(state: &CloudState, meta: &GogMeta, syncing: bool) -> Sto
     }
 }
 
-fn conflict_ipc(conflict: &grid_core::stores::gog::SaveConflict) -> StoreSaveConflict {
+pub(crate) fn conflict_ipc(conflict: &grid_core::stores::SaveConflict) -> StoreSaveConflict {
     StoreSaveConflict {
         local_at: conflict.local_at,
         local_files: conflict.local_files,
@@ -2000,7 +2248,7 @@ mod tests {
     }
 
     struct Harness {
-        service: Arc<StoresService>,
+        service: Arc<GogStore>,
         fake: Arc<FakeGog>,
         events: Arc<Mutex<Vec<StoreEvent>>>,
         dir: tempfile::TempDir,
@@ -2011,15 +2259,18 @@ mod tests {
         let config_path = dir.path().join("config.toml");
         Config::default().save(&config_path).unwrap();
         let fake = Arc::new(FakeGog::default());
-        let service = StoresService::new(
+        let shared = StoreShared::new();
+        let service = GogStore::new(
             fake.clone(),
             GogEndpoints::e2e(Url::parse("http://127.0.0.1:1/").unwrap()),
             dir.path().to_path_buf(),
             config_path,
+            shared.clone(),
         );
+        shared.register(service.clone());
         let events = Arc::new(Mutex::new(Vec::new()));
         let sink = events.clone();
-        service.set_emitter(Arc::new(move |event| sink.lock().unwrap().push(event)));
+        shared.set_emitter(Arc::new(move |event| sink.lock().unwrap().push(event)));
         Harness {
             service,
             fake,
@@ -2356,14 +2607,7 @@ mod tests {
         };
         let rows = vec![row("20", "Lanternfall", &meta)];
         let mut updates = HashMap::new();
-        updates.insert(
-            "20".to_string(),
-            GogUpdate {
-                store_id: "20".into(),
-                version: "2.2".into(),
-                build_id: "b".into(),
-            },
-        );
+        updates.insert("20".to_string(), "2.2".to_string());
         let config = GogConfig::default();
         let (installed, available) =
             assemble_games(&state, &config, &rows, &updates, &HashSet::new());
@@ -2391,7 +2635,7 @@ mod tests {
                 local_files: 2,
                 local_bytes: 3,
                 cloud_at: 4,
-                cloud_files: 5,
+                cloud_files: Some(5),
                 cloud_bytes: Some(6),
             }),
         );
@@ -2486,7 +2730,7 @@ mod tests {
                 local_files: 2,
                 local_bytes: 3,
                 cloud_at: 4,
-                cloud_files: 5,
+                cloud_files: Some(5),
                 cloud_bytes: Some(6),
             }),
             &meta,
@@ -2495,7 +2739,7 @@ mod tests {
         assert_eq!(conflict.state, "conflict");
         let sides = conflict.conflict.unwrap();
         assert_eq!(sides.cloud_at, 4);
-        assert_eq!((sides.cloud_files, sides.cloud_bytes), (5, Some(6)));
+        assert_eq!((sides.cloud_files, sides.cloud_bytes), (Some(5), Some(6)));
         assert_eq!(cloud_state_ipc(&CloudState::Off, &meta, true).state, "off");
     }
 
@@ -2514,7 +2758,7 @@ mod tests {
             local_files: 1,
             local_bytes: 1,
             cloud_at: 2,
-            cloud_files: 1,
+            cloud_files: Some(1),
             cloud_bytes: None,
         }));
         let result = rt().block_on(h.service.sync_before_launch(&registry, &game));
@@ -2529,7 +2773,7 @@ mod tests {
             local_files: 1,
             local_bytes: 1,
             cloud_at: 2,
-            cloud_files: 1,
+            cloud_files: Some(1),
             cloud_bytes: None,
         }));
         rt().block_on(h.service.sync_before_launch(&registry, &off))
@@ -2662,5 +2906,61 @@ mod tests {
         let json = serde_json::to_value(notice::tool_installed()).unwrap();
         assert_eq!(json["action"], serde_json::Value::Null);
         assert_eq!(json["source"], "gog");
+    }
+
+    #[test]
+    fn platforms_parse_linux_and_windows_only() {
+        assert_eq!(parse_platform("linux").unwrap(), GogPlatform::Linux);
+        assert_eq!(parse_platform("windows").unwrap(), GogPlatform::Windows);
+        assert!(parse_platform("mac").is_err());
+    }
+
+    #[test]
+    fn game_settings_pin_a_new_executable_and_keep_the_folder() {
+        let meta = GogMeta {
+            platform: GogPlatform::Windows,
+            cloud_saves: true,
+            ..GogMeta::default()
+        };
+        let row = InstalledGame {
+            native_game_dir: "/g/Ashen".into(),
+            native_executable_path: "/g/Ashen/game.exe".into(),
+            native_launch_source: "sidecar".into(),
+            native_wineprefix: "/p".into(),
+            store_meta: meta.to_json(),
+            ..Default::default()
+        };
+        let mut settings = StoreGameSettings {
+            install_dir: "/elsewhere".into(),
+            executable: "/g/Ashen/game.exe".into(),
+            exe_user_pinned: false,
+            launch_parameters: " -windowed ".into(),
+            compat_tool: "GE-Proton9-20".into(),
+            wineprefix: "/other".into(),
+            cloud_saves: false,
+        };
+        let same = apply_game_settings(row.clone(), &settings);
+        assert_eq!(same.native_launch_source, "sidecar");
+        assert_eq!(same.native_launch_parameters, "-windowed");
+        assert_eq!(same.native_compat_tool, "GE-Proton9-20");
+        assert_eq!(same.native_game_dir, "/g/Ashen");
+        assert_eq!(same.native_wineprefix, "/p");
+        assert!(!GogMeta::from_json(&same.store_meta).cloud_saves);
+
+        settings.executable = "/g/Ashen/launcher.exe".into();
+        let pinned = apply_game_settings(row, &settings);
+        assert_eq!(pinned.native_executable_path, "/g/Ashen/launcher.exe");
+        assert_eq!(pinned.native_launch_source, "user");
+        assert!(GogMeta::from_json(&pinned.store_meta).exe_user_pinned);
+    }
+
+    #[test]
+    fn the_login_spec_ends_at_on_login_success() {
+        let h = harness();
+        let spec = h.service.login_spec();
+        assert_eq!(spec.store_name, "GOG");
+        assert_eq!(spec.finish.as_str(), "http://127.0.0.1:1/on_login_success");
+        assert_eq!(spec.code_param, "code");
+        assert_eq!(spec.user_agent, None);
     }
 }

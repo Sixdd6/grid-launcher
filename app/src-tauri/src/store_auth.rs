@@ -9,11 +9,17 @@
 //!   data folder of its own under `<data_dir>/stores/login-webview/`, so the
 //!   store's cookies never mix with GRID's window and never outlive the
 //!   window; Disconnect deletes that folder too ([`wipe_login_data`]).
-//! - The redirect to `embed.gog.com/on_login_success?code=…` is caught by
-//!   `on_navigation` (WebKitGTK asks the navigation policy for a server
-//!   redirect too) and, as a fallback, by `on_page_load`. The navigation is
-//!   refused, so the store's success page never loads; the code goes
-//!   straight to [`crate::stores_service::StoresService::finish_login`] as a
+//! - Each store says what ends its login in a [`LoginSpec`]: the finish
+//!   URL (scheme, host, port and path) and the query parameter with the
+//!   code. GOG's is `embed.gog.com/on_login_success?code=…`; Epic's is
+//!   `https://localhost/launcher/authorized?code=…`, which Epic sends only
+//!   to a launcher user agent ([`LoginSpec::user_agent`]). The finish URL is
+//!   caught by `on_navigation` (WebKitGTK asks the navigation policy for a
+//!   server redirect too) and, as a fallback, by `on_page_load`. The
+//!   navigation is refused, so the store's success page never loads (and
+//!   nothing on the user's port 443 hears Epic's code); the code goes
+//!   straight to the backend's `finish_login`
+//!   ([`crate::stores_service::StoreBackend::finish_login`]) as a
 //!   [`SecretString`]. It never crosses IPC, a log line or an error.
 //! - Chrome: a plain decorated window. Its title is "Sign in to GOG — GRID"
 //!   followed by the page's address (a lock when it is https), so the user
@@ -35,8 +41,25 @@ use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 /// The login window's label. No capability names it.
 pub const LOGIN_WINDOW_LABEL: &str = "store-login";
 
-/// The path GOG redirects to when the login finishes.
-const LOGIN_SUCCESS_PATH: &str = "on_login_success";
+/// The path under GOG's embed host that GOG redirects to when the login
+/// finishes.
+pub const GOG_LOGIN_SUCCESS_PATH: &str = "on_login_success";
+
+/// What one store's login window opens, and what ends it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoginSpec {
+    /// "GOG", "Epic Games": the window title's name.
+    pub store_name: String,
+    /// The page the window opens.
+    pub login_url: Url,
+    /// The URL that ends the login: its scheme, host, port and path are
+    /// matched (the query is not).
+    pub finish: Url,
+    /// The finish URL's query parameter that carries the code.
+    pub code_param: &'static str,
+    /// The user agent the window shows the store, `None` for WebKit's own.
+    pub user_agent: Option<String>,
+}
 
 /// What a URL the login window is about to load means.
 #[derive(Debug)]
@@ -49,37 +72,36 @@ pub enum Redirect {
     Failed,
 }
 
-/// Whether `url` is the login's finish redirect: the embed host (scheme,
-/// host and port of `embed`) and the `on_login_success` path under it.
-/// Real form `https://embed.gog.com/on_login_success?origin=client&code=…`;
-/// e2e form `http://127.0.0.1:<port>/on_login_success?code=…`.
-pub fn is_login_redirect(url: &Url, embed: &Url) -> bool {
-    if url.scheme() != embed.scheme()
-        || url.host_str() != embed.host_str()
-        || url.port_or_known_default() != embed.port_or_known_default()
+/// Whether `url` is the login's finish URL: the scheme, host, port and path
+/// of `finish` (a trailing `/` aside). GOG's real form
+/// `https://embed.gog.com/on_login_success?origin=client&code=…`, Epic's
+/// `https://localhost/launcher/authorized?code=…`; e2e forms
+/// `http://127.0.0.1:<port>/on_login_success?code=…` and
+/// `http://127.0.0.1:<port>/launcher/authorized?code=…`.
+pub fn is_login_redirect(url: &Url, finish: &Url) -> bool {
+    if url.scheme() != finish.scheme()
+        || url.host_str() != finish.host_str()
+        || url.port_or_known_default() != finish.port_or_known_default()
     {
         return false;
     }
-    let Ok(expected) = embed.join(LOGIN_SUCCESS_PATH) else {
-        return false;
-    };
-    url.path().trim_end_matches('/') == expected.path().trim_end_matches('/')
+    url.path().trim_end_matches('/') == finish.path().trim_end_matches('/')
 }
 
-/// The `code` query value, `None` when absent or blank.
-fn code_param(url: &Url) -> Option<String> {
+/// The `name` query value, `None` when absent or blank.
+fn code_param(url: &Url, name: &str) -> Option<String> {
     url.query_pairs()
-        .find(|(name, _)| name == "code")
+        .find(|(key, _)| key == name)
         .map(|(_, value)| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
 
 /// Classifies a URL the login window is about to load (see [`Redirect`]).
-pub fn classify(url: &Url, embed: &Url) -> Redirect {
-    if !is_login_redirect(url, embed) {
+pub fn classify(url: &Url, spec: &LoginSpec) -> Redirect {
+    if !is_login_redirect(url, &spec.finish) {
         return Redirect::Other;
     }
-    match code_param(url) {
+    match code_param(url, spec.code_param) {
         Some(code) => Redirect::Code(SecretString::from(code)),
         None => Redirect::Failed,
     }
@@ -230,13 +252,10 @@ pub trait LoginSink: Send + Sync + 'static {
 
 /// Everything [`open_login_window`] needs.
 pub struct LoginWindowSpec {
-    /// "GOG".
-    pub store_name: String,
-    /// `gog`, for the data folder.
+    /// The store's page, finish URL and user agent.
+    pub login: LoginSpec,
+    /// `gog`, `epic`: the data folder.
     pub source: String,
-    pub login_url: Url,
-    /// The embed host whose `on_login_success` ends the login.
-    pub embed: Url,
     pub data_dir: PathBuf,
     /// TV mode: keep the window above the fullscreen main window.
     pub tv: bool,
@@ -257,8 +276,8 @@ impl<S: LoginSink> Once<S> {
 
     /// Handles a URL the window is about to load or has loaded. Returns
     /// whether the window may load it.
-    fn on_url(&self, url: &Url, embed: &Url) -> bool {
-        match classify(url, embed) {
+    fn on_url(&self, url: &Url, spec: &LoginSpec) -> bool {
+        match classify(url, spec) {
             Redirect::Other => true,
             Redirect::Code(code) => {
                 if self.take() {
@@ -295,26 +314,27 @@ pub fn open_login_window<S: LoginSink>(
     let data = login_data_dir(&spec.data_dir, &spec.source);
     let _ = std::fs::create_dir_all(&data);
 
+    let login = spec.login;
     let nav_once = once.clone();
-    let nav_embed = spec.embed.clone();
+    let nav_spec = login.clone();
     let nav_app = app.clone();
     let load_once = once.clone();
-    let load_embed = spec.embed.clone();
+    let load_spec = login.clone();
     let load_app = app.clone();
-    let store_name = spec.store_name.clone();
+    let store_name = login.store_name.clone();
     let mut builder = WebviewWindowBuilder::new(
         app,
         LOGIN_WINDOW_LABEL,
-        WebviewUrl::External(spec.login_url.clone()),
+        WebviewUrl::External(login.login_url.clone()),
     )
-    .title(window_title(&spec.store_name, Some(&spec.login_url)))
+    .title(window_title(&login.store_name, Some(&login.login_url)))
     .inner_size(520.0, 760.0)
     .center()
     .focused(true)
     .incognito(true)
     .data_directory(data)
     .on_navigation(move |url| {
-        let allow = nav_once.on_url(url, &nav_embed);
+        let allow = nav_once.on_url(url, &nav_spec);
         if !allow {
             tracing::info!("store login: finish redirect caught (navigation)");
             close_soon(&nav_app);
@@ -322,7 +342,7 @@ pub fn open_login_window<S: LoginSink>(
         allow
     })
     .on_page_load(move |window, payload| {
-        if !load_once.on_url(payload.url(), &load_embed) {
+        if !load_once.on_url(payload.url(), &load_spec) {
             tracing::info!("store login: finish redirect caught (page load)");
             close_soon(&load_app);
             return;
@@ -340,6 +360,9 @@ pub fn open_login_window<S: LoginSink>(
     if spec.tv {
         builder = builder.always_on_top(true);
     }
+    if let Some(agent) = &login.user_agent {
+        builder = builder.user_agent(agent);
+    }
     let window = builder.build()?;
 
     let close_once = once.clone();
@@ -350,7 +373,7 @@ pub fn open_login_window<S: LoginSink>(
     });
 
     #[cfg(target_os = "linux")]
-    install_network_error_page(&window, spec.login_url.clone());
+    install_network_error_page(&window, login.login_url.clone());
     Ok(())
 }
 
@@ -433,9 +456,32 @@ mod tests {
         Url::parse(text).unwrap()
     }
 
+    /// GOG's spec for an embed base, as `GogStore::login_spec` builds it.
+    fn gog(embed: &str) -> LoginSpec {
+        let embed = url(embed);
+        LoginSpec {
+            store_name: "GOG".into(),
+            login_url: embed.clone(),
+            finish: embed.join(GOG_LOGIN_SUCCESS_PATH).unwrap(),
+            code_param: "code",
+            user_agent: None,
+        }
+    }
+
+    /// Epic's spec for a finish URL.
+    fn epic(finish: &str) -> LoginSpec {
+        LoginSpec {
+            store_name: "Epic Games".into(),
+            login_url: url("https://www.epicgames.com/id/login?responseType=code"),
+            finish: url(finish),
+            code_param: "code",
+            user_agent: Some("EpicGamesLauncher".into()),
+        }
+    }
+
     #[test]
     fn the_real_redirect_matches() {
-        let embed = url("https://embed.gog.com/");
+        let embed = gog("https://embed.gog.com/").finish;
         assert!(is_login_redirect(
             &url("https://embed.gog.com/on_login_success?origin=client&code=abc"),
             &embed
@@ -459,7 +505,7 @@ mod tests {
 
     #[test]
     fn the_e2e_redirect_matches_with_its_port() {
-        let embed = url("http://127.0.0.1:41235/");
+        let embed = gog("http://127.0.0.1:41235/").finish;
         assert!(is_login_redirect(
             &url("http://127.0.0.1:41235/on_login_success?code=e2e-code"),
             &embed
@@ -476,7 +522,7 @@ mod tests {
 
     #[test]
     fn an_embed_base_with_a_path_prefix_is_honoured() {
-        let embed = url("http://127.0.0.1:9000/gog/");
+        let embed = gog("http://127.0.0.1:9000/gog/").finish;
         assert!(is_login_redirect(
             &url("http://127.0.0.1:9000/gog/on_login_success?code=x"),
             &embed
@@ -490,22 +536,24 @@ mod tests {
     #[test]
     fn the_code_is_read_from_the_query() {
         assert_eq!(
-            code_param(&url(
-                "https://embed.gog.com/on_login_success?origin=client&code=abc123"
-            )),
+            code_param(
+                &url("https://embed.gog.com/on_login_success?origin=client&code=abc123"),
+                "code"
+            ),
             Some("abc123".to_string())
         );
         assert_eq!(
-            code_param(&url("https://embed.gog.com/on_login_success?code=")),
+            code_param(&url("https://embed.gog.com/on_login_success?code="), "code"),
             None
         );
         assert_eq!(
-            code_param(&url(
-                "https://embed.gog.com/on_login_success?error=access_denied"
-            )),
+            code_param(
+                &url("https://embed.gog.com/on_login_success?error=access_denied"),
+                "code"
+            ),
             None
         );
-        let embed = url("https://embed.gog.com/");
+        let embed = gog("https://embed.gog.com/");
         assert!(matches!(
             classify(
                 &url("https://embed.gog.com/on_login_success?code=abc"),
@@ -527,8 +575,53 @@ mod tests {
     }
 
     #[test]
+    fn epics_launcher_redirect_is_the_finish_and_nothing_else_on_localhost() {
+        let spec = epic("https://localhost/launcher/authorized");
+        assert!(matches!(
+            classify(
+                &url("https://localhost/launcher/authorized?code=FAKE-STORE-TOKEN-not-real"),
+                &spec
+            ),
+            Redirect::Code(_)
+        ));
+        assert!(matches!(
+            classify(
+                &url("https://localhost/launcher/authorized?error=access_denied"),
+                &spec
+            ),
+            Redirect::Failed
+        ));
+        for other in [
+            "https://www.epicgames.com/id/login?responseType=code",
+            "http://localhost/launcher/authorized?code=x",
+            "https://localhost:8443/launcher/authorized?code=x",
+            "https://localhost/launcher/authorized-not?code=x",
+            "https://127.0.0.1/launcher/authorized?code=x",
+            "https://www.epicgames.com/id/api/redirect?clientId=x&responseType=code",
+        ] {
+            assert!(
+                matches!(classify(&url(other), &spec), Redirect::Other),
+                "{other}"
+            );
+        }
+        // e2e: the mock serves both the page and the finish path.
+        let e2e = epic("http://127.0.0.1:4300/launcher/authorized");
+        assert!(matches!(
+            classify(
+                &url("http://127.0.0.1:4300/launcher/authorized?code=c"),
+                &e2e
+            ),
+            Redirect::Code(_)
+        ));
+        assert!(matches!(
+            classify(&url("http://127.0.0.1:4300/id/login"), &e2e),
+            Redirect::Other
+        ));
+    }
+
+    #[test]
     fn a_code_never_shows_in_the_debug_form() {
-        let embed = url("https://embed.gog.com/");
+        let embed = gog("https://embed.gog.com/");
         let out = classify(
             &url("https://embed.gog.com/on_login_success?code=FAKE-STORE-TOKEN-not-real"),
             &embed,
@@ -608,7 +701,7 @@ mod tests {
             done: AtomicBool::new(false),
             sink: rec.clone(),
         };
-        let embed = url("http://127.0.0.1:1/");
+        let embed = gog("http://127.0.0.1:1/");
         assert!(once.on_url(&url("http://127.0.0.1:1/auth"), &embed));
         assert!(!once.on_url(&url("http://127.0.0.1:1/on_login_success?code=c"), &embed));
         // The page-load fallback sees the same URL again; the close after it.
