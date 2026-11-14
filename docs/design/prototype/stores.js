@@ -510,7 +510,7 @@ function stCloudHTML(g) {
   var h = '<div class="st-cloud">';
   if (g.cloud === 'conflict') {
     h += '<div class="st-cloud-state warn"><span class="st-cloud-ico" data-icon="cloud" data-size="18"></span><span><b>These saves changed in two places</b><span class="note">Both this computer’s save and the one in your ' + esc(s.name) + ' account changed since the last sync. Pick the one to keep; the other is replaced.</span></span></div>' +
-      '<div class="st-conflict"><div class="st-side newer"><b>This computer</b><span class="note">Changed today, 21:40 · 3 files · 2.1 MB</span><button class="g-btn" data-st-keep="local">Keep this computer’s save</button><span class="note">Uploads it to ' + esc(s.name) + '.</span></div>' +
+      '<div class="st-sides"><div class="st-side newer"><b>This computer</b><span class="note">Changed today, 21:40 · 3 files · 2.1 MB</span><button class="g-btn" data-st-keep="local">Keep this computer’s save</button><span class="note">Uploads it to ' + esc(s.name) + '.</span></div>' +
       '<div class="st-side"><b>' + esc(s.name) + ' cloud</b><span class="note">Changed today, 19:12 on another computer · 3 files · 2.0 MB</span><button class="g-btn secondary" data-st-keep="cloud">Use the cloud save</button><span class="note">Replaces the save on this computer.</span></div></div>';
   } else if (g.cloud === 'off') {
     h += '<div class="st-cloud-state"><span class="st-cloud-ico" data-icon="cloud" data-size="18"></span><span><b>Cloud saves are off for this game</b><span class="note">Turn them on in Game Settings, or for every ' + esc(s.name) + ' game in Settings › Stores.</span></span><button class="small-btn" data-st-d="settings">Game Settings</button></div>';
@@ -526,7 +526,7 @@ function stConflictHTML(d) {
   var g = stG(d.gid), s = stS(g.s);
   return stHead(g, 'Which save should ' + esc(g.t) + ' use?', esc(s.name) + ' cloud saves') +
     '<p class="note">Both this computer’s save and the one in your ' + esc(s.name) + ' account changed since the last sync. Pick the one to keep; the other is replaced.</p>' +
-    '<div class="st-conflict"><div class="st-side newer"><b>This computer</b><span class="note">Changed today, 21:40 · 2.1 MB</span><button class="g-btn" data-st-keep="local">Keep this computer’s save</button></div>' +
+    '<div class="st-sides"><div class="st-side newer"><b>This computer</b><span class="note">Changed today, 21:40 · 2.1 MB</span><button class="g-btn" data-st-keep="local">Keep this computer’s save</button></div>' +
     '<div class="st-side"><b>' + esc(s.name) + ' cloud</b><span class="note">Changed today, 19:12 on another computer · 2.0 MB</span><button class="g-btn secondary" data-st-keep="cloud">Use the cloud save</button></div></div>' +
     '<div class="form-actions bk-foot"><span class="note">' + (d.launch ? 'The game starts after you pick.' : '') + '</span><button class="g-btn secondary" data-st-dlg="close">' + (d.launch ? 'Don’t launch' : 'Decide later') + '</button></div>';
 }

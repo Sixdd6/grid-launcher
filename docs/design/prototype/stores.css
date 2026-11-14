@@ -43,6 +43,9 @@
   @keyframes st-shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
   @media (prefers-reduced-motion: reduce) { .st-skel .g-cover::after { animation: none; } }
 
+  /* Small buttons are the app's (StoresPage / StoreDetails .small-btn): 6px corners (--r-chip), 10px sides. */
+  .small-btn { padding: 5px 10px; border-radius: var(--r-chip); }
+
   /* Store game cards */
   .g-tag-stack .g-tag { white-space: nowrap; }
   .st-space .bk-proto { align-self: flex-start; }
@@ -78,7 +81,7 @@
   .st-cloud-ico { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: var(--r-control); background: var(--field); color: var(--primary); flex: none; }
   .st-cloud-state.warn { border-color: var(--danger); }
   .st-cloud-state.warn .st-cloud-ico { color: var(--danger); }
-  .st-conflict { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .st-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .st-side { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: var(--r-row); border: 1px solid var(--line); background: var(--surface); }
   .st-side b { color: var(--text-h); }
   .st-side .note { font-size: 12px; }
@@ -103,7 +106,10 @@
   .st-space .note.warn { color: var(--danger); font-weight: 600; }
   .st-refuse { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: var(--r-row); border-left: 3px solid var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
   .st-refuse b { color: var(--text-h); display: block; margin-bottom: 2px; }
-  .st-refuse p { margin: 0; font-size: 13px; color: var(--text); }
+  .st-refuse p { margin: 0; font-size: 12px; line-height: 1.45; color: var(--text); }
+  /* Dialog notes are Game backups' (BackupDialog.svelte): 12px text, 600-weight titles. */
+  .stdlg .note { font-size: 12px; line-height: 1.45; }
+  .stdlg .st-refuse b, .stdlg .st-side b, .stdlg .bk-opt-main b, .stdlg .bk-also b { font-weight: 600; }
   .st-found { display: flex; gap: 14px; align-items: center; padding: 12px 14px; border-radius: var(--r-row); border: 1px solid var(--line); background: var(--surface); }
   .st-found b { color: var(--text-h); font-size: 15px; display: block; }
   .st-found .note { display: block; font-size: 12px; }
