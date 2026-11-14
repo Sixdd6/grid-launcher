@@ -198,7 +198,9 @@ async function cmdDownload({ command, positional, flags }, fx) {
     writeFileSync(path.join(dir, `goggame-${id}.info`), JSON.stringify(gameInfo(g, os, lang, id)));
   }
   if (os === "linux") {
-    writeFileSync(path.join(dir, "start.sh"), "#!/bin/sh\nexit 0\n");
+    // The game stays running until GRID stops it (a game that ends at once
+    // is "Process exited immediately", and Play would race Stop).
+    writeFileSync(path.join(dir, "start.sh"), "#!/bin/sh\nexec sleep 300\n");
     try { chmodSync(path.join(dir, "start.sh"), 0o755); } catch { /* not unix */ }
     writeFileSync(path.join(dir, "gameinfo"), `${g.title}\n${g.version}\n`);
   } else {
