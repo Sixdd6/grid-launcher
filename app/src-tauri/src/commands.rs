@@ -621,6 +621,15 @@ pub fn dismiss_download(state: State<'_, AppState>, entry_id: u64) -> Result<(),
     Ok(())
 }
 
+/// TV mode's Delete installer on a row whose installer couldn't run
+/// silently: deletes the installer files (a local installer, or a RomM
+/// row's kept download) and dismisses the row.
+#[tauri::command]
+pub fn delete_failed_installer(state: State<'_, AppState>, entry_id: u64) -> Result<(), String> {
+    let install = state.install.as_ref().map_err(Clone::clone)?;
+    install.delete_installer(entry_id).map_err(err)
+}
+
 #[tauri::command]
 pub async fn uninstall_game(
     state: State<'_, AppState>,

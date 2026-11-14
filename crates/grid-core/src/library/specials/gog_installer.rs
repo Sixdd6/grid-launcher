@@ -64,8 +64,10 @@ pub struct ArchiveInstall {
 
 /// Whether a failed installer run removes the download (the card's
 /// "The download was removed."): an unrecognised installer, a DLC without
-/// its base, an installer that exited with an error. A run that needs its
-/// setup window, or was cancelled, keeps it for a retry.
+/// its base, an installer whose setup window exited with an error. Silent
+/// runs that failed where no setup window may open
+/// ([`LibraryError::InstallerSilentFailed`], TV mode), or a cancel, keep it
+/// for a retry.
 pub fn removes_download(error: &LibraryError) -> bool {
     matches!(
         error,

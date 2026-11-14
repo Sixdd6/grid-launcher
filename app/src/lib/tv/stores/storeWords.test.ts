@@ -3,11 +3,14 @@ import { installedGame, row, status, storeGame } from '../../gamestores/fixtures
 import { mixedStoreGames, storeGameFromDrive } from './libraryStores';
 import {
   conflictPrompt,
+  deleteInstallerWords,
+  deletesInstaller,
   disconnectedCard,
   disconnectWords,
   loginHost,
   notConnectedNote,
   tvStoreListSub,
+  tvStoreLine,
   refusalTitle,
   storeRowPill,
   storeRowSub,
@@ -160,7 +163,10 @@ describe('TV offline installer', () => {
       'GE-Proton10-17',
       true,
     );
-    expect(v.kind === 'found' && v.how).toContain('TV mode never opens an installer’s own setup window');
+    const how = v.kind === 'found' ? v.how : '';
+    expect(how).toContain('GRID tries once more with gentler settings');
+    expect(how).toContain('so you can retry or delete it');
+    expect(how).not.toMatch(/desktop/i);
     expect(refusalTitle('This is a macOS installer')).toBe('This is a macOS installer.');
   });
 });
@@ -172,9 +178,46 @@ describe('TV Downloads store rows and installer cards', () => {
     expect(tvStoreRowA(row({ status: 'failed' }))).toBe('Retry or dismiss');
   });
 
-  it('the silent-only failure card offers Retry', () => {
-    const e = row({ job: 'game', kind: 'base', title: 'Foxglove', status: 'failed', failure: { code: 'installer_needs_wizard', base_title: '', base_gog_id: '', kept: true } });
-    expect(tvFailureCard(e)).toEqual({ text: 'Couldn’t install Foxglove silently', sub: 'This installer needs its setup window. Install it in desktop mode.', action: { kind: 'retry' } });
+  it('Delete installer follows Retry on a failed silent install, asked first', () => {
+    const error = "Couldn't run the installer silently: there isn't enough disk space. The installer was kept.";
+    const offline = row({ kind: 'store_installer', title: 'Quarry Nine', status: 'failed', error });
+    expect(tvStoreActions(offline, null).map((a) => a.label)).toEqual(['Retry', 'Delete installer', 'Dismiss']);
+    expect(deletesInstaller(row({ job: 'game', kind: 'base', status: 'failed', error }))).toBe(true);
+    // A drive restore's installer stays on the drive; other failures have none.
+    expect(deletesInstaller(row({ kind: 'store_restore', status: 'failed', error }))).toBe(false);
+    expect(deletesInstaller(row({ kind: 'store_installer', status: 'failed', error: 'boom' }))).toBe(false);
+    expect(deleteInstallerWords(offline)).toEqual({
+      title: 'Delete Quarry Nine’s installer?',
+      body: 'The installer file and its parts are deleted from this computer. This can’t be undone.',
+      ok: 'Delete installer',
+    });
+  });
+
+  it('a failed silent install’s card gives the reason and offers Retry, never desktop mode', () => {
+    const disk = row({
+      job: 'game',
+      kind: 'base',
+      title: 'Foxglove',
+      status: 'failed',
+      error: "Couldn't run the installer silently: there isn't enough disk space. The installer was kept.",
+    });
+    expect(tvFailureCard(disk)).toEqual({ text: 'Couldn’t install Foxglove silently', sub: 'There isn’t enough disk space.', action: { kind: 'retry' } });
+    const reasons: [string, string][] = [
+      ['a file it needed was in use or access was denied', 'A file it needed was in use or access was denied.'],
+      ["the installer's files are missing or damaged", 'The installer’s files are missing or damaged.'],
+      ['the installer cancelled itself', 'The installer cancelled itself.'],
+      ['the installer stopped without saying why', 'The installer stopped without saying why.'],
+    ];
+    for (const [words, sub] of reasons) {
+      const e = row({ kind: 'store_installer', title: 'Quarry Nine', status: 'failed', error: `Couldn't run the installer silently: ${words}. The installer was kept.` });
+      const c = tvFailureCard(e);
+      expect(c?.sub).toBe(sub);
+      expect(`${c?.text} ${c?.sub} ${tvStoreLine(e, 'GE-Proton10-17', '')}`).not.toMatch(/desktop/i);
+    }
+    // The queue's older code reads as the unknown reason.
+    const old = row({ job: 'game', kind: 'base', title: 'Foxglove', status: 'failed', failure: { code: 'installer_needs_wizard', base_title: '', base_gog_id: '', kept: true } });
+    expect(tvFailureCard(old)).toEqual({ text: 'Couldn’t install Foxglove silently', sub: 'The installer stopped without saying why.', action: { kind: 'retry' } });
+    expect(tvStoreLine(old, '', '')).not.toMatch(/desktop/i);
     const dlc = row({ job: 'game', kind: 'base', title: 'Low Tide Radio', status: 'failed', failure: { code: 'installer_dlc_base_missing', base_title: 'Pale Summit', base_gog_id: '', kept: false } });
     expect(tvFailureCard(dlc)?.action).toEqual({ kind: 'install_base', title: 'Pale Summit' });
   });

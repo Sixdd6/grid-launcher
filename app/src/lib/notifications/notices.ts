@@ -9,6 +9,7 @@
 
 import type { BackupNotice, DownloadEntry, DownloadStatus, GameSession } from '../api';
 import type { ToastLevel } from '../stores/toasts.svelte';
+import { silentFailureReason } from '../gamestores/downloads';
 
 /**
  * Cards of one group that arrive together are merged into one summary card.
@@ -206,8 +207,10 @@ function outcomeNotice(entry: DownloadEntry, ctx: NoticeContext): Notice | null 
         };
       case 'failed': {
         // A failure in the archive's GOG installer has its own card, worded
-        // from `failure` (gamestores/notices.ts `installerFailedNotice`).
-        if (entry.failure) return null;
+        // from `failure` (gamestores/notices.ts `installerFailedNotice`), and
+        // so has one whose installer couldn't run silently (TV mode's
+        // "Couldn’t install <title> silently" · Retry).
+        if (entry.failure || silentFailureReason(entry) !== null) return null;
         const what = shape === 'update' ? `Couldn't update ${t}` : shape === 'content' ? `Couldn't install extra content for ${t}` : `Couldn't install ${t}`;
         return { group: 'game-failed', text: withReason(what, entry.error), level: 'error', action: 'downloads' };
       }

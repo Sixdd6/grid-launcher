@@ -373,10 +373,15 @@ Decisions taken from them (lead):
   `--force-download` deletes local files missing in the cloud: copy the local saves aside first.
 - **Windows installers.** Silent flags: `/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL
   /NOICONS /LANG=<inno lang> /DIR="<path>" /LOG="<path>\grid-install.log"`; under Wine/umu use
-  a `Z:\…` path (backslashes). Exit 0 ok; 2 and 5 = cancelled; 1, 3, 4, 7, 8 = failed → wizard
-  offer (desktop) / `InstallerNeedsWizard` (TV). "Needs a wizard" mostly shows as a **hang**: treat
-  the process as stalled when neither the log nor the target dir has grown for 120 s, then kill
-  it (`wineserver -k` in that prefix) and treat it as needing the wizard. No overall timeout.
+  a `Z:\…` path (backslashes). Exit 0 ok; 2 and 5 = cancelled; 1, 3, 4, 7, 8 = failed. A failed
+  silent run mostly shows as a **hang**: treat the process as stalled when neither the log nor
+  the target dir has grown for 120 s, then kill it (`wineserver -k` in that prefix) and treat it
+  as failed. No overall timeout. **Changed 2026-11-14:** a failed silent run (any non-zero exit,
+  a stall, or exit 0 with a log that says it rolled back) is followed by a milder silent run
+  (`/SP- /SILENT /SUPPRESSMSGBOXES /NORESTART /LANG= /DIR= /LOG=`: no `/VERYSILENT`, no
+  `/NOCANCEL`, no `/NOICONS`), then the wizard in desktop mode only. In TV mode the job fails
+  with `InstallerSilentFailed { reason, kept: true }` (see "Silent-install failures" below);
+  it never says to use desktop mode.
   **A DLC installer runs in the base game's prefix with the base game's `/DIR`.**
 - **No innoextract.** 1.9 is too old for current Inno versions and has no macOS build. For identity
   before running, try the `innospect` crate (Apache-2.0, pure Rust) to read `goggame-*.info`
@@ -424,7 +429,9 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
   installed check (default: yes).
 - `InstallerNeedsWizard` Display: "This installer needs its setup window. Install it in desktop
   mode." plus " The download was kept." when `kept`. The UI words the offline-installer variant
-  ("The installer was kept.") from `failure`.
+  ("The installer was kept.") from `failure`. **Superseded 2026-11-14:** nothing raises it any
+  more (`InstallerSilentFailed` replaces it); the variant and its `FailureCode` stay only
+  because `library/queue.rs` names them, and the UI reads that code as the unknown reason.
 - A `BackupItemKey::Store` row has `rom_id` 0 and its game key in `source_id`.
 - `Pack::paths()` includes store games, so a bad store path makes a pack unreadable like any
   other. `backup::pack::store_game_dir_rel(source, name, id)` gives `stores/<source>/<name>-<id>`.
@@ -805,3 +812,38 @@ Parity gaps closed after integration (against the GameStores / TVStores prototyp
   The desktop launches through `launchGame`; TV mode registers `navigation.play`, which runs
   `playGame` (Playing page). A summary card has no Play. Store install cards already had
   Play (`notice::installed`).
+
+## Silent-install failures (2026-11-14)
+
+User rule: a TV-mode user is on a TV and can't switch to desktop mode, so no TV flow may
+defer to desktop mode. The old "Install it in desktop mode" failure is gone.
+
+- **Attempts** (`stores::offline::exec::attempts`): the silent run, then the milder silent
+  run, then (desktop only, `wizard_allowed`) the setup window. Each run writes its own log
+  (`grid-install.log`, `grid-install-2.log`, …) in GRID's temp folder beside the install
+  folder. `judge_silent` decides a silent run from how it ended and its log. GRID's own
+  cancel stops at once; an installer's own exit 2 or 5 in a silent run is a failure the next
+  run follows.
+- **Reasons** (`stores::offline::inno_log`): a failed run's log is matched, case-insensitive,
+  for a few known patterns: the installer's files missing or damaged ("Setup needs the next
+  disk", "corrupted", a CRC or checksum error), not enough disk space ("not enough space on
+  the disk", "disk is full", code 112), a file in use or access denied ("being used by
+  another process", "access is denied", codes 5 and 32), and a cancel ("User canceled",
+  "Got EAbort exception"); in that order, since a cause often ends in a cancel. None found is
+  `Unknown`. The last run that named a reason wins. The log's text never leaves the module:
+  no log line, no error text, no IPC.
+- **The error** (`LibraryError::InstallerSilentFailed { reason, kept: true }`): "Couldn't run
+  the installer silently: <reason words>. The installer was kept." Its start is
+  `library::INSTALLER_SILENT_FAILED_LEAD`. `library/queue.rs` was not changed (another
+  package owned it), so `JobFailure::from_error` gives it no code (`failure: null`); the UI
+  (`gamestores/downloads.ts` `silentFailureReason`) and the GOG notifier
+  (`stores_service/gog.rs` `silent_install_failed`) know it by that start, word for word, as
+  they already do for `REDIST_DECLINED`. A follow-up may give it a `FailureCode`.
+- **TV mode:** the row reads "Failed · Couldn't run the installer silently: …"; the card
+  "Couldn’t install <title> silently" with the reason as a sentence and Retry (View), which
+  re-runs from the first attempt with the kept installer (no new download). A's list on the
+  row adds **Delete installer** (asked first) for a local installer and a RomM archive's kept
+  download (`InstallService::remember_installer` / `delete_installer`, the
+  `delete_failed_installer` command). A drive restore's installer stays on its drive.
+- **RomM archives** (`library::specials::gog_installer`) run the same attempts; the download
+  is kept for `InstallerSilentFailed`.

@@ -577,7 +577,7 @@ function stFoundHTML(d) {
   var what = f.kind === 'dlc' ? 'Digital Artbook · DLC for ' + esc(g.t) + ' · ' + f.size
     : (win ? 'Windows version' : 'Linux version') + ' · v' + f.ver + ' · ' + f.size;
   var how = f.kind === 'dlc' ? 'Adds to the installed ' + esc(g.t) + ' (the Linux version). GRID unpacks its files into the game’s folder; the installer script isn’t run.'
-    : win ? 'GRID runs the installer silently under ' + esc(ST.compat) + '. If it can’t run silently, its own setup window opens: finish it there and GRID adds the game when it closes.'
+    : win ? 'GRID runs the installer silently under ' + esc(ST.compat) + '. If it can’t run silently, GRID tries once more with gentler settings, then opens its own setup window: finish it there and GRID adds the game when it closes.'
     : 'GRID unpacks the game files from it. The installer script isn’t run.';
   var already = f.kind === 'update' ? '<p class="bk-warn">' + esc(g.t) + ' is installed already (v' + esc(g.ver) + '). Installing this replaces its files with v' + f.ver + '. Saves and settings stay.</p>' : '';
   return '<h3>' + title + '</h3><div class="st-found"><span class="st-cover-sm" style="background:' + g.c + '">' + esc(g.t) + '</span><span><b>' + esc(g.t) + '</b><span class="note">' + what + '</span><span class="note">From a GOG offline installer · ' + esc(f.n) + '</span></span></div>' +

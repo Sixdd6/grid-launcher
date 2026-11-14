@@ -42,7 +42,8 @@
   import { gameStores } from '../../../stores/gameStores.svelte';
   import TvStoreMark from '../../stores/TvStoreMark.svelte';
   import { defaultCompat, openStoreGame } from '../../stores/storeActions';
-  import { isStoreRow, tvStoreActions, tvStoreCancelWords, tvStoreKind, tvStoreLine, tvStoreListSub, tvStoreRowA, type StoreRowAct } from '../../stores/storeWords';
+  import { deleteInstallerWords, deletesInstaller, isStoreRow, tvStoreActions, tvStoreCancelWords, tvStoreKind, tvStoreLine, tvStoreListSub, tvStoreRowA, type StoreRowAct } from '../../stores/storeWords';
+  import { api } from '../../../api';
 
   let segments = $derived(tvSegments(downloads.entries));
   const SPARK = { width: 120, height: 38 };
@@ -104,6 +105,9 @@
       case 'retry':
         void retryEntry(e).catch(fail);
         return;
+      case 'delete_installer':
+        deleteInstaller(e);
+        return;
       case 'dismiss':
         void dismissEntry(e.id).catch(fail);
         return;
@@ -112,6 +116,13 @@
         if (g) openStoreGame(g.key, g.title);
       }
     }
+  }
+
+  // Delete installer (a failed silent install's row): asked first, then the
+  // installer GRID kept is deleted and the row leaves.
+  function deleteInstaller(e: DownloadEntry) {
+    const w = deleteInstallerWords(e);
+    void confirmBox({ ...w, danger: true, onOk: () => void api.deleteFailedInstaller(e.id).catch(fail) });
   }
 
   function storeActions(e: DownloadEntry) {
@@ -134,11 +145,14 @@
       return;
     }
     const acts = rowActions(e, libraryMove.phase);
-    void openList({
-      title: e.title,
-      sub: listSub(e),
-      items: acts.map((a) => ({ label: a.label, danger: a.danger, testId: `tv-dl-act-${a.kind}`, onPick: () => run(e, a) })),
-    });
+    const items = acts.map((a) => ({ label: a.label, danger: a.danger, testId: `tv-dl-act-${a.kind}`, onPick: () => run(e, a) }));
+    // A RomM game whose archive's installer couldn't run silently: Delete
+    // installer after Retry.
+    if (deletesInstaller(e)) {
+      const at = acts.findIndex((a) => a.kind === 'retry') + 1;
+      items.splice(at, 0, { label: 'Delete installer', danger: true, testId: 'tv-dl-act-delete_installer', onPick: () => deleteInstaller(e) });
+    }
+    void openList({ title: e.title, sub: listSub(e), items });
   }
 
   function clearCompleted() {

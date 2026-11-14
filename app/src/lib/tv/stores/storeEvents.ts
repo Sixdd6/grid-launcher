@@ -8,6 +8,7 @@
 // (E1) owns the data; the desktop shell subscribes its own way.
 import type { DownloadEntry, StoreNoticeAction, StoreSource } from '../../api';
 import { connectedNotice, loginFailedNotice, noticeActionLabel } from '../../gamestores/notices';
+import { silentFailureReason } from '../../gamestores/downloads';
 import { gameStores, initGameStores, onStoreLogin, onStoreNotice } from '../../stores/gameStores.svelte';
 import { onSnapshot } from '../../stores/downloads.svelte';
 import { pushToast, TOAST_DURATION_MS, type ToastAction } from '../../stores/toasts.svelte';
@@ -123,8 +124,11 @@ export function startStoreEvents(): () => void {
         // A RomM row's installer failure has no shared card (the shared
         // notifier skips a row with `failure`), so TV mode words each one.
         // A store row's failures are the backend's `store-notice` cards,
-        // except the silent-only rule, which the backend leaves to TV mode.
-        if (e.status === 'failed' && e.failure && (e.job === 'game' || e.failure.code === 'installer_needs_wizard')) failureCard(e);
+        // except a failed silent install, which the backend leaves to TV
+        // mode (it never happens on the desktop, which opens the setup
+        // window instead).
+        const silent = silentFailureReason(e) !== null;
+        if (e.status === 'failed' && (silent || (e.failure && e.job === 'game'))) failureCard(e);
         if (e.status === 'completed' && (e.kind === 'store_restore' || e.kind === 'backup_store_game')) bumpDrives();
       }
     }

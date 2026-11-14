@@ -347,6 +347,23 @@ mod tests {
     }
 
     #[test]
+    fn an_inno_signature_innospect_cannot_parse_is_unknown() {
+        // The e2e suite's fake installers (gog-installers.mjs) have this
+        // shape: identity only after the run.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("setup_foxglove_1.0_(55001).exe");
+        let mut bytes = b"MZ".to_vec();
+        bytes.resize(64, 0);
+        bytes.extend_from_slice(&[
+            b'r', b'D', b'l', b'P', b't', b'S', 0xCD, 0xE6, 0xD7, b'{', 0x0B, b'*',
+        ]);
+        bytes.resize(2048, 0);
+        bytes.extend_from_slice(b"\nGRID-E2E-FAKE-INSTALLER\n{\"mode\":\"silent\"}");
+        fs::write(&path, bytes).unwrap();
+        assert_eq!(read(&path), ExeRead::Unknown);
+    }
+
+    #[test]
     fn bin_parts_run_on_and_report_the_first_gap() {
         let dir = tempfile::tempdir().unwrap();
         let setup = dir.path().join("setup_x_1.0_(1).exe");

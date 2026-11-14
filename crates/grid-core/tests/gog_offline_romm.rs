@@ -395,8 +395,10 @@ async fn a_windows_installer_archive_runs_silently_into_the_game_folder() {
 #[tokio::test]
 async fn tv_mode_keeps_the_download_and_a_retry_does_not_download_again() {
     let h = harness().await;
+    // TV mode: the silent run and the milder one both hang; the retry's
+    // first run installs.
     let fake = Fake::new(
-        &[Script::Hangs, Script::Installs],
+        &[Script::Hangs, Script::Hangs, Script::Installs],
         "920",
         goggame("920", "920", "Foxglove", "bin\\\\game.exe"),
     );
@@ -422,20 +424,22 @@ async fn tv_mode_keeps_the_download_and_a_retry_does_not_download_again() {
         return;
     }
     assert_eq!(entry.status, DownloadStatus::Failed);
-    let failure = entry.failure.clone().expect("a failure code");
-    assert_eq!(failure.code, FailureCode::InstallerNeedsWizard);
-    assert!(failure.kept);
     assert_eq!(
         entry.error,
-        "This installer needs its setup window. Install it in desktop mode. The download was kept."
+        "Couldn't run the installer silently: the installer stopped without saying why. The installer was kept."
     );
+    assert!(!entry.error.contains("desktop"));
+    let commands = fake.commands.lock().unwrap().clone();
+    assert_eq!(commands.len(), 2, "two silent runs, no setup window");
+    assert!(commands[0].argv.iter().any(|arg| arg == "/VERYSILENT"));
+    assert!(commands[1].argv.iter().any(|arg| arg == "/SILENT"));
+    assert!(!commands[1].argv.iter().any(|arg| arg == "/VERYSILENT"));
     let home = h.home("Windows", "Foxglove");
     assert!(home.join("foxglove.zip").is_file(), "the download was kept");
     assert!(!home.join("installer").exists());
     assert_eq!(hits.load(Ordering::SeqCst), 1);
 
-    // Desktop mode: the retry runs it again from the kept download.
-    h.service.set_wizard_allowed(Arc::new(|| true));
+    // Retry runs it again from the kept download.
     h.service
         .retry(Some(h.client.clone()), entry.id)
         .await
@@ -445,6 +449,53 @@ async fn tv_mode_keeps_the_download_and_a_retry_does_not_download_again() {
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
     assert_eq!(hits.load(Ordering::SeqCst), 1, "no second download");
     assert_eq!(h.row(11).source, GameSource::Romm);
+}
+
+#[tokio::test]
+async fn delete_installer_removes_the_kept_download_and_the_row() {
+    let h = harness().await;
+    let fake = Fake::new(
+        &[Script::Hangs, Script::Hangs],
+        "921",
+        goggame("921", "921", "Bramble", "bin\\\\game.exe"),
+    );
+    h.service.set_installer_runner(fake, fast());
+    h.service.set_wizard_allowed(Arc::new(|| false));
+    let archive = zip_bytes(&[("setup_bramble.exe", &opaque_exe())]);
+    h.serve(
+        detail(
+            15,
+            "Bramble",
+            "Windows",
+            "win",
+            "bramble.zip",
+            archive.len(),
+        ),
+        "bramble.zip",
+        archive,
+    )
+    .await;
+    let entry = h.install(15).await;
+    if cfg!(windows) {
+        return;
+    }
+    assert_eq!(entry.status, DownloadStatus::Failed);
+    let home = h.home("Windows", "Bramble");
+    assert!(home.join("bramble.zip").is_file());
+    h.service.delete_installer(entry.id).unwrap();
+    assert!(
+        !home.join("bramble.zip").exists(),
+        "the kept download is gone"
+    );
+    assert!(
+        h.service
+            .snapshot()
+            .entries
+            .iter()
+            .all(|e| e.id != entry.id),
+        "the row is dismissed"
+    );
+    assert!(h.service.delete_installer(entry.id).is_err());
 }
 
 #[tokio::test]

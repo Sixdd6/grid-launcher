@@ -52,7 +52,11 @@ describe('Downloads lines', () => {
     );
     expect(
       storeEntryLine(row({ status: 'failed', kind: 'store_installer', failure: { code: 'installer_needs_wizard', base_title: '', base_gog_id: '', kept: true } })),
-    ).toBe('Failed · This installer needs its setup window. Install it in desktop mode. The installer was kept.');
+    ).toBe('Failed · Couldn’t run the installer silently: the installer stopped without saying why. The installer was kept.');
+    // grid-core's own words for a failed silent install.
+    expect(
+      storeEntryLine(row({ status: 'failed', kind: 'store_installer', error: "Couldn't run the installer silently: there isn't enough disk space. The installer was kept." })),
+    ).toBe("Failed · Couldn't run the installer silently: there isn't enough disk space. The installer was kept.");
   });
   it('names the kind badges', () => {
     expect(storeKindLabel('store_install')).toBe('');

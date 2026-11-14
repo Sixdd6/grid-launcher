@@ -1,8 +1,10 @@
 // e2e-app-args:
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { connectPad, focused, hints, key, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, pageErrors, testId, text, waitGone, waitText } from '../helpers/tvDetails.js';
-import { confirmDialog, pageRow, tap, waitNotice } from '../helpers/tvBackups.js';
+import { byK, confirmDialog, dlLines, listOptions, notices, pageRow, tap, waitNotice } from '../helpers/tvBackups.js';
 import { loginWindowOpen, MAIN_WINDOW } from '../helpers/gogLogin.js';
 
 /**
@@ -13,6 +15,29 @@ import { loginWindowOpen, MAIN_WINDOW } from '../helpers/gogLogin.js';
  * GOG login with one game installed). Green only once the backend
  * packages and D's harness are merged.
  */
+const DATA = process.env.E2E_DATA_DIR ?? '';
+
+/** Opens the installer `name` from ~/Downloads through Settings › Stores › GOG's Install from installer…. */
+async function openTvInstaller(name: string): Promise<void> {
+  await tap(testId('tv-pr-installer'));
+  await $(testId('tv-folder-browser')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+  await tap(testId(`tv-fs-fs-${name}`));
+  await $(testId('tv-store-offline')).waitForExist({ timeout: 10_000 });
+}
+
+/** The Downloads line of the row whose title starts with `title`. */
+async function tvRowLine(title: string): Promise<string> {
+  return (await dlLines()).find((r) => r.title.startsWith(title))?.line ?? '';
+}
+
+async function waitTvRowLine(title: string, re: RegExp, timeout = 60_000): Promise<void> {
+  await browser.waitUntil(async () => re.test(await tvRowLine(title)), {
+    timeout,
+    interval: 250,
+    timeoutMsg: `${title}'s row never matched ${re} (it reads "${await tvRowLine(title)}")`,
+  });
+}
+
 describe('tv-gog-b: Settings › Stores, signing in, offline installers, backups', () => {
   before(async () => {
     await $(testId('connect-server-url')).waitForExist({ timeout: APP_START_TIMEOUT, timeoutMsg: 'the connect form never appeared' });
@@ -110,6 +135,48 @@ describe('tv-gog-b: Settings › Stores, signing in, offline installers, backups
     await key('m');
     await waitGone('tv-store-offline');
     await waitNotice(/added to download queue$/, 10_000);
+  });
+
+  it('a Windows installer whose silent run fails installs on the milder silent run', async () => {
+    if (DATA === '') return;
+    await openTvInstaller('setup_bramble_1.0_(55002).exe');
+    const how = await text('tv-pr-how');
+    expect(how).toContain('GRID tries once more with gentler settings');
+    expect(how).not.toMatch(/desktop/i);
+    await key('m');
+    await waitGone('tv-store-offline');
+    // The card names the file: the identity is known only after the run.
+    await waitNotice(/^setup_bramble_1\.0_\(55002\)\.exe added to download queue$/, 10_000);
+  });
+
+  it('when both silent runs fail: the reason, Retry and Delete installer, never desktop mode', async () => {
+    if (DATA === '') return;
+    await openTvInstaller('setup_foxglove_1.0_(55001).exe');
+    await key('m');
+    await waitGone('tv-store-offline');
+    await waitNotice('Couldn’t install Foxglove silently | There isn’t enough disk space.', 60_000);
+    await tap(testId('tv-tab-downloads'));
+    // Bramble (the case before) installed on its milder silent run.
+    await waitTvRowLine('Bramble', /^Installed from its installer$/);
+    await waitTvRowLine('Foxglove', /^Failed · /);
+    expect(await tvRowLine('Foxglove')).toBe("Failed · Couldn't run the installer silently: there isn't enough disk space. The installer was kept.");
+    expect((await notices()).filter((n) => /desktop/i.test(n))).toEqual([]);
+    const row = (await browser.execute(
+      () => Array.from(document.querySelectorAll('[data-testid^="tv-dl-row-"]')).find((r) => (r.textContent ?? '').includes('Foxglove'))?.getAttribute('data-k') ?? null,
+    )) as string;
+    await tap(byK(row));
+    await $(testId('tv-list')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    expect((await listOptions()).options).toEqual(['Retry', 'Delete installer', 'Dismiss']);
+    await tap(testId('tv-dl-act-delete_installer'));
+    const d = await confirmDialog();
+    expect(d).toMatchObject({
+      title: 'Delete Foxglove’s installer?',
+      body: 'The installer file and its parts are deleted from this computer. This can’t be undone.',
+      ok: 'Delete installer',
+      danger: true,
+    });
+    await browser.waitUntil(async () => (await tvRowLine('Foxglove')) === '', { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the row never left' });
+    expect(existsSync(path.join(DATA, 'home', 'Downloads', 'setup_foxglove_1.0_(55001).exe'))).toBe(false);
   });
 
   it('GOG › Installed: RT picks, Y opens the Backup page', async () => {

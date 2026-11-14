@@ -22,7 +22,8 @@ use grid_core::stores::gog::meta::{GogMeta, GogOrigin, GogPlatform};
 use grid_core::stores::gog::GogJobCtx;
 use grid_core::stores::offline::{
     self, detect_in_dir, inspect, install_job_with, run_into_with, Inspection, InstallerCommand,
-    InstallerKind, InstallerProcess, InstallerSpawner, OfflineOpts, Verdict, Watch,
+    InstallerKind, InstallerProcess, InstallerReason, InstallerSpawner, OfflineOpts, Verdict,
+    Watch,
 };
 use grid_core::stores::{GameKey, GameSource, StoreKind};
 
@@ -734,52 +735,92 @@ fn run_wine(
 }
 
 #[test]
-fn a_stalled_silent_run_falls_back_to_the_wizard_on_the_desktop() {
-    let (result, commands, phases, kills, _) =
-        run_wine(&[Script::Hangs, Script::Installs], true, false);
+fn stalled_silent_runs_fall_back_to_the_wizard_on_the_desktop() {
+    let (result, commands, phases, kills, _) = run_wine(
+        &[Script::Hangs, Script::Hangs, Script::Installs],
+        true,
+        false,
+    );
     assert_eq!(result.unwrap(), "400");
     assert_eq!(
         phases,
-        vec![JobPhase::InstallerSilent, JobPhase::InstallerWizard]
+        vec![
+            JobPhase::InstallerSilent,
+            JobPhase::InstallerSilent,
+            JobPhase::InstallerWizard
+        ]
     );
-    assert_eq!(kills, 1, "the stalled run was killed");
-    assert!(commands[0].argv.contains(&"/VERYSILENT".to_string()));
-    assert!(!commands[1].argv.contains(&"/VERYSILENT".to_string()));
+    assert_eq!(kills, 2, "both stalled runs were killed");
+    let has = |n: usize, flag: &str| commands[n].argv.contains(&flag.to_string());
+    assert!(has(0, "/VERYSILENT") && has(0, "/NOCANCEL"));
+    assert!(has(1, "/SILENT") && !has(1, "/VERYSILENT") && !has(1, "/NOCANCEL"));
+    assert!(!has(2, "/SILENT") && !has(2, "/VERYSILENT"));
     assert_eq!(dir_arg(&commands[1].argv), dir_arg(&commands[0].argv));
+    assert_eq!(dir_arg(&commands[2].argv), dir_arg(&commands[0].argv));
+    assert_ne!(
+        path_arg(&commands[1].argv, "/LOG="),
+        path_arg(&commands[0].argv, "/LOG="),
+        "each run writes its own log"
+    );
+}
+
+#[test]
+fn the_milder_silent_run_installs_after_the_first_fails() {
+    for wizard_allowed in [false, true] {
+        let (result, commands, phases, _, _) =
+            run_wine(&[Script::Exits(1), Script::Installs], wizard_allowed, false);
+        assert_eq!(result.unwrap(), "400");
+        assert_eq!(commands.len(), 2);
+        assert_eq!(
+            phases,
+            vec![JobPhase::InstallerSilent, JobPhase::InstallerSilent]
+        );
+    }
 }
 
 #[test]
 fn tv_mode_never_opens_the_wizard_and_keeps_the_installer() {
     for first in [Script::Hangs, Script::Exits(1), Script::Exits(7)] {
-        let (result, commands, phases, _, _) = run_wine(&[first], false, false);
+        let (result, commands, phases, _, _) = run_wine(&[first, first], false, false);
         assert!(
             matches!(
                 result,
-                Err(LibraryError::InstallerNeedsWizard { kept: true })
+                Err(LibraryError::InstallerSilentFailed {
+                    reason: InstallerReason::Unknown,
+                    kept: true
+                })
             ),
             "{first:?}: {result:?}"
         );
-        assert_eq!(commands.len(), 1, "no wizard run");
-        assert_eq!(phases, vec![JobPhase::InstallerSilent]);
+        assert_eq!(commands.len(), 2, "two silent runs, no wizard run");
+        assert_eq!(
+            phases,
+            vec![JobPhase::InstallerSilent, JobPhase::InstallerSilent]
+        );
     }
 }
 
 #[test]
 fn installer_errors_cancels_and_a_missing_goggame() {
-    let (result, ..) = run_wine(&[Script::Exits(6)], true, false);
+    // The wizard itself fails.
+    let (result, ..) = run_wine(
+        &[Script::Exits(6), Script::Exits(6), Script::Exits(6)],
+        true,
+        false,
+    );
     assert!(
         matches!(result, Err(LibraryError::InstallerExit(6))),
         "{result:?}"
     );
-    // The wizard itself fails.
-    let (result, ..) = run_wine(&[Script::Exits(1), Script::Exits(1)], true, false);
-    assert!(
-        matches!(result, Err(LibraryError::InstallerExit(1))),
-        "{result:?}"
+    // A silent run's exit 2 is a failure the next run follows; the user
+    // cancelling the setup window (exit 2), or GRID's cancel, cancels.
+    let (result, commands, ..) = run_wine(
+        &[Script::Exits(2), Script::Exits(1), Script::Exits(2)],
+        true,
+        false,
     );
-    // The user cancelled the installer (exit 2), or GRID's cancel.
-    let (result, ..) = run_wine(&[Script::Exits(2)], true, false);
     assert!(matches!(result, Err(LibraryError::Cancelled)), "{result:?}");
+    assert_eq!(commands.len(), 3);
     let (result, _, _, kills, _) = run_wine(&[Script::Hangs], true, true);
     assert!(matches!(result, Err(LibraryError::Cancelled)), "{result:?}");
     assert_eq!(kills, 1);
@@ -803,7 +844,7 @@ fn a_failed_fresh_install_leaves_nothing_behind() {
     };
     let (result, _) = run_job(&env, insp, opts, true, spawner);
     assert!(
-        matches!(result, Err(LibraryError::InstallerExit(6))),
+        matches!(result, Err(LibraryError::InstallerExit(_))),
         "{result:?}"
     );
     assert!(!dest.exists());

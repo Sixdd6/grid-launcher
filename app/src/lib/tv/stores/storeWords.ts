@@ -13,7 +13,7 @@ import type {
   StoreGame,
   StoreStatus,
 } from '../../api';
-import { failureReason, hasStoreBadge, storeBackupLine, storeEntryLine, storeKindLabel, entrySource } from '../../gamestores/downloads';
+import { failureReason, hasStoreBadge, silentFailureReason, storeBackupLine, storeEntryLine, storeKindLabel, entrySource } from '../../gamestores/downloads';
 import { cloudSwitchLabel, storeHeaderLine } from '../../gamestores/details';
 import { inspectionView, fileName, type InspectionView } from '../../gamestores/inspection';
 import { isLive, isManagedRow, jobAct, jobPercent } from '../../gamestores/jobs';
@@ -607,9 +607,9 @@ export const LOGIN_FOOT = 'GRID never sees your password. This window closes on 
 export const PICK_INSTALLER_TITLE = 'Choose a GOG installer';
 export const READING_INSTALLER = 'Reading the installer…';
 
-/** TV mode runs a Windows installer silently only (user decision 2026-11-13). */
+/** TV mode runs a Windows installer silently only (user decisions 2026-11-13, 2026-11-14). */
 export function silentOnlyHow(compat: string): string {
-  return `GRID runs the installer silently under ${compat || 'its compatibility tool'}. TV mode never opens an installer’s own setup window: if it can’t run silently, GRID stops, keeps the installer and asks you to install it in desktop mode.`;
+  return `GRID runs the installer silently under ${compat || 'its compatibility tool'}. If that fails, GRID tries once more with gentler settings. If it still can’t install, GRID keeps the installer and tells you why, so you can retry or delete it.`;
 }
 
 /** The GameStores card's view of an inspected installer, with TV mode's silent-only words for a Windows installer. */
@@ -645,15 +645,32 @@ export function tvStoreKind(e: DownloadEntry): string {
   return storeKindLabel(e.kind) ?? '';
 }
 
-export type StoreRowAct = 'cancel' | 'retry' | 'dismiss' | 'open';
+export type StoreRowAct = 'cancel' | 'retry' | 'delete_installer' | 'dismiss' | 'open';
 
-/** A on a store row (prototype `ACT.dlrow`): Cancel, Retry, Dismiss, Open <game>. */
+/**
+ * Whether a failed row offers Delete installer: a local installer (the
+ * Installer kind) or a RomM game whose archive's installer couldn't run
+ * silently. A drive restore's installer stays on its drive.
+ */
+export function deletesInstaller(e: DownloadEntry): boolean {
+  if (silentFailureReason(e) === null) return false;
+  return e.kind === 'store_installer' || e.job === 'game';
+}
+
+/** Delete installer asks first. */
+export function deleteInstallerWords(e: DownloadEntry): { title: string; body: string; ok: string } {
+  const what = e.kind === 'store_installer' ? 'The installer file and its parts are deleted from this computer.' : 'The downloaded installer is deleted from this computer.';
+  return { title: `Delete ${e.title}’s installer?`, body: `${what} This can’t be undone.`, ok: 'Delete installer' };
+}
+
+/** A on a store row (prototype `ACT.dlrow`): Cancel, Retry, Delete installer, Dismiss, Open <game>. */
 export function tvStoreActions(e: DownloadEntry, gameTitle: string | null): { act: StoreRowAct; label: string; danger?: boolean }[] {
   const out: { act: StoreRowAct; label: string; danger?: boolean }[] = [];
   // Steam owns pause, cancel and retry of its installs: no Cancel, no Retry.
   const managed = isManagedRow(e);
   if (isLive(e) && e.status !== 'cancelling' && !managed) out.push({ act: 'cancel', label: 'Cancel', danger: true });
   if ((e.status === 'failed' || e.status === 'cancelled') && !managed) out.push({ act: 'retry', label: 'Retry' });
+  if (deletesInstaller(e)) out.push({ act: 'delete_installer', label: 'Delete installer', danger: true });
   if (e.status === 'completed' || e.status === 'failed' || e.status === 'cancelled') out.push({ act: 'dismiss', label: 'Dismiss' });
   if (gameTitle) out.push({ act: 'open', label: `Open ${gameTitle}` });
   return out;
@@ -695,16 +712,17 @@ export type FailureCard = {
 
 /**
  * The card a failed installer row raises in TV mode: "Couldn’t install
- * Foxglove silently" with Retry (the installer needs its setup window, which
- * TV mode never opens), or "Couldn’t install Iron Lullaby" with Open
- * Downloads / Install Pale Summit. `null` for a row with no installer failure.
+ * Foxglove silently" with the reason its log gave ("There isn’t enough disk
+ * space.") and Retry (both silent runs failed; TV mode never opens the
+ * setup window), or "Couldn’t install Iron Lullaby" with Open Downloads /
+ * Install Pale Summit. `null` for a row with no installer failure.
  */
 export function tvFailureCard(e: DownloadEntry): FailureCard | null {
+  const silent = silentFailureReason(e);
+  if (silent !== null) return { text: `Couldn’t install ${e.title} silently`, sub: silent, action: { kind: 'retry' } };
   if (e.status !== 'failed' || e.failure === null) return null;
   const f = e.failure;
   switch (f.code) {
-    case 'installer_needs_wizard':
-      return { text: `Couldn’t install ${e.title} silently`, sub: 'This installer needs its setup window. Install it in desktop mode.', action: { kind: 'retry' } };
     case 'installer_unrecognised':
       return { text: `Couldn’t install ${e.title}`, sub: 'Its archive holds an installer GRID doesn’t recognise.', action: { kind: 'open_downloads' } };
     case 'installer_dlc_base_missing': {

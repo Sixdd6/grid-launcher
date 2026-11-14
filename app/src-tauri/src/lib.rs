@@ -866,6 +866,7 @@ pub fn run() {
             commands::install_game,
             commands::cancel_install,
             commands::retry_install,
+            commands::delete_failed_installer,
             commands::dismiss_download,
             commands::uninstall_game,
             commands::list_downloads,

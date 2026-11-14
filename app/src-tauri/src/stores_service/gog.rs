@@ -962,9 +962,7 @@ impl GogStore {
                     failed: matches!(entry.status, DownloadStatus::Failed),
                     error: entry.error.clone(),
                     drive: entry.drive_name.clone(),
-                    needs_wizard: entry.failure.as_ref().is_some_and(|failure| {
-                        failure.code == grid_core::library::queue::FailureCode::InstallerNeedsWizard
-                    }),
+                    silent_failed: silent_install_failed(entry),
                     base: entry.failure.as_ref().and_then(|failure| {
                         (!failure.base_gog_id.is_empty()).then(|| {
                             (
@@ -999,10 +997,10 @@ impl GogStore {
             announced.retain(|id| live.contains(id));
         }
         for entry in &finished {
-            // An installer that needs its setup window fails only where GRID
-            // may not open one (TV mode), which words that card itself
-            // ("Couldn't install <title> silently" · Retry).
-            if entry.failed && entry.needs_wizard {
+            // A silent install fails only where GRID may not open the
+            // installer's setup window (TV mode), which words that card
+            // itself ("Couldn't install <title> silently" · Retry).
+            if entry.failed && entry.silent_failed {
                 continue;
             }
             let card = if entry.completed {
@@ -1441,10 +1439,24 @@ struct JobRow {
     failed: bool,
     error: String,
     drive: String,
-    /// The installer needed its setup window, which GRID may not open here.
-    needs_wizard: bool,
+    /// Its installer's silent runs failed where GRID may not open the setup
+    /// window (TV mode).
+    silent_failed: bool,
     /// A DLC installer's missing base game: its title and key.
     base: Option<(String, String)>,
+}
+
+/// Whether a Downloads entry failed in its installer's silent runs where
+/// no setup window may open: grid-core's `InstallerSilentFailed` (known by
+/// its words, [`grid_core::library::INSTALLER_SILENT_FAILED_LEAD`]), or the
+/// queue's older `installer_needs_wizard` code.
+fn silent_install_failed(entry: &grid_core::library::queue::DownloadEntry) -> bool {
+    entry
+        .error
+        .starts_with(grid_core::library::INSTALLER_SILENT_FAILED_LEAD)
+        || entry.failure.as_ref().is_some_and(|failure| {
+            failure.code == grid_core::library::queue::FailureCode::InstallerNeedsWizard
+        })
 }
 
 /// The tool's download size for the cards ("Installing gogdl (12 MB)…").
@@ -2872,7 +2884,7 @@ mod tests {
             failed: false,
             error: String::new(),
             drive: "Couch kit".into(),
-            needs_wizard: false,
+            silent_failed: false,
             base: None,
         }
     }
@@ -2924,7 +2936,7 @@ mod tests {
         let h = harness();
         let mut row = entry(1, "store_installer", "gog:5", false);
         row.failed = true;
-        row.needs_wizard = true;
+        row.silent_failed = true;
         h.service.observe_rows(vec![row]);
         assert!(h.notices().is_empty());
     }

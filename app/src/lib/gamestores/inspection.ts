@@ -79,7 +79,7 @@ export function inspectionView(insp: InstallerInspection, opts: { compat: string
   }
   const what = `${windows ? 'Windows version' : 'Linux version'}${version ? ` · v${version}` : ''} · ${size}`;
   const how = windows
-    ? `GRID runs the installer silently under ${opts.compat || 'its compatibility tool'}. If it can’t run silently, its own setup window opens: finish it there and GRID adds the game when it closes.`
+    ? `GRID runs the installer silently under ${opts.compat || 'its compatibility tool'}. If it can’t run silently, GRID tries once more with gentler settings, then opens its own setup window: finish it there and GRID adds the game when it closes.`
     : 'GRID unpacks the game files from it. The installer script isn’t run.';
   if (v.kind === 'update') {
     return {

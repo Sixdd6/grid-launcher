@@ -158,8 +158,8 @@ function stRestoreDone(j) {
    2026-11-13). The user zips the installer (setup_*.exe and its .bin parts, or a
    Linux .sh) and uploads it to RomM; GRID never uploads. After the download GRID
    finds the installer and runs it: a .sh is read as a zip (data/noarch/), an .exe
-   runs silently under Wine/Proton (natively on Windows), with the installer's own
-   window as a fallback. The game stays a RomM game, with every RomM feature. ==== */
+   runs silently under Wine/Proton (natively on Windows), then once more with milder
+   silent flags, with the installer's own window as a fallback. The game stays a RomM game, with every RomM feature. ==== */
 var RI = {
   'Grey Meridian': { type: 'exe' },
   'Foxglove': { type: 'exe', wizard: 1 },

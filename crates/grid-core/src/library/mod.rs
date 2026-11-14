@@ -128,17 +128,43 @@ pub enum LibraryError {
     /// The installer exited with this code.
     #[error("The installer stopped with an error (exit code {0}). The download was removed.")]
     InstallerExit(i32),
-    /// A Windows installer that could not run silently where its setup
-    /// window may not open (TV mode). `kept`: the download stays for a
-    /// retry in desktop mode.
+    /// No longer raised: a failed silent install is
+    /// [`LibraryError::InstallerSilentFailed`]. Kept for the queue's
+    /// `FailureCode::InstallerNeedsWizard`.
     #[error("This installer needs its setup window. Install it in desktop mode.{}", if *kept { " The download was kept." } else { "" })]
     InstallerNeedsWizard { kept: bool },
+    /// A Windows installer whose silent runs (the full one, then the milder
+    /// one) both failed where its setup window may not open (TV mode):
+    /// why, read from its log and in GRID's words
+    /// ([`INSTALLER_SILENT_FAILED_LEAD`] starts the text). `kept`: the
+    /// installer (or the download holding it) stays for a retry.
+    #[error("{INSTALLER_SILENT_FAILED_LEAD}{}.{}", reason.words(), if *kept { " The installer was kept." } else { "" })]
+    InstallerSilentFailed {
+        reason: crate::stores::offline::InstallerReason,
+        kept: bool,
+    },
     /// An installer GRID refuses, in GRID's words.
     #[error("{0}")]
     InstallerRefused(String),
 }
 
 // --- constants --------------------------------------------------------------
+
+/// How [`LibraryError::InstallerSilentFailed`]'s text starts, word for word:
+/// the UI and the store's notifier know the failure by it (the queue's
+/// `JobFailure` has no code for it).
+pub const INSTALLER_SILENT_FAILED_LEAD: &str = "Couldn't run the installer silently: ";
+
+/// The key [`InstallService::remember_installer`] files a row's installer
+/// under: `rom:<id>` for a RomM row (`job` `"game"`), else the row's game
+/// key (`source_id`, `gog:<id>`).
+pub fn installer_key(job: &str, rom_id: i64, source_id: &str) -> String {
+    if job == "game" {
+        format!("rom:{rom_id}")
+    } else {
+        source_id.to_string()
+    }
+}
 
 /// Minimum gap between change notifications caused by download progress.
 /// Status transitions ignore this and always notify.
@@ -1271,6 +1297,10 @@ pub struct InstallService {
     /// Every store job admitted this session, by entry id: what `retry`
     /// re-enqueues.
     store_rows: Mutex<HashMap<u64, StoreJob>>,
+    /// The installer files of offline and RomM-archive installs, by the
+    /// row's key ([`installer_key`]): what [`Self::delete_installer`]
+    /// removes after a failed silent install.
+    kept_installers: Mutex<HashMap<String, Vec<PathBuf>>>,
     /// Whether an installer may open its own setup window
     /// ([`Self::set_wizard_allowed`]; the app answers `!tv_mode`). Yes
     /// until the app installs its own.
@@ -1360,6 +1390,7 @@ impl InstallService {
             resolved_sizes: Mutex::new(HashMap::new()),
             backup_rows: Mutex::new(HashMap::new()),
             store_rows: Mutex::new(HashMap::new()),
+            kept_installers: Mutex::new(HashMap::new()),
             wizard_allowed: RwLock::new(Arc::new(|| true)),
             installer_runner: RwLock::new((
                 Arc::new(crate::stores::offline::SystemSpawner),
@@ -3321,6 +3352,54 @@ impl InstallService {
         self.wizard_allowed.read().unwrap().clone()
     }
 
+    /// Remembers the installer files of the row keyed `key`
+    /// ([`installer_key`]), for [`Self::delete_installer`]. A second call
+    /// replaces the first.
+    pub fn remember_installer(&self, key: String, files: Vec<PathBuf>) {
+        self.kept_installers.lock().unwrap().insert(key, files);
+    }
+
+    /// Deletes the installer a failed silent install kept (TV mode's
+    /// Delete installer) and dismisses its row. Only a failed row whose
+    /// error is [`LibraryError::InstallerSilentFailed`]'s qualifies; its
+    /// files are the ones [`Self::remember_installer`] recorded (a local
+    /// installer's `.exe` and `.bin` parts, a RomM row's kept download).
+    pub fn delete_installer(&self, entry_id: u64) -> Result<(), LibraryError> {
+        let snapshot = self.snapshot();
+        let entry = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.id == entry_id)
+            .ok_or_else(|| LibraryError::InstallerRefused("That download is gone.".to_string()))?;
+        if entry.status != DownloadStatus::Failed
+            || !entry.error.starts_with(INSTALLER_SILENT_FAILED_LEAD)
+        {
+            return Err(LibraryError::InstallerRefused(
+                "Only an installer that couldn't run silently can be deleted here.".to_string(),
+            ));
+        }
+        let key = installer_key(entry.job, entry.rom_id, &entry.source_id);
+        let files = self.kept_installers.lock().unwrap().remove(&key);
+        let Some(files) = files else {
+            return Err(LibraryError::InstallerRefused(
+                "GRID doesn't know where this installer is any more.".to_string(),
+            ));
+        };
+        for file in &files {
+            match fs::remove_file(file) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    // Keep what is left, so a second try can finish.
+                    self.kept_installers.lock().unwrap().insert(key, files);
+                    return Err(LibraryError::Io(error));
+                }
+            }
+        }
+        self.dismiss(entry_id);
+        Ok(())
+    }
+
     /// Replaces what runs a GOG installer found in a RomM archive, and the
     /// stall timing. A test seam: the default spawns the real process.
     pub fn set_installer_runner(
@@ -4620,9 +4699,10 @@ impl InstallService {
     /// The extracted installer is removed whatever happens. On success the
     /// archive goes like any extracted archive's; an unrecognised installer,
     /// a DLC without its base, or an installer error removes it too ("The
-    /// download was removed."); a run that needs its setup window (TV
-    /// mode), or a cancel, keeps it, so a retry installs without
-    /// downloading again.
+    /// download was removed."); a silent install that failed where no
+    /// setup window may open (TV mode), or a cancel, keeps it, so a retry
+    /// installs without downloading again (or Delete installer removes it,
+    /// [`Self::delete_installer`]).
     fn finalize_installer_archive<'a>(
         &self,
         id: u64,
@@ -4665,15 +4745,20 @@ impl InstallService {
             &mut sink,
         );
         let _ = fs::remove_dir_all(&staging);
+        let key = installer_key("game", job.rom_id, "");
         let installed = match result {
             Ok(installed) => installed,
             Err(error) => {
                 if specials::gog_installer::removes_download(&error) {
                     let _ = fs::remove_file(archive);
+                } else if matches!(error, LibraryError::InstallerSilentFailed { .. }) {
+                    // TV mode's Delete installer removes the kept download.
+                    self.remember_installer(key, vec![archive.to_path_buf()]);
                 }
                 return Err(error);
             }
         };
+        self.kept_installers.lock().unwrap().remove(&key);
         record.extracted_dir = path_string(&installed.extracted_dir);
         record.extracted_path = installed.executable.clone();
         record.native_executable_path = installed.executable;
