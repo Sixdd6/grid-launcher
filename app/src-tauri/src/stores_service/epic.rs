@@ -1107,6 +1107,7 @@ impl EpicStore {
             store_name: STORE_NAME.to_string(),
             login_url: self.endpoints.login.clone(),
             finish: self.endpoints.finish.clone(),
+            finish_query: None,
             code_param: EPIC_CODE_PARAM,
             user_agent: Some(EPIC_LOGIN_USER_AGENT.to_string()),
         }
@@ -1449,6 +1450,9 @@ impl StoreBackend for EpicStore {
     }
     fn is_art_url(&self, url: &str) -> bool {
         EpicStore::is_art_url(self, url)
+    }
+    fn launch_hook(self: Arc<Self>) -> Option<Arc<dyn StoreLaunchHook>> {
+        Some(self)
     }
 }
 

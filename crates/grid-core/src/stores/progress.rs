@@ -1,7 +1,8 @@
 //! Store tool progress lines, parsed into [`ToolProgress`], and legendary's
-//! known lines, read as a [`ToolSignal`] ([`legendary_signal`]). A line
-//! that is neither is dropped, never logged; legendary's format is under
-//! [`parse_legendary_line`].
+//! and nile's known lines, read as a [`ToolSignal`] ([`legendary_signal`],
+//! [`nile_signal`]). A line that is neither is dropped, never logged;
+//! legendary's format is under [`parse_legendary_line`], nile's under
+//! [`parse_nile_line`].
 //!
 //! gogdl (v1.4.0) reports on stderr about once a second, through Python
 //! logging (`[PROGRESS] INFO: <msg>`):
@@ -305,6 +306,121 @@ fn verify_failed(rest: &str) -> Option<ToolSignal> {
     Some(ToolSignal::VerifyFailed { corrupted, missing })
 }
 
+/// The progress a nile output line reports, `None` for any other line.
+///
+/// nile 1.2.0 logs on stderr through Python logging as
+/// `LEVEL [Name]:<TAB> message`. Its download progress
+/// (`nile/downloading/progress.py`) comes about once a second:
+///
+/// ```text
+/// INFO [PROGRESS]:<TAB> = Progress: 11.45 424234858/3705895264, Running for: 02:52:48, ETA: 22:16:42
+/// INFO [PROGRESS]:<TAB> = Downloaded: 404.57 MiB, Written: 404.57 MiB
+/// INFO [PROGRESS]:<TAB>  + Download<TAB>- 12.34 MiB/s
+/// INFO [PROGRESS]:<TAB>  + Disk<TAB>- 12.34 MiB/s
+/// ```
+///
+/// `= Progress` carries real bytes done and the total (the files are
+/// stored as they download, so it is also the disk size); `+ Download`
+/// gives a speed-only report. `verify` and `update` print the same lines,
+/// so the phase is the job's to set.
+pub fn parse_nile_line(line: &str) -> Option<ToolProgress> {
+    let line = line.trim_end_matches(['\r', '\n', '\t', ' ']);
+    if !line.contains("[PROGRESS]") {
+        return None;
+    }
+    if let Some(at) = line.find("= Progress:") {
+        let mut parts = line[at + "= Progress:".len()..].split_whitespace();
+        let _percent = parts.next()?;
+        let counts = parts.next()?.trim_end_matches(',');
+        let (done, total) = counts.split_once('/')?;
+        return Some(ToolProgress {
+            done: done.trim().parse().ok()?,
+            total: total.trim().parse().ok()?,
+            speed_bps: 0.0,
+            phase: JobPhase::Downloading,
+        });
+    }
+    if let Some(at) = line.find("+ Download") {
+        let rest = line[at + "+ Download".len()..]
+            .trim_start()
+            .trim_start_matches('-')
+            .trim_start();
+        let speed_bps = mib_per_second(rest.split_whitespace().next()?)?;
+        return Some(ToolProgress {
+            done: 0,
+            total: 0,
+            speed_bps,
+            phase: JobPhase::Downloading,
+        });
+    }
+    None
+}
+
+/// The [`ToolSignal`] a nile output line (stderr or stdout) means, `None`
+/// for a line GRID has no word for. The raw line is dropped either way.
+///
+/// nile exits 0 for many failures, so a job reads these. Specific signals
+/// win over [`ToolSignal::OtherError`], which also comes for any other
+/// `ERROR [`/`CRITICAL [` line and for a Python traceback. Lines and
+/// sources: `docs/stores-phase3-plan.md` "Research" and "Spike results".
+///
+/// - `Failed to refresh the token <Response [4xx]>`: Amazon refused the
+///   saved login ([`ToolSignal::NotLoggedIn`]); the same prefix followed by
+///   anything else is a `requests` connection error's text
+///   ([`ToolSignal::Network`]).
+/// - `Game is up to date` is [`ToolSignal::DownloadSize`] `(0)`: nothing
+///   to download (as legendary's "Download size is 0").
+/// - `No games installed` (`list-updates` with nothing installed) is no
+///   signal: its `[]` on stdout is the answer.
+/// - The `WARNING` that the FuelSDK download failed is no signal either.
+pub fn nile_signal(line: &str) -> Option<ToolSignal> {
+    let line = line.trim_end_matches(['\r', '\n', '\t', ' ']).trim_start();
+    if line.is_empty() || line.contains("No games installed") {
+        return None;
+    }
+    if let Some(at) = line.find("Failed to refresh the token") {
+        let rest = line[at + "Failed to refresh the token".len()..].trim_start();
+        return Some(if rest.starts_with("<Response") {
+            ToolSignal::NotLoggedIn
+        } else {
+            ToolSignal::Network
+        });
+    }
+    if line.contains("User not logged in") || line.contains("You are not logged in") {
+        return Some(ToolSignal::NotLoggedIn);
+    }
+    if line.contains("Failed to register a device") {
+        return Some(ToolSignal::LoginFailed);
+    }
+    if line.contains("Not enough space available") {
+        return Some(ToolSignal::NotEnoughSpace);
+    }
+    if line.contains("Game is not installed")
+        || line.contains("No game is installed")
+        || line.contains("Game isn't installed")
+    {
+        return Some(ToolSignal::NotInstalled);
+    }
+    if line.contains("Game is up to date") {
+        return Some(ToolSignal::DownloadSize(0));
+    }
+    if line.starts_with("requests.exceptions.")
+        && NETWORK_ERRORS
+            .iter()
+            .any(|name| line["requests.exceptions.".len()..].starts_with(name))
+    {
+        return Some(ToolSignal::Network);
+    }
+    if line.starts_with("Checksum error for")
+        || line.starts_with("Traceback (most recent call last)")
+        || line.starts_with("ERROR [")
+        || line.starts_with("CRITICAL [")
+    {
+        return Some(ToolSignal::OtherError);
+    }
+    None
+}
+
 /// Folds a tool's separate progress and speed reports into one running
 /// report.
 #[derive(Debug, Default, Clone, Copy)]
@@ -494,6 +610,93 @@ mod tests {
         ];
         for (line, want) in cases {
             assert_eq!(&legendary_signal(line), want, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn nile_progress_lines() {
+        let p = parse_nile_line(
+            "INFO [PROGRESS]:\t = Progress: 11.45 424234858/3705895264, Running for: 02:52:48, ETA: 22:16:42\n",
+        )
+        .unwrap();
+        assert_eq!((p.done, p.total), (424_234_858, 3_705_895_264));
+        assert_eq!(p.phase, JobPhase::Downloading);
+        assert!(!p.is_speed_only());
+        let s = parse_nile_line("INFO [PROGRESS]:\t  + Download\t- 12.34 MiB/s").unwrap();
+        assert!(s.is_speed_only());
+        assert!((s.speed_bps - 12.34 * MIB).abs() < 1.0);
+        for line in [
+            "",
+            "INFO [PROGRESS]:\t = Downloaded: 404.57 MiB, Written: 404.57 MiB",
+            "INFO [PROGRESS]:\t  + Disk\t- 12.34 MiB/s",
+            "INFO [PROGRESS]:\t  + Download\t- 0.00 MiB/s",
+            "INFO [CLI]:\t = Progress: 1.00 1/2,",
+            "INFO [PROGRESS]:\t = Progress: x y/z",
+            "INFO [CLI]:\t Download complete",
+            "{\"fake_session\": \"FAKE-STORE-TOKEN-not-real\"}",
+        ] {
+            assert_eq!(parse_nile_line(line), None, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn nile_signals_from_recorded_lines() {
+        use ToolSignal::*;
+        let cases: &[(&str, Option<ToolSignal>)] = &[
+            // Spike 1: signed out, offline.
+            ("ERROR [CLI]:\t User not logged in", Some(NotLoggedIn)),
+            ("ERROR [AUTH_MANAGER]:\t You are not logged in", Some(NotLoggedIn)),
+            ("WARNING [CLI]:\t There was an error getting sdk", None),
+            ("ERROR [CLI]:\t No games installed", None),
+            ("ERROR [UNINSTALL]:\t Game isn't installed", Some(NotInstalled)),
+            ("ERROR [CLI]:\t No game is installed", Some(NotInstalled)),
+            ("ERROR [CLI]:\t Game is not installed", Some(NotInstalled)),
+            ("ERROR [DOWNLOAD]:\t Unable to load manifest", Some(OtherError)),
+            ("ERROR [CLI]:\t No game match", Some(OtherError)),
+            ("Traceback (most recent call last):", Some(OtherError)),
+            ("AttributeError: 'NoneType' object has no attribute 'encode'", None),
+            (
+                "[PYI-186:ERROR] Failed to execute script 'cli' due to unhandled exception!",
+                None,
+            ),
+            // Spike 2: register with Amazon unreachable.
+            (
+                "requests.exceptions.ProxyError: HTTPSConnectionPool(host='api.amazon.com', port=443): Max retries exceeded with url: /auth/register",
+                Some(Network),
+            ),
+            ("requests.exceptions.ConnectionError: x", Some(Network)),
+            ("requests.exceptions.HTTPError: 404", None),
+            (
+                "urllib3.exceptions.MaxRetryError: HTTPSConnectionPool(host='api.amazon.com', port=443)",
+                None,
+            ),
+            (
+                "INFO [AUTH_MANAGER]:\t Registerring a device. ID: FAKE-STORE-TOKEN-not-real",
+                None,
+            ),
+            // From the 1.2.0 source.
+            ("ERROR [AUTH_MANAGER]:\t Failed to register a device", Some(LoginFailed)),
+            ("INFO [AUTH_MANAGER]:\t Succesfully registered a device", None),
+            (
+                "ERROR [AUTH_MANAGER]:\t Failed to refresh the token <Response [400]>",
+                Some(NotLoggedIn),
+            ),
+            (
+                "ERROR [AUTH_MANAGER]:\t Failed to refresh the token HTTPSConnectionPool(host='api.amazon.com', port=443): Max retries exceeded with url: /auth/token (Caused by ProxyError('Unable to connect to proxy'))",
+                Some(Network),
+            ),
+            ("ERROR [LIBRARY]:\t There was an error syncing library", Some(OtherError)),
+            ("ERROR [DOWNLOAD]:\t Not enough space available", Some(NotEnoughSpace)),
+            ("INFO [DOWNLOAD]:\t Game is up to date", Some(DownloadSize(0))),
+            ("Checksum error for /games/Fogline/bin/Fogline.exe", Some(OtherError)),
+            ("INFO [CLI]:\t Download complete", None),
+            ("INFO [LIBRARY]:\t Successfully synced the library", None),
+            ("{\"Username\": \"<not logged in>\", \"LoggedIn\": false}", None),
+            ("FAKE-STORE-TOKEN-not-real", None),
+            ("", None),
+        ];
+        for (line, want) in cases {
+            assert_eq!(&nile_signal(line), want, "{line:?}");
         }
     }
 

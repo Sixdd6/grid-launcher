@@ -31,7 +31,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::Semaphore;
 
 use crate::commands::stores::StoreConnection;
-use crate::stores_service::{BoxFut, EpicStore, GogStore, StoresService};
+use crate::stores_service::{AmazonStore, BoxFut, EpicStore, GogStore, StoresService};
 
 pub const UPDATES_CHANGED_EVENT: &str = "updates-changed";
 /// Verbatim (details_view_mixin.py:1818).
@@ -589,6 +589,31 @@ impl StoreUpdateSource for EpicStore {
     }
     fn changed(&self) {
         EpicStore::changed(self)
+    }
+}
+
+/// Amazon (Step 0): never ready, so its check never runs and it reports no
+/// updates until package C fills in `list-updates`.
+impl StoreUpdateSource for AmazonStore {
+    fn kind(&self) -> StoreKind {
+        StoreKind::Amazon
+    }
+    fn ready(&self) -> bool {
+        false
+    }
+    fn registry(&self) -> Option<Arc<Registry>> {
+        AmazonStore::registry(self)
+    }
+    fn find(
+        self: Arc<Self>,
+        _rows: Vec<InstalledGame>,
+    ) -> BoxFut<'static, Result<Vec<StoreUpdate>, StoreError>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn failed(&self, _error: StoreError) {}
+    fn update_notice(&self, _title: &str, _version: &str) {}
+    fn changed(&self) {
+        crate::stores_service::StoreBackend::changed(self)
     }
 }
 

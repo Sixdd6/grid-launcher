@@ -23,7 +23,10 @@ use std::time::Instant;
 use secrecy::{ExposeSecret as _, SecretString};
 
 use super::paths;
-use super::progress::{legendary_signal, parse_gogdl_line, parse_legendary_line, ToolProgress};
+use super::progress::{
+    legendary_signal, nile_signal, parse_gogdl_line, parse_legendary_line, parse_nile_line,
+    ToolProgress,
+};
 use super::tools::StoreTool;
 use super::StoreError;
 use crate::library::LibraryError;
@@ -42,8 +45,9 @@ const STDOUT_CAP: usize = 16 * 1024 * 1024;
 /// [`ToolExit::stdout`].
 const STDOUT_LINE_CAP: usize = 8 * 1024;
 
-/// Which tool's lines a run reads: its progress parser and, for legendary,
-/// its signal matcher ([`super::progress::legendary_signal`]).
+/// Which tool's lines a run reads: its progress parser and, for legendary
+/// and nile, its signal matcher ([`super::progress::legendary_signal`],
+/// [`super::progress::nile_signal`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LineParser {
     /// heroic-gogdl: [`parse_gogdl_line`] on stderr, no signals.
@@ -52,6 +56,9 @@ pub enum LineParser {
     /// legendary: [`parse_legendary_line`] and [`legendary_signal`] on
     /// stderr and on stdout's lines.
     Legendary,
+    /// nile: [`parse_nile_line`] and [`nile_signal`] on stderr and on
+    /// stdout's lines (its `Checksum error for` line is on stdout).
+    Nile,
 }
 
 impl LineParser {
@@ -60,6 +67,7 @@ impl LineParser {
         match self {
             LineParser::Gogdl => StoreTool::Gogdl,
             LineParser::Legendary => StoreTool::Legendary,
+            LineParser::Nile => StoreTool::Nile,
         }
     }
 
@@ -67,6 +75,7 @@ impl LineParser {
         match self {
             LineParser::Gogdl => parse_gogdl_line(line),
             LineParser::Legendary => parse_legendary_line(line),
+            LineParser::Nile => parse_nile_line(line),
         }
     }
 
@@ -74,7 +83,14 @@ impl LineParser {
         match self {
             LineParser::Gogdl => None,
             LineParser::Legendary => legendary_signal(line),
+            LineParser::Nile => nile_signal(line),
         }
+    }
+
+    /// Whether stdout's lines are read for signals too (every parser with
+    /// a signal matcher).
+    fn reads_stdout(self) -> bool {
+        !matches!(self, LineParser::Gogdl)
     }
 }
 
@@ -130,7 +146,17 @@ pub struct ToolCommand {
     /// ends, however it ends: legendary's config folder, whose token files
     /// it writes with no mode.
     pub private_tree: Option<PathBuf>,
+    /// How long the run may take before the runner stops the process
+    /// group and fails with [`TIMED_OUT`]; `None` waits for ever. nile
+    /// sets no timeout on its own requests, so a short nile command can
+    /// hang on a network that drops packets (`docs/stores-phase3-plan.md`
+    /// "Spike results").
+    pub timeout: Option<Duration>,
 }
+
+/// The reason in [`StoreError::ToolFailed`] when a run outlived its
+/// [`ToolCommand::timeout`].
+pub const TIMED_OUT: &str = "it didn't finish in time";
 
 impl std::fmt::Debug for ToolCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -153,6 +179,7 @@ impl std::fmt::Debug for ToolCommand {
             .field("parser", &self.parser)
             .field("progress_stdout", &self.progress_stdout)
             .field("private_tree", &self.private_tree)
+            .field("timeout", &self.timeout)
             .finish()
     }
 }
@@ -212,7 +239,8 @@ impl Signals {
 /// stdout is kept; with [`LineParser::Legendary`] (or
 /// [`ToolCommand::progress_stdout`]) its lines are read the same way.
 /// [`ToolCommand::stdin`] is written, then stdin closed; a tool that exits
-/// before reading it is not an error. Blocking.
+/// before reading it is not an error. A run past [`ToolCommand::timeout`]
+/// is stopped like a cancel and fails with [`TIMED_OUT`]. Blocking.
 pub fn run_tool(
     cmd: &ToolCommand,
     cancel: &AtomicBool,
@@ -297,7 +325,7 @@ fn run(
         }
     });
     let stdout = child.stdout.take();
-    let read_lines = cmd.progress_stdout || parser == LineParser::Legendary;
+    let read_lines = cmd.progress_stdout || parser.reads_stdout();
     let stdout_progress = cmd.progress_stdout;
     let stdout_signals = signals.clone();
     let stdout_reader = thread::spawn(move || {
@@ -338,9 +366,24 @@ fn run(
         kept
     });
 
+    let deadline = cmd
+        .timeout
+        .map(|timeout| std::time::Instant::now() + timeout);
     let status = loop {
         while let Ok(report) = rx.try_recv() {
             on_progress(report);
+        }
+        if deadline.is_some_and(|at| std::time::Instant::now() >= at) {
+            stop_group(&mut child);
+            let _ = stderr_reader.join();
+            let _ = stdout_reader.join();
+            if let Some(writer) = stdin_writer {
+                let _ = writer.join();
+            }
+            return Err(StoreError::ToolFailed {
+                tool,
+                reason: TIMED_OUT.to_string(),
+            });
         }
         if cancel.load(Ordering::Relaxed) {
             stop_group(&mut child);
@@ -546,6 +589,14 @@ mod splitter_tests {
         assert_eq!(LineParser::default(), LineParser::Gogdl);
         assert_eq!(LineParser::Gogdl.tool().name(), "gogdl");
         assert_eq!(LineParser::Legendary.tool().name(), "legendary");
+        assert_eq!(LineParser::Nile.tool().name(), "nile");
+        assert_eq!(
+            LineParser::Nile.signal("ERROR [CLI]:\t User not logged in"),
+            Some(ToolSignal::NotLoggedIn)
+        );
+        assert!(LineParser::Nile.reads_stdout());
+        assert!(LineParser::Legendary.reads_stdout());
+        assert!(!LineParser::Gogdl.reads_stdout());
         assert_eq!(LineParser::Gogdl.signal("[cli] ERROR: x"), None);
         assert_eq!(
             LineParser::Legendary.signal("[cli] ERROR: x"),
@@ -787,5 +838,60 @@ echo '[cli] ERROR: Verification failed, 0 file(s) corrupted, 1 file(s) are missi
         assert_eq!(mode(&tree), 0o700);
         assert_eq!(mode(&tree.join("tmp")), 0o700);
         assert_eq!(mode(&tree.join("user.json")), 0o600);
+    }
+
+    #[test]
+    fn nile_signals_and_progress_come_from_both_streams() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = script(
+            dir.path(),
+            r#"echo 'WARNING [CLI]:	 There was an error getting sdk' >&2
+echo 'INFO [PROGRESS]:	 = Progress: 50.00 512/1024, Running for: 00:00:01, ETA: 00:00:01' >&2
+echo 'INFO [PROGRESS]:	  + Download	- 2.00 MiB/s' >&2
+echo 'Checksum error for /games/x/a.dll'
+echo 'INFO [CLI]:	 Download complete' >&2"#,
+        );
+        let cmd = ToolCommand {
+            program,
+            parser: LineParser::Nile,
+            ..Default::default()
+        };
+        let mut reports = Vec::new();
+        let exit = run_tool(&cmd, &AtomicBool::new(false), &mut |p| reports.push(p)).unwrap();
+        assert!(exit.success(), "nile exits 0 after a checksum error");
+        assert_eq!(exit.signals, vec![ToolSignal::OtherError]);
+        assert_eq!(reports.len(), 2);
+        assert_eq!((reports[0].done, reports[0].total), (512, 1024));
+        assert!(reports[1].is_speed_only());
+    }
+
+    #[test]
+    fn a_run_past_its_timeout_stops_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = script(dir.path(), "sleep 30");
+        let cmd = ToolCommand {
+            program,
+            parser: LineParser::Nile,
+            timeout: Some(Duration::from_millis(300)),
+            ..Default::default()
+        };
+        let started = Instant::now();
+        let error = run_tool(&cmd, &AtomicBool::new(false), &mut |_| {}).unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(10));
+        match error {
+            StoreError::ToolFailed { tool, reason } => {
+                assert_eq!(tool, "nile");
+                assert_eq!(reason, TIMED_OUT);
+            }
+            other => panic!("{other}"),
+        }
+        let quick = ToolCommand {
+            program: script(dir.path(), "exit 0"),
+            timeout: Some(Duration::from_secs(30)),
+            ..Default::default()
+        };
+        assert!(run_tool(&quick, &AtomicBool::new(false), &mut |_| {})
+            .unwrap()
+            .success());
     }
 }

@@ -1,7 +1,7 @@
 //! Store art: the image URLs GOG gives (protocol-relative links, gamesdb
 //! `url_format` templates, api.gog.com `formatter_template_url`s) made
-//! into plain `https` URLs, the store image hosts GRID fetches from (GOG's
-//! and Epic's, [`is_store_art_url`]), and a small on-disk cache under
+//! into plain `https` URLs, the store image hosts GRID fetches from (GOG's,
+//! Epic's and Amazon's, [`is_store_art_url`]), and a small on-disk cache under
 //! `<data_dir>/stores/art/` keyed by the URL's SHA-256, like the RomM art
 //! cache. Only `http(s)` URLs are fetched.
 
@@ -74,12 +74,17 @@ pub fn cache_path(data_dir: &Path, url: &str) -> PathBuf {
 /// The stores' image hosts: these domains and their subdomains. GOG's,
 /// then Epic's (keyImages come from `cdn1.epicgames.com`,
 /// `cdn2.unrealengine.com` and `media-cdn.epicgames.com`;
-/// `docs/stores-phase2-plan.md` "Spike results", spike 4).
-const STORE_ART_DOMAINS: [&str; 4] = [
+/// `docs/stores-phase2-plan.md` "Spike results", spike 4), then Amazon's
+/// (`m.media-amazon.com`, and the older `images-na.ssl-images-amazon.com`
+/// and `images-amazon.com` hosts; `docs/stores-phase3-plan.md` spike 4).
+const STORE_ART_DOMAINS: [&str; 7] = [
     "gog-statics.com",
     "gog.com",
     "epicgames.com",
     "unrealengine.com",
+    "media-amazon.com",
+    "ssl-images-amazon.com",
+    "images-amazon.com",
 ];
 
 /// Whether `url` is store art GRID may fetch for the UI: an `https` address
@@ -246,6 +251,26 @@ mod tests {
         assert!(is_store_art_url("http://127.0.0.1:4300/art/e1.jpg", &mocks));
         assert!(is_store_art_url("http://127.0.0.1:4100/art/g1.jpg", &mocks));
         assert!(!is_store_art_url("http://127.0.0.1:4400/art/x.jpg", &mocks));
+    }
+
+    #[test]
+    fn store_art_includes_amazons_image_hosts_over_https() {
+        for url in [
+            "https://m.media-amazon.com/images/I/A1quZkgvrsL.jpg",
+            "https://images-na.ssl-images-amazon.com/images/I/71VKoVJLPfL.jpg",
+            "https://images-amazon.com/images/I/x.png",
+        ] {
+            assert!(is_store_art_url(url, &[]), "{url}");
+        }
+        for url in [
+            "http://m.media-amazon.com/images/I/a.jpg",
+            "https://m.media-amazon.com.evil.example/a.jpg",
+            "https://notmedia-amazon.com/a.jpg",
+            "https://www.amazon.com/a.jpg",
+            "https://gaming.amazon.com/a.jpg",
+        ] {
+            assert!(!is_store_art_url(url, &[]), "{url}");
+        }
     }
 
     #[tokio::test]

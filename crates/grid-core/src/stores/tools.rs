@@ -1,13 +1,18 @@
-//! The GRID-managed store tools (heroic-gogdl for GOG, legendary for Epic):
+//! The GRID-managed store tools (heroic-gogdl for GOG, legendary for Epic,
+//! nile for Amazon):
 //! their pinned releases and SHA-256s, the install that checks them, and
 //! the command that starts one.
 //!
 //! The gogdl pins come from GitHub's published asset digests for
 //! heroic-gogdl v1.4.0 (`docs/stores-phase1-plan.md` "Spike results"); the
 //! legendary pins from the 0.21.1 assets themselves, which match GitHub's
-//! digests (`docs/stores-phase2-plan.md` "Research"). Both tools' Linux
-//! assets are Python zipapps, run as `python3 <file>` with the same Python
-//! 3.10 floor as GRID's umu-launcher ([`crate::launch::umu::MIN_PYTHON`]).
+//! digests (`docs/stores-phase2-plan.md` "Research"); the nile pins from
+//! the v1.2.0 assets, which match GitHub's digests
+//! (`docs/stores-phase3-plan.md` "Research"). gogdl's and legendary's
+//! Linux assets are Python zipapps, run as `python3 <file>` with the same
+//! Python 3.10 floor as GRID's umu-launcher
+//! ([`crate::launch::umu::MIN_PYTHON`]); every nile asset is a frozen
+//! PyInstaller binary, run as itself.
 
 use std::fs;
 use std::io::Write as _;
@@ -27,6 +32,7 @@ use super::StoreError;
 pub enum StoreTool {
     Gogdl,
     Legendary,
+    Nile,
 }
 
 impl StoreTool {
@@ -36,17 +42,19 @@ impl StoreTool {
         match self {
             StoreTool::Gogdl => "gogdl",
             StoreTool::Legendary => "legendary",
+            StoreTool::Nile => "nile",
         }
     }
 
     /// The e2e override variable naming a fake tool
-    /// (`GRID_LAUNCHER_E2E_TOOL_GOGDL`, `GRID_LAUNCHER_E2E_TOOL_LEGENDARY`),
-    /// read only with the `e2e` feature.
+    /// (`GRID_LAUNCHER_E2E_TOOL_GOGDL`, `GRID_LAUNCHER_E2E_TOOL_LEGENDARY`,
+    /// `GRID_LAUNCHER_E2E_TOOL_NILE`), read only with the `e2e` feature.
     #[cfg(feature = "e2e")]
     pub fn e2e_env(self) -> &'static str {
         match self {
             StoreTool::Gogdl => "GRID_LAUNCHER_E2E_TOOL_GOGDL",
             StoreTool::Legendary => "GRID_LAUNCHER_E2E_TOOL_LEGENDARY",
+            StoreTool::Nile => "GRID_LAUNCHER_E2E_TOOL_NILE",
         }
     }
 }
@@ -238,11 +246,81 @@ static LEGENDARY_PIN: ToolPin = ToolPin {
     assets: &LEGENDARY_ASSETS,
 };
 
+macro_rules! nile_asset {
+    ($os:literal, $arch:literal, $file:literal, $sha:literal, $size:literal) => {
+        PinnedAsset {
+            os: $os,
+            arch: $arch,
+            url: concat!(
+                "https://github.com/imLinguin/nile/releases/download/v1.2.0/",
+                $file
+            ),
+            file_name: $file,
+            sha256: $sha,
+            size: $size,
+            launcher: AssetLauncher::Direct,
+        }
+    };
+}
+
+/// nile v1.2.0 "Robert Speedwagon" (2026-03-03). The project publishes no
+/// SHA256SUMS: these were computed from the downloaded assets and match
+/// GitHub's per-asset digests. Every asset is a frozen PyInstaller
+/// `--onefile` binary (Python 3.8 inside), so all are `Direct`. There is no
+/// Windows arm64 asset. The Linux x86_64 binary's bundled libraries need
+/// glibc 2.35 (`docs/stores-phase3-plan.md` "Spike results").
+static NILE_ASSETS: [PinnedAsset; 5] = [
+    nile_asset!(
+        "linux",
+        "x86_64",
+        "nile_linux_x86_64",
+        "d73519514df9d52c50c6feec629373cc3a0d9504e087b6c7372a8ca8a95e7bfe",
+        11113264
+    ),
+    nile_asset!(
+        "linux",
+        "aarch64",
+        "nile_linux_arm64",
+        "197859c629c47e4e4d7ed1d2a290b7bef1e778f891ff8ca42ba65dbb020ba751",
+        10847400
+    ),
+    nile_asset!(
+        "windows",
+        "x86_64",
+        "nile_windows_x86_64.exe",
+        "6531790c59f78cea4a8743bf0582d5afda7fb887f5c143391d7339ad0f42ab88",
+        12386046
+    ),
+    nile_asset!(
+        "macos",
+        "x86_64",
+        "nile_macOS_x86_64",
+        "93ef4a5d29a378901569e3a854c289d356a0be3503700ebf7ee70586d401b0b0",
+        10002608
+    ),
+    nile_asset!(
+        "macos",
+        "aarch64",
+        "nile_macOS_arm64",
+        "6cc74eb19117c8c309b0b94657e1e267642a3b4840d7386a133dcf6f3bffeab0",
+        8348560
+    ),
+];
+
+static NILE_PIN: ToolPin = ToolPin {
+    tool: StoreTool::Nile,
+    version: "1.2.0",
+    license: "GPL-3.0",
+    source_url: "https://github.com/imLinguin/nile",
+    assets: &NILE_ASSETS,
+};
+
 /// The tool's pinned release.
 pub fn pin(tool: StoreTool) -> &'static ToolPin {
     match tool {
         StoreTool::Gogdl => &GOGDL_PIN,
         StoreTool::Legendary => &LEGENDARY_PIN,
+        StoreTool::Nile => &NILE_PIN,
     }
 }
 
@@ -530,6 +608,38 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&StoreTool::Legendary).unwrap(),
             r#""legendary""#
+        );
+    }
+
+    #[test]
+    fn nile_is_pinned_to_1_2_0() {
+        let pin = pin(StoreTool::Nile);
+        assert_eq!(pin.version, "1.2.0");
+        assert_eq!(pin.license, "GPL-3.0");
+        assert_eq!(pin.source_url, "https://github.com/imLinguin/nile");
+        assert_eq!(pin.assets.len(), 5);
+        for asset in pin.assets {
+            assert_eq!(asset.sha256.len(), 64, "{}", asset.file_name);
+            assert!(asset.sha256.chars().all(|c| c.is_ascii_hexdigit()));
+            assert!(asset.url.ends_with(asset.file_name));
+            assert!(asset
+                .url
+                .contains("/imLinguin/nile/releases/download/v1.2.0/"));
+            assert!(asset.size > 0);
+            assert_eq!(asset.launcher, AssetLauncher::Direct, "{}", asset.file_name);
+        }
+        let linux = asset_for(StoreTool::Nile, "linux", "x86_64").unwrap();
+        assert_eq!(linux.file_name, "nile_linux_x86_64");
+        assert_eq!(linux.size, 11113264);
+        assert!(asset_for(StoreTool::Nile, "windows", "x86_64").is_some());
+        assert!(
+            asset_for(StoreTool::Nile, "windows", "aarch64").is_none(),
+            "nile ships no Windows arm64 build"
+        );
+        assert_eq!(StoreTool::Nile.name(), "nile");
+        assert_eq!(
+            serde_json::to_string(&StoreTool::Nile).unwrap(),
+            r#""nile""#
         );
     }
 

@@ -1106,6 +1106,7 @@ impl GogStore {
             store_name: StoreKind::Gog.platform_name().to_string(),
             login_url: self.api.login_url(),
             finish,
+            finish_query: None,
             code_param: "code",
             user_agent: None,
         }

@@ -13,7 +13,10 @@
 //!   URL (scheme, host, port and path) and the query parameter with the
 //!   code. GOG's is `embed.gog.com/on_login_success?code=…`; Epic's is
 //!   `https://localhost/launcher/authorized?code=…`, which Epic sends only
-//!   to a launcher user agent ([`LoginSpec::user_agent`]). The finish URL is
+//!   to a launcher user agent ([`LoginSpec::user_agent`]); Amazon's is
+//!   `https://www.amazon.com/?openid.assoc_handle=amzn_sonic_games_launcher&openid.oa2.authorization_code=…`,
+//!   where the `openid.assoc_handle` pair ([`LoginSpec::finish_query`])
+//!   tells it from Amazon's home page, which has the same path. The finish URL is
 //!   caught by `on_navigation` (WebKitGTK asks the navigation policy for a
 //!   server redirect too) and, as a fallback, by `on_page_load`. The
 //!   navigation is refused, so the store's success page never loads (and
@@ -59,8 +62,13 @@ pub struct LoginSpec {
     /// The page the window opens.
     pub login_url: Url,
     /// The URL that ends the login: its scheme, host, port and path are
-    /// matched (the query is not).
+    /// matched (the query only through [`Self::finish_query`]).
     pub finish: Url,
+    /// A query pair the finish URL must also carry, `None` for none (GOG,
+    /// Epic). Amazon's `("openid.assoc_handle", "amzn_sonic_games_launcher")`:
+    /// without it, a click on Amazon's logo (its home page, the same path)
+    /// would read as a failed sign-in.
+    pub finish_query: Option<(&'static str, &'static str)>,
     /// The finish URL's query parameter that carries the code.
     pub code_param: &'static str,
     /// The user agent the window shows the store, `None` for WebKit's own.
@@ -94,6 +102,19 @@ pub fn is_login_redirect(url: &Url, finish: &Url) -> bool {
         return false;
     }
     url.path().trim_end_matches('/') == finish.path().trim_end_matches('/')
+}
+
+/// Whether `url` ends the login `spec` describes: [`is_login_redirect`]
+/// on its finish URL, and the [`LoginSpec::finish_query`] pair present
+/// when there is one.
+pub fn is_finish(url: &Url, spec: &LoginSpec) -> bool {
+    is_login_redirect(url, &spec.finish)
+        && match spec.finish_query {
+            None => true,
+            Some((name, value)) => url
+                .query_pairs()
+                .any(|(key, found)| key == name && found == value),
+        }
 }
 
 /// The `name` query value, `None` when absent or blank.
@@ -130,7 +151,7 @@ pub fn is_loopback(url: &Url) -> bool {
 
 /// Classifies a URL the login window is about to load (see [`Redirect`]).
 pub fn classify(url: &Url, spec: &LoginSpec) -> Redirect {
-    if !is_login_redirect(url, &spec.finish) {
+    if !is_finish(url, spec) {
         // Nothing on this computer but the finish URL, and the login
         // page's own origin when that is local (the e2e mock).
         if is_loopback(url) && url.origin() != spec.login_url.origin() {
@@ -548,6 +569,7 @@ mod tests {
             store_name: "GOG".into(),
             login_url: embed.clone(),
             finish: embed.join(GOG_LOGIN_SUCCESS_PATH).unwrap(),
+            finish_query: None,
             code_param: "code",
             user_agent: None,
         }
@@ -559,9 +581,84 @@ mod tests {
             store_name: "Epic Games".into(),
             login_url: url("https://www.epicgames.com/id/login?responseType=code"),
             finish: url(finish),
+            finish_query: None,
             code_param: "code",
             user_agent: Some("EpicGamesLauncher".into()),
         }
+    }
+
+    /// Amazon's spec for a finish URL and the login URL nile printed.
+    fn amazon(finish: &str, login: &str) -> LoginSpec {
+        LoginSpec {
+            store_name: "Amazon Games".into(),
+            login_url: url(login),
+            finish: url(finish),
+            finish_query: Some(("openid.assoc_handle", "amzn_sonic_games_launcher")),
+            code_param: "openid.oa2.authorization_code",
+            user_agent: None,
+        }
+    }
+
+    #[test]
+    fn amazons_finish_needs_the_assoc_handle() {
+        let spec = amazon(
+            "https://www.amazon.com/",
+            "https://amazon.com/ap/signin?openid.assoc_handle=amzn_sonic_games_launcher",
+        );
+        assert!(matches!(
+            classify(
+                &url("https://www.amazon.com/?openid.assoc_handle=amzn_sonic_games_launcher&openid.oa2.authorization_code=FAKE-STORE-TOKEN-not-real"),
+                &spec
+            ),
+            Redirect::Code(_)
+        ));
+        assert!(matches!(
+            classify(
+                &url("https://www.amazon.com/?openid.assoc_handle=amzn_sonic_games_launcher&openid.mode=cancel"),
+                &spec
+            ),
+            Redirect::Failed
+        ));
+        // Amazon's home page (the logo) and the sign-in pages load.
+        for other in [
+            "https://www.amazon.com/",
+            "https://www.amazon.com/?ref_=nav_logo",
+            "https://www.amazon.com/?openid.assoc_handle=other_handle&openid.oa2.authorization_code=x",
+            "https://amazon.com/ap/signin?openid.assoc_handle=amzn_sonic_games_launcher",
+            "https://www.amazon.com/ap/mfa?openid.assoc_handle=amzn_sonic_games_launcher",
+            "https://amazon.com/?openid.assoc_handle=amzn_sonic_games_launcher&openid.oa2.authorization_code=x",
+        ] {
+            assert!(
+                matches!(classify(&url(other), &spec), Redirect::Other),
+                "{other}"
+            );
+        }
+        // e2e: the mock is the login page's origin and the finish.
+        let e2e = amazon(
+            "http://127.0.0.1:4400/",
+            "http://127.0.0.1:4400/ap/signin?openid.assoc_handle=amzn_sonic_games_launcher",
+        );
+        assert!(matches!(
+            classify(
+                &url("http://127.0.0.1:4400/?openid.assoc_handle=amzn_sonic_games_launcher&openid.oa2.authorization_code=FAKE-E2E-AMAZON-CODE"),
+                &e2e
+            ),
+            Redirect::Code(_)
+        ));
+        assert!(matches!(
+            classify(&url("http://127.0.0.1:4400/"), &e2e),
+            Redirect::Other
+        ));
+        assert!(matches!(
+            classify(&url("http://127.0.0.1:4401/"), &e2e),
+            Redirect::Refused
+        ));
+        // GOG and Epic have no finish query: any query matches as before.
+        let gog_spec = gog("https://embed.gog.com/");
+        assert!(is_finish(
+            &url("https://embed.gog.com/on_login_success?origin=client&code=abc"),
+            &gog_spec
+        ));
     }
 
     #[test]

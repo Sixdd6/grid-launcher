@@ -118,9 +118,10 @@ Modules as declared in `src/lib.rs`:
   by rom id or a store row by its key (`launch(rom_id)` is a thin wrapper), and a GOG,
   Epic or Amazon row always takes the native branch (`build_native_command`; the row sets
   `extracted_dir`, `native_game_dir`, `native_executable_path` and a `win`/`linux`
-  `platform_slug`). Before it builds, a store row asks the app's `StoreLaunchHook` for a
+  `platform_slug`). Before it builds, a store row asks the app's `StoreLaunchHook` (one
+  slot; the app installs a router that asks the row's own store) for a
   `StoreLaunchPrep` (Epic: legendary's executable, folder, arguments, and the exchange
-  code as `secret_args`, every one a redacted position). `GameSession` carries `key` and an optional `rom_id`; one live session
+  code as `secret_args`, every one a redacted position; Amazon: nile's FUEL environment). `GameSession` carries `key` and an optional `rom_id`; one live session
   per key. `LaunchService::register_watched` adds a session GRID did not spawn (Steam,
   later): no child, liveness from a polled `AliveCheck`, never signalled by `stop`.
   `NativeLaunch::redact` lists argv positions (an Epic exchange code) that print as
@@ -242,18 +243,19 @@ Modules as declared in `src/lib.rs`:
   after each batch.
 - `retroachievements` — the RetroAchievements login client. Login only.
 - `stores` — external game stores (SPEC "Game stores", `docs/external-stores-plan.md`,
-  `docs/stores-phase1-plan.md`, `docs/stores-phase2-plan.md`). The shared identity types: `StoreKind` (gog, epic,
+  `docs/stores-phase1-plan.md`, `docs/stores-phase2-plan.md`, `docs/stores-phase3-plan.md`). The shared identity types: `StoreKind` (gog, epic,
   amazon, steam, with their platform names "GOG", "Epic Games", "Amazon Games", "Steam"),
   `GameSource` (the registry `source`) and `GameKey` (`Rom(i64)` or `Store { source,
   store_id }`, string and serde form `romm:123` / `gog:1207664643`). Beside them:
-  `tools` (the pinned heroic-gogdl and legendary releases, their SHA-256 check and the
-  command that starts one), `runner` (the only place a store tool is spawned; its output
-  is never logged or forwarded; it writes a stdin secret, reads a `LineParser`'s progress
-  and legendary's known lines as `ToolSignal`s, and makes legendary's folder owner-only
-  after each run), `progress` (tool progress lines and `legendary_signal`), `paths`
+  `tools` (the pinned heroic-gogdl, legendary and nile releases, their SHA-256 check and
+  the command that starts one), `runner` (the only place a store tool is spawned; its
+  output is never logged or forwarded; it writes a stdin secret, reads a `LineParser`'s
+  progress and legendary's and nile's known lines as `ToolSignal`s, stops a run past its
+  `timeout`, and makes the tool's folder owner-only after each run), `progress` (tool
+  progress lines, `legendary_signal` and `nile_signal`), `paths`
   (`<data_dir>/stores/<tool>/`, 0700/0600, `make_tree_private`) and `art` (store image
   URLs, the token-free art cache under `<data_dir>/stores/art/`, and `is_store_art_url`,
-  the GOG and Epic host rule `ensure_image` uses). The cloud save types every store
+  the GOG, Epic and Amazon host rule `ensure_image` uses). The cloud save types every store
   shares (`CloudState`, `SyncMode`, `SaveConflict`) live in `stores` itself.
   `gog` is GOG's HTTP APIs (`api`), sign-in (`auth`), gogdl install, update, repair, DLC
   and uninstall jobs (`install`), cloud saves (`cloud`), the update check (`update`), and
@@ -278,8 +280,17 @@ Modules as declared in `src/lib.rs`:
   (`list-saves` / `sync-saves`, the save path GRID resolves from `CloudSaveFolder`, a copy
   of the local saves under `stores/save-backups/epic/` before a download), `meta`
   (`EpicMeta`) and `row` (`epic_row`; every Epic row is a Windows version with its
-  prefix at `<install dir>/prefix`). Every parser ignores unknown JSON keys and
-  non-JSON stdout lines. Nothing here may log or forward a store tool's stdout or
+  prefix at `<install dir>/prefix`). `amazon` is Amazon Games through nile (Phase 3;
+  Step 0 so far): `AmazonService` (`mod.rs`) builds every nile run (`tool()`: the pinned
+  PyInstaller binary or the test/e2e override, `NILE_CONFIG_PATH=<data_dir>/stores/nile`
+  (nile keeps its files in `stores/nile/nile/`), `LineParser::Nile`, the folder made
+  owner-only before and after each run; short commands set `QUICK_RUN_TIMEOUT`), the
+  endpoints and the login-URL host check, `AmazonLoginStart` (nile's per-attempt
+  `client_id`/`code_verifier`/`serial` in a `SecretString`, read only by `auth.rs`),
+  `meta` (`AmazonMeta`) and `row` (`amazon_row` and the JSON5 `fuel.json` reader
+  `read_fuel`; every Amazon row is a Windows version with its prefix at
+  `<install dir>/prefix`). Login, owned list, jobs, uninstall, updates and launch prep
+  are package A's. Every parser ignores unknown JSON keys and non-JSON stdout lines. Nothing here may log or forward a store tool's stdout or
   stderr.
 - `romm` — the RomM HTTP client: `RommClient`, platforms, games, ROM detail, firmware,
   byte fetches, the cloud save/state endpoints, and the play-session ingest. All request construction lives here;
@@ -315,11 +326,17 @@ The shell owns *when* things run; grid-core owns *what* they do.
 - `stores_service/` — the stores in the app, one backend per store behind the
   `StoreBackend` trait (`mod.rs`), which has every method a store command calls (login,
   disconnect, tool install, refresh, library, updates, install options and jobs, DLC,
-  uninstall, game settings, cloud state and sync, the syncs around a session, art).
-  `StoresService` is the facade the app holds: `backend(StoreKind)`, `statuses()` (every
-  store, in the frontend's `STORE_ORDER`), and the fan-outs (startup, Downloads
-  snapshots, the session-finished upload, art, the launch hook). `StoreShared` carries the
-  emitter, the registry and the art client. `gog.rs` is `GogStore` around grid-core's
+  uninstall, game settings, cloud state and sync, the syncs around a session, art, the
+  launch hook). A new login window gets its spec from `prepare_login` (by default
+  `begin_login` then `login_spec`; Amazon installs nile and asks it for the per-attempt
+  login URL first); an open one is only focused. `StoresService` is the facade the app
+  holds: `backend(StoreKind)`, `statuses()` (every store, in the frontend's
+  `STORE_ORDER`: amazon, epic, gog), and the fan-outs (startup, Downloads snapshots, the
+  session-finished upload, art). The launch service has one store launch hook slot;
+  `install_launch_hook` fills it with `StoreLaunchRouter`, which hands each store row to
+  its own backend's `launch_hook()` (Epic and Amazon have one; GOG's rows launch as they
+  are). `StoreShared` carries the emitter, the registry, the art client and the
+  backends (weakly; `StoreShared::backend(kind)`). `gog.rs` is `GogStore` around grid-core's
   `stores::gog::GogService`: the store status and library the UI reads (owned list cached
   at `<data_dir>/stores/cache/gog-owned.json`), the gogdl install, the cloud sync before a
   launch and after a session, the update check, and the `store-notice` cards for what
@@ -334,10 +351,16 @@ The shell owns *when* things run; grid-core owns *what* they do.
   (gated by `[stores.epic] cloud_saves` and the game's own switch), and the
   `StoreLaunchHook` that adds Epic's launch ticket. The hook owns the one offline retry:
   signed out, a game that may run offline asks for an `--offline` ticket; signed in, a
-  network failure retries once with `--offline` for such a game. Store updates are keyed
+  network failure retries once with `--offline` for such a game. `amazon.rs` is
+  `AmazonStore` around `stores::amazon::AmazonService` (Phase 3; Step 0 is a stub: always
+  "not connected", every action `not implemented`, real login spec and Game Settings,
+  a launch hook that refuses Amazon rows until nile's launch prep exists); it keeps nile's
+  `AmazonLoginStart` between `prepare_login` and `run_finish_login`. Store updates are keyed
   by `GameKey` in `update_service.rs` (`StoreUpdateSource`, one per store). `store_auth.rs` is the login window: a separate, unprivileged, incognito webview
-  whose finish URL (a store's `LoginSpec`) is caught in Rust and refused (the code goes to
-  the backend as a `SecretString`). The commands are `commands/stores.rs` (`backend_for`,
+  whose finish URL (a store's `LoginSpec`: scheme, host, port and path, plus a required
+  query pair when `finish_query` is set, as Amazon's `openid.assoc_handle`, so Amazon's
+  home page is not the finish) is caught in Rust and refused (the code goes to the
+  backend as a `SecretString`). The commands are `commands/stores.rs` (`backend_for`,
   `backend_for_key`) and, for GOG backups, `commands/store_backups.rs`.
 - `commands.rs` — also `launch_game_key`: a RomM key takes `launch_game`'s path, a store
   key skips the RomM-only steps (cloud restore, firmware, session stamps) and stamps

@@ -731,7 +731,8 @@ pub fn run() {
                 }
                 if let Ok(launch) = &state.launch {
                     state.stores.install_session_finished_hook(launch);
-                    // Epic's launch ticket (`StoreLaunchHook`).
+                    // The stores' launch hook (`StoreLaunchRouter`): Epic's
+                    // launch ticket, Amazon's FUEL environment.
                     state.stores.install_launch_hook(launch);
                 }
                 let stores = state.stores.clone();
@@ -740,7 +741,8 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     stores.check_login().await;
                     updates.spawn_store_check(handle.clone(), stores.gog.clone());
-                    updates.spawn_store_check(handle, stores.epic.clone());
+                    updates.spawn_store_check(handle.clone(), stores.epic.clone());
+                    updates.spawn_store_check(handle, stores.amazon.clone());
                 });
             }
             if let Ok(launch) = &state.launch {

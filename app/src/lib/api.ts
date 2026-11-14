@@ -1196,7 +1196,7 @@ export type LayoutMigrationNotice = { message: string };
 export type StoreSource = Exclude<GameSource, 'romm'>;
 export type StorePlatform = 'linux' | 'windows';
 export type ToolStatus = {
-  name: 'gogdl' | 'legendary';
+  name: 'gogdl' | 'legendary' | 'nile';
   version: string;
   state: 'not_installed' | 'installing' | 'installed' | 'failed';
   size_bytes: number;
@@ -1241,7 +1241,7 @@ export type StoreGame = {
   disk_bytes: number;
   version: string;
   update_version: string;
-  origin: 'gogdl' | 'offline' | 'drive' | 'legendary' | null;
+  origin: 'gogdl' | 'offline' | 'drive' | 'legendary' | 'nile' | null;
   not_supported: string;
   dlc: StoreDlc[];
   cloud: 'off' | 'none' | 'synced' | 'conflict' | 'unknown';

@@ -17,7 +17,10 @@ cd "$(dirname "$0")/.."
 # login code) and for handing a tool's kept stdout to a JSON parse.
 # `stores/epic/launch.rs` is on it for Epic's exchange code, which goes into
 # the game's argv as a redacted argument.
-allowed_files=("crates/grid-core/src/secrets.rs" "crates/grid-core/src/romm/mod.rs" "crates/grid-core/src/autoconfig/mod.rs" "crates/grid-core/src/retroachievements.rs" "crates/grid-core/tests/ra_login.rs" "crates/grid-core/src/stores/gog/auth.rs" "crates/grid-core/src/stores/gog/api.rs" "crates/grid-core/src/stores/runner.rs" "crates/grid-core/src/stores/epic/launch.rs")
+# `stores/amazon/auth.rs` is on it for the Amazon login: the code and nile's
+# client_id, code_verifier and serial, which only nile register's argv takes
+# (nile has no stdin or environment path for them).
+allowed_files=("crates/grid-core/src/secrets.rs" "crates/grid-core/src/romm/mod.rs" "crates/grid-core/src/autoconfig/mod.rs" "crates/grid-core/src/retroachievements.rs" "crates/grid-core/tests/ra_login.rs" "crates/grid-core/src/stores/gog/auth.rs" "crates/grid-core/src/stores/gog/api.rs" "crates/grid-core/src/stores/runner.rs" "crates/grid-core/src/stores/epic/launch.rs" "crates/grid-core/src/stores/amazon/auth.rs")
 allowed_args=()
 for f in "${allowed_files[@]}"; do
   allowed_args+=(-e "$f")

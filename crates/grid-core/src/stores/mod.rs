@@ -11,13 +11,13 @@
 //!   for a store product — with a stable string form (`romm:123`,
 //!   `gog:1207664643`) that is also its serde form.
 //!
-//! Phases 1 and 2 add, under this folder: `tools` (the pinned heroic-gogdl
-//! and legendary downloads; nile later), `runner` (the only place a tool
-//! process is spawned), `progress` (tool progress and legendary's known
+//! Phases 1 to 3 add, under this folder: `tools` (the pinned heroic-gogdl,
+//! legendary and nile downloads), `runner` (the only place a tool
+//! process is spawned), `progress` (tool progress and legendary's and nile's known
 //! lines), `paths` (`<data_dir>/stores/<tool>/`, 0700/0600), `art`, the
 //! cloud save types every store shares ([`CloudState`], [`SyncMode`],
 //! [`SaveConflict`]), and one folder per source: `gog`, `offline` (GOG
-//! offline installers), `epic` (Phase 2); `amazon` and `steam` later.
+//! offline installers), `epic` (Phase 2), `amazon` (Phase 3); `steam` later.
 //! [`StoreError`] is every store operation's error.
 //!
 //! Secrets: the tools' own token files live under `<data_dir>/stores/` (the
@@ -30,6 +30,7 @@ use std::str::FromStr;
 
 use crate::library::LibraryError;
 
+pub mod amazon;
 pub mod art;
 pub mod epic;
 pub mod gog;

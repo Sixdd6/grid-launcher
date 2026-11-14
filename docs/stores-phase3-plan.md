@@ -1,6 +1,7 @@
 # Game stores — Phase 3 (Amazon Games / Prime Gaming) work plan
 
-Status: planned 2026-11-13, not started. Read it with:
+Status: planned 2026-11-13; spikes and Step 0 done 2026-11-13 (see "Spike results" and
+"Contract deviations — Step 0"); packages A, C and D not started. Read it with:
 - `docs/external-stores-plan.md` for the user decisions;
 - `docs/stores-phase2-plan.md`, the template. Its spike results, contract deviations and
   integration outcome are the lessons this plan builds on;
@@ -620,6 +621,240 @@ scratch `NILE_CONFIG_PATH`/`HOME`/`TMPDIR` and `HTTPS_PROXY=http://127.0.0.1:9`.
    - which pop-ups appear.
 
    Without it, C keeps the structural rule.
+
+## Spike results (2026-11-13)
+
+All five downloaded assets matched the SHA-256s in Research. The Linux x86_64 binary was
+copied to a fresh folder and run only inside the build container (`scripts/ctr.sh run`;
+Ubuntu 24.04, glibc 2.39), with a scratch `NILE_CONFIG_PATH`, `HOME` and `TMPDIR`, and
+every request sent to a dead proxy (`HTTPS_PROXY=http://127.0.0.1:9`, connection refused).
+One run used a black-hole proxy (`10.255.255.1:9`, no answer at all). No Amazon account
+and no network login were used. Where a line could not be produced offline, it was read
+from the v1.2.0 source (`N/`).
+
+### Spike 1 — the asset, offline
+
+- `--version` prints `1.2.0 Robert Speedwagon` (exit 0, about 0.35 s). It writes nothing
+  and does not try the SDK.
+- `--help` confirms the commands: `auth`, `register`, `library`, `install` (aliases
+  `update`, `verify`, one parser), `launch`, `uninstall`, `import`, `list-updates`.
+  - `auth`: `--login --status --gui --non-interactive --logout`;
+  - `register`: `--code --client-id --code-verifier --serial`;
+  - `library {list,sync}`: `--json --force --installed`;
+  - `install`/`update`/`verify`: `--max-workers --base-path --path EXACT_PATH --info
+    --json id`;
+  - `launch`: `--bottle --wine-prefix --wine --json --no-wine --wrapper id` (no
+    `--override-exe`, as Research says);
+  - `uninstall id`; `list-updates --json`.
+- **Every run except `--version` costs about 0.35 s** and first tries Amazon's FuelSDK.
+  Against the refused proxy that gives one line, `WARNING [CLI]:<TAB> There was an error
+  getting sdk`, and the command goes on. nile skips the fetch only when `<cfg>/SDK`
+  exists, so it retries on every command until one succeeds.
+  - **Against the black-hole proxy, `auth --status` hung until it was killed at 90 s**
+    (exit 124). nile sets no timeout on any request. Step 0 therefore adds
+    `ToolCommand.timeout` (see the deviations), and the Amazon code sets
+    `QUICK_RUN_TIMEOUT` on every short command.
+  - From the source: `get_sdk` writes straight into `SDK/`, so a download that fails
+    halfway leaves a partial `SDK/` that nile never fetches again.
+- **Files.** The first command creates `<cfg>/nile/` (0755) and `installed.json` (0644,
+  `[]`); the id migration that runs on every start rewrites it. Precedence is confirmed:
+  `NILE_CONFIG_PATH` wins over `XDG_CONFIG_HOME`, and nile appends `/nile` to either.
+- **`auth --status`** signed out: `{"Username": "<not logged in>", "LoggedIn": false}`
+  (exit 0). With a hand-written `current_user.json` and no token file it says
+  `{"Username": "FakeGivenName", "LoggedIn": true}`: it reads only that file, so
+  `LoggedIn: true` does not prove there is a token.
+- **`library list --json`** with no `library.json`: an `AttributeError` traceback, exit 1
+  (the crash is confirmed). With a `library.json` it prints the file, exit 0, signed out
+  too.
+- **`list-updates --json`**: nothing installed gives `[]` on stdout plus `ERROR [CLI]:<TAB>
+  No games installed` (exit 0). Something installed and signed out gives a traceback,
+  exit 1, and no `[]`.
+- **`library sync`** signed out: `ERROR [CLI]:<TAB> User not logged in`, exit 1. With
+  `current_user.json` but no token file: a traceback, exit 1.
+- **`install --info`, `install` and `update`** signed out: with no `library.json`, a
+  traceback; with one, `INFO [CLI]:<TAB> Found: Fogline` and then a traceback (the token
+  read), exit 1.
+- **`verify`** of a game that is not installed: `ERROR [DOWNLOAD]:<TAB> Unable to load
+  manifest`, then `INFO [CLI]:<TAB> Download complete`, exit 0. This confirms that
+  `Download complete` proves nothing.
+- **`uninstall`** of a game that is not installed: `ERROR [UNINSTALL]:<TAB> Game isn't
+  installed`, exit 0 (not "Game is not installed"; `nile_signal` matches both).
+- **`launch`**: an id not in the library gives `ERROR [CLI]: No game match` (exit 0); an
+  empty `installed.json` gives `ERROR [CLI]:<TAB> No game is installed` (exit 0); no
+  `library.json` gives a traceback (exit 1).
+- **`auth --logout`** signed out: `ERROR [AUTH_MANAGER]:<TAB> You are not logged in`
+  (exit 0). With `current_user.json` but no token: a traceback, exit 1. So Disconnect
+  must delete the folder itself, as planned.
+- **`_MEI*`.** Each run unpacks about 21 MB into `$TMPDIR/_MEIxxxxxx` (0700). A normal
+  exit removes it, and so does SIGTERM to the process group (the runner's cancel).
+  SIGKILL leaves it behind. The runner's SIGTERM, then SIGKILL after 3 s, is enough.
+- **The glibc floor.** The libraries were extracted with a small CArchive parser (no
+  execution) and read with `objdump -T`.
+  - The bootloader needs `GLIBC_2.14` (x86_64) or `GLIBC_2.17` (arm64).
+  - The bundled `libpython3.8.so.1.0` and `libgcc_s.so.1` need **`GLIBC_2.35`** on both
+    architectures (the Ubuntu 22.04 build).
+  - GRID's release build image is Debian 13 (glibc 2.41), so any computer that runs a
+    released GRID meets nile's floor. On an older glibc, nile fails to start, and that
+    shows as a tool error.
+
+### Spike 2 — login without a network
+
+- **`auth --login --non-interactive`**: exit 0, one JSON line on stdout,
+  `{"client_id", "code_verifier", "serial", "url"}`, and only the SDK warning on stderr.
+  - `client_id` is 94 hex characters (the serial and `#A2UMVHOX7UP4V7`, hex-encoded),
+    `code_verifier` 43 characters, `serial` 32 hex characters. Every run gives new values.
+  - Nothing goes to the network but the SDK fetch.
+  - `url` is `https://amazon.com/ap/signin?…` (host `amazon.com`, no `www`), with the
+    query keys `openid.ns`, `openid.claimed_id`, `openid.identity`,
+    `openid.mode=checkid_setup`, `openid.oa2.scope=device_auth_access`, `openid.ns.oa2`,
+    `openid.oa2.response_type=code`, `openid.oa2.code_challenge_method=S256`,
+    `openid.oa2.client_id=device:<client_id>`, `language=en_US`,
+    `marketPlaceId=ATVPDKIKX0DER`, `openid.return_to=https://www.amazon.com`,
+    `openid.pape.max_auth_age=0`, `openid.assoc_handle=amzn_sonic_games_launcher`,
+    `pageId=amzn_sonic_games_launcher` and `openid.oa2.code_challenge`.
+- **`register` with fake values, Amazon unreachable: exit 1**, not 0. It ends in an
+  uncaught `requests.exceptions.ProxyError` traceback (`Network`), and **stdout is
+  empty**: with no response there is no body to print.
+  - stderr carries `INFO [AUTH_MANAGER]:<TAB> Registerring a device. ID: <client_id>`
+    (the runner drops it).
+  - **grep: the code, the verifier and the serial appear in neither stream.** The
+    client id appears only in that one stderr line.
+  - From the source: when Amazon refuses (`response.ok` false), nile logs `ERROR
+    [AUTH_MANAGER]:<TAB> Failed to register a device`, prints Amazon's response body on
+    stdout and exits 0. The body is Amazon's error JSON; GRID keeps stdout only as a
+    `SecretString` and never shows it.
+- **The interactive `auth --login`** (rejected alternative): it prints `Login URL:
+  <url>` and two prompts on stdout, waits for Enter, calls `webbrowser.open`
+  (`BROWSER=true` stopped it), then reads the redirect URL from stdin. It accepted a fed
+  redirect (`Got authorization code`) and went on to `register`. With EOF on stdin it
+  ends in an `EOFError` traceback, exit 1.
+
+### Spike 3 — launch dry run offline
+
+- With a hand-made `library.json`, `installed.json`, `current_user.json` and a
+  `fuel.json` that has a `//` comment and trailing commas, `launch --json --no-wine <id>`
+  exits 0 and prints
+  `{"command": {"instruction": "<abs exe>", "arguments": [...]}, "game_directory": "<install>",
+  "env": {"FUEL_DIR", "AMAZON_GAMES_SDK_PATH", "AMAZON_GAMES_FUEL_ENTITLEMENT_ID",
+  "AMAZON_GAMES_FUEL_PRODUCT_SKU", "AMAZON_GAMES_FUEL_DISPLAY_NAME"}}`.
+  - `FUEL_DIR` and `AMAZON_GAMES_SDK_PATH` name `<cfg>/nile/SDK/Amazon Games
+    Services/{Legacy,AmazonGamesSDK}` even when the SDK was never downloaded.
+  - `AMAZON_GAMES_FUEL_DISPLAY_NAME` is `current_user.json`'s name (the fake name was on
+    stdout). Signed out (no `current_user.json`) it still works, with an empty name.
+  - It needs no token and no network, apart from the SDK attempt, which can hang (so
+    launch prep sets the quick timeout).
+- **There is no working-folder key.** nile applies `WorkingSubdirOverride` to the cwd of
+  its own launch only and never prints it; `game_directory` is the install root. So
+  launch prep leaves `working_dir` empty, and the row's (from `read_fuel`) is used.
+- `--json` without `--no-wine` prints the same thing (`--json` returns before any wine
+  logic). Without `--json`, nile tries to start the `.exe` itself.
+- `fuel.json` is read with `json5` (comments and trailing commas are fine), and
+  **`SchemaVersion` is required**: without it, a `KeyError` traceback, exit 1. GRID's
+  `read_fuel` does not require it.
+- `uninstall` with the manifest missing: an `AttributeError` traceback, exit 1;
+  `installed.json` and the files are untouched (confirms Research).
+
+### Spike 4 — art hosts
+
+- Public pages only. Junk Store's Amazon game pages, built from Amazon's catalog, use
+  `m.media-amazon.com` for every image. Besiege and Disney Pixar Cars each have a 400×225
+  PNG icon (16:9), a 512×288 banner, and a 1080×1440 (3:4, portrait) cover, all on that
+  host and fetched with no credentials.
+- Which `library.json` field carries the portrait image could not be seen without an
+  account. Heroic's and BannerHub's code use `iconUrl` as the card art and
+  `backgroundUrl1`/`backgroundUrl2` as the hero. If `iconUrl` is the 16:9 icon, it does
+  not suit a portrait card; package A keeps the planned order until the user's
+  `library.json` shows the fields.
+- **Rule:** https on `media-amazon.com`, `ssl-images-amazon.com` and `images-amazon.com`
+  and their subdomains.
+
+### Spike 5 — not run
+
+Spike 5 is manual (the user, a real account). It is left for the user's final login test.
+
+### What waits for a real account (the user's final login test)
+
+- Spike 5: WebKitGTK's user agent on Amazon's page, captcha and 2-step in the ephemeral
+  context, the finish hop reaching `on_navigation`, and the pop-ups.
+- `register`'s real lines: success, and the refusal body on stdout.
+- `library sync` succeeding, and the expired-refresh line (`Failed to refresh the token
+  <Response [4xx]>`).
+- The real `library.json` art fields (the spike 4 portrait question).
+- Real `install`/`update`/`verify` progress, the `installed.json` version format and real
+  `list-updates --json` output.
+- The SDK download succeeding (the FUEL DLLs), and `auth --logout` deregistering.
+
+## Contract deviations — Step 0
+
+Where the skeleton differs from, or adds to, the Step 0 block above:
+
+- **grid-core runner.**
+  - `ToolCommand.timeout: Option<Duration>` and `runner::TIMED_OUT` are new (spike 1:
+    nile can hang for ever). A run past its timeout is stopped like a cancel (the process
+    group, SIGTERM then SIGKILL) and fails with `StoreError::ToolFailed { tool, reason:
+    TIMED_OUT }`. `None` (the default) keeps every GOG and Epic run as it was.
+  - `LineParser::Nile` reads stdout's lines for signals too (as legendary's), through a
+    private `reads_stdout()`.
+- **`nile_signal`**, from the spikes:
+  - `Failed to refresh the token` followed by anything but `<Response` is `Network`.
+    nile logs the `requests` exception's text, which does not name the class.
+  - `Game isn't installed` (uninstall) is `NotInstalled`, beside the two `launch` lines.
+  - A `requests.exceptions.<network error>` traceback line is `Network` (`register`
+    offline).
+  - The `Traceback` line gives `OtherError`. The exception line itself
+    (`AttributeError: …`) and PyInstaller's `[PYI-…:ERROR]` line are not signals.
+  - `You are not logged in` (`auth --logout`) is `NotLoggedIn`.
+- **`AmazonService`.**
+  - `tool()` returns `Result<ToolCommand, StoreError>`, as Epic's does: `ToolMissing`
+    when nile is not installed, and `Refused` when the folder can't be made private.
+  - These are real in Step 0, not stubs: `tool`, `tool_env`, `tool_installed`,
+    `install_tool` (returns the path, as Epic's), `tool_dir`, `config_dir`
+    (`<data_dir>/stores/nile/nile`) and `endpoints`.
+  - `QUICK_RUN_TIMEOUT` (90 s) is the deadline package A sets on every short run.
+  - `AmazonEndpoints::allows_login_url` (the login-URL host check) and
+    `AMAZON_SIGNIN_PATH` are implemented. The e2e finish is the base's root.
+  - `AmazonLoginStart::new(url, secret)` and `secret() -> &SecretString` are public;
+    only `auth.rs` may call `expose_secret` on it.
+- **`row.rs`.**
+  - `read_fuel` strips comments and trailing commas, then uses `serde_json`, so no new
+    crate. It also has `parse_fuel` (the pure part), `FUEL_FILE` and `join_args`.
+  - `amazon_row`: the title falls back to the product id, and `genres` is set too.
+  - The launch parameters are `join_args(Main.Args)`: single-quoted where needed, so
+    they split back unchanged through `launch::template::split_template`. Windows `\`
+    paths survive.
+  - The working folder is `WorkingSubdirOverride` when it is a safe relative path, else
+    the executable's folder.
+- **`AmazonConfig`** derives `Default`. It has no cloud field, and it is not written while
+  default.
+- **App trait.**
+  - `StoreBackend` is now `Send + Sync + 'static`.
+  - `prepare_login` has the planned default. `login_spec()` stays on the trait: when the
+    window is already open, `store_connect` only focuses it and asks `login_spec()`
+    (the spec is unused then).
+  - `launch_hook(self: Arc<Self>) -> Option<Arc<dyn StoreLaunchHook>>`, default `None`;
+    `EpicStore` and `AmazonStore` return `Some(self)`.
+  - `StoreShared::backend(kind)` (the registered backends) feeds
+    `StoreLaunchRouter::new(&Arc<StoreShared>)`.
+- **`store_auth`**: a public `is_finish(url, spec)` (`is_login_redirect` plus
+  `finish_query`); `classify` uses it.
+- **The Amazon stub** (`stores_service/amazon.rs`):
+  - `cloud_state` answers `off`, and `cloud_sync` answers "Amazon Games has no cloud
+    saves." (not `not implemented`);
+  - the DLC calls answer `not implemented`;
+  - the login spec's `login_url` is the kept start's URL, else `<login host>/ap/signin`;
+  - `login_cancelled` and `login_redirect_failed` drop the kept start;
+  - its launch hook refuses an Amazon row with "Couldn't start <title> through nile: not
+    implemented".
+- **Updates.** `update_service.rs` has a `StoreUpdateSource` for `AmazonStore` that is
+  never `ready()`. `lib.rs` already spawns its check after the startup login check
+  (integration item 8); it does nothing until package C.
+- **The hygiene script** allows `expose_secret` in `stores/amazon/auth.rs`, which does
+  not exist yet.
+
+- **Results.** `scripts/ctr.sh gate` PASS; `scripts/ctr.sh wincheck` PASS;
+  `scripts/ctr.sh e2e gog gog-library gog-cloud tv-gog epic epic-library epic-cloud tv-epic launch`:
+  12 spec files passed, `== e2e: all stages passed`. GOG and Epic are unchanged through
+  `prepare_login`, the `finish_query` rule and the launch router.
 
 ## E2E plan
 

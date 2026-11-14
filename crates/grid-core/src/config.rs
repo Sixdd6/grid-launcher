@@ -336,6 +336,9 @@ pub struct StoresConfig {
     /// Not written while default, so a GOG-only config keeps its shape.
     #[serde(default, skip_serializing_if = "EpicConfig::is_default")]
     pub epic: EpicConfig,
+    /// Not written while default, like Epic.
+    #[serde(default, skip_serializing_if = "AmazonConfig::is_default")]
+    pub amazon: AmazonConfig,
 }
 
 impl StoresConfig {
@@ -408,6 +411,29 @@ impl EpicConfig {
     /// Whether nothing differs from the defaults.
     pub fn is_default(&self) -> bool {
         self == &EpicConfig::default()
+    }
+}
+
+/// Amazon Games (`[stores.amazon]`). No cloud saves switch: Amazon has
+/// none in nile.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AmazonConfig {
+    /// The user connected Amazon Games (nile's token file decides whether
+    /// the login is still good).
+    #[serde(default)]
+    pub connected: bool,
+    /// The Amazon given name nile reports, for Settings. Not a secret.
+    #[serde(default)]
+    pub username: String,
+    /// Where Amazon games install; `""` = `<library>/Amazon Games`.
+    #[serde(default)]
+    pub install_dir: String,
+}
+
+impl AmazonConfig {
+    /// Whether nothing differs from the defaults.
+    pub fn is_default(&self) -> bool {
+        self == &AmazonConfig::default()
     }
 }
 
@@ -885,6 +911,7 @@ mod tests {
             "Epic cloud saves default on"
         );
         assert_eq!(loaded.stores.epic.install_dir, "");
+        assert_eq!(loaded.stores.amazon, AmazonConfig::default());
         loaded.save(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(!written.contains("stores"), "written:\n{written}");
@@ -913,6 +940,7 @@ mod tests {
                     cloud_saves: false,
                 },
                 epic: EpicConfig::default(),
+                amazon: AmazonConfig::default(),
             },
             ..Default::default()
         };
@@ -922,6 +950,10 @@ mod tests {
         assert!(
             !written.contains("epic"),
             "a default Epic is not written:\n{written}"
+        );
+        assert!(
+            !written.contains("amazon"),
+            "a default Amazon is not written:\n{written}"
         );
         assert!(
             !written.to_lowercase().contains("token"),
@@ -944,6 +976,27 @@ mod tests {
         cfg.save(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(written.contains("[stores.epic]"), "written:\n{written}");
+        assert!(
+            !written.to_lowercase().contains("token"),
+            "written:\n{written}"
+        );
+        assert_eq!(Config::load(&path).unwrap(), cfg);
+
+        let cfg = Config {
+            stores: StoresConfig {
+                amazon: AmazonConfig {
+                    connected: true,
+                    username: "sam.plays".into(),
+                    install_dir: "/games/Amazon Games".into(),
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("[stores.amazon]"), "written:\n{written}");
+        assert!(!written.contains("epic"), "written:\n{written}");
         assert!(
             !written.to_lowercase().contains("token"),
             "written:\n{written}"

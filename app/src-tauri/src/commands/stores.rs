@@ -1,4 +1,4 @@
-//! External game stores (GOG, Epic) commands and events
+//! External game stores (GOG, Epic, Amazon) commands and events
 //! (`docs/stores-phase1-plan.md` "Tauri commands and events",
 //! `docs/stores-phase2-plan.md` "App"). Thin wrappers: each store command
 //! finds its store's backend (`backend_for`, `backend_for_key`) and calls
@@ -56,7 +56,7 @@ pub enum ToolState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ToolStatus {
-    /// `gogdl` | `legendary`.
+    /// `gogdl` | `legendary` | `nile`.
     pub name: String,
     pub version: String,
     pub state: ToolState,
@@ -87,7 +87,7 @@ pub enum OwnedState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StoreStatus {
-    /// `gog` | `epic`.
+    /// `gog` | `epic` | `amazon`.
     pub source: String,
     pub connection: StoreConnection,
     pub username: String,
@@ -133,8 +133,8 @@ pub struct StoreGame {
     pub disk_bytes: u64,
     pub version: String,
     pub update_version: String,
-    /// `gogdl` | `offline` | `drive` | `legendary`, `None` when not
-    /// installed.
+    /// `gogdl` | `offline` | `drive` | `legendary` | `nile`, `None` when
+    /// not installed.
     pub origin: Option<String>,
     pub not_supported: String,
     pub dlc: Vec<StoreDlc>,
@@ -323,10 +323,10 @@ pub struct StoreBackupPlan {
 /// What every store command answers for a store GRID doesn't support.
 const UNSUPPORTED_STORE: &str = "GRID doesn't support that store yet.";
 
-/// The store a `source` argument names: GOG or Epic.
+/// The store a `source` argument names: GOG, Epic or Amazon.
 fn store_kind(source: &str) -> Result<StoreKind, String> {
     match StoreKind::parse(source.trim()) {
-        Some(kind @ (StoreKind::Gog | StoreKind::Epic)) => Ok(kind),
+        Some(kind @ (StoreKind::Gog | StoreKind::Epic | StoreKind::Amazon)) => Ok(kind),
         _ => Err(UNSUPPORTED_STORE.to_string()),
     }
 }
@@ -340,7 +340,8 @@ fn backend_for(state: &AppState, source: &str) -> Result<Arc<dyn StoreBackend>, 
         .ok_or_else(|| UNSUPPORTED_STORE.to_string())
 }
 
-/// A store game key's store and product id (GOG product id, Epic app name).
+/// A store game key's store and product id (GOG product id, Epic app name,
+/// Amazon product id).
 fn store_key(key: &str) -> Result<(StoreKind, String), String> {
     match key.parse::<GameKey>().map_err(err)? {
         GameKey::Store { source, store_id } => {
@@ -489,9 +490,13 @@ impl crate::store_auth::LoginSink for LoginSink {
     }
 }
 
-fn login_spec(state: &AppState, backend: &dyn StoreBackend) -> crate::store_auth::LoginWindowSpec {
+fn login_spec(
+    state: &AppState,
+    backend: &dyn StoreBackend,
+    login: crate::store_auth::LoginSpec,
+) -> crate::store_auth::LoginWindowSpec {
     crate::store_auth::LoginWindowSpec {
-        login: backend.login_spec(),
+        login,
         source: backend.kind().as_str().to_string(),
         data_dir: state.stores.data_dir().to_path_buf(),
         tv: state.ui_mode.mode() == super::tv::UiMode::Tv,
@@ -499,7 +504,9 @@ fn login_spec(state: &AppState, backend: &dyn StoreBackend) -> crate::store_auth
 }
 
 /// Opens the login window (or focuses it); the result is a
-/// [`STORE_LOGIN_EVENT`].
+/// [`STORE_LOGIN_EVENT`]. The backend prepares the login first
+/// (`StoreBackend::prepare_login`: Amazon installs nile and asks it for
+/// the per-attempt login URL); an open window is only focused.
 #[tauri::command]
 pub async fn store_connect(
     state: State<'_, AppState>,
@@ -508,10 +515,12 @@ pub async fn store_connect(
 ) -> Result<(), String> {
     let backend = backend_for(&state, &source)?;
     let already_open = crate::store_auth::login_window_open(&app);
-    if !already_open {
-        backend.begin_login()?;
-    }
-    let spec = login_spec(&state, backend.as_ref());
+    let login = if already_open {
+        backend.login_spec()
+    } else {
+        backend.clone().prepare_login().await?
+    };
+    let spec = login_spec(&state, backend.as_ref(), login);
     let sink = LoginSink {
         backend: backend.clone(),
         app: app.clone(),
@@ -1044,7 +1053,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keys_and_sources_route_to_gog_and_epic() {
+    fn keys_and_sources_route_to_gog_epic_and_amazon() {
         assert_eq!(
             store_key("gog:1207664643").unwrap(),
             (StoreKind::Gog, "1207664643".to_string())
@@ -1054,7 +1063,11 @@ mod tests {
             (StoreKind::Epic, "Fortnite".to_string())
         );
         assert!(store_key("steam:620").is_err());
-        assert!(store_key("amazon:x").is_err());
+        assert_eq!(
+            store_key("amazon:amzn1.adg.product.1:x").unwrap(),
+            (StoreKind::Amazon, "amzn1.adg.product.1:x".to_string())
+        );
+        assert_eq!(store_kind("amazon").unwrap(), StoreKind::Amazon);
         assert!(store_key("romm:5").is_err());
         assert!(store_key("nonsense").is_err());
         assert_eq!(store_kind("gog").unwrap(), StoreKind::Gog);
