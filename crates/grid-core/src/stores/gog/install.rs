@@ -12,6 +12,11 @@
 //! while `update` with no stored manifest downloads everything into the
 //! exact folder the user picked. A stale manifest from an earlier install
 //! is deleted first, so the update is a full download.
+//!
+//! After the row is written, a Windows build's setup steps run
+//! (`super::setup`): the script and redistributables after an install or a
+//! DLC add, the script alone after an update, none after a repair. Their
+//! problems are the finished entry's warning, never a failed job.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -26,6 +31,7 @@ use super::auth;
 use super::goggame::{find_info_files, parse_info, GogGameInfo, PlayTask};
 use super::meta::{GogDlcMeta, GogMeta, GogOrigin, GogPlatform};
 use super::row::gog_row;
+use super::setup::{self, Scope};
 use super::{
     library_error, tool_exit_error, GogDlcOption, GogInstallOptions, GogInstallRequest, GogJobCtx,
     GogService, GogVersionOption,
@@ -618,7 +624,7 @@ impl StoreJobRunner for GogJob {
             })
             .collect();
 
-        let row = build_row(
+        let mut row = build_row(
             &game,
             &self.install_dir,
             &meta,
@@ -626,9 +632,29 @@ impl StoreJobRunner for GogJob {
             self.old_row.as_ref(),
             &self.compat_tool,
         )?;
+        // The game is installed before its setup steps run: a cancel or a
+        // failed step leaves it so.
         self.ctx.registry.upsert_store(&row)?;
         sink.progress(1, 1);
-        Ok(String::new())
+        let scope = match self.op {
+            StoreOp::Install | StoreOp::Dlc => Scope::Full,
+            StoreOp::Update => Scope::ScriptOnly,
+            _ => return Ok(String::new()),
+        };
+        let outcome = setup::run_after_job(
+            &self.svc,
+            &row,
+            &meta,
+            scope,
+            &self.ctx.default_compat_tool,
+            sink,
+        );
+        if let Some(ran) = outcome.ran {
+            setup::record_ran(&mut meta, ran, scope);
+            row.store_meta = meta.to_json();
+            self.ctx.registry.upsert_store(&row)?;
+        }
+        Ok(outcome.warning)
     }
 }
 

@@ -1,6 +1,23 @@
-import { TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { dataDir, INSTALL_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { connectRomm, openDownloads, openGog, openStoresSettings, storeCards, testId, waitForDownloadLine } from '../helpers/gog.js';
+import { selectValue } from '../helpers/systems.js';
 import { waitForToast } from '../helpers/toasts.js';
+
+/** Each run the seed's `wine` / `umu-run` stand-ins logged: its argv, WINEPREFIX and folder. */
+function compatRuns(): { argv: string[]; prefix: string }[] {
+  const file = path.join(dataDir(), 'gog-setup-argv.log');
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8')
+    .split('---\n')
+    .filter((run) => run.trim() !== '')
+    .map((run) => {
+      const lines = run.split('\n').filter((l) => l !== '');
+      const prefix = (lines.find((l) => l.startsWith('WINEPREFIX=')) ?? '').slice('WINEPREFIX='.length);
+      return { argv: lines.filter((l) => !l.startsWith('WINEPREFIX=') && !l.startsWith('CWD=')), prefix };
+    });
+}
 
 /**
  * Stage `gog-library` (GameStores README, "Library", "Install dialog",
@@ -43,10 +60,50 @@ describe('gog-library', () => {
     await card.$(testId(`card-primary-${((await card.getAttribute('data-testid')) ?? '').replace('library-store-card-', '')}`)).click();
     await $(testId('store-install-dialog')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await expect($(testId('store-install-download'))).toHaveText(/ to download$/);
+    // The Windows version, through the seed's `wine` stand-in ("Wine (system)"):
+    // its setup steps run after the download.
+    await $(testId('store-install-version-windows')).click();
+    const compat = $(testId('store-install-compat'));
+    await compat.waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await browser.waitUntil(async () => (await compat.$$('option')).length > 0, {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the install dialog never listed a compatibility tool',
+    });
+    const tool = (await compat.$$('option').map((o) => o.getAttribute('value'))).find((v) => v.startsWith('Wine')) ?? '';
+    expect(tool).not.toBe('');
+    await selectValue('store-install-compat', tool);
     await $(testId('store-install-go')).click();
     await waitForToast(`${title} added to download queue`);
     await openDownloads();
-    await waitForDownloadLine(/^(Downloading \d+% · |Waiting for a slot|Installing \d+%)/);
+    await waitForDownloadLine(/^(Downloading \d+% · |Waiting for a slot|Installing \d+%|Running the installer silently|Installed · )/);
+  });
+
+  it('a Windows install runs its setup script, then each redistributable, silently in its prefix', async () => {
+    await openDownloads();
+    await waitForDownloadLine(/^Installed · /, INSTALL_TIMEOUT * 3);
+    // No setup-step warning on the row.
+    expect((await waitForDownloadLine(/^Installed · /)).includes('Couldn')).toBe(false);
+    const runs = compatRuns().filter((run) => run.argv[0]?.includes('/stores/gogdl/redist/'));
+    // The script for the game, then for its DLC (the dialog installs it too),
+    // then each redistributable.
+    expect(runs.map((run) => path.basename(run.argv[0]))).toEqual([
+      'scriptinterpreter.exe',
+      'scriptinterpreter.exe',
+      'VC_redist.x64.exe',
+      'oalinst.exe',
+    ]);
+    const [script, dlc, vc, oal] = runs;
+    expect(dlc.argv).toContain('/ProductId=1453375254');
+    expect(script.argv).toEqual(expect.arrayContaining(['/VERYSILENT', '/ProductId=1453375253', '/galaxyclient', '/buildId=56012345678905678', '/lang-code=en-US', '/nodesktopshortcut']));
+    const dir = script.argv.find((a) => a.startsWith('/DIR=')) ?? '';
+    expect(dir).toMatch(/^\/DIR=Z:\\.*\\Lanternfall$/);
+    expect(script.argv.find((a) => a.startsWith('/supportDir='))).toMatch(/^\/supportDir=Z:\\.*\\stores\\gogdl\\support\\1453375253$/);
+    expect(vc.argv.slice(1)).toEqual(['/install', '/quiet', '/norestart']);
+    expect(oal.argv.slice(1)).toEqual(['/S']);
+    for (const run of runs) expect(run.prefix).toMatch(/\/Lanternfall\/prefix$/);
+    // gogdl fetched the full set into one shared folder.
+    const repo = JSON.parse(readFileSync(path.join(dataDir(), 'stores', 'gogdl', 'redist', '.gogdl-redist-manifest'), 'utf8'));
+    expect(repo.HGLInstalled).toEqual(['ISI', 'MSVC2019_x64', 'openAL']);
   });
 
   it('opens Details for an installed game: no RomM sections, store chips and tabs', async () => {

@@ -247,6 +247,7 @@ pub fn parse_post_install(text: &str) -> Vec<FuelStep> {
                 args,
                 valid_returns,
                 in_exe_folder: false,
+                root: String::new(),
             })
         })
         .collect()
@@ -536,6 +537,7 @@ mod tests {
                     args: vec!["/silent".into()],
                     valid_returns: vec![],
                     in_exe_folder: false,
+                    root: String::new(),
                 },
                 FuelStep {
                     id: String::new(),
@@ -543,6 +545,7 @@ mod tests {
                     args: vec!["/silent".into()],
                     valid_returns: vec![0, 3010],
                     in_exe_folder: false,
+                    root: String::new(),
                 },
                 FuelStep {
                     id: String::new(),
@@ -550,6 +553,7 @@ mod tests {
                     args: vec!["/q".into(), "2".into(), "true".into()],
                     valid_returns: vec![],
                     in_exe_folder: false,
+                    root: String::new(),
                 },
             ]
         );

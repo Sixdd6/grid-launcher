@@ -19,6 +19,16 @@
 //   and $GOGDL_CONFIG_PATH/heroic_gogdl/manifests/<id>.)
 //   gogdl --auth-config-path <file> save-sync <path> <id> --os <os> --ts <float> --name <n>
 //         --force-upload|--force-download|--skip-upload|--skip-download
+//   gogdl --auth-config-path <file> redist --ids <a,b> --path <dir>
+//   (GRID's setup steps: writes each listed `__redist` item's installer,
+//   `<dir>/__redist/<ID>/<file>`, deletes the files of items an earlier call
+//   listed and this one doesn't, as gogdl does, and writes the repository
+//   manifest `<dir>/.gogdl-redist-manifest` with `HGLInstalled`.)
+//
+// A product's `script_interpreter`, `dependencies` and `temp_executable`
+// (products.json) go into a Windows build's saved manifest
+// (`scriptInterpreter`, `dependencies`, `products[].temp_executable`); a
+// temp executable is also written under `--support <dir>/<id>/`.
 //
 // Environment: GOGDL_CONFIG_PATH (manifests under heroic_gogdl/manifests/),
 // FAKE_GOGDL_STEPS (progress lines, default 5), FAKE_GOGDL_STEP_MS (default
@@ -26,7 +36,7 @@
 // FAKE_GOGDL_WORKER_FAIL=1 (download exits 0 WITHOUT writing the manifest,
 // as gogdl does after a fatal worker error).
 
-import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -132,7 +142,7 @@ function cmdInfo({ positional, flags }, fx) {
     : {
         size: Object.fromEntries([["*", { download_size: g.download_size, disk_size: g.disk_size }], ...g.languages.map((l) => [l, { download_size: 0, disk_size: 0 }])]),
         dlcs, buildId: g.build_id, languages: g.languages, folder_name: g.folder_name,
-        dependencies: [], versionEtag: "etag", versionName: g.version,
+        dependencies: g.dependencies ?? [], versionEtag: "etag", versionName: g.version,
       };
   log("API", "DEBUG", `authorization: Bearer ${FAKE_TOKEN}`);
   process.stdout.write(JSON.stringify(out) + "\n");
@@ -210,9 +220,66 @@ async function cmdDownload({ command, positional, flags }, fx) {
       languages: [lang ?? "en-US"], dlcs: dlcIds.map((id) => ({ id })), HGLInstallLanguage: lang ?? "en-US",
       HGLPlatform: os, HGLdlcs: dlcIds.map((id) => ({ id })),
       versionName: g.version,
+      baseProductId: g.id,
+      scriptInterpreter: g.script_interpreter === true,
+      dependencies: g.dependencies ?? [],
+      products: [
+        { productId: g.id, name: g.title, temp_executable: g.temp_executable ?? "", temp_arguments: "" },
+        ...dlcIds.map((id) => ({ productId: id, name: id, temp_executable: "", temp_arguments: "" })),
+      ],
     }));
   }
+  if (os !== "linux" && g.temp_executable && typeof flags.support === "string") {
+    const support = path.join(flags.support, g.id);
+    mkdirSync(support, { recursive: true });
+    writeFileSync(path.join(support, g.temp_executable), "MZ fake setup");
+  }
   return 0;
+}
+
+/** The dependency repository the fake serves (GOG's live rows, trimmed). */
+export const REPOSITORY = [
+  { dependencyId: "ISI", readableName: "GOG Script Interpreter", executable: { path: "__redist/ISI/scriptinterpreter.exe", arguments: "" }, internal: true },
+  { dependencyId: "DirectX", readableName: "DirectX", executable: { path: "__redist/DirectX/DXSETUP.exe", arguments: "/silent" }, internal: false },
+  { dependencyId: "MSVC2019", readableName: "MSVC2019", executable: { path: "__redist/MSVC2019/VC_redist.x86.exe", arguments: "/install /quiet /norestart" }, internal: false },
+  { dependencyId: "MSVC2019_x64", readableName: "MSVC2019_x64", executable: { path: "__redist/MSVC2019_x64/VC_redist.x64.exe", arguments: "/install /quiet /norestart" }, internal: false },
+  { dependencyId: "openAL", readableName: "Open AL (2.0.7.0)", executable: { path: "__redist/openAL/oalinst.exe", arguments: "/S" }, internal: false },
+  { dependencyId: "XNA_40", readableName: "XNA 4.0", executable: { path: "__redist/XNA_40/xnafx40_redist.msi", arguments: "/qn" }, internal: false },
+  { dependencyId: "QuickTime", readableName: "QuickTime", executable: { path: "__redist/QuickTime/QuickTimeInstaller.exe", arguments: "" }, internal: true },
+  { dependencyId: "DOSBox074", readableName: "DOSBox 0.74", executable: { path: "", arguments: "" }, internal: true },
+];
+
+async function cmdRedist({ flags }) {
+  if (typeof flags.ids !== "string" || typeof flags.path !== "string") { log("REDIST", "ERROR", "--ids and --path are required"); return 1; }
+  if (process.env.FAKE_GOGDL_REDIST_FAIL === "1") { print("Unable to proceed, Not enough disk space"); return 2; }
+  const dir = flags.path;
+  const ids = flags.ids.split(",").filter(Boolean);
+  const manifestFile = path.join(dir, ".gogdl-redist-manifest");
+  let previous = [];
+  try { previous = JSON.parse(readFileSync(manifestFile, "utf8")).HGLInstalled ?? []; } catch { /* first run */ }
+  const wanted = REPOSITORY.filter((d) => ids.includes(d.dependencyId) && d.executable.path.startsWith("__redist"));
+  for (const d of REPOSITORY) {
+    if (previous.includes(d.dependencyId) && !wanted.includes(d) && d.executable.path) {
+      rmSync(path.join(dir, d.executable.path), { force: true });
+    }
+  }
+  const total = wanted.length * 1024;
+  let done = 0;
+  for (const d of wanted) {
+    const file = path.join(dir, d.executable.path);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, `MZ fake ${d.dependencyId}`);
+    done += 1024;
+    log("PROGRESS", "INFO", `= Progress: ${((done / total) * 100).toFixed(2)} ${done}/${total}, Running for: 00:00:01, ETA: 00:00:00`);
+    await sleep(Number(process.env.FAKE_GOGDL_STEP_MS ?? 150) / 3);
+  }
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(manifestFile, JSON.stringify({ depots: REPOSITORY, build_id: "60163282911088704", HGLInstalled: wanted.map((d) => d.dependencyId) }));
+  return 0;
+}
+
+function print(line) {
+  process.stdout.write(`${line}\n`);
 }
 
 function cmdSaveSync({ positional, flags }) {
@@ -232,6 +299,8 @@ export async function main(argv) {
     case "update":
     case "repair": return cmdDownload(args, fx);
     case "save-sync": return cmdSaveSync(args);
+    case "redist":
+    case "dependencies": return cmdRedist(args);
     case "--version":
     case "version":
       process.stdout.write("1.4.0\n");

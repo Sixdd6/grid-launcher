@@ -286,6 +286,7 @@ pub fn prereq_steps(prereq: Option<&EpicPrereq>, third_party: bool) -> Vec<Redis
         args: split_template(&prereq.args).unwrap_or_default(),
         valid_returns: Vec::new(),
         in_exe_folder: true,
+        root: String::new(),
     }]
 }
 
@@ -1278,6 +1279,7 @@ mod tests {
                 args: vec!["/quiet".into(), "/norestart".into()],
                 valid_returns: vec![],
                 in_exe_folder: true,
+                root: String::new(),
             }]
         );
         // Arguments split shell-style: quotes group, and none is no argument.

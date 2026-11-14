@@ -89,6 +89,7 @@ mod tests {
                 args: vec!["/quiet".into(), "/norestart".into()],
                 valid_returns: vec![],
                 in_exe_folder: true,
+                root: String::new(),
             }],
         };
         let json = meta.to_json();

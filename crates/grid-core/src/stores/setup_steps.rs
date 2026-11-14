@@ -36,8 +36,9 @@ pub const SETUP_FOLDER_GONE: &str =
 /// What one store gives the setup-steps job for one game.
 pub trait SetupStepsStore: Send + Sync {
     /// The game's setup steps now, re-read from the store's own files when
-    /// the job runs (Amazon: the game's fuel.json). Commands resolve
-    /// against the game folder.
+    /// the job runs (Amazon: the game's fuel.json; GOG: its saved build
+    /// manifest). Commands resolve against the game folder, or a step's
+    /// own `root`.
     fn steps(&self) -> Result<Vec<RedistStep>, LibraryError>;
     /// Records `ran` as the list that last worked (Amazon:
     /// `AmazonMeta::post_install_ran`). Called only when every step
@@ -217,8 +218,7 @@ mod tests {
             id: String::new(),
             command: command.into(),
             args: vec!["/silent".into()],
-            valid_returns: vec![],
-            in_exe_folder: false,
+            ..Default::default()
         }
     }
 

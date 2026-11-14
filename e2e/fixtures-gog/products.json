@@ -41,6 +41,8 @@
       "build_id": "56012345678905678",
       "update_version": "2.2",
       "update_build_id": "56012345678909999",
+      "script_interpreter": true,
+      "dependencies": ["MSVC2019_x64", "openAL"],
       "download_size": 2097152,
       "disk_size": 4194304,
       "languages": ["en-US"],

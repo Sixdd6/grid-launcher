@@ -82,3 +82,32 @@ test("save-sync prints a timestamp", () => {
   const out = execFileSync(process.execPath, [tool, "--auth-config-path", "/x", "save-sync", "/s", "1", "--os", "linux", "--ts", "0", "--name", "saves", "--force-upload"], { encoding: "utf8" });
   assert.match(out.trim(), /^\d+\.\d+$/);
 });
+
+test("redist writes the listed installers and the repository, and drops what a later call leaves out", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "fake-gogdl-"));
+  const first = run(["--auth-config-path", "/x", "redist", "--ids", "ISI,MSVC2019_x64,openAL,DOSBox074", "--path", dir]);
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stderr, /\[PROGRESS\] INFO: = Progress: 100\.00 /);
+  assert.ok(existsSync(path.join(dir, "__redist", "ISI", "scriptinterpreter.exe")));
+  assert.ok(existsSync(path.join(dir, "__redist", "openAL", "oalinst.exe")));
+  const manifest = JSON.parse(readFileSync(path.join(dir, ".gogdl-redist-manifest"), "utf8"));
+  assert.deepEqual(manifest.HGLInstalled, ["ISI", "MSVC2019_x64", "openAL"]);
+  assert.equal(manifest.depots.find((d) => d.dependencyId === "openAL").executable.arguments, "/S");
+  const second = run(["--auth-config-path", "/x", "redist", "--ids", "ISI,openAL", "--path", dir]);
+  assert.equal(second.status, 0, second.stderr);
+  assert.ok(!existsSync(path.join(dir, "__redist", "MSVC2019_x64", "VC_redist.x64.exe")), "gogdl deletes what isn't listed");
+  assert.ok(existsSync(path.join(dir, "__redist", "openAL", "oalinst.exe")));
+});
+
+test("a Windows build's manifest carries its script interpreter flag and dependencies", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "fake-gogdl-"));
+  const out = run(
+    ["--auth-config-path", "/x", "update", "1453375253", "--platform", "windows", "--path", path.join(dir, "Lanternfall"), "--skip-dlcs"],
+    { GOGDL_CONFIG_PATH: path.join(dir, "cfg") },
+  );
+  assert.equal(out.status, 0, out.stderr);
+  const manifest = JSON.parse(readFileSync(path.join(dir, "cfg", "heroic_gogdl", "manifests", "1453375253"), "utf8"));
+  assert.equal(manifest.scriptInterpreter, true);
+  assert.deepEqual(manifest.dependencies, ["MSVC2019_x64", "openAL"]);
+  assert.equal(manifest.products[0].productId, "1453375253");
+});

@@ -57,6 +57,7 @@ mod tests {
                 args: vec!["/silent".into()],
                 valid_returns: vec![],
                 in_exe_folder: false,
+                root: String::new(),
             }],
         };
         assert_eq!(AmazonMeta::from_json(&meta.to_json()), meta);

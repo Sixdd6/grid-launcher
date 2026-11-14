@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::stores::redist::RedistStep;
+
 /// What GRID keeps about one installed GOG game.
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 #[serde(default)]
@@ -35,6 +37,10 @@ pub struct GogMeta {
     pub last_sync: i64,
     /// The user picked the executable in Game Settings; an update keeps it.
     pub exe_user_pinned: bool,
+    /// The setup steps (script, then redistributables) that last all
+    /// worked for a gogdl Windows install (`setup`): programs, arguments
+    /// and folders, never a secret.
+    pub setup_ran: Vec<RedistStep>,
 }
 
 /// How a GOG game was installed.
@@ -127,6 +133,13 @@ mod tests {
             }],
             last_sync: 1_700_000_000,
             exe_user_pinned: true,
+            setup_ran: vec![RedistStep {
+                id: "openAL".into(),
+                command: "__redist/openAL/oalinst.exe".into(),
+                args: vec!["/S".into()],
+                root: "/t/redist".into(),
+                ..Default::default()
+            }],
         };
         let json = meta.to_json();
         assert!(json.contains(r#""origin":"offline""#), "{json}");

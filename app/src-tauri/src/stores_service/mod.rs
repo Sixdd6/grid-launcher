@@ -202,7 +202,7 @@ pub trait StoreBackend: Send + Sync + 'static {
     /// game's step list when the job runs and records the list once every
     /// step worked. The command has already checked the game is installed,
     /// not running and has no other live job. The default refuses: the
-    /// store has none (Steam; GOG and Epic until they implement it).
+    /// store has none (Steam).
     fn setup_steps_job(&self, _row: &InstalledGame, _ctx: JobCtx) -> Result<StoreJob, String> {
         Err(grid_core::stores::setup_steps::NO_SETUP_STEPS.to_string())
     }
@@ -658,7 +658,7 @@ mod tests {
     }
 
     #[test]
-    fn stores_without_setup_steps_refuse_the_setup_steps_job() {
+    fn steam_refuses_the_setup_steps_job() {
         let (stores, dir) = facade();
         let ctx = JobCtx {
             registry: Arc::new(Registry::open(&dir.path().join("registry.db")).unwrap()),
@@ -670,15 +670,13 @@ mod tests {
             store_id: "S".into(),
             ..Default::default()
         };
-        for kind in [StoreKind::Gog, StoreKind::Steam] {
-            let refusal = stores
-                .backend(kind)
-                .unwrap()
-                .setup_steps_job(&row, ctx.clone())
-                .err()
-                .unwrap();
-            assert_eq!(refusal, grid_core::stores::setup_steps::NO_SETUP_STEPS);
-        }
+        let refusal = stores
+            .backend(StoreKind::Steam)
+            .unwrap()
+            .setup_steps_job(&row, ctx)
+            .err()
+            .unwrap();
+        assert_eq!(refusal, grid_core::stores::setup_steps::NO_SETUP_STEPS);
     }
 
     #[test]

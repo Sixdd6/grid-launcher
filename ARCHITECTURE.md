@@ -264,8 +264,13 @@ Modules as declared in `src/lib.rs`:
   `akamaihd.net`). The cloud save types every store
   shares (`CloudState`, `SyncMode`, `SaveConflict`) live in `stores` itself.
   `gog` is GOG's HTTP APIs (`api`), sign-in (`auth`), gogdl install, update, repair, DLC
-  and uninstall jobs (`install`), cloud saves (`cloud`), the update check (`update`), and
-  the parts every install path shares: `goggame` (`goggame-*.info`), `meta` (a row's
+  and uninstall jobs (`install`), cloud saves (`cloud`), the update check (`update`), a
+  gogdl Windows install's setup steps (`setup`: the build manifest's script step, ISI or
+  `temp_executable` or v1 `support_commands`, then its `__redist` dependencies fetched by
+  `gogdl redist` with the full id set into one shared `<gogdl>/redist` folder and read
+  from its `.gogdl-redist-manifest`; run through `stores::redist` after an install or DLC
+  add, script only after an update, recorded in `GogMeta.setup_ran`; `setup_steps_job`
+  for Retry), and the parts every install path shares: `goggame` (`goggame-*.info`), `meta` (a row's
   `store_meta` JSON) and `row` (`gog_row`). `offline` is GOG offline installers (a Linux
   `.sh` read as a zip, a Windows Inno Setup `.exe` run silently or, outside TV mode, with
   its wizard; a macOS `.pkg` refused) and their Downloads job. Every GOG Wine prefix is
@@ -313,11 +318,12 @@ Modules as declared in `src/lib.rs`:
   `row::read_post_install`, run through `stores::redist` when `redist::steps_due` says
   so, against `AmazonMeta.post_install_ran`) and `launch` (`launch --json
   --no-wine` gives the five FUEL variables; `launch_error` gives GRID's words). Every parser ignores unknown JSON keys and non-JSON stdout lines. Nothing here may log or forward a store tool's stdout or
-  stderr. `redist` is store-neutral: a game's redistributable steps (`RedistStep`), for
-  Amazon and Epic now and GOG next. A step starts in the game folder, or with
-  `in_exe_folder` in its program's own folder (`step_dir`). It skips what is already
-  installed (`redist_of` maps an id or a file name to a known redistributable, Unreal's
-  prerequisites bundle by its parts; `already_installed` checks the
+  stderr. `redist` is store-neutral: a game's redistributable steps (`RedistStep`, each
+  resolved in the game folder or in its own `root`, GOG's shared folder), for Amazon, Epic
+  and GOG. A step starts in the game folder, or with `in_exe_folder` in its program's own
+  folder (`step_dir`). It skips what is already installed (`redist_of` maps an id or a
+  file name to a known redistributable, Unreal's prerequisites bundle by its parts;
+  `already_installed` checks the
   Windows registry, or real, non-Wine-stub system files in the host or the prefix;
   `.grid-redist.json` in the prefix notes the steps that worked there). Then it runs the
   rest: under the compat tool in the game's prefix (`step_command`, through
@@ -329,7 +335,7 @@ Modules as declared in `src/lib.rs`:
   job (`StoreOp::SetupSteps`, kind `store_setup`) behind Retry on a setup-step warning: a
   store gives it the game row and a `SetupStepsStore` (re-read the step list, record it
   once every step worked), and it runs them through `redist::run_steps` with no download.
-  The app's `StoreBackend::setup_steps_job` builds it (Amazon and Epic now; the default
+  The app's `StoreBackend::setup_steps_job` builds it (Amazon, Epic and GOG; the default
   refuses)
   and the `store_setup_steps` command guards it (installed, not running, no other live
   job, no backup). `steam` is Steam (Phase 4, built 2026-11-14): no tool, no login window, no
