@@ -1227,11 +1227,14 @@ testable statement.
   the Library rail, and Settings › Backup drives with a page per drive.
 
 # Game stores
-Status: Phase 1, GOG with offline installers, built (2026-11-13); Phase 2, Epic Games
-Store through legendary, built (2026-11-13); Phase 3, Amazon Games through nile, built
-(2026-11-14); Steam is planned. The plan is `docs/external-stores-plan.md`, the work
-plans `docs/stores-phase1-plan.md`, `docs/stores-phase2-plan.md` and
-`docs/stores-phase3-plan.md`. The approved design is
+Status: all four stores are built. Phase 1, GOG with offline installers (2026-11-13);
+Phase 2, Epic Games Store through legendary (2026-11-13); Phase 3, Amazon Games through
+nile (2026-11-14); Phase 4, Steam through the Steam client and the Steam Web API
+(2026-11-14). The login and real-account checks wait for the user's own test
+(`docs/external-stores-plan.md`, "Waiting for the user's real-account test"). The plan is
+`docs/external-stores-plan.md`, the work plans `docs/stores-phase1-plan.md`,
+`docs/stores-phase2-plan.md`, `docs/stores-phase3-plan.md` and
+`docs/stores-phase4-plan.md`. The approved design is
 `docs/design/system/components/GameStores/README.md` and
 `docs/design/system/components/TVStores/README.md`.
 
@@ -1293,9 +1296,9 @@ What store games get:
 | Store cloud saves | On, for GOG and Epic (Amazon has none) |
 | Drive backups | GOG on; Epic, Amazon, Steam off ("Store games are not backed up") |
 | Relink and server update checks | Off |
-| Each store's own update check | On |
+| Each store's own update check | On (Steam updates its games itself) |
 | Last played, rail, sort, search | On |
-| Details Overview, Game Settings, uninstall | On |
+| Details Overview, Game Settings, uninstall | On (Steam: no Game Settings; Steam uninstalls) |
 
 GOG, Epic and Amazon games launch like native games, from their install folder (with
 Wine/Proton for a Windows build). A Windows GOG game's Wine prefix is `prefix/` in its
@@ -1304,7 +1307,8 @@ so uninstalling the game removes it and a backup leaves it out. A DLC installer 
 its base game's prefix. Store art (covers, screenshots) is fetched from the store's own
 image hosts without any credential and cached under `<data_dir>/stores/art/`. An Epic launch carries a one-time exchange code, which
 is never printed in a log, an error or a warning. A Steam game's session is watched
-rather than spawned: GRID sees it running until its process ends.
+rather than spawned: Steam starts the game and GRID sees it running until Steam reports
+it closed.
 
 Store screens (2026-11-13, matching the approved design):
 - **Save conflicts.** Both sides show when they changed and their size: this computer's
@@ -1349,6 +1353,32 @@ Store screens (2026-11-13, matching the approved design):
   before a new sign-in). On a Linux system older than glibc 2.35, nile can't run, and
   Settings and the store panel say "nile can't run on this computer: it needs a newer
   Linux system (glibc 2.35 or later)." Amazon games are never backed up to a drive.
+- **Steam** (Phase 4, 2026-11-14). Steam has no tool and no login window: it connects in
+  Settings › Stores › Steam with a SteamID64 (picked from the accounts signed in to this
+  computer's Steam, by persona name only, or typed) and the user's own Web API key.
+  Connect needs a key Steam answers for. The key lives only in the OS keyring; Settings
+  shows a saved key as dots only, never any part of it, and the key field is empty after
+  a Save. Test asks Steam once (`GetOwnedGames`) and says so: "The key works · N games
+  owned", a rejected key ("Steam rejected the key…", with no status code), private game
+  details (Available stays empty, installed games still show), a SteamID64 of the wrong
+  form (refused before any request), or no network. Remove key keeps Steam connected
+  with its installed games only; Disconnect deletes the key, the SteamID64 and GRID's
+  Steam rows, never a game. The client line reads "Steam client found · <path>", or for
+  a Flatpak or Snap Steam its package ("Flatpak (com.valvesoftware.Steam)"); with no
+  client, Steam's panels say to install Steam. Steam installs, updates, verifies,
+  uninstalls and runs its own games: GRID opens `steam://` links and Steam's own window
+  does the rest. While Steam installs, the Downloads row reads "Installing in Steam N% ·
+  Managed by Steam" with Cancel disabled (it takes no download slot and is never retried)
+  and ends "Installed by Steam" or Cancelled. Games installed in Steam outside GRID
+  appear by themselves within the 15 s background scan, and Details says "Installed in
+  Steam, outside GRID". Only games and demos show: Proton, the Steam runtimes,
+  redistributables and owned software are filtered out everywhere. An Available Steam
+  game shows no size, and no Steam game shows Genres. Play starts the game through Steam
+  and GRID watches the session (Steam's running app, else the game's process); it ends
+  when Steam reports the game closed, or silently when Steam never starts it within
+  3 minutes. GRID can't stop a Steam game ("Running in Steam"). Steam games have no Game
+  Settings, no store cloud saves (Steam Cloud is Steam's), no updates in Library ›
+  Updates, and are never backed up to a drive.
 - **Play on installed cards.** Every "<game> installed" card for a RomM install has Play,
   which launches the game the normal way (TV mode opens Playing). A card that sums several
   installs has none. Store install cards already have Play.

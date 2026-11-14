@@ -1,6 +1,51 @@
 # External game stores — plan
 
-Status: Phase 0 done 2026-11-13 (shared model on main; design approved: `docs/design/system/components/GameStores` and `TVStores`). Phase 1 (GOG with offline installers) built 2026-11-13 (`docs/stores-phase1-plan.md`). Phase 2 (Epic Games Store through legendary) built 2026-11-13 (`docs/stores-phase2-plan.md`). Phase 3 (Amazon Games through nile) built 2026-11-14 (`docs/stores-phase3-plan.md`). Phase 4 (Steam) is next.
+Status: Phase 0 done 2026-11-13 (shared model on main; design approved: `docs/design/system/components/GameStores` and `TVStores`). Phase 1 (GOG with offline installers) built 2026-11-13 (`docs/stores-phase1-plan.md`). Phase 2 (Epic Games Store through legendary) built 2026-11-13 (`docs/stores-phase2-plan.md`). Phase 3 (Amazon Games through nile) built 2026-11-14 (`docs/stores-phase3-plan.md`). Phase 4 (Steam) built 2026-11-14 (`docs/stores-phase4-plan.md`). All phases are built; the real-account login tests are pending with the user (checklist below, "Waiting for the user's real-account test").
+
+## Waiting for the user's real-account test
+
+Everything here was built and tested against mocks and fakes only (no real account, key
+or Steam client). The user's final test, store by store:
+
+**GOG (Phase 1)**
+- [ ] Sign in through GRID's login window with a real GOG account: the real page renders
+  in the incognito WebKitGTK window, 2-step and captcha work, and the redirect to
+  `on_login_success` is caught in Rust (the success page never loads).
+- [ ] TV mode: the login page over TV mode, typing with the on-screen keyboard
+  (`store_login_type`), Tab/Enter/Backspace.
+- [ ] gogdl's real `auth`, a real install, update and repair, and a real `save-sync` both
+  ways; Disconnect removes `<data_dir>/stores/gogdl/` and the login webview's data.
+
+**Epic Games (Phase 2)**
+- [ ] Spike 3: the Tauri login window with Epic's real sign-in page (the finish URL and
+  any other localhost navigation refused; pop-ups opening in the same window; the
+  authorization code reaching legendary).
+- [ ] legendary's real login, owned list, install, launch (exchange code, offline retry)
+  and `sync-saves`.
+
+**Amazon Games (Phase 3)**
+- [ ] Spike 5: WebKitGTK's user agent on Amazon's page, captcha and 2-step in the
+  ephemeral context, the finish hop reaching `on_navigation`, and the pop-ups.
+- [ ] `register`'s real lines: success, and the refusal body on stdout.
+- [ ] `library sync` succeeding, and the expired-refresh line (`Failed to refresh the
+  token <Response [4xx]>`).
+- [ ] The real `library.json` art fields (the portrait cover question).
+- [ ] Real `install`/`update`/`verify` progress, the `installed.json` version format and
+  real `list-updates --json` output.
+- [ ] The SDK download (the FUEL DLLs), and `auth --logout` deregistering.
+
+**Steam (Phase 4)**
+- [ ] Spike 5, the real client: `steam://install`, `uninstall`, `validate` and `-silent
+  steam://rungameid/<id>` with Steam running, not running and signed out, on native and
+  Flatpak Steam (and Snap if available); Steam's dialogs appearing over TV mode.
+- [ ] `RunningAppID` and `apps/<id>/Running` in `registry.vdf` while a native and a
+  Proton game run (the `/proc` fallback covers them until then), and the same values in
+  the Windows registry (`SteamPath`, `SteamExe`, `RunningAppID`) on a Windows host.
+- [ ] The manifest's flags and bytes during a real install, a pause and an update (the
+  install watch's progress and its Cancelled rule), and `LastPlayed` in real manifests.
+- [ ] The user's key: Test works, the private toggle gives `{"response": {}}`, a revoked
+  key's status (the words carry no code either way), the real `GetOwnedGames` shape with
+  `rtime_last_played`, and `GetPlayerSummaries` for a manual SteamID64.
 
 ## User decisions (2026-11-13)
 

@@ -304,14 +304,22 @@ Modules as declared in `src/lib.rs`:
   `--path <the game's folder>` exactly, `install::folder_name` as nile names it; update,
   verify, uninstall; fuel.json `PostInstall` is never run) and `launch` (`launch --json
   --no-wine` gives the five FUEL variables; `launch_error` gives GRID's words). Every parser ignores unknown JSON keys and non-JSON stdout lines. Nothing here may log or forward a store tool's stdout or
-  stderr. `steam` is Steam (Phase 4; Step 0 on 2026-11-14): no tool, no login window, no
-  GRID-run job. Step 0 holds the contracts: `mod.rs` (`SteamEndpoints`, `SteamId`,
-  `SteamApiError` whose words never carry a URL, the owned-list, `GetItems`, client,
-  account and manifest types, `SteamLink` and `SteamService`, whose bodies package A
-  fills: the Web API in `api.rs`, the only file that reads the key and only into a
-  request's query; roots, the executable, `loginusers.vdf` and manifests in
-  `paths.rs`/`local.rs`; the `steam://` opener in `client.rs`; the alive check and the
-  install watch in `watch.rs`), `filter` (games vs tools: the denylist, the name and
+  stderr. `steam` is Steam (Phase 4, built 2026-11-14): no tool, no login window, no
+  GRID-run job. `mod.rs` holds `SteamEndpoints`, `SteamId`, `SteamApiError` (whose words
+  never carry a URL or a status code), the owned-list, `GetItems`, client, account and
+  manifest types (`ManifestRead`: found, unreadable while Steam writes it, missing),
+  `SteamLink` and `SteamService`: the Web API in `api.rs` (`GetOwnedGames`,
+  `GetPlayerSummaries`, the keyless `GetItems`; the only file that reads the key, and only
+  into a request's query; no redirect followed); roots (native, Flatpak, Snap; Windows
+  from `HKCU`/`HKLM`), the executable and `loginusers.vdf` in `paths.rs`; libraries and
+  manifests in `local.rs` (`scan_report` keeps unreadable manifests and unplugged
+  libraries apart from uninstalls); the `steam://` opener in `client.rs` (clean env, own
+  process group, null stdio); and in `watch.rs` the alive check (`registry.vdf`'s
+  `RunningAppID`, the `/proc` fallback, the Windows registry) and `InstallWatch`, the one
+  pure install-watch step the app drives (unreadable keeps the last progress; two polls
+  in a row without an installing manifest end it Cancelled; no manifest within the start
+  timeout ends it Cancelled; `resumed()` for an install Steam started itself). The e2e
+  override (`with_roots_override`) reads only the roots it is given. `filter` (games vs tools: the denylist, the name and
   folder patterns, the store type; the `StateFlags` phase and progress), `meta`
   (`SteamMeta`) and `row` (`steam_row`: no path column is set, so no GRID path that
   removes, moves or backs up files can reach a folder Steam owns; the folder is in
@@ -388,19 +396,33 @@ The shell owns *when* things run; grid-core owns *what* they do.
   guards, nile's glibc floor shown as the tool's error, and the `StoreLaunchHook` that
   adds nile's FUEL environment (not connected or no nile, as after a Disconnect: the row
   launches as it is). No cloud saves (`cloud_state` answers `none`) and no DLC.
-  `steam.rs` is `SteamStore` (Phase 4; a Step 0 stub until package C): no tool (an empty
-  `ToolStatus`), no login window (`prepare_login` answers "Steam connects in Settings ›
-  Stores."), every install, update, repair, DLC and uninstall path refused ("Steam
-  installs, updates and uninstalls its games itself."), and `launch_watched`, which opens
-  `steam://rungameid/<id>` through `SteamService::open` and registers a watched session.
-  Its status carries `StoreStatus.steam` (`SteamCard`: the client line, the SteamID64, the
-  key's state, the local accounts; never the key). It holds the keyring's
-  `SteamKeyStore` slot (`StoresService::real` takes it from `lib.rs`). Its HTTP client
-  follows no redirect. The Steam commands (`steam_test`, `steam_save`,
-  `steam_remove_key`, `steam_recheck_client`, `steam_open`) are in `commands/stores.rs`;
-  `steam_open`'s install admits the queue's store-external Downloads row
-  (`InstallService::admit_store_external`: no slot, no cancel or retry, Steam owns
-  them). Store updates are keyed
+  `steam.rs` is `SteamStore` (Phase 4): no tool (an empty `ToolStatus`), no login window
+  (`prepare_login` answers "Steam connects in Settings › Stores."), every install,
+  update, repair, DLC and uninstall path refused ("Steam installs, updates and uninstalls
+  its games itself."), and `launch_watched`, which opens `steam://rungameid/<id>` through
+  `SteamService::open` and registers a watched session. It reaches Steam only through
+  the `SteamApi` seam (`RealSteam` forwards to grid-core's `SteamService`; the unit tests
+  fake it, so no test reaches the network). It owns the Steam registry rows (reconciled
+  from the manifests by the 15 s background scan, tools and runtimes never written,
+  `outside` unless GRID's own install watch saw it finish), the only writer of
+  `stores/cache/steam-owned.json` and `steam-apps.json` (Disconnect deletes both; Remove
+  key deletes the owned list), the install watches (grid-core's `InstallWatch` stepped
+  every 2 s, each with its store-external Downloads row) and the background
+  `store-notice` cards ("Steam connected · N games owned" / the private-connect error after
+  `steam_save`, a Refresh's "Steam: N games found · M to install" and its still-private
+  error, "<title> installed" · Play, "<title> uninstalled"); the frontend raises the cards
+  for the other commands it calls. Its status carries `StoreStatus.steam` (`SteamCard`:
+  the client line, the SteamID64, the key's state, the local accounts; never the key). It
+  holds the keyring's `SteamKeyStore` slot (`StoresService::real` takes it from
+  `lib.rs`). The Steam commands (`steam_test`, `steam_save`, `steam_remove_key`,
+  `steam_recheck_client`, `steam_open`) are in `commands/stores.rs`; `steam_open`'s
+  install admits the queue's store-external Downloads row
+  (`InstallService::admit_store_external`: no slot, no cancel or retry, Steam owns them).
+  The UI words every Steam sentence in `app/src/lib/gamestores/steam.ts` (desktop and
+  TV), reads `managedByClient` rather than the store's name, and keeps the key out of
+  every Svelte store (the desktop field is read once on Test or Save; TV's masked
+  keyboard hands it to a plain variable); Settings is `settings/SteamCard.svelte` and TV's
+  `tv/stores/TvSteamPage.svelte`. Store updates are keyed
   by `GameKey` in `update_service.rs` (`StoreUpdateSource`, one per store). `store_auth.rs` is the login window: a separate, unprivileged, incognito webview
   whose finish URL (a store's `LoginSpec`: scheme, host, port and path, plus a required
   query pair when `finish_query` is set, as Amazon's `openid.assoc_handle`, so Amazon's

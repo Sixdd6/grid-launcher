@@ -1475,6 +1475,93 @@ Where package D differs from, or adds to, the plan:
   `E2E_STEAM_ROOT` and `E2E_STEAM_ARGV_FILE` to the spec process for the steam groups;
   the seed must leave Moonlit Ferry installed and Deep Field Radio `outside`.
 
+## Integration outcome (2026-11-14)
+
+Package D (fcef208) merged onto Step 0 + A + C (a79e4c3). The plan's per-package sections
+were additive and are all kept (one textual conflict, between the A and D deviation
+sections). Items:
+
+- **Notice split: every card once.** The backend raises "Steam connected · N games
+  owned" / the private-connect error (after `steam_save`), a Refresh's "Steam: N games
+  found · M to install", the still-private Refresh error ("Steam still lists no games:
+  the profile’s game details are private"), "<title> installed" · Play and "<title>
+  uninstalled". The frontend raises the cards for the commands it calls: Install /
+  Verify / Uninstall in Steam, "Steam isn’t installed…", "Starting … through Steam…",
+  "… is running in Steam…", "Steam client found", "Web API key removed…" and "Steam
+  disconnected…". Both had claimed the still-private Refresh card: D's frontend refused
+  to send `store_refresh` while the card's key state was `private` and raised its own
+  card. **The backend now owns it** (desktop and TV): Refresh always asks Steam, so a
+  profile made public since the last look refreshes instead of being refused until the
+  next Test or Save, and the card shows once. D's `steamStillPrivateNotice` is gone. TV
+  shows the backend's one-line card instead of the TV prototype's title + sub line (the
+  same words). C's backend emits nothing for `steam_open`, `steam_recheck_client`,
+  `steam_remove_key` or Disconnect (checked); the shared Downloads notifier skips store
+  rows, so the store-external row adds no "installed" card of its own.
+- **One install watch: A's `InstallWatch`, with C's rules.** C's private `watch_step` /
+  `WatchState` / `WatchEvent` are gone; the app drives grid-core's
+  `InstallWatch::step(&ManifestRead)` through a new `SteamApi::manifest_read` (default:
+  from `manifest()`, so the unit fake is unchanged; `RealSteam` forwards to A's
+  `SteamService::manifest_read`). Kept from C: two polls in a row without an installing
+  manifest after it was seen end it Cancelled (`STEAM_INSTALL_END_MISSES` = 2; A's watch
+  cancelled on the first), and the app's configurable start timeout
+  (`InstallWatch::with_start_timeout`). Kept from A: an unreadable manifest (Steam
+  writing it) keeps the last progress and is not a miss, and `resumed()` now starts the
+  watch for an install Steam started by itself (seen already, so it never waits the
+  15-minute start timeout). A's unit tests and C's `the_install_watch_steps` were
+  updated to the merged rules.
+- **`DownloadKind 'store_external'`** in `api.ts` matches the queue's
+  `kind: "store_external"` string.
+- **No test reaches the network.** The Steam unit tests use C's fake `SteamApi`;
+  `tests/steam_store.rs`'s local-file services used `SteamEndpoints::real()` (they made
+  no request, but a future call would have reached Steam): they now use a dead loopback
+  API (`dead_api()`, `127.0.0.1:9`). Every network test uses the wiremock server or a
+  closed port; every e2e spec uses the mock Steam.
+- **D's specs on C's harness.** `steam-library` and `tv-steam` now call
+  `ensureSteamKey()` in `before` (the seed writes no key). D's helper reads the fake's
+  argv lines as JSON arrays (joined by spaces). The desktop key field is filled with
+  `fillKey()`, which sends the key reversed and lets the page turn it back, so the key
+  never crosses the WebDriver wire as text (D's `setValue(key)` and the unused
+  `typeKey` are gone). `tv-steam` still types the fixture key through the on-screen
+  keyboard one key at a time: that is the flow under test, and only `steam-secrets`
+  scans its own wdio logs. C's seed already matches D's assumptions (Moonlit Ferry
+  installed; every fake-root game is `outside`, Deep Field Radio included);
+  `scripts/e2e.sh` already exported `E2E_STEAM_ROOT` / `E2E_STEAM_ARGV_FILE`.
+- **Secrets.** `steam-secrets` passes on the merged tree with debug logging (no key in
+  any GRID log line, event, answer, file or wdio log). D's UI paths keep the key out of
+  every Svelte store and IPC payload (the desktop field is read once on Test or Save via
+  `bind:this` and cleared; TV keeps it in a plain variable of the page, cleared after a Save that
+  connects and after Disconnect, and gone with the page).
+- **Phase 2/3 lessons.** No `tv-*` spec that lists Settings panes or store counts needed
+  a change (Steam not connected has no rail group); `tv-steam` keeps the main window
+  for WebDriver; Details' Escape works for Steam's Verify/Uninstall.
+
+Failures found and fixed at integration:
+- `steam-library` Play: Details' "Last played" stayed "2 hours ago" after the Steam
+  session ended. A real bug for every store: open Details read the registry list, which
+  is re-read only when the Library comes forward, and the launch stamp has no event.
+  `StoreDetails` now re-reads the registry whenever the game starts or stops playing.
+- `steam-library` Install in Steam: the spec read Installed once, right after the
+  "installed" card, before the list had followed `stores-changed`; it now waits for the
+  title (spec race, the app was right).
+- `steam-library` cancelled install: D's spec used `.fake-install-cancel` (no manifest
+  ever), which ends only at the 15-minute start timeout; it now uses C's
+  `.fake-install-abort` (Steam cancels halfway, the manifest goes), which is the plan's
+  "the install goes away" case.
+- `tv-steam` Play: the spec waited 5 s for the Playing page to close; the fake runs the
+  game 4 s and the watched session needs two misses 2.5 s apart, so it now waits up to
+  20 s, as the desktop spec does.
+- Gate: `launch_service`'s `a_platform_known_only_by_its_slug_still_resolves_a_retroarch_core`
+  failed once on an empty argv record: the recording stub's shell created the file before
+  writing it, so `record.is_file()` could see it empty (an old race, not Steam's). The stub
+  now writes aside and renames.
+
+Results: `scripts/ctr.sh gate` PASS (`== gate: PASS`); `scripts/ctr.sh wincheck` PASS
+(`== wincheck: PASS`); full `scripts/ctr.sh e2e`: 52 stage groups, 86 spec files
+(`steam`, `steam-library`, `tv-steam` and every GOG, Epic, Amazon and TV group
+included), every one on its first attempt, `== e2e: all stages passed`. The real-account
+checks wait for the user (`docs/external-stores-plan.md`, "Waiting for the user's
+real-account test").
+
 ## E2E plan
 
 - **Mock Steam** and **fake steam** as in package C. Every other group gets the dead
