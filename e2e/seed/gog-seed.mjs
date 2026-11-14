@@ -17,8 +17,9 @@
  *   conflicts: `E2E_GOG_CONFLICT_KEY`). Lanternfall stays available.
  *
  * Always: `home/Downloads` with the same two installers (tv-gog's HOME), and
- * `stubs/bin` with `wine` and `umu-run` stand-ins that run the fake
- * GOG installer (e2e/fake-tools/installer.mjs), and `installers/` with a
+ * `stubs/bin` with `wine` and `umu-run` stand-ins that log every run to
+ * `gog-setup-argv.log` and run the fake GOG installer
+ * (e2e/fake-tools/installer.mjs) or, for a setup step, exit 0, and `installers/` with a
  * GOG Linux `.sh` (`E2E_GOG_INSTALLER_SH`) and a macOS `.pkg`
  * (`E2E_GOG_INSTALLER_PKG`).
  */
@@ -50,9 +51,22 @@ const sql = (s) => `'${String(s).replace(/'/g, "''")}'`;
 const stubs = path.join(dataDir, 'stubs', 'bin');
 mkdirSync(stubs, { recursive: true });
 const installer = path.join(here, '..', 'fake-tools', 'installer.mjs');
+// Each run's argv (one argument per line), its WINEPREFIX and folder, then
+// a `---` line, go to <data>/gog-setup-argv.log. A setup step (the script
+// interpreter, a temp executable or a redistributable from gogdl's shared
+// folder, msiexec) ends at once; anything else is the fake offline installer.
+const argvLog = path.join(dataDir, 'gog-setup-argv.log');
 for (const name of ['wine', 'umu-run']) {
   const file = path.join(stubs, name);
-  writeFileSync(file, `#!/bin/sh\nexec node ${JSON.stringify(installer)} "$@"\n`);
+  writeFileSync(
+    file,
+    `#!/bin/sh
+for a in "$@"; do printf '%s\\n' "$a" >> ${JSON.stringify(argvLog)}; done
+printf 'WINEPREFIX=%s\\nCWD=%s\\n---\\n' "$WINEPREFIX" "$PWD" >> ${JSON.stringify(argvLog)}
+case "$1" in */stores/gogdl/redist/*|*/stores/gogdl/support/*|msiexec) exit 0 ;; esac
+exec node ${JSON.stringify(installer)} "$@"
+`,
+  );
   chmodSync(file, 0o755);
 }
 const installers = path.join(dataDir, 'installers');

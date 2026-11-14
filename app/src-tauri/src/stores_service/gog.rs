@@ -75,6 +75,17 @@ pub trait GogApi: Send + Sync {
     fn update_job(&self, row: &InstalledGame, ctx: GogJobCtx) -> StoreJob;
     fn repair_job(&self, row: &InstalledGame, ctx: GogJobCtx) -> StoreJob;
     fn dlc_job(&self, row: &InstalledGame, dlc_id: &str, ctx: GogJobCtx) -> StoreJob;
+    /// Only a gogdl Windows install's setup steps (no game download, no
+    /// login).
+    fn setup_steps_job(
+        &self,
+        _row: &InstalledGame,
+        _ctx: GogJobCtx,
+    ) -> Result<StoreJob, StoreError> {
+        Err(StoreError::Refused(
+            grid_core::stores::setup_steps::NO_SETUP_STEPS.to_string(),
+        ))
+    }
     fn remove_dlc(
         &self,
         registry: &Registry,
@@ -180,6 +191,9 @@ impl GogApi for RealGog {
     }
     fn dlc_job(&self, row: &InstalledGame, dlc_id: &str, ctx: GogJobCtx) -> StoreJob {
         self.service.dlc_job(row, dlc_id, ctx)
+    }
+    fn setup_steps_job(&self, row: &InstalledGame, ctx: GogJobCtx) -> Result<StoreJob, StoreError> {
+        self.service.setup_steps_job(row, ctx)
     }
     fn remove_dlc(
         &self,
@@ -1348,6 +1362,11 @@ impl StoreBackend for GogStore {
     }
     fn repair_job(&self, row: &InstalledGame, ctx: JobCtx) -> StoreJob {
         self.api.repair_job(row, ctx.gog())
+    }
+    fn setup_steps_job(&self, row: &InstalledGame, ctx: JobCtx) -> Result<StoreJob, String> {
+        self.api
+            .setup_steps_job(row, ctx.gog())
+            .map_err(|e| e.to_string())
     }
     fn dlc_job(
         self: Arc<Self>,

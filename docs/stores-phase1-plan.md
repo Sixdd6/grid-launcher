@@ -805,3 +805,63 @@ Parity gaps closed after integration (against the GameStores / TVStores prototyp
   The desktop launches through `launchGame`; TV mode registers `navigation.play`, which runs
   `playGame` (Playing page). A summary card has no Play. Store install cards already had
   Play (`notice::installed`).
+
+## Setup steps outcome (2026-11-14)
+
+User decision (2026-11-14, `docs/external-stores-plan.md` "User decisions"): a gogdl
+install of a Windows build runs GOG's setup script and the build's redistributables
+silently, right after install. Built in `grid-core` `stores::gog::setup` on the shared
+`stores::redist` runner and `stores::setup_steps` job:
+
+- **Script first**, for the base game and each installed DLC (from the saved build
+  manifest `heroic_gogdl/manifests/<id>`): `scriptInterpreter: true` runs
+  `<gogdl>/redist/__redist/ISI/scriptinterpreter.exe /VERYSILENT /DIR=<game>
+  /Language=<name> /LANG=<name> /ProductId=<pid> /galaxyclient /buildId=<build>
+  /versionName=<v> /lang-code=<code> /supportDir=<support> /nodesktopshorctut
+  /nodesktopshortcut` (Heroic's set; paths in Wine's `Z:\` form off Windows, as they are
+  on Windows or for a ScummVM game); else a non-empty `temp_executable` from
+  `<gogdl>/support/<id>/<pid>/`; a v1 manifest's `support_commands` for the install
+  language or `Neutral`. Each script step's id is `gog-script:<pid>:<build>`.
+- **Then the dependencies** (`dependencies`; v1 `product.depots[].redist`): only items
+  whose repository path is under `__redist/`, not internal, and not ISI, QuickTime, Foxit
+  or AdobeAir. `gogdl [--auth-config-path F] redist --ids <ISI + every saved manifest's
+  dependencies> --path <gogdl>/redist`, always the full set (gogdl deletes what isn't
+  listed), and only when that folder lacks an installer the job needs. Its progress uses
+  the gogdl parser under "Running the installer silently". Programs and silent arguments
+  come from `.gogdl-redist-manifest` (arguments split like Python's shlex); a `.msi` runs
+  through msiexec.
+- **When**: last step of an install and a DLC add (script then redistributables); after
+  an update the script alone (the new build in its id, so the prefix marker doesn't skip
+  it); none after a repair. GRID has no move for store games, so nothing runs on one.
+  `GogMeta.setup_ran` keeps the list that last all worked; the prefix marker
+  `.grid-redist.json` keeps each step that worked there, keyed by the store id when the
+  detection table has no rule.
+- **Retry**: `GogService::setup_steps_job` (app `GogApi`/`StoreBackend::setup_steps_job`):
+  re-reads the manifest, fetches the shared folder again only if it lacks an installer,
+  runs what isn't satisfied, records the list. Refuses a Linux, offline or drive row with
+  `NO_SETUP_STEPS`, and a build with no steps with "<title> has no setup steps to run."
+- **Shared changes**: `RedistStep.root` (the folder a step resolves in when it isn't the
+  game folder; skipped in JSON when empty, so Amazon's meta is unchanged), `resolve_in`
+  and the warnings "its file isn't there" / "its path leads outside its folder"; the
+  marker key falls back to the step's id before its command; the detection table gains
+  .NET 3.5, .NET 4.0–4.7.2 (registry `Install`/`Release`), XNA 3.1 and 4.0 (registry),
+  and never maps an unknown `msvc…`/`dotnet…` id (or a `vcredist` path with 2005/2008)
+  to a newer rule. MSVC2005, MSVC2008, MSVC2026, PhysX, .NET Core/Desktop Runtime and UE4
+  prerequisites have no reliable check and always run (the prefix marker still skips a
+  rerun).
+- **Tests**: `stores::gog::setup` unit tests (manifest parsing v1/v2, dependency filtering,
+  the full-set `--ids`, ISI vs temp_executable vs v1 commands, the update-reruns-only-
+  the-script record, the fetch-when-missing rule); `stores::redist` tests for the GOG
+  ids and a rooted step (resolution, marker by id, a new build reruns);
+  `crates/grid-core/tests/gog_setup.rs` with a fake gogdl implementing `redist` and a
+  fake runner (install order and argv, the full set, update/repair/DLC, a failed step
+  then Retry running only it, a failed download as a warning, game-folder deps never
+  run, a Linux row refused). e2e `gog-library`: Lanternfall's Windows build
+  (`scriptInterpreter`, `["MSVC2019_x64","openAL"]` in the fixture) installs under
+  "Wine (system)"; the seed's `wine`/`umu-run` stand-ins log every run to
+  `<data>/gog-setup-argv.log`, and the spec checks the script, then `VC_redist.x64.exe
+  /install /quiet /norestart`, then `oalinst.exe /S`, in `<Lanternfall>/prefix`, and the
+  shared folder's `HGLInstalled`. `node --test e2e/fake-tools/gogdl.test.mjs` covers the
+  fake's `redist`.
+- Not checked on a real Windows host or with real GOG builds: the script interpreter's
+  behaviour under Proton and the elevated runner (unit-tested as text only).

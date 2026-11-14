@@ -7,9 +7,11 @@
 //! to run them again). User decisions 2026-11-14
 //! (`docs/stores-phase3-plan.md` "User decisions" 2).
 //!
-//! Each step's command is resolved inside the game folder ([`resolve_step`]:
-//! either separator, never out of the folder) and runs with its arguments
-//! as given, in the game folder. A `.msi` runs through `msiexec /i`.
+//! Each step's command is resolved inside the game folder, or inside its
+//! own [`RedistStep::root`] (GOG's shared redistributables folder and its
+//! support files: [`resolve_in`], [`resolve_step`]: either separator, never
+//! out of the folder) and runs with its arguments as given, in the game
+//! folder. A `.msi` runs through `msiexec /i`.
 //!
 //! - **Linux and macOS:** each step runs under the game's compat tool in the
 //!   game's own prefix: the command a launch of the game would use
@@ -112,6 +114,12 @@ pub struct RedistStep {
     /// The exit codes that mean it worked; empty for
     /// [`DEFAULT_VALID_RETURNS`].
     pub valid_returns: Vec<i64>,
+    /// The folder `command` is resolved in (and must stay inside) when it
+    /// isn't the game folder: GOG's shared redistributables folder or its
+    /// support files folder. `""` for the game folder. An absolute path,
+    /// never a secret.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub root: String,
 }
 
 // --- what is already installed ---------------------------------------------------
@@ -131,6 +139,17 @@ pub enum Redist {
     },
     /// .NET Framework 4.8.
     DotNet48,
+    /// .NET Framework 3.5 (2.0 and 3.0 with it).
+    DotNet35,
+    /// .NET Framework 4.0 (`release` 0) or a 4.x release up to 4.7.2: its
+    /// least `Release` value ([`DOTNET45_RELEASE`] and so on).
+    DotNet4 {
+        release: u32,
+    },
+    /// The XNA Framework 3.1 (`v4` false) or 4.0 redistributable.
+    Xna {
+        v4: bool,
+    },
 }
 
 impl Redist {
@@ -143,6 +162,9 @@ impl Redist {
                 format!("vcredist-{year}-{}", if x64 { "x64" } else { "x86" })
             }
             Redist::DotNet48 => "dotnet48".to_string(),
+            Redist::DotNet35 => "dotnet35".to_string(),
+            Redist::DotNet4 { release } => format!("dotnet4-{release}"),
+            Redist::Xna { v4 } => if v4 { "xna-4.0" } else { "xna-3.1" }.to_string(),
         }
     }
 }
@@ -157,12 +179,25 @@ impl Redist {
 /// | `directx`, `directx_jun2010` | `dxsetup.exe` | DirectX June 2010 |
 /// | `msvc2010[_x64]` … `msvc2013[_x64]` | `vcredist_x86/x64.exe` with that year in its path | VC++ of that year |
 /// | `msvc2015` … `msvc2022[_x64]` | `vc_redist.x86/x64.exe`, `vcredist_x86/x64.exe` | VC++ 2015–2022 |
-/// | `dotnet48`, `dotnet4` | `ndp48-*.exe` | .NET Framework 4.8 |
+/// | `dotnet48` | `ndp48-*.exe` | .NET Framework 4.8 |
+/// | `dotnet35`, `dotnet35c` | | .NET Framework 3.5 |
+/// | `dotnet4`, `dotnet4c`, `dotnet45` … `dotnet472` | | .NET Framework 4.0–4.7.2 |
+/// | `xna`, `xna_40` | | XNA Framework 3.1, 4.0 |
+///
+/// GOG's other ids have no rule (`MSVC2005`, `MSVC2008` and `MSVC2026`:
+/// no one registry value or system file tells their exact runtime; PhysX,
+/// .NET Core and Desktop Runtime, UE4 prerequisites). An `msvc…` or
+/// `dotnet…` id with no rule never falls back to the file name (GOG's
+/// `MSVC2005` is a `vcredist_x86.exe` too), and neither does a
+/// `vcredist_x86/x64.exe` with 2005 or 2008 in its path.
 pub fn redist_of(step: &RedistStep) -> Option<Redist> {
     let id = step.id.trim().to_lowercase();
     if !id.is_empty() {
         if let Some(found) = redist_of_id(&id) {
             return Some(found);
+        }
+        if id.starts_with("msvc") || id.starts_with("dotnet") {
+            return None;
         }
     }
     let command = step.command.trim().to_lowercase().replace('\\', "/");
@@ -174,6 +209,11 @@ pub fn redist_of(step: &RedistStep) -> Option<Redist> {
             year: 2015,
             x64: name.contains("x64"),
         }),
+        "vcredist_x64.exe" | "vcredist_x86.exe"
+            if command.contains("2005") || command.contains("2008") =>
+        {
+            None
+        }
         "vcredist_x64.exe" | "vcredist_x86.exe" => {
             let year = [2010u16, 2012, 2013]
                 .into_iter()
@@ -193,7 +233,31 @@ fn redist_of_id(id: &str) -> Option<Redist> {
     match id {
         "openal" => return Some(Redist::OpenAl),
         "directx" | "directx_jun2010" | "directx_june2010" => return Some(Redist::DirectXJun2010),
-        "dotnet48" | "dotnet4" | "dotnet_48" => return Some(Redist::DotNet48),
+        "dotnet48" | "dotnet_48" => return Some(Redist::DotNet48),
+        "dotnet35" | "dotnet35c" => return Some(Redist::DotNet35),
+        "dotnet4" | "dotnet4c" => return Some(Redist::DotNet4 { release: 0 }),
+        "dotnet45" => {
+            return Some(Redist::DotNet4 {
+                release: DOTNET45_RELEASE,
+            })
+        }
+        "dotnet46" => {
+            return Some(Redist::DotNet4 {
+                release: DOTNET46_RELEASE,
+            })
+        }
+        "dotnet47" => {
+            return Some(Redist::DotNet4 {
+                release: DOTNET47_RELEASE,
+            })
+        }
+        "dotnet472" => {
+            return Some(Redist::DotNet4 {
+                release: DOTNET472_RELEASE,
+            })
+        }
+        "xna" | "xna_31" => return Some(Redist::Xna { v4: false }),
+        "xna_40" | "xna40" => return Some(Redist::Xna { v4: true }),
         _ => {}
     }
     let rest = id.strip_prefix("msvc")?;
@@ -239,13 +303,23 @@ fn files_of(redist: Redist) -> (&'static [&'static str], Bits) {
             };
             (files, if x64 { Bits::X64 } else { Bits::X86 })
         }
-        // No file says which .NET release is there.
-        Redist::DotNet48 => (&[], Bits::Both),
+        // No file says which .NET or XNA release is there.
+        Redist::DotNet48 | Redist::DotNet35 | Redist::DotNet4 { .. } | Redist::Xna { .. } => {
+            (&[], Bits::Both)
+        }
     }
 }
 
 /// .NET 4.8's `Release` value.
 pub const DOTNET48_RELEASE: u32 = 528_040;
+/// .NET 4.5's least `Release` value.
+pub const DOTNET45_RELEASE: u32 = 378_389;
+/// .NET 4.6's.
+pub const DOTNET46_RELEASE: u32 = 393_295;
+/// .NET 4.7's.
+pub const DOTNET47_RELEASE: u32 = 460_798;
+/// .NET 4.7.2's.
+pub const DOTNET472_RELEASE: u32 = 461_808;
 
 /// The registry value that shows `redist` is installed on a Windows host
 /// (a key, a DWORD value, and the least it must be), `None` for one GRID
@@ -273,6 +347,29 @@ fn registry_of(redist: Redist) -> Option<(String, &'static str, u32)> {
             r"HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full".to_string(),
             "Release",
             DOTNET48_RELEASE,
+        )),
+        Redist::DotNet4 { release: 0 } => Some((
+            r"HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full".to_string(),
+            "Install",
+            1,
+        )),
+        Redist::DotNet4 { release } => Some((
+            r"HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full".to_string(),
+            "Release",
+            release,
+        )),
+        Redist::DotNet35 => Some((
+            r"HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v3.5".to_string(),
+            "Install",
+            1,
+        )),
+        Redist::Xna { v4 } => Some((
+            format!(
+                r"HKLM\SOFTWARE\WOW6432Node\Microsoft\XNA\Framework\{}",
+                if v4 { "v4.0" } else { "v3.1" }
+            ),
+            "Installed",
+            1,
         )),
         _ => None,
     }
@@ -403,9 +500,9 @@ pub fn already_installed(
 /// The file in a prefix where GRID notes the steps that worked there.
 pub const PREFIX_MARKER: &str = ".grid-redist.json";
 
-/// One step GRID ran in a prefix: what it installs (the [`Redist`] key, or
-/// the step's command in lower case) and its program's size, which stands
-/// in for its version.
+/// One step GRID ran in a prefix: what it installs (the [`Redist`] key,
+/// else the store's id for the step, else its command, in lower case) and
+/// its program's size, which stands in for its version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct MarkerEntry {
@@ -416,9 +513,14 @@ pub struct MarkerEntry {
 /// The marker entry for `step`, whose program is `exe`.
 pub fn marker_entry(step: &RedistStep, exe: &Path) -> MarkerEntry {
     MarkerEntry {
-        key: redist_of(step)
-            .map(Redist::key)
-            .unwrap_or_else(|| step.command.trim().to_lowercase().replace('\\', "/")),
+        key: redist_of(step).map(Redist::key).unwrap_or_else(|| {
+            let id = step.id.trim();
+            if id.is_empty() {
+                step.command.trim().to_lowercase().replace('\\', "/")
+            } else {
+                id.to_lowercase()
+            }
+        }),
         size: fs::metadata(exe).map(|m| m.len()).unwrap_or(0),
     }
 }
@@ -545,6 +647,28 @@ pub fn resolve_step(game_dir: &Path, command: &str) -> Result<PathBuf, &'static 
         return Err(ESCAPES_FOLDER);
     }
     Ok(path)
+}
+
+/// A rooted step ([`RedistStep::root`]) whose file isn't there.
+pub const NOT_THERE: &str = "its file isn't there";
+
+/// A rooted step whose path leads out of its folder.
+pub const ESCAPES_ROOT: &str = "its path leads outside its folder";
+
+/// `step`'s program: [`resolve_step`] in its [`RedistStep::root`], else in
+/// `game_dir`.
+pub fn resolve_in(step: &RedistStep, game_dir: &Path) -> Result<PathBuf, &'static str> {
+    let root = step.root.trim();
+    if root.is_empty() {
+        return resolve_step(game_dir, &step.command);
+    }
+    resolve_step(Path::new(root), &step.command).map_err(|reason| {
+        if reason == ESCAPES_FOLDER {
+            ESCAPES_ROOT
+        } else {
+            NOT_THERE
+        }
+    })
 }
 
 /// Whether `path` is a Windows Installer package.
@@ -828,7 +952,7 @@ pub fn run_steps(
     // its warning.
     let todo: Vec<RedistStep> = steps
         .iter()
-        .filter(|step| match resolve_step(target.game_dir, &step.command) {
+        .filter(|step| match resolve_in(step, target.game_dir) {
             Ok(exe) => !satisfied(
                 step,
                 &exe,
@@ -886,7 +1010,7 @@ fn run_wrapped(
             return worked;
         }
         sink.progress(index as u64, total);
-        let exe = match resolve_step(target.game_dir, &step.command) {
+        let exe = match resolve_in(step, target.game_dir) {
             Ok(exe) => exe,
             Err(reason) => {
                 outcome.warnings.push(couldnt_run(&name, reason));
@@ -947,7 +1071,7 @@ fn run_elevated(
     // Resolve first: refused steps are warnings; the rest run in order.
     let mut runnable: Vec<(usize, PathBuf)> = Vec::new();
     for (index, step) in steps.iter().enumerate() {
-        match resolve_step(target.game_dir, &step.command) {
+        match resolve_in(step, target.game_dir) {
             Ok(exe) => runnable.push((index, exe)),
             Err(reason) => outcome.warnings.push(couldnt_run(&step_name(step), reason)),
         }
@@ -1118,6 +1242,7 @@ mod tests {
             command: command.into(),
             args: args.iter().map(|a| a.to_string()).collect(),
             valid_returns: vec![],
+            root: String::new(),
         }
     }
 
@@ -1779,6 +1904,206 @@ mod tests {
             compat: "GE-Proton9-20",
             prefix: Some(prefix),
         }
+    }
+
+    #[test]
+    fn gog_ids_have_rules_only_where_a_check_is_reliable() {
+        let vc = |year, x64| Some(Redist::VcRedist { year, x64 });
+        for (id, command, want) in [
+            (
+                "MSVC2019_x64",
+                "__redist/MSVC2019_x64/VC_redist.x64.exe",
+                vc(2015, true),
+            ),
+            (
+                "MSVC2012",
+                "__redist/MSVC2012/vcredist_x86.exe",
+                vc(2012, false),
+            ),
+            // No reliable check, and never the file name's newer rule.
+            ("MSVC2005", "__redist/MSVC2005/vcredist_x86.exe", None),
+            (
+                "MSVC2008_x64",
+                "__redist/MSVC2008_x64/vcredist_x64.exe",
+                None,
+            ),
+            (
+                "MSVC2026_x64",
+                "__redist/MSVC2026_x64/VC_redist.x64.exe",
+                None,
+            ),
+            (
+                "dotNetDesktopRuntime60_x64",
+                "__redist/x/windowsdesktop-runtime.exe",
+                None,
+            ),
+            (
+                "PHYSX",
+                "__redist/PHYSX/PhysX-9.19.0218-SystemSoftware.exe",
+                None,
+            ),
+            (
+                "dotNet35",
+                "__redist/dotNet35/dotnetfx35.exe",
+                Some(Redist::DotNet35),
+            ),
+            (
+                "dotNet4",
+                "__redist/dotNet4/x.exe",
+                Some(Redist::DotNet4 { release: 0 }),
+            ),
+            (
+                "dotNet472",
+                "__redist/dotNet472/x.exe",
+                Some(Redist::DotNet4 {
+                    release: DOTNET472_RELEASE,
+                }),
+            ),
+            (
+                "XNA",
+                "__redist/XNA/xnafx31_redist.msi",
+                Some(Redist::Xna { v4: false }),
+            ),
+            (
+                "XNA_40",
+                "__redist/XNA_40/xnafx40_redist.msi",
+                Some(Redist::Xna { v4: true }),
+            ),
+        ] {
+            assert_eq!(redist_of(&id_step(id, command)), want, "{id}");
+        }
+        assert_eq!(redist_of(&step("redist/2005/vcredist_x86.exe", &[])), None);
+        assert_eq!(Redist::Xna { v4: true }.key(), "xna-4.0");
+        assert_eq!(Redist::DotNet4 { release: 0 }.key(), "dotnet4-0");
+
+        let dir = tempfile::tempdir().unwrap();
+        let probe = Reg(vec![
+            (
+                r"HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v3.5",
+                "Install",
+                1,
+            ),
+            (
+                r"HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full",
+                "Install",
+                1,
+            ),
+            (
+                r"HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full",
+                "Release",
+                461_808,
+            ),
+            (
+                r"HKLM\SOFTWARE\WOW6432Node\Microsoft\XNA\Framework\v4.0",
+                "Installed",
+                1,
+            ),
+        ]);
+        let have = |r| already_installed(r, None, Some(dir.path()), &probe);
+        assert!(have(Redist::DotNet35));
+        assert!(have(Redist::DotNet4 { release: 0 }));
+        assert!(have(Redist::DotNet4 {
+            release: DOTNET472_RELEASE
+        }));
+        assert!(!have(Redist::DotNet48));
+        assert!(have(Redist::Xna { v4: true }));
+        assert!(!have(Redist::Xna { v4: false }));
+        // In a prefix nothing says so: they run (and the marker remembers).
+        let prefix = dir.path().join("prefix");
+        assert!(!already_installed(
+            Redist::DotNet35,
+            Some(&prefix),
+            None,
+            &probe
+        ));
+    }
+
+    #[test]
+    fn a_rooted_step_resolves_in_its_own_folder_and_is_marked_by_its_id() {
+        let (_dir, game) = game();
+        let prefix = game.join("prefix");
+        fs::create_dir_all(&prefix).unwrap();
+        let shared = game.parent().unwrap().join("shared");
+        fs::create_dir_all(shared.join("__redist/ISI")).unwrap();
+        fs::write(shared.join("__redist/ISI/scriptinterpreter.exe"), b"MZ isi").unwrap();
+        let rooted = |id: &str, command: &str| RedistStep {
+            id: id.into(),
+            command: command.into(),
+            args: vec!["/VERYSILENT".into()],
+            root: shared.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let isi = rooted("gog-script:1:7", "__redist/ISI/scriptinterpreter.exe");
+        assert_eq!(
+            resolve_in(&isi, &game).unwrap(),
+            shared.join("__redist/ISI/scriptinterpreter.exe")
+        );
+        assert_eq!(
+            resolve_in(&rooted("x", "__redist/gone.exe"), &game),
+            Err(NOT_THERE)
+        );
+        assert_eq!(
+            resolve_in(&rooted("x", "../Game/oalinst.exe"), &game),
+            Err(ESCAPES_ROOT)
+        );
+        // No root: the game folder, as before.
+        assert!(resolve_in(&step("oalinst.exe", &[]), &game).is_ok());
+
+        let script = Script::new(vec![(Ok(Some(Some(0))), "")]);
+        let steps = vec![isi.clone(), rooted("x", "__redist/gone.exe")];
+        let outcome = run_steps(
+            &steps,
+            wrapped(&game, &prefix),
+            &runner(&script, "linux"),
+            &mut Sink::default(),
+        );
+        assert_eq!(
+            outcome.warnings,
+            ["Couldn't run gone.exe: its file isn't there"]
+        );
+        let spawned = script.spawned.lock().unwrap().clone();
+        assert_eq!(spawned.len(), 1);
+        assert_eq!(
+            spawned[0].argv[1],
+            shared
+                .join("__redist/ISI/scriptinterpreter.exe")
+                .to_string_lossy()
+        );
+        assert_eq!(spawned[0].cwd, game, "it runs in the game folder");
+        // Marked by its id (with the build in it), so an update's new id
+        // runs again while the same one doesn't.
+        assert_eq!(read_marker(&prefix)[0].key, "gog-script:1:7");
+        let again = Script::new(vec![]);
+        run_steps(
+            std::slice::from_ref(&isi),
+            wrapped(&game, &prefix),
+            &runner(&again, "linux"),
+            &mut Sink::default(),
+        );
+        assert!(again.spawned.lock().unwrap().is_empty());
+        let update = Script::new(vec![(Ok(Some(Some(0))), "")]);
+        run_steps(
+            &[rooted(
+                "gog-script:1:8",
+                "__redist/ISI/scriptinterpreter.exe",
+            )],
+            wrapped(&game, &prefix),
+            &runner(&update, "linux"),
+            &mut Sink::default(),
+        );
+        assert_eq!(update.spawned.lock().unwrap().len(), 1);
+        // A step with a rule keeps the rule's key; one with neither its command.
+        assert_eq!(
+            marker_entry(&id_step("openAL", "x/oalinst.exe"), &game).key,
+            "openal"
+        );
+        assert_eq!(
+            marker_entry(&step("Redist\\A.exe", &[]), &game).key,
+            "redist/a.exe"
+        );
+        // The root never shows up in an Amazon list's JSON.
+        let json = serde_json::to_string(&step("a.exe", &[])).unwrap();
+        assert!(!json.contains("root"), "{json}");
     }
 
     #[test]

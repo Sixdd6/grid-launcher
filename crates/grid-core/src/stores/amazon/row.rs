@@ -246,6 +246,7 @@ pub fn parse_post_install(text: &str) -> Vec<FuelStep> {
                 command,
                 args,
                 valid_returns,
+                root: String::new(),
             })
         })
         .collect()
@@ -534,18 +535,21 @@ mod tests {
                     command: "oalinst.exe".into(),
                     args: vec!["/silent".into()],
                     valid_returns: vec![],
+                    root: String::new(),
                 },
                 FuelStep {
                     id: String::new(),
                     command: "DirectX\\DXSETUP.exe".into(),
                     args: vec!["/silent".into()],
                     valid_returns: vec![0, 3010],
+                    root: String::new(),
                 },
                 FuelStep {
                     id: String::new(),
                     command: "v.exe".into(),
                     args: vec!["/q".into(), "2".into(), "true".into()],
                     valid_returns: vec![],
+                    root: String::new(),
                 },
             ]
         );

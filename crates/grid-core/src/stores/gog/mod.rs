@@ -4,7 +4,8 @@
 //! the drive backups; the rest is package A's (`docs/stores-phase1-plan.md`):
 //! `auth` (login, gogdl's `auth` answers, the in-memory bearer), `api`
 //! (GOG's HTTP APIs), `install` (`gogdl info`, the job runners, uninstall),
-//! `update` (the update check) and `cloud` (save sync).
+//! `update` (the update check), `cloud` (save sync) and `setup` (a gogdl
+//! Windows install's setup script and redistributables).
 //!
 //! Secrets: the login code and the bearer token live only in memory as
 //! [`SecretString`]; gogdl keeps its own token file under
@@ -17,6 +18,7 @@ pub mod goggame;
 pub mod install;
 pub mod meta;
 pub mod row;
+pub mod setup;
 pub mod update;
 
 use std::io;
@@ -28,6 +30,7 @@ use secrecy::SecretString;
 use url::Url;
 
 use super::paths;
+use super::redist::RedistRunner;
 use super::runner::{run_tool, ToolCommand};
 use super::tools::{self, StoreTool};
 use super::StoreError;
@@ -188,8 +191,11 @@ pub struct GogService {
     token: Arc<Mutex<Option<GogToken>>>,
     /// The last owned list, for product details in a job's row.
     owned: Arc<Mutex<Vec<GogProduct>>>,
-    /// A program run in place of the installed gogdl (unit tests only).
+    /// A program run in place of the installed gogdl (tests only).
     tool_override: Option<PathBuf>,
+    /// What runs a Windows build's setup steps after a job
+    /// ([`setup`]).
+    redist: RedistRunner,
 }
 
 impl GogService {
@@ -201,7 +207,24 @@ impl GogService {
             token: Arc::new(Mutex::new(None)),
             owned: Arc::new(Mutex::new(Vec::new())),
             tool_override: None,
+            redist: RedistRunner::system(),
         }
+    }
+
+    /// Runs the setup steps with `runner` (a scripted spawner). For tests;
+    /// the app never calls it.
+    #[doc(hidden)]
+    pub fn with_redist_runner(mut self, runner: RedistRunner) -> Self {
+        self.redist = runner;
+        self
+    }
+
+    /// Runs `program` in place of the installed gogdl, as is. For tests
+    /// with a fake gogdl; the app never calls it.
+    #[doc(hidden)]
+    pub fn with_tool_override(mut self, program: PathBuf) -> Self {
+        self.tool_override = Some(program);
+        self
     }
 
     /// The login page the login window opens.
@@ -345,6 +368,16 @@ impl GogService {
             Some(dlc_id),
             ctx,
         )
+    }
+
+    /// The job that runs only a gogdl Windows install's setup steps
+    /// (Retry on a setup-step warning; [`setup::setup_steps_job`]).
+    pub fn setup_steps_job(
+        &self,
+        row: &InstalledGame,
+        ctx: GogJobCtx,
+    ) -> Result<StoreJob, StoreError> {
+        setup::setup_steps_job(self, row, ctx)
     }
 
     pub fn remove_dlc(

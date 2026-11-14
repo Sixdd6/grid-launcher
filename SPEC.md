@@ -1305,7 +1305,19 @@ GOG, Epic and Amazon games launch like native games, from their install folder (
 Wine/Proton for a Windows build). A Windows GOG game's Wine prefix is `prefix/` in its
 install folder, however it was installed (gogdl, an offline installer, a backup drive),
 so uninstalling the game removes it and a backup leaves it out. A DLC installer runs in
-its base game's prefix. Store art (covers, screenshots) is fetched from the store's own
+its base game's prefix. A Windows GOG game installed through gogdl gets its setup steps
+right after the download, silently, in its prefix: first GOG's setup script for the game
+and each installed DLC (GOG's script interpreter, or the game's own setup program), which
+writes the registry keys, CD keys and language settings the game expects; then the
+redistributables its build lists (Visual C++, DirectX, OpenAL, .NET and the like),
+downloaded once by gogdl into a folder all GOG games share. Game-folder items (DOSBox,
+ScummVM) are never run, and neither are QuickTime, Foxit or Adobe AIR. After an update
+only the setup script runs again; a DLC add runs the new DLC's script; a repair runs
+none. A Linux build, an offline installer (it runs its own) and a backup-drive restore
+have none. Skipping what is already installed, the one Windows permission prompt, the
+warnings and Retry ("Setup" row) work as for Amazon below; when gogdl can't download the
+redistributables, the row reads "Couldn't run its setup steps: GRID couldn't download
+them (…)" and Retry tries again. Store art (covers, screenshots) is fetched from the store's own
 image hosts without any credential and cached under `<data_dir>/stores/art/`. An Epic launch carries a one-time exchange code, which
 is never printed in a log, an error or a warning. A Steam game's session is watched
 rather than spawned: Steam starts the game and GRID sees it running until Steam reports
@@ -1362,7 +1374,7 @@ Store screens (2026-11-13, matching the approved design):
   Downloads row with no download, no login and no nile call, reading "Running the
   installer silently · N%" and then "Setup steps done" (or "Setup steps didn't all run ·
   <warnings>", with Retry again). It is refused while the game runs or has another job.
-  GOG and Epic will use the same job. A cancel stops the steps and leaves the game
+  GOG uses the same job; Epic will. A cancel stops the steps and leaves the game
   installed. A
   "Sign in again" that is cancelled leaves the store expired (nile's old login is deleted
   before a new sign-in). On a Linux system older than glibc 2.35, nile can't run, and
