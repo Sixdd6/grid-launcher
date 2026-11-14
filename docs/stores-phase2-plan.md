@@ -1187,3 +1187,71 @@ Built on D1 (5c2fb5e), which is imported, never edited.
   (loading, legendary missing / failed, login expired) and the `off` folder. The only
   differences are fixture data and the pin's real legendary size and version (3 MB,
   0.21.1) where the prototype has placeholders (14 MB, 0.20.37).
+
+## Integration outcome (2026-11-13)
+
+Packages C, D (with D1) and E merged onto A + B (23cbc4e); the plan's per-package
+sections were additive and are all kept. Items:
+
+- **One legendary helper.** `launch.rs` and `cloud.rs` run legendary through
+  `EpicService::tool()` and the service's blocking runner. B's `legendary_command`,
+  `legendary_env`, `run` and `set_tool_override_for_tests` are gone; `tests/epic_cloud.rs`
+  uses `with_tool_override`. `tool_error` stays in `launch.rs` for the launch and cloud
+  words. Every legendary run now has `private_tree` (the only other `tool_command` call,
+  `RealEpic::tool_problem`, runs nothing). `RealEpic::tool_installed` / `install_tool` go
+  through the service, so the first-run `config.ini` is written there too.
+- **One offline retry, in the app's launch hook.** `EpicStore::launch_ticket` already
+  decided signed-out offline launches, so it owns the retry (signed in, `Network`, game
+  `can_run_offline`: once more with `--offline`). `launch_prep` runs exactly what it is
+  asked and never retries; `tests/epic_cloud.rs` checks both halves. The hook's errors go
+  through B's `launch_ticket_error` (login expired / Epic didn't answer / the error's
+  text); `LoginExpired` still flips the card.
+- **Cloud hooks.** C's `sync_before_launch` / `sync_after_session` call B's `cloud_sync`
+  (Auto), gated by `[stores.epic] cloud_saves`, the game's switch and a cloud folder, and
+  only while connected. No change needed.
+- **One owned-cache owner.** The app backend is the only writer of
+  `stores/cache/epic-owned.json`, in grid-core's format (`list::OwnedCache` with
+  `EpicGame`), through `list::write_owned_cache`; C's private `CachedGame` copy is gone.
+  It deletes the cache on Disconnect (`list::remove_owned_cache`); `EpicService::disconnect`
+  no longer touches it. New: startup seeds the service's kept owned list from the cache
+  (`EpicApi::set_owned`), so a job started before the first refresh (or offline) still
+  has titles, DLC and the expected build.
+- **Parsers.** A's JSON helpers take the first JSON value in stdout and skip other lines;
+  B's ticket parser takes the last JSON line; no struct denies unknown keys. The fake
+  legendary's `fake_session` keys and stdout token lines pass `epic`, `epic-secrets` and
+  every other Epic group.
+- **Repair result.** New `StoreJobRunner::detail()` (default `""`), asked after a
+  successful finalize; the queue's `set_detail` stores it. Epic's repair returns
+  "N files repaired" there, and its finalize message now holds only warnings, so the
+  Downloads row reads "Verified · 2 files repaired" and C's card "…: 2 damaged files were
+  downloaded again". GOG's repair can return a count the same way (gogdl gives none
+  today, so it reads "Verified").
+- **Third-party names.** A maps `origin` → "the EA app" and `ubisoftconnect` → "Ubisoft
+  Connect" (lowercased, spaces dropped); the fixtures' `Origin` / `UbisoftConnect` match.
+- **E2E names.** D's and E's specs ran against C's seed and groups as written (SamPlays,
+  covers by title, the conflict on Starlight Courier, `E2E_EPIC_*`).
+- **TV RT Select** (`TvLibrary.svelte`) follows `canBackup`, not `source === 'gog'`.
+- **e2e typecheck.** `helpers/gog.ts` `storeCards()` returns the chainable array as is,
+  and `gog-library` reads a `null` test id as `''`.
+- **Phase 1 lessons.** The `tv-*` Settings and store-count specs and the TV notifier
+  needed no change (a not-connected Epic with nothing installed has no rail group, and
+  the full suite passes); `tv-epic` keeps the main window for WebDriver
+  (`switchToWindow(MAIN_WINDOW)`).
+
+Failures found and fixed at integration:
+- `epic-library` (Verify, Update) and `epic-cloud` (Sync now): those buttons go away once
+  pressed and took the focus to the page body, so Escape no longer closed desktop store
+  Details (a real bug, GOG too). `StoreDetails` now also closes on a window-level Escape
+  while the focus is on the body and no other dialog is above it.
+- `epic-cloud`: Details' line read "Cloud save conflict ·  Resolve" (the text's trailing
+  space plus the link's gap). Fixed in `StoreDetails`.
+- `tv-epic`, spec changes where the app follows the prototype: the game page opens on its
+  first enabled item (TV focus rule item 78), so the spec goes to the disabled Not
+  supported button before pressing A; "RomM cloud saves are off for store games." sits
+  under Save location, outside the cloud rows (TVStores prototype), so it is read from the
+  tab body; the disconnect card carries its sub line, so it is matched by its title. The
+  install, Downloads and Not supported steps after it had failed only in cascade.
+- Gate: one test still named C's removed `owned_cache_path`.
+
+Results: `scripts/ctr.sh gate` PASS; `scripts/ctr.sh wincheck` PASS; full
+`scripts/ctr.sh e2e`: all 46 stage groups, `== e2e: all stages passed`, with no retries.

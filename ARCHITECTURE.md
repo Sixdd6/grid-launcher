@@ -263,9 +263,24 @@ Modules as declared in `src/lib.rs`:
   its wizard; a macOS `.pkg` refused) and their Downloads job. Every GOG Wine prefix is
   `<install dir>/prefix` (gogdl, offline installers, drive restores), so uninstall
   removes it and a backup leaves it out. `epic` is the Epic Games Store through legendary
-  (Phase 2): `EpicService`, `meta` (`EpicMeta`) and `row` (`epic_row`; every Epic row
-  is a Windows version with its prefix at `<install dir>/prefix`). Nothing here may log
-  or forward a store tool's stdout or stderr.
+  (Phase 2). `EpicService` (`mod.rs`) builds every legendary run (`tool()`: the pinned
+  zipapp or the test/e2e override, `tool_env()`, `LineParser::Legendary`, and
+  `private_tree` so the runner makes `stores/legendary/` owner-only after each run), and
+  keeps the last owned list for the jobs. `auth` (sign-in with the code on stdin,
+  `status --json`), `list` (`list --json -T`: Windows titles plus third-party ones shown
+  as Not supported, DLC folded into the base, portrait covers first; `info`,
+  `list-installed`; the owned-cache format and its read/write/remove helpers), `install`
+  (install, update, repair and DLC jobs; an update or repair also runs each installed
+  DLC; a repair's "N files repaired" is the job's `StoreJobRunner::detail`, the
+  Downloads row's "Verified · …"), `update` (the pure build comparison), `launch`
+  (`launch --json`: the ticket's `egl_parameters` become redacted `secret_args`;
+  `launch_ticket_error` gives GRID's words; it never retries by itself), `cloud`
+  (`list-saves` / `sync-saves`, the save path GRID resolves from `CloudSaveFolder`, a copy
+  of the local saves under `stores/save-backups/epic/` before a download), `meta`
+  (`EpicMeta`) and `row` (`epic_row`; every Epic row is a Windows version with its
+  prefix at `<install dir>/prefix`). Every parser ignores unknown JSON keys and
+  non-JSON stdout lines. Nothing here may log or forward a store tool's stdout or
+  stderr.
 - `romm` — the RomM HTTP client: `RommClient`, platforms, games, ROM detail, firmware,
   byte fetches, the cloud save/state endpoints, and the play-session ingest. All request construction lives here;
   check `openapi.json` before changing any of it. `RommClient::recent_games` is one
@@ -311,8 +326,16 @@ The shell owns *when* things run; grid-core owns *what* they do.
   happens in the background (`observe_downloads`; a frontend command's own outcome is
   worded by the frontend, never sent twice); its GOG-only extras (offline installers,
   drive backups) are reached as `StoresService::gog`. `epic.rs` is `EpicStore` around
-  `stores::epic::EpicService` (Phase 2), and the `StoreLaunchHook` that adds Epic's launch
-  ticket. `store_auth.rs` is the login window: a separate, unprivileged, incognito webview
+  `stores::epic::EpicService` (Phase 2, behind the `EpicApi` seam its tests fake): the
+  connection state (legendary is installed before the login code is redeemed), the owned
+  list and its cache at `<data_dir>/stores/cache/epic-owned.json` (this backend is the
+  cache's only writer, in grid-core's format, and deletes it on Disconnect), the
+  background `store-notice` cards, the install guards, the cloud syncs around a session
+  (gated by `[stores.epic] cloud_saves` and the game's own switch), and the
+  `StoreLaunchHook` that adds Epic's launch ticket. The hook owns the one offline retry:
+  signed out, a game that may run offline asks for an `--offline` ticket; signed in, a
+  network failure retries once with `--offline` for such a game. Store updates are keyed
+  by `GameKey` in `update_service.rs` (`StoreUpdateSource`, one per store). `store_auth.rs` is the login window: a separate, unprivileged, incognito webview
   whose finish URL (a store's `LoginSpec`) is caught in Rust and refused (the code goes to
   the backend as a `SecretString`). The commands are `commands/stores.rs` (`backend_for`,
   `backend_for_key`) and, for GOG backups, `commands/store_backups.rs`.

@@ -1,6 +1,6 @@
 # External game stores — plan
 
-Status: Phase 0 done 2026-11-13 (shared model on main; design approved: `docs/design/system/components/GameStores` and `TVStores`). Phase 1 (GOG) is next.
+Status: Phase 0 done 2026-11-13 (shared model on main; design approved: `docs/design/system/components/GameStores` and `TVStores`). Phase 1 (GOG with offline installers) built 2026-11-13 (`docs/stores-phase1-plan.md`). Phase 2 (Epic Games Store through legendary) built 2026-11-13 (`docs/stores-phase2-plan.md`). Phase 3 (Amazon) is next.
 
 ## User decisions (2026-11-13)
 

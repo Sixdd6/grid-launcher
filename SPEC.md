@@ -1227,9 +1227,10 @@ testable statement.
   the Library rail, and Settings › Backup drives with a page per drive.
 
 # Game stores
-Status: Phase 1, GOG with offline installers, built (2026-11-13); Epic, Amazon and Steam
-are planned. The plan is `docs/external-stores-plan.md`, Phase 1's work plan
-`docs/stores-phase1-plan.md`. The approved design is
+Status: Phase 1, GOG with offline installers, built (2026-11-13); Phase 2, Epic Games
+Store through legendary, built (2026-11-13); Amazon and Steam are planned. The plan is
+`docs/external-stores-plan.md`, the work plans `docs/stores-phase1-plan.md` and
+`docs/stores-phase2-plan.md`. The approved design is
 `docs/design/system/components/GameStores/README.md` and
 `docs/design/system/components/TVStores/README.md`.
 
@@ -1320,6 +1321,18 @@ Store screens (2026-11-13, matching the approved design):
   and redistributables are left out. A file the user picked before that isn't in the list
   stays in it, first. There is no file chooser. Picking another one makes it the user's
   choice; saving with the list untouched pins nothing.
+- **Epic Games** (Phase 2). legendary is installed when Epic is connected, before the
+  sign-in code is redeemed (legendary redeems it). Every Epic game is its Windows
+  version, launched under Wine/Proton. Titles another launcher manages (the EA app,
+  Ubisoft Connect) are listed with a NOT SUPPORTED tag; Details names the launcher and
+  GRID can't install them. Covers are the portrait images, like GOG's. The install dialog
+  has no Version or Language rows. An update or a Verify and repair also runs each
+  installed DLC, and a repair's result shows as "Verified · N files repaired". Signed
+  out, a game that may run offline still launches offline; signed in, when Epic can't be
+  reached, GRID retries such a game once offline. Epic cloud saves always sync to the save
+  folder GRID resolves from the game's cloud folder; before a download replaces the local
+  save, a copy goes to `<data_dir>/stores/save-backups/epic/<game>/` (the newest five
+  kept). Epic games are never backed up to a drive.
 - **Play on installed cards.** Every "<game> installed" card for a RomM install has Play,
   which launches the game the normal way (TV mode opens Playing). A card that sums several
   installs has none. Store install cards already have Play.
