@@ -31,12 +31,24 @@ const ACCOUNT: &str = "romm-credential";
 /// the RomM credential (`ACCOUNT`) must never clear the RetroAchievements
 /// token, and vice versa — they are two accounts, not one shared slot.
 const RA_ACCOUNT: &str = "retroachievements-token";
+/// A THIRD independent keyring item under [`SERVICE`]: the Steam Web API
+/// key. Saving or clearing it never touches the RomM credential or the RA
+/// token, and back.
+const STEAM_KEY_ACCOUNT: &str = "steam-web-api-key";
 
 /// The RetroAchievements token's OS-keyring slot. A separate trait from
 /// [`SecretStore`] (rather than a third `Credential` variant) because it is
 /// a second, independent keyring item — see [`RA_ACCOUNT`].
 pub trait RaTokenStore: Send + Sync {
     fn save(&self, token: &SecretString) -> Result<(), SecretError>;
+    fn load(&self) -> Result<Option<SecretString>, SecretError>;
+    fn clear(&self) -> Result<(), SecretError>;
+}
+
+/// The Steam Web API key's OS-keyring slot ([`STEAM_KEY_ACCOUNT`]), a
+/// separate trait as [`RaTokenStore`]. `clear` treats a missing item as done.
+pub trait SteamKeyStore: Send + Sync {
+    fn save(&self, key: &SecretString) -> Result<(), SecretError>;
     fn load(&self) -> Result<Option<SecretString>, SecretError>;
     fn clear(&self) -> Result<(), SecretError>;
 }
@@ -59,6 +71,10 @@ impl KeyringStore {
     }
     fn ra_entry() -> Result<keyring::Entry, SecretError> {
         keyring::Entry::new(SERVICE, RA_ACCOUNT).map_err(|e| SecretError::Keyring(e.to_string()))
+    }
+    fn steam_entry() -> Result<keyring::Entry, SecretError> {
+        keyring::Entry::new(SERVICE, STEAM_KEY_ACCOUNT)
+            .map_err(|e| SecretError::Keyring(e.to_string()))
     }
 }
 
@@ -134,6 +150,29 @@ impl RaTokenStore for KeyringStore {
     }
 }
 
+impl SteamKeyStore for KeyringStore {
+    fn save(&self, key: &SecretString) -> Result<(), SecretError> {
+        Self::steam_entry()?
+            .set_password(key.expose_secret())
+            .map_err(|e| SecretError::Keyring(e.to_string()))
+    }
+
+    fn load(&self) -> Result<Option<SecretString>, SecretError> {
+        match Self::steam_entry()?.get_password() {
+            Ok(key) => Ok(Some(SecretString::from(key))),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(SecretError::Keyring(e.to_string())),
+        }
+    }
+
+    fn clear(&self) -> Result<(), SecretError> {
+        match Self::steam_entry()?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(SecretError::Keyring(e.to_string())),
+        }
+    }
+}
+
 /// In-memory store for tests and for the Tauri layer's unit tests. The RA
 /// token lives in its own field — a second, independent slot mirroring the
 /// two real keyring items (see [`RA_ACCOUNT`]) — so clearing one credential
@@ -142,6 +181,7 @@ impl RaTokenStore for KeyringStore {
 pub struct MemoryStore {
     credential: std::sync::Mutex<Option<Credential>>,
     ra_token: std::sync::Mutex<Option<SecretString>>,
+    steam_key: std::sync::Mutex<Option<SecretString>>,
 }
 
 impl SecretStore for MemoryStore {
@@ -168,6 +208,20 @@ impl RaTokenStore for MemoryStore {
     }
     fn clear(&self) -> Result<(), SecretError> {
         *self.ra_token.lock().unwrap() = None;
+        Ok(())
+    }
+}
+
+impl SteamKeyStore for MemoryStore {
+    fn save(&self, key: &SecretString) -> Result<(), SecretError> {
+        *self.steam_key.lock().unwrap() = Some(key.clone());
+        Ok(())
+    }
+    fn load(&self) -> Result<Option<SecretString>, SecretError> {
+        Ok(self.steam_key.lock().unwrap().clone())
+    }
+    fn clear(&self) -> Result<(), SecretError> {
+        *self.steam_key.lock().unwrap() = None;
         Ok(())
     }
 }
@@ -248,5 +302,38 @@ mod tests {
         RaTokenStore::clear(&store).unwrap();
         assert!(RaTokenStore::load(&store).unwrap().is_none());
         assert!(SecretStore::load(&store).unwrap().is_some());
+    }
+
+    /// The Steam key is a THIRD independent slot: saving or clearing it
+    /// never touches the RomM credential or the RA token, and back.
+    #[test]
+    fn steam_key_store_is_independent_of_the_other_slots() {
+        let store = MemoryStore::default();
+        SecretStore::save(
+            &store,
+            &Credential::Token(SecretString::from("FAKE-TEST-TOKEN-not-real")),
+        )
+        .unwrap();
+        RaTokenStore::save(&store, &SecretString::from("FAKE-RA-TOKEN-not-real")).unwrap();
+        assert!(SteamKeyStore::load(&store).unwrap().is_none());
+        SteamKeyStore::save(&store, &SecretString::from("FAKE-STEAM-KEY-not-real")).unwrap();
+        assert_eq!(
+            SteamKeyStore::load(&store)
+                .unwrap()
+                .map(|k| k.expose_secret().to_string()),
+            Some("FAKE-STEAM-KEY-not-real".to_string())
+        );
+
+        SteamKeyStore::clear(&store).unwrap();
+        assert!(SteamKeyStore::load(&store).unwrap().is_none());
+        assert!(SecretStore::load(&store).unwrap().is_some());
+        assert!(RaTokenStore::load(&store).unwrap().is_some());
+        // Clearing an empty slot is fine.
+        SteamKeyStore::clear(&store).unwrap();
+
+        SteamKeyStore::save(&store, &SecretString::from("FAKE-STEAM-KEY-not-real")).unwrap();
+        SecretStore::clear(&store).unwrap();
+        RaTokenStore::clear(&store).unwrap();
+        assert!(SteamKeyStore::load(&store).unwrap().is_some());
     }
 }

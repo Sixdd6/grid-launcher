@@ -212,6 +212,7 @@ export function baseStatus(source: FakeSource = 'gog'): StoreStatus {
     cloud_saves: true,
     install_dir: '~/Games/GRID/stores/gog',
     in_rail: true,
+    steam: null,
     last_error: '',
   };
 }
@@ -242,6 +243,7 @@ export function baseEpicStatus(): StoreStatus {
     cloud_saves: true,
     install_dir: '~/Games/GRID/stores/epic',
     in_rail: true,
+    steam: null,
     last_error: '',
   };
 }
@@ -276,6 +278,7 @@ export function baseAmazonStatus(): StoreStatus {
     cloud_saves: false,
     install_dir: '~/Games/GRID/stores/amazon',
     in_rail: true,
+    steam: null,
     last_error: '',
   };
 }

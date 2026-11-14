@@ -1,7 +1,7 @@
 //! Store art: the image URLs GOG gives (protocol-relative links, gamesdb
 //! `url_format` templates, api.gog.com `formatter_template_url`s) made
 //! into plain `https` URLs, the store image hosts GRID fetches from (GOG's,
-//! Epic's and Amazon's, [`is_store_art_url`]), and a small on-disk cache under
+//! Epic's, Amazon's and Steam's, [`is_store_art_url`]), and a small on-disk cache under
 //! `<data_dir>/stores/art/` keyed by the URL's SHA-256, like the RomM art
 //! cache. Only `http(s)` URLs are fetched.
 
@@ -76,8 +76,11 @@ pub fn cache_path(data_dir: &Path, url: &str) -> PathBuf {
 /// `cdn2.unrealengine.com` and `media-cdn.epicgames.com`;
 /// `docs/stores-phase2-plan.md` "Spike results", spike 4), then Amazon's
 /// (`m.media-amazon.com`, and the older `images-na.ssl-images-amazon.com`
-/// and `images-amazon.com` hosts; `docs/stores-phase3-plan.md` spike 4).
-const STORE_ART_DOMAINS: [&str; 7] = [
+/// and `images-amazon.com` hosts; `docs/stores-phase3-plan.md` spike 4),
+/// then Steam's (`shared.akamai.steamstatic.com`,
+/// `cdn.cloudflare.steamstatic.com` and the other `steamstatic.com` CDNs;
+/// `docs/stores-phase4-plan.md` "Art hosts").
+const STORE_ART_DOMAINS: [&str; 8] = [
     "gog-statics.com",
     "gog.com",
     "epicgames.com",
@@ -85,10 +88,17 @@ const STORE_ART_DOMAINS: [&str; 7] = [
     "media-amazon.com",
     "ssl-images-amazon.com",
     "images-amazon.com",
+    "steamstatic.com",
 ];
 
+/// Store image hosts admitted as the exact host only, never their domain:
+/// Steam's old `steamcdn-a.akamaihd.net`. `akamaihd.net` itself serves every
+/// Akamai customer, so it must never be a whole domain.
+const STORE_ART_HOSTS: [&str; 1] = ["steamcdn-a.akamaihd.net"];
+
 /// Whether `url` is store art GRID may fetch for the UI: an `https` address
-/// on a store's image hosts ([`STORE_ART_DOMAINS`]), or any address on one
+/// on a store's image hosts ([`STORE_ART_DOMAINS`] and their subdomains, or
+/// exactly one of [`STORE_ART_HOSTS`]), or any address on one
 /// of `extra_origins` (the e2e build's mock servers, which serve art over
 /// plain http). Store art is fetched with no credential, so this never
 /// admits the RomM server just because it is connected.
@@ -110,9 +120,10 @@ pub fn is_store_art_url(url: &str, extra_origins: &[url::Url]) -> bool {
         return false;
     };
     let host = host.to_ascii_lowercase();
-    STORE_ART_DOMAINS
-        .iter()
-        .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+    STORE_ART_HOSTS.contains(&host.as_str())
+        || STORE_ART_DOMAINS
+            .iter()
+            .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
 }
 
 /// The cached copy of `url`, downloading it on a miss. `None` for a blank
@@ -268,6 +279,35 @@ mod tests {
             "https://notmedia-amazon.com/a.jpg",
             "https://www.amazon.com/a.jpg",
             "https://gaming.amazon.com/a.jpg",
+        ] {
+            assert!(!is_store_art_url(url, &[]), "{url}");
+        }
+    }
+
+    #[test]
+    fn store_art_includes_steams_hosts_but_never_all_of_akamaihd() {
+        for url in [
+            "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/620/library_600x900.jpg",
+            "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/620/library_600x900.jpg",
+            "https://shared.steamstatic.com/store_item_assets/steam/apps/620/library_600x900.jpg",
+            "https://cdn.cloudflare.steamstatic.com/steam/apps/620/library_600x900.jpg",
+            "https://cdn.akamai.steamstatic.com/steam/apps/620/header.jpg",
+            "https://steamcdn-a.akamaihd.net/steam/apps/620/library_600x900.jpg",
+            "https://STEAMCDN-A.akamaihd.net/steam/apps/620/header.jpg",
+        ] {
+            assert!(is_store_art_url(url, &[]), "{url}");
+        }
+        for url in [
+            "http://shared.akamai.steamstatic.com/a.jpg",
+            "http://steamcdn-a.akamaihd.net/a.jpg",
+            "https://akamaihd.net/a.jpg",
+            "https://evil.akamaihd.net/a.jpg",
+            "https://x.steamcdn-a.akamaihd.net/a.jpg",
+            "https://steamcdn-b.akamaihd.net/a.jpg",
+            "https://steamstatic.com.evil.example/a.jpg",
+            "https://notsteamstatic.com/a.jpg",
+            "https://api.steampowered.com/a.jpg",
+            "https://store.steampowered.com/a.jpg",
         ] {
             assert!(!is_store_art_url(url, &[]), "{url}");
         }

@@ -26,7 +26,7 @@ use grid_core::config::Config;
 use grid_core::launch::LaunchService;
 use grid_core::library::registry::Registry;
 use grid_core::library::InstallService;
-use grid_core::secrets::{KeyringStore, RaTokenStore};
+use grid_core::secrets::{KeyringStore, RaTokenStore, SteamKeyStore};
 use grid_core::session::SessionManager;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
@@ -274,7 +274,8 @@ pub fn run() {
         .map(|registry| InstallService::new(registry, config_path.clone()));
     // External game stores (GOG, Epic). Reads their config sections and the
     // owned caches now; the login checks run from `.setup()`.
-    let stores = stores_service::StoresService::real(config_path.clone());
+    let steam_keys: Arc<dyn SteamKeyStore> = Arc::new(KeyringStore::new());
+    let stores = stores_service::StoresService::real(config_path.clone(), steam_keys);
     if let Ok(registry) = &registry {
         stores.set_registry(registry.clone());
     }
@@ -977,6 +978,11 @@ pub fn run() {
             commands::stores::store_connect,
             commands::stores::store_cancel_login,
             commands::stores::store_disconnect,
+            commands::stores::steam_test,
+            commands::stores::steam_save,
+            commands::stores::steam_remove_key,
+            commands::stores::steam_recheck_client,
+            commands::stores::steam_open,
             commands::stores::store_install_tool,
             commands::stores::store_login_type,
             commands::stores::store_set_install_dir,

@@ -140,7 +140,11 @@ Modules as declared in `src/lib.rs`:
   and `JobPayload::Store(StoreJob)`, admitted by `InstallService::enqueue_store_job`. A
   `StoreJob` carries a `StoreJobRunner` whose `download` and `finalize` halves run on the
   blocking pool through the same slots, progress, cancel and retry as a RomM install
-  (`job: "store"`, `source_id` = the game key).
+  (`job: "store"`, `source_id` = the game key). A store install the store's own client
+  drives (Steam) is a `JobKey::StoreExternal` row (`kind: "store_external"`,
+  `admit_store_external` / `finish_store_external` with an `ExternalOutcome`): no slot, no
+  waiting, never cancelled or retried by GRID, one live row per product, and a library
+  path change does not wait for it.
   `user_data_links` links an emulator's own-written directories into
   `saves/`; `layout_migration` is the one-shot startup migration to the layout below.
   `path_change` (Q2) validates a new library folder, switches `library_path` (the old
@@ -243,7 +247,7 @@ Modules as declared in `src/lib.rs`:
   after each batch.
 - `retroachievements` — the RetroAchievements login client. Login only.
 - `stores` — external game stores (SPEC "Game stores", `docs/external-stores-plan.md`,
-  `docs/stores-phase1-plan.md`, `docs/stores-phase2-plan.md`, `docs/stores-phase3-plan.md`). The shared identity types: `StoreKind` (gog, epic,
+  `docs/stores-phase1-plan.md`, `docs/stores-phase2-plan.md`, `docs/stores-phase3-plan.md`, `docs/stores-phase4-plan.md`). The shared identity types: `StoreKind` (gog, epic,
   amazon, steam, with their platform names "GOG", "Epic Games", "Amazon Games", "Steam"),
   `GameSource` (the registry `source`) and `GameKey` (`Rom(i64)` or `Store { source,
   store_id }`, string and serde form `romm:123` / `gog:1207664643`). Beside them:
@@ -255,7 +259,9 @@ Modules as declared in `src/lib.rs`:
   progress lines, `legendary_signal` and `nile_signal`), `paths`
   (`<data_dir>/stores/<tool>/`, 0700/0600, `make_tree_private`) and `art` (store image
   URLs, the token-free art cache under `<data_dir>/stores/art/`, and `is_store_art_url`,
-  the GOG, Epic and Amazon host rule `ensure_image` uses). The cloud save types every store
+  the GOG, Epic, Amazon and Steam host rule `ensure_image` uses: domains with their
+  subdomains, plus exact hosts such as `steamcdn-a.akamaihd.net`, never all of
+  `akamaihd.net`). The cloud save types every store
   shares (`CloudState`, `SyncMode`, `SaveConflict`) live in `stores` itself.
   `gog` is GOG's HTTP APIs (`api`), sign-in (`auth`), gogdl install, update, repair, DLC
   and uninstall jobs (`install`), cloud saves (`cloud`), the update check (`update`), and
@@ -298,7 +304,18 @@ Modules as declared in `src/lib.rs`:
   `--path <the game's folder>` exactly, `install::folder_name` as nile names it; update,
   verify, uninstall; fuel.json `PostInstall` is never run) and `launch` (`launch --json
   --no-wine` gives the five FUEL variables; `launch_error` gives GRID's words). Every parser ignores unknown JSON keys and non-JSON stdout lines. Nothing here may log or forward a store tool's stdout or
-  stderr.
+  stderr. `steam` is Steam (Phase 4; Step 0 on 2026-11-14): no tool, no login window, no
+  GRID-run job. Step 0 holds the contracts: `mod.rs` (`SteamEndpoints`, `SteamId`,
+  `SteamApiError` whose words never carry a URL, the owned-list, `GetItems`, client,
+  account and manifest types, `SteamLink` and `SteamService`, whose bodies package A
+  fills: the Web API in `api.rs`, the only file that reads the key and only into a
+  request's query; roots, the executable, `loginusers.vdf` and manifests in
+  `paths.rs`/`local.rs`; the `steam://` opener in `client.rs`; the alive check and the
+  install watch in `watch.rs`), `filter` (games vs tools: the denylist, the name and
+  folder patterns, the store type; the `StateFlags` phase and progress), `meta`
+  (`SteamMeta`) and `row` (`steam_row`: no path column is set, so no GRID path that
+  removes, moves or backs up files can reach a folder Steam owns; the folder is in
+  `store_meta`).
 - `romm` — the RomM HTTP client: `RommClient`, platforms, games, ROM detail, firmware,
   byte fetches, the cloud save/state endpoints, and the play-session ingest. All request construction lives here;
   check `openapi.json` before changing any of it. `RommClient::recent_games` is one
@@ -306,8 +323,10 @@ Modules as declared in `src/lib.rs`:
   (the preferred platforms, the New releases window and limit, Recently added without
   the coverflow's games, and its platform filters), which always re-filter and re-sort because the server ignores
   an unknown `order_by`.
-- `secrets` — `Credential`, the `SecretStore`/`RaTokenStore` traits, and `KeyringStore`,
-  the OS keyring implementation. Secrets are `SecretString` values that cannot be
+- `secrets` — `Credential`, the `SecretStore`/`RaTokenStore`/`SteamKeyStore` traits (the
+  RomM credential, the RetroAchievements token and the Steam Web API key: three
+  independent keyring items under one service), and `KeyringStore`, the OS keyring
+  implementation (`MemoryStore` for tests). Secrets are `SecretString` values that cannot be
   formatted or logged.
 - `session` — `SessionManager`: connect, restore, disconnect, and the shared
   `RommClient` and image cache handles the rest of the app reads. `use_offline` turns on
@@ -334,11 +353,11 @@ The shell owns *when* things run; grid-core owns *what* they do.
   `StoreBackend` trait (`mod.rs`), which has every method a store command calls (login,
   disconnect, tool install, refresh, library, updates, install options and jobs, DLC,
   uninstall, game settings, cloud state and sync, the syncs around a session, art, the
-  launch hook). A new login window gets its spec from `prepare_login` (by default
+  launch hook, and `launch_watched` for a store whose own client starts the game). A new login window gets its spec from `prepare_login` (by default
   `begin_login` then `login_spec`; Amazon installs nile and asks it for the per-attempt
   login URL first); an open one is only focused. `StoresService` is the facade the app
   holds: `backend(StoreKind)`, `statuses()` (every store, in the frontend's
-  `STORE_ORDER`: amazon, epic, gog), and the fan-outs (startup, Downloads snapshots, the
+  `STORE_ORDER`: amazon, epic, gog, steam), and the fan-outs (startup, Downloads snapshots, the
   session-finished upload, art). The launch service has one store launch hook slot;
   `install_launch_hook` fills it with `StoreLaunchRouter`, which hands each store row to
   its own backend's `launch_hook()` (Epic and Amazon have one; GOG's rows launch as they
@@ -368,7 +387,20 @@ The shell owns *when* things run; grid-core owns *what* they do.
   `library sync`; GRID writes no copy), the background `store-notice` cards, the install
   guards, nile's glibc floor shown as the tool's error, and the `StoreLaunchHook` that
   adds nile's FUEL environment (not connected or no nile, as after a Disconnect: the row
-  launches as it is). No cloud saves (`cloud_state` answers `none`) and no DLC. Store updates are keyed
+  launches as it is). No cloud saves (`cloud_state` answers `none`) and no DLC.
+  `steam.rs` is `SteamStore` (Phase 4; a Step 0 stub until package C): no tool (an empty
+  `ToolStatus`), no login window (`prepare_login` answers "Steam connects in Settings ›
+  Stores."), every install, update, repair, DLC and uninstall path refused ("Steam
+  installs, updates and uninstalls its games itself."), and `launch_watched`, which opens
+  `steam://rungameid/<id>` through `SteamService::open` and registers a watched session.
+  Its status carries `StoreStatus.steam` (`SteamCard`: the client line, the SteamID64, the
+  key's state, the local accounts; never the key). It holds the keyring's
+  `SteamKeyStore` slot (`StoresService::real` takes it from `lib.rs`). Its HTTP client
+  follows no redirect. The Steam commands (`steam_test`, `steam_save`,
+  `steam_remove_key`, `steam_recheck_client`, `steam_open`) are in `commands/stores.rs`;
+  `steam_open`'s install admits the queue's store-external Downloads row
+  (`InstallService::admit_store_external`: no slot, no cancel or retry, Steam owns
+  them). Store updates are keyed
   by `GameKey` in `update_service.rs` (`StoreUpdateSource`, one per store). `store_auth.rs` is the login window: a separate, unprivileged, incognito webview
   whose finish URL (a store's `LoginSpec`: scheme, host, port and path, plus a required
   query pair when `finish_query` is set, as Amazon's `openid.assoc_handle`, so Amazon's
@@ -377,7 +409,8 @@ The shell owns *when* things run; grid-core owns *what* they do.
   `backend_for_key`) and, for GOG backups, `commands/store_backups.rs`.
 - `commands.rs` — also `launch_game_key`: a RomM key takes `launch_game`'s path, a store
   key skips the RomM-only steps (cloud restore, firmware, session stamps) and stamps
-  `last_played_at` by key.
+  `last_played_at` by key. A store whose backend answers `launch_watched` (Steam) gets
+  that watched session; every other store row goes through `LaunchService::launch_key`.
 - `commands.rs` (+ `commands/cloud.rs`, `commands/specials.rs`, `commands/updates.rs`,
   `commands/logging.rs`, `commands/setup.rs`, `commands/discover.rs`,
   `commands/backups.rs`) — the `#[tauri::command]` surface. Thin
@@ -716,7 +749,12 @@ tools' stdout or stderr, and redacts an Epic exchange code in a launch argv
 (`NativeLaunch::redact`). GRID's own secrets, the Steam Web API key included, stay in the
 keyring. The hygiene script refuses a log or print macro in the store code that mentions
 stdout or stderr, and allows only the fake markers `FAKE-STORE-TOKEN-not-real` and
-`FAKE-STEAM-KEY-not-real` in store fixtures.
+`FAKE-STEAM-KEY-not-real` in store fixtures. For Steam it also refuses the keyring account
+name outside `secrets.rs`, a key-named field (`steam_api_key`, `web_api_key`,
+`steam_key`) anywhere else, and a format or log macro in the Steam code that names a URL
+and the key together. reqwest, hyper, hyper-util and h2 log no request URL at any level
+(`app/src-tauri/tests/steam_key_logging.rs` checks it at `trace`), but a
+`reqwest::Error`'s text carries the full URL: Steam's errors go through `without_url()`.
 
 `scripts/check_secret_hygiene.sh` enforces the mechanical half: `expose_secret()` is
 allowed only at a fixed list of call sites, and committed fixtures must not contain

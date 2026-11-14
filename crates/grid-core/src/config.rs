@@ -339,6 +339,9 @@ pub struct StoresConfig {
     /// Not written while default, like Epic.
     #[serde(default, skip_serializing_if = "AmazonConfig::is_default")]
     pub amazon: AmazonConfig,
+    /// Not written while default, like Epic.
+    #[serde(default, skip_serializing_if = "SteamConfig::is_default")]
+    pub steam: SteamConfig,
 }
 
 impl StoresConfig {
@@ -434,6 +437,30 @@ impl AmazonConfig {
     /// Whether nothing differs from the defaults.
     pub fn is_default(&self) -> bool {
         self == &AmazonConfig::default()
+    }
+}
+
+/// Steam (`[stores.steam]`). No key field, ever: the Steam Web API key lives
+/// only in the OS keyring (`secrets::SteamKeyStore`), and the hygiene script
+/// refuses a key-named field.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SteamConfig {
+    /// The user connected Steam (a SteamID64 and a key Steam answered for).
+    #[serde(default)]
+    pub connected: bool,
+    /// The SteamID64, the public profile number. Not a secret.
+    #[serde(default)]
+    pub steam_id: String,
+    /// The Steam persona name, for Settings. Not a secret (never the login
+    /// name).
+    #[serde(default)]
+    pub persona: String,
+}
+
+impl SteamConfig {
+    /// Whether nothing differs from the defaults.
+    pub fn is_default(&self) -> bool {
+        self == &SteamConfig::default()
     }
 }
 
@@ -912,6 +939,7 @@ mod tests {
         );
         assert_eq!(loaded.stores.epic.install_dir, "");
         assert_eq!(loaded.stores.amazon, AmazonConfig::default());
+        assert_eq!(loaded.stores.steam, SteamConfig::default());
         loaded.save(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(!written.contains("stores"), "written:\n{written}");
@@ -941,6 +969,7 @@ mod tests {
                 },
                 epic: EpicConfig::default(),
                 amazon: AmazonConfig::default(),
+                steam: SteamConfig::default(),
             },
             ..Default::default()
         };
@@ -997,9 +1026,30 @@ mod tests {
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(written.contains("[stores.amazon]"), "written:\n{written}");
         assert!(!written.contains("epic"), "written:\n{written}");
+        assert!(!written.contains("steam"), "written:\n{written}");
         assert!(
             !written.to_lowercase().contains("token"),
             "written:\n{written}"
+        );
+        assert_eq!(Config::load(&path).unwrap(), cfg);
+
+        let cfg = Config {
+            stores: StoresConfig {
+                steam: SteamConfig {
+                    connected: true,
+                    steam_id: "76561198000000001".into(),
+                    persona: "SamPlays".into(),
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("[stores.steam]"), "written:\n{written}");
+        assert!(
+            !written.to_lowercase().contains("key"),
+            "no key field, ever:\n{written}"
         );
         assert_eq!(Config::load(&path).unwrap(), cfg);
     }

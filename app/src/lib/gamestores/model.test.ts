@@ -68,14 +68,18 @@ describe('marks', () => {
   });
   it('gives each store its capabilities', () => {
     expect(storeCaps('gog')).toEqual({
-      hasTool: true, hasCloud: true, canBackup: true, hasInstaller: true, hasVersions: true, hasLanguages: true, hasDlc: true, readableVersions: true,
+      hasTool: true, hasCloud: true, canBackup: true, hasInstaller: true, hasVersions: true, hasLanguages: true, hasDlc: true, readableVersions: true, managedByClient: false,
     });
     expect(storeCaps('epic')).toEqual({
-      hasTool: true, hasCloud: true, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: true, readableVersions: true,
+      hasTool: true, hasCloud: true, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: true, readableVersions: true, managedByClient: false,
     });
     // Amazon is the first store with a tool but no cloud saves, no DLC and opaque versions.
     expect(storeCaps('amazon')).toEqual({
-      hasTool: true, hasCloud: false, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: false, readableVersions: false,
+      hasTool: true, hasCloud: false, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: false, readableVersions: false, managedByClient: false,
+    });
+    // Steam's own client installs, updates and starts its games.
+    expect(storeCaps('steam')).toEqual({
+      hasTool: false, hasCloud: false, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: false, readableVersions: false, managedByClient: true,
     });
     expect([hasTool('steam'), hasCloud('amazon'), canBackup('epic'), hasInstaller('epic')]).toEqual([false, false, false, false]);
     expect([hasTool('epic'), hasCloud('epic'), canBackup('gog'), hasInstaller('gog')]).toEqual([true, true, true, true]);

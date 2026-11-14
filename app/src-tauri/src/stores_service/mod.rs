@@ -6,8 +6,11 @@
 //! - [`epic`]: [`EpicStore`], Epic through grid-core's `stores::epic`
 //!   (Phase 2).
 //! - [`amazon`]: [`AmazonStore`], Amazon Games through grid-core's
-//!   `stores::amazon` (Phase 3; Step 0 stubs every action with
-//!   `not implemented`).
+//!   `stores::amazon` (Phase 3).
+//! - [`steam`]: [`SteamStore`], Steam through grid-core's `stores::steam`
+//!   (Phase 4): no tool, no login window, no GRID-run job; its launches are
+//!   watched sessions ([`StoreBackend::launch_watched`]). Step 0 stubs its
+//!   commands with `not implemented`.
 //!
 //! [`StoresService`] is the facade the app holds: it routes a store id to
 //! its backend ([`StoresService::backend`]), assembles every store's
@@ -27,6 +30,7 @@
 pub mod amazon;
 pub mod epic;
 pub mod gog;
+pub mod steam;
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -35,9 +39,12 @@ use std::pin::Pin;
 use std::sync::{Arc, OnceLock, RwLock, Weak};
 
 use grid_core::config::Config;
-use grid_core::launch::{LaunchError, StoreLaunchHook, StoreLaunchPrep};
+use grid_core::launch::{
+    GameSession, LaunchError, LaunchService, StoreLaunchHook, StoreLaunchPrep,
+};
 use grid_core::library::queue::{DownloadsSnapshot, StoreJob};
 use grid_core::library::registry::{InstalledGame, Registry};
+use grid_core::secrets::SteamKeyStore;
 use grid_core::stores::amazon::AmazonJobCtx;
 use grid_core::stores::epic::EpicJobCtx;
 use grid_core::stores::gog::GogJobCtx;
@@ -54,6 +61,7 @@ use crate::store_auth::LoginSpec;
 pub use amazon::AmazonStore;
 pub use epic::EpicStore;
 pub use gog::{notice, GogStore};
+pub use steam::SteamStore;
 
 /// A boxed, sendable future: the async methods of [`StoreBackend`] and the
 /// store API seams.
@@ -249,6 +257,20 @@ pub trait StoreBackend: Send + Sync + 'static {
     fn launch_hook(self: Arc<Self>) -> Option<Arc<dyn StoreLaunchHook>> {
         None
     }
+
+    /// A launch GRID does not spawn: the store's own client starts the game
+    /// and the session is a watched one (`LaunchService::register_watched`).
+    /// `launch_game_key` takes this answer as the session when there is one,
+    /// before `LaunchService::launch_key`. `None` (the default: GOG, Epic,
+    /// Amazon) launches through `launch_key` as before; Steam opens
+    /// `steam://rungameid/<id>`.
+    fn launch_watched(
+        self: Arc<Self>,
+        _key: GameKey,
+        _launch: Arc<LaunchService>,
+    ) -> Option<BoxFut<'static, Result<GameSession, LaunchError>>> {
+        None
+    }
 }
 
 // --- what the backends share --------------------------------------------------------
@@ -375,39 +397,44 @@ impl StoreLaunchHook for StoreLaunchRouter {
 
 // --- the facade ------------------------------------------------------------------
 
-/// The external stores: GOG, Epic and Amazon.
+/// The external stores: GOG, Epic, Amazon and Steam.
 pub struct StoresService {
     shared: Arc<StoreShared>,
     data_dir: PathBuf,
     pub gog: Arc<GogStore>,
     pub epic: Arc<EpicStore>,
     pub amazon: Arc<AmazonStore>,
+    pub steam: Arc<SteamStore>,
 }
 
 impl StoresService {
-    /// The facade over `gog`, `epic` and `amazon`, registered on `shared`
-    /// in the frontend's `STORE_ORDER` (amazon, epic, gog, steam).
+    /// The facade over `gog`, `epic`, `amazon` and `steam`, registered on
+    /// `shared` in the frontend's `STORE_ORDER` (amazon, epic, gog, steam).
     pub fn new(
         shared: Arc<StoreShared>,
         data_dir: PathBuf,
         gog: Arc<GogStore>,
         epic: Arc<EpicStore>,
         amazon: Arc<AmazonStore>,
+        steam: Arc<SteamStore>,
     ) -> Arc<Self> {
         shared.register(amazon.clone());
         shared.register(epic.clone());
         shared.register(gog.clone());
+        shared.register(steam.clone());
         Arc::new(StoresService {
             shared,
             data_dir,
             gog,
             epic,
             amazon,
+            steam,
         })
     }
 
-    /// The real stores for this run.
-    pub fn real(config_path: PathBuf) -> Arc<Self> {
+    /// The real stores for this run. `steam_keys` is the OS keyring's Steam
+    /// Web API key slot.
+    pub fn real(config_path: PathBuf, steam_keys: Arc<dyn SteamKeyStore>) -> Arc<Self> {
         let data_dir = config_path
             .parent()
             .map(Path::to_path_buf)
@@ -429,8 +456,9 @@ impl StoresService {
             http.clone(),
             shared.clone(),
         );
-        let amazon = AmazonStore::real(data_dir.clone(), config_path, http, shared.clone());
-        StoresService::new(shared, data_dir, gog, epic, amazon)
+        let amazon = AmazonStore::real(data_dir.clone(), config_path.clone(), http, shared.clone());
+        let steam = SteamStore::real(config_path, steam_keys, shared.clone());
+        StoresService::new(shared, data_dir, gog, epic, amazon, steam)
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -454,19 +482,24 @@ impl StoresService {
         self.shared.statuses()
     }
 
-    /// The backend for `kind`; `None` for a store GRID doesn't support yet
-    /// (Steam).
+    /// The backend for `kind`. `Option` so a later store can be added
+    /// before its backend; every store has one now.
     pub fn backend(&self, kind: StoreKind) -> Option<Arc<dyn StoreBackend>> {
         match kind {
             StoreKind::Gog => Some(self.gog.clone()),
             StoreKind::Epic => Some(self.epic.clone()),
             StoreKind::Amazon => Some(self.amazon.clone()),
-            StoreKind::Steam => None,
+            StoreKind::Steam => Some(self.steam.clone()),
         }
     }
 
-    fn backends(&self) -> [Arc<dyn StoreBackend>; 3] {
-        [self.amazon.clone(), self.epic.clone(), self.gog.clone()]
+    fn backends(&self) -> [Arc<dyn StoreBackend>; 4] {
+        [
+            self.amazon.clone(),
+            self.epic.clone(),
+            self.gog.clone(),
+            self.steam.clone(),
+        ]
     }
 
     /// Startup: every store's tool, cache and connection.
@@ -572,7 +605,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("config.toml");
         Config::default().save(&config_path).unwrap();
-        let stores = StoresService::real(config_path);
+        let stores = StoresService::real(
+            config_path,
+            Arc::new(grid_core::secrets::MemoryStore::default()),
+        );
         (stores, dir)
     }
 
@@ -580,7 +616,7 @@ mod tests {
     fn statuses_come_in_store_order_and_backends_route() {
         let (stores, _dir) = facade();
         let sources: Vec<String> = stores.statuses().into_iter().map(|s| s.source).collect();
-        assert_eq!(sources, ["amazon", "epic", "gog"]);
+        assert_eq!(sources, ["amazon", "epic", "gog", "steam"]);
         assert_eq!(
             stores.backend(StoreKind::Gog).unwrap().kind(),
             StoreKind::Gog
@@ -593,12 +629,18 @@ mod tests {
             stores.backend(StoreKind::Amazon).unwrap().kind(),
             StoreKind::Amazon
         );
-        assert!(stores.backend(StoreKind::Steam).is_none());
+        assert_eq!(
+            stores.backend(StoreKind::Steam).unwrap().kind(),
+            StoreKind::Steam
+        );
         assert_eq!(
             stores.shared.backend(StoreKind::Amazon).unwrap().kind(),
             StoreKind::Amazon
         );
-        assert!(stores.shared.backend(StoreKind::Steam).is_none());
+        assert_eq!(
+            stores.shared.backend(StoreKind::Steam).unwrap().kind(),
+            StoreKind::Steam
+        );
     }
 
     #[test]
@@ -610,7 +652,7 @@ mod tests {
         stores.epic.changed();
         let events = events.lock().unwrap();
         match events.as_slice() {
-            [StoreEvent::Changed(statuses)] => assert_eq!(statuses.len(), 3),
+            [StoreEvent::Changed(statuses)] => assert_eq!(statuses.len(), 4),
             other => panic!("{other:?}"),
         }
     }
@@ -621,6 +663,11 @@ mod tests {
         assert!(stores.is_art_url("https://images.gog-statics.com/a.jpg"));
         assert!(stores.is_art_url("https://cdn1.epicgames.com/a.jpg"));
         assert!(stores.is_art_url("https://m.media-amazon.com/images/I/a.jpg"));
+        assert!(stores.is_art_url(
+            "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/620/library_600x900.jpg"
+        ));
+        assert!(stores.is_art_url("https://steamcdn-a.akamaihd.net/steam/apps/620/header.jpg"));
+        assert!(!stores.is_art_url("https://other.akamaihd.net/a.jpg"));
         assert!(!stores.is_art_url("https://romm.example/a.jpg"));
     }
 
@@ -664,5 +711,34 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    /// Only Steam answers `launch_watched` (its launches are watched
+    /// sessions through the Steam client); GOG, Epic and Amazon launch
+    /// through `launch_key`. A Steam row that isn't installed is refused
+    /// before anything opens.
+    #[tokio::test]
+    async fn only_steam_launches_watched() {
+        let (stores, _dir) = facade();
+        let registry_dir = tempfile::tempdir().unwrap();
+        let registry = Arc::new(Registry::open(&registry_dir.path().join("r.db")).unwrap());
+        stores.set_registry(registry.clone());
+        let launch = LaunchService::new(registry, registry_dir.path().join("config.toml"));
+        for kind in [StoreKind::Gog, StoreKind::Epic, StoreKind::Amazon] {
+            let key = GameKey::store(kind, "x".to_string());
+            assert!(stores
+                .backend(kind)
+                .unwrap()
+                .launch_watched(key, launch.clone())
+                .is_none());
+        }
+        let key = GameKey::store(StoreKind::Steam, "620".to_string());
+        let started = stores
+            .backend(StoreKind::Steam)
+            .unwrap()
+            .launch_watched(key, launch.clone())
+            .expect("Steam launches watched");
+        assert!(matches!(started.await, Err(LaunchError::NotInstalled)));
+        assert!(launch.snapshot().sessions.is_empty());
     }
 }

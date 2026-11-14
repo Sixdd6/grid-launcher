@@ -1396,6 +1396,7 @@ fn assemble_status(
         install_dir: install_dir.to_string(),
         in_rail,
         last_error: state.last_error.clone(),
+        steam: None,
     }
 }
 

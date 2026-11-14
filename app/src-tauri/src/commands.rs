@@ -1210,7 +1210,9 @@ pub async fn launch_game(
 /// A RomM key takes exactly [`launch_game`]'s path (cloud restore, firmware
 /// top-up, session stamps). A store key skips every RomM-only step — store
 /// games have no RomM cloud saves, firmware or play activity — and stamps
-/// `last_played_at` by key once the process has spawned.
+/// `last_played_at` by key once the process has spawned. A Steam key's
+/// session is its backend's `launch_watched` (the Steam client starts the
+/// game; GRID watches it), never `launch_key`.
 #[tauri::command]
 pub async fn launch_game_key(
     state: State<'_, AppState>,
@@ -1257,7 +1259,17 @@ pub async fn launch_game_key(
         }
     }
 
-    let session = launch.launch_key(&key).await?;
+    // A store whose client starts the game itself (Steam) answers with a
+    // watched session; every other store row goes through `launch_key`
+    // (which refuses a Steam row, `STEAM_LAUNCH_UNSUPPORTED`).
+    let watched = key
+        .store_kind()
+        .and_then(|kind| state.stores.backend(kind))
+        .and_then(|backend| backend.launch_watched(key.clone(), launch.clone()));
+    let session = match watched {
+        Some(started) => started.await?,
+        None => launch.launch_key(&key).await?,
+    };
 
     // Fire-and-forget, like `launch_game`'s stamp. The key is safe to log:
     // a store id is a product id, never a credential.

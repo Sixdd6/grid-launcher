@@ -3121,6 +3121,46 @@ impl InstallService {
         self.notify_now();
     }
 
+    /// Creates the Downloads row of a store install the store's own client
+    /// drives (Steam; [`queue::QueueState::admit_store_external`]). It takes
+    /// no slot and is not behind the library gate: the store writes into
+    /// its own libraries, never GRID's. `None` while a live row for the
+    /// product exists.
+    pub fn admit_store_external(
+        &self,
+        source: crate::stores::StoreKind,
+        store_id: &str,
+        title: &str,
+    ) -> Option<u64> {
+        let id = self
+            .queue
+            .lock()
+            .unwrap()
+            .admit_store_external(source, store_id, title);
+        if id.is_some() {
+            self.notify_now();
+        }
+        id
+    }
+
+    /// The progress of a store-external row, as the store reports it.
+    pub fn store_external_progress(&self, id: u64, done: u64, total: u64) {
+        self.queue
+            .lock()
+            .unwrap()
+            .set_progress(id, done, total, 0.0);
+        self.notify_now();
+    }
+
+    /// Ends a store-external row.
+    pub fn finish_store_external(&self, id: u64, outcome: queue::ExternalOutcome) {
+        self.queue
+            .lock()
+            .unwrap()
+            .finish_store_external(id, outcome);
+        self.notify_now();
+    }
+
     /// Retries a failed or cancelled entry: the old entry is dismissed and a
     /// fresh install starts for the same rom or emulator. Any other entry is
     /// ignored.
@@ -3197,6 +3237,8 @@ impl InstallService {
             // never moved its bytes and has no plan to restart. The owner
             // re-requests it instead, which creates a new row.
             Some(JobKey::External(_)) => Ok(()),
+            // Never retryable (the store restarts its own installs).
+            Some(JobKey::StoreExternal { .. }) => Ok(()),
             // A library move is resumed or restarted by its own service.
             Some(JobKey::LibraryMove) => Ok(()),
             Some(JobKey::Backup { drive, item }) => {

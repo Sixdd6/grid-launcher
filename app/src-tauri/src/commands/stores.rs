@@ -1,4 +1,4 @@
-//! External game stores (GOG, Epic, Amazon) commands and events
+//! External game stores (GOG, Epic, Amazon, Steam) commands and events
 //! (`docs/stores-phase1-plan.md` "Tauri commands and events",
 //! `docs/stores-phase2-plan.md` "App"). Thin wrappers: each store command
 //! finds its store's backend (`backend_for`, `backend_for_key`) and calls
@@ -11,7 +11,9 @@
 //! The IPC types below mirror `app/src/lib/api.ts` field for field.
 //!
 //! Secrets: no payload here carries a login code or a token, and nothing in
-//! this file may log or forward a store tool's output.
+//! this file may log or forward a store tool's output. The Steam commands
+//! take the Web API key as a plain `String` (IPC has no other form) and wrap
+//! it in a `SecretString` on their first line; no answer ever carries it.
 //!
 //! The five backup commands at the end (`plan_store_backup` …
 //! `remove_store_from_drive`) are package C's: they delegate to
@@ -87,7 +89,7 @@ pub enum OwnedState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StoreStatus {
-    /// `gog` | `epic` | `amazon`.
+    /// `gog` | `epic` | `amazon` | `steam`.
     pub source: String,
     pub connection: StoreConnection,
     pub username: String,
@@ -102,6 +104,67 @@ pub struct StoreStatus {
     pub install_dir: String,
     pub in_rail: bool,
     pub last_error: String,
+    /// Steam's part of the card; `None` for every other store.
+    pub steam: Option<SteamCard>,
+}
+
+/// Where Steam's Web API key stands. Step 0's status only says `None`;
+/// package C sets the rest from the last Web API answer.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SteamKeyState {
+    /// Steam answered with games.
+    Ok,
+    /// No key in the keyring.
+    None,
+    /// Steam rejected the key on the last call.
+    Bad,
+    /// The key works, but the profile's game details are private.
+    Private,
+}
+
+/// An account that signed in to Steam on this computer. Never the login
+/// name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SteamAccount {
+    pub persona: String,
+    pub steam_id: String,
+    pub most_recent: bool,
+}
+
+/// Steam's part of [`StoreStatus`]. Never the key, nor any part of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SteamCard {
+    /// The client line: the executable's path, the Flatpak/Snap name; `""`
+    /// when Steam isn't installed.
+    pub client_path: String,
+    /// The SteamID64 (not a secret).
+    pub steam_id: String,
+    pub key: SteamKeyState,
+    /// Always `""`: a saved key shows as dots only (user decision 2).
+    pub key_tail: String,
+    pub accounts: Vec<SteamAccount>,
+}
+
+/// `steam_test` / `steam_save`'s answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SteamTestResult {
+    Ok { owned_count: u32 },
+    BadKey { status: u16 },
+    Private,
+    BadSteamId,
+    Network,
+}
+
+/// `steam_open`'s action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SteamOpenAction {
+    Install,
+    Uninstall,
+    Validate,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -133,8 +196,9 @@ pub struct StoreGame {
     pub disk_bytes: u64,
     pub version: String,
     pub update_version: String,
-    /// `gogdl` | `offline` | `drive` | `legendary` | `nile`, `None` when
-    /// not installed.
+    /// `gogdl` | `offline` | `drive` | `legendary` | `nile` | `steam`
+    /// (installed through GRID's Install in Steam) | `steam_outside` (found
+    /// in Steam's files), `None` when not installed.
     pub origin: Option<String>,
     pub not_supported: String,
     pub dlc: Vec<StoreDlc>,
@@ -323,12 +387,9 @@ pub struct StoreBackupPlan {
 /// What every store command answers for a store GRID doesn't support.
 const UNSUPPORTED_STORE: &str = "GRID doesn't support that store yet.";
 
-/// The store a `source` argument names: GOG, Epic or Amazon.
+/// The store a `source` argument names: GOG, Epic, Amazon or Steam.
 fn store_kind(source: &str) -> Result<StoreKind, String> {
-    match StoreKind::parse(source.trim()) {
-        Some(kind @ (StoreKind::Gog | StoreKind::Epic | StoreKind::Amazon)) => Ok(kind),
-        _ => Err(UNSUPPORTED_STORE.to_string()),
-    }
+    StoreKind::parse(source.trim()).ok_or_else(|| UNSUPPORTED_STORE.to_string())
 }
 
 /// The backend for a `source` argument.
@@ -341,7 +402,7 @@ fn backend_for(state: &AppState, source: &str) -> Result<Arc<dyn StoreBackend>, 
 }
 
 /// A store game key's store and product id (GOG product id, Epic app name,
-/// Amazon product id).
+/// Amazon product id, Steam app id).
 fn store_key(key: &str) -> Result<(StoreKind, String), String> {
     match key.parse::<GameKey>().map_err(err)? {
         GameKey::Store { source, store_id } => {
@@ -903,6 +964,69 @@ fn inspection_ipc(insp: &offline::Inspection, product: Option<&GogProduct>) -> I
     }
 }
 
+// --- Steam (Settings › Stores › Steam, and Steam's own links) ----------------
+
+/// Tests a SteamID64 and a key (`key: None` tests the saved key) with one
+/// `GetOwnedGames` call. The key is wrapped on the first line and never
+/// read again here.
+#[tauri::command]
+pub async fn steam_test(
+    state: State<'_, AppState>,
+    steam_id: String,
+    key: Option<String>,
+) -> Result<SteamTestResult, String> {
+    let key = key.map(SecretString::from);
+    state.stores.steam.test(&steam_id, key).await
+}
+
+/// The test, then (on `ok` or `private`) the key into the keyring when
+/// given, `[stores.steam]`, a scan and a refresh.
+#[tauri::command]
+pub async fn steam_save(
+    state: State<'_, AppState>,
+    steam_id: String,
+    key: Option<String>,
+) -> Result<SteamTestResult, String> {
+    let key = key.map(SecretString::from);
+    state.stores.steam.save(&steam_id, key).await
+}
+
+/// Clears the key's keyring slot; Steam stays connected with no key.
+#[tauri::command]
+pub async fn steam_remove_key(state: State<'_, AppState>) -> Result<(), String> {
+    let steam = state.stores.steam.clone();
+    tokio::task::spawn_blocking(move || steam.remove_key())
+        .await
+        .map_err(err)?
+}
+
+/// Finds the Steam client again and scans.
+#[tauri::command]
+pub async fn steam_recheck_client(state: State<'_, AppState>) -> Result<(), String> {
+    let steam = state.stores.steam.clone();
+    tokio::task::spawn_blocking(move || steam.recheck_client())
+        .await
+        .map_err(err)?
+}
+
+/// Hands the Steam client an install, uninstall or validate link for a
+/// Steam game key.
+#[tauri::command]
+pub async fn steam_open(
+    state: State<'_, AppState>,
+    key: String,
+    action: SteamOpenAction,
+) -> Result<(), String> {
+    let (kind, id) = store_key(&key)?;
+    if kind != StoreKind::Steam {
+        return Err(UNSUPPORTED_STORE.to_string());
+    }
+    let steam = state.stores.steam.clone();
+    tokio::task::spawn_blocking(move || steam.open(&id, action))
+        .await
+        .map_err(err)?
+}
+
 /// Reads an installer file.
 async fn inspect(state: &AppState, path: &str) -> Result<offline::Inspection, String> {
     let install = install_service(state)?;
@@ -1062,7 +1186,10 @@ mod tests {
             store_key("epic:Fortnite").unwrap(),
             (StoreKind::Epic, "Fortnite".to_string())
         );
-        assert!(store_key("steam:620").is_err());
+        assert_eq!(
+            store_key("steam:620").unwrap(),
+            (StoreKind::Steam, "620".to_string())
+        );
         assert_eq!(
             store_key("amazon:amzn1.adg.product.1:x").unwrap(),
             (StoreKind::Amazon, "amzn1.adg.product.1:x".to_string())
@@ -1072,8 +1199,32 @@ mod tests {
         assert!(store_key("nonsense").is_err());
         assert_eq!(store_kind("gog").unwrap(), StoreKind::Gog);
         assert_eq!(store_kind(" epic ").unwrap(), StoreKind::Epic);
-        assert_eq!(store_kind("steam").unwrap_err(), UNSUPPORTED_STORE);
+        assert_eq!(store_kind("steam").unwrap(), StoreKind::Steam);
+        assert_eq!(store_kind("origin").unwrap_err(), UNSUPPORTED_STORE);
         assert!(store_kind("romm").is_err());
+    }
+
+    #[test]
+    fn steam_ipc_types_serialize_as_api_ts_says() {
+        assert_eq!(
+            serde_json::to_value(SteamTestResult::Ok { owned_count: 4 }).unwrap(),
+            serde_json::json!({"kind": "ok", "owned_count": 4})
+        );
+        assert_eq!(
+            serde_json::to_value(SteamTestResult::BadKey { status: 401 }).unwrap(),
+            serde_json::json!({"kind": "bad_key", "status": 401})
+        );
+        assert_eq!(
+            serde_json::to_value(SteamTestResult::BadSteamId).unwrap(),
+            serde_json::json!({"kind": "bad_steam_id"})
+        );
+        assert_eq!(
+            serde_json::to_value(SteamKeyState::Private).unwrap(),
+            serde_json::json!("private")
+        );
+        let action: SteamOpenAction =
+            serde_json::from_value(serde_json::json!("validate")).unwrap();
+        assert_eq!(action, SteamOpenAction::Validate);
     }
 
     #[test]

@@ -52,6 +52,26 @@ pub enum JobKey {
         store_id: String,
         op: StoreOp,
     },
+    /// A store install the queue shows but does not drive: the store's own
+    /// client moves the bytes (Steam). Created by
+    /// [`QueueState::admit_store_external`]: `job` `"store"`, `kind`
+    /// `"store_external"`, `source_id` the game key. It takes no slot,
+    /// never waits, is never cancelled or retried here (the store owns
+    /// pause and cancel), and dedupes per product while live.
+    StoreExternal { source: StoreKind, store_id: String },
+}
+
+/// How a [`JobKey::StoreExternal`] row ends
+/// ([`QueueState::finish_store_external`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExternalOutcome {
+    /// The store finished it; `detail` is the row's line ("Installed by
+    /// Steam").
+    Completed { detail: String },
+    /// The store's install went away before it finished.
+    Cancelled,
+    /// It failed, with GRID's words.
+    Failed(String),
 }
 
 /// What a store job does.
@@ -398,10 +418,14 @@ impl DownloadsSnapshot {
     /// ([`DownloadStatus::is_live`]), firmware rows included. A library
     /// path change waits for this. The library move's own row is not an
     /// install and does not count: see [`Self::has_live_library_move`].
+    /// Neither does a store-external row (Steam writes into its own
+    /// libraries, never GRID's).
     pub fn has_live_entry(&self) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| entry.status.is_live() && entry.key != JobKey::LibraryMove)
+        self.entries.iter().any(|entry| {
+            entry.status.is_live()
+                && entry.key != JobKey::LibraryMove
+                && !matches!(entry.key, JobKey::StoreExternal { .. })
+        })
     }
 
     /// True while the library move's row is live.
@@ -521,9 +545,12 @@ impl QueueState {
             // Never reached: `cancel_drive_queue` creates its own row.
             JobKey::BackupSummary(_) => ("backup", 0, String::new()),
             // `source_id` carries the product's game key (`gog:1207664643`).
+            // A store-external row never routes through here
+            // (`admit_store_external`), but it keys the same way.
             JobKey::Store {
                 source, store_id, ..
-            } => (
+            }
+            | JobKey::StoreExternal { source, store_id } => (
                 "store",
                 0,
                 GameKey::store(*source, store_id.clone()).to_string(),
@@ -624,6 +651,85 @@ impl QueueState {
         } else {
             entry.status = DownloadStatus::Failed;
             entry.error = error.to_string();
+        }
+        self.prune_terminal();
+    }
+
+    /// Creates the Downloads row of a store install the store's own client
+    /// drives (Steam): `job` `"store"`, `kind` `"store_external"`,
+    /// `source_id` the game key, `Downloading` from the start. Like
+    /// [`Self::admit_external`] it takes no slot and never enters
+    /// `waiting`. `None` when a live row for the same product exists.
+    /// [`Self::set_progress`] works on it as on any row.
+    pub fn admit_store_external(
+        &mut self,
+        source: StoreKind,
+        store_id: &str,
+        title: &str,
+    ) -> Option<u64> {
+        let key = JobKey::StoreExternal {
+            source,
+            store_id: store_id.to_string(),
+        };
+        if self
+            .entries
+            .iter()
+            .any(|entry| entry.key == key && entry.status.is_live())
+        {
+            return None;
+        }
+        let id = self.alloc_id();
+        self.entries.push(DownloadEntry {
+            id,
+            job: "store",
+            kind: "store_external",
+            rom_id: 0,
+            source_id: GameKey::store(source, store_id.to_string()).to_string(),
+            title: title.to_string(),
+            platform: source.platform_name().to_string(),
+            status: DownloadStatus::Downloading,
+            downloaded_bytes: 0,
+            total_bytes: 0,
+            speed_bps: 0.0,
+            install_processed_bytes: 0,
+            install_total_bytes: 0,
+            error: String::new(),
+            detail: String::new(),
+            drive_id: String::new(),
+            drive_name: String::new(),
+            drive_label: String::new(),
+            batch: 0,
+            phase: JobPhase::None,
+            failure: None,
+            key,
+        });
+        Some(id)
+    }
+
+    /// Ends a live [`Self::admit_store_external`] row. Ignores an id that
+    /// is unknown, not a store-external row, or already ended.
+    pub fn finish_store_external(&mut self, id: u64, outcome: ExternalOutcome) {
+        let Some(entry) = self.entry_mut(id) else {
+            return;
+        };
+        if !matches!(entry.key, JobKey::StoreExternal { .. }) || !entry.status.is_live() {
+            return;
+        }
+        entry.speed_bps = 0.0;
+        match outcome {
+            ExternalOutcome::Completed { detail } => {
+                entry.status = DownloadStatus::Completed;
+                entry.error.clear();
+                entry.detail = detail;
+            }
+            ExternalOutcome::Cancelled => {
+                entry.status = DownloadStatus::Cancelled;
+                entry.error.clear();
+            }
+            ExternalOutcome::Failed(error) => {
+                entry.status = DownloadStatus::Failed;
+                entry.error = error;
+            }
         }
         self.prune_terminal();
     }
@@ -1019,11 +1125,16 @@ impl QueueState {
     }
 
     /// `Some(key)` when `id`'s entry is `Failed` or `Cancelled`; `None`
-    /// otherwise (including when `id` is unknown, and for a
-    /// `"backup_cancelled"` summary row, which offers Dismiss only).
+    /// otherwise (including when `id` is unknown, for a
+    /// `"backup_cancelled"` summary row, which offers Dismiss only, and for
+    /// a store-external row).
     pub fn retryable(&self, id: u64) -> Option<JobKey> {
         let entry = self.entry(id)?;
-        if matches!(entry.key, JobKey::BackupSummary(_)) {
+        // A store-external row is the store's to restart (Steam).
+        if matches!(
+            entry.key,
+            JobKey::BackupSummary(_) | JobKey::StoreExternal { .. }
+        ) {
             return None;
         }
         match entry.status {
@@ -2030,6 +2141,93 @@ mod tests {
             state.admit(JobKey::NativeUpdate(7), "Game", "Windows", "native_update"),
             Admission::Queued(_)
         ));
+    }
+
+    #[test]
+    fn a_store_external_row_takes_no_slot_and_is_never_cancelled_or_retried() {
+        let mut state = QueueState::default();
+        let id = state
+            .admit_store_external(StoreKind::Steam, "620", "Portal 2")
+            .unwrap();
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.job, "store");
+        assert_eq!(entry.kind, "store_external");
+        assert_eq!(entry.source_id, "steam:620");
+        assert_eq!(entry.platform, "Steam");
+        assert_eq!(entry.status, DownloadStatus::Downloading);
+
+        // One live row per product; another product is fine.
+        assert_eq!(
+            state.admit_store_external(StoreKind::Steam, "620", "Portal 2"),
+            None
+        );
+        assert!(state
+            .admit_store_external(StoreKind::Steam, "400", "Portal")
+            .is_some());
+
+        // It took no slot: a real install starts at once, and the external
+        // row is never handed out as ready work.
+        assert!(matches!(
+            state.admit(JobKey::Rom(1), "Game", "SNES", "base"),
+            Admission::Start(_)
+        ));
+        assert_eq!(state.next_ready(), None);
+
+        // Progress works as on any row; a library path change never waits
+        // for it.
+        state.set_progress(id, 50, 100, 0.0);
+        assert_eq!(state.entry(id).unwrap().downloaded_bytes, 50);
+        let mut alone = QueueState::default();
+        alone.admit_store_external(StoreKind::Steam, "620", "Portal 2");
+        assert!(!alone.snapshot().has_live_entry());
+
+        // Steam owns pause and cancel.
+        assert_eq!(state.request_cancel(id), CancelAction::Ignored);
+        assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Downloading);
+
+        state.finish_store_external(
+            id,
+            ExternalOutcome::Completed {
+                detail: "Installed by Steam".into(),
+            },
+        );
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.status, DownloadStatus::Completed);
+        assert_eq!(entry.detail, "Installed by Steam");
+        assert_eq!(state.retryable(id), None);
+        // A second finish is ignored.
+        state.finish_store_external(id, ExternalOutcome::Cancelled);
+        assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Completed);
+
+        // Once ended, the product may be admitted again.
+        let again = state
+            .admit_store_external(StoreKind::Steam, "620", "Portal 2")
+            .unwrap();
+        state.finish_store_external(again, ExternalOutcome::Cancelled);
+        assert_eq!(
+            state.entry(again).unwrap().status,
+            DownloadStatus::Cancelled
+        );
+        assert_eq!(state.retryable(again), None);
+        let failed = state
+            .admit_store_external(StoreKind::Steam, "620", "Portal 2")
+            .unwrap();
+        state.finish_store_external(failed, ExternalOutcome::Failed("boom".into()));
+        assert_eq!(state.entry(failed).unwrap().status, DownloadStatus::Failed);
+        assert_eq!(state.entry(failed).unwrap().error, "boom");
+        assert_eq!(state.retryable(failed), None);
+    }
+
+    #[test]
+    fn finish_store_external_ignores_other_rows() {
+        let mut state = QueueState::default();
+        let firmware = state.admit_external("PS3 Firmware", "PS3");
+        state.finish_store_external(firmware, ExternalOutcome::Cancelled);
+        assert_eq!(
+            state.entry(firmware).unwrap().status,
+            DownloadStatus::Downloading
+        );
+        state.finish_store_external(9999, ExternalOutcome::Cancelled);
     }
 
     #[test]

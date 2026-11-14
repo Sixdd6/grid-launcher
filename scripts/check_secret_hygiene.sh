@@ -20,7 +20,9 @@ cd "$(dirname "$0")/.."
 # `stores/amazon/auth.rs` is on it for the Amazon login: the code and nile's
 # client_id, code_verifier and serial, which only nile register's argv takes
 # (nile has no stdin or environment path for them).
-allowed_files=("crates/grid-core/src/secrets.rs" "crates/grid-core/src/romm/mod.rs" "crates/grid-core/src/autoconfig/mod.rs" "crates/grid-core/src/retroachievements.rs" "crates/grid-core/tests/ra_login.rs" "crates/grid-core/src/stores/gog/auth.rs" "crates/grid-core/src/stores/gog/api.rs" "crates/grid-core/src/stores/runner.rs" "crates/grid-core/src/stores/epic/launch.rs" "crates/grid-core/src/stores/amazon/auth.rs")
+# `stores/steam/api.rs` is on it for the Steam Web API key, which only goes
+# into a request's query at send time (Steam has no header form).
+allowed_files=("crates/grid-core/src/secrets.rs" "crates/grid-core/src/romm/mod.rs" "crates/grid-core/src/autoconfig/mod.rs" "crates/grid-core/src/retroachievements.rs" "crates/grid-core/tests/ra_login.rs" "crates/grid-core/src/stores/gog/auth.rs" "crates/grid-core/src/stores/gog/api.rs" "crates/grid-core/src/stores/runner.rs" "crates/grid-core/src/stores/epic/launch.rs" "crates/grid-core/src/stores/amazon/auth.rs" "crates/grid-core/src/stores/steam/api.rs")
 allowed_args=()
 for f in "${allowed_files[@]}"; do
   allowed_args+=(-e "$f")
@@ -96,6 +98,67 @@ if [ -n "$ra_account_users" ] && [ "$ra_account_users" != "crates/grid-core/src/
   echo "RA_ACCOUNT/retroachievements-token referenced outside secrets.rs:" >&2
   echo "$ra_account_users" >&2
   exit 1
+fi
+
+# The Steam Web API key's keyring account name may appear only in
+# secrets.rs, as the RA slot's.
+steam_account_users=$(grep -rl "STEAM_KEY_ACCOUNT\|steam-web-api-key" crates app/src-tauri/src app/src --include="*.rs" --include="*.ts" --include="*.svelte" || true)
+if [ -n "$steam_account_users" ] && [ "$steam_account_users" != "crates/grid-core/src/secrets.rs" ]; then
+  echo "STEAM_KEY_ACCOUNT/steam-web-api-key referenced outside secrets.rs:" >&2
+  echo "$steam_account_users" >&2
+  exit 1
+fi
+
+# The Steam Web API key has no config key, IPC field or struct field outside
+# the keyring code: a field named like one means the key is (or was meant to
+# be) serialized somewhere.
+steam_key_field=$(grep -rnwE "steam_api_key|web_api_key|steam_key|steamApiKey|webApiKey" crates app/src-tauri/src app/src --include="*.rs" --include="*.ts" --include="*.svelte" | grep -v -e "^crates/grid-core/src/secrets.rs:" || true)
+if [ -n "$steam_key_field" ]; then
+  echo "A Steam key field (steam_api_key / web_api_key / steam_key) was found outside secrets.rs:" >&2
+  echo "$steam_key_field" >&2
+  exit 1
+fi
+
+# The Steam key travels only in a request's query, so in the Steam store code
+# no format or log macro may name a URL and the key together (it could print
+# a URL that carries the key). A macro's text runs to its balanced closing
+# parenthesis, so multi-line calls count.
+steam_paths=()
+for p in crates/grid-core/src/stores/steam app/src-tauri/src/stores_service/steam.rs; do
+  if [ -e "$p" ]; then
+    steam_paths+=("$p")
+  fi
+done
+if [ "${#steam_paths[@]}" -gt 0 ]; then
+  steam_url_key=$(find "${steam_paths[@]}" -name '*.rs' -print0 | xargs -0 awk '
+    FNR == 1 { inside = 0 }
+    {
+      line = $0
+      if (!inside && line !~ /^[[:space:]]*\/\// && match(line, /(format|format_args|write|writeln|panic|print|println|eprint|eprintln|trace|debug|info|warn|error|event)!\(/)) {
+        inside = 1; start = FNR; text = ""; depth = 0
+        line = substr(line, RSTART)
+      }
+      if (inside) {
+        text = text " " line
+        n = length(line)
+        for (i = 1; i <= n; i++) {
+          c = substr(line, i, 1)
+          if (c == "(") depth++
+          else if (c == ")") { depth--; if (depth == 0) break }
+        }
+        if (depth <= 0) {
+          if (text ~ /([Uu]rl|URL)/ && text ~ /[Kk]ey/) {
+            print FILENAME ":" start ": a URL and the key in one macro:" text
+          }
+          inside = 0
+        }
+      }
+    }' || true)
+  if [ -n "$steam_url_key" ]; then
+    echo "Steam code must never format a URL together with the key:" >&2
+    echo "$steam_url_key" >&2
+    exit 1
+  fi
 fi
 
 # `Config` carries `retroachievements_username` only; the token has no config

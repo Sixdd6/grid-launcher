@@ -1,6 +1,6 @@
 # Game stores — Phase 4 (Steam) work plan
 
-Status: planned 2026-11-14. Not started. Read it with:
+Status: planned 2026-11-14. Spikes 1–4 and Step 0 done 2026-11-14. Read it with:
 - `docs/external-stores-plan.md` for the user decisions;
 - `docs/stores-phase3-plan.md` and `docs/stores-phase2-plan.md`, the templates. Their spike
   results, contract deviations and integration outcomes are the lessons this plan builds on;
@@ -999,6 +999,205 @@ Spike 5, plus:
 - Steam's dialogs appearing over TV mode (fullscreen GRID window);
 - the Windows registry values (`SteamPath`, `SteamExe`, `RunningAppID`) on a Windows
   host.
+
+## Spike results (2026-11-14)
+
+Spikes 1–4 ran in the build container (`scripts/ctr.sh run`; Ubuntu 24.04) on 2026-11-14,
+from a scratch crate and scripts that were deleted afterwards (spike 4 is kept as a
+test). No Steam client, no Steam account and no real key: network probes sent only
+`FAKE-STEAM-KEY-not-real`, an all-zero key or no key. Spike 5 is the user's.
+
+### Spike 1 — parsing real formats
+
+steamlocate 2.1.1 (`SteamDir::from_dir`, `libraries()`, `Library::apps()`) and
+keyvalues-parser 0.2.4 on real-format samples: a root `libraryfolders.vdf` with three
+libraries, Steam's full manifest shape (`InstalledDepots`, `SharedDepots`, `UserConfig`,
+`MountedConfig`, plus an invented key), an installing manifest, a `loginusers.vdf` with
+two users, and a `registry.vdf`.
+- **A `path` with `\\` and `\"`** (`My "Games"\Lib`): read back exactly; its library and
+  manifests load.
+- **A manifest cut in half:** `apps()` yields an `Err` for that one app and goes on with
+  the next; `find_app` on it answers `Err`. One bad manifest never fails the library.
+- **A library whose folder is missing:** `libraries()` yields an `Err` (`NotFound`) for
+  that library only; the others load.
+- **Unknown keys** are ignored.
+- **`BytesToStage` / `BytesStaged`** are read (`bytes_to_stage`, `bytes_staged`), as are
+  `BytesToDownload`, `BytesDownloaded`, `StateFlags`, `SizeOnDisk`, `buildid`,
+  `LastUpdated` (a `SystemTime`) and `installdir`. steamlocate 2.1.1 has no `LastPlayed`
+  field: package A reads it with keyvalues-parser, or treats it as 0 and relies on
+  `rtime_last_played`.
+- **keyvalues-parser** reads `loginusers.vdf` (escaped quotes in a `PersonaName` come
+  back unescaped) and `registry.vdf` (`Registry/HKCU/Software/Valve/Steam/RunningAppID`,
+  `…/apps/<id>/Running`).
+- **Two secrets findings for package A:**
+  - a keyvalues-parser (and so steamlocate) parse error's `Debug` quotes the text at the
+    error (`line: "\t\"Byte"`). A parse error of `loginusers.vdf` or `registry.vdf` can
+    therefore carry an account name: **never log or show a VDF parse error's
+    `Display`/`Debug`**, only "couldn't read <file>";
+  - `registry.vdf` has `AutoLoginUser`, which is the login name too: never read it, as
+    `AccountName`.
+- **Pick: steamlocate 2.1.1** (deps `crc` 3.4, `keyvalues-parser` 0.2.4,
+  `keyvalues-serde` 0.2.4, `winreg` 0.56 on Windows), with keyvalues-parser directly for
+  `loginusers.vdf` and `registry.vdf`.
+- **The tool id list** (`steam::filter` DENYLIST): the plan's list plus Proton 10.0
+  (3658110, SteamDB) and Proton 11.0 (4628710, SteamDB package page). Every id on it
+  except SteamVR answered `GetItems` `success: 15` (spike 2), which confirms they are
+  tools with no store page. SteamVR (250820) answers type 0 (a game) and SteamVR
+  Performance Test (323910) type 6, so the denylist, not the store type, keeps SteamVR
+  out. The labels of the numbered Proton releases before 8.0 are not checked one by one;
+  the ids are from the plan's research.
+
+### Spike 2 — the Web API from the container
+
+- `GetOwnedGames` with the fixture key, with no key and with 32 zeros: **401**,
+  `text/html; charset=UTF-8`. `GetPlayerSummaries` with the fixture key: **403**, the same
+  type. No `Retry-After`, no rate headers, no `Location`.
+- **No 3xx anywhere:** plain `http://api.steampowered.com/…` answers 401 itself (no
+  redirect to https), and a path without the trailing slash answers 401 too. An unknown
+  method answers 404 (HTML). So a 3xx from Steam is not expected, and Network stays the
+  right reading.
+- `GetItems` for 55 ids (games, DLC, software, the tool ids) answered 200 JSON
+  (~150 KB) with one entry per id, in order:
+  - **a `success: 15` entry has `appid: 0`** (and no name, type or assets). Package A
+    must match answers to the asked ids **by position**, not by `appid`;
+  - games answered type 0, Wallpaper Engine 6, a DLC (Phantom Liberty, 2138330) type 4
+    with no `library_capsule`;
+  - newer games' capsules are `<sha1>/library_capsule.jpg`, not `library_600x900.jpg`;
+  - no delisted game in the sample answered differently (Black Ops II and Battlefront II
+    2005 still have store pages).
+- **The cover rule on 30 games:** the rule (`STEAM_ART_BASE` + `asset_url_format` with
+  `library_capsule`) and the plain `steam/apps/<id>/library_600x900.jpg` both answered 200
+  for all 30, hash-folder games included. No misses.
+- The private `{}` and the owned list's shape wait for the user's key.
+
+### Spike 3 — opening links
+
+No client code exists before package A, so this checked the two mechanisms package A
+builds on, not the per-layout argv (A's unit tests cover `SteamLink` argv per
+`ClientExe`):
+- **No zombie:** a child spawned with null stdio and never waited on stays a zombie
+  (`Z`, parent GRID) until reaped; `std` does not reap on drop. A child handed to a
+  thread that calls `wait()` leaves none. So `client.rs` needs the reaper thread the plan
+  names. With null stdio, nothing the child prints (the test child printed the fixture
+  key) reaches GRID.
+- **The `/proc` fallback:** a process whose argv holds `SteamLaunch AppId=620` is found
+  by one pass over `/proc/*/cmdline` (matching the two adjacent arguments). With 505
+  processes, a miss (a full pass) took about 7.5 ms and a hit about 0.2–0.3 ms; after the
+  process is killed the pass finds nothing. 7.5 ms under the session lock every 2.5 s is
+  acceptable for a fallback, but package A should use it only when `registry.vdf` is
+  missing, as planned.
+
+### Spike 4 — the key in logs
+
+A key-carrying request (`RequestBuilder::query`, the fixture key) against a local server
+answering 200, 302 (with redirects off, and with reqwest's default policy following it),
+401 with Steam's HTML, a refused connection and a timeout, under a global
+`tracing_subscriber` fmt layer with `EnvFilter::new("trace")` (the app's subscriber shape;
+`init` also bridges the `log` crate, which reqwest and rustls use):
+- **No captured line carries the key, the query, or any request path.** reqwest logs
+  only the host (`starting new connection 'Some("127.0.0.1")'`), hyper-util only
+  `("http", 127.0.0.1:port)` pool keys and socket addresses, `reqwest::retry` only
+  "shouldn't retry!". Following a redirect logs nothing about its target. hyper 1.12
+  has no logging dependency at all.
+- From the source (not exercised; the mock is plain http): h2 0.4.20's `Headers` and
+  `PushPromise` `Debug` leave out the pseudo-headers (`:path`) on purpose, so HTTP/2 to
+  the real host logs no path either. reqwest's raw byte trace (`connect.rs`, "write:
+  …") exists only with `ClientBuilder::connection_verbose(true)`, which GRID never sets.
+- **But a `reqwest::Error`'s `Display` and `Debug` carry the full URL, key included**,
+  for the timeout and the refused connection; after `without_url()` neither does. This
+  confirms Research item 2: every Steam error goes through `without_url()`.
+- **Decision: `logging.rs` needs no `reqwest`/`hyper` directives** and is unchanged. The
+  spike is kept as `app/src-tauri/tests/steam_key_logging.rs` (its own process, so its
+  own global subscriber), which fails if a reqwest/hyper upgrade ever starts logging a
+  request URL, or if `without_url` stops removing it. The e2e secrets spec still runs
+  with debug prints on.
+
+### What waits for the user's machine (the user's final test)
+
+Spike 5 as listed, in particular:
+- `RunningAppID` and `apps/<id>/Running` in `registry.vdf` while a native and a Proton
+  game run (no public source documents them; the `/proc` fallback covers them until
+  then), and the same values in the Windows registry;
+- the manifest's flags and bytes during a real install, pause and update;
+- `steam -silent steam://rungameid/<id>` with Steam running, not running and signed out,
+  native and Flatpak; Steam's dialogs over TV mode;
+- the user's key: Test works, the private toggle gives `{"response": {}}`, a revoked key's
+  status, the `rtime_last_played` shape, and `GetPlayerSummaries` for a manual SteamID64;
+- `LastPlayed` in real manifests (steamlocate does not model it).
+
+## Contract deviations — Step 0
+
+Where the skeleton differs from, or adds to, the Step 0 block above:
+
+- **`ManifestState`** carries the four byte fields (`bytes_to_download`,
+  `bytes_downloaded`, `bytes_to_stage`, `bytes_staged`) instead of `done`/`total`, so
+  `filter::progress` does the plan's fallback (downloaded of to-download, else staged
+  of to-stage, never past the total) as a pure, tested function.
+- **`filter::phase` precedence:** Uninstalling (2048) → Gone; FullyInstalled (4) →
+  Installed; any install bit (2, 256, 512, 1024, 524288, 1048576, 2097152, 4194304) →
+  Installing; anything else, Uninstalled (1) included → Gone. `filter::flags` names the
+  bits.
+- **`steam_row` sets no path column.** The game's folder is `<library>/steamapps/common/
+  <installdir>` from `SteamMeta` (`row::install_path(library, install_dir)`), never
+  `extracted_dir` or `native_game_dir`, so GRID's uninstall, the library move and drive
+  backups can never reach a folder Steam owns. It also sets `revision` = `buildid`,
+  `installed_at` = `LastUpdated`, `description` and `screenshot_urls`;
+  `STEAM_SLUG` = `steam`.
+- **`SteamId`'s error** is `BadSteamId`, whose `Display` is `NOT_A_STEAM_ID` (the
+  design's words). `SteamApiError`'s words: Rejected "Steam rejected the key. Check that
+  you copied all 32 characters, or make a new key." (no status, user decision 1), Private
+  and Network as the design's Test lines, NoSuchAccount as "That isn’t a SteamID64…".
+- **`SteamLink::silent()`** says whether `-silent` goes first (Run only); `Display` is
+  the bare link.
+- **`SteamService`** has `endpoints()`; its other bodies are stubs (`find_client` None,
+  `local_accounts`/`scan`/`app_info` empty, `manifest` None, `open` `not implemented`,
+  `alive_check` always false, `owned`/`persona` Network). `SteamEndpoints::e2e` puts art at
+  `<base>/art/`.
+- **Queue.** `ExternalOutcome::Completed { detail }` writes the row's `detail`.
+  `has_live_entry` ignores a store-external row (a library path change does not wait for
+  Steam, which writes only into its own libraries). `InstallService` wraps it as
+  `admit_store_external(source, store_id, title)` (not behind the library gate, for the
+  same reason), `store_external_progress(id, done, total)` (the plan's "set_progress
+  works on it", exposed) and `finish_store_external`. The row's `platform` is "Steam".
+- **`store_kind` accepts `steam`**, so every store command reaches `SteamStore`; its
+  install, update, repair, DLC and uninstall paths refuse with "Steam installs, updates
+  and uninstalls its games itself." (`update_job`/`repair_job`, which can't return an
+  error, give a job that fails with those words; `ensure_can_install` refuses first, so
+  the commands never queue it). `StoresService::backend(Steam)` is `Some`.
+- **`StoresService::real(config_path, steam_keys)`** takes the keyring slot; `lib.rs`
+  passes a `KeyringStore`.
+- **`launch_watched` is wired, not stubbed:** `SteamStore` checks the row (not installed
+  → `NotInstalled`), the client (missing → "Steam isn’t installed. Install Steam, then try
+  again."), opens `SteamLink::Run` and calls `register_watched(key, title, "Steam",
+  "Steam", 0, alive_check)`. With Step 0's stub service every launch ends at the missing
+  client. `launch_game_key` takes the watched session when the backend answers one.
+- **The Steam commands** are on `SteamStore` as `test`, `save`, `remove_key`,
+  `recheck_client` and `open`; `steam_open` refuses a key that isn't a Steam key.
+  `test` is already the real flow, not a stub: the SteamID64's form (no request), the
+  given key or the saved one (none: "Paste your key first."; a keyring error: "Couldn’t
+  read your key from the OS keyring: …"), then `SteamService::owned` mapped by the pure
+  `test_result` (Rejected → `bad_key{status}`, Private → `private`, NoSuchAccount →
+  `bad_steam_id`, Network → `network`). With Step 0's stub service it answers `network`.
+  `save`, `remove_key`, `recheck_client`, `open` and `disconnect` answer
+  `not implemented`.
+  `SteamOpenAction` is `install | uninstall | validate`. `SteamKeyState`, `SteamAccount`,
+  `SteamCard` and `SteamTestResult` are in `commands/stores.rs`.
+- **TS.** `ToolStatus.name` gains `''` (Steam's empty tool). `StoreCaps.managedByClient`
+  is `true` for Steam and `false` for the rest; nothing reads it yet. `fakeApi`'s three
+  statuses gain `steam: null` (the only change to a package D file).
+- **Hygiene.** The URL+key rule covers every format, write, panic, print and log macro in
+  `stores/steam/` and `stores_service/steam.rs`, to the macro's balanced closing
+  parenthesis (checked with mawk, the container's awk, and gawk). The key-field rule also
+  refuses the camelCase `steamApiKey` / `webApiKey` in TS.
+- **New test** `app/src-tauri/tests/steam_key_logging.rs` (spike 4).
+- **logging.rs** is unchanged (spike 4).
+
+- **Results.** `scripts/ctr.sh gate` PASS (`== gate: PASS`); `scripts/ctr.sh wincheck`
+  PASS (`== wincheck: PASS`); `scripts/ctr.sh e2e library launch library-move gog
+  gog-library gog-cloud gog-offline gog-romm-installer gog-backups tv-gog epic
+  epic-library epic-cloud tv-epic amazon amazon-library tv-amazon`: 25 spec files passed,
+  each on its first attempt, `== e2e: all stages passed`. GOG, Epic and Amazon are
+  unchanged by the Steam backend, the `launch_watched` route and the store-external row.
 
 ## E2E plan
 

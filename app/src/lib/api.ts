@@ -1196,7 +1196,8 @@ export type LayoutMigrationNotice = { message: string };
 export type StoreSource = Exclude<GameSource, 'romm'>;
 export type StorePlatform = 'linux' | 'windows';
 export type ToolStatus = {
-  name: 'gogdl' | 'legendary' | 'nile';
+  /** `''` for Steam, which has no tool. */
+  name: 'gogdl' | 'legendary' | 'nile' | '';
   version: string;
   state: 'not_installed' | 'installing' | 'installed' | 'failed';
   size_bytes: number;
@@ -1221,7 +1222,26 @@ export type StoreStatus = {
   install_dir: string;
   in_rail: boolean;
   last_error: string;
+  /** Steam's part of the card; `null` for every other store. */
+  steam: SteamCard | null;
 };
+/** Steam's part of `StoreStatus` (Phase 4). Never the Web API key, nor any part of it. */
+export type SteamCard = {
+  /** The Steam client line (`/usr/bin/steam`, `Flatpak (com.valvesoftware.Steam)`); `''` = Steam not found. */
+  client_path: string;
+  steam_id: string;
+  key: 'ok' | 'none' | 'bad' | 'private';
+  /** Always `''`: a saved key shows as dots only (user decision 2). */
+  key_tail: string;
+  accounts: { persona: string; steam_id: string; most_recent: boolean }[];
+};
+/** `steamTest` / `steamSave`'s answer. */
+export type SteamTestResult =
+  | { kind: 'ok'; owned_count: number }
+  | { kind: 'bad_key'; status: number }
+  | { kind: 'private' }
+  | { kind: 'bad_steam_id' }
+  | { kind: 'network' };
 export type StoreDlc = { id: string; title: string; download_bytes: number; installed: boolean };
 export type StoreGame = {
   key: string;
@@ -1241,7 +1261,8 @@ export type StoreGame = {
   disk_bytes: number;
   version: string;
   update_version: string;
-  origin: 'gogdl' | 'offline' | 'drive' | 'legendary' | 'nile' | null;
+  /** `steam`: installed through GRID's Install in Steam; `steam_outside`: found in Steam's files. */
+  origin: 'gogdl' | 'offline' | 'drive' | 'legendary' | 'nile' | 'steam' | 'steam_outside' | null;
   not_supported: string;
   dlc: StoreDlc[];
   cloud: 'off' | 'none' | 'synced' | 'conflict' | 'unknown';
@@ -1771,4 +1792,13 @@ export const api = {
   /** `key` is the drive key. Answers how many games were removed. */
   removeStoreFromDrive: (key: string, gameKeys: string[]) =>
     invoke<number>('remove_store_from_drive', { key, gameKeys }),
+  // ── Steam (Phase 4). The key goes to the backend once and is never kept here. ──
+  /** One `GetOwnedGames` call; `key` omitted tests the saved key. */
+  steamTest: (steamId: string, key?: string) => invoke<SteamTestResult>('steam_test', { steamId, key: key ?? null }),
+  /** The test, then (on ok or private) the keyring, `[stores.steam]`, a scan. */
+  steamSave: (steamId: string, key?: string) => invoke<SteamTestResult>('steam_save', { steamId, key: key ?? null }),
+  steamRemoveKey: () => invoke<void>('steam_remove_key'),
+  steamRecheckClient: () => invoke<void>('steam_recheck_client'),
+  /** `key` is a Steam game key (`steam:620`). */
+  steamOpen: (key: string, action: 'install' | 'uninstall' | 'validate') => invoke<void>('steam_open', { key, action }),
 };

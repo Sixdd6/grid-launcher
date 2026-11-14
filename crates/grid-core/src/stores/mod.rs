@@ -17,7 +17,8 @@
 //! lines), `paths` (`<data_dir>/stores/<tool>/`, 0700/0600), `art`, the
 //! cloud save types every store shares ([`CloudState`], [`SyncMode`],
 //! [`SaveConflict`]), and one folder per source: `gog`, `offline` (GOG
-//! offline installers), `epic` (Phase 2), `amazon` (Phase 3); `steam` later.
+//! offline installers), `epic` (Phase 2), `amazon` (Phase 3) and `steam`
+//! (Phase 4: no tool; Steam's own files, the Web API and `steam://` links).
 //! [`StoreError`] is every store operation's error.
 //!
 //! Secrets: the tools' own token files live under `<data_dir>/stores/` (the
@@ -38,6 +39,7 @@ pub mod offline;
 pub mod paths;
 pub mod progress;
 pub mod runner;
+pub mod steam;
 pub mod tools;
 
 /// Why a store operation failed. The Display text is GRID's own words,

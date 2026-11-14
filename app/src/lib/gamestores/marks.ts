@@ -88,13 +88,18 @@ export type StoreCaps = {
    * button reads "Update" and no version shows (user decision 2026-11-13).
    */
   readableVersions: boolean;
+  /**
+   * The store's own client installs, updates and starts its games, and owns
+   * pause and cancel (Steam). No caller reads it until the Steam UI lands.
+   */
+  managedByClient: boolean;
 };
 
 const CAPS: Record<StoreSource, StoreCaps> = {
-  gog: { hasTool: true, hasCloud: true, canBackup: true, hasInstaller: true, hasVersions: true, hasLanguages: true, hasDlc: true, readableVersions: true },
-  epic: { hasTool: true, hasCloud: true, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: true, readableVersions: true },
-  amazon: { hasTool: true, hasCloud: false, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: false, readableVersions: false },
-  steam: { hasTool: false, hasCloud: false, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: false, readableVersions: false },
+  gog: { hasTool: true, hasCloud: true, canBackup: true, hasInstaller: true, hasVersions: true, hasLanguages: true, hasDlc: true, readableVersions: true, managedByClient: false },
+  epic: { hasTool: true, hasCloud: true, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: true, readableVersions: true, managedByClient: false },
+  amazon: { hasTool: true, hasCloud: false, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: false, readableVersions: false, managedByClient: false },
+  steam: { hasTool: false, hasCloud: false, canBackup: false, hasInstaller: false, hasVersions: false, hasLanguages: false, hasDlc: false, readableVersions: false, managedByClient: true },
 };
 
 export function storeCaps(source: StoreSource): StoreCaps {
