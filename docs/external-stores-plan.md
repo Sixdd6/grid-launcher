@@ -86,9 +86,11 @@ or Steam client). The user's final test, store by store:
   This replaces the earlier "Store games are not backed up" rule, for GOG only. GRID's
   backup feature is its own and needs nothing from gogdl.
 - **TV mode runs Windows installers silently only.** GRID never opens the installer's
-  setup window over TV mode. If the silent install fails, GRID keeps the installer and
-  the error says to finish it in desktop mode. Desktop mode stays silent-first, with the
-  installer's own setup window as the fallback.
+  setup window over TV mode, and never tells a TV user to switch to desktop mode. If the
+  silent install fails, GRID tries once more with milder silent flags. If that fails too,
+  GRID keeps the installer, and the row and the card give the reason from the installer's
+  log in GRID's words, with Retry and Delete installer (2026-11-14). Desktop mode runs
+  silent, then the milder silent run, then the installer's own setup window.
 
 ## Design
 
@@ -144,8 +146,8 @@ or Steam client). The user's final test, store by store:
 ### Offline installers
 
 - A Linux `.sh` is read as a zip; GRID takes `data/noarch/` and never runs the script.
-- A Windows `setup_*.exe` runs silently under Wine/Proton, falling back to the wizard. On a
-  Windows host it runs natively.
+- A Windows `setup_*.exe` runs silently under Wine/Proton, then once more with milder silent
+  flags, falling back to the wizard (desktop only). On a Windows host it runs natively.
 - The game is identified from `goggame-*.info`. A DLC installer attaches to its base game
   by `rootGameId`.
 - macOS `.pkg` installers are refused with a reason.

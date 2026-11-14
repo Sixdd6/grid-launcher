@@ -1269,12 +1269,20 @@ User decisions (2026-11-13):
   opens over TV mode, with the on-screen keyboard.
 - **Offline installers.** A Linux `.sh` installer is read as a zip, and GRID takes
   `data/noarch/` from it without running the script. A Windows `setup_*.exe` runs
-  silently under Wine/Proton (natively on a Windows host), falling back to the wizard.
+  silently under Wine/Proton (natively on a Windows host). When the silent run fails (a
+  non-zero exit, no progress for 120 s, or its Inno Setup log says it rolled back), GRID
+  runs it once more with milder silent flags, which still need no input. In desktop mode
+  the installer's own wizard is the last fallback.
   The game is identified from `goggame-*.info`; a DLC installer attaches to its base game
   by `rootGameId`. A macOS `.pkg` is refused with a reason. An offline install is the
-  same GOG product as an online one. TV mode runs Windows installers silently only: when
-  the silent install fails, the installer is kept and the error says to install it in
-  desktop mode.
+  same GOG product as an online one. TV mode runs Windows installers silently only and
+  never sends the user to desktop mode: when both silent runs fail, the installer is kept,
+  and the Downloads row and the card give the reason read from the installer's log in
+  GRID's words (not enough disk space; a file in use or access denied; the installer's
+  files missing or damaged; the installer cancelled itself; else "the installer stopped
+  without saying why"). The card offers Retry, which runs both silent attempts again
+  without downloading again. The row offers Retry and Delete installer. GRID never shows
+  or logs the log's own text, or the installer's output.
 - **Installers on the RomM server.** The user zips GOG offline installers and uploads
   them to RomM; GRID never uploads them. When a downloaded RomM archive holds an
   installer instead of loose game files, GRID runs the offline-installer flow. The game

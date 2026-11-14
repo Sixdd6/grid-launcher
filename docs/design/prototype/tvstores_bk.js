@@ -142,7 +142,7 @@ function riTvTick() {
       toast('Couldn\'t install ' + d.t, { err: 1, s: r.fail === 'unknown' ? 'Its archive holds an installer GRID doesn\'t recognise.' : 'It\'s DLC for ' + r.base + ', which isn\'t installed.', act: base ? ['Install ' + r.base, function () { install(base); }] : ['Open Downloads', function () { S.pages = []; S.tab = 'downloads'; render(); }] });
       advanceQueue(); if (!S.layers.length) repaint(); return;
     }
-    if (r.wizard && d.pct >= 70) { sNeedsDesktop(d); advanceQueue(); if (!S.layers.length) repaint(); }
+    if (r.wizard && d.pct >= 70) { sSilentFailed(d); advanceQueue(); if (!S.layers.length) repaint(); }
   });
 }
 /* Details of such a RomM game: one line says what its archive holds. */
@@ -162,11 +162,20 @@ libRailHTML = function () {
   return h;
 };
 
-/* TV mode runs Windows installers silently only (user decision 2026-11-13): one that
-   can't run silently stops, keeps its files and asks for desktop mode; no setup
-   window ever opens over TV mode. */
-function sNeedsDesktop(d) {
-  d.st = 'failed';
-  d.line = 'Failed · This installer needs its setup window. Install it in desktop mode. The ' + (d.store === 'romm' ? 'download' : 'installer') + ' was kept.';
-  toast('Couldn\'t install ' + d.t + ' silently', { err: 1, s: 'This installer needs its setup window. Install it in desktop mode.', act: ['Retry', function () { d.st = d.store === 'romm' ? 'queued' : 'squeued'; d.pct = d.store === 'romm' ? 55 : 0; toast(d.t + ' added to download queue'); repaint(); }] });
+/* TV mode runs Windows installers silently only (user decisions 2026-11-13 and
+   2026-11-14): no setup window ever opens over TV mode, and nothing sends the user to
+   desktop mode. GRID runs the installer silently, then once more with milder silent
+   flags; when both fail it keeps the installer and gives the reason read from the
+   installer's log in GRID's words (here: not enough disk space). Retry runs both
+   attempts again with the kept installer; the row also offers Delete installer. */
+var SILENT_REASON = { w: 'there isn\'t enough disk space', s: 'There isn\'t enough disk space.' };
+function sSilentFailed(d) {
+  d.st = 'failed'; d.silentFail = 1;
+  d.line = 'Failed · Couldn\'t run the installer silently: ' + SILENT_REASON.w + '. The installer was kept.';
+  toast('Couldn\'t install ' + d.t + ' silently', { err: 1, s: SILENT_REASON.s, act: ['Retry', function () { sRetrySilent(d); }] });
+}
+function sRetrySilent(d) { d.st = d.store === 'romm' ? 'queued' : 'squeued'; d.pct = d.store === 'romm' ? 55 : 0; d.silentFail = 0; toast(d.t + ' added to download queue'); repaint(); }
+/* Delete installer (asked first): the installer GRID kept goes, and so does the row. */
+function sDeleteInstaller(d) {
+  confirmBox({ title: 'Delete ' + d.t + '\u2019s installer?', body: (d.store === 'romm' ? 'The downloaded installer is deleted from this computer.' : 'The installer file and its parts are deleted from this computer.') + ' This can\u2019t be undone.', ok: 'Delete installer', danger: 1, fn: function () { DL.splice(DL.indexOf(d), 1); toast(d.t + '\u2019s installer deleted'); renderStage(); restoreFocus(); } });
 }
