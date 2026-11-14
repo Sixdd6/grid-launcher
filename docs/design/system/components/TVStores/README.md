@@ -22,7 +22,7 @@ Click inside the card, then use the keyboard as a controller (TV mode's README h
 
 ## The game page
 
-- **Buttons:** Play · Install… · Install in Steam · Cancel install · 45% · Installing in Steam · 52% (disabled; A on it says "Managed by Steam. Pause or cancel it in Steam.") · Not supported (disabled; A says why) · Update to 2.2 · Game settings · Verify and repair (Verify in Steam) · Uninstall (confirmed; Steam: Uninstall in Steam…, which opens Steam's window).
+- **Buttons:** Play · Install… · Install in Steam · Cancel install · 45% · Stop waiting for Steam (while Steam hasn't started the download) · Installing in Steam · 52% (disabled; A on it says "Managed by Steam. Pause or cancel it in Steam.") · Not supported (disabled; A says why) · Update to 2.2 · Game settings · Verify and repair (Verify in Steam) · Uninstall (confirmed; Steam: Uninstall in Steam…, which opens Steam's window).
 - **Left column:** last played, how it runs, the cloud state ("Cloud save conflict. See Cloud saves."), "Installed from an offline installer", "Installed in Steam, outside GRID", for Epic, Amazon and Steam games why they can't be backed up (the desktop's words), for a GOG game "On Couch kit" when a connected drive holds it, and for a Steam install the Managed by Steam box with its bar.
 - **Tabs (LB / RB):** Overview (description, **DLC you own** rows: A installs or, confirmed, removes; facts), Media, **Cloud saves** (GOG and Epic, installed): a Synced row whose A is Sync now; on a conflict, two rows, **Keep this computer's save** and **Use the cloud save**, each confirmed; off ("Turn them on in Game settings"); the save location; "RomM cloud saves are off for store games."
 - **Play:** "Launching Ashen Tide…" with "Synced cloud saves with GOG", then the Playing page ("GOG · Native"); Stop game syncs after ("Cloud saves uploaded to GOG for Ashen Tide"). A conflict opens a list first: Keep this computer's save, Use the cloud save, Don't launch. Steam: "Starting Moonlit Ferry through Steam…", and the Playing page has no Stop ("Steam runs this game. Quit it from the game; GRID notices when it closes.").
@@ -50,6 +50,13 @@ Click inside the card, then use the keyboard as a controller (TV mode's README h
 ## Downloads and notifications
 
 - Store rows sit in Active, Queued and Completed with a store badge and kind badge, and the desktop's lines ("Installing in Steam 67% · Managed by Steam", "Failed · legendary stopped: …"). A on a row opens a list: Cancel (not for Steam rows: the list's subtitle says Steam manages them), Retry, Dismiss, Open <game>. Y clears completed rows, store rows too.
+- **Steam: waiting for Steam to start (2026-11-14).** The desktop's states and words (GameStores README).
+  - **Waiting:** the row reads "Waiting for Steam to start the download", with no bar and no sparkline. Focused, the hint bar's A reads **Stop waiting**. A opens the row's list: title the game, subtitle "Steam · Waiting for Steam to start the download. If you cancelled it in Steam, stop waiting. If Steam installs it later, GRID still adds it.", items **Stop waiting** and **Open <game>**.
+  - **Stop waiting** ends the row; focus stays on it, now in Completed ("**Not installed · you stopped waiting for Steam**", A: Dismiss). Card: "Stopped waiting for Steam" / "If Steam installs Harbor of Bells later, GRID adds it."
+  - **Timeout (5 minutes):** "**Not installed · Steam didn't start the download in 5 minutes**", A: Dismiss. Ended Steam rows have no Retry and no "Managed by Steam" subtitle.
+  - **Game page while waiting:** the primary button is **Stop waiting for Steam** (it does the same; focus then lands on Install in Steam). The left column box reads "**Waiting for Steam to start the download.** Steam's install window is open. If you cancelled it there, stop waiting." The cover tag reads **Waiting**.
+  - Once Steam has started, the row is "Installing in Steam N% · Managed by Steam" as before (A: Open).
+  - Prototype: Harbor of Bells waits forever; Rime Assembly shows the timeout row.
 - Notification cards are the desktop's; those with an action (Play, Open Downloads, Try again) take it with View.
 
 ## RomM games with a GOG installer in their archive (2026-11-13)

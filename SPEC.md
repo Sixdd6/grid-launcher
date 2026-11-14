@@ -1423,9 +1423,16 @@ Store screens (2026-11-13, matching the approved design):
   a Flatpak or Snap Steam its package ("Flatpak (com.valvesoftware.Steam)"); with no
   client, Steam's panels say to install Steam. Steam installs, updates, verifies,
   uninstalls and runs its own games: GRID opens `steam://` links and Steam's own window
-  does the rest. While Steam installs, the Downloads row reads "Installing in Steam N% ·
-  Managed by Steam" with Cancel disabled (it takes no download slot and is never retried)
-  and ends "Installed by Steam" or Cancelled. Games installed in Steam outside GRID
+  does the rest. Until Steam writes the game's manifest, the Downloads row reads "Waiting
+  for Steam to start the download" (no bar) with a **Stop waiting** action, in desktop and
+  TV mode: Steam writes nothing when its install window is cancelled, so the user ends
+  the wait. Stop waiting ends the row "Not installed · you stopped waiting for Steam" and
+  GRID stops watching; with no manifest after 5 minutes it ends by itself "Not installed ·
+  Steam didn't start the download in 5 minutes". Both end with Dismiss, no Retry. If
+  Steam installs the game later anyway, the background scan still adopts it. Once Steam's
+  download is under way, the row reads "Installing in Steam N% · Managed by Steam" with
+  Cancel disabled and no action (it takes no download slot and is never retried) and ends
+  "Installed by Steam" or Cancelled. Games installed in Steam outside GRID
   appear by themselves within the 15 s background scan, and Details says "Installed in
   Steam, outside GRID". Only games and demos show: Proton, the Steam runtimes,
   redistributables and owned software are filtered out everywhere. An Available Steam

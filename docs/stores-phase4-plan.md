@@ -396,9 +396,12 @@ for `appmanifest_<id>.acf` in every library:
 - it completes when installed (bit 4, not uninstalling). Then: "Installed by Steam", the
   card "<title> installed · Play", the row upserted, `changed()`.
 
-When no manifest appears within `STEAM_INSTALL_START_TIMEOUT` (15 min; the user closed the
-dialog), or the manifest goes away before completion, the row ends Cancelled
-("Cancelled"). Steam owns pause and cancel, so GRID's Cancel is disabled (design). The
+Until a manifest appears, the row reads "Waiting for Steam to start the download" with a
+Stop waiting action (user decision 4, 2026-11-14). When no manifest appears within
+`STEAM_INSTALL_START_TIMEOUT` (5 min since 2026-11-14, was 15; the user closed the dialog),
+the row ends "Not installed · Steam didn't start the download in 5 minutes"; Stop waiting
+ends it "Not installed · you stopped waiting for Steam". When the manifest goes away
+before completion, the row ends Cancelled ("Cancelled"). Steam owns pause and cancel, so GRID's Cancel is disabled (design). The
 watcher survives a restart: on startup, any manifest that is installing becomes a
 Downloads row again (for a game installed inside Steam too).
 
@@ -1219,7 +1222,7 @@ Where package C differs from, or adds to, the plan. No Step 0 frozen file change
   by Steam"); installing gives `store_external_progress(done, total)`; once the install
   was seen, two polls in a row without an installing manifest end it Cancelled (one
   unreadable poll, Steam mid-write, does not); no manifest within
-  `STEAM_INSTALL_START_TIMEOUT` (15 min) ends it Cancelled. Package A's `watch::InstallWatch`
+  `STEAM_INSTALL_START_TIMEOUT` (15 min; 5 min since user decision 4) ends it Cancelled. Package A's `watch::InstallWatch`
   may replace it at integration. After `steam://uninstall` a short watch (2 s, up to 10
   min) scans as soon as the manifest is gone, so the game leaves without waiting for the
   15 s scan.
@@ -1340,7 +1343,7 @@ Package A (grid-core Steam store) filled `SteamService`'s bodies and added
   missing or gone after it was seen installing → `Cancelled`; missing or gone before
   that → `Waiting` until `STEAM_INSTALL_START_TIMEOUT`, then `Cancelled`.
 - **Constants** for C: `watch::{STEAM_START_GRACE (180 s), STEAM_END_MISSES (2),
-  STEAM_INSTALL_START_TIMEOUT (15 min), STEAM_INSTALL_POLL (2 s)}`,
+  STEAM_INSTALL_START_TIMEOUT (15 min; 5 min since user decision 4), STEAM_INSTALL_POLL (2 s)}`,
   `api::{API_REQUEST_TIMEOUT (20 s, set per request), APP_INFO_BATCH (100)}`.
 - **The override** (`with_roots_override`) reads only what it is given: the first given
   root that has `steamapps/`, the given executable, else `XdgOpen`. It never looks at
@@ -1656,5 +1659,17 @@ real-account test").
    the keyring code; the design's "…3F2A" suffix is not shown.
 3. **Flatpak/Snap client line.** "Steam client found · Flatpak (com.valvesoftware.Steam)"
    (Snap: its package name). Native installs keep showing the path.
+4. **Stop waiting for Steam (2026-11-14).** The user cancelled Steam's install dialog (Steam
+   said the game isn't fully supported); Steam wrote nothing, so the row kept showing as
+   installing until the 15-minute timeout. Decided:
+   - while the row waits for Steam to start (no manifest seen yet), it reads "Waiting for
+     Steam to start the download" and has a **Stop waiting** action, in desktop and TV
+     mode. It ends the row "Not installed · you stopped waiting for Steam" and GRID stops
+     watching;
+   - `STEAM_INSTALL_START_TIMEOUT` drops from 15 to **5 minutes**; the timed-out row reads
+     "Not installed · Steam didn't start the download in 5 minutes";
+   - if Steam installs the game later anyway, the background scan still adopts it;
+   - once Steam's download is under way, the row stays "Managed by Steam" with no action.
+   Design: GameStores and TVStores READMEs and prototypes.
 
 Questions for the user: none open.

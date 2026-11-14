@@ -70,7 +70,7 @@ function scover(g, o) {
   else if (g.inst && g.upd && !j) b += '<span class="tag upd">UPDATE</span>';
   if (g.inst) b += '<i class="idot" aria-label="Installed"></i>';
   if (o.mixed) b += '<span class="tag sst">' + smark(s) + esc(s.name) + '</span>';
-  if (j) b += '<span class="tag q">' + (j.st === 'sactive' ? j.pct + '%' : 'Queued') + '</span><span class="sprog' + (j.kind === 'steam' ? ' steam' : '') + '"><b style="width:' + (j.st === 'sactive' ? j.pct : 0) + '%"></b></span>';
+  if (j) b += '<span class="tag q">' + (j.wait ? 'Waiting' : j.st === 'sactive' ? j.pct + '%' : 'Queued') + '</span><span class="sprog' + (j.skind === 'steam' ? ' steam' : '') + '"><b style="width:' + (j.st === 'sactive' && !j.wait ? j.pct : 0) + '%"></b></span>';
   return '<button class="cv' + (g.ns ? ' sns' : '') + (pk ? ' pk' : '') + '" data-f data-k="' + (o.k || 's') + g.id + '" data-a="sdetails" data-sid="' + g.id + '"' + (o.drive ? ' data-drive="' + o.drive + '"' : '') + ' data-al="Details" data-onfocus="shero"' + (q ? ' data-xl="' + q + '" data-xa="squick"' : '') + ' style="--c:' + g.c + '">' +
     '<span class="cv-art">' + b + '<span class="ttl">' + esc(g.t) + '</span></span><span class="cv-l">' + esc(g.t) + '</span></button>';
 }
@@ -146,7 +146,8 @@ function sdetails(g, drv) {
     render: function () {
       var s = sst(g.s), j = sJob(g), btn = [], steam = s.id === 'steam', pack = drv && sPackOf(drv, g);
       var B = function (lab, a, pri, extra) { btn.push('<button class="btn' + (pri ? ' pri' : '') + (/Uninstall/.test(lab) ? ' dng' : '') + '" data-f data-k="sd-' + a + '" data-a="' + a + '" data-sid="' + g.id + '"' + (extra || '') + '>' + lab + '</button>'); };
-      if (j && j.kind === 'steam') B('Installing in Steam · ' + j.pct + '%', 'snop', 1, ' disabled data-why="Managed by Steam. Pause or cancel it in Steam."');
+      if (j && j.skind === 'steam' && j.wait) B('Stop waiting for Steam', 'sstopwait', 1);
+      else if (j && j.skind === 'steam') B('Installing in Steam · ' + j.pct + '%', 'snop', 1, ' disabled data-why="Managed by Steam. Pause or cancel it in Steam."');
       else if (j) B('Cancel ' + (j.kind === 'update' ? 'update' : j.kind === 'repair' ? 'verify' : 'install') + (j.st === 'sactive' ? ' · ' + j.pct + '%' : ' · queued'), 'scancel', 1);
       else if (g.inst) B(gIcon('play', 18) + 'Play', 'splay', 1);
       else if (pack) B(gIcon('download', 18) + 'Install from drive', 'srestore', 1, ' data-drive="' + drv.id + '"');
@@ -161,7 +162,8 @@ function sdetails(g, drv) {
       else if (s.id === 'gog' && g.inst) B('Backup to drive…', 'sbackup');
       var tabs = sTabs(g); if (tabs.indexOf(S.sdTab) < 0) S.sdTab = 'Overview';
       var lp = [];
-      if (j && j.kind === 'steam') lp.push('<div class="smanaged"><b>Managed by Steam.</b> Pause or cancel it in Steam.<div class="pbar"><b style="width:' + j.pct + '%"></b></div></div>');
+      if (j && j.skind === 'steam' && j.wait) lp.push('<div class="smanaged"><b>Waiting for Steam to start the download.</b> Steam\'s install window is open. If you cancelled it there, stop waiting.</div>');
+      else if (j && j.skind === 'steam') lp.push('<div class="smanaged"><b>Managed by Steam.</b> Pause or cancel it in Steam.<div class="pbar"><b style="width:' + j.pct + '%"></b></div></div>');
       if (g.ns) lp.push('<b>Needs ' + esc(g.ns) + '.</b> GRID can\'t install games that start through another company\'s launcher.');
       if (g.inst) lp.push('Last played <b>' + esc(g.played || 'never') + '</b>');
       lp.push(steam ? 'Launches through <b>Steam</b>' : !g.inst ? (g.builds.indexOf('linux') >= 0 ? 'Has a <b>Linux version</b>' : 'Windows only · runs through <b>' + STV.compat + '</b>') : g.os === 'linux' ? 'Runs natively · <b>Linux version</b>' : 'Runs through <b>' + STV.compat + '</b> · Windows version');
@@ -235,14 +237,14 @@ function sPlay(g) {
 function sQueue(g, kind, o) {
   o = o || {};
   var busy = DL.some(function (d) { return d.st === 'sactive' && d.skind !== 'steam'; });
-  var d = { id: 's' + Date.now() + Math.random(), sgid: g ? g.id : null, t: o.t || g.t, store: o.store || g.s, skind: kind, kind: SKIND[kind], st: kind === 'steam' || kind === 'tool' || !busy ? 'sactive' : 'squeued', pct: 0, os: o.os, needsWiz: o.needsWiz, how: o.how, from: o.from, dname: o.dname };
+  var d = { id: 's' + Date.now() + Math.random(), sgid: g ? g.id : null, t: o.t || g.t, store: o.store || g.s, skind: kind, kind: SKIND[kind], st: kind === 'steam' || kind === 'tool' || !busy ? 'sactive' : 'squeued', pct: 0, os: o.os, wait: kind === 'steam' ? (o.wait != null ? o.wait : 11) : 0, needsWiz: o.needsWiz, how: o.how, from: o.from, dname: o.dname };
   DL.push(d); repaint(); return d;
 }
 function sLine(d) {
   if (d.store === 'romm') return riLine(d);
   if (d.st === 'squeued') return 'Waiting for a slot';
   if (d.skind === 'restore') return d.how === 'installer' ? (d.pct < 45 ? 'Copying the installer from ' + d.from + ' ' + d.pct + '%' : 'Running the installer · ' + d.pct + '%') : 'Copying from ' + d.from + ' ' + d.pct + '%';
-  if (d.skind === 'steam') return 'Installing in Steam ' + d.pct + '% · Managed by Steam';
+  if (d.skind === 'steam') return d.wait ? 'Waiting for Steam to start the download' : 'Installing in Steam ' + d.pct + '% · Managed by Steam';
   if (d.skind === 'tool') return 'Downloading ' + d.pct + '% · checking its SHA-256';
   if (d.skind === 'repair') return 'Verifying files ' + d.pct + '%';
   if (d.skind === 'installer') return d.os === 'windows' ? 'Running the installer · ' + d.pct + '%' : 'Unpacking the game files ' + d.pct + '%';
@@ -262,11 +264,12 @@ setInterval(function () {
   if (typeof riTvTick === 'function') riTvTick();
   var act = DL.filter(function (d) { return d.st === 'sactive'; }); if (!act.length && !DL.some(function (d) { return d.st === 'squeued'; })) return;
   var done = false;
-  act.forEach(function (d) { if (d.needsWiz && d.pct >= 50) { sSilentFailed(d); done = true; return; } d.pct = Math.min(100, d.pct + (d.skind === 'tool' ? 25 : d.skind === 'steam' ? 1 : 2) + Math.floor(Math.random() * 3)); if (d.pct >= 100) { sFinish(d); done = true; } });
+  /* A Steam row waits until Steam writes the game's manifest; a stuck one (wait: -1) never starts. */
+  act.forEach(function (d) { if (d.wait) { if (d.wait > 0 && !--d.wait) done = true; return; } if (d.needsWiz && d.pct >= 50) { sSilentFailed(d); done = true; return; } d.pct = Math.min(100, d.pct + (d.skind === 'tool' ? 25 : d.skind === 'steam' ? 1 : 2) + Math.floor(Math.random() * 3)); if (d.pct >= 100) { sFinish(d); done = true; } });
   if (!DL.some(function (d) { return d.st === 'sactive' && d.skind !== 'steam'; })) { var q = DL.filter(function (d) { return d.st === 'squeued'; })[0]; if (q) { q.st = 'sactive'; done = true; } }
   if (S.layers.length) { if (done) S.dirty = true; return; }
   if (done || (S.tab === 'downloads' && !S.pages.length) || (S.pages.length && S.pages[S.pages.length - 1].sid)) { repaint(); return; }
-  act.forEach(function (d) { document.querySelectorAll('.cv[data-sid="' + d.sgid + '"]').forEach(function (c) { var t = c.querySelector('.tag.q'), b = c.querySelector('.sprog b'); if (t) t.textContent = d.pct + '%'; if (b) b.style.width = d.pct + '%'; }); });
+  act.forEach(function (d) { if (d.wait) return; document.querySelectorAll('.cv[data-sid="' + d.sgid + '"]').forEach(function (c) { var t = c.querySelector('.tag.q'), b = c.querySelector('.sprog b'); if (t) t.textContent = d.pct + '%'; if (b) b.style.width = d.pct + '%'; }); });
 }, 900);
 /* Downloads: the RomM rows as before, plus store rows with the store's mark. */
 var tvsDlRender = TABS.downloads.render;
@@ -274,10 +277,10 @@ TABS.downloads.render = function () {
   var keep = DL; var rom = DL.filter(function (d) { return !d.store; });
   DL = rom; var base = tvsDlRender(); DL = keep;
   var srow = function (d) {
-    var romm = d.store === 'romm', s = romm ? null : sst(d.store), live = d.st === 'sactive' || d.st === 'active', steam = d.skind === 'steam';
+    var romm = d.store === 'romm', s = romm ? null : sst(d.store), steam = d.skind === 'steam', wait = steam && d.wait && d.st === 'sactive', live = !wait && (d.st === 'sactive' || d.st === 'active');
     var line = d.st === 'done' || d.st === 'failed' || d.st === 'cancelled' ? d.line : sLine(d);
     if (romm) line = PLAT[d.p] + ' · ' + line;
-    return '<div class="lrow dl" data-f data-k="dl-' + d.id + '" data-a="dlrow" data-id="' + d.id + '" data-al="' + (steam && live ? 'Open' : live || d.st === 'squeued' ? 'Cancel' : d.st === 'failed' ? 'Retry or dismiss' : 'Dismiss') + '"><div><div class="t">' + esc(d.t) + (s ? '<span class="kind" style="display:inline-flex;align-items:center;gap:.3rem">' + smark(s) + esc(s.name) + '</span>' : '') + (d.kind ? '<span class="kind">' + d.kind + '</span>' : '') + '</div><div class="s' + (d.st === 'failed' ? ' err' : '') + '">' + esc(line) + '</div>' + (live ? '<div class="pbar"><b style="width:' + d.pct + '%"></b></div>' : '') + '</div>' +
+    return '<div class="lrow dl" data-f data-k="dl-' + d.id + '" data-a="dlrow" data-id="' + d.id + '" data-al="' + (wait ? 'Stop waiting' : steam && live ? 'Open' : live || d.st === 'squeued' ? 'Cancel' : d.st === 'failed' ? 'Retry or dismiss' : 'Dismiss') + '"><div><div class="t">' + esc(d.t) + (s ? '<span class="kind" style="display:inline-flex;align-items:center;gap:.3rem">' + smark(s) + esc(s.name) + '</span>' : '') + (d.kind ? '<span class="kind">' + d.kind + '</span>' : '') + '</div><div class="s' + (d.st === 'failed' ? ' err' : '') + '">' + esc(line) + '</div>' + (live ? '<div class="pbar"><b style="width:' + d.pct + '%"></b></div>' : '') + '</div>' +
       (live ? '<div class="spark"><svg viewBox="0 0 120 38" preserveAspectRatio="none"><polyline fill="none" stroke="var(--primary)" stroke-width="2" points="0,30 20,22 40,25 60,14 80,18 100,10 120,16"/></svg></div>' : '<div></div>') + '<div class="s">' + (live && !steam ? '41.2 MB/s' : '') + '</div></div>';
   };
   var segs = { Active: ['sactive', 'active'], Queued: ['squeued', 'queued'], Completed: ['done', 'failed', 'cancelled'] };
@@ -304,13 +307,27 @@ ACT.dlrow = function (el) {
   }
   if (!d || !d.store || d.store === 'romm') return tvsDlrow(el);
   var s = sst(d.store), items = [], g = d.sgid && sG(d.sgid);
+  if (d.skind === 'steam' && d.wait && d.st === 'sactive') {
+    openSheet({ title: d.t, sub: 'Steam · Waiting for Steam to start the download. If you cancelled it in Steam, stop waiting. If Steam installs it later, GRID still adds it.', items: [
+      { label: 'Stop waiting', fn: function () { sStopWait(d); } }].concat(g ? [{ label: 'Open ' + g.t, fn: function () { push(sdetails(g)); } }] : []) });
+    return;
+  }
   if ((d.st === 'sactive' || d.st === 'squeued') && d.skind !== 'steam') items.push({ label: 'Cancel', danger: 1, fn: function () { d.st = 'cancelled'; d.line = 'Cancelled'; if (d.skind === 'tool') s.tool = 'missing'; toast('Cancelled ' + d.t); renderStage(); } });
-  if (d.st === 'failed' || d.st === 'cancelled') items.push({ label: 'Retry', fn: function () { d.st = 'squeued'; d.pct = 0; d.silentFail = 0; toast(d.t + ' added to download queue'); renderStage(); } });
+  if ((d.st === 'failed' || d.st === 'cancelled') && d.skind !== 'steam') items.push({ label: 'Retry', fn: function () { d.st = 'squeued'; d.pct = 0; d.silentFail = 0; toast(d.t + ' added to download queue'); renderStage(); } });
   if (d.silentFail) items.push({ label: 'Delete installer', danger: 1, fn: function () { sDeleteInstaller(d); } });
   if (d.st === 'done' || d.st === 'failed' || d.st === 'cancelled') items.push({ label: 'Dismiss', fn: function () { DL.splice(DL.indexOf(d), 1); renderStage(); restoreFocus(); } });
   if (g) items.push({ label: 'Open ' + g.t, fn: function () { push(sdetails(g)); } });
-  openSheet({ title: d.t, sub: s.name + (d.kind ? ' · ' + d.kind : '') + (d.skind === 'steam' ? ' · Managed by Steam: pause or cancel it in Steam' : ''), items: items });
+  openSheet({ title: d.t, sub: s.name + (d.kind ? ' · ' + d.kind : '') + (d.skind === 'steam' && d.st === 'sactive' ? ' · Managed by Steam: pause or cancel it in Steam' : ''), items: items });
 };
+/* Stop waiting (or the 5-minute timeout in the app): the row ends as not installed and GRID stops watching. */
+function sStopWait(d, timedOut) {
+  d.st = 'cancelled'; d.wait = 0;
+  d.line = timedOut ? 'Not installed · Steam didn\'t start the download in 5 minutes' : 'Not installed · you stopped waiting for Steam';
+  toast('Stopped waiting for Steam', { s: 'If Steam installs ' + d.t + ' later, GRID adds it.' });
+  /* Focus stays on the thing pressed: the row, now in Completed, or the game page's Install in Steam. */
+  renderStage(); restoreFocus({ _k: S.pages.length ? 'sd-sinstall' : 'dl-' + d.id });
+}
+ACT.sstopwait = function (el) { var d = sJob(sG(el.dataset.sid)); if (d) sStopWait(d); };
 var tvsDlHints = TABS.downloads.hints;
 TABS.downloads.hints = function () { return DL.some(function (d) { return d.st === 'done' || d.st === 'failed' || d.st === 'cancelled'; }) ? [['Y', 'Clear completed']] : []; };
 TABS.downloads.y = function () { DL = DL.filter(function (d) { return d.st === 'active' || d.st === 'queued' || d.st === 'sactive' || d.st === 'squeued'; }); render(); };
@@ -557,7 +574,10 @@ guideMenu = function () {
 function sBoot() {
   DL.push({ id: 'sb1', sgid: 'g4', t: 'Copper Saints', store: 'gog', skind: 'install', kind: '', st: 'sactive', pct: 38, os: 'linux' });
   DL.push({ id: 'sb2', sgid: 'g5', t: 'Hush Valley', store: 'gog', skind: 'install', kind: '', st: 'squeued', pct: 0, os: 'windows' });
-  DL.push({ id: 'sb3', sgid: 's4', t: 'Quiet Comet', store: 'steam', skind: 'steam', kind: '', st: 'sactive', pct: 52 });
+  DL.push({ id: 'sb3', sgid: 's4', t: 'Quiet Comet', store: 'steam', skind: 'steam', kind: '', st: 'sactive', pct: 52, wait: 0 });
+  /* Steam's install window for Harbor of Bells was cancelled: the row waits until Stop waiting (or 5 minutes in the app). */
+  DL.push({ id: 'sb5', sgid: 's5', t: 'Harbor of Bells', store: 'steam', skind: 'steam', kind: '', st: 'sactive', pct: 0, wait: -1 });
+  DL.push({ id: 'sb6', sgid: 's6', t: 'Rime Assembly', store: 'steam', skind: 'steam', kind: '', st: 'cancelled', line: 'Not installed · Steam didn\'t start the download in 5 minutes' });
   DL.push({ id: 'sb4', t: 'Glimmer Deep', store: 'epic', skind: 'install', kind: '', st: 'failed', line: 'Failed · legendary stopped: Epic\'s download server didn\'t answer' });
   S.tab = 'library'; S.libRail = 'st:gog:inst'; TABS.library._k = 'r-st:gog:inst';
 }
