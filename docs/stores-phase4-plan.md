@@ -1199,6 +1199,82 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
   each on its first attempt, `== e2e: all stages passed`. GOG, Epic and Amazon are
   unchanged by the Steam backend, the `launch_watched` route and the store-external row.
 
+## Contract deviations — package A
+
+Package A (grid-core Steam store) filled `SteamService`'s bodies and added
+`stores/steam/{api,paths,local,client,watch}.rs`, `tests/steam_store.rs` and
+`tests/fixtures/steam/`. Where it differs from, or adds to, the plan and Step 0:
+
+- **Additive `SteamService` methods** (in `mod.rs`, whose bodies are A's; no Step 0
+  signature changed):
+  - `libraries(client)`: every `path` in `libraryfolders.vdf` plus the root, each folder
+    once (by canonical path). A missing or broken `libraryfolders.vdf` gives the root
+    alone;
+  - `scan_report(client) -> SteamScan { manifests, unreadable: Vec<u32>,
+    missing_libraries: Vec<PathBuf> }`. `scan()` is its `manifests`. Package C should
+    keep the rows of an `unreadable` app id (Steam is writing its manifest) and of a
+    game whose `SteamMeta.library` is in `missing_libraries` (an unplugged drive), rather
+    than delete them as uninstalled;
+  - `scan_library(path) -> Option<LibraryScan>` for C's per-library mtime scan;
+  - `manifest_read(client, appid) -> ManifestRead { Found | Unreadable | Missing }`.
+    `manifest()` is its `Found`.
+- **`InstallWatch::step(&ManifestRead, elapsed)`** takes a `ManifestRead`, not
+  `Option<ManifestState>`, so a manifest Steam is still writing reads as unchanged
+  (the last progress). `InstallWatch::resumed()` starts a watch for an install found
+  under way at startup. Rules: installed → `Installed`; installing → `Progress`;
+  missing or gone after it was seen installing → `Cancelled`; missing or gone before
+  that → `Waiting` until `STEAM_INSTALL_START_TIMEOUT`, then `Cancelled`.
+- **Constants** for C: `watch::{STEAM_START_GRACE (180 s), STEAM_END_MISSES (2),
+  STEAM_INSTALL_START_TIMEOUT (15 min), STEAM_INSTALL_POLL (2 s)}`,
+  `api::{API_REQUEST_TIMEOUT (20 s, set per request), APP_INFO_BATCH (100)}`.
+- **The override** (`with_roots_override`) reads only what it is given: the first given
+  root that has `steamapps/`, the given executable, else `XdgOpen`. It never looks at
+  `PATH` or a real root.
+- **`registry.vdf`'s place** (`watch::registry_vdf_candidates`), first that exists:
+  `<base>/.steam/registry.vdf` for a root under `<base>/.local/share/Steam` (native,
+  Flatpak, Snap), then `<root>/../registry.vdf` (`~/.steam/` for `~/.steam/steam`), then
+  `<root>/registry.vdf` (macOS). **For C's e2e fake root:** put `registry.vdf` at
+  `<root>/registry.vdf` (or beside the root). The `/proc` fallback runs only when none
+  exists.
+- **The executable.** Flatpak roots always run `flatpak run com.valvesoftware.Steam
+  [-silent] <link>` (not the exported launcher). A Snap root runs `/snap/bin/steam` when
+  it exists, shown as "Snap (steam)" (user decision 3); without it, it falls back like a
+  native root. Native: `steam` on `PATH`, `<root>/steam.sh`, `~/.steam/steam.sh`. No
+  executable: the OS's link opener (`xdg-open`; `explorer` on Windows, `open` on macOS)
+  with the link alone, shown as the root.
+- **Windows** reads `HKCU\Software\Valve\Steam` `SteamPath`/`SteamExe`, then `HKLM`
+  `InstallPath` (32- then 64-bit key) itself with `winreg`; steamlocate's own `locate()` is
+  not used. The alive check reads `HKCU` `RunningAppID` and `Apps\<id>\Running`.
+- **The spawn** clears the environment to `launch::spawn::clean_env()` (an AppImage's
+  bundle paths never reach Steam), runs in its own process group (unix) or detached
+  (Windows), with null stdio and a `steam-open-reaper` thread that waits for it.
+- **`GetItems`.** Answers match the asked ids by position; when the count differs, by
+  each entry's `id` (the asked id, which Steam keeps even when `appid` is 0). An entry
+  with `success` ≠ 1 gives an `AppInfo` with `kind: None` and the plain cover, so C can
+  cache "no store page" and not ask again. Asked ids are de-duplicated and 0 dropped.
+  **For C's mock:** covers are `art_base` + `asset_url_format` with `${FILENAME}` =
+  `library_capsule` (answer `"asset_url_format": "${FILENAME}"`, `"library_capsule":
+  "<id>.jpg"` to get `<base>/art/<id>.jpg`); the plain fallback is
+  `<base>/art/steam/apps/<id>/library_600x900.jpg`. Screenshots are `art_base` +
+  `filename`. The year is `steam_release_date`, else `original_release_date`.
+- **`owned()`** drops `appid` 0 and clamps a negative `rtime_last_played` to 0. A 2xx
+  body that isn't the expected JSON is `Network`.
+- **`LastPlayed`** is read with keyvalues-parser from the manifest's text (a second read;
+  steamlocate has no field for it), 0 when absent or unparseable.
+- **Dependencies:** `steamlocate` 2.1.1 and `keyvalues-parser` 0.2.4; `winreg` 0.56 for
+  `cfg(windows)` (already in the tree). keyvalues-parser brings `pest`, whose stack guard
+  brings `stacker`/`psm` (a `cc` build script).
+- Proton 10.0 and 11.0 were already in Step 0's denylist; unchanged.
+- No Step 0 frozen file other than `stores/steam/mod.rs` (bodies, the module list, two
+  `pub use`s and the additive methods) changed.
+- **One line outside A's scope** (`stores_service/steam.rs`, package C's): its unit
+  tests' `SteamService` used `SteamEndpoints::real()`, which with the real `owned()`
+  sent the fixture key to api.steampowered.com (and got 401, failing
+  `test_checks_the_steam_ids_form_first`). The tests now use a dead loopback API
+  (`http://127.0.0.1:9/`), so they answer `Network` and never reach Steam.
+- **Results.** `scripts/ctr.sh gate` PASS (`== gate: PASS`); `scripts/ctr.sh wincheck`
+  PASS (`== wincheck: PASS`). No e2e group is A's (the Steam groups are C's and D's).
+
 ## E2E plan
 
 - **Mock Steam** and **fake steam** as in package C. Every other group gets the dead

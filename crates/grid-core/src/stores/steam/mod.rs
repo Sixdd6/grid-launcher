@@ -6,11 +6,10 @@
 //!
 //! `meta` (the `store_meta` JSON), `row` (the registry row) and `filter`
 //! (games vs tools, and the `StateFlags` reading) are Step 0's shared
-//! contracts, implemented. Package A adds `api` (the Web API), `paths` and
-//! `local` (roots, executable, `loginusers.vdf`, libraries and manifests),
-//! `client` (the `steam://` opener) and `watch` (the alive check and the
-//! install watch), and fills in [`SteamService`]'s bodies; until then they
-//! answer "nothing found" or `not implemented`.
+//! contracts. `api` is the Web API, `paths` the roots and the executable,
+//! `local` Steam's files (`loginusers.vdf`, `registry.vdf`, libraries and
+//! manifests), `client` the `steam://` opener and `watch` the alive check
+//! and the install watch. [`SteamService`] is the facade the app holds.
 //!
 //! Secrets: the Web API key arrives as a [`SecretString`]. Only `api.rs`
 //! (package A) may read it, and only to put it in a request's query at send
@@ -22,20 +21,27 @@
 //! `loginusers.vdf`'s `AccountName` (the Steam login name) is never read
 //! into any struct. Nothing the Steam client prints is read or logged.
 
+pub mod api;
+pub mod client;
 pub mod filter;
+pub mod local;
 pub mod meta;
+pub mod paths;
 pub mod row;
+pub mod watch;
 
 use std::fmt;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use secrecy::SecretString;
 use url::Url;
 
-use super::NOT_IMPLEMENTED;
 use crate::launch::AliveCheck;
+
+pub use local::{LibraryScan, ManifestRead, SteamScan};
+pub use watch::{InstallWatch, WatchEvent};
 
 /// The Steam Web API.
 pub const STEAM_API: &str = "https://api.steampowered.com";
@@ -277,14 +283,11 @@ impl fmt::Display for SteamLink {
 /// Steam's local files, the Web API and the client. Cheap to clone.
 #[derive(Clone)]
 pub struct SteamService {
-    // Package A's `api.rs` sends with it (built with no redirects).
-    #[allow(dead_code)]
+    /// Built with no redirects; `api.rs` sends with it.
     http: reqwest::Client,
     endpoints: SteamEndpoints,
-    // Package A's root and executable finders read the override first.
-    #[allow(dead_code)]
+    /// Tests and e2e: the roots (and executable) instead of the real ones.
     roots_override: Option<Vec<PathBuf>>,
-    #[allow(dead_code)]
     exe_override: Option<PathBuf>,
 }
 
@@ -314,58 +317,89 @@ impl SteamService {
     }
 
     /// The Steam root and executable, `None` when Steam isn't installed.
+    /// With the override, only the given roots and executable count.
     pub fn find_client(&self) -> Option<SteamClient> {
-        None
+        match &self.roots_override {
+            Some(roots) => paths::from_override(roots, self.exe_override.as_deref()),
+            None => paths::locate(),
+        }
     }
 
-    /// The accounts in `loginusers.vdf`.
-    pub fn local_accounts(&self, _client: &SteamClient) -> Vec<LocalAccount> {
-        Vec::new()
+    /// The accounts in `loginusers.vdf` (persona names, never the login
+    /// name), the signed-in one first.
+    pub fn local_accounts(&self, client: &SteamClient) -> Vec<LocalAccount> {
+        local::local_accounts(&client.root)
     }
 
-    /// Every manifest in every library.
-    pub fn scan(&self, _client: &SteamClient) -> Vec<ManifestState> {
-        Vec::new()
+    /// The client's libraries (`libraryfolders.vdf` plus the root).
+    pub fn libraries(&self, client: &SteamClient) -> Vec<PathBuf> {
+        local::library_paths(&client.root)
+    }
+
+    /// Every manifest in every library. A manifest that doesn't parse is
+    /// skipped; [`Self::scan_report`] says which.
+    pub fn scan(&self, client: &SteamClient) -> Vec<ManifestState> {
+        self.scan_report(client).manifests
+    }
+
+    /// Every library scanned, with the manifests that didn't parse and the
+    /// libraries that couldn't be read.
+    pub fn scan_report(&self, client: &SteamClient) -> SteamScan {
+        local::scan_root(&client.root)
+    }
+
+    /// One library's manifests (`None`: its folder can't be read).
+    pub fn scan_library(&self, library: &Path) -> Option<LibraryScan> {
+        local::scan_library(library)
     }
 
     /// One app's manifest, in whichever library holds it.
-    pub fn manifest(&self, _client: &SteamClient, _appid: u32) -> Option<ManifestState> {
-        None
+    pub fn manifest(&self, client: &SteamClient, appid: u32) -> Option<ManifestState> {
+        match self.manifest_read(client, appid) {
+            ManifestRead::Found(manifest) => Some(manifest),
+            ManifestRead::Unreadable | ManifestRead::Missing => None,
+        }
+    }
+
+    /// One app's manifest, telling a missing file from one Steam is still
+    /// writing (what [`InstallWatch::step`] takes).
+    pub fn manifest_read(&self, client: &SteamClient, appid: u32) -> ManifestRead {
+        local::read_manifest(&self.libraries(client), appid)
     }
 
     /// Hands `link` to the Steam client: detached, null stdio, never waited
     /// on in the caller's thread.
-    pub fn open(&self, _client: &SteamClient, _link: SteamLink) -> io::Result<()> {
-        Err(io::Error::other(NOT_IMPLEMENTED))
+    pub fn open(&self, client: &SteamClient, link: SteamLink) -> io::Result<()> {
+        client::open(&client.exe, link)
     }
 
     /// The watched session's check for `appid` (cheap, never blocks).
-    pub fn alive_check(&self, _client: &SteamClient, _appid: u32) -> AliveCheck {
-        Box::new(|| false)
+    pub fn alive_check(&self, client: &SteamClient, appid: u32) -> AliveCheck {
+        watch::alive_check(&client.root, appid)
     }
 
     /// `IPlayerService/GetOwnedGames`.
     pub async fn owned(
         &self,
-        _key: &SecretString,
-        _id: SteamId,
+        secret: &SecretString,
+        id: SteamId,
     ) -> Result<OwnedGames, SteamApiError> {
-        Err(SteamApiError::Network)
+        api::owned(&self.http, &self.endpoints, secret, id).await
     }
 
     /// `ISteamUser/GetPlayerSummaries`: the persona name.
     pub async fn persona(
         &self,
-        _key: &SecretString,
-        _id: SteamId,
+        secret: &SecretString,
+        id: SteamId,
     ) -> Result<String, SteamApiError> {
-        Err(SteamApiError::Network)
+        api::persona(&self.http, &self.endpoints, secret, id).await
     }
 
     /// `IStoreBrowseService/GetItems` (no key), 100 ids per request;
     /// failures give no entry.
-    pub async fn app_info(&self, _ids: &[u32]) -> Vec<AppInfo> {
-        Vec::new()
+    pub async fn app_info(&self, ids: &[u32]) -> Vec<AppInfo> {
+        api::app_info(&self.http, &self.endpoints, ids).await
     }
 }
 
@@ -437,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn the_stub_finds_nothing() {
+    fn an_empty_override_finds_nothing() {
         let service = SteamService::new(reqwest::Client::new(), SteamEndpoints::real())
             .with_roots_override(Vec::new(), None);
         assert!(service.find_client().is_none());

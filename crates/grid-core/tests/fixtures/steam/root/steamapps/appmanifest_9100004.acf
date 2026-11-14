@@ -1,0 +1,33 @@
+"AppState"
+{
+	"appid"		"9100004"
+	"universe"		"1"
+	"name"		"Lantern Keeper"
+	"StateFlags"		"1026"
+	"installdir"		"Lantern Keeper"
+	"LastUpdated"		"0"
+	"SizeOnDisk"		"0"
+	"StagingSize"		"0"
+	"buildid"		"0"
+	"LastOwner"		"76561198000000001"
+	"UpdateResult"		"0"
+	"BytesToDownload"		"4000000000"
+	"BytesDownloaded"		"1000000000"
+	"BytesToStage"		"6000000000"
+	"BytesStaged"		"1500000000"
+	"TargetBuildID"		"16660004"
+	"AutoUpdateBehavior"		"0"
+	"AllowOtherDownloadsWhileRunning"		"0"
+	"ScheduledAutoUpdate"		"0"
+	"StagingFolder"		"0"
+	"InstalledDepots"
+	{
+	}
+	"UserConfig"
+	{
+		"language"		"english"
+	}
+	"MountedConfig"
+	{
+	}
+}

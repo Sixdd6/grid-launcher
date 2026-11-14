@@ -1,0 +1,39 @@
+"AppState"
+{
+	"appid"		"9100002"
+	"universe"		"1"
+	"name"		"Deep Field Radio"
+	"StateFlags"		"6"
+	"installdir"		"DeepFieldRadio"
+	"LastUpdated"		"1729500000"
+	"LastPlayed"		"1730900000"
+	"SizeOnDisk"		"5368709120"
+	"StagingSize"		"0"
+	"buildid"		"12220002"
+	"LastOwner"		"76561198000000001"
+	"UpdateResult"		"0"
+	"BytesToDownload"		"0"
+	"BytesDownloaded"		"0"
+	"BytesToStage"		"0"
+	"BytesStaged"		"0"
+	"TargetBuildID"		"12220003"
+	"AutoUpdateBehavior"		"1"
+	"AllowOtherDownloadsWhileRunning"		"1"
+	"ScheduledAutoUpdate"		"1731500000"
+	"InstalledDepots"
+	{
+		"9100003"
+		{
+			"manifest"		"3234567890123456789"
+			"size"		"5368709120"
+		}
+	}
+	"UserConfig"
+	{
+		"language"		"english"
+	}
+	"MountedConfig"
+	{
+		"language"		"english"
+	}
+}

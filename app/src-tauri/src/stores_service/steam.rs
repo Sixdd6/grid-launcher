@@ -575,8 +575,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("config.toml");
         Config::default().save(&config_path).unwrap();
-        let service = SteamService::new(reqwest::Client::new(), SteamEndpoints::real())
-            .with_roots_override(Vec::new(), None);
+        // A dead loopback API (port 9, discard): no test reaches Steam.
+        let dead = SteamEndpoints::e2e("http://127.0.0.1:9/".parse().unwrap());
+        let service =
+            SteamService::new(reqwest::Client::new(), dead).with_roots_override(Vec::new(), None);
         let store = SteamStore::new(
             service,
             config_path,
@@ -634,7 +636,7 @@ mod tests {
                 )
                 .await,
             Ok(SteamTestResult::Network),
-            "Step 0's service answers Network for every call"
+            "the dead loopback API answers Network"
         );
         assert_eq!(
             store.test("76561198000000001", None).await,
