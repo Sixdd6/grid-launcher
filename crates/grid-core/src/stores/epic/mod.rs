@@ -1,11 +1,17 @@
 //! Epic Games Store, through legendary 0.21.1 (`docs/stores-phase2-plan.md`).
 //!
-//! Step 0 holds the contracts every work package builds on: the types, the
-//! `store_meta` JSON ([`meta`]), the registry row ([`row`]) and the
-//! [`EpicService`] surface. The service's bodies are the work packages'
-//! (A: login, owned list, install, update, repair, uninstall; B: launch
-//! prep and cloud saves); until they land every call fails with
-//! [`StoreError::not_implemented`].
+//! `meta` (the `store_meta` JSON) and `row` (the registry row) are shared
+//! contracts; `auth` (login, status, the first-run config), `list` (the
+//! owned, installed and `info` answers, and the owned cache), `install`
+//! (install options, the job runners, DLC removal and uninstall) and
+//! `update` (the pure update check) are package A's; launch prep and cloud
+//! saves are package B's.
+//!
+//! Every legendary run goes through [`EpicService::tool`]: its config
+//! folder (`LEGENDARY_CONFIG_PATH`), its cache (`XDG_CACHE_HOME`, where
+//! the Linux zipapp unpacks its native modules), `BROWSER=true` (so `auth`
+//! never opens a browser), legendary's signal matcher, and the config
+//! folder made owner-only when the run ends.
 //!
 //! Secrets: the login code arrives as a [`SecretString`] and reaches
 //! legendary on stdin only (`runner::ToolCommand::stdin`), never argv.
@@ -14,26 +20,31 @@
 //! run. The exchange code `launch --json` prints is read in `launch.rs`
 //! only and travels as a redacted launch argument.
 
+pub mod auth;
+pub mod install;
+pub mod list;
 pub mod meta;
 pub mod row;
+pub mod update;
 
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use secrecy::SecretString;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use url::Url;
 
 use super::paths;
-use super::tools::StoreTool;
-use super::{CloudState, StoreError, StoreKind, SyncMode};
+use super::runner::{run_tool, LineParser, ToolCommand, ToolExit, ToolSignal};
+use super::tools::{self, StoreTool};
+use super::{CloudState, StoreError, SyncMode};
 use crate::launch::StoreLaunchPrep;
-use crate::library::queue::{StoreJob, StoreJobRunner, StoreOp, StoreProgressSink};
+use crate::library::queue::{StoreJob, StoreOp};
 use crate::library::registry::{InstalledGame, Registry};
-use crate::library::LibraryError;
-use meta::EpicMeta;
+
+pub use update::updates;
 
 /// The user agent the login window shows Epic, so Epic ends the sign-in
 /// with the launcher redirect that carries the code (Heroic's way).
@@ -87,11 +98,13 @@ pub struct EpicAccount {
 }
 
 /// One owned Epic game from `list --json -T`, DLC folded into its base.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// Serialized only into the owned cache (product metadata, no token).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EpicGame {
     pub app_name: String,
     pub title: String,
-    /// Cover art URL (keyImages, in the order the plan's Research names).
+    /// Cover art URL (keyImages, portrait first; [`list`]).
     pub cover: String,
     pub screenshots: Vec<String>,
     pub description: String,
@@ -111,7 +124,8 @@ pub struct EpicGame {
 }
 
 /// One owned DLC.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EpicGameDlc {
     pub app_name: String,
     pub title: String,
@@ -197,14 +211,32 @@ pub struct EpicJobCtx {
 #[derive(Clone)]
 pub struct EpicService {
     data_dir: PathBuf,
-    #[allow(dead_code)] // package A: legendary's install and art
     http: reqwest::Client,
     ep: EpicEndpoints,
+    /// The last owned list, for an install's details and DLC titles.
+    owned: Arc<Mutex<Vec<EpicGame>>>,
+    /// A program run in place of the installed legendary (tests only).
+    tool_override: Option<PathBuf>,
 }
 
 impl EpicService {
     pub fn new(data_dir: PathBuf, http: reqwest::Client, ep: EpicEndpoints) -> Self {
-        EpicService { data_dir, http, ep }
+        EpicService {
+            data_dir,
+            http,
+            ep,
+            owned: Arc::new(Mutex::new(Vec::new())),
+            tool_override: None,
+        }
+    }
+
+    /// Runs `program` in place of the installed legendary, as is (no
+    /// `python3`, no pin check). For tests with a fake legendary; the app
+    /// never calls it.
+    #[doc(hidden)]
+    pub fn with_tool_override(mut self, program: PathBuf) -> Self {
+        self.tool_override = Some(program);
+        self
     }
 
     /// The sign-in page the login window opens.
@@ -223,76 +255,300 @@ impl EpicService {
         paths::tool_dir(&self.data_dir, StoreTool::Legendary)
     }
 
-    /// Signs in with the code: `auth --disable-webview`, the code on stdin
-    /// (package A).
+    // --- the tool -----------------------------------------------------------
+
+    /// Whether legendary is ready to run (the pinned file, or a fake).
+    pub fn tool_installed(&self) -> bool {
+        self.tool_override.is_some()
+            || tools::installed_path(&self.data_dir, StoreTool::Legendary).is_some()
+    }
+
+    /// Downloads the pinned legendary and checks its SHA-256 (a mismatch
+    /// deletes it: [`StoreError::Refused`]), then writes the first-run
+    /// `config.ini`. `progress(done, total)`.
+    pub async fn install_tool(
+        &self,
+        progress: &mut (dyn FnMut(u64, u64) + Send),
+    ) -> Result<PathBuf, StoreError> {
+        let path = match &self.tool_override {
+            Some(program) => {
+                progress(1, 1);
+                program.clone()
+            }
+            None => {
+                tools::install_tool(&self.http, &self.data_dir, StoreTool::Legendary, progress)
+                    .await?
+            }
+        };
+        self.prepare_dir()?;
+        Ok(path)
+    }
+
+    /// legendary's folder, owner-only, with the first-run `config.ini`.
+    fn prepare_dir(&self) -> Result<(), StoreError> {
+        let dir = self.tool_dir();
+        auth::ensure_first_run_config(&dir)
+            .and_then(|()| paths::make_tree_private(&dir))
+            .map_err(|e| {
+                StoreError::Refused(format!(
+                    "Couldn't create GRID's Epic Games folder ({}).",
+                    e.kind()
+                ))
+            })
+    }
+
+    /// The environment every legendary run gets.
+    pub fn tool_env(&self) -> Vec<(String, String)> {
+        let dir = self.tool_dir();
+        let mut env = vec![
+            (
+                "LEGENDARY_CONFIG_PATH".to_string(),
+                dir.to_string_lossy().into_owned(),
+            ),
+            ("BROWSER".to_string(), "true".to_string()),
+        ];
+        if !cfg!(windows) {
+            env.push((
+                "XDG_CACHE_HOME".to_string(),
+                dir.join("cache").to_string_lossy().into_owned(),
+            ));
+        }
+        env
+    }
+
+    /// The legendary command for `args`: the installed tool (or the test
+    /// override), its environment, legendary's line parser, and its folder
+    /// made private when the run ends. The first-run `config.ini` is
+    /// written first. [`StoreError::ToolMissing`] when legendary is not
+    /// installed.
+    pub fn tool(&self, args: Vec<String>) -> Result<ToolCommand, StoreError> {
+        let mut cmd = match &self.tool_override {
+            Some(program) => ToolCommand {
+                program: program.clone(),
+                args,
+                env: self.tool_env(),
+                ..Default::default()
+            },
+            None => {
+                tools::tool_command(&self.data_dir, StoreTool::Legendary, args, self.tool_env())?
+            }
+        };
+        let dir = self.tool_dir();
+        if !dir.join(auth::CONFIG_FILE).exists() {
+            self.prepare_dir()?;
+        }
+        cmd.parser = LineParser::Legendary;
+        cmd.private_tree = Some(dir);
+        Ok(cmd)
+    }
+
+    /// `run_tool` on the blocking pool, not cancellable.
+    async fn run_blocking(&self, cmd: ToolCommand) -> Result<ToolExit, StoreError> {
+        tokio::task::spawn_blocking(move || run_tool(&cmd, &AtomicBool::new(false), &mut |_| {}))
+            .await
+            .map_err(|_| StoreError::ToolFailed {
+                tool: StoreTool::Legendary.name(),
+                reason: "it stopped unexpectedly".to_string(),
+            })?
+    }
+
+    /// Whether legendary has a saved login (`user.json`).
+    fn has_login(&self) -> bool {
+        self.tool_dir().join(auth::USER_FILE).is_file()
+    }
+
+    /// A failed run of a command that needs the login, in GRID's words:
+    /// signed out or expired, Epic unreachable, else legendary's failure.
+    fn command_error(&self, exit: &ToolExit) -> StoreError {
+        if exit.has(&ToolSignal::NotLoggedIn) || exit.has(&ToolSignal::LoginFailed) {
+            return if self.has_login() {
+                StoreError::LoginExpired
+            } else {
+                StoreError::NotSignedIn
+            };
+        }
+        if exit.has(&ToolSignal::Network) {
+            return StoreError::Network("Epic Games".to_string());
+        }
+        install::step_failure(exit).unwrap_or_else(not_understood)
+    }
+
+    // --- login and account ----------------------------------------------------
+
+    /// Signs in with the code: `auth --disable-webview`, the code on stdin.
+    /// Done only when legendary exited 0, printed no failure and wrote its
+    /// token file; then the account comes from `status --json --offline`.
     pub async fn complete_login(&self, code: SecretString) -> Result<EpicAccount, StoreError> {
-        drop(code);
-        Err(StoreError::not_implemented())
+        let mut cmd = self.tool(auth::login_args())?;
+        cmd.stdin = Some(code);
+        let exit = self.run_blocking(cmd).await?;
+        auth::login_outcome(&exit, self.has_login())?;
+        let cmd = self.tool(auth::status_args(true))?;
+        let exit = self.run_blocking(cmd).await?;
+        match exit.read_stdout(auth::parse_status) {
+            Some(Some(account)) => Ok(account),
+            Some(None) => Err(StoreError::Refused(
+                "Epic Games didn't accept the sign-in. Try again.".to_string(),
+            )),
+            None => Err(not_understood()),
+        }
     }
 
-    /// The signed-in account, `None` when signed out;
-    /// [`StoreError::LoginExpired`] when Epic refuses the saved login
-    /// (package A: `status --json`).
+    /// The signed-in account, `None` when signed out (no saved login);
+    /// [`StoreError::LoginExpired`] when Epic refuses the saved one,
+    /// [`StoreError::Network`] when Epic (or legendary's API) is
+    /// unreachable. `status --json` refreshes the login.
     pub async fn account(&self) -> Result<Option<EpicAccount>, StoreError> {
-        Err(StoreError::not_implemented())
+        if !self.has_login() {
+            return Ok(None);
+        }
+        let cmd = self.tool(auth::status_args(false))?;
+        let exit = self.run_blocking(cmd).await?;
+        if exit.has(&ToolSignal::NotLoggedIn) || exit.has(&ToolSignal::LoginFailed) {
+            return Err(StoreError::LoginExpired);
+        }
+        if exit.has(&ToolSignal::Network) {
+            return Err(StoreError::Network("Epic Games".to_string()));
+        }
+        if !exit.success() {
+            return Err(self.command_error(&exit));
+        }
+        match exit.read_stdout(auth::parse_status) {
+            Some(Some(account)) => Ok(Some(account)),
+            Some(None) => Err(StoreError::LoginExpired),
+            None => Err(not_understood()),
+        }
     }
 
-    /// Signs out: legendary's folder (its token files with it) goes.
-    /// Package A runs `auth --delete` first.
+    /// The account legendary has saved, without asking Epic
+    /// (`status --json --offline`): `None` when signed out.
+    pub async fn saved_account(&self) -> Result<Option<EpicAccount>, StoreError> {
+        if !self.has_login() {
+            return Ok(None);
+        }
+        let cmd = self.tool(auth::status_args(true))?;
+        let exit = self.run_blocking(cmd).await?;
+        exit.read_stdout(auth::parse_status)
+            .ok_or_else(|| self.command_error(&exit))
+    }
+
+    /// Signs out: `auth --delete` (best effort), then legendary's whole
+    /// folder (its token files with it) and the owned cache go. Blocking.
     pub fn disconnect(&self) -> io::Result<()> {
+        if let Ok(cmd) = self.tool(auth::logout_args()) {
+            let _ = run_tool(&cmd, &AtomicBool::new(false), &mut |_| {});
+        }
+        self.owned.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        let _ = list::remove_owned_cache(&self.data_dir);
         paths::remove_tool_dir(&self.data_dir, StoreTool::Legendary)
     }
 
-    /// The owned games, DLC folded into their base (package A:
-    /// `list --json -T`).
+    // --- owned and installed --------------------------------------------------
+
+    /// The owned games, DLC folded into their base (`list --json -T`). The
+    /// list is kept for the jobs ([`Self::game`]); the caller writes the
+    /// owned cache ([`list::write_owned_cache`]).
     pub async fn owned(&self) -> Result<Vec<EpicGame>, StoreError> {
-        Err(StoreError::not_implemented())
+        if !self.has_login() {
+            return Err(StoreError::NotSignedIn);
+        }
+        let cmd = self.tool(list::list_args())?;
+        let exit = self.run_blocking(cmd).await?;
+        let games = match exit.read_stdout(list::parse_owned) {
+            Some(games) if exit.success() => games,
+            _ => return Err(self.command_error(&exit)),
+        };
+        self.set_owned(games.clone());
+        Ok(games)
     }
 
-    /// What legendary has installed (package A: `list-installed --json`).
+    /// Seeds the kept owned list (from the owned cache at startup).
+    pub fn set_owned(&self, games: Vec<EpicGame>) {
+        *self.owned.lock().unwrap_or_else(|e| e.into_inner()) = games;
+    }
+
+    /// The owned game `app` from the kept owned list.
+    pub fn game(&self, app: &str) -> Option<EpicGame> {
+        self.owned
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .find(|game| game.app_name == app.trim())
+            .cloned()
+    }
+
+    /// What legendary has installed (`list-installed --json`, offline).
     pub async fn installed(&self) -> Result<Vec<EpicInstalled>, StoreError> {
-        Err(StoreError::not_implemented())
+        let cmd = self.tool(list::installed_args())?;
+        let exit = self.run_blocking(cmd).await?;
+        exit.read_stdout(list::parse_installed)
+            .ok_or_else(|| self.command_error(&exit))
     }
 
-    /// The base game's and its DLC's sizes (package A: `info --json`).
+    /// The base game's sizes and its DLC with theirs: `info --json` for the
+    /// base, then for each DLC it (or the owned list) names. A DLC whose
+    /// `info` fails is offered with no size.
     pub async fn install_options(&self, app: &str) -> Result<EpicInstallOptions, StoreError> {
-        let _ = app;
-        Err(StoreError::not_implemented())
+        let game = self.game(app);
+        if let Some(launcher) = game.as_ref().and_then(|g| g.third_party.clone()) {
+            return Err(StoreError::Refused(format!(
+                "Needs {launcher}. GRID can't install games that start through another company's launcher."
+            )));
+        }
+        let cmd = self.tool(list::info_args(app))?;
+        let exit = self.run_blocking(cmd).await?;
+        let base = match exit.read_stdout(list::parse_info) {
+            Some(info) if install::step_failure(&exit).is_none() => info,
+            _ => return Err(self.command_error(&exit)),
+        };
+        let mut dlc = Vec::new();
+        for item in install::dlc_to_offer(&base, game.as_ref()) {
+            let info = match self.tool(list::info_args(&item.app_name)) {
+                Ok(cmd) => self
+                    .run_blocking(cmd)
+                    .await
+                    .ok()
+                    .filter(|exit| install::step_failure(exit).is_none())
+                    .and_then(|exit| exit.read_stdout(list::parse_info)),
+                Err(_) => None,
+            };
+            dlc.push((item, info));
+        }
+        Ok(install::options_from(&base, dlc))
     }
+
+    // --- jobs -------------------------------------------------------------------
 
     pub fn install_job(&self, req: EpicInstallRequest, ctx: EpicJobCtx) -> StoreJob {
-        let _ = ctx;
-        not_implemented_job(req.app_name, req.title, StoreOp::Install)
+        install::install_job(self.clone(), req, ctx)
     }
 
     pub fn update_job(&self, row: &InstalledGame, ctx: EpicJobCtx) -> StoreJob {
-        let _ = ctx;
-        not_implemented_job(row.store_id.clone(), row.title.clone(), StoreOp::Update)
+        install::row_job(self.clone(), row, StoreOp::Update, None, ctx)
     }
 
     pub fn repair_job(&self, row: &InstalledGame, ctx: EpicJobCtx) -> StoreJob {
-        let _ = ctx;
-        not_implemented_job(row.store_id.clone(), row.title.clone(), StoreOp::Repair)
+        install::row_job(self.clone(), row, StoreOp::Repair, None, ctx)
     }
 
     pub fn dlc_job(&self, row: &InstalledGame, dlc: &str, ctx: EpicJobCtx) -> StoreJob {
-        let _ = (dlc, ctx);
-        not_implemented_job(row.store_id.clone(), row.title.clone(), StoreOp::Dlc)
+        install::row_job(self.clone(), row, StoreOp::Dlc, Some(dlc), ctx)
     }
 
+    /// Removes one installed DLC (`uninstall <dlc>`). Blocking.
     pub fn remove_dlc(
         &self,
         registry: &Registry,
         row: &InstalledGame,
         dlc: &str,
     ) -> Result<(), StoreError> {
-        let _ = (registry, row, dlc);
-        Err(StoreError::not_implemented())
+        install::remove_dlc(self, registry, row, dlc)
     }
 
+    /// Uninstalls a game: legendary's `uninstall`, then the folder (prefix
+    /// inside it) through the removal guard, then the row. Blocking.
     pub fn uninstall(&self, registry: &Registry, app: &str) -> Result<(), StoreError> {
-        let _ = (registry, app);
-        Err(StoreError::not_implemented())
+        install::uninstall(self, registry, app)
     }
 
     /// The installed games the owned list has a different build for. Pure:
@@ -301,6 +557,8 @@ impl EpicService {
     pub fn updates(&self, rows: &[InstalledGame], owned: &[EpicGame]) -> Vec<EpicUpdate> {
         updates(rows, owned)
     }
+
+    // --- package B --------------------------------------------------------------
 
     /// The launch ticket: `launch --json`, its `egl_parameters` as
     /// redacted arguments (package B).
@@ -329,53 +587,11 @@ impl EpicService {
     }
 }
 
-/// [`EpicService::updates`]: the pure comparison.
-pub fn updates(rows: &[InstalledGame], owned: &[EpicGame]) -> Vec<EpicUpdate> {
-    rows.iter()
-        .filter_map(|row| {
-            let meta = EpicMeta::from_json(&row.store_meta);
-            let installed = meta.version.trim();
-            let game = owned.iter().find(|game| game.app_name == row.store_id)?;
-            let latest = game.build_version.trim();
-            (!installed.is_empty() && !latest.is_empty() && installed != latest).then(|| {
-                EpicUpdate {
-                    app_name: row.store_id.clone(),
-                    version: latest.to_string(),
-                }
-            })
-        })
-        .collect()
-}
-
-/// A job that fails with [`StoreError::not_implemented`] (Step 0).
-fn not_implemented_job(store_id: String, title: String, op: StoreOp) -> StoreJob {
-    StoreJob {
-        source: StoreKind::Epic,
-        store_id,
-        op,
-        title,
-        drive: None,
-        runner: Arc::new(NotImplemented),
-    }
-}
-
-struct NotImplemented;
-
-impl StoreJobRunner for NotImplemented {
-    fn download(
-        &self,
-        _cancel: &AtomicBool,
-        _progress: &mut dyn FnMut(u64, u64, f64),
-    ) -> Result<(), LibraryError> {
-        Err(LibraryError::Extract(
-            StoreError::not_implemented().to_string(),
-        ))
-    }
-
-    fn finalize(&self, _sink: &mut dyn StoreProgressSink) -> Result<String, LibraryError> {
-        Err(LibraryError::Extract(
-            StoreError::not_implemented().to_string(),
-        ))
+/// legendary printed something GRID can't read.
+fn not_understood() -> StoreError {
+    StoreError::ToolFailed {
+        tool: StoreTool::Legendary.name(),
+        reason: "it gave an answer GRID doesn't understand".to_string(),
     }
 }
 
@@ -421,71 +637,64 @@ mod tests {
         assert_eq!(rows[0].save_path, "");
     }
 
-    #[test]
-    fn updates_compare_build_versions() {
-        let row = |id: &str, version: &str| InstalledGame {
-            store_id: id.into(),
-            source: crate::stores::GameSource::Store(StoreKind::Epic),
-            store_meta: EpicMeta {
-                version: version.into(),
-                ..Default::default()
-            }
-            .to_json(),
-            ..Default::default()
-        };
-        let game = |id: &str, build: &str| EpicGame {
-            app_name: id.into(),
-            build_version: build.into(),
-            ..Default::default()
-        };
-        let rows = [row("a", "1"), row("b", "2"), row("c", ""), row("d", "1")];
-        let owned = [
-            game("a", "1"),
-            game("b", "3"),
-            game("c", "9"),
-            game("e", "1"),
-        ];
-        assert_eq!(
-            updates(&rows, &owned),
-            vec![EpicUpdate {
-                app_name: "b".into(),
-                version: "3".into()
-            }]
-        );
-    }
-
-    #[tokio::test]
-    async fn step_0_calls_say_not_implemented() {
-        let dir = tempfile::tempdir().unwrap();
-        let svc = EpicService::new(
-            dir.path().to_path_buf(),
+    fn service(data: &std::path::Path) -> EpicService {
+        EpicService::new(
+            data.to_path_buf(),
             reqwest::Client::new(),
             EpicEndpoints::real(),
-        );
-        let error = svc
-            .complete_login(SecretString::from("FAKE-STORE-TOKEN-not-real"))
-            .await
-            .unwrap_err();
-        assert_eq!(error.to_string(), crate::stores::NOT_IMPLEMENTED);
-        assert!(svc.account().await.is_err());
-        assert!(svc.owned().await.is_err());
-        assert!(svc.tool_dir().ends_with("stores/legendary"));
+        )
+    }
+
+    #[test]
+    fn the_tool_env_names_legendarys_folders_and_no_browser() {
+        let svc = service(std::path::Path::new("/data"));
+        let env = svc.tool_env();
+        assert_eq!(env[0].0, "LEGENDARY_CONFIG_PATH");
+        assert!(PathBuf::from(&env[0].1).ends_with("stores/legendary"));
+        assert!(env.contains(&("BROWSER".to_string(), "true".to_string())));
+        if !cfg!(windows) {
+            let cache = env.iter().find(|(k, _)| k == "XDG_CACHE_HOME").unwrap();
+            assert!(PathBuf::from(&cache.1).ends_with("stores/legendary/cache"));
+        }
+    }
+
+    #[test]
+    fn a_missing_legendary_is_tool_missing_and_signed_out_needs_no_run() {
+        #[cfg(feature = "e2e")]
+        let _lock = crate::test_env::lock();
+        let dir = tempfile::tempdir().unwrap();
+        let svc = service(dir.path());
+        if tools::host_asset(StoreTool::Legendary).is_some() {
+            assert!(!svc.tool_installed());
+            assert!(matches!(
+                svc.tool(auth::status_args(true)),
+                Err(StoreError::ToolMissing("legendary"))
+            ));
+        }
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        assert_eq!(rt.block_on(svc.account()).unwrap(), None);
+        assert!(matches!(
+            rt.block_on(svc.owned()),
+            Err(StoreError::NotSignedIn)
+        ));
         svc.disconnect().unwrap();
-        let job = svc.update_job(
-            &InstalledGame {
-                store_id: "a".into(),
-                ..Default::default()
-            },
-            EpicJobCtx {
-                registry: Arc::new(Registry::open(&dir.path().join("registry.db")).unwrap()),
-                library: dir.path().to_path_buf(),
-                default_compat_tool: String::new(),
-            },
-        );
-        assert_eq!(job.source, StoreKind::Epic);
-        assert!(job
-            .runner
-            .download(&AtomicBool::new(false), &mut |_, _, _| {})
-            .is_err());
+        assert!(!svc.tool_dir().exists());
+    }
+
+    #[test]
+    fn the_kept_owned_list_answers_game() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = service(dir.path());
+        assert_eq!(svc.game("A"), None);
+        svc.set_owned(vec![EpicGame {
+            app_name: "A".into(),
+            title: "Alpha".into(),
+            ..Default::default()
+        }]);
+        assert_eq!(svc.game(" A ").unwrap().title, "Alpha");
+        let clone = svc.clone();
+        assert!(clone.game("A").is_some(), "clones share the list");
     }
 }

@@ -814,6 +814,80 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
 - **TypeScript.** Besides the three `api.ts` types, `gamestores/details.ts` leaves out
   the cloud file count when it is `null` (a one-line type fix, so that the check passes).
 
+## Contract deviations — package A
+
+No frozen file changed. Package A filled `stores/epic/mod.rs` and added
+`stores/epic/{auth,list,install,update}.rs` and `crates/grid-core/tests/epic_store.rs`.
+`tools`, `progress`, `paths` and `art` needed nothing beyond Step 0.
+
+- **Additions to `EpicService`** (for package C):
+  - `tool_installed()` and `install_tool(progress)`. The second is the pinned download
+    with its SHA-256 check (a mismatch deletes the file: `Refused`), then the first-run
+    `config.ini`.
+  - `tool(args)` builds every legendary command: env `LEGENDARY_CONFIG_PATH`,
+    `BROWSER=true` and (off Windows) `XDG_CACHE_HOME=<tool dir>/cache`;
+    `LineParser::Legendary`; `private_tree`. It writes `config.ini`
+    (`disable_update_notice = true`) before the first run. `tool_env()` is public.
+  - `saved_account()` is `status --json --offline` (no network). Use it at startup when
+    Epic can't be reached.
+  - `set_owned(games)` seeds the kept owned list from the cache, and `game(app)` reads
+    it. The jobs and `install_options` read titles, DLC, the third-party refusal and the
+    expected build from it.
+  - `with_tool_override(program)` (`#[doc(hidden)]`) runs a fake legendary in the tests.
+  - `list::{read,write,remove}_owned_cache` and `OwnedCache { refreshed_at, games }`
+    handle `<data>/stores/cache/epic-owned.json`. `EpicGame` and `EpicGameDlc` are
+    `Serialize`/`Deserialize` for it. The caller writes the cache after `owned()`.
+    `disconnect()` removes it.
+- **Login.** Signed in means exit 0, no `Network`/`LoginFailed`/`OtherError` signal,
+  and `user.json` present. The account then comes from `status --json --offline`.
+  `Network` gives `StoreError::Network("Epic Games")` and `LoginFailed` gives "Epic Games
+  didn't accept the sign-in. Try again."
+- **Account.** It returns `None` without running legendary when there is no `user.json`.
+  Otherwise it runs `status --json` (online). `NotLoggedIn`/`LoginFailed` give
+  `LoginExpired`, and `Network` gives `Network`.
+- **Owned list.** It keeps items that have a `Windows`/`Win32` asset, **and third-party
+  titles, which have no asset** (`-T`). Without that rule, Not supported could never
+  show.
+  - It drops items whose categories are only `mods`/`applications`, mods without
+    `games`, DLC listed on their own (`mainGameItem`), and DLC with no Windows asset.
+  - The cover is portrait first (`DieselGameBoxTall`, `OfferImageTall`,
+    `DieselStoreFrontTall`, then `DieselGameBox`, `OfferImageWide`), because the Library
+    cards are portrait, like GOG's `vertical_cover`.
+  - Screenshots are `Screenshot`/`GalleryImage`, else one wide image.
+  - The year is the first plausible `releaseInfo` date.
+  - Third-party names: `origin`/`the ea app` give "the EA app", and
+    `ubisoftconnect`/`uplay` give "Ubisoft Connect". Any other value is shown as it is.
+- **Install options.** The DLC come from `info`'s installable `owned_dlc`, then from the
+  owned list, each once. A DLC whose `info` fails is offered with size 0. A third-party
+  title is refused.
+- **Jobs.**
+  - An update and a repair also run `update`/`repair` for each installed DLC (from
+    `meta.dlc`). This is because `--skip-dlcs`, which is always present, leaves the DLC
+    alone. A DLC transfer that fails inside an install, update or repair does not fail
+    the job. It becomes a warning line ("Couldn't install Night Route: …"), and only the
+    DLC that `list-installed` shows go into `meta.dlc`.
+  - Progress is in bytes from `info`'s download sizes for an install or a DLC. For an
+    update or a repair, whose sizes are unknown up front, it is a fraction of the whole
+    job (N × 10 000). The repair's `download_phase()` is `Verifying`.
+  - The success rule: no failure signal on the base transfer (exit code included), and
+    the app present in `list-installed` with a non-empty version. After an update, the
+    version must be the owned `build_version`, or at least differ from the old one,
+    unless legendary printed `DownloadSize(0)` (already up to date). A cached build that
+    is stale must not fail a real update, so the check is not strictly "== expected".
+  - `step_failure` maps the signals to GRID's words in this order: `NotLoggedIn` or
+    `LoginFailed` give `LoginExpired`; `ThirdPartyManaged`; "there isn't enough disk
+    space"; "Epic's download server didn't answer"; "it ran out of memory"; "the game
+    isn't installed"; the exit code; "it reported an error".
+- **Uninstall and DLC removal.** A missing legendary, or `NotInstalled` (legendary
+  forgot the game, for example after a Disconnect), still removes the files. Any other
+  failure stops before a file is touched.
+
+**Left for integration:** the repair result ("2 files repaired") is what the job's
+`finalize` returns, and the queue stores that as the completed entry's `error`. The
+frontend reads `DownloadEntry.detail` (`Verified · <detail>`). One line in
+`library/mod.rs` (store finalize: a completed `StoreOp::Repair` message goes to
+`detail`) closes this. GOG's repair would also use it.
+
 ## E2E plan
 
 - **Mock Epic** (`mock-romm/mock-epic.mjs`, one base for login and art).
