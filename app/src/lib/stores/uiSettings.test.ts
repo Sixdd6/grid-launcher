@@ -339,6 +339,8 @@ describe('background blur', () => {
       card_size_server: 'medium',
       card_labels: 'always',
       card_display: 'rows',
+      tv_card_size: 'medium',
+      tv_card_labels: 'always',
       hardware_acceleration: true,
       open_on: 'automatic',
       tv_prompts: 'match',
@@ -406,6 +408,69 @@ describe('game labels', () => {
     expect(store.uiSettings.cardLabels).toBe('hover');
     expect(setUiSettings).toHaveBeenLastCalledWith(
       expect.objectContaining({ card_labels: 'hover', background_fade: 25 }),
+    );
+  });
+});
+
+describe("TV mode's card size and game labels", () => {
+  async function loadStore(stored: Record<string, unknown>) {
+    vi.resetModules();
+    vi.stubGlobal('localStorage', fakeStorage());
+    vi.stubGlobal('document', { documentElement: { dataset: {} } });
+    vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
+    const setUiSettings = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('../api', () => ({
+      api: {
+        getUiSettings: () =>
+          Promise.resolve({
+            theme: 'system',
+            background_fade: 25,
+            background_blur: 2,
+            card_size_library: 'small',
+            card_size_server: 'large',
+            card_labels: 'hover',
+            ...stored,
+          }),
+        setUiSettings,
+      },
+    }));
+    const store = await import('./uiSettings.svelte');
+    await store.initUiSettings();
+    return { store, setUiSettings };
+  }
+
+  it('loads the stored values, and a config without them is Medium and Always visible', async () => {
+    const { store } = await loadStore({ tv_card_size: 'large', tv_card_labels: 'focus' });
+    expect(store.uiSettings.tvCardSize).toBe('large');
+    expect(store.uiSettings.tvCardLabels).toBe('focus');
+    const fresh = (await loadStore({})).store;
+    expect(fresh.uiSettings.tvCardSize).toBe('medium');
+    expect(fresh.uiSettings.tvCardLabels).toBe('always');
+  });
+
+  it("never takes the desktop's values", async () => {
+    const { store } = await loadStore({ tv_card_labels: 'hover' });
+    expect(store.uiSettings.tvCardSize).toBe('medium');
+    expect(store.uiSettings.tvCardLabels).toBe('always');
+  });
+
+  it("saves a change without touching the desktop's keys", async () => {
+    const { store, setUiSettings } = await loadStore({});
+    await store.setTvCardSize('small');
+    await store.setTvCardLabels('focus');
+    expect(store.uiSettings.tvCardSize).toBe('small');
+    expect(store.uiSettings.tvCardLabels).toBe('focus');
+    expect(store.uiSettings.cardSizeLibrary).toBe('small');
+    expect(store.uiSettings.cardSizeServer).toBe('large');
+    expect(store.uiSettings.cardLabels).toBe('hover');
+    expect(setUiSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        tv_card_size: 'small',
+        tv_card_labels: 'focus',
+        card_size_library: 'small',
+        card_size_server: 'large',
+        card_labels: 'hover',
+      }),
     );
   });
 });

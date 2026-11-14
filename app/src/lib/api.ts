@@ -49,6 +49,12 @@ export type UiSettings = {
   /** "Game card display": `rows` (Equal height) or `columns` (Equal width)
    *  (`ui.card_display`). */
   card_display: 'rows' | 'columns';
+  /** TV mode's own "Card size", one for every TV grid (`ui.tv_card_size`).
+   *  Apart from `card_size_library` / `card_size_server`. */
+  tv_card_size: CardSizeName;
+  /** TV mode's own "Game labels": `always` or `focus`
+   *  (`ui.tv_card_labels`). Apart from `card_labels`. */
+  tv_card_labels: 'always' | 'focus';
   /** "Hardware acceleration": the webview renders on the GPU. Read at
    *  startup, so a change applies after a restart (`ui.hardware_acceleration`). */
   hardware_acceleration: boolean;

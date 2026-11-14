@@ -3,7 +3,10 @@
   // out as the desktop lays out its cards (`cards/layout.ts`): Equal height
   // rows or Equal width columns, the "Game card display" setting both modes
   // share. Sizes are in rem, so the grid scales with the TV window: rows
-  // around a 10rem-wide portrait cover's height, columns at least 10rem.
+  // around a portrait cover's height at TV mode's own Card size (8.5, 10
+  // or 12.5rem wide), columns at least that wide. Game labels › Visible on
+  // focus reserves no title line: the focused cover's title floats as a
+  // pill (tv.css). Both apply live, keeping focus and scroll.
   // Moving off its edge reaches only what sits straight past that edge; it
   // is entered where it was left, else at its first cover.
   //
@@ -25,6 +28,7 @@
   import { shapeOf } from '../../stores/coverShapes.svelte';
   import { uiSettings } from '../../stores/uiSettings.svelte';
   import { scrollParent } from '../../visibleWarm';
+  import { tvCoverRem, tvLabelRowRem } from '../gridSettings';
   import { INITIAL_WINDOW, layoutMove, windowIndexes } from '../focus/grid';
   import { registerWindow } from '../focus/windows';
   import { revealFocus } from '../nav.svelte';
@@ -52,13 +56,14 @@
     children?: Snippet;
   } = $props();
 
-  /** A cover's width at the portrait shape, and the gaps, in rem (tv.css). */
-  const COVER_REM = 10;
+  /** The gaps, in rem (tv.css). */
   const GAP_REM = 1.2;
   const ROW_GAP_REM = 1.6;
-  /** The title under a cover: the cover's .5rem gap and one .9rem line at
-   *  line-height 1.4 (tv.css `.cv-l`). */
-  const LABEL_REM = 0.5 + 0.9 * 1.4;
+  /** A cover's width at the portrait shape, in rem: TV mode's Card size. */
+  let coverRem = $derived(tvCoverRem(uiSettings.tvCardSize));
+  /** The title row under each cover, in rem: none while only the focused
+   *  cover's title shows (Game labels › Visible on focus). */
+  let labelRem = $derived(tvLabelRowRem(uiSettings.tvCardLabels));
   /** How far past the visible part covers are rendered, in rem. */
   const BUFFER_REM = 30;
 
@@ -80,16 +85,16 @@
   let shapes = $derived(items ? items.map((it) => shapeOf(cover?.(it) ?? null)) : []);
   let layout: Layout = $derived.by(() => {
     const w = width ?? 1280;
-    const common = { shapes, width: w, labelRow: LABEL_REM * rem, gap: GAP_REM * rem, rowGap: ROW_GAP_REM * rem };
+    const common = { shapes, width: w, labelRow: labelRem * rem, gap: GAP_REM * rem, rowGap: ROW_GAP_REM * rem };
     return uiSettings.cardDisplay === 'columns'
-      ? columnsLayout({ ...common, minColumn: COVER_REM * rem })
-      : rowsLayout({ ...common, target: (COVER_REM / CARD_CELL_ASPECT) * rem });
+      ? columnsLayout({ ...common, minColumn: coverRem * rem })
+      : rowsLayout({ ...common, target: (coverRem / CARD_CELL_ASPECT) * rem });
   });
   let shown = $derived.by(() => {
     const range =
       band === null
         ? { start: 0, end: Math.min(count, INITIAL_WINDOW) }
-        : visibleRange(layout, LABEL_REM * rem, band.top - BUFFER_REM * rem, band.bottom + BUFFER_REM * rem);
+        : visibleRange(layout, labelRem * rem, band.top - BUFFER_REM * rem, band.bottom + BUFFER_REM * rem);
     return windowIndexes(range, focusIndex, count);
   });
 
