@@ -17,7 +17,7 @@ import { failureReason, hasStoreBadge, storeBackupLine, storeEntryLine, storeKin
 import { cloudSwitchLabel, storeHeaderLine } from '../../gamestores/details';
 import { inspectionView, fileName, type InspectionView } from '../../gamestores/inspection';
 import { isLive, jobAct, jobPercent } from '../../gamestores/jobs';
-import { hasStoreCloud, noBackupReason, storeName, storeTool } from '../../gamestores/marks';
+import { canBackup, hasCloud as hasStoreCloud, hasInstaller, noBackupReason, storeName, storeTool } from '../../gamestores/marks';
 import { availBlock, type StorePart } from '../../gamestores/rail';
 import { agoText, changedAt, plural, sizeGb } from '../../gamestores/text';
 import { storePanel, type PanelAct, type StorePanel } from '../../gamestores/view';
@@ -55,14 +55,18 @@ export function tvChips(status: StoreStatus): TvChip[] {
   return out;
 }
 
-/** The header's buttons: Backup all N… (GOG › Installed), Install from installer… (GOG), Refresh (Available, when it lists games). */
+/**
+ * The header's buttons: Backup all N… (Installed, a store that can back up:
+ * GOG), Install from installer… (a store with offline installers: GOG),
+ * Refresh (Available, when it lists games). Epic Games has Refresh only.
+ */
 export function tvHeaderActions(status: StoreStatus, part: StorePart, installedCount: number): { backupAll: number; installer: boolean; refresh: boolean; select: boolean } {
-  const gog = status.source === 'gog';
+  const backups = canBackup(status.source) && part === 'installed';
   return {
-    backupAll: gog && part === 'installed' ? installedCount : 0,
-    installer: gog,
+    backupAll: backups ? installedCount : 0,
+    installer: hasInstaller(status.source),
     refresh: part === 'available' && availBlock(status) === '',
-    select: gog && part === 'installed',
+    select: backups,
   };
 }
 
@@ -167,7 +171,7 @@ export function tvStoreButtons(o: {
     out.push({ act: 'uninstall', label: 'Uninstall', primary: false, danger: true });
   }
   if (o.fromDrive) out.push({ act: 'remove_drive', label: 'Remove from drive…', primary: false });
-  else if (game.source === 'gog' && game.installed) out.push({ act: 'backup', label: 'Backup to drive…', primary: false });
+  else if (canBackup(game.source) && game.installed) out.push({ act: 'backup', label: 'Backup to drive…', primary: false });
   return out;
 }
 
@@ -212,7 +216,7 @@ export function tvLeftLines(o: {
         ? 'its installer files and saves. Installing runs the installer again.'
         : 'a copy of an installed game, with its saves. Installing copies it back.';
     out.push({ key: 'drive', segs: [{ text: 'From ' }, { text: o.drive.name, b: true }, { text: ` · ${how}` }] });
-  } else if (game.source === 'gog') {
+  } else if (canBackup(game.source)) {
     if (o.onDrives.length > 0) out.push({ key: 'on', segs: [{ text: 'On ' }, { text: o.onDrives.join(', '), b: true }] });
   } else {
     out.push({ key: 'nobk', segs: [{ text: noBackupReason(game.source) }] });
@@ -459,7 +463,7 @@ export function notConnectedNote(status: StoreStatus): string {
   const tool = storeTool(status.source) ?? { name: 'its tool', pkg: '' };
   return `Sign in to ${name} to see the games you own in the Library and install them. GRID installs with ${tool.name} (${tool.pkg}, ${
     status.tool.license || 'GPL-3.0'
-  }, ${sizeGb(status.tool.size_bytes)}), which it downloads when you connect.${status.source === 'gog' ? ' You can install GOG offline installers without signing in.' : ''}`;
+  }, ${sizeGb(status.tool.size_bytes)}), which it downloads when you connect.${hasInstaller(status.source) ? ` You can install ${name} offline installers without signing in.` : ''}`;
 }
 
 /** "8 · 3 installed · updated 5 min ago" ("Loading…" while it loads). */
@@ -488,6 +492,12 @@ export function disconnectWords(status: StoreStatus): { title: string; body: str
   const n = status.installed_count;
   const stay = n > 0 ? ` The ${n} installed games stay and still play; they can’t install, update${hasStoreCloud(status.source) ? ' or sync cloud saves' : ''} until you connect again.` : '';
   return { title: `Disconnect ${name}?`, body: `GRID deletes your ${name} login and ${tool} from this computer.${stay}`, ok: 'Disconnect' };
+}
+
+/** The card after Disconnect (prototype `sStorePage`): "Epic Games disconnected" / "Its login and legendary were deleted; installed games stay." */
+export function disconnectedCard(source: StoreGame['source']): { text: string; sub: string } {
+  const tool = storeTool(source)?.name ?? 'its tool';
+  return { text: `${storeName(source)} disconnected`, sub: `Its login and ${tool} were deleted; installed games stay.` };
 }
 
 // ── Signing in ──────────────────────────────────────────────────────────
@@ -573,7 +583,7 @@ export function tvStoreRowA(e: DownloadEntry): string {
 /** The list's line: "GOG · Update". */
 export function tvStoreListSub(e: DownloadEntry): string {
   const src = entrySource(e);
-  return [src ? storeName(src) : 'GOG', tvStoreKind(e)].filter((s) => s !== '').join(' · ');
+  return [src ? storeName(src) : e.platform.trim(), tvStoreKind(e)].filter((s) => s !== '').join(' · ');
 }
 
 /** Cancel on a store row asks first, in the prototype's words. */

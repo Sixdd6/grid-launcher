@@ -3,7 +3,11 @@ import { installedGame, row, status, storeGame } from '../../gamestores/fixtures
 import { mixedStoreGames, storeGameFromDrive } from './libraryStores';
 import {
   conflictPrompt,
+  disconnectedCard,
   disconnectWords,
+  loginHost,
+  notConnectedNote,
+  tvStoreListSub,
   refusalTitle,
   storeRowPill,
   storeRowSub,
@@ -26,7 +30,7 @@ import {
   tvTabStep,
   tvTabs,
 } from './storeWords';
-import type { InstalledGame } from '../../api';
+import type { InstalledGame, StoreCloudState, StoreGame, StoreStatus } from '../../api';
 
 const NOW = 1_800_000_000;
 
@@ -191,5 +195,88 @@ describe('store games in the Library’s own rows', () => {
   it('a drive’s record stands in for a game GRID doesn’t own a record of', () => {
     const g = storeGameFromDrive({ key: 'gog:7', name: 'Paper Lanterns', platform: 'linux', layout: 'installed', version: '1.1', size: 10, cover: '', installed: false, added: '', summary: 's' });
     expect(g).toMatchObject({ key: 'gog:7', store_id: '7', title: 'Paper Lanterns', installed: false });
+  });
+});
+
+describe('Epic Games in TV mode (docs/stores-phase2-plan.md package E)', () => {
+  const epicStatus = (over: Partial<StoreStatus> = {}) =>
+    status({ source: 'epic', username: 'SamPlays', ...over, tool: { ...status().tool, name: 'legendary', version: '0.21.1', license: 'GPL-3.0', size_bytes: 3_093_622, ...(over.tool ?? {}) } });
+  const epicGame = (over: Partial<StoreGame> = {}) =>
+    storeGame({ source: 'epic', key: 'epic:Glimmer', store_id: 'Glimmer', title: 'Glimmer Deep', platforms: ['windows'], origin: null, ...over });
+  const epicInstalled = (over: Partial<StoreGame> = {}) =>
+    installedGame({ source: 'epic', key: 'epic:Starlight', store_id: 'Starlight', title: 'Starlight Courier', platforms: ['windows'], installed_platform: 'windows', origin: 'legendary', ...over });
+
+  it('the header has no Backup all, installer button or Select; Refresh on Available', () => {
+    expect(tvHeaderActions(epicStatus(), 'installed', 2)).toEqual({ backupAll: 0, installer: false, refresh: false, select: false });
+    expect(tvHeaderActions(epicStatus(), 'available', 2)).toEqual({ backupAll: 0, installer: false, refresh: true, select: false });
+    expect(tvChips(epicStatus()).map((c) => `${c.text}${c.bold ?? ''}`)).toEqual(['Signed in as SamPlays', 'Cloud saves: on']);
+  });
+
+  it('nothing installed offers Open Available only (no installer)', () => {
+    expect(tvPanel(epicStatus(), 'installed', [])?.actions.map((a) => a.label)).toEqual(['Open Available']);
+  });
+
+  it('a game that needs another launcher: NOT SUPPORTED, no X, a disabled Not supported, and why', () => {
+    const g = epicGame({ not_supported: 'the EA app' });
+    expect(tvCoverTag(g, null)).toEqual({ text: 'NOT SUPPORTED', cls: 'sns' });
+    expect(tvQuick(g, epicStatus(), null)).toBeNull();
+    expect(tvStoreButtons({ game: g, status: epicStatus(), job: null, fromDrive: false })).toEqual([
+      expect.objectContaining({ label: 'Not supported', disabled: true, why: 'Needs the EA app. GRID can’t install games that start through another company’s launcher.' }),
+    ]);
+    const lines = tvLeftLines({ game: g, nowSeconds: NOW, lastPlayedAt: 0, compat: 'GE-Proton9-20', drive: null, onDrives: [] });
+    expect(lines.map((l) => l.segs.map((s) => s.text).join(''))).toEqual([
+      'Needs the EA app. GRID can’t install games that start through another company’s launcher.',
+      'Windows only · runs through GE-Proton9-20',
+      'Epic Games games can’t be backed up: legendary installs only from Epic’s servers.',
+    ]);
+  });
+
+  it('an installed game has no Backup to drive…, runs through its tool, and has Cloud saves', () => {
+    const g = epicInstalled({ compat_tool: 'GE-Proton9-20', cloud: 'synced', last_sync: NOW - 4 * 86400 });
+    const acts = tvStoreButtons({ game: g, status: epicStatus(), job: null, fromDrive: false }).map((b) => b.label);
+    expect(acts).toEqual(['Play', 'Game settings', 'Verify and repair', 'Uninstall']);
+    const lines = tvLeftLines({ game: g, nowSeconds: NOW, lastPlayedAt: NOW - 4 * 86400, compat: 'GE-Proton9-20', drive: null, onDrives: ['Couch kit'] });
+    expect(lines.map((l) => l.key)).toEqual(['played', 'runs', 'cloud', 'nobk']);
+    expect(lines[1].segs.map((s) => s.text).join('')).toBe('Runs through GE-Proton9-20 · Windows version');
+    expect(tvTabs(g)).toEqual(['Overview', 'Media', 'Cloud saves']);
+    expect(tvCloudTab(g, null, NOW, false)).toMatchObject({ kind: 'synced', sub: 'GRID syncs with Epic Games before the game starts and after it closes' });
+    expect(tvCloudTab(epicInstalled({ cloud: 'none' }), null, NOW, false)).toEqual({ kind: 'none', note: 'Epic Games doesn’t keep saves for this game.' });
+  });
+
+  it('a conflict whose cloud side has no size leaves it out', () => {
+    const c = { state: 'conflict', synced_at: 0, conflict: { local_at: NOW - 60, local_bytes: 2 * 1024 ** 2, local_files: 3, cloud_at: NOW - 120, cloud_bytes: null, cloud_files: null } };
+    const t = tvCloudTab(epicInstalled({ cloud: 'conflict' }), c as unknown as StoreCloudState, NOW, false);
+    expect(t.kind).toBe('conflict');
+    if (t.kind === 'conflict') {
+      expect(t.cloud.sub).toMatch(/on another computer · replaces the save here$/);
+      expect(t.local.sub).toMatch(/uploads it to Epic Games$/);
+    }
+  });
+
+  it('Settings › Stores: the row, the tool row, the not-connected note and the Disconnect words', () => {
+    expect(storeRowSub(epicStatus())).toBe('Signed in as SamPlays');
+    expect(storeRowSub(epicStatus({ tool: { ...status().tool, state: 'not_installed' } }))).toBe('Signed in as SamPlays · legendary not installed');
+    expect(toolRow(epicStatus({ tool: { ...status().tool, state: 'installed', version: '0.21.1' } }))).toEqual({ info: true, value: 'legendary 0.21.1 · installed' });
+    expect(toolRow(epicStatus({ tool: { ...status().tool, state: 'failed', error: '' } }))).toMatchObject({ label: 'Couldn’t install legendary', value: 'Try again' });
+    expect(notConnectedNote(epicStatus({ connection: 'not_connected' }))).toMatch(
+      /^Sign in to Epic Games to see the games you own in the Library and install them\. GRID installs with legendary \(legendary, GPL-3\.0, .+\), which it downloads when you connect\.$/,
+    );
+    expect(disconnectWords(epicStatus({ installed_count: 2 }))).toEqual({
+      title: 'Disconnect Epic Games?',
+      body: 'GRID deletes your Epic Games login and legendary from this computer. The 2 installed games stay and still play; they can’t install, update or sync cloud saves until you connect again.',
+      ok: 'Disconnect',
+    });
+  });
+
+  it('Disconnect raises the prototype’s card', () => {
+    expect(disconnectedCard('epic')).toEqual({ text: 'Epic Games disconnected', sub: 'Its login and legendary were deleted; installed games stay.' });
+  });
+
+  it('the sign-in shows Epic’s login address', () => {
+    expect(loginHost('epic')).toBe('www.epicgames.com/id/login');
+  });
+
+  it('a Downloads row’s list line names Epic Games', () => {
+    expect(tvStoreListSub(row({ source_id: 'epic:Glimmer', platform: 'Epic Games', kind: 'store_update' }))).toMatch(/^Epic Games/);
   });
 });

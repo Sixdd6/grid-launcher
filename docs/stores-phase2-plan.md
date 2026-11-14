@@ -892,3 +892,35 @@ None. Two choices were taken here and can be reversed on request:
   Epic client changes. Only the update notice is off.
 - The Epic install folder defaults to `<library>/Epic Games`, the store's platform name,
   as GOG uses `<library>/GOG`.
+
+## Package E — outcome (TV UI)
+
+Built on D1 (5c2fb5e), which is imported, never edited.
+
+- `tv/stores/storeWords.ts` reads the store's capabilities instead of `source === 'gog'`:
+  Backup all N… and RT Select need `canBackup`, Install from installer… needs
+  `hasInstaller`, Backup to drive… and "On <drive>" need `canBackup` (else the
+  can't-be-backed-up line), the not-connected note names offline installers only for
+  `hasInstaller`. A Downloads row's list line falls back to the row's platform, not "GOG".
+- `TvStoreView` (select mode), `TvStoreDetails` (drive lookup) and `TvStorePage` (the
+  installer row) use the same capabilities. The install page needed no change: Version and
+  Language already follow `storeInstallOptions` (one Windows version, no languages for
+  Epic).
+- The Epic login host words (`www.epicgames.com/id/login`) were already in Phase 1's
+  `loginHost`; a test now pins them.
+- **Gap closed (every store):** Disconnect in TV mode raised no card. `TvStorePage` now
+  raises the prototype's "<Store> disconnected" / "Its login and <tool> were deleted;
+  installed games stay." (`disconnectedCard`).
+- `e2e/specs/tv-epic.spec.ts` is written against this plan and C's seed (SamPlays;
+  Starlight Courier and Vector Bloom installed; Iron Orchard needs the EA app; Glimmer Deep
+  installable). It needs C's `tv-epic` group in `scripts/e2e.sh` (the Epic seed, the fake
+  legendary, `E2E_HOME`) and is **pending integration**. It assumes the seed may start
+  without a RomM server, and that the login window's label is `store-login` (as GOG's).
+- Parity: checked in the dev mock (`VITE_FAKE_STORES`, a `--mode development` build) in TV
+  mode beside the TVStores prototype at 960×540: Available, Installed, the Not supported
+  page and its A card, the installed page and Cloud saves tab (synced, conflict), Game
+  settings, the install page, Downloads rows and the A-list, Settings › Stores pane,
+  connected page, Disconnect confirm, not-connected page, the sign-in layer, the panels
+  (loading, legendary missing / failed, login expired) and the `off` folder. The only
+  differences are fixture data and the pin's real legendary size and version (3 MB,
+  0.21.1) where the prototype has placeholders (14 MB, 0.20.37).
