@@ -628,7 +628,8 @@ mod tests {
     /// the router hands each store row to its own backend. A GOG row and a
     /// RomM row launch as they are; an Epic row reaches Epic's hook (no
     /// login here, so it refuses with Epic's words); an Amazon row reaches
-    /// Amazon's (Step 0: not implemented).
+    /// Amazon's, which launches it as it is while Amazon is not connected
+    /// (after a Disconnect, nile and its files are gone).
     #[tokio::test]
     async fn the_launch_router_asks_each_rows_own_store() {
         let (stores, _dir) = facade();
@@ -658,10 +659,10 @@ mod tests {
             .prepare(&row(GameSource::Store(StoreKind::Epic)))
             .await;
         assert!(epic.is_err(), "Epic's own hook answered: {epic:?}");
-        let amazon = router
+        assert!(router
             .prepare(&row(GameSource::Store(StoreKind::Amazon)))
             .await
-            .unwrap_err();
-        assert!(amazon.to_string().contains("nile"), "{amazon}");
+            .unwrap()
+            .is_none());
     }
 }
