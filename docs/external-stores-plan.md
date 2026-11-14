@@ -177,3 +177,20 @@ Each phase ends when these pass:
 - e2e with mock store HTTP and a fake tool binary
 - an e2e check that the log never holds the fake token
 - the gate
+
+## User decisions (2026-11-14, after the first real-account test)
+
+- **Redistributables and setup steps run silently, right after install**, for every
+  store that has them (Hotline Miami on Amazon failed without the OpenAL step it lists):
+  - Amazon: fuel.json `PostInstall` steps.
+  - GOG (gogdl installs): the game's setup script (GOG's scriptinterpreter or its
+    `temp_executable`) for the game and each installed DLC, then the manifest's `__redist`
+    dependencies fetched with `gogdl redist`. After an update or move only the script runs
+    again. Offline installers already run their own.
+  - Epic: legendary's `prereq_info`.
+  - Steam: nothing; the Steam client runs them itself.
+- They run in the game's own prefix under umu/Proton. On a Windows host each one runs
+  elevated with one UAC prompt per item; in TV mode on Windows they are skipped and the
+  Downloads row says to finish them in desktop mode.
+- A failed or timed-out step is a warning on the Downloads row, never a failed install.
+  Research notes: `docs/research/store-redistributables.md`.
