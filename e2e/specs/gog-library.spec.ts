@@ -68,6 +68,25 @@ describe('gog-library', () => {
     await $(testId('store-details')).waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
   });
 
+  it('Game Settings lists the game’s executables, without its uninstaller or Wine prefix', async () => {
+    await openGog('installed');
+    await $(testId('library-store-card-gog-1580232252')).click();
+    await $(testId('store-details')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('store-details-settings')).click();
+    const exe = $(testId('store-settings-exe'));
+    await browser.waitUntil(async () => (await exe.$$('option').length) > 0, {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the Executable list never filled',
+    });
+    const options = await exe.$$('option').map((o) => o.getText());
+    expect(options).toEqual(['game.exe', 'Launcher.exe']);
+    await expect(exe).toHaveValue(expect.stringMatching(/game\.exe$/));
+    await browser.keys('Escape');
+    await $(testId('store-game-settings')).waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
+    await browser.keys('Escape');
+    await $(testId('store-details')).waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
+  });
+
   it('Settings › Stores shows the GOG card and asks before Disconnect', async () => {
     await openStoresSettings();
     await expect($(testId('store-card-pill-gog'))).toHaveText(expect.stringContaining('Connected'));

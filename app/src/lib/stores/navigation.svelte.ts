@@ -19,6 +19,9 @@ export type NavigationHandler = {
   /** Opens a system's page (TV mode's "Set up <Platform>"). Optional: the
    *  desktop's cards offer no action. */
   openSystem?: (platform: string) => void;
+  /** Plays an installed game from a card's Play (TV mode pushes its Playing
+   *  page). Optional: without it the card launches the game itself. */
+  play?: (game: { romId: number; title: string; platform: string }) => void;
 };
 
 let handler: NavigationHandler | null = null;
@@ -48,5 +51,11 @@ export const navigation = {
   },
   openSystem(platform: string): void {
     handler?.openSystem?.(platform);
+  },
+  /** Answers whether the mounted shell played it; `false` leaves the launch to the caller. */
+  play(game: { romId: number; title: string; platform: string }): boolean {
+    if (!handler?.play) return false;
+    handler.play(game);
+    return true;
   },
 };

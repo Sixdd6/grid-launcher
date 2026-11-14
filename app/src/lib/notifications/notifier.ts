@@ -35,12 +35,18 @@ import {
   type Hint,
   type Notice,
   type NoticeAction,
+  type PlayTarget,
   type StatusBook,
 } from './notices';
 
-/** What a card's action does. Only TV mode's cards show it (View runs it). */
+/** What a card's action does. TV mode's cards show every action (View runs
+ *  it); the desktop's show Play only, as a button. */
 function toastAction(action: NoticeAction | undefined): ToastAction | undefined {
   if (action === 'downloads') return { label: 'Open Downloads', run: () => navigation.go('downloads') };
+  if (action && 'play' in action) {
+    const game = action.play;
+    return { label: 'Play', run: () => playFromCard(game) };
+  }
   if (action) {
     const system = action.system;
     return { label: `Set up ${system}`, run: () => navigation.openSystem(system) };
@@ -48,9 +54,18 @@ function toastAction(action: NoticeAction | undefined): ToastAction | undefined 
   return undefined;
 }
 
-const coalescer = new Coalescer((text, level, card) =>
-  pushToast(text, level, TOAST_DURATION_MS, { sub: card.sub, action: toastAction(card.action) }),
-);
+/** A card's Play: the mounted shell's own play (TV mode's Playing page), else the launch itself. */
+function playFromCard(game: PlayTarget): void {
+  if (navigation.play(game)) return;
+  // The launching card and a refusal's card come from `launchGame`.
+  launchGame(game.romId, game.title, game.platform).catch(() => undefined);
+}
+
+const coalescer = new Coalescer((text, level, card) => {
+  const action = toastAction(card.action);
+  const play = card.action !== undefined && card.action !== 'downloads' && 'play' in card.action;
+  pushToast(text, level, TOAST_DURATION_MS, { sub: card.sub, action, ...(play ? { desktopAction: action } : {}) });
+});
 
 /** Shows `notice`, merged with any of its group arriving at the same time. */
 export function notify(notice: Notice): void {

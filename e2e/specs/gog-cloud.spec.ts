@@ -44,6 +44,10 @@ describe('gog-cloud', () => {
     await $(testId(`card-primary-${BADGE}`)).click();
     await $(testId('store-conflict-dialog')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await expect($(testId('store-conflict-later'))).toHaveText('Don’t launch');
+    // The cloud side's size comes from GOG's cloud listing (the mock's 2.0 MB save).
+    await expect($(`${testId('store-conflict-dialog')} ${testId('store-conflict-sides')}`)).toHaveText(
+      expect.stringMatching(/on another computer · 2\.0 MB/),
+    );
     await $(testId('store-conflict-local')).click();
     await waitForToast(/^Kept this computer’s save for .+ and uploaded it$/);
     await waitForToast(/^Launching .+…$/);

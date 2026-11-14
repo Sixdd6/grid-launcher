@@ -179,11 +179,35 @@ pub fn local_side(dirs: &[PathBuf]) -> LocalSide {
     side
 }
 
-/// The cloud side: the newest file time and the file count.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// The cloud side: the newest file time, the file count, and the bytes
+/// (`None` when cloudstorage's listing leaves a file's size out).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CloudSide {
     pub newest: i64,
     pub files: u32,
+    pub bytes: Option<u64>,
+}
+
+impl Default for CloudSide {
+    fn default() -> Self {
+        CloudSide {
+            newest: 0,
+            files: 0,
+            bytes: Some(0),
+        }
+    }
+}
+
+impl CloudSide {
+    /// Adds one save location's cloud files.
+    pub fn add(&mut self, location: &api::CloudLocation) {
+        self.newest = self.newest.max(location.newest);
+        self.files += location.files;
+        self.bytes = self
+            .bytes
+            .zip(location.bytes)
+            .map(|(sum, size)| sum.saturating_add(size));
+    }
 }
 
 /// What a sync should do.
@@ -353,9 +377,8 @@ async fn context(svc: &GogService, row: &InstalledGame) -> Result<Option<Context
     let by_location = api::cloud_by_location(&files);
     let mut cloud = CloudSide::default();
     for (loc, _) in &resolved {
-        if let Some((newest, count)) = by_location.get(&loc.name) {
-            cloud.newest = cloud.newest.max(*newest);
-            cloud.files += count;
+        if let Some(location) = by_location.get(&loc.name) {
+            cloud.add(location);
         }
     }
     Ok(Some(Context {
@@ -373,6 +396,8 @@ fn state_for(ctx: &Context, decision: Decision) -> CloudState {
             local_files: ctx.local.files,
             local_bytes: ctx.local.bytes,
             cloud_at: ctx.cloud.newest,
+            cloud_files: ctx.cloud.files,
+            cloud_bytes: ctx.cloud.bytes,
         }),
         _ if ctx.meta.last_sync > 0 => CloudState::Synced {
             at: ctx.meta.last_sync,
@@ -539,7 +564,35 @@ mod tests {
     }
 
     fn cloud(newest: i64, files: u32) -> CloudSide {
-        CloudSide { newest, files }
+        CloudSide {
+            newest,
+            files,
+            bytes: Some(u64::from(files) * 10),
+        }
+    }
+
+    #[test]
+    fn the_cloud_side_sums_its_locations() {
+        let mut side = CloudSide::default();
+        assert_eq!(side.bytes, Some(0));
+        side.add(&api::CloudLocation {
+            newest: 50,
+            files: 2,
+            bytes: Some(2_000),
+        });
+        side.add(&api::CloudLocation {
+            newest: 40,
+            files: 1,
+            bytes: Some(100),
+        });
+        assert_eq!((side.newest, side.files, side.bytes), (50, 3, Some(2_100)));
+        // One location without sizes makes the total unknown; the count stays.
+        side.add(&api::CloudLocation {
+            newest: 60,
+            files: 1,
+            bytes: None,
+        });
+        assert_eq!((side.newest, side.files, side.bytes), (60, 4, None));
     }
 
     #[test]

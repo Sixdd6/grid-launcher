@@ -50,7 +50,13 @@ export type NoticeGroup =
 export type NoticeAction =
   | 'downloads'
   /** "Set up <Platform>": that system's page (a launch with no emulator). */
-  | { system: string };
+  | { system: string }
+  /** "Play": launches the installed game (a "<title> installed" card;
+   *  user decision 2026-11-13). The desktop card shows it as a button too. */
+  | { play: PlayTarget };
+
+/** What a card's Play launches. */
+export type PlayTarget = { romId: number; title: string; platform: string };
 
 /**
  * `sub` is a card's second line. Only TV mode's cards show it ("Copying from
@@ -190,7 +196,14 @@ function outcomeNotice(entry: DownloadEntry, ctx: NoticeContext): Notice | null 
         if (shape === 'update') return { group: 'game-updated', text: `${t} updated`, level: 'success' };
         if (shape === 'content')
           return { group: 'content-installed', text: `Extra content for ${t} installed`, level: 'success' };
-        return { group: 'game-installed', text: `${t} installed`, level: 'success' };
+        return {
+          group: 'game-installed',
+          text: `${t} installed`,
+          level: 'success',
+          // Every RomM install's card offers Play (GameStores prototype's
+          // installed card; a summary of several has none).
+          ...(entry.rom_id > 0 ? { action: { play: { romId: entry.rom_id, title: t, platform: entry.platform } } } : {}),
+        };
       case 'failed': {
         // A failure in the archive's GOG installer has its own card, worded
         // from `failure` (gamestores/notices.ts `installerFailedNotice`).

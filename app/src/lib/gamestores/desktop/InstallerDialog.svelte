@@ -8,7 +8,7 @@
   import { pickFile } from '../../pickers';
   import { compatTools } from '../../stores/compatTools.svelte';
   import { gameStores } from '../../stores/gameStores.svelte';
-  import { inspectionView, PICKER_FOOT, PICKER_TITLE, readingLine, REFUSED_HEADING, spaceNote, fileName } from '../inspection';
+  import { inspectionView, installerSpaceNote, PICKER_FOOT, PICKER_TITLE, readingLine, REFUSED_HEADING, fileName } from '../inspection';
   import { queuedNotice, refusedNotice } from '../notices';
   import StoreCoverSm from './StoreCoverSm.svelte';
   import StoreDialog from './StoreDialog.svelte';
@@ -21,6 +21,8 @@
   let path = $state('');
   let compat = $state(compatTools.defaultTool || 'GE-Proton10-17');
   let installDir = $state('');
+  /** Free bytes where it installs: the inspection's, then the picked folder's. */
+  let freeBytes = $state<number | null>(null);
   let error = $state<string | null>(null);
   let busy = $state(false);
 
@@ -52,6 +54,7 @@
       const insp = await api.offlineInspect(p);
       const base = gog?.install_dir ?? '';
       installDir = base === '' ? '' : `${base}/${insp.title.replace(/[^A-Za-z0-9]+/g, '')}`;
+      freeBytes = insp.free_bytes;
       step = { kind: 'done', insp };
     } catch (err) {
       step = { kind: 'pick' };
@@ -68,7 +71,13 @@
   async function changeFolder() {
     const { pickFolder } = await import('../../pickers');
     const picked = await pickFolder('Install folder');
-    if (picked) installDir = picked;
+    if (!picked) return;
+    installDir = picked;
+    try {
+      freeBytes = await api.storeFreeSpace(picked);
+    } catch {
+      freeBytes = null;
+    }
   }
 
   async function install() {
@@ -159,7 +168,7 @@
     {/if}
     {#if view.joins}<p class="note">{view.joins}</p>{/if}
     <div class="foot">
-      <span class="note">{spaceNote(step.insp.bytes, null)}</span>
+      <span class="note" data-testid="store-installer-space">{installerSpaceNote(step.insp, freeBytes)}</span>
       <button class="g-btn secondary" onclick={onClose}>Cancel</button>
       <button class="g-btn" data-testid="store-installer-install" disabled={busy} onclick={install}>{view.button}</button>
     </div>
@@ -208,15 +217,21 @@
     background: color-mix(in srgb, var(--danger) 8%, transparent);
   }
 
+  /* The Game backups dialog's note style (BackupDialog.svelte `.note`):
+     12px, line-height 1.45, 600-weight title. */
   .refuse b {
     color: var(--text-h);
     display: block;
     margin-bottom: 2px;
+    font-size: 12px;
+    line-height: 1.45;
+    font-weight: 600;
   }
 
   .refuse p {
     margin: 0;
-    font-size: 13px;
+    font-size: 12px;
+    line-height: 1.45;
     color: var(--text);
   }
 

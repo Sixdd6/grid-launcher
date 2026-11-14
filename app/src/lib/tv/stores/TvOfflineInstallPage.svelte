@@ -12,7 +12,8 @@
   import TvRowsPage from '../pages/TvRowsPage.svelte';
   import type { PageMain, PageRow } from '../pages/pageRows';
   import { card, compatChoices, defaultCompat, fail, toDownloads } from './storeActions';
-  import { folderName, installerNeeds, joinPath, tvInspectionView } from './storeWords';
+  import { folderName, joinPath, tvInspectionView } from './storeWords';
+  import { installerSpaceNote } from '../../gamestores/inspection';
 
   let { insp }: { insp: InstallerInspection } = $props();
 
@@ -22,6 +23,8 @@
   let view = $derived(tvInspectionView(insp, compat, gog?.connection === 'connected'));
   // svelte-ignore state_referenced_locally
   let folder = $state(joinPath(gog?.install_dir || '~/Games/GRID/stores/gog', folderName(insp.title)));
+  // svelte-ignore state_referenced_locally
+  let freeBytes = $state<number | null>(insp.free_bytes);
   let busy = $state(false);
   let dlc = $derived(insp.verdict.kind === 'dlc');
 
@@ -47,12 +50,25 @@
         key: 'folder',
         label: 'Install folder',
         value: folder,
-        run: () => openFolderBrowser({ title: `Install ${v.title} in`, start: folder.replace(/[\\/][^\\/]*$/, ''), onPick: (p) => (folder = joinPath(p, folderName(v.title))) }),
+        run: () => openFolderBrowser({ title: `Install ${v.title} in`, start: folder.replace(/[\\/][^\\/]*$/, ''), onPick: (p) => pickFolder(joinPath(p, folderName(v.title))) }),
       });
     }
     if (v.joins) R.push({ kind: 'note', key: 'joins', text: v.joins });
     return R;
   });
+
+  /** A new install folder, and the free space on its volume for the summary. */
+  function pickFolder(next: string) {
+    folder = next;
+    api
+      .storeFreeSpace(next)
+      .then((free) => {
+        if (folder === next) freeBytes = free;
+      })
+      .catch(() => {
+        if (folder === next) freeBytes = null;
+      });
+  }
 
   async function install() {
     if (busy || view.kind !== 'found') return;
@@ -72,7 +88,7 @@
 
   let main = $derived.by((): PageMain | null => {
     if (view.kind !== 'found') return null;
-    return { label: view.button, summary: installerNeeds(insp.bytes), disabled: busy, hint: 'Install', press: () => void install() };
+    return { label: view.button, summary: installerSpaceNote(insp, freeBytes), disabled: busy, hint: 'Install', press: () => void install() };
   });
 </script>
 

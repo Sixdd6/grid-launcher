@@ -347,6 +347,9 @@ fn a_linux_installer_unpacks_into_a_gog_row_and_its_script_never_runs() {
         return;
     }
     assert_eq!(insp.verdict, Verdict::Install);
+    // A new game's space line measures the folder it would get.
+    let fresh = env.library.join("GOG").join("Paper Lanterns");
+    assert_eq!(offline::target_dir(&insp, &env.registry, &fresh), fresh);
 
     let spawner = FakeInstaller::new(&[], GAME_ID, String::new());
     let (result, sink) = run_job(&env, insp, OfflineOpts::default(), true, spawner.clone());
@@ -410,6 +413,9 @@ fn a_newer_linux_installer_updates_in_place_and_linux_dlc_joins_its_base() {
             installed_version: "1.0.4".into()
         }
     );
+    // The space line measures the installed game's folder for an update.
+    let fresh = env.library.join("new");
+    assert_eq!(offline::target_dir(&insp, &env.registry, &fresh), dest);
     let spawner = FakeInstaller::new(&[], GAME_ID, String::new());
     run_job(&env, insp, OfflineOpts::default(), true, spawner.clone())
         .0
@@ -435,6 +441,8 @@ fn a_newer_linux_installer_updates_in_place_and_linux_dlc_joins_its_base() {
             base_title: "Paper Lanterns".into()
         }
     );
+    // A DLC's goes into its base game's folder.
+    assert_eq!(offline::target_dir(&insp, &env.registry, &fresh), dest);
     run_job(&env, insp, OfflineOpts::default(), true, spawner)
         .0
         .unwrap();

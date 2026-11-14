@@ -203,6 +203,10 @@ pub struct SaveConflict {
     pub local_files: u32,
     pub local_bytes: u64,
     pub cloud_at: i64,
+    /// The cloud files in the game's save locations (cloudstorage's listing).
+    pub cloud_files: u32,
+    /// Their bytes, `None` when the listing leaves a file's size out.
+    pub cloud_bytes: Option<u64>,
 }
 
 /// How many seconds before expiry a cached bearer is refreshed.

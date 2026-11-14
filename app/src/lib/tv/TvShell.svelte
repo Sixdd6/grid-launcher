@@ -42,7 +42,7 @@
   import TvLayer from './overlays/TvLayer.svelte';
   import { confirmBox, openKeyboard, openList, openMenu, openStartupMenu } from './overlays/overlays.svelte';
   import { notify } from '../notifications/notifier';
-  import { openDetails, openSystem } from './gameActions';
+  import { openDetails, openSystem, playGame } from './gameActions';
   import { selectDriveRow } from './tabs/library/library.svelte';
   import { selectRail as selectServerRail } from './tabs/server/server.svelte';
   import { resetConnectForm } from './startup/connectForm.svelte';
@@ -216,6 +216,8 @@
       },
       openDetails,
       openSystem,
+      // A "<title> installed" card's Play (TVStores prototype's installed toast).
+      play: (game) => void playGame(game),
     }),
   );
 

@@ -120,10 +120,15 @@ describe('TV store game page', () => {
   });
 
   it('the Cloud saves tab and the choice before launch', () => {
-    const c = { state: 'conflict' as const, synced_at: 0, locations: [], conflict: { local_at: NOW - 60, local_files: 2, local_bytes: 2.1 * 1024 * 1024, cloud_at: NOW - 7200 } };
+    const c = { state: 'conflict' as const, synced_at: 0, locations: [], conflict: { local_at: NOW - 60, local_files: 2, local_bytes: 2.1 * 1024 * 1024, cloud_at: NOW - 7200, cloud_files: 3, cloud_bytes: 2.0 * 1024 * 1024 } };
     const tab = tvCloudTab(installedGame({ cloud: 'conflict' }), c, NOW, false);
     expect(tab.kind).toBe('conflict');
-    if (tab.kind === 'conflict') expect(tab.local.sub).toMatch(/2\.1 MB · uploads it to GOG$/);
+    if (tab.kind === 'conflict') {
+      expect(tab.local.sub).toMatch(/2\.1 MB · uploads it to GOG$/);
+      expect(tab.cloud.sub).toMatch(/ on another computer · 2\.0 MB · replaces the save here$/);
+    }
+    const unsized = tvCloudTab(installedGame({ cloud: 'conflict' }), { ...c, conflict: { ...c.conflict, cloud_bytes: null } }, NOW, false);
+    if (unsized.kind === 'conflict') expect(unsized.cloud.sub).toMatch(/ on another computer · replaces the save here$/);
     expect(tvCloudTab(installedGame({ cloud: 'off' }), null, NOW, false)).toMatchObject({ title: 'Cloud saves are off for this game', sub: 'Turn them on in Game settings' });
     expect(tvCloudTab(installedGame(), null, NOW, true)).toMatchObject({ kind: 'synced', title: 'Syncing…' });
     expect(conflictPrompt(installedGame({ title: 'Lanternfall' }), null, NOW).title).toBe('Which save should Lanternfall use?');
@@ -147,7 +152,7 @@ describe('TV Settings › Stores', () => {
 describe('TV offline installer', () => {
   it('a Windows installer runs silently only in TV mode', () => {
     const v = tvInspectionView(
-      { path: '/d/setup_x.exe', kind: 'windows_exe', key: 'gog:1', title: 'Quarry Nine', cover: '', version: '1.4', bytes: 1, verdict: { kind: 'install' } },
+      { path: '/d/setup_x.exe', kind: 'windows_exe', key: 'gog:1', title: 'Quarry Nine', cover: '', version: '1.4', bytes: 1, verdict: { kind: 'install' }, free_bytes: null },
       'GE-Proton10-17',
       true,
     );

@@ -1304,6 +1304,26 @@ image hosts without any credential and cached under `<data_dir>/stores/art/`. An
 is never printed in a log, an error or a warning. A Steam game's session is watched
 rather than spawned: GRID sees it running until its process ends.
 
+Store screens (2026-11-13, matching the approved design):
+- **Save conflicts.** Both sides show when they changed and their size: this computer's
+  files and bytes from its save folders, the cloud's file count and bytes from GOG's cloud
+  listing (the conflict prompt shows the bytes only, the Cloud saves tab both). A size the
+  listing doesn't give is left out, never guessed.
+- **Offline installer space.** The installer card reads "Needs <size> · <free> free": about
+  1.4 times the installer's size, and the free space on the volume it installs to (the new
+  game's folder, the installed game's for an update, the base game's for a DLC). Picking
+  another install folder reads that folder's volume again. It doesn't block the install.
+- **Game Settings › Executable** (store games only; RomM native games keep their own
+  Game Settings) is a list of the game's executables, found up to four path parts deep in
+  its folder: `.exe` files for a Windows build, `.sh` scripts and ELF binaries for a Linux
+  build. The Wine prefix, uninstallers (`unins*`), installers (`setup*`), crash reporters
+  and redistributables are left out. A file the user picked before that isn't in the list
+  stays in it, first. There is no file chooser. Picking another one makes it the user's
+  choice; saving with the list untouched pins nothing.
+- **Play on installed cards.** Every "<game> installed" card for a RomM install has Play,
+  which launches the game the normal way (TV mode opens Playing). A card that sums several
+  installs has none. Store install cards already have Play.
+
 # Cloud Save Synchronization
 The application now includes cloud save and state synchronization for emulator-based games using the RomM saves/states API.
 

@@ -111,6 +111,8 @@ test("--cloud-conflict starts Grey Meridian with a cloud save", async () => {
     const list = await (await fetch(`${mock.url}/v1/48628349957132247/52095557858325425`)).json();
     assert.equal(list[0].name, "saves/slot1.sav");
     assert.ok(!list[0].last_modified.endsWith("Z"));
+    // Its size, as GOG's listing gives it (the conflict prompt's "· 2.0 MB").
+    assert.equal(list[0].bytes, 2 * 1024 * 1024);
   } finally {
     await mock.close();
   }

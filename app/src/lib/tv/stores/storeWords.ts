@@ -298,7 +298,10 @@ export function tvCloudTab(game: StoreGame, cloud: StoreCloudState | null, nowSe
       kind: 'conflict',
       note: `Both this computer’s save and the one in your ${name} account changed since the last sync. Pick the one to keep; the other is replaced.`,
       local: { title: 'Keep this computer’s save', sub: `Changed ${changedAt(c.local_at, nowSeconds)} · ${mb(c.local_bytes)} · uploads it to ${name}` },
-      cloud: { title: 'Use the cloud save', sub: `Changed ${changedAt(c.cloud_at, nowSeconds)} on another computer · replaces the save here` },
+      cloud: {
+        title: 'Use the cloud save',
+        sub: `Changed ${changedAt(c.cloud_at, nowSeconds)} on another computer${c.cloud_bytes === null ? '' : ` · ${mb(c.cloud_bytes)}`} · replaces the save here`,
+      },
     };
   }
   if (state === 'off') return { kind: 'off', title: 'Cloud saves are off for this game', sub: 'Turn them on in Game settings' };
@@ -526,11 +529,6 @@ export function tvInspectionView(insp: InstallerInspection, compat: string, gogC
 export function refusalTitle(title: string): string {
   const t = title.trim();
   return /[.!?]$/.test(t) ? t : `${t}.`;
-}
-
-/** What the new game needs on disk (the installer unpacks to about 1.4 times its size). */
-export function installerNeeds(bytes: number): string {
-  return `Needs ${sizeGb(Math.round(bytes * 1.4))}`;
 }
 
 export { fileName };

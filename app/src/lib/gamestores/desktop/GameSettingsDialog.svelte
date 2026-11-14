@@ -4,9 +4,8 @@
   // launch parameters, compatibility tool and Wine prefix (Windows) or
   // "Linux games run directly.", and the per-game cloud saves switch.
   import { api, type StoreGame, type StoreGameSettings } from '../../api';
-  import { pickFile } from '../../pickers';
   import { compatTools } from '../../stores/compatTools.svelte';
-  import { cloudSwitchLabel, executableHelp, LINUX_RUNS_DIRECTLY } from '../details';
+  import { chosenExecutable, cloudSwitchLabel, executableChoices, executableHelp, LINUX_RUNS_DIRECTLY } from '../details';
   import { gameSettingsSavedNotice, refusedNotice } from '../notices';
   import { hasStoreCloud } from '../marks';
   import StoreDialog from './StoreDialog.svelte';
@@ -17,18 +16,29 @@
   let s = $state<StoreGameSettings | null>(null);
   let loadError = $state<string | null>(null);
   let saving = $state(false);
-  let exeBefore = '';
+  let exeBefore = $state('');
+  /** The executable exactly as the row had it. */
+  let exeOriginal = '';
+  let found = $state<string[]>([]);
 
   $effect(() => {
     const key = game.key;
-    api
-      .storeGameSettings(key)
-      .then((got) => {
-        s = got;
-        exeBefore = got.executable;
+    Promise.all([api.storeGameSettings(key), api.storeGameExecutables(key).catch(() => [] as string[])])
+      .then(([got, exes]) => {
+        found = exes;
+        const choices = executableChoices(got.executable, exes, got.install_dir);
+        // An empty executable takes the best one found, as a launch would.
+        const exe = got.executable.trim() === '' && choices.length > 0 ? choices[0].value : chosenExecutable(got.executable, choices);
+        exeBefore = exe;
+        exeOriginal = got.executable;
+        s = { ...got, executable: exe };
       })
       .catch((err) => (loadError = err instanceof Error ? err.message : String(err)));
   });
+
+  // The game's executables (prototype `stSettingsHTML`: a list, no file
+  // chooser), with the one it had when the dialog opened kept in the list.
+  let exeChoices = $derived(s ? executableChoices(exeBefore, found, s.install_dir) : []);
 
   let windows = $derived(game.installed_platform === 'windows');
   let compatChoices = $derived.by(() => {
@@ -37,16 +47,14 @@
     return current !== '' && !names.includes(current) ? [current, ...names] : names;
   });
 
-  async function chooseExe() {
-    const picked = await pickFile(`Executable for ${game.title}`);
-    if (picked && s) s = { ...s, executable: picked };
-  }
-
   async function save() {
     if (!s) return;
     saving = true;
     // Picking another executable makes it the user's choice (store updates leave it).
-    const next = { ...s, exe_user_pinned: s.exe_user_pinned || s.executable !== exeBefore };
+    // An untouched list sends the executable as it was, so opening and
+    // saving pins nothing.
+    const changed = s.executable !== exeBefore;
+    const next = { ...s, executable: changed ? s.executable : exeOriginal, exe_user_pinned: s.exe_user_pinned || changed };
     try {
       await api.storeSetGameSettings(game.key, next);
       showCard(gameSettingsSavedNotice());
@@ -67,10 +75,9 @@
     <div class="st-field"><span>Install folder</span><code data-testid="store-settings-folder">{s.install_dir}</code></div>
     <label class="st-field">
       <span>Executable</span>
-      <span class="inline">
-        <input class="g-field" data-testid="store-settings-exe" bind:value={s.executable} />
-        <button class="small-btn" type="button" onclick={chooseExe}>Choose…</button>
-      </span>
+      <select class="g-field" data-testid="store-settings-exe" bind:value={s.executable} disabled={exeChoices.length === 0}>
+        {#each exeChoices as c (c.value)}<option value={c.value}>{c.label}</option>{/each}
+      </select>
     </label>
     <p class="help">{executableHelp(game.source)}</p>
     <label class="st-field">

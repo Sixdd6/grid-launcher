@@ -989,6 +989,8 @@ pub fn run() {
             commands::stores::store_cloud_sync,
             commands::stores::store_cloud_resolve,
             commands::stores::offline_inspect,
+            commands::stores::store_free_space,
+            commands::stores::store_game_executables,
             commands::stores::offline_install,
             commands::stores::plan_store_backup,
             commands::stores::start_store_backup,
