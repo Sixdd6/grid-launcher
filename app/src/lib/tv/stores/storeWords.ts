@@ -100,11 +100,11 @@ export function tvPanel(status: StoreStatus, part: StorePart, games: readonly St
   return { ...tvSteamWords(p), actions: tvSteamWords(p).actions.map((a, i) => ({ ...a, primary: i === 0 })) };
 }
 
-/** Where TV's Steam panels say it their own way (prototype `tvstores.js` L111–119): desktop mode, no paste. */
+/** Where TV's Steam panels say it their own way (prototype `tvstores.js` L111–119): never desktop mode, no paste. */
 function tvSteamWords(p: StorePanel): StorePanel {
   switch (p.testId) {
     case 'store-state-noclient':
-      return { ...p, body: 'GRID installs, starts and uninstalls Steam games through the Steam client. Install Steam in desktop mode, sign in once, then come back.' };
+      return { ...p, body: 'GRID installs, starts and uninstalls Steam games through the Steam client. Install Steam on this PC and sign in once, then press Check again.' };
     case 'store-state-nokey':
       return { ...p, actions: p.actions.map((a) => ({ ...a, label: 'Open Settings › Stores' })) };
     case 'store-state-badkey':

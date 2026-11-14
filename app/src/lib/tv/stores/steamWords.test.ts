@@ -34,9 +34,9 @@ describe('TV: Steam in the Library', () => {
     expect(tvCountLine(steamStatus(), 'installed', 3, now)).toBe('3 games · in your Steam libraries');
   });
 
-  it('says its panels TV’s way: desktop mode, no paste, no status code', () => {
+  it('says its panels TV’s way: never desktop mode, no paste, no status code', () => {
     const noclient = tvPanel(steamStatus({}, { client_path: '' }), 'installed', [])!;
-    expect(noclient.body).toBe('GRID installs, starts and uninstalls Steam games through the Steam client. Install Steam in desktop mode, sign in once, then come back.');
+    expect(noclient.body).toBe('GRID installs, starts and uninstalls Steam games through the Steam client. Install Steam on this PC and sign in once, then press Check again.');
     expect(noclient.actions).toEqual([{ label: 'Check again', act: 'recheck', primary: true }]);
     expect(tvPanel(steamStatus({}, { key: 'none' }), 'available', [])!.actions.map((a) => a.label)).toEqual(['Open Settings › Stores']);
     const bad = tvPanel(steamStatus({}, { key: 'bad' }), 'available', [])!;

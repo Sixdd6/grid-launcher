@@ -149,7 +149,7 @@
     const R: PageRow[] = [
       place !== null
         ? { kind: 'info', key: 'client', label: 'Steam client', value: `Found · ${place}` }
-        : { kind: 'info', key: 'client', label: 'Steam client', sub: 'Install Steam in desktop mode, sign in once, then come back', value: 'Not installed' },
+        : { kind: 'info', key: 'client', label: 'Steam client', sub: 'Install Steam on this PC and sign in once, then come back here', value: 'Not installed' },
       {
         kind: 'row',
         key: 'account',

@@ -1436,8 +1436,9 @@ Where package D differs from, or adds to, the plan:
   with it empty keeps the saved key (`key: None`).
 - **The client line** shows `client_path` as code when it is a path, and as plain text
   for the backend's "Flatpak (com.valvesoftware.Steam)" / Snap form (user decision 3).
-- **TV says three panels its own way** (the TV prototype): "Install Steam in desktop mode…"
-  for the missing client, "Open Settings › Stores" for no key, "…enter it in Settings ›
+- **TV says three panels its own way** (the TV prototype): "Install Steam on this PC and
+  sign in once, then press Check again." for the missing client (was "Install Steam in
+  desktop mode…" until 2026-11-14: no TV text defers to desktop mode), "Open Settings › Stores" for no key, "…enter it in Settings ›
   Stores › Steam." for a rejected key. The rejected key's words carry no status code
   anywhere (user decision 1).
 - **Header size.** The Installed header sums `disk_bytes` (SizeOnDisk); with the client
