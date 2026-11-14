@@ -52,10 +52,13 @@
 // Environment: FAKE_NILE_FIXTURES (library.json, default
 // e2e/fixtures-amazon/library.json), FAKE_NILE_STEPS (progress lines,
 // default 5), FAKE_NILE_STEP_MS (default 150), GRID_LAUNCHER_E2E_AMAZON_BASE
-// (the mock Amazon: the login page's and the art's origin).
+// (the mock Amazon: the login page's and the art's origin), and
+// E2E_NILE_ARGV_FILE: when set, every run appends its argv there (one run
+// per line, arguments joined by spaces), so a spec can tell whether GRID
+// called nile at all.
 
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -520,6 +523,9 @@ function cmdLaunch(ctx, { positional, flags }) {
 }
 
 export async function main(argv, env = process.env) {
+  if (env.E2E_NILE_ARGV_FILE) {
+    try { appendFileSync(env.E2E_NILE_ARGV_FILE, `${argv.join(" ")}\n`); } catch { /* the log is only for specs */ }
+  }
   const args = parseArgs(argv);
   if (args.flags.version) {
     out(`${VERSION}\n`);

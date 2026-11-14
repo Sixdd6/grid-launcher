@@ -86,6 +86,9 @@ pub enum StoreOp {
     Installer,
     /// Install a store game from a backup drive.
     Restore,
+    /// Run only an installed game's setup steps (redistributables,
+    /// `stores::setup_steps`): no download, no login.
+    SetupSteps,
 }
 
 impl StoreOp {
@@ -98,6 +101,7 @@ impl StoreOp {
             StoreOp::Dlc => "store_dlc",
             StoreOp::Installer => "store_installer",
             StoreOp::Restore => "store_restore",
+            StoreOp::SetupSteps => "store_setup",
         }
     }
 }
@@ -1798,6 +1802,7 @@ mod tests {
             (StoreOp::Dlc, "store_dlc"),
             (StoreOp::Installer, "store_installer"),
             (StoreOp::Restore, "store_restore"),
+            (StoreOp::SetupSteps, "store_setup"),
         ] {
             assert_eq!(op.kind(), kind);
         }

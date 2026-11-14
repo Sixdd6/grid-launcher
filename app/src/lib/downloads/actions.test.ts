@@ -7,6 +7,8 @@ const api = vi.hoisted(() => ({
   dismissDownload: vi.fn(async () => {}),
   cancelInstall: vi.fn(async () => {}),
   retryInstall: vi.fn(async () => {}),
+  storeSetupSteps: vi.fn(async () => {}),
+  storeRepair: vi.fn(async () => {}),
 }));
 vi.mock('../api', () => ({ api }));
 
@@ -27,6 +29,37 @@ describe('downloads/actions', () => {
     expect(api.retryInstall).toHaveBeenCalledWith(4);
     expect(api.dismissDownload).toHaveBeenCalledWith(4);
     expect(api.libraryMoveCancel).not.toHaveBeenCalled();
+  });
+
+  it('retries a setup-step warning by running only the setup steps, never Verify and repair', async () => {
+    const warned = row({
+      id: 9,
+      job: 'store',
+      kind: 'store_install',
+      status: 'completed',
+      source_id: 'amazon:kettle',
+      error: "Couldn't run oalinst.exe: choose a compatibility tool (Wine or Proton) to run a Windows installer.",
+    });
+    await retryEntry(warned);
+    expect(api.storeSetupSteps).toHaveBeenCalledWith('amazon:kettle');
+    expect(api.dismissDownload).toHaveBeenCalledWith(9);
+    expect(api.storeRepair).not.toHaveBeenCalled();
+    expect(api.retryInstall).not.toHaveBeenCalled();
+
+    // A setup-steps row that still warns retries the same way.
+    api.storeSetupSteps.mockClear();
+    await retryEntry({ ...warned, kind: 'store_setup', error: "Couldn't run oalinst.exe: it exited with code 1" });
+    expect(api.storeSetupSteps).toHaveBeenCalledWith('amazon:kettle');
+
+    // A refusal keeps the old row.
+    api.dismissDownload.mockClear();
+    api.storeSetupSteps.mockRejectedValueOnce(new Error('Quit Kettle Drum before running its setup steps.'));
+    await expect(retryEntry(warned)).rejects.toThrow('Quit Kettle Drum');
+    expect(api.dismissDownload).not.toHaveBeenCalled();
+
+    // A cancelled setup-steps row retries its own job.
+    await retryEntry({ ...warned, kind: 'store_setup', status: 'cancelled', error: '' });
+    expect(api.retryInstall).toHaveBeenCalledWith(9);
   });
 
   it('cancels a library move, and dismisses its failed row once undone', async () => {

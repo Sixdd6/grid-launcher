@@ -97,6 +97,12 @@ pub trait AmazonApi: Send + Sync {
     fn install_job(&self, req: AmazonInstallRequest, ctx: AmazonJobCtx) -> StoreJob;
     fn update_job(&self, row: &InstalledGame, ctx: AmazonJobCtx) -> StoreJob;
     fn verify_job(&self, row: &InstalledGame, ctx: AmazonJobCtx) -> StoreJob;
+    /// Only the game's fuel.json `PostInstall` steps (no nile call).
+    fn setup_steps_job(
+        &self,
+        row: &InstalledGame,
+        ctx: AmazonJobCtx,
+    ) -> Result<StoreJob, StoreError>;
     fn uninstall(&self, registry: &Registry, id: &str) -> Result<(), StoreError>;
     fn updates(&self) -> BoxFut<'_, Result<Vec<AmazonUpdate>, StoreError>>;
     fn launch_prep<'a>(
@@ -173,6 +179,13 @@ impl AmazonApi for RealAmazon {
     }
     fn verify_job(&self, row: &InstalledGame, ctx: AmazonJobCtx) -> StoreJob {
         self.service.verify_job(row, ctx)
+    }
+    fn setup_steps_job(
+        &self,
+        row: &InstalledGame,
+        ctx: AmazonJobCtx,
+    ) -> Result<StoreJob, StoreError> {
+        self.service.setup_steps_job(row, ctx)
     }
     fn uninstall(&self, registry: &Registry, id: &str) -> Result<(), StoreError> {
         self.service.uninstall(registry, id)
@@ -1187,6 +1200,11 @@ impl StoreBackend for AmazonStore {
     fn repair_job(&self, row: &InstalledGame, ctx: JobCtx) -> StoreJob {
         self.api.verify_job(row, ctx.amazon())
     }
+    fn setup_steps_job(&self, row: &InstalledGame, ctx: JobCtx) -> Result<StoreJob, String> {
+        self.api
+            .setup_steps_job(row, ctx.amazon())
+            .map_err(|e| e.to_string())
+    }
     fn dlc_job(
         self: Arc<Self>,
         _row: InstalledGame,
@@ -1844,6 +1862,13 @@ mod tests {
         }
         fn verify_job(&self, row: &InstalledGame, _ctx: AmazonJobCtx) -> StoreJob {
             job(row.store_id.clone(), StoreOp::Repair)
+        }
+        fn setup_steps_job(
+            &self,
+            row: &InstalledGame,
+            _ctx: AmazonJobCtx,
+        ) -> Result<StoreJob, StoreError> {
+            Ok(job(row.store_id.clone(), StoreOp::SetupSteps))
         }
         fn uninstall(&self, _r: &Registry, _id: &str) -> Result<(), StoreError> {
             Ok(())

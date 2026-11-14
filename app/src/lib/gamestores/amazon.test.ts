@@ -5,7 +5,7 @@
 // is the prototype's (`stores.js` a1–a3).
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { REDIST_DECLINED, retriesSetupSteps, storeEntryLine, storeStripLine } from './downloads';
+import { REDIST_CANCELLED, REDIST_DECLINED, retriesSetupSteps, storeEntryLine, storeKindLabel, storeStripLine } from './downloads';
 import { rowAction } from '../downloads/format';
 import { noticeActionLabel, toolNeededNotice, uninstalledNotice } from './notices';
 import { initialChoice, installDialogView, installRequest, optionsForStore } from './install';
@@ -179,7 +179,7 @@ describe('Amazon Games cards and Downloads', () => {
     // GOG and Epic keep their version.
     expect(storeEntryLine(row({ kind: 'store_update', status: 'completed' }), { version: '2.2' })).toBe('Updated to 2.2');
   });
-  it('shows the setup steps: running, their warnings, and Retry only for a declined Windows prompt', () => {
+  it('shows the setup steps: running, their warnings, and Retry for any setup-step warning', () => {
     const base = { source_id: 'amazon:amzn1.adg.product.x', title: 'Hotline Miami', platform: 'Amazon Games' };
     expect(storeEntryLine(row({ ...base, status: 'installing', phase: 'installer_silent', install_processed_bytes: 1, install_total_bytes: 2 }))).toBe(
       'Running the installer silently · 50%',
@@ -192,8 +192,20 @@ describe('Amazon Games cards and Downloads', () => {
     expect(storeEntryLine(warned)).toBe(
       "Installed · <1 MB · Couldn't run oalinst.exe: it exited with code 1 · Couldn't run DXSETUP.exe: it isn't in the game folder",
     );
-    expect(retriesSetupSteps(warned)).toBe(false);
-    expect(rowAction(warned)).toBe('dismiss');
+    expect(retriesSetupSteps(warned)).toBe(true);
+    expect(rowAction(warned)).toBe('retry-dismiss');
+    const noCompat = row({
+      ...base,
+      status: 'completed',
+      error: "Couldn't run oalinst.exe: choose a compatibility tool (Wine or Proton) to run a Windows installer.",
+    });
+    expect(rowAction(noCompat)).toBe('retry-dismiss');
+    expect(rowAction(row({ ...base, status: 'completed', error: REDIST_CANCELLED }))).toBe('retry-dismiss');
+    // A warning that isn't a setup step's keeps Dismiss only.
+    expect(retriesSetupSteps(row({ ...base, status: 'completed', error: 'Cloud saves are off' }))).toBe(false);
+    expect(rowAction(row({ ...base, status: 'completed', error: 'Cloud saves are off' }))).toBe('dismiss');
+    // A RomM row never runs store setup steps.
+    expect(retriesSetupSteps(row({ ...base, job: 'game', status: 'completed', error: REDIST_DECLINED }))).toBe(false);
     const declined = row({ ...base, status: 'completed', error: REDIST_DECLINED });
     expect(storeEntryLine(declined)).toBe(`Installed · <1 MB · ${REDIST_DECLINED}`);
     expect(retriesSetupSteps(declined)).toBe(true);
@@ -201,8 +213,27 @@ describe('Amazon Games cards and Downloads', () => {
     expect(retriesSetupSteps({ ...declined, status: 'failed' })).toBe(false);
     expect(storeEntryLine(row({ ...base, status: 'completed' }))).toBe('Installed · <1 MB');
   });
+  it('words the setup-steps row: running, done, and what didn’t run (with Retry again)', () => {
+    const base = { source_id: 'amazon:amzn1.adg.product.x', title: 'Kettle Drum', platform: 'Amazon Games', kind: 'store_setup' as const };
+    expect(storeKindLabel('store_setup')).toBe('Setup');
+    expect(storeEntryLine(row({ ...base, status: 'queued' }))).toBe('Waiting for a slot');
+    expect(storeEntryLine(row({ ...base, status: 'downloading', phase: 'installer_silent', total_bytes: 0, downloaded_bytes: 0 }))).toBe(
+      'Running the installer silently · 0%',
+    );
+    expect(storeEntryLine(row({ ...base, status: 'installing', phase: 'installer_silent', install_processed_bytes: 1, install_total_bytes: 2 }))).toBe(
+      'Running the installer silently · 50%',
+    );
+    const done = row({ ...base, status: 'completed', error: '' });
+    expect(storeEntryLine(done)).toBe('Setup steps done');
+    expect(rowAction(done)).toBe('dismiss');
+    const again = row({ ...base, status: 'completed', error: "Couldn't run oalinst.exe: it exited with code 1" });
+    expect(storeEntryLine(again)).toBe("Setup steps didn’t all run · Couldn't run oalinst.exe: it exited with code 1");
+    expect(rowAction(again)).toBe('retry-dismiss');
+  });
   it('matches the backend’s declined-prompt words', () => {
     const rust = readFileSync(new URL('../../../../crates/grid-core/src/stores/redist.rs', import.meta.url), 'utf8');
     expect(rust).toContain(JSON.stringify(REDIST_DECLINED));
+    expect(rust).toContain(JSON.stringify(REDIST_CANCELLED));
+    expect(rust).toContain('"Couldn\'t run {name}: {}"');
   });
 });

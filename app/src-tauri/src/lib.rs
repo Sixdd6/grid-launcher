@@ -998,6 +998,7 @@ pub fn run() {
             commands::stores::store_install,
             commands::stores::store_update,
             commands::stores::store_repair,
+            commands::stores::store_setup_steps,
             commands::stores::store_uninstall,
             commands::stores::store_install_dlc,
             commands::stores::store_remove_dlc,

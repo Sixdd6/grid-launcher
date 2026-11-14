@@ -35,6 +35,8 @@ export function storeKindLabel(kind: DownloadKind): string | null {
       return 'Update';
     case 'store_repair':
       return 'Repair';
+    case 'store_setup':
+      return 'Setup';
     case 'store_dlc':
       return 'Content';
     case 'store_tool':
@@ -118,17 +120,38 @@ function withWarnings(line: string, warning: string): string {
 }
 
 /**
- * Whether a finished store row's Retry runs the game's setup steps again:
- * its warning says Windows' permission prompt was declined. Retry is then
- * the game's Verify and repair, which runs the steps that didn't run.
+ * The backend's warning when a cancel stopped a game's setup steps (grid-core
+ * `stores::redist::REDIST_CANCELLED`, word for word).
+ */
+export const REDIST_CANCELLED = "Cancelled its setup steps: the game is installed, but they didn't all run";
+
+/** The start of a setup step's own warning (`Couldn't run oalinst.exe: …`, grid-core `stores::redist`). */
+const STEP_WARNING = "Couldn't run ";
+
+/** Whether one warning line came from a game's setup steps. */
+export function isSetupStepWarning(line: string): boolean {
+  const w = line.trim();
+  return w === REDIST_DECLINED || w === REDIST_CANCELLED || w.startsWith(STEP_WARNING);
+}
+
+/**
+ * Whether a finished store row's Retry runs only the game's setup steps
+ * again (`store_setup_steps`, no download and no login): a warning came
+ * from them (a declined Windows prompt, a failed or timed-out step, no
+ * compatibility tool, a cancel).
  */
 export function retriesSetupSteps(e: DownloadEntry): boolean {
   return (
     e.job === 'store' &&
     e.status === 'completed' &&
     e.source_id.trim() !== '' &&
-    e.error.split('\n').some((w) => w.trim() === REDIST_DECLINED)
+    e.error.split('\n').some(isSetupStepWarning)
   );
+}
+
+/** A finished setup-steps row: "Setup steps done", or what didn't run. */
+function setupStepsLine(e: DownloadEntry): string {
+  return e.error.trim() === '' ? 'Setup steps done' : withWarnings('Setup steps didn’t all run', e.error);
 }
 
 /**
@@ -150,6 +173,7 @@ export function storeEntryLine(e: DownloadEntry, ctx: LineContext = {}): string 
     case 'failed':
       return `Failed · ${failureReason(e)}`;
     case 'completed':
+      if (e.kind === 'store_setup') return setupStepsLine(e);
       return withWarnings(completedLine(e, ctx, drive), e.error);
     default:
       break;
@@ -178,6 +202,7 @@ export function storeEntryLine(e: DownloadEntry, ctx: LineContext = {}): string 
       break;
   }
   if (e.kind === 'store_repair') return `Verifying files ${p}%`;
+  if (e.kind === 'store_setup') return `Running the installer silently · ${p}%`;
   if (e.kind === 'store_restore') return `Copying from ${drive} ${p}%`;
   if (e.status === 'installing') return `Installing ${p}%`;
   return `Downloading ${p}% · ${rateText(e.speed_bps)}`;

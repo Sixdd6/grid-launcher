@@ -40,6 +40,7 @@ pub mod paths;
 pub mod progress;
 pub mod redist;
 pub mod runner;
+pub mod setup_steps;
 pub mod steam;
 pub mod tools;
 

@@ -25,10 +25,10 @@ export function cancelEntry(e: DownloadEntry): Promise<void> {
   return e.kind === 'library_move' ? cancelLibraryMove(e) : api.cancelInstall(e.id);
 }
 
-/** Runs a store game's setup steps again (its Verify and repair, which runs
- *  the steps that didn't run); the old row makes way for the new one. */
+/** Runs only a store game's setup steps again (a `store_setup` row: no
+ *  download, no login); the old row makes way for the new one. */
 export async function retrySetupSteps(e: DownloadEntry): Promise<void> {
-  await api.storeRepair(e.source_id);
+  await api.storeSetupSteps(e.source_id);
   await api.dismissDownload(e.id);
 }
 

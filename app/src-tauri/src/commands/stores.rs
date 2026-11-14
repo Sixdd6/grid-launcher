@@ -734,6 +734,54 @@ pub async fn store_repair(state: State<'_, AppState>, key: String) -> Result<(),
     enqueue(&install, job)
 }
 
+/// Why a setup-steps job can't be queued now, `None` when it can: the
+/// game is running, another job for it is queued or running, or a backup
+/// is copying it.
+fn setup_steps_refusal(
+    title: &str,
+    running: bool,
+    job_live: bool,
+    backing_up: bool,
+) -> Option<String> {
+    let title = title.trim();
+    if running {
+        return Some(format!("Quit {title} before running its setup steps."));
+    }
+    if job_live {
+        return Some(format!(
+            "{title} is already in the download queue. Try again when that's done."
+        ));
+    }
+    if backing_up {
+        return Some(format!(
+            "{title} is being backed up. Try again when the backup is done."
+        ));
+    }
+    None
+}
+
+/// Runs only an installed store game's setup steps (Retry on a Downloads
+/// row whose warning came from them): a `store_setup` row, no download, no
+/// login.
+#[tauri::command]
+pub async fn store_setup_steps(state: State<'_, AppState>, key: String) -> Result<(), String> {
+    ensure_library_idle(&state)?;
+    let (backend, kind, _) = backend_for_key(&state, &key)?;
+    let install = install_service(&state)?;
+    let row = store_row(&install, &key).await?;
+    let game_key = GameKey::store(kind, row.store_id.clone());
+    if let Some(refusal) = setup_steps_refusal(
+        &row.title,
+        running(&state, &game_key),
+        install.store_job_live(&game_key),
+        install.store_backup_busy(&game_key),
+    ) {
+        return Err(refusal);
+    }
+    let job = backend.setup_steps_job(&row, job_ctx(&install)?)?;
+    enqueue(&install, job)
+}
+
 #[tauri::command]
 pub async fn store_uninstall(
     state: State<'_, AppState>,
@@ -1173,6 +1221,26 @@ pub async fn remove_store_from_drive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setup_steps_wait_for_the_game_its_jobs_and_its_backup() {
+        assert_eq!(
+            setup_steps_refusal("Kettle Drum", false, false, false),
+            None
+        );
+        assert_eq!(
+            setup_steps_refusal("Kettle Drum", true, true, true).unwrap(),
+            "Quit Kettle Drum before running its setup steps."
+        );
+        assert_eq!(
+            setup_steps_refusal("Kettle Drum", false, true, true).unwrap(),
+            "Kettle Drum is already in the download queue. Try again when that's done."
+        );
+        assert_eq!(
+            setup_steps_refusal(" Kettle Drum ", false, false, true).unwrap(),
+            "Kettle Drum is being backed up. Try again when the backup is done."
+        );
+    }
 
     #[test]
     fn keys_and_sources_route_to_gog_epic_and_amazon() {

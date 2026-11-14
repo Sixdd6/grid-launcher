@@ -192,6 +192,20 @@ pub trait StoreBackend: Send + Sync + 'static {
     ) -> BoxFut<'static, Result<StoreJob, String>>;
     fn update_job(&self, row: &InstalledGame, ctx: JobCtx) -> StoreJob;
     fn repair_job(&self, row: &InstalledGame, ctx: JobCtx) -> StoreJob;
+    /// The job that runs only `row`'s setup steps (redistributables and
+    /// install scripts), for Retry on a Downloads row whose warning came
+    /// from them. It queues as `StoreOp::SetupSteps` (kind `store_setup`):
+    /// no download, no login, no store tool. A store builds it with
+    /// `grid_core::stores::setup_steps::setup_steps_job` from the game row
+    /// (its folder, prefix and compat tool, the row's else
+    /// `ctx.default_compat_tool`) and a `SetupStepsStore` that re-reads the
+    /// game's step list when the job runs and records the list once every
+    /// step worked. The command has already checked the game is installed,
+    /// not running and has no other live job. The default refuses: the
+    /// store has none (Steam; GOG and Epic until they implement it).
+    fn setup_steps_job(&self, _row: &InstalledGame, _ctx: JobCtx) -> Result<StoreJob, String> {
+        Err(grid_core::stores::setup_steps::NO_SETUP_STEPS.to_string())
+    }
     fn dlc_job(
         self: Arc<Self>,
         row: InstalledGame,
@@ -641,6 +655,30 @@ mod tests {
             stores.shared.backend(StoreKind::Steam).unwrap().kind(),
             StoreKind::Steam
         );
+    }
+
+    #[test]
+    fn stores_without_setup_steps_refuse_the_setup_steps_job() {
+        let (stores, dir) = facade();
+        let ctx = JobCtx {
+            registry: Arc::new(Registry::open(&dir.path().join("registry.db")).unwrap()),
+            library: dir.path().join("library"),
+            default_compat_tool: String::new(),
+        };
+        let row = InstalledGame {
+            title: "Starlight".into(),
+            store_id: "S".into(),
+            ..Default::default()
+        };
+        for kind in [StoreKind::Gog, StoreKind::Epic, StoreKind::Steam] {
+            let refusal = stores
+                .backend(kind)
+                .unwrap()
+                .setup_steps_job(&row, ctx.clone())
+                .err()
+                .unwrap();
+            assert_eq!(refusal, grid_core::stores::setup_steps::NO_SETUP_STEPS);
+        }
     }
 
     #[test]

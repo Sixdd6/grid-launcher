@@ -477,6 +477,9 @@ export type DownloadKind =
   | 'store_installer'
   // A store game copied back from a backup drive.
   | 'store_restore'
+  // Only an installed store game's setup steps (redistributables), run
+  // again from Retry: no download, no login (`StoreOp::SetupSteps`).
+  | 'store_setup'
   // The store tool's own download (gogdl).
   | 'store_tool'
   // An install the store's own client runs (Steam): GRID shows its progress
@@ -1764,6 +1767,7 @@ export const api = {
   storeInstall: (request: StoreInstallRequest) => invoke<void>('store_install', { request }),
   storeUpdate: (key: string) => invoke<void>('store_update', { key }),
   storeRepair: (key: string) => invoke<void>('store_repair', { key }),
+  storeSetupSteps: (key: string) => invoke<void>('store_setup_steps', { key }),
   storeUninstall: (key: string) => invoke<void>('store_uninstall', { key }),
   storeInstallDlc: (key: string, dlcId: string) => invoke<void>('store_install_dlc', { key, dlcId }),
   storeRemoveDlc: (key: string, dlcId: string) => invoke<void>('store_remove_dlc', { key, dlcId }),

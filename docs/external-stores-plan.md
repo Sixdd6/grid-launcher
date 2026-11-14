@@ -198,4 +198,8 @@ Each phase ends when these pass:
   what already ran there) and skips them. When nothing is missing, nothing runs and no UAC
   prompt shows. Steps GRID can't recognise always run.
 - A failed or timed-out step is a warning on the Downloads row, never a failed install.
+- Retry on any setup-step warning runs only the missing steps (decision 2026-11-14): a
+  small "Setup" Downloads job, no network, no login, not Verify and repair. Built for
+  Amazon (`stores::setup_steps`, `StoreBackend::setup_steps_job`); GOG and Epic implement
+  the same backend method.
   Research notes: `docs/research/store-redistributables.md`.

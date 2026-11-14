@@ -36,8 +36,10 @@ use crate::library::LibraryError;
 use crate::stores::gog::install::{game_dir, removal_refusal};
 use crate::stores::gog::library_error;
 use crate::stores::progress::ProgressMerger;
-use crate::stores::redist::{run_steps, steps_due, RedistTarget};
+use crate::stores::redist::{run_steps, steps_due, RedistStep, RedistTarget};
 use crate::stores::runner::{ToolExit, ToolSignal, TIMED_OUT};
+use crate::stores::setup_steps::{self, SetupStepsStore};
+use crate::stores::GameKey;
 use crate::stores::{StoreError, StoreKind};
 
 /// The Wine prefix folder inside an Amazon game's folder (as GOG, Epic and
@@ -242,6 +244,60 @@ fn store_job(job: AmazonJob) -> StoreJob {
         drive: None,
         runner: Arc::new(job),
     }
+}
+
+/// Where Amazon's setup-steps job reads and records a game's steps: its
+/// fuel.json `PostInstall`, and [`AmazonMeta::post_install_ran`] on its
+/// registry row.
+struct AmazonSetupSteps {
+    registry: Arc<Registry>,
+    id: String,
+    dir: PathBuf,
+}
+
+impl SetupStepsStore for AmazonSetupSteps {
+    fn steps(&self) -> Result<Vec<RedistStep>, LibraryError> {
+        Ok(read_post_install(&self.dir))
+    }
+
+    fn record(&self, ran: &[RedistStep]) -> Result<(), LibraryError> {
+        let key = GameKey::store(StoreKind::Amazon, self.id.clone());
+        let Some(mut row) = self.registry.find_key(&key)? else {
+            return Ok(());
+        };
+        let mut meta = AmazonMeta::from_json(&row.store_meta);
+        meta.post_install_ran = ran.to_vec();
+        row.store_meta = meta.to_json();
+        self.registry.upsert_store(&row)
+    }
+}
+
+/// The job that runs only `row`'s `PostInstall` steps (no nile call).
+/// Refuses a game whose fuel.json lists none.
+pub fn setup_steps_job(
+    svc: &AmazonService,
+    row: &InstalledGame,
+    ctx: AmazonJobCtx,
+) -> Result<StoreJob, StoreError> {
+    let dir = game_dir(row);
+    if read_post_install(&dir).is_empty() {
+        return Err(StoreError::Refused(format!(
+            "{} has no setup steps to run.",
+            row.title.trim()
+        )));
+    }
+    let store = AmazonSetupSteps {
+        registry: ctx.registry.clone(),
+        id: row.store_id.trim().to_string(),
+        dir,
+    };
+    Ok(setup_steps::setup_steps_job(
+        StoreKind::Amazon,
+        row,
+        &ctx.default_compat_tool,
+        Arc::new(store),
+        svc.redist.clone(),
+    ))
 }
 
 /// A row the removal guard can judge `dir` against (an install that

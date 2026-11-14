@@ -720,6 +720,53 @@ async fn post_install_steps_warn_never_fail_and_rerun_when_their_list_changes() 
 }
 
 #[tokio::test]
+async fn the_setup_steps_job_runs_only_the_steps_and_never_nile() {
+    let f = Fixture::new();
+    f.sign_in().await;
+    f.steps.exits.lock().unwrap().push(Some(1));
+    let (result, _) = run_job(f.svc.install_job(f.request(), f.ctx())).await;
+    assert_eq!(
+        result.unwrap(),
+        "Couldn't run vc.exe: it exited with code 1"
+    );
+    let row = f.row();
+    let nile_before = f.argv();
+
+    // Signed out: the setup steps need no login.
+    f.clear("current_user.json");
+    assert!(!f.svc.has_login());
+    let job = f.svc.setup_steps_job(&row, f.ctx()).unwrap();
+    assert_eq!(job.op, StoreOp::SetupSteps);
+    assert_eq!(job.op.kind(), "store_setup");
+    let (result, reports) = run_job(job).await;
+    assert_eq!(result.unwrap(), "");
+    assert!(reports.is_empty(), "no download: {reports:?}");
+    assert_eq!(f.argv(), nile_before, "no nile call");
+    let spawned = f.spawned();
+    assert_eq!(spawned.len(), 2);
+    assert!(spawned[1].argv[1].ends_with("vc.exe"));
+    assert_eq!(
+        AmazonMeta::from_json(&f.row().store_meta)
+            .post_install_ran
+            .len(),
+        1,
+        "the list counts once every step worked"
+    );
+
+    // A game whose fuel.json lists no steps is refused.
+    let mut bare = row.clone();
+    bare.native_game_dir = f
+        .root
+        .path()
+        .join("elsewhere")
+        .to_string_lossy()
+        .into_owned();
+    bare.extracted_dir = bare.native_game_dir.clone();
+    let refusal = f.svc.setup_steps_job(&bare, f.ctx()).err().unwrap();
+    assert_eq!(refusal.to_string(), "Fogline has no setup steps to run.");
+}
+
+#[tokio::test]
 async fn a_cancel_during_post_install_steps_leaves_the_game_installed() {
     let f = Fixture::new();
     f.sign_in().await;

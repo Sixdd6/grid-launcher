@@ -1352,3 +1352,33 @@ its line and offers Retry (Verify and repair) on `REDIST_DECLINED`.
 Results: `scripts/ctr.sh gate` PASS; `scripts/ctr.sh wincheck` PASS;
 `scripts/ctr.sh e2e amazon amazon-library tv-amazon gog-offline launch`: all stages
 passed; `node --test e2e/fake-tools/nile.test.mjs` 13/13.
+
+## Setup steps job outcome (2026-11-14)
+
+User decision (2026-11-14): Retry on a store game's setup-step warning runs only the
+missing setup steps, not Verify and repair. Built as a store-neutral job:
+
+- grid-core `stores::setup_steps`: `StoreOp::SetupSteps` (Downloads kind
+  `store_setup`, badge "Setup"), `setup_steps_job(source, row, default_compat, store,
+  runner)` and the `SetupStepsStore` trait (`steps()` re-reads the game's list when the
+  job runs; `record(ran)` only after every step worked). The download half only checks
+  the game folder; finalize runs `redist::run_steps` (skipping what is installed or in
+  the prefix marker). A cancel ends the row Cancelled; step problems stay warnings.
+- Amazon: `AmazonService::setup_steps_job` reads fuel.json `PostInstall` and records
+  `AmazonMeta.post_install_ran` on the registry row; refuses a game that lists none. No
+  nile call and no login.
+- App: `StoreBackend::setup_steps_job(row, ctx) -> Result<StoreJob, String>`, default
+  refusal `NO_SETUP_STEPS` ("This store has no setup steps."); GOG and Epic implement it
+  next. Command `store_setup_steps(key)`: library idle, the game installed, not running,
+  no live job for it, no backup copying it.
+- Frontend: `retriesSetupSteps` is true for a completed store row with any setup-step
+  warning (`REDIST_DECLINED`, `REDIST_CANCELLED`, or a `Couldn't run …` line); Retry
+  calls `storeSetupSteps` and dismisses the old row, desktop and TV. The row reads
+  "Running the installer silently · N%", then "Setup steps done" or "Setup steps didn't
+  all run · <warnings>" with Retry again.
+- Tests: 6 `stores::setup_steps` unit tests, an `amazon_store` integration test (no nile
+  call, signed out, records the list, refuses a game with no steps), app tests for the
+  guards and the default refusal, vitest for the routing and words. e2e
+  `amazon-library`: Kettle Drum's compat-tool warning → choose "Wine (system)" in Game
+  Settings → Retry → the step runs with `/silent`, the row reads "Setup steps done", and
+  the fake nile's argv log (`E2E_NILE_ARGV_FILE`) has no new run.

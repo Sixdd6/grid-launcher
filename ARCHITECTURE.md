@@ -316,7 +316,13 @@ Modules as declared in `src/lib.rs`:
   PowerShell runner whose result file it reads back (`runner_script`,
   `elevated_command`, `parse_results`). It reuses `offline::exec`'s spawner, supervisor
   and prefix kill. Every problem is a warning line (`REDIST_DECLINED` for a declined
-  prompt), never an error. `steam` is Steam (Phase 4, built 2026-11-14): no tool, no login window, no
+  prompt), never an error. `setup_steps` is the store-neutral "run only the setup steps"
+  job (`StoreOp::SetupSteps`, kind `store_setup`) behind Retry on a setup-step warning: a
+  store gives it the game row and a `SetupStepsStore` (re-read the step list, record it
+  once every step worked), and it runs them through `redist::run_steps` with no download.
+  The app's `StoreBackend::setup_steps_job` builds it (Amazon now; the default refuses)
+  and the `store_setup_steps` command guards it (installed, not running, no other live
+  job, no backup). `steam` is Steam (Phase 4, built 2026-11-14): no tool, no login window, no
   GRID-run job. `mod.rs` holds `SteamEndpoints`, `SteamId`, `SteamApiError` (whose words
   never carry a URL or a status code), the owned-list, `GetItems`, client, account and
   manifest types (`ManifestRead`: found, unreadable while Steam writes it, missing),

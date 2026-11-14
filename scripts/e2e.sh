@@ -1163,6 +1163,8 @@ EOF
         # What the Amazon specs read (seed/amazon-seed.mjs, fixtures-amazon).
         export E2E_AMAZON_ARGV_FILE="$data_dir/amazon-game-argv.log"
         export E2E_AMAZON_ENV_FILE="$data_dir/amazon-game-env.log"
+        # The fake nile appends each run's argv here (fake-tools/nile.mjs).
+        export E2E_NILE_ARGV_FILE="$data_dir/nile-argv.log"
       else
         export E2E_AMAZON_URL="$DEAD_FORGE_URL"
       fi

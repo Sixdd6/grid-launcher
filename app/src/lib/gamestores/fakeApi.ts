@@ -771,6 +771,8 @@ export class FakeStores {
         e.detail = '2 files repaired';
         this.notice(`${g.title}: 2 damaged files were downloaded again`, {}, src);
       }
+    } else if (e.kind === 'store_setup') {
+      // The steps ran: the row reads "Setup steps done", no card.
     } else if (e.kind === 'store_dlc') {
       for (const d of g.dlc) if (e.title === d.title) d.installed = true;
       this.notice(`${e.title} installed`, {}, src);
@@ -891,6 +893,10 @@ export class FakeStores {
         return null;
       case 'store_repair':
         if (g) this.queue('store_repair', g);
+        return null;
+      case 'store_setup_steps':
+        // Only the setup steps: nothing to download.
+        if (g) this.queue('store_setup', g, undefined, { total_bytes: 0, phase: 'installer_silent' });
         return null;
       case 'store_uninstall':
         if (g) {

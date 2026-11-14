@@ -579,6 +579,17 @@ impl AmazonService {
         install::row_job(self.clone(), row, StoreOp::Repair, ctx)
     }
 
+    /// Runs only the game's fuel.json `PostInstall` steps
+    /// ([`crate::stores::setup_steps`]): no nile call. Refuses a game whose
+    /// fuel.json lists none.
+    pub fn setup_steps_job(
+        &self,
+        row: &InstalledGame,
+        ctx: AmazonJobCtx,
+    ) -> Result<StoreJob, StoreError> {
+        install::setup_steps_job(self, row, ctx)
+    }
+
     /// `uninstall <id>`, then the leftover folder and its prefix. Blocking.
     pub fn uninstall(&self, registry: &Registry, id: &str) -> Result<(), StoreError> {
         install::uninstall(self, registry, id)

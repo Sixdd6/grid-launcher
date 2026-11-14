@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { dataDir, INSTALL_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import {
@@ -29,6 +29,37 @@ import { waitForToast } from '../helpers/toasts.js';
  * no cloud saves and no DLC. Needs packages A and C (the mock Amazon
  * server, fake nile and seed): it goes green only after they are merged.
  */
+/** Every nile run so far (the fake nile's argv log, one run per line). */
+function nileRuns(): string[] {
+  const file = process.env.E2E_NILE_ARGV_FILE ?? path.join(dataDir(), 'nile-argv.log');
+  return existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter((l) => l !== '') : [];
+}
+
+/** The id of the Downloads row whose status line matches `re`. */
+async function downloadRowId(re: RegExp): Promise<string> {
+  for (const el of await $$('[data-testid^="download-detail-"]')) {
+    if (re.test((await el.getText()).trim())) return (await el.getAttribute('data-testid')).slice('download-detail-'.length);
+  }
+  throw new Error(`no Downloads row matched ${re}`);
+}
+
+/**
+ * Sets a native `<select>`'s value and dispatches `change` (a WebDriver click
+ * on an `<option>` doesn't reliably fire one on this WebKitGTK driver).
+ */
+async function selectValue(testIdName: string, value: string): Promise<void> {
+  await browser.execute(
+    (selector, val) => {
+      const el = document.querySelector(selector) as HTMLSelectElement | null;
+      if (!el) throw new Error(`no element matched ${selector}`);
+      el.value = val;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+    testId(testIdName),
+    value,
+  );
+}
+
 describe('amazon-library', () => {
   before(async () => {
     await startApp();
@@ -102,6 +133,51 @@ describe('amazon-library', () => {
     await waitForToast('Kettle Drum installed', { timeout: INSTALL_TIMEOUT });
     await openAmazon('installed');
     expect(await amazonTitles()).toContain('Kettle Drum');
+  });
+
+  it('Retry on the setup-step warning runs only the setup steps: no nile call, then “Setup steps done”', async () => {
+    // Choose a compatibility tool for Kettle Drum in Game Settings (the
+    // seed's `wine` stand-in is on PATH: "Wine (system)").
+    await openAmazon('installed');
+    await openAmazonDetails('Kettle Drum');
+    await $(testId('store-details-settings')).click();
+    await $(testId('store-game-settings')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    const compat = $(testId('store-settings-compat'));
+    await compat.waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await browser.waitUntil(async () => (await compat.$$('option')).length > 0, {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Game Settings never listed a compatibility tool',
+    });
+    const tool = (await compat.$$('option').map((o) => o.getAttribute('value'))).find((v) => v.startsWith('Wine')) ?? '';
+    expect(tool).not.toBe('');
+    await selectValue('store-settings-compat', tool);
+    await $(testId('store-settings-save')).click();
+    await $(testId('store-game-settings')).waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
+    await closeWithEscape('store-details');
+
+    const nileBefore = nileRuns();
+    const kettle = path.join(dataDir(), 'library', 'Amazon Games', 'Kettle Drum');
+    const stepRuns = () =>
+      readFileSync(path.join(dataDir(), 'amazon-game-argv.log'), 'utf8')
+        .split('---\n')
+        .filter((run) => run.split('\n')[0] === path.join(kettle, 'oalinst.exe'));
+    expect(existsSync(path.join(dataDir(), 'amazon-game-argv.log')) ? stepRuns() : []).toEqual([]);
+
+    await openDownloads();
+    const id = await downloadRowId(/^Installed · .+ · Couldn't run oalinst\.exe: choose a compatibility tool/);
+    await $(testId(`download-action-retry-${id}`)).click();
+    // The old row makes way for a Setup row that runs only the steps.
+    await $(testId(`download-row-${id}`)).waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
+    await waitForDownloadLine(/^Setup steps done$/, INSTALL_TIMEOUT);
+    const done = await downloadRowId(/^Setup steps done$/);
+    await expect($(testId(`download-kind-${done}`))).toHaveText('Setup');
+    await expect($(testId(`download-action-retry-${done}`))).not.toExist();
+
+    const runs = stepRuns();
+    expect(runs.length).toBe(1);
+    expect(runs[0].split('\n').slice(1, -1)).toEqual(['/silent']);
+    // No install, verify, sync or any other nile run.
+    expect(nileRuns()).toEqual(nileBefore);
   });
 
   it('opens Details for an installed game: no Backup to drive, the runs and backup lines, Overview and Media only, no version', async () => {

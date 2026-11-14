@@ -298,7 +298,7 @@ export function actionFor(
 
 /**
  * A row's action ([`actionFor`]), plus Retry on a finished store row whose
- * setup steps didn't run because Windows' permission prompt was declined.
+ * warning came from its setup steps (Retry runs only those again).
  */
 export function rowAction(e: DownloadEntry, movePhase: MovePhase | null = null): DownloadAction {
   return retriesSetupSteps(e) ? 'retry-dismiss' : actionFor(e.status, e.kind, movePhase);

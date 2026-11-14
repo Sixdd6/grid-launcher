@@ -1357,8 +1357,13 @@ Store screens (2026-11-13, matching the approved design):
   runner, so there is one permission prompt, in TV mode too. While they run, the row
   reads "Running the installer silently". A step that fails, or a declined prompt, is a
   warning on the Downloads row ("Couldn't run oalinst.exe: …"), never a failed install.
-  A declined prompt offers Retry, which runs Verify and repair. A cancel stops the steps
-  and leaves the game installed. A
+  A warning from the steps (a declined prompt, a failed or timed-out step, no compat
+  tool, a cancel) offers Retry, which runs only the missing steps: a small "Setup"
+  Downloads row with no download, no login and no nile call, reading "Running the
+  installer silently · N%" and then "Setup steps done" (or "Setup steps didn't all run ·
+  <warnings>", with Retry again). It is refused while the game runs or has another job.
+  GOG and Epic will use the same job. A cancel stops the steps and leaves the game
+  installed. A
   "Sign in again" that is cancelled leaves the store expired (nile's old login is deleted
   before a new sign-in). On a Linux system older than glibc 2.35, nile can't run, and
   Settings and the store panel say "nile can't run on this computer: it needs a newer
