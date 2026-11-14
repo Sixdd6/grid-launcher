@@ -1,6 +1,6 @@
 // A fake of the store commands and events, with the GameStores prototype's
-// GOG data (placeholder titles only; fake markers, never a real account or
-// token). Used by the vitest suites and, behind the dev-only VITE_FAKE_STORES
+// GOG and Epic Games data (`stores.js` g1–g8 and e1–e6; placeholder titles
+// only; fake markers, never a real account or token). Used by the vitest suites and, behind the dev-only VITE_FAKE_STORES
 // flag (`devMock.ts`), to click through every state in a browser. It answers
 // `invoke(cmd, args)` calls by command name and emits events through the
 // `emit` it is given; it never touches the network or the disk.
@@ -28,8 +28,14 @@ const NOW = () => Math.floor(Date.now() / 1000);
 
 /** A fake username: never a real account. */
 export const FAKE_USERNAME = 'sam_plays';
+/** The fake Epic Games account (the prototype's "Signed in as SamPlays"). */
+export const FAKE_EPIC_USERNAME = 'SamPlays';
 
-type Seed = Partial<StoreGame> & { id: string; title: string; hue: string; dl: number; disk: number };
+/** The stores the fake answers for. */
+export type FakeSource = 'gog' | 'epic';
+export const FAKE_SOURCES: readonly FakeSource[] = ['epic', 'gog'];
+
+type Seed = Partial<StoreGame> & { id: string; title: string; hue: string; dl: number; disk: number; source?: FakeSource };
 
 const SEEDS: Seed[] = [
   {
@@ -61,6 +67,50 @@ const SEEDS: Seed[] = [
   { id: '1008', title: 'Quarry Nine', hue: 'hsl(210 15% 34%)', dl: 9.7, disk: 13.2, platforms: ['windows'], developer: 'Deepcut', year: '2024', genres: ['Simulation'] },
 ];
 
+/**
+ * The prototype's Epic Games games (`stores.js` e1–e6), keyed by a made-up
+ * app name. Every Epic game is a Windows build. Iron Orchard and Northern
+ * Static start through another company's launcher (Not supported). Glimmer
+ * Deep has a DLC so the install dialog's "DLC you own" shows.
+ */
+const EPIC_SEEDS: Seed[] = [
+  {
+    source: 'epic', id: 'Starlight', title: 'Starlight Courier', hue: 'hsl(250 45% 36%)', installed: true, installed_platform: 'windows', version: '1.12', dl: 24.0, disk: 31.2,
+    cloud: 'synced', platforms: ['windows'], developer: 'Northstar', year: '2022', genres: ['Racing'],
+  },
+  {
+    source: 'epic', id: 'VectorBloom', title: 'Vector Bloom', hue: 'hsl(160 45% 30%)', installed: true, installed_platform: 'windows', version: '3.0.1', dl: 8.8, disk: 11.0,
+    cloud: 'none', platforms: ['windows'], developer: 'Petal Logic', year: '2021', genres: ['Puzzle'],
+  },
+  {
+    source: 'epic', id: 'GlimmerDeep', title: 'Glimmer Deep', hue: 'hsl(195 55% 30%)', dl: 45.0, disk: 60.0, platforms: ['windows'], developer: 'Abyssal', year: '2023', genres: ['Action'],
+    dlc: [{ id: 'GlimmerDeepTrench', title: 'Glimmer Deep — The Trench', download_bytes: 3.2 * GB, installed: false }],
+  },
+  {
+    source: 'epic', id: 'IronOrchard', title: 'Iron Orchard', hue: 'hsl(20 30% 28%)', dl: 52.0, disk: 70.0, platforms: ['windows'], not_supported: 'the EA app',
+    developer: 'Forge North', year: '2022', genres: ['Shooter'],
+  },
+  {
+    source: 'epic', id: 'NorthernStatic', title: 'Northern Static', hue: 'hsl(205 25% 36%)', dl: 38.0, disk: 50.0, platforms: ['windows'], not_supported: 'Ubisoft Connect',
+    developer: 'Polar Line', year: '2021', genres: ['Open world'],
+  },
+  { source: 'epic', id: 'RustbeltRally', title: 'Rustbelt Rally', hue: 'hsl(35 50% 34%)', dl: 12.5, disk: 16.0, platforms: ['windows'], developer: 'Gravel Works', year: '2020', genres: ['Racing'] },
+];
+
+/** The store tool's name and the origin its installs get. */
+function toolOf(source: FakeSource): 'gogdl' | 'legendary' {
+  return source === 'epic' ? 'legendary' : 'gogdl';
+}
+
+/** The store's name as the UI writes it (kept local: the fake imports no UI module). */
+function nameOf(source: FakeSource): string {
+  return source === 'epic' ? 'Epic Games' : 'GOG';
+}
+
+function folderOf(source: FakeSource, title: string): string {
+  return `~/Games/GRID/stores/${source}/${title.replace(/[^A-Za-z0-9]+/g, '')}`;
+}
+
 /** A cover as an inline SVG: the prototype's coloured tile with the title. */
 export function fakeCover(title: string, hue: string): string {
   const esc = title.replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -69,9 +119,10 @@ export function fakeCover(title: string, hue: string): string {
 }
 
 function game(s: Seed): StoreGame {
+  const source = s.source ?? 'gog';
   return {
-    key: `gog:${s.id}`,
-    source: 'gog',
+    key: `${source}:${s.id}`,
+    source,
     store_id: s.id,
     title: s.title,
     installed: s.installed ?? false,
@@ -87,17 +138,18 @@ function game(s: Seed): StoreGame {
     disk_bytes: Math.round(s.disk * GB),
     version: s.version ?? '',
     update_version: s.update_version ?? '',
-    origin: s.installed ? (s.origin ?? 'gogdl') : null,
-    not_supported: '',
+    origin: s.installed ? (s.origin ?? toolOf(source)) : null,
+    not_supported: s.not_supported ?? '',
     dlc: (s.dlc ?? []).map((d) => ({ ...d, download_bytes: Math.round(d.download_bytes) })),
     cloud: s.installed ? (s.cloud ?? 'synced') : 'unknown',
     last_sync: s.installed ? NOW() - 2 * 3600 : 0,
-    install_dir: s.installed ? `~/Games/GRID/stores/gog/${s.title.replace(/[^A-Za-z0-9]+/g, '')}` : '',
+    install_dir: s.installed ? folderOf(source, s.title) : '',
     compat_tool: s.installed_platform === 'windows' ? 'GE-Proton10-17' : '',
   };
 }
 
-export function baseStatus(): StoreStatus {
+export function baseStatus(source: FakeSource = 'gog'): StoreStatus {
+  if (source === 'epic') return baseEpicStatus();
   return {
     source: 'gog',
     connection: 'connected',
@@ -126,6 +178,36 @@ export function baseStatus(): StoreStatus {
   };
 }
 
+/** The Epic Games status: signed in as SamPlays, legendary installed (the pin's data, plan package C). */
+export function baseEpicStatus(): StoreStatus {
+  return {
+    source: 'epic',
+    connection: 'connected',
+    username: FAKE_EPIC_USERNAME,
+    tool: {
+      name: 'legendary',
+      version: '0.21.1',
+      state: 'installed',
+      size_bytes: Math.round(3.1 * MB),
+      error: '',
+      license: 'GPL-3.0',
+      source_url: 'https://github.com/legendary-gl/legendary',
+      done: 0,
+      total: 0,
+    },
+    owned: 'ready',
+    owned_error: '',
+    owned_count: 6,
+    installed_count: 2,
+    installed_bytes: 0,
+    refreshed_at: NOW() - 300,
+    cloud_saves: true,
+    install_dir: '~/Games/GRID/stores/epic',
+    in_rail: true,
+    last_error: '',
+  };
+}
+
 /** The prototype's dashed "Prototype" select, as named scenarios. */
 export type FakeScenario =
   | 'normal'
@@ -138,10 +220,14 @@ export type FakeScenario =
   | 'needsPython'
   | 'expired'
   | 'notConnected'
-  | 'notConnectedNothing';
+  | 'notConnectedNothing'
+  | 'ownedError'
+  | 'update'
+  | 'cloudConflict';
 
 export const FAKE_SCENARIOS: readonly FakeScenario[] = [
   'normal', 'loading', 'emptyInstalled', 'everythingInstalled', 'toolMissing', 'toolInstalling', 'toolFailed', 'needsPython', 'expired', 'notConnected', 'notConnectedNothing',
+  'ownedError', 'update', 'cloudConflict',
 ];
 
 /** The offline installers the fake file chooser offers (the prototype's ST_FILES). */
@@ -198,14 +284,20 @@ function entry(partial: Partial<DownloadEntry> & { kind: DownloadKind; title: st
   };
 }
 
+/** The store a command is for: its `source` argument, else its game key's store, else GOG. */
+function sourceOf(args: Record<string, unknown>, g: StoreGame | null): FakeSource {
+  const src = typeof args.source === 'string' ? args.source : (g?.source ?? (typeof args.key === 'string' ? args.key.split(':')[0] : ''));
+  return src === 'epic' ? 'epic' : 'gog';
+}
+
 /**
  * The fake backend. `emit` sends events to the app (the dev mock wires it to
  * Tauri's mocked event bus; tests pass a spy). `tick()` moves running jobs on
  * (the dev mock calls it on a timer; tests call it by hand).
  */
 export class FakeStores {
-  status: StoreStatus = baseStatus();
-  games: StoreGame[] = SEEDS.map(game);
+  statuses: Record<FakeSource, StoreStatus> = { gog: baseStatus('gog'), epic: baseEpicStatus() };
+  games: StoreGame[] = [...SEEDS.map(game), ...EPIC_SEEDS.map(game)];
   entries: DownloadEntry[] = [];
   driveGames: DriveStoreGame[] = [];
   cloud: Record<string, StoreCloudState> = {};
@@ -213,8 +305,16 @@ export class FakeStores {
   /** The next sign-in's outcome (the prototype's dashed buttons). */
   nextLogin: 'connected' | 'failed' | 'cancelled' = 'connected';
   emit: FakeEmit;
-  /** The game key a launch reports as a cloud conflict until it is resolved. */
-  private snapshot: StoreGame[] | null = null;
+  /** Each store's games before a scenario that changes what is installed, so `normal` restores them. */
+  private snapshots: Partial<Record<FakeSource, StoreGame[]>> = {};
+
+  /** GOG's status (the fake's first store; most tests read only this one). */
+  get status(): StoreStatus {
+    return this.statuses.gog;
+  }
+  set status(next: StoreStatus) {
+    this.statuses.gog = next;
+  }
 
   constructor(emit: FakeEmit = () => {}) {
     this.emit = emit;
@@ -226,7 +326,7 @@ export class FakeStores {
     };
   }
 
-  /** The prototype's boot: one GOG install running at 38%, one queued. */
+  /** The prototype's boot: one GOG install running at 38%, one queued, and a failed Epic Games install. */
   bootJobs(): void {
     const cs = this.games.find((g) => g.store_id === '1004')!;
     const hv = this.games.find((g) => g.store_id === '1005')!;
@@ -234,94 +334,159 @@ export class FakeStores {
       entry({ kind: 'store_install', title: cs.title, source_id: cs.key, status: 'downloading', phase: 'downloading', total_bytes: cs.download_bytes, downloaded_bytes: Math.round(cs.download_bytes * 0.38), speed_bps: 41.2 * MB }),
       entry({ kind: 'store_install', title: hv.title, source_id: hv.key, status: 'queued' }),
     );
+    // The prototype's failed Epic Games row (`stBoot`).
+    const gd = this.games.find((g) => g.key === 'epic:GlimmerDeep')!;
+    this.entries.push(
+      entry({ kind: 'store_install', title: gd.title, source_id: gd.key, platform: 'Epic Games', status: 'failed', error: 'legendary stopped: Epic’s download server didn’t answer' }),
+    );
   }
 
-  library(): StoreLibrary {
-    const installed = this.games.filter((g) => g.installed);
-    this.status.installed_count = installed.length;
-    this.status.installed_bytes = installed.reduce((t, g) => t + g.disk_bytes, 0);
-    this.status.owned_count = this.games.length;
-    const avail = this.status.owned === 'ready' && this.status.connection === 'connected' ? this.games.filter((g) => !g.installed) : [];
-    return { status: { ...this.status }, installed, available: avail };
+  /** One store's games. */
+  gamesOf(source: FakeSource): StoreGame[] {
+    return this.games.filter((g) => g.source === source);
   }
 
-  /** Applies a prototype state. The base data comes back first, then the state applies. */
-  scenario(s: FakeScenario): void {
-    this.status = baseStatus();
-    if (this.snapshot) {
-      this.games = this.snapshot;
-      this.snapshot = null;
+  library(source: FakeSource = 'gog'): StoreLibrary {
+    const status = this.statuses[source];
+    const own = this.gamesOf(source);
+    const installed = own.filter((g) => g.installed);
+    status.installed_count = installed.length;
+    status.installed_bytes = installed.reduce((t, g) => t + g.disk_bytes, 0);
+    status.owned_count = own.length;
+    const avail = status.owned === 'ready' && status.connection === 'connected' ? own.filter((g) => !g.installed) : [];
+    return { status: { ...status }, installed, available: avail };
+  }
+
+  /** Replaces one store's games, keeping the others. */
+  private setGamesOf(source: FakeSource, list: StoreGame[]): void {
+    this.games = [...this.games.filter((g) => g.source !== source), ...list];
+  }
+
+  /** Applies a prototype state to one store. The base data comes back first, then the state applies. */
+  scenario(s: FakeScenario, source: FakeSource = 'gog'): void {
+    this.statuses[source] = baseStatus(source);
+    const saved = this.snapshots[source];
+    if (saved) {
+      this.setGamesOf(source, saved);
+      delete this.snapshots[source];
     }
-    const keep = () => (this.snapshot = this.games.map((g) => ({ ...g })));
+    for (const k of Object.keys(this.cloud)) if (k.startsWith('epic:') && source === 'epic') delete this.cloud[k];
+    const keep = () => (this.snapshots[source] = this.gamesOf(source).map((g) => ({ ...g })));
+    const map = (fn: (g: StoreGame) => StoreGame) => this.setGamesOf(source, this.gamesOf(source).map(fn));
+    const tool = toolOf(source);
+    const status = this.statuses[source];
     switch (s) {
       case 'loading':
-        this.status.owned = 'loading';
+        status.owned = 'loading';
         break;
       case 'emptyInstalled':
         keep();
-        this.games = this.games.map((g) => ({ ...g, installed: false, origin: null, installed_platform: null }));
+        map((g) => ({ ...g, installed: false, origin: null, installed_platform: null }));
         break;
       case 'everythingInstalled':
         keep();
-        this.games = this.games.map((g) => ({ ...g, installed: true, origin: g.origin ?? 'gogdl', installed_platform: g.installed_platform ?? g.platforms[0], version: g.version || '1.0' }));
+        map((g) => ({ ...g, installed: true, origin: g.origin ?? tool, installed_platform: g.installed_platform ?? g.platforms[0], version: g.version || '1.0' }));
         break;
       case 'toolMissing':
-        this.status.tool = { ...this.status.tool, state: 'not_installed', version: '' };
+        status.tool = { ...status.tool, state: 'not_installed', version: '' };
         break;
       case 'toolInstalling':
-        this.status.tool = { ...this.status.tool, state: 'installing', done: 400_000, total: this.status.tool.size_bytes };
+        status.tool = { ...status.tool, state: 'installing', done: 400_000, total: status.tool.size_bytes };
         break;
       case 'toolFailed':
-        this.status.tool = { ...this.status.tool, state: 'failed', error: 'the download didn’t match its checksum' };
+        status.tool = { ...status.tool, state: 'failed', error: 'the download didn’t match its checksum' };
         break;
       case 'needsPython':
-        this.status.tool = { ...this.status.tool, state: 'failed', error: 'needs Python 3.10' };
+        status.tool = { ...status.tool, state: 'failed', error: 'needs Python 3.10' };
         break;
       case 'expired':
-        this.status.connection = 'expired';
+        status.connection = 'expired';
         break;
       case 'notConnected':
-        this.status.connection = 'not_connected';
-        this.status.username = '';
-        this.status.tool = { ...this.status.tool, state: 'not_installed' };
+        status.connection = 'not_connected';
+        status.username = '';
+        status.tool = { ...status.tool, state: 'not_installed' };
         break;
       case 'notConnectedNothing':
         keep();
-        this.status.connection = 'not_connected';
-        this.status.username = '';
-        this.status.in_rail = false;
-        this.games = this.games.map((g) => ({ ...g, installed: false }));
+        status.connection = 'not_connected';
+        status.username = '';
+        status.in_rail = false;
+        map((g) => ({ ...g, installed: false }));
         break;
+      case 'ownedError':
+        status.owned = 'error';
+        status.owned_error = `${nameOf(source)} didn’t answer. Check your connection and try again.`;
+        break;
+      case 'update': {
+        keep();
+        const first = this.gamesOf(source).find((g) => g.installed);
+        if (first) map((g) => (g.key === first.key ? { ...g, update_version: source === 'epic' ? '1.13' : '2.2' } : g));
+        break;
+      }
+      case 'cloudConflict': {
+        keep();
+        const first = this.gamesOf(source).find((g) => g.installed && g.cloud !== 'none' && g.cloud !== 'off');
+        if (first) {
+          map((g) => (g.key === first.key ? { ...g, cloud: 'conflict' } : g));
+          // Epic's list-saves gives no file list: the cloud side has no file count.
+          this.cloud[first.key] = {
+            state: 'conflict',
+            synced_at: NOW() - 3 * 86400,
+            locations: [`${first.install_dir}/prefix/drive_c/users/steamuser/Saved Games/${first.title}`],
+            conflict: {
+              local_at: NOW() - 3600,
+              local_files: 3,
+              local_bytes: Math.round(2.1 * MB),
+              cloud_at: NOW() - 3 * 3600,
+              cloud_files: source === 'epic' ? null : 3,
+              cloud_bytes: Math.round(2.0 * MB),
+            },
+          };
+        }
+        break;
+      }
       default:
         break;
     }
-    this.status.in_rail = this.status.connection !== 'not_connected' || this.games.some((g) => g.installed);
+    status.in_rail = status.connection !== 'not_connected' || this.gamesOf(source).some((g) => g.installed);
     this.changed();
   }
 
   /** Emits `stores-changed` and the downloads snapshot. */
   changed(): void {
-    this.library();
-    this.emit('stores-changed', [{ ...this.status }]);
+    this.emit('stores-changed', this.allStatuses());
     this.emitDownloads();
+  }
+
+  /** Every store's status, in the rail's order (Epic Games, GOG). */
+  allStatuses(): StoreStatus[] {
+    return FAKE_SOURCES.map((src) => this.library(src).status);
   }
 
   emitDownloads(): void {
     this.emit('downloads-changed', { entries: [...this.entries].reverse() });
   }
 
-  notice(message: string, opts: Partial<StoreNotice> = {}): void {
-    this.emit('store-notice', { source: 'gog', message, detail: '', error: false, action: null, ...opts });
+  notice(message: string, opts: Partial<StoreNotice> = {}, source: FakeSource = 'gog'): void {
+    this.emit('store-notice', { source, message, detail: '', error: false, action: null, ...opts });
   }
 
-  private queue(kind: DownloadKind, g: StoreGame | null, title?: string, extra: Partial<DownloadEntry> = {}): DownloadEntry {
+  private queue(
+    kind: DownloadKind,
+    g: StoreGame | null,
+    title?: string,
+    extra: Partial<DownloadEntry> = {},
+    source: FakeSource = g?.source === 'epic' ? 'epic' : 'gog',
+  ): DownloadEntry {
     const busy = this.entries.some((e) => e.kind !== 'store_tool' && (e.status === 'downloading' || e.status === 'installing'));
     const e = entry({
       kind,
       title: title ?? g?.title ?? '',
-      source_id: g?.key ?? 'gog',
+      source_id: g?.key ?? source,
+      platform: nameOf(source),
       status: busy && kind !== 'store_tool' ? 'queued' : 'downloading',
-      total_bytes: g?.download_bytes ?? this.status.tool.size_bytes,
+      total_bytes: g?.download_bytes ?? this.statuses[source].tool.size_bytes,
       phase: kind === 'store_repair' ? 'verifying' : kind === 'store_installer' ? 'unpacking' : kind === 'store_tool' ? 'checksum' : 'downloading',
       ...extra,
     });
@@ -370,32 +535,40 @@ export class FakeStores {
     e.status = 'completed';
     const g = this.games.find((x) => x.key === e.source_id);
     if (e.kind === 'store_tool') {
-      this.status.tool = { ...this.status.tool, state: 'installed', version: '1.4.0' };
-      e.detail = '1.4.0';
-      this.notice('gogdl installed');
+      const src: FakeSource = e.source_id === 'epic' ? 'epic' : 'gog';
+      const version = baseStatus(src).tool.version;
+      this.statuses[src].tool = { ...this.statuses[src].tool, state: 'installed', version };
+      e.detail = version;
+      this.notice(`${toolOf(src)} installed`, {}, src);
       this.changed();
       return;
     }
     if (!g) return;
+    const src: FakeSource = g.source === 'epic' ? 'epic' : 'gog';
     if (e.kind === 'store_update') {
       g.version = g.update_version;
       g.update_version = '';
-      this.notice(`${g.title} updated to ${g.version}`);
+      this.notice(`${g.title} updated to ${g.version}`, {}, src);
     } else if (e.kind === 'store_repair') {
       e.detail = '2 files repaired';
-      this.notice(`${g.title}: 2 damaged files were downloaded again`);
+      this.notice(`${g.title}: 2 damaged files were downloaded again`, {}, src);
     } else if (e.kind === 'store_dlc') {
       for (const d of g.dlc) if (e.title === d.title) d.installed = true;
-      this.notice(`${e.title} installed`);
+      this.notice(`${e.title} installed`, {}, src);
     } else {
       g.installed = true;
       g.installed_platform = g.installed_platform ?? (g.platforms.includes('linux') ? 'linux' : 'windows');
       g.version = g.version || '1.0';
-      g.origin = e.kind === 'store_installer' ? 'offline' : e.kind === 'store_restore' ? 'drive' : 'gogdl';
+      g.origin = e.kind === 'store_installer' ? 'offline' : e.kind === 'store_restore' ? 'drive' : toolOf(src);
       g.cloud = 'synced';
       g.last_sync = NOW();
-      g.install_dir = `~/Games/GRID/stores/gog/${g.title.replace(/[^A-Za-z0-9]+/g, '')}`;
-      this.notice(e.kind === 'store_installer' ? `${g.title} installed from its installer` : `${g.title} installed`, { action: { kind: 'play', key: g.key } });
+      g.install_dir = folderOf(src, g.title);
+      g.compat_tool = g.installed_platform === 'windows' ? 'GE-Proton10-17' : '';
+      this.notice(
+        e.kind === 'store_installer' ? `${g.title} installed from its installer` : `${g.title} installed`,
+        { action: { kind: 'play', key: g.key } },
+        src,
+      );
     }
     this.changed();
   }
@@ -404,19 +577,21 @@ export class FakeStores {
   handle(cmd: string, args: Record<string, unknown>): unknown {
     const key = typeof args.key === 'string' ? args.key : '';
     const g = this.games.find((x) => x.key === key) ?? null;
+    const source: FakeSource = sourceOf(args, g);
+    const status = this.statuses[source];
     switch (cmd) {
       case 'stores_status':
-        this.library();
-        return [{ ...this.status }];
+        return this.allStatuses();
       case 'store_library':
-        return this.library();
+        return this.library(source);
       case 'store_refresh':
-        this.status.owned = 'loading';
+        status.owned = 'loading';
         this.changed();
         setTimeout(() => {
-          this.status.owned = 'ready';
-          this.status.refreshed_at = NOW();
-          this.notice(`GOG: ${this.games.length} games found · ${this.games.filter((x) => !x.installed).length} to install`);
+          const own = this.gamesOf(source);
+          status.owned = 'ready';
+          status.refreshed_at = NOW();
+          this.notice(`${nameOf(source)}: ${own.length} games found · ${own.filter((x) => !x.installed).length} to install`, {}, source);
           this.changed();
         }, 1200);
         return null;
@@ -426,17 +601,18 @@ export class FakeStores {
         // The login window is the backend's own window; the fake finishes it at once.
         setTimeout(() => {
           const outcome = this.nextLogin;
+          const user = source === 'epic' ? FAKE_EPIC_USERNAME : FAKE_USERNAME;
           if (outcome === 'connected') {
-            this.status.connection = 'connected';
-            this.status.username = FAKE_USERNAME;
-            this.status.in_rail = true;
-            if (this.status.tool.state !== 'installed') this.installTool();
+            status.connection = 'connected';
+            status.username = user;
+            status.in_rail = true;
+            if (status.tool.state !== 'installed') this.installTool(source);
           }
           this.emit('store-login', {
-            source: 'gog',
+            source,
             outcome,
-            username: outcome === 'connected' ? FAKE_USERNAME : '',
-            error: outcome === 'failed' ? 'GOG returned an error. Try again.' : '',
+            username: outcome === 'connected' ? user : '',
+            error: outcome === 'failed' ? `${nameOf(source)} returned an error. Try again.` : '',
           });
           this.changed();
         }, 600);
@@ -444,21 +620,21 @@ export class FakeStores {
       case 'store_cancel_login':
         return null;
       case 'store_disconnect':
-        this.status.connection = 'not_connected';
-        this.status.username = '';
-        this.status.tool = { ...this.status.tool, state: 'not_installed' };
-        this.status.in_rail = this.games.some((x) => x.installed);
+        status.connection = 'not_connected';
+        status.username = '';
+        status.tool = { ...status.tool, state: 'not_installed' };
+        status.in_rail = this.gamesOf(source).some((x) => x.installed);
         this.changed();
         return null;
       case 'store_install_tool':
-        this.installTool();
+        this.installTool(source);
         return null;
       case 'store_set_install_dir':
-        this.status.install_dir = String(args.path ?? '');
+        status.install_dir = String(args.path ?? '');
         this.changed();
         return null;
       case 'store_set_cloud_saves':
-        this.status.cloud_saves = Boolean(args.on);
+        status.cloud_saves = Boolean(args.on);
         this.changed();
         return null;
       case 'store_install_options':
@@ -587,14 +763,28 @@ export class FakeStores {
     }
   }
 
-  private installTool(): void {
-    this.status.tool = { ...this.status.tool, state: 'installing', done: 0, total: this.status.tool.size_bytes };
-    this.queue('store_tool', null, 'gogdl', { source_id: 'gog' });
-    this.notice('Installing gogdl (1 MB) for GOG…');
+  private installTool(source: FakeSource = 'gog'): void {
+    const status = this.statuses[source];
+    status.tool = { ...status.tool, state: 'installing', done: 0, total: status.tool.size_bytes };
+    this.queue('store_tool', null, toolOf(source), { source_id: source }, source);
+    this.notice(`Installing ${toolOf(source)} (${Math.max(1, Math.round(status.tool.size_bytes / MB))} MB) for ${nameOf(source)}…`, {}, source);
     this.changed();
   }
 
   installOptions(g: StoreGame | null): StoreInstallOptions {
+    if (g?.source === 'epic') {
+      // legendary installs the Windows build only, in one language: no Version, no Language.
+      return {
+        versions: [{ platform: 'windows', recommended: true, download_bytes: g.download_bytes, disk_bytes: g.disk_bytes }],
+        languages: [],
+        default_language: '',
+        dlc: g.dlc.map((d) => ({ ...d })),
+        install_dir: folderOf('epic', g.title),
+        free_bytes: 412 * GB,
+        volume: '/home',
+        compat_tool: 'GE-Proton10-17',
+      };
+    }
     const linux = g?.platforms.includes('linux') ?? false;
     const versions: StoreInstallOptions['versions'] = (g?.platforms ?? ['windows']).map((p) => ({
       platform: p,
@@ -623,13 +813,17 @@ export class FakeStores {
       exe_user_pinned: false,
       launch_parameters: '',
       compat_tool: win ? 'GE-Proton10-17' : '',
-      wineprefix: win ? `${g?.install_dir}/pfx` : '',
+      wineprefix: win ? `${g?.install_dir}/${g?.source === 'epic' ? 'prefix' : 'pfx'}` : '',
       cloud_saves: g?.cloud !== 'off',
     };
   }
 
   private cloudState(g: StoreGame | null): StoreCloudState {
     if (g && this.cloud[g.key]) return this.cloud[g.key];
+    if (g?.source === 'epic') {
+      const state = g.cloud === 'off' ? 'off' : g.cloud === 'none' ? 'none' : 'synced';
+      return { state, synced_at: g.last_sync, locations: state === 'none' ? [] : [`${g.install_dir}/prefix/drive_c/users/steamuser/Saved Games/${g.title}`], conflict: null };
+    }
     const loc = g?.installed_platform === 'linux' ? `~/.local/share/${(g?.title ?? '').replace(/[^A-Za-z]+/g, '')}/saves` : `${g?.install_dir}/pfx/drive_c/users/steamuser/Saved Games/${g?.title}`;
     const state = g?.cloud === 'off' ? 'off' : g?.cloud === 'none' ? 'none' : 'synced';
     return { state, synced_at: g?.last_sync ?? 0, locations: [loc], conflict: null };

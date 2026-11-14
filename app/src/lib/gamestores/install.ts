@@ -1,8 +1,11 @@
 // The store install dialog (GameStores README, "Install dialog"; prototype
 // `stInstallHTML`): Version (GOG, when both builds exist), Options
 // (compatibility tool, language, install folder), DLC you own, the space line
-// and the button. Pure: the dialog keeps the choice; this words it.
-import type { StoreGame, StoreInstallOptions, StoreInstallRequest, StorePlatform } from '../api';
+// and the button. Epic Games has neither Version nor Language: its games are
+// Windows builds, in one language. Pure: the dialog keeps the choice; this
+// words it.
+import type { StoreGame, StoreInstallOptions, StoreInstallRequest, StorePlatform, StoreSource } from '../api';
+import { storeCaps } from './marks';
 import { sizeGb } from './text';
 
 export type InstallChoice = {
@@ -27,9 +30,9 @@ export function initialChoice(opts: StoreInstallOptions): InstallChoice {
 
 export type VersionRow = { platform: StorePlatform; label: string; note: string; recommended: boolean };
 
-/** The Version radios, Linux first, shown only when both builds exist. */
-export function versionRows(opts: StoreInstallOptions, compat: string): VersionRow[] {
-  if (opts.versions.length < 2) return [];
+/** The Version radios, Linux first, shown only when both builds exist (a store with versions: GOG). */
+export function versionRows(opts: StoreInstallOptions, compat: string, source: StoreSource = 'gog'): VersionRow[] {
+  if (!storeCaps(source).hasVersions || opts.versions.length < 2) return [];
   const order: StorePlatform[] = ['linux', 'windows'];
   return order.flatMap((p) => {
     const v = opts.versions.find((x) => x.platform === p);
@@ -89,9 +92,9 @@ export function installDialogView(
   return {
     title: `Install ${game.title}`,
     sub: `${storeName} · ${sizeGb(base?.download_bytes ?? game.download_bytes)} download`,
-    versions: versionRows(opts, choice.compatTool),
+    versions: versionRows(opts, choice.compatTool, game.source),
     showCompat: choice.platform === 'windows',
-    showLanguage: opts.languages.length > 1,
+    showLanguage: storeCaps(game.source).hasLanguages && opts.languages.length > 1,
     spaceLine: tooBig
       ? `Needs ${sizeGb(sizes.diskBytes)} · ${sizeGb(opts.free_bytes)} free on ${volume}`
       : `${sizeGb(sizes.diskBytes)} on disk · ${sizeGb(opts.free_bytes)} free on ${volume}`,

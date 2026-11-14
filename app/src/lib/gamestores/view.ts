@@ -3,7 +3,7 @@
 // which chips and actions it has, and the panel that replaces the grid.
 import type { StoreGame, StoreSource, StoreStatus } from '../api';
 import { availBlock, type StorePart } from './rail';
-import { hasStoreCloud, storeName, storeTool } from './marks';
+import { canBackup, hasCloud, hasInstaller, storeName, storeTool } from './marks';
 import { agoText, plural, sizeGb } from './text';
 
 /** The view's title parts: "GOG" and "· Installed". */
@@ -49,7 +49,7 @@ export function storeChips(status: StoreStatus): StoreChip[] {
   } else {
     out.push({ text: 'Not connected · Connect…', act: 'settings', warn: false, testId: 'store-chip-off' });
   }
-  if (hasStoreCloud(status.source) && status.cloud_saves && status.connection !== 'not_connected') {
+  if (hasCloud(status.source) && status.cloud_saves && status.connection !== 'not_connected') {
     out.push({ text: 'Cloud saves: on', act: null, warn: false, testId: 'store-chip-cloud' });
   }
   const tool = storeTool(status.source);
@@ -59,19 +59,23 @@ export function storeChips(status: StoreStatus): StoreChip[] {
   return out;
 }
 
-/** The header's actions on the right: Backup all N… (GOG › Installed), Install from installer… (GOG), Refresh (Available). */
+/**
+ * The header's actions on the right: Backup all N… (Installed, a store that
+ * can back up: GOG), Install from installer… (a store with offline
+ * installers: GOG), Refresh (Available). Epic Games has Refresh only.
+ */
 export function storeHeaderActions(
   status: StoreStatus,
   part: StorePart,
   installedCount: number,
 ): { backupAll: number; installer: boolean; refresh: boolean; select: boolean } {
-  const gog = status.source === 'gog';
+  const backup = canBackup(status.source);
   return {
-    backupAll: gog && part === 'installed' ? installedCount : 0,
-    installer: gog,
+    backupAll: backup && part === 'installed' ? installedCount : 0,
+    installer: hasInstaller(status.source),
     refresh: part === 'available' && availBlock(status) === '',
-    // Select mode (backups) is offered in GOG › Installed only.
-    select: gog && part === 'installed' && installedCount > 0,
+    // Select mode (backups) is offered in a backup store's Installed only.
+    select: backup && part === 'installed' && installedCount > 0,
   };
 }
 
@@ -104,7 +108,7 @@ export type StorePanel = {
  */
 export function storePanel(status: StoreStatus, part: StorePart, games: readonly StoreGame[]): StorePanel | null {
   const name = storeName(status.source);
-  const gog = status.source === 'gog';
+  const installer = hasInstaller(status.source);
   const panel = (p: Omit<StorePanel, 'kind' | 'tone'> & { tone?: StorePanel['tone'] }): StorePanel => ({
     kind: 'panel',
     tone: p.tone ?? '',
@@ -117,10 +121,10 @@ export function storePanel(status: StoreStatus, part: StorePart, games: readonly
     if (games.length > 0) return null;
     return panel({
       title: `No ${name} games installed yet`,
-      body: gog ? 'Install one from Available, or from a GOG offline installer you downloaded.' : 'Install one from Available.',
+      body: installer ? `Install one from Available, or from a ${name} offline installer you downloaded.` : 'Install one from Available.',
       actions: [
         { label: 'Open Available', act: 'open_available', primary: true },
-        ...(gog ? [{ label: 'Install from installer…', act: 'installer' as const, primary: false }] : []),
+        ...(installer ? [{ label: 'Install from installer…', act: 'installer' as const, primary: false }] : []),
       ],
       testId: 'store-state-empty-installed',
     });

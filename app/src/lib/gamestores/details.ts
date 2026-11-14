@@ -4,7 +4,7 @@
 // `stSettingsHTML`). Pure: which buttons, lines, chips, tabs and facts show.
 import type { DownloadEntry, DriveStoreGame, StoreCloudState, StoreGame, StoreStatus } from '../api';
 import { jobAct, jobPercent } from './jobs';
-import { hasStoreCloud, noBackupReason, storeName } from './marks';
+import { canBackup, hasCloud, installedByTool, noBackupReason, storeLauncher, storeName } from './marks';
 import { agoText, changedAt, sizeGb } from './text';
 
 export type StoreButtonAct =
@@ -84,11 +84,12 @@ export function storeButtons(ctx: DetailsContext): StoreButton[] {
         ? { label: `Remove from ${ctx.drive.name}`, act: 'remove_drive_confirm', primary: false, destructive: true, confirm: true }
         : { label: 'Remove from drive…', act: 'remove_drive', primary: false, destructive: true },
     );
-  } else if (game.source === 'gog' && game.installed) {
+  } else if (canBackup(game.source) && game.installed) {
     out.push({ label: 'Backup to drive…', act: 'backup', primary: false });
   }
   if (game.installed && job === null) {
-    out.push({ label: 'Verify and repair', act: 'verify', primary: false, disabled: !signedIn || game.origin !== 'gogdl' });
+    // Only the store's tool can verify: an offline install or a drive copy can't be.
+    out.push({ label: 'Verify and repair', act: 'verify', primary: false, disabled: !signedIn || !installedByTool(game) });
     out.push(
       confirm === 'uninstall'
         ? { label: 'Confirm uninstall', act: 'uninstall_confirm', primary: false, destructive: true, confirm: true }
@@ -120,7 +121,7 @@ export function storeLines(
   if (game.not_supported !== '') {
     out.push({
       kind: 'why',
-      text: `Needs ${game.not_supported}. GRID can’t install games that start through another company’s launcher; install it from the ${launcherOf(game)} instead.`,
+      text: `Needs ${game.not_supported}. GRID can’t install games that start through another company’s launcher; install it from the ${storeLauncher(game.source)} instead.`,
       testId: 'store-details-unsupported',
     });
   }
@@ -132,22 +133,18 @@ export function storeLines(
     });
   }
   out.push({ kind: 'meta', text: runsLine(game, opts.compat), testId: 'store-details-runs' });
-  if (game.installed && hasStoreCloud(game.source)) {
+  if (game.installed && hasCloud(game.source)) {
     out.push(cloudLine(game, opts.syncing, opts.nowSeconds));
   }
   if (game.origin === 'offline') out.push({ kind: 'meta', text: 'Installed from an offline installer', testId: 'store-details-offline' });
   if (ctx.drive) {
     out.push({ kind: 'meta', text: driveRestoreLine(ctx.drive.game), testId: 'store-details-drive-copy' });
-  } else if (game.source === 'gog') {
+  } else if (canBackup(game.source)) {
     if (opts.onDrives.length > 0) out.push({ kind: 'drive', text: `On ${opts.onDrives.join(', ')}`, testId: 'store-details-on-drives' });
   } else {
     out.push({ kind: 'meta', text: noBackupReason(game.source), testId: 'store-details-no-backup' });
   }
   return out;
-}
-
-function launcherOf(game: StoreGame): string {
-  return game.source === 'epic' ? 'Epic Games Launcher' : `${storeName(game.source)} app`;
 }
 
 /** "Runs natively · Linux version", "Runs through GE-Proton10-17 · Windows version", or for a game not installed "Has a Linux version" / "Windows only · runs through …". */
@@ -218,7 +215,7 @@ export type StoreTab = 'overview' | 'media' | 'cloud';
 
 /** Overview, Media, and Cloud saves for an installed GOG (or Epic) game. */
 export function storeTabs(game: StoreGame): StoreTab[] {
-  return game.installed && hasStoreCloud(game.source) ? ['overview', 'media', 'cloud'] : ['overview', 'media'];
+  return game.installed && hasCloud(game.source) ? ['overview', 'media', 'cloud'] : ['overview', 'media'];
 }
 
 export const STORE_TAB_LABELS: Record<StoreTab, string> = { overview: 'Overview', media: 'Media', cloud: 'Cloud saves' };
