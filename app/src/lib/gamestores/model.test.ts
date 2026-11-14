@@ -53,11 +53,11 @@ describe('text', () => {
 });
 
 describe('marks', () => {
-  it('shows GOG, Epic Games and Amazon Games in Phase 3', () => {
-    expect(ENABLED_STORES).toEqual(['amazon', 'epic', 'gog']);
+  it('shows all four stores in Phase 4', () => {
+    expect(ENABLED_STORES).toEqual(['amazon', 'epic', 'gog', 'steam']);
     expect(isEnabledStore('epic')).toBe(true);
     expect(isEnabledStore('amazon')).toBe(true);
-    expect(isEnabledStore('steam')).toBe(false);
+    expect(isEnabledStore('steam')).toBe(true);
     expect(storeName('gog')).toBe('GOG');
     expect(storeName('epic')).toBe('Epic Games');
     expect(storeName('amazon')).toBe('Amazon Games');
@@ -109,10 +109,12 @@ describe('marks', () => {
     expect(storesLede(['epic', 'gog'])).toBe(
       `${start} GRID installs GOG and Epic games with the open-source tools Heroic Games Launcher uses; their logins stay in those tools’ files in GRID’s data folder.`,
     );
-    // Phase 3: the prototype's line without Steam.
-    expect(storesLede()).toBe(
+    // Phase 3's line, without Steam.
+    expect(storesLede(['amazon', 'epic', 'gog'])).toBe(
       `${start} GRID installs GOG, Epic and Amazon games with the open-source tools Heroic Games Launcher uses; their logins stay in those tools’ files in GRID’s data folder.`,
     );
+    // Phase 4 shows every store: the prototype's full line.
+    expect(storesLede()).toBe(storesLede(['amazon', 'epic', 'gog', 'steam']));
     // The prototype's full line, every store shown.
     expect(storesLede(['amazon', 'epic', 'gog', 'steam'])).toBe(
       `${start} GRID installs GOG, Epic and Amazon games with the open-source tools Heroic Games Launcher uses; their logins stay in those tools’ files in GRID’s data folder. Steam games install and start through the Steam client.`,
@@ -173,8 +175,8 @@ describe('rail', () => {
     expect(storeRailGroups([status({ owned: 'loading' })])[0].rows[1].count).toEqual({ kind: 'loading' });
     expect(storeRailGroups([status({ connection: 'expired' })])[0].rows[1].count).toEqual({ kind: 'attention' });
   });
-  it('hides stores that are not enabled', () => {
-    expect(storeRailGroups([status({ source: 'steam' })])).toEqual([]);
+  it('keeps a status the backend sends for a store it has no group for out', () => {
+    expect(storeRailGroups([status({ source: 'steam', connection: 'not_connected', in_rail: false })])).toEqual([]);
   });
 });
 

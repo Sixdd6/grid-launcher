@@ -2,7 +2,8 @@
   // Settings › Stores (TVStores README § Settings › Stores; prototype
   // `setPaint` for `stores`): a row per store with its mark, "Signed in as …"
   // (or "Not signed in") and its status (Connected, Login expired, Not
-  // connected). A opens the store's page. One row per enabled store (GOG, Epic Games).
+  // connected; Steam: "SteamID64 …" and Connected / Installed games only / Not
+  // connected). A opens the store's page (Steam's is TvSteamPage). One row per enabled store.
   import { ENABLED_STORES, storeName } from '../../gamestores/marks';
   import { gameStores } from '../../stores/gameStores.svelte';
   import { tvf } from '../focus/actions';

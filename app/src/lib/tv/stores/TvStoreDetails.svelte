@@ -6,12 +6,14 @@
   // repair · Uninstall · Backup to drive… / Install from drive · Remove from
   // drive…) and the tabs (LB / RB): Overview with DLC you own, Media, and
   // Cloud saves for an installed GOG game. From a drive's grid the header
-  // line starts "From Couch kit".
+  // line starts "From Couch kit". A Steam game's page goes through the Steam
+  // client: Install in Steam, the disabled "Installing in Steam · 52%" with
+  // its Managed by Steam box, Verify in Steam and Uninstall in Steam….
   import { tick } from 'svelte';
   import { api, type DriveStoreGame, type StoreCloudState, type StoreGame } from '../../api';
   import { descriptionParagraphs } from '../../gamestores/details';
   import { liveJobFor } from '../../gamestores/jobs';
-  import { canBackup, hasStoreCloud, storeName } from '../../gamestores/marks';
+  import { canBackup, hasStoreCloud, managedByClient, storeName } from '../../gamestores/marks';
   import { sizeGb } from '../../gamestores/text';
   import { downloads } from '../../stores/downloads.svelte';
   import { drives } from '../../stores/drives.svelte';
@@ -32,7 +34,19 @@
   import TvStoreMark from './TvStoreMark.svelte';
   import TvStoreViewer from './TvStoreViewer.svelte';
   import { bumpDrives, driveStoreCache, setSyncing, tvStores } from './storeState.svelte';
-  import { card, defaultCompat, fail, openInstall, openStoreBackup, playStore, resolveCloud, restoreFromDrive, toDownloads } from './storeActions';
+  import {
+    card,
+    defaultCompat,
+    fail,
+    openInstall,
+    openStoreBackup,
+    playStore,
+    resolveCloud,
+    restoreFromDrive,
+    steamUninstall,
+    steamVerify,
+    toDownloads,
+  } from './storeActions';
   import { uninstalledNotice } from '../../gamestores/notices';
   import {
     cancelJobWords,
@@ -46,6 +60,7 @@
     tvFacts,
     tvHeaderLine,
     tvLeftLines,
+    tvManagedBox,
     tvStoreButtons,
     tvTabs,
     tvTabStep,
@@ -195,9 +210,18 @@
         void pushPage({ title: 'Game settings', component: TvStoreGameSettings, props: { gameKey } });
         return;
       case 'verify':
+        if (managedByClient(g.source)) {
+          steamVerify(g);
+          return;
+        }
         void api.storeRepair(g.key).then(() => card(`Verifying ${g.title}’s files…`), fail);
         return;
       case 'uninstall':
+        // Steam asks in its own window: no confirm of GRID's.
+        if (managedByClient(g.source)) {
+          steamUninstall(g);
+          return;
+        }
         ask(uninstallWords(g), true, () =>
           void api
             .storeUninstall(g.key)
@@ -279,6 +303,7 @@
     });
   }
 
+  let managed = $derived(tvManagedBox(job));
   let cloudTab = $derived(game ? tvCloudTab(game, cloud, nowSeconds, tvStores.syncing(gameKey)) : null);
 </script>
 
@@ -287,6 +312,9 @@
     <div class="det-l">
       <TvStoreCover k="dc" {game} {job} quick={null} label={false} width="17rem" testId="tv-store-det-cover" />
       <div class="lp" data-testid="tv-det-left">
+        {#if managed}
+          <div class="smanaged" data-testid="tv-store-managed"><b>{managed.bold}</b>{managed.rest}<div class="pbar"><b style={`width:${managed.pct}%`}></b></div></div>
+        {/if}
         {#each lines as line (line.key)}
           <div data-testid={`tv-store-line-${line.key}`}>{#each line.segs as s, j (j)}{#if s.b}<b class:warn={s.warn}>{s.text}</b>{:else}{s.text}{/if}{/each}</div>
         {/each}

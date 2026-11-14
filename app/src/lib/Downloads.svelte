@@ -161,6 +161,9 @@
                   disabled={pending[e.id]}
                   onclick={() => cancel(e)}
                 >{e.kind === 'library_move' ? 'Cancel move' : 'Cancel'}</button>
+              {:else if action === 'managed'}
+                <!-- GameStores README: Steam owns pause and cancel of its installs. -->
+                <button data-testid={`download-action-cancel-${e.id}`} disabled title="Managed by Steam">Cancel</button>
               {:else if action === 'retry-dismiss'}
                 <button data-testid={`download-action-retry-${e.id}`} disabled={pending[e.id]} onclick={() => retry(e)}>Retry</button>
                 <button data-testid={`download-action-dismiss-${e.id}`} class="secondary" disabled={pending[e.id]} onclick={() => dismiss(e.id)}>Dismiss</button>

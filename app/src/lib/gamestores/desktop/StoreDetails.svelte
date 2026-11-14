@@ -18,6 +18,7 @@
     cloudPanel,
     descriptionParagraphs,
     dlcRows,
+    managedBox,
     saveLocationsNote,
     STORE_TAB_LABELS,
     storeButtons,
@@ -31,7 +32,7 @@
     type StoreTab,
   } from '../details';
   import { liveJobFor } from '../jobs';
-  import { canBackup, storeName } from '../marks';
+  import { canBackup, managedByClient, storeName } from '../marks';
   import { parseGameKey } from '../../gameKey';
   import { removedFromDriveNotice, uninstalledNotice } from '../notices';
   import StoreMark from './StoreMark.svelte';
@@ -49,6 +50,8 @@
     resolveCloud,
     showCard,
     signIn,
+    steamUninstall,
+    steamVerify,
     stopStore,
     syncNow,
     uninstallStore,
@@ -130,6 +133,7 @@
       : [],
   );
   let chips = $derived(game ? storeDetailChips(game, playing) : []);
+  let managed = $derived(managedBox(job));
   let facts = $derived(game ? storeFacts(game) : []);
   let dlc = $derived(game ? dlcRows(game, downloads.entries) : []);
   let panel = $derived(game ? cloudPanel(game, cloud, now) : null);
@@ -228,10 +232,13 @@
         }
         break;
       case 'verify':
-        await repairStore(g);
+        if (managedByClient(g.source)) await steamVerify(g);
+        else await repairStore(g);
         break;
       case 'uninstall':
-        confirm = 'uninstall';
+        // Steam asks in its own uninstall window: no confirm of GRID's.
+        if (managedByClient(g.source)) await steamUninstall(g);
+        else confirm = 'uninstall';
         break;
       case 'uninstall_confirm':
         confirm = null;
@@ -310,6 +317,14 @@
           </div>
 
           <div class="action">
+            {#if managed}
+              <!-- Steam installs it: the progress, and why GRID can't pause or cancel it. -->
+              <div class="managed" data-testid="store-details-managed">
+                <span><b>{managed.title}</b></span>
+                <div class="mbar"><b style:width={`${managed.pct}%`}></b></div>
+                <span>{managed.note}</span>
+              </div>
+            {/if}
             <!-- Keyed without `_confirm`: the second click's button is the
                  same element, so it keeps focus (and Escape still closes). -->
             {#each buttons as b (b.act.replace(/_confirm$/, ''))}
@@ -627,6 +642,36 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+
+  /* Steam's install (prototype `.st-managed`): its percentage, bar and note. */
+  .managed {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: var(--r-control);
+    background: var(--field);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .managed b {
+    color: var(--text-h);
+    font-weight: 600;
+  }
+
+  .mbar {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line);
+    overflow: hidden;
+  }
+
+  .mbar b {
+    display: block;
+    height: 100%;
+    background: var(--primary);
   }
 
   .action button {

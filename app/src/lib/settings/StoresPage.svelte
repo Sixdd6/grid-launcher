@@ -1,14 +1,16 @@
 <script lang="ts">
   // Settings › Stores (GameStores README, "Settings › Stores"; prototype
   // `renderStoresPane`, `stStoreCard`). A lede, then one card per store in
-  // the rail's order (Epic Games, GOG). Words come from
-  // `gamestores/settings.ts`.
+  // the rail's order (Amazon Games, Epic Games, GOG, Steam). Words come from
+  // `gamestores/settings.ts`; Steam, which has no tool and no login, has its
+  // own card (`SteamCard.svelte`).
   import { api, type StoreStatus } from '../api';
   import Icon from '../Icon.svelte';
   import { pickFolder } from '../pickers';
   import { gameStores } from '../stores/gameStores.svelte';
   import StoreMark from '../gamestores/desktop/StoreMark.svelte';
-  import { hasCloud, hasInstaller, storeName } from '../gamestores/marks';
+  import { hasCloud, hasInstaller, managedByClient, storeName } from '../gamestores/marks';
+  import SteamCard from './SteamCard.svelte';
   import { disconnectedNotice, storeCloudSwitchNotice, refusedNotice } from '../gamestores/notices';
   import {
     accountLine,
@@ -74,6 +76,9 @@
   {/if}
 
   {#each statuses as s (s.source)}
+    {#if managedByClient(s.source)}
+      <SteamCard status={s} {active} />
+    {:else}
     {@const pill = storePill(s)}
     {@const tool = toolLine(s)}
     {@const lic = licenseLine(s)}
@@ -189,6 +194,7 @@
         </div>
       {/if}
     </article>
+    {/if}
   {/each}
 </div>
 

@@ -3,11 +3,13 @@
   // `splaying`): NOW PLAYING, the title, "GOG · Native · 0:12", "Your saves
   // sync with GOG when the game closes." while its saves sync, Back to the
   // game (focused) and Stop game (confirmed). The page closes by itself when
-  // the game exits; the upload card after it is the backend's.
+  // the game exits; the upload card after it is the backend's. A Steam game
+  // runs in Steam: "Steam · running in Steam", its note, and no Stop game.
   import { onDestroy } from 'svelte';
   import { api } from '../../api';
   import * as run from '../../games/run';
   import { gameStores } from '../../stores/gameStores.svelte';
+  import { managedByClient, storeOfKey } from '../../gamestores/marks';
   import { sessions } from '../../stores/sessions.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import { closeLayer, nav, popPage, topLayer } from '../nav.svelte';
@@ -30,6 +32,7 @@
   let startedMs = $derived(session && session.started_at > 0 ? session.started_at * 1000 : openedAt);
   let line = $derived(game ? tvPlayingLine(game, defaultCompat(), sessionTime(now - startedMs)) : sessionTime(now - startedMs));
   let note = $derived(game ? tvPlayingNote(game) : null);
+  let canStop = $derived(!managedByClient(game?.source ?? storeOfKey(gameKey)));
 
   const tick = setInterval(() => (now = Date.now()), 1000);
   onDestroy(() => clearInterval(tick));
@@ -87,7 +90,7 @@
     {#if note}<p class="note pl-note">{note}</p>{/if}
     <div class="btns" data-nav="h">
       <TvButton k="pl-resume" autofocus testId="tv-playing-resume" onA={resume}>Back to the game</TvButton>
-      <TvButton k="pl-stop" danger testId="tv-playing-stop" onA={stop}>Stop game</TvButton>
+      {#if canStop}<TvButton k="pl-stop" danger testId="tv-playing-stop" onA={stop}>Stop game</TvButton>{/if}
     </div>
   </div>
 </div>

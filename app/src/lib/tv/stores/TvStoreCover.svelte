@@ -6,6 +6,7 @@
   // tag at the bottom left. A opens the game's page; X is the quick action
   // (Play, Install…, Install from drive), none while a job runs.
   import type { DownloadEntry, StoreGame } from '../../api';
+  import { coverProgressTone } from '../../gamestores/cover';
   import { storeName } from '../../gamestores/marks';
   import { tvf } from '../focus/actions';
   import TvIcon from '../ui/TvIcon.svelte';
@@ -57,7 +58,7 @@
     {#if tag}<span class={`tag ${tag.cls}`} data-testid="tv-store-cover-tag">{tag.text}</span>{/if}
     {#if game.installed}<i class="idot" aria-label="Installed"></i>{/if}
     {#if mixed}<span class="tag sst"><TvStoreMark source={game.source} />{storeName(game.source)}</span>{/if}
-    {#if jt}<span class="tag q" data-testid="tv-store-cover-job">{jt.text}</span><span class="sprog"><b style={`width:${jt.pct}%`}></b></span>{/if}
+    {#if jt}<span class="tag q" data-testid="tv-store-cover-job">{jt.text}</span><span class="sprog" class:managed={coverProgressTone(job) === 'managed'} data-testid="tv-store-cover-bar"><b style={`width:${jt.pct}%`}></b></span>{/if}
   </span>
   {#if label}<span class="cv-l">{game.title}</span>{/if}
 {/snippet}

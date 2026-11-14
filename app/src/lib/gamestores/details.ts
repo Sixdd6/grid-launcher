@@ -3,8 +3,18 @@
 // from a drive"; prototype `stRenderDetails`, `stCloudHTML`, `stConflictHTML`,
 // `stSettingsHTML`). Pure: which buttons, lines, chips, tabs and facts show.
 import type { DownloadEntry, DriveStoreGame, StoreCloudState, StoreGame, StoreStatus } from '../api';
-import { jobAct, jobPercent } from './jobs';
-import { canBackup, hasCloud, hasDlc, installedByTool, noBackupReason, shownVersion, storeLauncher, storeName, updateLabel } from './marks';
+import { isManagedRow, jobAct, jobPercent } from './jobs';
+import { canBackup, hasCloud, hasDlc, installedByTool, managedByClient, noBackupReason, shownVersion, storeLauncher, storeName, updateLabel } from './marks';
+import {
+  INSTALL_IN_STEAM,
+  installingInSteam,
+  MANAGED_BY_STEAM,
+  MANAGED_NOTE,
+  OUTSIDE_GRID,
+  RUNNING_IN_STEAM,
+  UNINSTALL_IN_STEAM,
+  VERIFY_IN_STEAM,
+} from './steam';
 import { agoText, changedAt, sizeGb } from './text';
 
 export type StoreButtonAct =
@@ -56,6 +66,7 @@ export type DetailsContext = {
  */
 export function storeButtons(ctx: DetailsContext): StoreButton[] {
   const { game, status, job, playing, confirm } = ctx;
+  if (managedByClient(game.source)) return clientButtons(ctx);
   const out: StoreButton[] = [];
   const signedIn = status !== null && status.connection === 'connected';
   if (job !== null) {
@@ -100,6 +111,39 @@ export function storeButtons(ctx: DetailsContext): StoreButton[] {
   return out;
 }
 
+/**
+ * A store whose client runs everything (Steam; prototype `stRenderDetails`'s
+ * Steam branches): a disabled Cancel beside the managed box while Steam
+ * installs, Play / Running in Steam, Install in Steam (no dialog), then
+ * Verify in Steam and Uninstall in Steam… (Steam asks, so no confirm of
+ * GRID's own). No Game Settings, Update or drive buttons.
+ */
+function clientButtons(ctx: DetailsContext): StoreButton[] {
+  const { game, job, playing } = ctx;
+  const out: StoreButton[] = [];
+  if (job !== null && isManagedRow(job)) {
+    out.push({ label: 'Cancel', act: 'cancel', primary: false, disabled: true, title: MANAGED_BY_STEAM });
+  } else if (game.installed) {
+    out.push(playing ? { label: RUNNING_IN_STEAM, act: 'stop', primary: true } : { label: 'Play', act: 'play', primary: true });
+  } else {
+    out.push({ label: INSTALL_IN_STEAM, act: 'install', primary: true });
+  }
+  if (game.installed && job === null) {
+    out.push({ label: VERIFY_IN_STEAM, act: 'verify', primary: false });
+    out.push({ label: UNINSTALL_IN_STEAM, act: 'uninstall', primary: false });
+  }
+  return out;
+}
+
+/** The box above the disabled Cancel while the store's client installs: "Installing in Steam · 52%", its bar and note. */
+export type ManagedBox = { title: string; pct: number; note: string };
+
+export function managedBox(job: DownloadEntry | null): ManagedBox | null {
+  if (job === null || !isManagedRow(job)) return null;
+  const pct = jobPercent(job);
+  return { title: installingInSteam(pct), pct, note: MANAGED_NOTE };
+}
+
 export type LineKind = 'why' | 'meta' | 'cloud' | 'cloud-err' | 'drive';
 /** A line under the buttons. `link` is a trailing link button ("Sign in again", "Resolve"). */
 export type StoreLine = { kind: LineKind; text: string; link?: { label: string; act: 'sign_in' | 'cloud_tab' }; testId: string };
@@ -112,7 +156,7 @@ export function storeLines(
   const { game, status } = ctx;
   const name = storeName(game.source);
   const out: StoreLine[] = [];
-  if (!game.installed && status !== null && status.connection !== 'connected' && !ctx.drive) {
+  if (!game.installed && status !== null && status.connection !== 'connected' && !ctx.drive && !managedByClient(game.source)) {
     out.push(
       status.connection === 'not_connected'
         ? { kind: 'why', text: `Connect ${name} in Settings › Stores to install.`, testId: 'store-details-why' }
@@ -138,6 +182,7 @@ export function storeLines(
     out.push(cloudLine(game, opts.syncing, opts.nowSeconds));
   }
   if (game.origin === 'offline') out.push({ kind: 'meta', text: 'Installed from an offline installer', testId: 'store-details-offline' });
+  if (game.installed && game.origin === 'steam_outside') out.push({ kind: 'meta', text: OUTSIDE_GRID, testId: 'store-details-outside' });
   if (ctx.drive) {
     out.push({ kind: 'meta', text: driveRestoreLine(ctx.drive.game), testId: 'store-details-drive-copy' });
   } else if (canBackup(game.source)) {
@@ -150,7 +195,7 @@ export function storeLines(
 
 /** "Runs natively · Linux version", "Runs through GE-Proton10-17 · Windows version", or for a game not installed "Has a Linux version" / "Windows only · runs through …". */
 export function runsLine(game: StoreGame, compat: string): string {
-  if (game.source === 'steam') return 'Launches through Steam';
+  if (managedByClient(game.source)) return 'Launches through Steam';
   if (!game.installed) {
     return game.platforms.includes('linux') ? 'Has a Linux version' : `Windows only · runs through ${compat}`;
   }
@@ -189,7 +234,8 @@ export function driveRestoreLine(g: DriveStoreGame): string {
 
 /** "GOG · 2023 · Lantern Works · RPG"; a drive leads with "From Couch kit". */
 export function storeHeaderLine(game: StoreGame): string {
-  return [storeName(game.source), game.year, game.developer, game.genres.join(', ')].filter((p) => p.trim() !== '').join(' · ');
+  const genres = managedByClient(game.source) ? '' : game.genres.join(', ');
+  return [storeName(game.source), game.year, game.developer, genres].filter((p) => p.trim() !== '').join(' · ');
 }
 
 export type StoreChipKind = 'store' | 'playing' | 'plain';
@@ -202,7 +248,8 @@ export function storeDetailChips(game: StoreGame, playing: boolean): StoreDetail
   // Amazon's version is an opaque id: no chip (user decision 2026-11-13).
   const version = shownVersion(game);
   if (game.installed && version !== '') out.push({ kind: 'plain', text: `v${version}`, testId: 'store-details-chip-version' });
-  if (game.installed && game.installed_platform !== null) {
+  // Steam's chips are the store's and Playing only: Steam picks the build.
+  if (game.installed && game.installed_platform !== null && !managedByClient(game.source)) {
     out.push({
       kind: 'plain',
       text: game.installed_platform === 'linux' ? 'Linux version' : 'Windows version',
@@ -225,21 +272,28 @@ export const STORE_TAB_LABELS: Record<StoreTab, string> = { overview: 'Overview'
 
 export type Fact = { term: string; value: string; code?: boolean };
 
-/** Overview's facts: Store, Developer, Released, Genres, Size, Version ("v2.1 · GOG v2.2"; none for Amazon), Folder. */
+/**
+ * Overview's facts: Store, Developer, Released, Genres, Size, Version ("v2.1 ·
+ * GOG v2.2"; none for Amazon), Folder. Steam has no Genres (Choices 6), no
+ * Size for a game not installed (Steam's API gives none; never guessed) and
+ * no Folder (Steam owns it).
+ */
 export function storeFacts(game: StoreGame): Fact[] {
   const name = storeName(game.source);
+  const managed = managedByClient(game.source);
   const out: Fact[] = [{ term: 'Store', value: name }];
   if (game.developer.trim()) out.push({ term: 'Developer', value: game.developer });
   if (game.year.trim()) out.push({ term: 'Released', value: game.year });
-  if (game.genres.length) out.push({ term: 'Genres', value: game.genres.join(', ') });
-  out.push({ term: 'Size', value: game.installed ? `${sizeGb(game.disk_bytes)} on disk` : `${sizeGb(game.download_bytes)} download` });
+  if (game.genres.length && !managed) out.push({ term: 'Genres', value: game.genres.join(', ') });
+  if (game.installed) out.push({ term: 'Size', value: `${sizeGb(game.disk_bytes)} on disk` });
+  else if (!managed) out.push({ term: 'Size', value: `${sizeGb(game.download_bytes)} download` });
   if (game.installed && shownVersion(game) !== '') {
     out.push({
       term: 'Version',
       value: game.update_version ? `v${game.version} · ${name} v${game.update_version}` : `v${game.version}`,
     });
   }
-  if (game.installed && game.source !== 'steam' && game.install_dir.trim()) out.push({ term: 'Folder', value: game.install_dir, code: true });
+  if (game.installed && !managed && game.install_dir.trim()) out.push({ term: 'Folder', value: game.install_dir, code: true });
   return out;
 }
 

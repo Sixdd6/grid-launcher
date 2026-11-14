@@ -1,14 +1,16 @@
 // The external stores GRID knows, their marks and their tools (GameStores
 // README, designer decision 3: neutral monogram tiles in a store colour,
 // never a store's logo). Pure and UI-agnostic: the desktop and TV mode both
-// read it. Phase 3 shows GOG, Epic Games and Amazon Games: Steam has no rail
-// group, card or row until its phase (docs/stores-phase3-plan.md).
+// read it. Phase 4 shows all four stores: GOG, Epic Games, Amazon Games and
+// Steam (docs/stores-phase4-plan.md).
 //
 // What a store can do is a capability here (`storeCaps`), never a
 // `source === 'gog'` check in a view: GOG, Epic and Amazon all have a tool,
 // but only GOG and Epic have cloud saves and DLC, only GOG has offline
-// installers, drive backups, a Linux build to pick and install languages, and
-// Amazon's versions are opaque ids GRID never shows.
+// installers, drive backups, a Linux build to pick and install languages,
+// Amazon's versions are opaque ids GRID never shows, and Steam has no tool:
+// the Steam client installs, updates, uninstalls and starts its games
+// (`managedByClient`).
 import type { StoreGame, StoreSource } from '../api';
 
 export type StoreMark = {
@@ -31,8 +33,8 @@ export const STORE_MARKS: Record<StoreSource, StoreMark> = {
 /** Every store, alphabetical by name (designer decision 2: the rail's order). */
 export const STORE_ORDER: readonly StoreSource[] = ['amazon', 'epic', 'gog', 'steam'];
 
-/** The stores this build shows. Phase 3: GOG, Epic Games and Amazon Games (Steam is hidden, not "coming soon"). */
-export const ENABLED_STORES: readonly StoreSource[] = ['amazon', 'epic', 'gog'];
+/** The stores this build shows (Phase 4: all four). */
+export const ENABLED_STORES: readonly StoreSource[] = ['amazon', 'epic', 'gog', 'steam'];
 
 export function isEnabledStore(source: string): source is StoreSource {
   return (ENABLED_STORES as readonly string[]).includes(source);
@@ -89,8 +91,10 @@ export type StoreCaps = {
    */
   readableVersions: boolean;
   /**
-   * The store's own client installs, updates and starts its games, and owns
-   * pause and cancel (Steam). No caller reads it until the Steam UI lands.
+   * The store's own client installs, updates, uninstalls and starts its
+   * games, and owns pause and cancel (Steam): Install in Steam (no dialog),
+   * "Managed by Steam" rows with no Cancel, Verify / Uninstall in Steam, no
+   * Game Settings, and "Running in Steam" with no Stop.
    */
   managedByClient: boolean;
 };
@@ -128,6 +132,10 @@ export function hasDlc(source: StoreSource): boolean {
 
 export function readableVersions(source: StoreSource): boolean {
   return CAPS[source].readableVersions;
+}
+
+export function managedByClient(source: StoreSource): boolean {
+  return CAPS[source].managedByClient;
 }
 
 /** The installed version a person can read ("2.1"), or `''` (none, or an opaque id: Amazon). */

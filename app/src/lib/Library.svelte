@@ -68,7 +68,7 @@
   import { gameStores } from './stores/gameStores.svelte';
   import { downloads } from './stores/downloads.svelte';
   import { parseStoreRailKey, storeRailGroups } from './gamestores/rail';
-  import { coverFaded, coverPrimary, coverProgress, coverTags, showCoverCloud } from './gamestores/cover';
+  import { coverFaded, coverPrimary, coverProgress, coverProgressTone, coverTags, showCoverCloud } from './gamestores/cover';
   import { liveJobFor } from './gamestores/jobs';
   import { noMatchText, storeGameMatches, storePanel, type PanelAct } from './gamestores/view';
   import { mixedCounts, mixedStoreGames, selectedToWrite, sortStoreView } from './gamestores/library';
@@ -86,7 +86,9 @@
     refreshStore,
     showCard,
     signIn,
+    steamRecheck,
   } from './gamestores/desktop/ui.svelte';
+  import { navigation } from './stores/navigation.svelte';
   import { refusedNotice } from './gamestores/notices';
 
   let { active }: { active: boolean } = $props();
@@ -280,6 +282,12 @@
         break;
       case 'install_tool':
         void installTool(source);
+        break;
+      case 'open_settings':
+        navigation.goSettings('stores');
+        break;
+      case 'recheck':
+        void steamRecheck();
         break;
       default:
         break;
@@ -881,7 +889,10 @@
         onHoverEnd={hover.end}
         extraTags={coverTags(game, job)}
         progress={coverProgress(job)}
+        progressTone={coverProgressTone(job)}
         primaryLabel={primary.label}
+        primaryDisabled={primary.disabled ?? false}
+        primaryTitle={primary.title}
         storeTag={mixedTag ? { name: mark.name, mono: mark.mono, hue: mark.hue } : null}
         showCloud={showCoverCloud(game)}
         faded={coverFaded(game)}

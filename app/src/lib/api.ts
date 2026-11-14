@@ -479,6 +479,9 @@ export type DownloadKind =
   | 'store_restore'
   // The store tool's own download (gogdl).
   | 'store_tool'
+  // An install the store's own client runs (Steam): GRID shows its progress
+  // from Steam's files. No slot, no Cancel, no Retry (`queue::admit_store_external`).
+  | 'store_external'
   // Game backups: a store game (GOG) written to a drive (`job: 'backup'`;
   // its `source_id` is the game key).
   | 'backup_store_game';

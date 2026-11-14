@@ -1199,6 +1199,91 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
   each on its first attempt, `== e2e: all stages passed`. GOG, Epic and Amazon are
   unchanged by the Steam backend, the `launch_watched` route and the store-external row.
 
+## Contract deviations — package D
+
+Where package D differs from, or adds to, the plan:
+
+- **Frozen file `api.ts`: one line.** `DownloadKind` gains `'store_external'` (the queue's
+  Steam row, `queue::admit_store_external`), which Step 0 added in Rust but not in TS.
+  Nothing else in `api.ts` changed.
+- **Outside the "Owns" list, minimal:**
+  - `lib/GameCard.svelte`: a `progressTone` prop (`'managed'` = the disk graph's teal),
+    for the Steam install's cover bar;
+  - `lib/Library.svelte`: the Steam cover's disabled "Installing in Steam" (`primaryDisabled`
+    / `primaryTitle`, already GameCard props), the teal bar, and the `recheck` and
+    `open_settings` panel actions (the latter was a dead case before);
+  - `lib/Downloads.svelte` and `lib/downloads/format.ts`: `actionFor` answers `managed`
+    for a live `store_external` row (a disabled Cancel titled "Managed by Steam") and
+    `dismiss` once it ends (never Retry); `currentTransfer` (the strip) prefers a row GRID
+    runs over a Steam row;
+  - `lib/tv/topbar.ts`: TV's top-bar download prefers a row GRID runs, as the strip does.
+- **One Steam words module.** `gamestores/steam.ts` holds the Settings card's model and
+  every Steam sentence for the desktop and TV (pill, SteamID64 line, client line, accounts,
+  key row, the five Test results, the Disconnect confirm, "Managed by Steam" and the
+  button words). Views read capabilities (`managedByClient`, `hasTool`), never
+  `source === 'steam'`; `rail.ts`'s `availBlock` gains the key blocks `none | bad | private`
+  and ignores the tool for a store without one.
+- **Who raises which card.** The frontend raises the cards for what the user pressed:
+  Install in Steam ("Steam opened to install …"), "Steam isn’t installed…" (before any
+  command, from the status), Verify / Uninstall in Steam, "Starting … through Steam…",
+  "… is running in Steam. Quit it from the game.", "Steam still lists no games…" (Refresh
+  while private; no command is sent), "Steam client found" (after `steam_recheck_client`,
+  when the status then has a client), "Web API key removed…" (after `steam_remove_key`) and
+  "Steam disconnected. Your key was deleted from the keyring." (after `store_disconnect`).
+  The backend's `store-notice` carries the background ones: "Steam connected · N games owned"
+  / the private-connect error after `steam_save` (as the plan says), "<title> installed" ·
+  Play, "<title> uninstalled". **Package C must not also emit a notice for `steam_open`,
+  `steam_recheck_client`, `steam_remove_key` or Disconnect**, or the card shows twice.
+- **Steam Test results on the desktop** show as the card's inline line (the design); a
+  Save that connects also gets the backend's card. On TV every result is a card, and a
+  Save that connects shows only the backend's card.
+- **The key's path.** The desktop field is read once (`bind:this`, never `bind:value`)
+  when Test or Save is pressed and cleared after a Save that connects, after Disconnect and
+  when the pane closes. TV's masked keyboard hands it to a plain (non-reactive) variable in
+  `TvSteamPage.svelte`, cleared after a Save that connects. A saved key shows as dots only;
+  a rejected or private key shows the field (prototype `editKey: s.key !== 'ok'`), and Save
+  with it empty keeps the saved key (`key: None`).
+- **The client line** shows `client_path` as code when it is a path, and as plain text
+  for the backend's "Flatpak (com.valvesoftware.Steam)" / Snap form (user decision 3).
+- **TV says three panels its own way** (the TV prototype): "Install Steam in desktop mode…"
+  for the missing client, "Open Settings › Stores" for no key, "…enter it in Settings ›
+  Stores › Steam." for a rejected key. The rejected key's words carry no status code
+  anywhere (user decision 1).
+- **Header size.** The Installed header sums `disk_bytes` (SizeOnDisk); with the client
+  missing the backend lists no installed games, so it reads "0 games · <1 MB · in your Steam
+  libraries", as the prototype's `bkFmt(0)` does.
+- **No Remove key row on TV** (the TV prototype has none); Remove is desktop only.
+- **Fake and dev mock.** `fakeApi` answers `steam_test`, `steam_save`, `steam_remove_key`,
+  `steam_recheck_client` and `steam_open` (install admits a `store_external` row that grows
+  slowly; uninstall removes the game after 2.5 s), with the scenarios `nokey`, `private`,
+  `badkey`, `noclient` (and `notConnected` for off) and `nextSteamTest` for any Test result.
+  The dev mock adds `?tv` (TV mode), a session list (Steam games "run" until
+  `__gridFake.endSession()`), `stop_game`, and Steam's registry rows with last played.
+
+### Package D outcome
+
+- **Built:** Steam in every store screen, desktop and TV, from the parity inventory:
+  the rail group (flags, `!` counts, no group when not connected), the header and chips,
+  covers (Install in Steam, the teal bar, the disabled "Installing in Steam"), every panel,
+  Details (managed box and disabled Cancel, Play / Running in Steam, Verify and Uninstall in
+  Steam, the outside-GRID line, no Game Settings, no Genres, no Size for an Available game,
+  no Folder), Downloads (the Steam row's words, disabled Cancel, Dismiss only, the strip's
+  preference), the cards, `SteamCard.svelte`, and on TV the folder, X Install in Steam, the
+  game page, the Playing page without Stop, the Downloads A-list without Cancel, the Stores
+  row and `TvSteamPage.svelte`.
+- **Parity:** checked state by state in the built-in browser against `GameStores.html` and
+  `TVStores.html`, desktop and TV, with the dev mock (`VITE_FAKE_STORES=1`); screenshots in
+  the worktree's `ctr-out/parity-steam/` (not committed).
+- **E2E:** `e2e/helpers/steam.ts`, `steam-library.spec.ts` and `tv-steam.spec.ts` are
+  written against the plan's harness (package C): they go green only once A and C are
+  merged. The helper reads `E2E_STEAM_ARGV_FILE` (else `<data dir>/steam-argv.log`) and
+  `E2E_STEAM_ROOT` (else `GRID_LAUNCHER_E2E_STEAM_ROOT`) from the stage's environment, and
+  drops a manifest into `<root>/steamapps/`. The `epic-library` / `amazon-library` lede
+  assertions now read the full prototype line.
+- **Left for integration:** the notice split above; `scripts/e2e.sh` must export
+  `E2E_STEAM_ROOT` and `E2E_STEAM_ARGV_FILE` to the spec process for the steam groups;
+  the seed must leave Moonlit Ferry installed and Deep Field Radio `outside`.
+
 ## E2E plan
 
 - **Mock Steam** and **fake steam** as in package C. Every other group gets the dead

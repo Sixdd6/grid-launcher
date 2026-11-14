@@ -236,6 +236,9 @@ export type DownloadAction =
   | 'retry-cancel'
   | 'retry'
   | 'dismiss'
+  // A row the store's own client runs (Steam): a disabled Cancel titled
+  // "Managed by Steam" while it is live.
+  | 'managed'
   | 'none';
 
 /**
@@ -268,6 +271,10 @@ export function actionFor(
   if (kind === 'firmware') {
     return LIVE_STATUSES.includes(status) ? 'none' : 'dismiss';
   }
+  // Steam owns pause, cancel and retry: GRID never offers them.
+  if (kind === 'store_external') {
+    return LIVE_STATUSES.includes(status) ? 'managed' : 'dismiss';
+  }
   // The removed drive's summary row is never retried: backup again.
   if (kind === 'backup_cancelled') return 'dismiss';
   // A backup row's write to the drive can be stopped (its writer checks a
@@ -295,8 +302,12 @@ export function actionFor(
  * is live. The strip's line and its sparkline both key off this.
  */
 export function currentTransfer(entries: DownloadEntry[]): DownloadEntry | null {
-  const live = entries.filter((e) => LIVE_STATUSES.includes(e.status));
-  if (live.length === 0) return null;
+  const all = entries.filter((e) => LIVE_STATUSES.includes(e.status));
+  if (all.length === 0) return null;
+  // The strip prefers a job GRID runs over an install Steam runs (prototype
+  // `renderDownloads`), and shows the Steam row when it is the only one.
+  const own = all.filter((e) => e.kind !== 'store_external');
+  const live = own.length > 0 ? own : all;
   return (
     live.find((e) => e.status === 'downloading') ??
     live.find((e) => e.status === 'installing') ??

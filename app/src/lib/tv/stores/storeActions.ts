@@ -6,7 +6,8 @@
 import { api, type StoreGame, type StoreSource } from '../../api';
 import { childPath } from '../pages/folderBrowser';
 import { toolNeededNotice } from '../../gamestores/notices';
-import { storeName, storeTool } from '../../gamestores/marks';
+import { managedByClient, storeName, storeTool } from '../../gamestores/marks';
+import { steamClientMissing, steamKeyState } from '../../gamestores/steam';
 import { gameStores, refreshLibrary } from '../../stores/gameStores.svelte';
 import { pushToast, TOAST_DURATION_MS } from '../../stores/toasts.svelte';
 import { toLaunchFailure } from '../../launchError';
@@ -21,6 +22,7 @@ import TvStoreDetails from './TvStoreDetails.svelte';
 import TvStoreInstallPage from './TvStoreInstallPage.svelte';
 import TvStorePlaying from './TvStorePlaying.svelte';
 import TvStorePage from './TvStorePage.svelte';
+import TvSteamPage from './TvSteamPage.svelte';
 import TvStoreLogin from './TvStoreLogin.svelte';
 import TvRefusal from './TvRefusal.svelte';
 import TvOfflineInstallPage from './TvOfflineInstallPage.svelte';
@@ -55,8 +57,12 @@ export function openStoreGame(key: string, title: string, drive: { key: string; 
   void pushPage({ title, component: TvStoreDetails, props: { gameKey: key, drive } });
 }
 
-/** Install…: the install page, or why it can't open. */
+/** Install…: the install page, or why it can't open. Steam has no install page: Steam's own window opens. */
 export function openInstall(game: StoreGame): void {
+  if (managedByClient(game.source)) {
+    void steamInstall(game);
+    return;
+  }
   const status = gameStores.status(game.source);
   if (!status || status.connection !== 'connected') {
     card(`Sign in to ${storeName(game.source)} again to install ${game.title}`, 'error', undefined, { label: 'Sign in again', run: () => startLogin(game.source) });
@@ -70,10 +76,49 @@ export function openInstall(game: StoreGame): void {
   void pushPage({ title: `Install ${game.title}`, component: TvStoreInstallPage, props: { gameKey: game.key } });
 }
 
-/** X on a cover: Play or Install…. */
-export function quickStore(game: StoreGame, quick: 'Play' | 'Install…' | null): void {
+/** X on a cover: Play, Install… or Install in Steam. */
+export function quickStore(game: StoreGame, quick: 'Play' | 'Install…' | 'Install in Steam' | null): void {
   if (quick === 'Play') void playStore(game);
-  else if (quick === 'Install…') openInstall(game);
+  else if (quick !== null) openInstall(game);
+}
+
+// ── Steam: everything goes through the Steam client ─────────────────────
+
+/** Install in Steam (prototype `ACT.sinstall`): Steam's window opens over TV mode; Downloads shows its progress. */
+export async function steamInstall(game: StoreGame): Promise<void> {
+  if (steamClientMissing(gameStores.status(game.source))) {
+    card('Steam isn’t installed', 'error', 'Install Steam, then try again.');
+    return;
+  }
+  try {
+    await api.steamOpen(game.key, 'install');
+  } catch (err) {
+    fail(err);
+    return;
+  }
+  card(`Steam opened to install ${game.title}`, 'success', 'Choose the library folder there; GRID shows the progress. Steam’s window opens over TV mode.');
+}
+
+/** Verify in Steam (prototype `ACT.sverify`). */
+export function steamVerify(game: StoreGame): void {
+  api.steamOpen(game.key, 'validate').then(() => card(`Steam is verifying ${game.title}`, 'success', 'Watch it in Steam'), fail);
+}
+
+/** Uninstall in Steam… (prototype `ACT.suninstall`): Steam asks; the game leaves once Steam removes it. */
+export function steamUninstall(game: StoreGame): void {
+  api.steamOpen(game.key, 'uninstall').then(() => card(`Steam opened its uninstall window for ${game.title}`, 'success', 'It leaves the Library once Steam removes it.'), fail);
+}
+
+/** Check again (prototype `ACT.srecheck`): finds the Steam client again. */
+export async function steamRecheck(): Promise<void> {
+  try {
+    await api.steamRecheckClient();
+  } catch (err) {
+    fail(err);
+    return;
+  }
+  await refreshLibrary('steam');
+  if (!steamClientMissing(gameStores.status('steam'))) card('Steam client found');
 }
 
 /**
@@ -86,6 +131,10 @@ export async function playStore(game: StoreGame): Promise<void> {
     await api.launchGameKey(game.key);
   } catch (err) {
     const f = toLaunchFailure(err);
+    if (managedByClient(game.source)) {
+      card(f.message.trim() === '' ? `Couldn’t start ${game.title}` : f.message.trim(), 'error');
+      return;
+    }
     if (f.code === 'store_cloud_conflict') {
       await askConflict(game);
       return;
@@ -93,7 +142,7 @@ export async function playStore(game: StoreGame): Promise<void> {
     card(f.message.trim() === '' ? `Couldn’t launch ${game.title}` : `Couldn’t launch ${game.title}: ${f.message.trim()}`, 'error');
     return;
   }
-  const c = launchingCard(game);
+  const c = managedByClient(game.source) ? { text: `Starting ${game.title} through Steam…`, sub: undefined } : launchingCard(game);
   card(c.text, 'success', c.sub);
   void pushPage({ title: 'Playing', component: TvStorePlaying, props: { gameKey: game.key, title: game.title } });
 }
@@ -142,6 +191,10 @@ export function goStoreSettings(): void {
 
 /** A store's page in Settings. */
 export function openStorePage(source: StoreSource): void {
+  if (managedByClient(source)) {
+    void pushPage({ title: storeName(source), component: TvSteamPage, props: {} });
+    return;
+  }
   void pushPage({ title: storeName(source), component: TvStorePage, props: { source } });
 }
 
@@ -165,6 +218,11 @@ export function installTool(source: StoreSource): void {
 }
 
 export function refreshStore(source: StoreSource): void {
+  // Steam: a profile that is still private lists nothing (prototype `ACT.srefresh`).
+  if (managedByClient(source) && steamKeyState(gameStores.status(source)) === 'private') {
+    card('Steam still lists no games', 'error', 'The profile’s game details are private.');
+    return;
+  }
   api.storeRefresh(source).catch(fail);
 }
 

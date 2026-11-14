@@ -36,6 +36,7 @@
     onHoverEnd,
     extraTags = [],
     progress = null,
+    progressTone = 'primary',
     primaryLabel = null,
     primaryDisabled = false,
     primaryTitle = undefined,
@@ -87,6 +88,8 @@
     extraTags?: { text: string; tone: 'queue' | 'update' | 'conflict' | 'unsupported' }[];
     /** A running install's bar along the cover's bottom edge (0–100); `null` for none. */
     progress?: number | null;
+    /** The bar's colour: `managed` is the disk graph's teal, for an install the store's client runs (Steam). */
+    progressTone?: 'primary' | 'managed';
     /** The hover bar's main button text, when the caller words it (store covers). */
     primaryLabel?: string | null;
     primaryDisabled?: boolean;
@@ -200,7 +203,7 @@
       {/if}
 
       {#if progress !== null}
-        <span data-testid={`card-progress-${badgeId}`} class="cprog" aria-hidden="true"><b style:width={`${progress}%`}></b></span>
+        <span data-testid={`card-progress-${badgeId}`} class="cprog" class:managed={progressTone === 'managed'} aria-hidden="true"><b style:width={`${progress}%`}></b></span>
       {/if}
 
       <!-- The shade never takes a click: a click on the cover above the bar
@@ -580,6 +583,11 @@
     height: 100%;
     background: var(--primary);
     transition: width 300ms ease;
+  }
+
+  /* An install the store's own client runs (prototype `.st-cprog.steam`). */
+  .cprog.managed b {
+    background: var(--graph-disk);
   }
 
   .faded .cover :global(img) {

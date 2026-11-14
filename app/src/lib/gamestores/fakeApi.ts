@@ -1,6 +1,7 @@
 // A fake of the store commands and events, with the GameStores prototype's
-// GOG, Epic Games and Amazon Games data (`stores.js` g1–g8, e1–e6 and a1–a3; placeholder titles
-// only; fake markers, never a real account or token). Used by the vitest
+// GOG, Epic Games, Amazon Games and Steam data (`stores.js` g1–g8, e1–e6,
+// a1–a3 and s1–s7; placeholder titles only; fake markers, never a real
+// account, key or token). Used by the vitest
 // suites and, behind the dev-only VITE_FAKE_STORES flag (`devMock.ts`), to
 // click through every state in a browser. It answers
 // `invoke(cmd, args)` calls by command name and emits events through the
@@ -21,6 +22,7 @@ import type {
   StoreLibrary,
   StoreNotice,
   StoreStatus,
+  SteamTestResult,
 } from '../api';
 
 const GB = 1024 ** 3;
@@ -35,17 +37,26 @@ export const FAKE_EPIC_USERNAME = 'SamPlays';
 /** The fake Amazon Games account (the prototype's "Signed in as sam.plays"). */
 export const FAKE_AMAZON_USERNAME = 'sam.plays';
 
+/** The fake Steam account (the prototype's SamPlays and couchguest, fake SteamID64s). */
+export const FAKE_STEAM_PERSONA = 'SamPlays';
+export const FAKE_STEAM_ID = '76561198000000001';
+export const FAKE_STEAM_GUEST_ID = '76561198000000002';
+/** The only key the fake treats as good: the fixture marker, never a real key. */
+export const FAKE_STEAM_KEY = 'FAKE-STEAM-KEY-not-real';
+export const FAKE_STEAM_CLIENT = '/usr/bin/steam';
+export const FAKE_STEAM_NOT_INSTALLED = 'Steam isn’t installed. Install Steam, then try again.';
+
 /** The stores the fake answers for, in the rail's order. */
-export type FakeSource = 'gog' | 'epic' | 'amazon';
-export const FAKE_SOURCES: readonly FakeSource[] = ['amazon', 'epic', 'gog'];
+export type FakeSource = 'gog' | 'epic' | 'amazon' | 'steam';
+export const FAKE_SOURCES: readonly FakeSource[] = ['amazon', 'epic', 'gog', 'steam'];
 
 function asFakeSource(src: string | undefined | null): FakeSource {
-  return src === 'epic' || src === 'amazon' ? src : 'gog';
+  return src === 'epic' || src === 'amazon' || src === 'steam' ? src : 'gog';
 }
 
-/** Amazon Games keeps no cloud saves and has no DLC (nile has neither). */
+/** Amazon Games keeps no cloud saves and has no DLC (nile has neither); Steam's cloud is Steam's. */
 function fakeHasCloud(source: FakeSource): boolean {
-  return source !== 'amazon';
+  return source === 'gog' || source === 'epic';
 }
 
 type Seed = Partial<StoreGame> & { id: string; title: string; hue: string; dl: number; disk: number; source?: FakeSource };
@@ -133,14 +144,35 @@ const AMAZON_SEEDS: Seed[] = [
   },
 ];
 
-/** The store tool's name and the origin its installs get. */
-function toolOf(source: FakeSource): 'gogdl' | 'legendary' | 'nile' {
-  return source === 'epic' ? 'legendary' : source === 'amazon' ? 'nile' : 'gogdl';
+/**
+ * The prototype's Steam games (`stores.js` s1–s7), keyed by a made-up app id.
+ * Moonlit Ferry was installed through GRID's Install in Steam; Deep Field
+ * Radio and Old Brick Road were installed in Steam itself (outside GRID).
+ * Steam's API gives no download size, so a game not installed has none.
+ */
+const STEAM_SEEDS: Seed[] = [
+  { source: 'steam', id: '9100001', title: 'Moonlit Ferry', hue: 'hsl(235 35% 30%)', installed: true, origin: 'steam', dl: 0, disk: 9.1, platforms: [], developer: 'Tideglass', year: '2024' },
+  { source: 'steam', id: '9100002', title: 'Deep Field Radio', hue: 'hsl(170 30% 28%)', installed: true, origin: 'steam_outside', dl: 0, disk: 4.0, platforms: [], developer: 'Static Choir', year: '2022' },
+  { source: 'steam', id: '9100003', title: 'Old Brick Road', hue: 'hsl(15 35% 32%)', installed: true, origin: 'steam_outside', dl: 0, disk: 14.0, platforms: [], developer: 'Kiln', year: '2018' },
+  { source: 'steam', id: '9100004', title: 'Quiet Comet', hue: 'hsl(265 30% 36%)', dl: 0, disk: 8.0, platforms: [], developer: 'Slow Orbit', year: '2025' },
+  { source: 'steam', id: '9100005', title: 'Harbor of Bells', hue: 'hsl(200 40% 38%)', dl: 0, disk: 24.0, platforms: [], developer: 'Chime', year: '2023' },
+  { source: 'steam', id: '9100006', title: 'Rime Assembly', hue: 'hsl(185 25% 40%)', dl: 0, disk: 6.0, platforms: [], developer: 'Frostbyte Co.', year: '2021' },
+  { source: 'steam', id: '9100007', title: 'Signal Lost', hue: 'hsl(0 0% 26%)', dl: 0, disk: 35.0, platforms: [], developer: 'Dead Air', year: '2020' },
+];
+
+/** The store tool's name and the origin its installs get (Steam: "steam", its client's). */
+function toolOf(source: FakeSource): 'gogdl' | 'legendary' | 'nile' | 'steam' {
+  return source === 'epic' ? 'legendary' : source === 'amazon' ? 'nile' : source === 'steam' ? 'steam' : 'gogdl';
 }
 
 /** The store's name as the UI writes it (kept local: the fake imports no UI module). */
 function nameOf(source: FakeSource): string {
-  return source === 'epic' ? 'Epic Games' : source === 'amazon' ? 'Amazon Games' : 'GOG';
+  return source === 'epic' ? 'Epic Games' : source === 'amazon' ? 'Amazon Games' : source === 'steam' ? 'Steam' : 'GOG';
+}
+
+/** Where Steam keeps a game (the fake's library folder). */
+function steamDir(title: string): string {
+  return `~/.local/share/Steam/steamapps/common/${title.replace(/[^A-Za-z0-9]+/g, '')}`;
 }
 
 function folderOf(source: FakeSource, title: string): string {
@@ -180,7 +212,7 @@ function game(s: Seed): StoreGame {
     dlc: (s.dlc ?? []).map((d) => ({ ...d, download_bytes: Math.round(d.download_bytes) })),
     cloud: s.installed && cloudy ? (s.cloud ?? 'synced') : 'unknown',
     last_sync: s.installed && cloudy ? NOW() - 2 * 3600 : 0,
-    install_dir: s.installed ? folderOf(source, s.title) : '',
+    install_dir: s.installed ? (source === 'steam' ? steamDir(s.title) : folderOf(source, s.title)) : '',
     compat_tool: s.installed_platform === 'windows' ? 'GE-Proton10-17' : '',
   };
 }
@@ -188,6 +220,7 @@ function game(s: Seed): StoreGame {
 export function baseStatus(source: FakeSource = 'gog'): StoreStatus {
   if (source === 'epic') return baseEpicStatus();
   if (source === 'amazon') return baseAmazonStatus();
+  if (source === 'steam') return baseSteamStatus();
   return {
     source: 'gog',
     connection: 'connected',
@@ -283,6 +316,41 @@ export function baseAmazonStatus(): StoreStatus {
   };
 }
 
+/**
+ * The Steam status (prototype `ST.stores.steam`): SteamID64 …0001 as SamPlays,
+ * the key saved and working, the client at /usr/bin/steam, two local
+ * accounts. No tool (an empty `ToolStatus`), no cloud saves, no install
+ * folder of GRID's. The key itself is never in a status.
+ */
+export function baseSteamStatus(): StoreStatus {
+  return {
+    source: 'steam',
+    connection: 'connected',
+    username: FAKE_STEAM_PERSONA,
+    tool: { name: '', version: '', state: 'not_installed', size_bytes: 0, error: '', license: '', source_url: '', done: 0, total: 0 },
+    owned: 'ready',
+    owned_error: '',
+    owned_count: 7,
+    installed_count: 3,
+    installed_bytes: 0,
+    refreshed_at: NOW() - 300,
+    cloud_saves: false,
+    install_dir: '',
+    in_rail: true,
+    steam: {
+      client_path: FAKE_STEAM_CLIENT,
+      steam_id: FAKE_STEAM_ID,
+      key: 'ok',
+      key_tail: '',
+      accounts: [
+        { persona: FAKE_STEAM_PERSONA, steam_id: FAKE_STEAM_ID, most_recent: true },
+        { persona: 'couchguest', steam_id: FAKE_STEAM_GUEST_ID, most_recent: false },
+      ],
+    },
+    last_error: '',
+  };
+}
+
 /** The tool error on a computer older than nile's glibc floor: grid-core's `NILE_SYSTEM_TOO_OLD`, word for word (plan, spike 1). */
 export const FAKE_NILE_GLIBC_ERROR = "nile can't run on this computer: it needs a newer Linux system (glibc 2.35 or later).";
 
@@ -302,12 +370,22 @@ export type FakeScenario =
   | 'notConnectedNothing'
   | 'ownedError'
   | 'update'
-  | 'cloudConflict';
+  | 'cloudConflict'
+  // Steam's (prototype `stProtoSelect`'s Steam list).
+  | 'nokey'
+  | 'private'
+  | 'badkey'
+  | 'noclient';
 
 export const FAKE_SCENARIOS: readonly FakeScenario[] = [
   'normal', 'loading', 'emptyInstalled', 'everythingInstalled', 'toolMissing', 'toolInstalling', 'toolFailed', 'needsPython', 'needsGlibc', 'expired', 'notConnected', 'notConnectedNothing',
-  'ownedError', 'update', 'cloudConflict',
+  'ownedError', 'update', 'cloudConflict', 'nokey', 'private', 'badkey', 'noclient',
 ];
+
+/** The SteamID64 form GRID checks before it asks Steam (17 digits, starting 7656). */
+function steamIdForm(id: string): boolean {
+  return /^7656[0-9]{13}$/.test(id.trim());
+}
 
 /** The offline installers the fake file chooser offers (the prototype's ST_FILES). */
 export const FAKE_INSTALLERS: readonly { path: string; insp: () => InstallerInspection }[] = [
@@ -375,8 +453,12 @@ function sourceOf(args: Record<string, unknown>, g: StoreGame | null): FakeSourc
  * (the dev mock calls it on a timer; tests call it by hand).
  */
 export class FakeStores {
-  statuses: Record<FakeSource, StoreStatus> = { gog: baseStatus('gog'), epic: baseEpicStatus(), amazon: baseAmazonStatus() };
-  games: StoreGame[] = [...SEEDS.map(game), ...EPIC_SEEDS.map(game), ...AMAZON_SEEDS.map(game)];
+  statuses: Record<FakeSource, StoreStatus> = { gog: baseStatus('gog'), epic: baseEpicStatus(), amazon: baseAmazonStatus(), steam: baseSteamStatus() };
+  games: StoreGame[] = [...SEEDS.map(game), ...EPIC_SEEDS.map(game), ...AMAZON_SEEDS.map(game), ...STEAM_SEEDS.map(game)];
+  /** The next Steam Test's answer, once (the prototype's "next Test result" button); `null` follows the key and SteamID64. */
+  nextSteamTest: SteamTestResult | null = null;
+  /** How long a Steam Test waits, so "Asking Steam…" shows (ms; tests set 0). */
+  steamDelayMs = 700;
   entries: DownloadEntry[] = [];
   driveGames: DriveStoreGame[] = [];
   cloud: Record<string, StoreCloudState> = {};
@@ -420,6 +502,24 @@ export class FakeStores {
     this.entries.push(
       entry({ kind: 'store_install', title: gd.title, source_id: gd.key, platform: 'Epic Games', status: 'failed', error: 'legendary stopped: Epic’s download server didn’t answer' }),
     );
+    // The prototype's Steam install that Steam runs, at 52% (`stBoot`'s jboot3).
+    const qc = this.games.find((g) => g.key === 'steam:9100004')!;
+    this.entries.push(this.externalRow(qc, 0.52));
+  }
+
+  /** A Steam install row: no slot, "Managed by Steam" (`queue::admit_store_external`). */
+  externalRow(g: StoreGame, pct = 0): DownloadEntry {
+    const total = g.disk_bytes || 6 * GB;
+    return entry({
+      kind: 'store_external',
+      title: g.title,
+      source_id: g.key,
+      platform: 'Steam',
+      status: 'downloading',
+      phase: 'none',
+      total_bytes: total,
+      downloaded_bytes: Math.round(total * pct),
+    });
   }
 
   /** One store's games. */
@@ -434,8 +534,14 @@ export class FakeStores {
     status.installed_count = installed.length;
     status.installed_bytes = installed.reduce((t, g) => t + g.disk_bytes, 0);
     status.owned_count = own.length;
-    const avail = status.owned === 'ready' && status.connection === 'connected' ? own.filter((g) => !g.installed) : [];
-    return { status: { ...status }, installed, available: avail };
+    const keyOk = source !== 'steam' || status.steam?.key === 'ok';
+    const avail = status.owned === 'ready' && status.connection === 'connected' && keyOk ? own.filter((g) => !g.installed) : [];
+    const steam = status.steam ? { ...status.steam, accounts: status.steam.accounts.map((a) => ({ ...a })) } : null;
+    // Steam: its rows go on Disconnect, and the Library lists none while the client is missing.
+    if (source === 'steam' && (status.connection === 'not_connected' || status.steam?.client_path === '')) {
+      return { status: { ...status, steam, installed_count: 0, installed_bytes: 0 }, installed: [], available: avail };
+    }
+    return { status: { ...status, steam }, installed, available: avail };
   }
 
   /** Replaces one store's games, keeping the others. */
@@ -490,6 +596,7 @@ export class FakeStores {
         status.connection = 'not_connected';
         status.username = '';
         status.tool = { ...status.tool, state: 'not_installed' };
+        if (status.steam) status.steam = { ...status.steam, steam_id: '', key: 'none' };
         break;
       case 'notConnectedNothing':
         keep();
@@ -509,6 +616,18 @@ export class FakeStores {
         if (first) map((g) => (g.key === first.key ? { ...g, update_version: next } : g));
         break;
       }
+      case 'nokey':
+        if (status.steam) status.steam.key = 'none';
+        break;
+      case 'private':
+        if (status.steam) status.steam.key = 'private';
+        break;
+      case 'badkey':
+        if (status.steam) status.steam.key = 'bad';
+        break;
+      case 'noclient':
+        if (status.steam) status.steam.client_path = '';
+        break;
       case 'cloudConflict': {
         if (!fakeHasCloud(source)) break;
         keep();
@@ -535,7 +654,7 @@ export class FakeStores {
       default:
         break;
     }
-    status.in_rail = status.connection !== 'not_connected' || this.gamesOf(source).some((g) => g.installed);
+    status.in_rail = status.connection !== 'not_connected' || (source !== 'steam' && this.gamesOf(source).some((g) => g.installed));
     this.changed();
   }
 
@@ -565,7 +684,7 @@ export class FakeStores {
     extra: Partial<DownloadEntry> = {},
     source: FakeSource = asFakeSource(g?.source),
   ): DownloadEntry {
-    const busy = this.entries.some((e) => e.kind !== 'store_tool' && (e.status === 'downloading' || e.status === 'installing'));
+    const busy = this.entries.some((e) => e.kind !== 'store_tool' && e.kind !== 'store_external' && (e.status === 'downloading' || e.status === 'installing'));
     const e = entry({
       kind,
       title: title ?? g?.title ?? '',
@@ -587,12 +706,12 @@ export class FakeStores {
     for (const e of this.entries) {
       if (e.status !== 'downloading' && e.status !== 'installing') continue;
       moved = true;
-      const step = e.kind === 'store_tool' ? 0.22 : e.kind === 'store_repair' ? 0.06 : 0.02;
+      const step = e.kind === 'store_tool' ? 0.22 : e.kind === 'store_repair' ? 0.06 : e.kind === 'store_external' ? 0.003 : 0.02;
       if (e.status === 'downloading') {
         const total = e.total_bytes || GB;
         e.total_bytes = total;
         e.downloaded_bytes = Math.min(total, e.downloaded_bytes + Math.round(total * step));
-        e.speed_bps = 41.2 * MB;
+        e.speed_bps = e.kind === 'store_external' ? 0 : 41.2 * MB;
         if (e.downloaded_bytes >= total) {
           if (e.kind === 'store_install' || e.kind === 'store_update' || e.kind === 'store_dlc') {
             e.status = 'installing';
@@ -606,7 +725,7 @@ export class FakeStores {
         if (e.install_processed_bytes >= e.install_total_bytes) this.finish(e);
       }
     }
-    if (!this.entries.some((e) => e.kind !== 'store_tool' && (e.status === 'downloading' || e.status === 'installing'))) {
+    if (!this.entries.some((e) => e.kind !== 'store_tool' && e.kind !== 'store_external' && (e.status === 'downloading' || e.status === 'installing'))) {
       const q = this.entries.find((e) => e.status === 'queued');
       if (q) {
         q.status = 'downloading';
@@ -631,6 +750,15 @@ export class FakeStores {
     }
     if (!g) return;
     const src: FakeSource = asFakeSource(g.source);
+    if (e.kind === 'store_external') {
+      g.installed = true;
+      g.origin = 'steam';
+      g.install_dir = steamDir(g.title);
+      e.detail = 'Installed by Steam';
+      this.notice(`${g.title} installed`, { action: { kind: 'play', key: g.key } }, src);
+      this.changed();
+      return;
+    }
     if (e.kind === 'store_update') {
       g.version = g.update_version;
       g.update_version = '';
@@ -711,11 +839,31 @@ export class FakeStores {
       case 'store_cancel_login':
         return null;
       case 'store_disconnect':
+        if (source === 'steam' && status.steam) {
+          // GRID forgets the SteamID64 and the key; Steam's games leave the Library.
+          status.steam = { ...status.steam, steam_id: '', key: 'none' };
+          for (const e of this.entries) if (e.kind === 'store_external' && (e.status === 'downloading' || e.status === 'queued')) e.status = 'cancelled';
+        }
         status.connection = 'not_connected';
         status.username = '';
         status.tool = { ...status.tool, state: 'not_installed' };
-        status.in_rail = this.gamesOf(source).some((x) => x.installed);
+        status.in_rail = source !== 'steam' && this.gamesOf(source).some((x) => x.installed);
         this.changed();
+        return null;
+      case 'steam_test':
+        return this.steamTest(String(args.steamId ?? ''), typeof args.key === 'string' ? args.key : null, false);
+      case 'steam_save':
+        return this.steamTest(String(args.steamId ?? ''), typeof args.key === 'string' ? args.key : null, true);
+      case 'steam_remove_key':
+        if (this.statuses.steam.steam) this.statuses.steam.steam.key = 'none';
+        this.changed();
+        return null;
+      case 'steam_recheck_client':
+        if (this.statuses.steam.steam) this.statuses.steam.steam.client_path = FAKE_STEAM_CLIENT;
+        this.changed();
+        return null;
+      case 'steam_open':
+        this.steamOpen(g, String(args.action ?? ''));
         return null;
       case 'store_install_tool':
         this.installTool(source);
@@ -851,6 +999,56 @@ export class FakeStores {
       }
       default:
         return NOT_HANDLED;
+    }
+  }
+
+  /** `steam_test` / `steam_save`: the SteamID64's form, then the key (the fixture marker only), then Steam's answer. */
+  private async steamTest(steamId: string, key: string | null, save: boolean): Promise<SteamTestResult> {
+    const status = this.statuses.steam;
+    const card = status.steam!;
+    if (!steamIdForm(steamId)) return { kind: 'bad_steam_id' };
+    if (key === null && card.key === 'none') throw new Error('Paste your key first.');
+    if (this.steamDelayMs > 0) await new Promise((r) => setTimeout(r, this.steamDelayMs));
+    let result: SteamTestResult;
+    if (this.nextSteamTest !== null) {
+      result = this.nextSteamTest;
+      this.nextSteamTest = null;
+    } else if (key !== null && key !== FAKE_STEAM_KEY) result = { kind: 'bad_key', status: 401 };
+    else if (steamId === FAKE_STEAM_GUEST_ID) result = { kind: 'private' };
+    else result = { kind: 'ok', owned_count: this.gamesOf('steam').length };
+    if (save && (result.kind === 'ok' || result.kind === 'private')) {
+      const persona = card.accounts.find((a) => a.steam_id === steamId)?.persona ?? FAKE_STEAM_PERSONA;
+      status.connection = 'connected';
+      status.username = persona;
+      status.in_rail = true;
+      status.steam = { ...card, steam_id: steamId, key: result.kind === 'ok' ? 'ok' : 'private' };
+      this.notice(
+        result.kind === 'ok'
+          ? `Steam connected · ${result.owned_count} games owned`
+          : 'Steam connected, but your game details are private, so Available is empty',
+        { error: result.kind !== 'ok' },
+        'steam',
+      );
+      this.changed();
+    }
+    return result;
+  }
+
+  /** `steam_open`: install admits a Steam row the client "runs"; uninstall removes the game a moment later; validate only opens Steam. */
+  private steamOpen(g: StoreGame | null, action: string): void {
+    if (!g || g.source !== 'steam') throw new Error('That isn’t a Steam game.');
+    if (this.statuses.steam.steam?.client_path === '') throw new Error(FAKE_STEAM_NOT_INSTALLED);
+    if (action === 'install') {
+      if (this.entries.some((e) => e.source_id === g.key && e.kind === 'store_external' && e.status === 'downloading')) return;
+      this.entries.push(this.externalRow(g));
+      this.emitDownloads();
+    } else if (action === 'uninstall') {
+      setTimeout(() => {
+        g.installed = false;
+        g.origin = null;
+        this.notice(`${g.title} uninstalled`, {}, 'steam');
+        this.changed();
+      }, 2500);
     }
   }
 

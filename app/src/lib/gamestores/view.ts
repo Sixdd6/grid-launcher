@@ -3,7 +3,8 @@
 // which chips and actions it has, and the panel that replaces the grid.
 import type { StoreGame, StoreSource, StoreStatus } from '../api';
 import { availBlock, type StorePart } from './rail';
-import { canBackup, hasCloud, hasInstaller, storeName, storeTool } from './marks';
+import { canBackup, hasCloud, hasInstaller, managedByClient, storeName, storeTool } from './marks';
+import { IN_STEAM_LIBRARIES, steamClientMissing } from './steam';
 import { agoText, plural, sizeGb, toolSize } from './text';
 
 /** The view's title parts: "GOG" and "· Installed". */
@@ -24,7 +25,8 @@ export function storeCountLine(
 ): string {
   if (part === 'installed') {
     const bytes = games.reduce((t, g) => t + g.disk_bytes, 0);
-    return `${plural(games.length, 'game')} · ${sizeGb(bytes)}`;
+    // Steam: "3 games · 21.1 GB · in your Steam libraries".
+    return `${plural(games.length, 'game')} · ${sizeGb(bytes)}${managedByClient(status.source) ? ` · ${IN_STEAM_LIBRARIES}` : ''}`;
   }
   const block = availBlock(status);
   if (block === 'loading') return 'Games you own and haven’t installed · loading';
@@ -43,7 +45,9 @@ export type StoreChip = { text: string; act: ChipAct; warn: boolean; testId: str
 export function storeChips(status: StoreStatus): StoreChip[] {
   const out: StoreChip[] = [];
   if (status.connection === 'connected') {
-    out.push({ text: `Signed in as ${status.username}`, act: 'settings', warn: false, testId: 'store-chip-account' });
+    // Steam has no login: its chip names the Steam account.
+    const text = managedByClient(status.source) ? `Steam account: ${status.username}` : `Signed in as ${status.username}`;
+    out.push({ text, act: 'settings', warn: false, testId: 'store-chip-account' });
   } else if (status.connection === 'expired') {
     out.push({ text: 'Login expired · Sign in again', act: 'sign_in', warn: true, testId: 'store-chip-expired' });
   } else {
@@ -86,7 +90,8 @@ export type PanelAct =
   | 'connect'
   | 'sign_in'
   | 'install_tool'
-  | 'open_settings';
+  | 'open_settings'
+  | 'recheck';
 
 export type PanelAction = { label: string; act: PanelAct; primary: boolean; disabled?: boolean };
 
@@ -117,11 +122,24 @@ export function storePanel(status: StoreStatus, part: StorePart, games: readonly
     actions: p.actions,
     testId: p.testId,
   });
+  const managed = managedByClient(status.source);
   if (part === 'installed') {
+    if (managed && status.connection !== 'not_connected' && steamClientMissing(status)) {
+      return panel({
+        title: 'Steam isn’t installed',
+        body: 'GRID installs, starts and uninstalls Steam games through the Steam client. Install Steam from your distribution’s software centre or from Steam’s own site, sign in once, then come back.',
+        actions: [{ label: 'Check again', act: 'recheck', primary: false }],
+        testId: 'store-state-noclient',
+      });
+    }
     if (games.length > 0) return null;
     return panel({
       title: `No ${name} games installed yet`,
-      body: installer ? `Install one from Available, or from a ${name} offline installer you downloaded.` : 'Install one from Available.',
+      body: installer
+        ? `Install one from Available, or from a ${name} offline installer you downloaded.`
+        : managed
+          ? 'Install one from Available. Games you install in Steam itself show here too.'
+          : 'Install one from Available.',
       actions: [
         { label: 'Open Available', act: 'open_available', primary: true },
         ...(installer ? [{ label: 'Install from installer…', act: 'installer' as const, primary: false }] : []),
@@ -167,6 +185,36 @@ export function storePanel(status: StoreStatus, part: StorePart, games: readonly
         },
       ],
       testId: failed ? 'store-state-tool-failed' : busy ? 'store-state-tool-installing' : 'store-state-tool',
+    });
+  }
+  if (block === 'none') {
+    return panel({
+      title: 'Steam needs your Web API key to list the games you haven’t installed',
+      body: 'Installed Steam games show without it. GRID asks Steam for your owned games with your own key, kept in the OS keyring.',
+      actions: [{ label: 'Add your key in Settings…', act: 'open_settings', primary: true }],
+      testId: 'store-state-nokey',
+    });
+  }
+  if (block === 'bad') {
+    // No status code in the words (user decision 1).
+    return panel({
+      tone: 'err',
+      title: 'Steam rejected your Web API key',
+      body: 'The key may have been revoked. Make a new key, then paste it in Settings › Stores.',
+      actions: [{ label: 'Open Settings › Stores', act: 'open_settings', primary: true }],
+      testId: 'store-state-badkey',
+    });
+  }
+  if (block === 'private') {
+    return panel({
+      tone: 'warn',
+      title: 'Your Steam game details are private',
+      body: 'Steam lists owned games only when the profile’s game details are public. In Steam: your profile › Edit Profile › Privacy Settings › Game details: Public. Then refresh.',
+      actions: [
+        { label: 'Refresh', act: 'refresh', primary: true },
+        { label: 'Open Settings › Stores', act: 'open_settings', primary: false },
+      ],
+      testId: 'store-state-private',
     });
   }
   if (block === 'loading') {

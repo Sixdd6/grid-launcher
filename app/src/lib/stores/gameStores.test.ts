@@ -43,7 +43,7 @@ afterEach(() => {
 
 describe('pure helpers', () => {
   it('keeps enabled stores only', () => {
-    expect(enabledStatuses([status(), status({ source: 'epic' }), status({ source: 'amazon' }), status({ source: 'steam' })]).map((s) => s.source)).toEqual(['gog', 'epic', 'amazon']);
+    expect(enabledStatuses([status(), status({ source: 'epic' }), status({ source: 'amazon' }), status({ source: 'steam' })]).map((s) => s.source)).toEqual(['gog', 'epic', 'amazon', 'steam']);
   });
   it('finds a game in any library', () => {
     const fake = new FakeStores();
