@@ -55,7 +55,8 @@
 // (the mock Amazon: the login page's and the art's origin), and
 // E2E_NILE_ARGV_FILE: when set, every run appends its argv there (one run
 // per line, arguments joined by spaces), so a spec can tell whether GRID
-// called nile at all.
+// called nile at all. The fake token (the login's code verifier) and the
+// login code read `<token>` and `<code>` there, so the log holds neither.
 
 import { createHash } from "node:crypto";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
@@ -524,7 +525,7 @@ function cmdLaunch(ctx, { positional, flags }) {
 
 export async function main(argv, env = process.env) {
   if (env.E2E_NILE_ARGV_FILE) {
-    try { appendFileSync(env.E2E_NILE_ARGV_FILE, `${argv.join(" ")}\n`); } catch { /* the log is only for specs */ }
+    try { appendFileSync(env.E2E_NILE_ARGV_FILE, `${argv.join(" ").replaceAll(FAKE_TOKEN, "<token>").replaceAll(GOOD_CODE, "<code>")}\n`); } catch { /* the log is only for specs */ }
   }
   const args = parseArgs(argv);
   if (args.flags.version) {
