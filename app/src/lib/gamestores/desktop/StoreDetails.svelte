@@ -266,10 +266,26 @@
     }
   }
 
+  // A button that goes away after its click (Verify while the job runs,
+  // Update once queued, Sync now while syncing) takes the focus with it, to
+  // the page body: Escape must still close Details then, as long as no other
+  // dialog is open over it.
+  function onWindowKey(e: KeyboardEvent) {
+    if (e.key !== 'Escape' || e.defaultPrevented || !panelEl) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== document.documentElement) return;
+    const modals = document.querySelectorAll('[aria-modal="true"]');
+    if (modals[modals.length - 1] !== panelEl) return;
+    e.preventDefault();
+    onClose();
+  }
+
   function onBackdropClick(e: MouseEvent) {
     if (e.target === e.currentTarget) onClose();
   }
 </script>
+
+<svelte:window onkeydown={onWindowKey} />
 
 <div class="backdrop" onclick={onBackdropClick} role="presentation">
   <div
@@ -322,7 +338,7 @@
             >
               {#if l.kind === 'cloud' || l.kind === 'cloud-err'}<Icon name="cloud" size={12} />{/if}
               {#if l.kind === 'drive'}<Icon name="drive" size={12} />{/if}
-              {l.text}{#if l.link}{' '}<button
+              {l.text}{#if l.link}{l.text.endsWith(' ') ? '' : ' '}<button
                   class="linkish"
                   onclick={() => (l.link?.act === 'sign_in' ? signIn(game!.source) : (tab = 'cloud'))}>{l.link.label}</button
                 >{/if}

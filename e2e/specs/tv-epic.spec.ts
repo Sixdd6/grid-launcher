@@ -109,8 +109,10 @@ describe('tv-epic: Epic Games in TV mode', () => {
     expect(await buttons()).toEqual(['Not supported']);
     expect(await text('tv-store-line-ns')).toBe('Needs the EA app. GRID can’t install games that start through another company’s launcher.');
     expect(await text('tv-store-line-nobk')).toBe('Epic Games games can’t be backed up: legendary installs only from Epic’s servers.');
-    // A on the disabled button says why, as a card.
-    await waitFocused('sd-install');
+    // A on the disabled button says why, as a card. The page opens on its
+    // first enabled item (a disabled one gives way, TV focus rule item 78),
+    // so go to the button itself.
+    await focusOn(byK('sd-install'));
     await key('Enter');
     await waitNotice(/^Needs the EA app\./, 10_000);
     await key('Escape');
@@ -184,7 +186,9 @@ describe('tv-epic: Epic Games in TV mode', () => {
     await key('e');
     await $(testId('tv-store-cloud')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     expect(await text('tv-store-cloud')).toContain('GRID syncs with Epic Games before the game starts and after it closes');
-    expect(await text('tv-store-cloud')).toContain('RomM cloud saves are off for store games.');
+    // The RomM note sits under Save location, after the cloud rows (TVStores
+    // prototype), so it is in the tab's body rather than its rows.
+    expect(await text('tv-det-body')).toContain('RomM cloud saves are off for store games.');
     await key('e');
     await waitGone('tv-store-cloud');
   });
@@ -238,7 +242,7 @@ describe('tv-epic: Epic Games in TV mode', () => {
 
   it('not connected: the note, Connect Epic Games… on Start, the sign-in over TV mode, and B cancels silently', async () => {
     // `confirmDialog` pressed Disconnect: the page closes with the card.
-    await waitNotice('Epic Games disconnected', 10_000);
+    await waitNotice(/^Epic Games disconnected( \||$)/, 10_000);
     await waitGone('tv-store-page');
     await waitText('tv-stores-row-epic', /Not signed in[\s\S]*Not connected/);
     await tap(testId('tv-stores-row-epic'));
