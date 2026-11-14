@@ -107,6 +107,18 @@ const appEnv: Record<string, string> = {
   // directly; it reads the base above for the login URL and the art).
   GRID_LAUNCHER_E2E_AMAZON_BASE: process.env.E2E_AMAZON_URL ?? 'http://127.0.0.1:9',
   ...(process.env.E2E_FAKE_NILE ? { GRID_LAUNCHER_E2E_TOOL_NILE: process.env.E2E_FAKE_NILE } : {}),
+  // The same for Steam: GRID_LAUNCHER_E2E_STEAM_BASE is the Web API and the
+  // art origin (app stores_service/steam.rs `steam_endpoints`, e2e feature
+  // only): the mock Steam for the steam groups (e2e.sh group_needs_steam),
+  // else the dead loopback address. GRID_LAUNCHER_E2E_STEAM_ROOT and
+  // GRID_LAUNCHER_E2E_STEAM_EXE are the fake Steam root (seed/steam-seed.mjs)
+  // and the fake steam client (fake-tools/steam.mjs, run directly; it reads
+  // the root and E2E_STEAM_ARGV_FILE from the environment it inherits). An
+  // e2e build with neither reads no Steam root at all.
+  GRID_LAUNCHER_E2E_STEAM_BASE: process.env.E2E_STEAM_URL ?? 'http://127.0.0.1:9',
+  ...(process.env.E2E_STEAM_ROOT ? { GRID_LAUNCHER_E2E_STEAM_ROOT: process.env.E2E_STEAM_ROOT } : {}),
+  ...(process.env.E2E_FAKE_STEAM ? { GRID_LAUNCHER_E2E_STEAM_EXE: process.env.E2E_FAKE_STEAM } : {}),
+  ...(process.env.E2E_STEAM_ARGV_FILE ? { E2E_STEAM_ARGV_FILE: process.env.E2E_STEAM_ARGV_FILE } : {}),
   // E2E_HOME (the tv-gog stage only) is the app's HOME: a folder in the
   // stage's data dir whose Downloads holds the fake GOG installers.
   ...(process.env.E2E_HOME ? { HOME: process.env.E2E_HOME } : {}),

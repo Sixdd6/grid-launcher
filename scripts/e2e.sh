@@ -260,6 +260,25 @@ STAGE_GROUPS=(
   "amazon:specs/amazon-login.spec.ts specs/amazon-secrets.spec.ts"
   "amazon-library:specs/amazon-library.spec.ts"
   "tv-amazon:specs/tv-amazon.spec.ts"
+  # Game stores, Steam (docs/stores-phase4-plan.md "E2E plan") against the
+  # mock Steam Web API (mock-romm/mock-steam.mjs: GetOwnedGames,
+  # GetPlayerSummaries, GetItems and the art at one base through
+  # GRID_LAUNCHER_E2E_STEAM_BASE), the fake Steam root
+  # (fixtures-steam/, copied to <data>/steam by seed/steam-seed.mjs,
+  # GRID_LAUNCHER_E2E_STEAM_ROOT) and the fake steam client
+  # (fake-tools/steam.mjs, GRID_LAUNCHER_E2E_STEAM_EXE), on a profile used
+  # without a server, seeded per spec: (connect) the client and the local
+  # accounts, Test against every Web API answer, Connect, Remove key, Save,
+  # Disconnect; (secrets, with RUST_LOG=debug) after a connect, a refresh,
+  # an install, a launch, an uninstall and a Disconnect no log, event,
+  # answer, file or page holds the fake Web API key or the Steam login name,
+  # and the key reached only the mock's key calls. Package D's desktop and TV
+  # specs start connected as SamPlays (they add the key through
+  # helpers/steamSetup.ts `ensureSteamKey`). A spec file that is not in this
+  # checkout yet is skipped.
+  "steam:specs/steam-connect.spec.ts specs/steam-secrets.spec.ts"
+  "steam-library:specs/steam-library.spec.ts"
+  "tv-steam:specs/tv-steam.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -434,6 +453,7 @@ forge_pid=""
 gog_pid=""
 epic_pid=""
 amazon_pid=""
+steam_pid=""
 # Set by the INT/TERM handler below so cleanup() can force a nonzero exit
 # even when the interrupted command itself happened to leave $? at 0.
 signal_caught=""
@@ -532,6 +552,13 @@ stop_amazon() {
   amazon_pid=""
 }
 
+stop_steam() {
+  [[ -n "$steam_pid" ]] || return 0
+  kill -TERM "$steam_pid" 2>/dev/null
+  wait "$steam_pid" 2>/dev/null
+  steam_pid=""
+}
+
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM
@@ -550,6 +577,7 @@ cleanup() {
   stop_gog
   stop_epic
   stop_amazon
+  stop_steam
   if run_dir_is_safe; then
     kill_run_processes TERM
     sleep 1
@@ -735,6 +763,14 @@ group_needs_amazon() {
   [[ "$1" == "amazon" || "$1" == amazon-* || "$1" == tv-amazon* ]]
 }
 
+# Stage groups that run the mock Steam Web API (mock-romm/mock-steam.mjs),
+# the fake Steam root and the fake steam client. Every other group points
+# Steam at the dead loopback address and gives the app no Steam root (the
+# e2e build then reads none, so no real Steam on the runner leaks in).
+group_needs_steam() {
+  [[ "$1" == "steam" || "$1" == steam-* || "$1" == tv-steam* ]]
+}
+
 group_needs_forge() {
   [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" || "$1" == "tv-startup" || "$1" == "tv-layout" ]]
 }
@@ -770,6 +806,7 @@ seed_script_for_group() {
     gog|gog-*|tv-gog) printf '%s' "$E2E_DIR/seed/gog-seed.mjs" ;;
     epic|epic-*|tv-epic) printf '%s' "$E2E_DIR/seed/epic-seed.mjs" ;;
     amazon|amazon-*|tv-amazon) printf '%s' "$E2E_DIR/seed/amazon-seed.mjs" ;;
+    steam|steam-*|tv-steam) printf '%s' "$E2E_DIR/seed/steam-seed.mjs" ;;
     *) printf '' ;;
   esac
 }
@@ -780,7 +817,7 @@ seed_script_for_group() {
 # the run's keyring, but each starts the app on the state its own seed
 # variant writes.
 group_seeds_per_spec() {
-  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == gog || "$1" == gog-* || "$1" == tv-gog || "$1" == epic || "$1" == epic-* || "$1" == tv-epic || "$1" == amazon || "$1" == amazon-* || "$1" == tv-amazon ]]
+  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == gog || "$1" == gog-* || "$1" == tv-gog || "$1" == epic || "$1" == epic-* || "$1" == tv-epic || "$1" == amazon || "$1" == amazon-* || "$1" == tv-amazon || "$1" == steam || "$1" == steam-* || "$1" == tv-steam ]]
 }
 
 # Runs every spec of one group against a freshly created data dir and mock.
@@ -1005,6 +1042,36 @@ EOF
     printf 'e2e: mock Amazon at %s\n' "$amazon_url"
   fi
 
+  # The mock Steam Web API, for the Steam groups. Same lifecycle as the mock
+  # Amazon.
+  local steam_url=""
+  attempt_steam_log=""
+  if group_needs_steam "$name"; then
+    attempt_steam_log="$LOG_DIR/$name-attempt-$attempt.steam.log"
+    rm -f "$attempt_steam_log" "$E2E_DIR/last-run-steam-requests.log"
+    ( cd "$E2E_DIR" && exec node mock-romm/mock-steam.mjs --port 0 ) >"$attempt_steam_log" 2>&1 &
+    steam_pid=$!
+    for _ in $(seq 1 100); do
+      steam_url="$(sed -n 's/^MOCK_STEAM_URL=\(http[^ ]*\).*/\1/p' "$attempt_steam_log" 2>/dev/null | head -n1)"
+      [[ -n "$steam_url" ]] && break
+      kill -0 "$steam_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if [[ -z "$steam_url" ]]; then
+      printf 'e2e: mock Steam did not report a URL\n' >&2
+      tail -n 40 "$attempt_steam_log" >&2
+      stop_steam
+      stop_amazon
+      stop_epic
+      stop_gog
+      stop_forge
+      stop_mock
+      attempt_failed_stage="$name (mock Steam)"
+      return 1
+    fi
+    printf 'e2e: mock Steam at %s\n' "$steam_url"
+  fi
+
   local spec stage wdio_log out_dir rc
   for spec in $specs; do
     stage="$name/$(basename "$spec")"
@@ -1021,8 +1088,13 @@ EOF
     # earlier spec saved in this run's private keyring must go too, or the
     # app would restore that session. Same best-effort clear as the
     # python-import group.
-    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */gog-*.spec.ts || "$spec" == */tv-gog-*.spec.ts || "$spec" == */epic-*.spec.ts || "$spec" == */tv-epic*.spec.ts || "$spec" == */amazon-*.spec.ts || "$spec" == */tv-amazon*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
+    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */gog-*.spec.ts || "$spec" == */tv-gog-*.spec.ts || "$spec" == */epic-*.spec.ts || "$spec" == */tv-epic*.spec.ts || "$spec" == */amazon-*.spec.ts || "$spec" == */tv-amazon*.spec.ts || "$spec" == */steam-*.spec.ts || "$spec" == */tv-steam*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
       secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
+    fi
+    # Every Steam spec starts with an empty Steam Web API key slot (a spec
+    # that needs the key saves it through the app, helpers/steamSetup.ts).
+    if group_needs_steam "$name" && command -v secret-tool >/dev/null 2>&1; then
+      secret-tool clear service grid-launcher username steam-web-api-key >/dev/null 2>&1 || true
     fi
     if [[ -n "$seed_script" ]] && group_seeds_per_spec "$name"; then
       # Appended to the mock log, which the failure dump already shows.
@@ -1093,6 +1165,25 @@ EOF
         export E2E_AMAZON_ENV_FILE="$data_dir/amazon-game-env.log"
       else
         export E2E_AMAZON_URL="$DEAD_FORGE_URL"
+      fi
+      # The Steam base (wdio.conf.ts turns it into
+      # GRID_LAUNCHER_E2E_STEAM_BASE), root and client: the mock Steam, the
+      # seeded fake root and the fake steam for the Steam groups; else the
+      # dead loopback address and no root or client at all.
+      if [[ -n "$steam_url" ]]; then
+        export E2E_STEAM_URL="$steam_url"
+        export E2E_FAKE_STEAM="$E2E_DIR/fake-tools/steam.mjs"
+        # What the Steam specs read (seed/steam-seed.mjs, fixtures-steam).
+        export E2E_STEAM_ROOT="$data_dir/steam/root"
+        export E2E_STEAM_ARGV_FILE="$data_dir/steam-argv.log"
+        # The secrets spec runs with debug prints on: no Steam log line at
+        # any level may carry the key.
+        if [[ "$spec" == */steam-secrets.spec.ts ]]; then
+          export E2E_RUST_LOG=debug
+        fi
+      else
+        export E2E_STEAM_URL="$DEAD_FORGE_URL"
+        unset E2E_FAKE_STEAM E2E_STEAM_ROOT E2E_STEAM_ARGV_FILE
       fi
       if [[ -n "$forge_url" ]]; then
         # wdio.conf.ts forwards both into the app process: the first is what
@@ -1187,12 +1278,15 @@ EOF
   stop_gog
   stop_epic
   stop_amazon
+  stop_steam
   [[ -n "$attempt_gog_log" && -f "$E2E_DIR/last-run-gog-requests.log" ]] &&
     cp "$E2E_DIR/last-run-gog-requests.log" "$LOG_DIR/$name-attempt-$attempt.gog-requests.log"
   [[ -n "$attempt_epic_log" && -f "$E2E_DIR/last-run-epic-requests.log" ]] &&
     cp "$E2E_DIR/last-run-epic-requests.log" "$LOG_DIR/$name-attempt-$attempt.epic-requests.log"
   [[ -n "$attempt_amazon_log" && -f "$E2E_DIR/last-run-amazon-requests.log" ]] &&
     cp "$E2E_DIR/last-run-amazon-requests.log" "$LOG_DIR/$name-attempt-$attempt.amazon-requests.log"
+  [[ -n "$attempt_steam_log" && -f "$E2E_DIR/last-run-steam-requests.log" ]] &&
+    cp "$E2E_DIR/last-run-steam-requests.log" "$LOG_DIR/$name-attempt-$attempt.steam-requests.log"
   [[ -f "$attempt_request_log" ]] && cp "$attempt_request_log" "$LOG_DIR/$name-attempt-$attempt.requests.log"
   [[ -n "$attempt_forge_request_log" && -f "$attempt_forge_request_log" ]] &&
     cp "$attempt_forge_request_log" "$LOG_DIR/$name-attempt-$attempt.forge-requests.log"

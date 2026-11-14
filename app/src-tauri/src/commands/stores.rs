@@ -1004,9 +1004,7 @@ pub async fn steam_remove_key(state: State<'_, AppState>) -> Result<(), String> 
 #[tauri::command]
 pub async fn steam_recheck_client(state: State<'_, AppState>) -> Result<(), String> {
     let steam = state.stores.steam.clone();
-    tokio::task::spawn_blocking(move || steam.recheck_client())
-        .await
-        .map_err(err)?
+    steam.recheck_client().await
 }
 
 /// Hands the Steam client an install, uninstall or validate link for a

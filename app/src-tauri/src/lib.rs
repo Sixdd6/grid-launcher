@@ -272,12 +272,17 @@ pub fn run() {
     let install = registry
         .clone()
         .map(|registry| InstallService::new(registry, config_path.clone()));
-    // External game stores (GOG, Epic). Reads their config sections and the
-    // owned caches now; the login checks run from `.setup()`.
+    // External game stores (GOG, Epic, Amazon, Steam). Reads their config
+    // sections and the owned caches now; the login checks (Steam: the first
+    // scan) run from `.setup()`. Steam's Web API key slot is the OS keyring.
     let steam_keys: Arc<dyn SteamKeyStore> = Arc::new(KeyringStore::new());
     let stores = stores_service::StoresService::real(config_path.clone(), steam_keys);
     if let Ok(registry) = &registry {
         stores.set_registry(registry.clone());
+    }
+    // Steam's installs are Downloads rows the queue shows but Steam drives.
+    if let Ok(install) = &install {
+        stores.steam.set_install(install.clone());
     }
     stores.load();
     // A library move's space check leaves room for what queued installs and
@@ -741,6 +746,8 @@ pub fn run() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     stores.check_login().await;
+                    // Steam's background scan of its libraries (every 15 s).
+                    stores.steam.spawn_background();
                     updates.spawn_store_check(handle.clone(), stores.gog.clone());
                     updates.spawn_store_check(handle.clone(), stores.epic.clone());
                     updates.spawn_store_check(handle, stores.amazon.clone());

@@ -1,0 +1,32 @@
+{
+  "_comment": "The mock Steam Web API's data (mock-romm/mock-steam.mjs) and the fake steam's install names (fake-tools/steam.mjs). Fake app ids and accounts; no real key. `owned` is GetOwnedGames per SteamID64 (…0002 has private game details and answers {}); `apps` is what GetItems says per app id (type 0 game, 6 software); `tools` answer GetItems with success 15. The installed games (Moonlit Ferry, Deep Field Radio, Old Brick Road) are in the fake root, not in the owned list, so Connect reads `4 games owned` (Desk Lights is software and Proton a tool).",
+  "personas": {
+    "76561198000000001": "SamPlays",
+    "76561198000000002": "couchguest",
+    "76561198000000005": "Manual Person"
+  },
+  "owned": {
+    "76561198000000001": [
+      { "appid": 3000040, "name": "Quiet Comet", "playtime_forever": 95, "img_icon_url": "a1b2c3", "rtime_last_played": 1731000000 },
+      { "appid": 3000050, "name": "Harbor of Bells", "playtime_forever": 0, "img_icon_url": "a1b2c4", "rtime_last_played": 0 },
+      { "appid": 3000060, "name": "Rime Assembly", "playtime_forever": 12, "img_icon_url": "a1b2c5", "rtime_last_played": 1720000000 },
+      { "appid": 3000070, "name": "Signal Lost", "playtime_forever": 0, "img_icon_url": "a1b2c6", "rtime_last_played": 0 },
+      { "appid": 3000080, "name": "Desk Lights", "playtime_forever": 300, "img_icon_url": "a1b2c7", "rtime_last_played": 1731100000 },
+      { "appid": 2805730, "name": "Proton 9.0", "playtime_forever": 0, "img_icon_url": "", "rtime_last_played": 0 }
+    ],
+    "76561198000000005": [
+      { "appid": 3000050, "name": "Harbor of Bells", "playtime_forever": 0, "img_icon_url": "a1b2c4", "rtime_last_played": 0 }
+    ]
+  },
+  "apps": {
+    "3000010": { "type": 0, "name": "Moonlit Ferry", "developer": "Tideglass", "release": 1704067200, "description": "Ferry passengers across a moonlit lake and listen to their stories.", "size": 7000000000 },
+    "3000020": { "type": 0, "name": "Deep Field Radio", "developer": "Static Choir", "release": 1640995200, "description": "Tune an old radio until the static starts answering.", "size": 3300000000 },
+    "3000030": { "type": 0, "name": "Old Brick Road", "developer": "Kiln", "release": 1514764800, "description": "Lay a road brick by brick across a growing kingdom.", "size": 10800000000 },
+    "3000040": { "type": 0, "name": "Quiet Comet", "developer": "Slow Orbit", "release": 1735689600, "description": "Steer a small comet through a silent solar system.", "size": 6000000000 },
+    "3000050": { "type": 0, "name": "Harbor of Bells", "developer": "Chime", "release": 1672531200, "description": "A harbour town where every bell rings a different story.", "size": 19000000000 },
+    "3000060": { "type": 0, "name": "Rime Assembly", "developer": "Frostbyte Co.", "release": 1609459200, "description": "Build machines out of ice before the thaw.", "size": 4400000000 },
+    "3000070": { "type": 0, "name": "Signal Lost", "developer": "Dead Air", "release": 1577836800, "description": "Find the station that went quiet.", "size": 27000000000 },
+    "3000080": { "type": 6, "name": "Desk Lights", "developer": "Lamp Works", "release": 1546300800, "description": "Animated desktop lighting.", "size": 500000000 }
+  },
+  "tools": [2805730, 1628350, 228980]
+}

@@ -1,0 +1,41 @@
+"Registry"
+{
+	"HKCU"
+	{
+		"Software"
+		{
+			"Valve"
+			{
+				"Steam"
+				{
+					"AutoLoginUser"		"FAKE-ACCOUNT-NAME-not-shown"
+					"RememberPassword"		"1"
+					"language"		"english"
+					"RunningAppID"		"0"
+					"SourceModInstallPath"		"{ROOT}/steamapps/sourcemods"
+					"apps"
+					{
+						"3000010"
+						{
+							"Installed"		"1"
+							"Running"		"0"
+							"Updating"		"0"
+						}
+						"3000020"
+						{
+							"Installed"		"1"
+							"Running"		"0"
+							"Updating"		"0"
+						}
+						"3000030"
+						{
+							"Installed"		"1"
+							"Running"		"0"
+							"Updating"		"0"
+						}
+					}
+				}
+			}
+		}
+	}
+}

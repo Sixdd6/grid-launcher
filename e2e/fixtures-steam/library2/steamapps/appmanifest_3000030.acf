@@ -1,0 +1,41 @@
+"AppState"
+{
+	"appid"		"3000030"
+	"universe"		"1"
+	"LauncherPath"		"{ROOT}/ubuntu12_32/steam"
+	"name"		"Old Brick Road"
+	"StateFlags"		"4"
+	"installdir"		"Old Brick Road"
+	"LastUpdated"		"1725000000"
+	"LastPlayed"		"0"
+	"SizeOnDisk"		"10800000000"
+	"StagingSize"		"0"
+	"buildid"		"15000301"
+	"LastOwner"		"76561198000000001"
+	"DownloadType"		"1"
+	"UpdateResult"		"0"
+	"BytesToDownload"		"0"
+	"BytesDownloaded"		"0"
+	"BytesToStage"		"0"
+	"BytesStaged"		"0"
+	"TargetBuildID"		"0"
+	"AutoUpdateBehavior"		"0"
+	"AllowOtherDownloadsWhileRunning"		"0"
+	"ScheduledAutoUpdate"		"0"
+	"InstalledDepots"
+	{
+		"3000031"
+		{
+			"manifest"		"1234567890123456703"
+			"size"		"10800000000"
+		}
+	}
+	"UserConfig"
+	{
+		"language"		"english"
+	}
+	"MountedConfig"
+	{
+		"language"		"english"
+	}
+}

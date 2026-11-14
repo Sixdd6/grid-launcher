@@ -1199,6 +1199,95 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
   each on its first attempt, `== e2e: all stages passed`. GOG, Epic and Amazon are
   unchanged by the Steam backend, the `launch_watched` route and the store-external row.
 
+## Contract deviations — package C
+
+Where package C differs from, or adds to, the plan. No Step 0 frozen file changed except
+`commands/stores.rs`'s `steam_recheck_client` wrapper (it now awaits the backend's async
+`recheck_client` instead of `spawn_blocking`); the Steam IPC types are unchanged.
+
+- **`SteamStore` has a seam.** `SteamStore::new(api: Arc<dyn SteamApi>, config_path, keys,
+  shared)`; `RealSteam` forwards every call to `SteamService`, the unit tests fake it.
+  `SteamStore::real(...)` keeps its Step 0 signature. The data folder is the config file's
+  folder (as `StoresService::real`). `lib.rs` adds `set_install(InstallService)` (the
+  Downloads rows) before `load()`, and `spawn_background()` (the 15 s scan) after the
+  startup login checks.
+- **Inherent signatures.** `save`, `open` and `scan_now` take `&Arc<Self>` (they start
+  watch tasks); `recheck_client` is async. `test`, `save`, `remove_key`, `open` and
+  `disconnect` keep Step 0's answers and words.
+- **The install watch's step is the app's** (`watch_step`, pure, tested), because Step 0
+  froze no `InstallWatch` type: a manifest that is installed ends it Completed ("Installed
+  by Steam"); installing gives `store_external_progress(done, total)`; once the install
+  was seen, two polls in a row without an installing manifest end it Cancelled (one
+  unreadable poll, Steam mid-write, does not); no manifest within
+  `STEAM_INSTALL_START_TIMEOUT` (15 min) ends it Cancelled. Package A's `watch::InstallWatch`
+  may replace it at integration. After `steam://uninstall` a short watch (2 s, up to 10
+  min) scans as soon as the manifest is gone, so the game leaves without waiting for the
+  15 s scan.
+- **Counts are games only.** Test and Connect answer the owned count after the filter
+  (rules 1–3). To know the store types, both also ask the keyless `GetItems` for ids not
+  yet in `steam-apps.json`; the keyed call is still one `GetOwnedGames`. `owned_count` on
+  the card is the same filtered count, and `0` unless the key is `ok`.
+- **Status.** `installed_count`/`installed_bytes` are `0` while the client is missing (the
+  rows stay, as planned). `owned` is `idle` with no key, `error` with GRID's words after a
+  rejected key (`owned_error`, no status code), and stays `ready` with the cached list when
+  a refresh finds no network (`owned_error` then carries the network words). The card's
+  `key` is `none` while not connected. Steam's `client_path` and `accounts` show while not
+  connected (Settings needs them before Connect).
+- **`StoreGame` for Steam.** `platforms: []` and `installed_platform: null`
+  (`StorePlatform` has no Steam value), `version: ""`, `update_version: ""`,
+  `cloud: "none"`, no DLC, `origin` `steam` / `steam_outside`, `disk_bytes` = `SizeOnDisk`,
+  Available games `0`/`0` bytes (Choices 7), `install_dir` = the Steam folder (shown
+  nowhere: the Folder fact is hidden). The cover is never stored in the row
+  (`cover_large_path` stays empty): `StoreGame.cover` is the `GetItems` capsule, else the
+  plain `<art base>steam/apps/<id>/library_600x900.jpg`.
+- **Notices.** The backend raises: "Steam connected · N games owned", "Steam connected, but
+  your game details are private, so Available is empty" (error), a Refresh's "Steam: N
+  games found · M to install", a still-private Refresh's "Steam still lists no games: the
+  profile's game details are private" (error), "<title> installed" · Play (every watched
+  install that completes, also one Steam ran by itself) and "<title> uninstalled" (a row a
+  scan removed that GRID saw installed in this run). The frontend raises the rest: the
+  install / verify / uninstall toasts, "Steam isn't installed…" refusals, Remove key's
+  card, "Steam client found" after Check again, and the Disconnect card.
+- **Remove key** also deletes `steam-owned.json` (the list needs the key); `steam-apps.json`
+  (public metadata) stays until Disconnect.
+- **Rows.** `outside` is false only for an install GRID's watch saw finish after GRID's
+  Install in Steam; an existing row keeps its value. `installed_at` keeps the old row's when
+  the manifest has no `LastUpdated`. A row is rewritten only when a compared field changed.
+  An installing manifest keeps an existing row; a filtered-out app's row is removed (no
+  card).
+- **E2E harness.**
+  - The key never crosses the WebDriver wire as text: wdio logs every command's arguments,
+    which the secrets spec scans. `helpers/steamSetup.ts` `steamSave` / `steamTest` /
+    `ensureSteamKey` send it reversed and the page turns it back before `invoke`. Specs must
+    use them, never `invoke('steam_save', { key })`.
+  - Seeds write no key. `e2e.sh` empties the run keyring's Steam slot (`secret-tool clear
+    service grid-launcher username steam-web-api-key`) before every Steam spec; package D's
+    connected specs call `ensureSteamKey()` (the app's own `steam_save`) in `before`.
+    Seed variants: a spec name ending `-private` (couchguest), `-noclient` (no root),
+    `-nokey` (documentation only).
+  - Layout: the fake root is `<data>/steam/root`, the second library `<data>/steam/library2`,
+    `registry.vdf` `<data>/steam/registry.vdf` (`<root>/../registry.vdf`, as Research
+    says). Package A's alive check must read that path for the e2e root.
+  - The mock owns Quiet Comet, Harbor of Bells, Rime Assembly, Signal Lost, Desk Lights
+    (software, type 6) and Proton 9.0 for SamPlays; the installed games are only in the fake
+    root, so Connect reads "4 games owned". App ids: Moonlit Ferry 3000010, Deep Field Radio
+    3000020, Old Brick Road 3000030, Quiet Comet 3000040, Harbor of Bells 3000050, Rime
+    Assembly 3000060, Signal Lost 3000070, Desk Lights 3000080 (exported as `GAMES`).
+  - `mock-steam.mjs` uses control routes, not a `.fail` file: `POST /__e2e__/fail` / `up`
+    (503), `redirect` / `no-redirect` (GetOwnedGames answers 302 to `/redirected`, which is
+    refused), `GET /__e2e__/requests` (the log). `GetItems` answers
+    `{"response": {"store_items": [...]}}` in the asked order, `{"appid": 0, "success": 15}`
+    for tools and unknown ids; screenshot filenames are paths under the art base, as Steam's.
+  - `fake-tools/steam.mjs` writes its argv as one JSON array per line to
+    `E2E_STEAM_ARGV_FILE`; its install writes `StateFlags` 1026 with growing
+    `BytesDownloaded` (6 steps of 1 s, after a 0.8 s "dialog"), then 4 and the game folder;
+    `rungameid` also stamps `LastPlayed` and runs a process whose argv holds `SteamLaunch
+    AppId=<id>`. Markers: `.fake-install-cancel`, `.fake-install-abort` (added: Steam
+    cancels halfway), `.fake-no-run`.
+  - `steam-secrets` runs with `E2E_RUST_LOG=debug` (`RUST_LOG` wins over `debug_prints`).
+  - `e2e/package.json` `test:mock` runs the two new harness tests (outside the Owns list,
+    as in Phase 3).
+
 ## E2E plan
 
 - **Mock Steam** and **fake steam** as in package C. Every other group gets the dead
