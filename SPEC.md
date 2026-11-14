@@ -467,8 +467,9 @@ There are several main sections to the application with buttons across the top b
   under `[ui]` in `config.toml` as `theme`, `background_fade` (100 is off; a config from before 2026-11-07 stored the art's
   opacity, 0–60 with 0 off, and is converted once on load),
   `card_size_library`, `card_size_server`, `card_labels` (`always` or `hover`) and
-  `card_display` (`rows` or `columns`); card size, game labels and card display are
-  desktop-only (TV mode has one cover size). `[ui]` also holds TV mode's `tv_prompts`
+  `card_display` (`rows` or `columns`); card display is shared with TV mode, while card
+  size and game labels are the desktop's alone: TV mode has its own (`tv_card_size`,
+  `tv_card_labels`; see TV mode). `[ui]` also holds TV mode's `tv_prompts`
   (`match`, `xbox`, `ps`, `nintendo` or `8bitdo`) and `tv_assignments` (a table of
   controller key → `xbox` or `nintendo`; two controllers of one model share a key).
   **Hardware acceleration** (on by default) renders
@@ -1209,6 +1210,16 @@ testable statement.
 - **Background art, theme, notifications** as on the desktop, with TV's sizes: Follow
   system shows dark; the cards sit at the top right, at most three, never take focus, and
   every card goes to Menu › Notifications (the whole session).
+- **TV grid settings** (Settings › Appearance, after Theme): **Game card display**
+  ("Here and in desktop mode", the shared `card_display`), then TV mode's own **Card size**
+  ("Every grid in TV mode": Small, Medium (default), Large; one size for every TV grid,
+  cover widths 8.5, 10 and 12.5rem; Discover's shelves and Details keep theirs) and **Game
+  labels** ("The title under each cover": Always visible (default), or Visible on focus,
+  where covers show no title line and the focused cover's title floats under it as a pill
+  without moving the layout). They are stored as `[ui]` `tv_card_size` (`small`, `medium`,
+  `large`) and `tv_card_labels` (`always`, `focus`), apart from the desktop's
+  `card_size_library`, `card_size_server` and `card_labels`: changing one mode never
+  changes the other. TV mode never sends the player to desktop mode for them (2026-11-14).
 
 ## Screens
 - **Tabs:** Library, Server (Discover first, then the platforms), Downloads, Settings (the

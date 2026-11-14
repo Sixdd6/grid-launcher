@@ -73,7 +73,7 @@ var driveOf = function (id) { return DRIVES.filter(function (d) { return d.id ==
 var readyDrives = function () { return DRIVES.filter(function (d) { return d.connected && d.status === 'ready'; }); };
 var onDrive = function (g) { return readyDrives().filter(function (d) { return d.games.indexOf(g.id) >= 0; })[0]; };
 var CFG = { theme: 'dark', art: true, fade: 45, blur: 40, hw: true, restore: true, upload: true, skipNewer: true, delay: 10, retain: 10,
-  raUser: 'sam_plays', raToken: '', prompts: 'auto', assign: {}, startOn: 'auto', bkFirmware: true, url: 'https://romm.home.lan', user: 'sam', lib: '/home/sam/Games/GRID', exitBtn: 'menu' };
+  raUser: 'sam_plays', raToken: '', prompts: 'auto', assign: {}, startOn: 'auto', cardDisplay: 'rows', tvSize: 'medium', tvLabels: 'always', bkFirmware: true, url: 'https://romm.home.lan', user: 'sam', lib: '/home/sam/Games/GRID', exitBtn: 'menu' };
 
 var S = { tab: 'server', pages: [], layers: [], offline: false, libRail: 'all', srvRail: 'discover', libQ: '', srvQ: '', libSort: 'Recently played', detTab: 'Overview', saveKind: 'Saves', notes: [], scheme: 'xbox', padName: '' };
 
@@ -520,11 +520,15 @@ function paneRows(id) {
   if (id === 'appearance') return [
     { type: 'choice', key: 'startOn', label: 'Open GRID on', sub: 'Here and in desktop mode', opts: [['auto', 'Automatic'], ['discover', 'Server › Discover'], ['library', 'Library']] },
     { type: 'choice', key: 'theme', label: 'Theme', opts: [['system', 'Follow system'], ['dark', 'Dark'], ['light', 'Light']] },
+    { type: 'choice', key: 'cardDisplay', label: 'Game card display', sub: 'Here and in desktop mode', opts: [['rows', 'Equal height'], ['columns', 'Equal width']] },
+    // TV's own grid settings (user decision 2026-11-14): stored apart from desktop's
+    // Card size and Game labels, so changing one mode never changes the other.
+    { type: 'choice', key: 'tvSize', label: 'Card size', sub: 'Every grid in TV mode', opts: [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']] },
+    { type: 'choice', key: 'tvLabels', label: 'Game labels', sub: 'The title under each cover', opts: [['always', 'Always visible'], ['focus', 'Visible on focus']] },
     { type: 'toggle', key: 'art', label: 'Background art', sub: 'The focused game\'s art, blurred, behind everything' },
     { type: 'slider', key: 'fade', label: 'Background fade', min: 0, max: 100, step: 5, fmt: function (v) { return v === 100 ? '100% · off' : v + '%'; } },
     { type: 'slider', key: 'blur', label: 'Background blur', min: 0, max: 100, step: 10, fmt: function (v) { return v + '%'; } },
-    { type: 'toggle', key: 'hw', label: 'Hardware acceleration', sub: 'Uses the graphics card. Restart to apply.' },
-    { type: 'info', label: 'More grid options', value: 'In desktop mode' }];
+    { type: 'toggle', key: 'hw', label: 'Hardware acceleration', sub: 'Uses the graphics card. Restart to apply.' }];
   if (id === 'cloud') return [
     { type: 'toggle', key: 'restore', label: 'Restore before launch', sub: 'Fetch the latest cloud save before a game starts' },
     { type: 'toggle', key: 'upload', label: 'Upload after exit', sub: 'Send new saves when a game closes' },
@@ -579,12 +583,16 @@ function rowOf(el) { var pane = el.closest('#pane, .page-in'); var rows = pane._
 function srowAct(el) {
   var r = rowOf(el); if (!r) return;
   if (r.type === 'toggle') { CFG[r.key] = !CFG[r.key]; repaintKeep(); if (r.key === 'art') hero(byId(1)); }
-  else if (r.type === 'choice') openSheet({ title: r.label, sub: r.key === 'assign' ? (S.padName || 'The controller in use') : '', items: r.opts.map(function (o) { return { label: o[1], sub: r.key === 'assign' ? (o[0] === 'xbox' ? 'Bottom selects, right goes back' : 'Right selects, bottom goes back') : '', checked: (r.get ? r.get() : CFG[r.key]) === o[0], fn: function () { if (r.set) r.set(o[0]); else CFG[r.key] = o[0]; paintHints(); paintTop(); if (r.key === 'theme') applyTheme(); repaintKeep(); } }; }) });
+  else if (r.type === 'choice') openSheet({ title: r.label, sub: r.key === 'assign' ? (S.padName || 'The controller in use') : '', items: r.opts.map(function (o) { return { label: o[1], sub: r.key === 'assign' ? (o[0] === 'xbox' ? 'Bottom selects, right goes back' : 'Right selects, bottom goes back') : '', checked: (r.get ? r.get() : CFG[r.key]) === o[0], fn: function () { if (r.set) r.set(o[0]); else CFG[r.key] = o[0]; paintHints(); paintTop(); if (r.key === 'theme') applyTheme(); applyGrid(); repaintKeep(); } }; }) });
   else if (r.type === 'text') openOSK({ title: r.label, value: r.mask ? '' : CFG[r.key], mask: r.mask, onDone: function (v) { CFG[r.key] = v; repaintKeep(); } });
   else if (r.type === 'action') r.fn(el);
 }
 function srowAdj(el, d) { var r = rowOf(el); if (!r || r.type !== 'slider') return false; CFG[r.key] = Math.max(r.min, Math.min(r.max, CFG[r.key] + d * r.step)); if (r.key === 'fade') $('art').style.setProperty('--fade', CFG.fade / 100); repaintKeep(); return true; }
 function repaintKeep() { repaint(); }
+// The TV grids read Card size and Game labels from the root (tvmode.css):
+// data-size small | medium | large, data-labels always | focus.
+function applyGrid() { var t = document.querySelector('.tv'); if (!t) return; t.dataset.size = CFG.tvSize; t.dataset.labels = CFG.tvLabels; t.dataset.display = CFG.cardDisplay; }
+applyGrid();
 function applyTheme() { var t = CFG.theme === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : CFG.theme; document.documentElement.setAttribute('data-theme', t); }
 
 function systemsPane() {
