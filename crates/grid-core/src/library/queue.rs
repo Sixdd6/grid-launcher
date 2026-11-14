@@ -134,7 +134,9 @@ pub enum FailureCode {
     InstallerUnrecognised,
     InstallerDlcBaseMissing,
     InstallerExit,
-    InstallerNeedsWizard,
+    /// A Windows installer's silent runs all failed where its setup window
+    /// may not open (TV mode); `reason` words why.
+    InstallerSilentFailed,
 }
 
 /// A failed entry's [`FailureCode`] and its parts; blank where a code has
@@ -146,6 +148,10 @@ pub struct JobFailure {
     pub base_gog_id: String,
     /// The download (or installer) was kept for a retry.
     pub kept: bool,
+    /// Why, in GRID's words, as the end of a sentence
+    /// ([`crate::stores::offline::InstallerReason::words`]): set for
+    /// [`FailureCode::InstallerSilentFailed`], blank for the others.
+    pub reason: String,
 }
 
 impl JobFailure {
@@ -157,6 +163,7 @@ impl JobFailure {
             base_title: String::new(),
             base_gog_id: String::new(),
             kept: false,
+            reason: String::new(),
         };
         match error {
             LibraryError::InstallerUnrecognised { .. } => {
@@ -171,9 +178,10 @@ impl JobFailure {
                 ..failure(FailureCode::InstallerDlcBaseMissing)
             }),
             LibraryError::InstallerExit(_) => Some(failure(FailureCode::InstallerExit)),
-            LibraryError::InstallerNeedsWizard { kept } => Some(JobFailure {
+            LibraryError::InstallerSilentFailed { reason, kept } => Some(JobFailure {
                 kept: *kept,
-                ..failure(FailureCode::InstallerNeedsWizard)
+                reason: reason.words().to_string(),
+                ..failure(FailureCode::InstallerSilentFailed)
             }),
             _ => None,
         }
@@ -1747,7 +1755,8 @@ mod tests {
                 "code": "installer_dlc_base_missing",
                 "base_title": "Pale Summit",
                 "base_gog_id": "42",
-                "kept": false
+                "kept": false,
+                "reason": ""
             })
         );
 
@@ -1772,22 +1781,29 @@ mod tests {
             LibraryError::InstallerExit(1).to_string(),
             "The installer stopped with an error (exit code 1). The download was removed."
         );
+        let silent = LibraryError::InstallerSilentFailed {
+            reason: crate::stores::offline::InstallerReason::DiskFull,
+            kept: true,
+        };
         assert_eq!(
-            LibraryError::InstallerNeedsWizard { kept: true }.to_string(),
-            "This installer needs its setup window. Install it in desktop mode. The download was kept."
+            silent.to_string(),
+            "Couldn't run the installer silently: there isn't enough disk space. \
+             The installer was kept."
         );
         assert_eq!(
-            LibraryError::InstallerNeedsWizard { kept: false }.to_string(),
-            "This installer needs its setup window. Install it in desktop mode."
-        );
-        assert_eq!(
-            JobFailure::from_error(&LibraryError::InstallerNeedsWizard { kept: true }),
+            JobFailure::from_error(&silent),
             Some(JobFailure {
-                code: FailureCode::InstallerNeedsWizard,
+                code: FailureCode::InstallerSilentFailed,
                 base_title: String::new(),
                 base_gog_id: String::new(),
-                kept: true
+                kept: true,
+                reason: "there isn't enough disk space".into(),
             })
+        );
+        let json = serde_json::to_string(&JobFailure::from_error(&silent)).unwrap();
+        assert!(
+            json.contains(r#""code":"installer_silent_failed""#),
+            "{json}"
         );
         assert_eq!(
             JobFailure::from_error(&LibraryError::InstallerRefused("no".into())),

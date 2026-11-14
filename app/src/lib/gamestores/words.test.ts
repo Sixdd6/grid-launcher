@@ -50,12 +50,16 @@ describe('Downloads lines', () => {
     expect(storeEntryLine(row({ status: 'failed', error: 'gogdl stopped: GOG’s download server didn’t answer' }))).toBe(
       'Failed · gogdl stopped: GOG’s download server didn’t answer',
     );
-    expect(
-      storeEntryLine(row({ status: 'failed', kind: 'store_installer', failure: { code: 'installer_needs_wizard', base_title: '', base_gog_id: '', kept: true } })),
-    ).toBe('Failed · Couldn’t run the installer silently: the installer stopped without saying why. The installer was kept.');
     // grid-core's own words for a failed silent install.
     expect(
-      storeEntryLine(row({ status: 'failed', kind: 'store_installer', error: "Couldn't run the installer silently: there isn't enough disk space. The installer was kept." })),
+      storeEntryLine(
+        row({
+          status: 'failed',
+          kind: 'store_installer',
+          error: "Couldn't run the installer silently: there isn't enough disk space. The installer was kept.",
+          failure: { code: 'installer_silent_failed', base_title: '', base_gog_id: '', kept: true, reason: "there isn't enough disk space" },
+        }),
+      ),
     ).toBe("Failed · Couldn't run the installer silently: there isn't enough disk space. The installer was kept.");
   });
   it('names the kind badges', () => {
@@ -79,11 +83,11 @@ describe('Downloads lines', () => {
       'Windows · Waiting for the installer’s setup window · finish it there',
     );
     expect(rommInstallerLine(fake.rommInstallerRow('X', 'Windows', 'downloading', 0.4))).toBeNull();
-    const dlc = fake.failedInstallerRow('Low Tide Radio', 'Windows', { code: 'installer_dlc_base_missing', base_title: 'Pale Summit', base_gog_id: '9', kept: false }, '');
+    const dlc = fake.failedInstallerRow('Low Tide Radio', 'Windows', { code: 'installer_dlc_base_missing', base_title: 'Pale Summit', base_gog_id: '9', kept: false, reason: '' }, '');
     expect(rommInstallerLine(dlc)).toBe(
       'Windows · Failed · Its archive holds a DLC installer for Pale Summit, which isn’t installed. Install Pale Summit first; the download was removed.',
     );
-    const unk = fake.failedInstallerRow('Iron Lullaby', 'Windows', { code: 'installer_unrecognised', base_title: '', base_gog_id: '', kept: false },
+    const unk = fake.failedInstallerRow('Iron Lullaby', 'Windows', { code: 'installer_unrecognised', base_title: '', base_gog_id: '', kept: false, reason: '' },
       'Its archive holds an installer GRID doesn’t recognise (setup.exe has no GOG game info). The download was removed.');
     expect(rommInstallerLine(unk)).toBe(
       'Windows · Failed · Its archive holds an installer GRID doesn’t recognise (setup.exe has no GOG game info). The download was removed.',
@@ -124,12 +128,12 @@ describe('notices', () => {
   });
   it('words RomM installer failures with Install <base>', () => {
     const fake = new FakeStores();
-    const dlc = fake.failedInstallerRow('Low Tide Radio', 'Windows', { code: 'installer_dlc_base_missing', base_title: 'Pale Summit', base_gog_id: '', kept: false }, '');
+    const dlc = fake.failedInstallerRow('Low Tide Radio', 'Windows', { code: 'installer_dlc_base_missing', base_title: 'Pale Summit', base_gog_id: '', kept: false, reason: '' }, '');
     expect(installerFailedNotice(dlc)).toMatchObject({
       text: 'Couldn’t install Low Tide Radio: it’s DLC for Pale Summit, which isn’t installed',
       action: { kind: 'install_base', title: 'Pale Summit' },
     });
-    const unk = fake.failedInstallerRow('Iron Lullaby', 'Windows', { code: 'installer_unrecognised', base_title: '', base_gog_id: '', kept: false }, '');
+    const unk = fake.failedInstallerRow('Iron Lullaby', 'Windows', { code: 'installer_unrecognised', base_title: '', base_gog_id: '', kept: false, reason: '' }, '');
     expect(installerFailedNotice(unk)).toMatchObject({
       text: 'Couldn’t install Iron Lullaby: its archive holds an installer GRID doesn’t recognise',
       action: { kind: 'open_downloads' },

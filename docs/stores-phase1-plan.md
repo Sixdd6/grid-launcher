@@ -430,8 +430,8 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
 - `InstallerNeedsWizard` Display: "This installer needs its setup window. Install it in desktop
   mode." plus " The download was kept." when `kept`. The UI words the offline-installer variant
   ("The installer was kept.") from `failure`. **Superseded 2026-11-14:** nothing raises it any
-  more (`InstallerSilentFailed` replaces it); the variant and its `FailureCode` stay only
-  because `library/queue.rs` names them, and the UI reads that code as the unknown reason.
+  more (`InstallerSilentFailed` replaces it). **Removed 2026-11-14** with its
+  `installer_needs_wizard` code: the queue's `installer_silent_failed` took its place.
 - A `BackupItemKey::Store` row has `rom_id` 0 and its game key in `source_id`.
 - `Pack::paths()` includes store games, so a bad store path makes a pack unreadable like any
   other. `backup::pack::store_game_dir_rel(source, name, id)` gives `stores/<source>/<name>-<id>`.
@@ -834,11 +834,12 @@ defer to desktop mode. The old "Install it in desktop mode" failure is gone.
   no log line, no error text, no IPC.
 - **The error** (`LibraryError::InstallerSilentFailed { reason, kept: true }`): "Couldn't run
   the installer silently: <reason words>. The installer was kept." Its start is
-  `library::INSTALLER_SILENT_FAILED_LEAD`. `library/queue.rs` was not changed (another
-  package owned it), so `JobFailure::from_error` gives it no code (`failure: null`); the UI
-  (`gamestores/downloads.ts` `silentFailureReason`) and the GOG notifier
-  (`stores_service/gog.rs` `silent_install_failed`) know it by that start, word for word, as
-  they already do for `REDIST_DECLINED`. A follow-up may give it a `FailureCode`.
+  `library::INSTALLER_SILENT_FAILED_LEAD`. Its queue failure is
+  `FailureCode::InstallerSilentFailed` (`installer_silent_failed`, with `kept` and `reason`,
+  the reason's words; integration 2026-11-14): the UI (`gamestores/downloads.ts`
+  `silentFailureReason`), the GOG notifier (`stores_service/gog.rs` `silent_install_failed`)
+  and `InstallService::delete_installer` know it by that code, not by its text. The old
+  `InstallerNeedsWizard` variant and its `installer_needs_wizard` code are gone.
 - **TV mode:** the row reads "Failed · Couldn't run the installer silently: …"; the card
   "Couldn’t install <title> silently" with the reason as a sentence and Retry (View), which
   re-runs from the first attempt with the kept installer (no new download). A's list on the

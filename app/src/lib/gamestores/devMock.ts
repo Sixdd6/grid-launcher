@@ -175,9 +175,9 @@ export function installDevMock(): void {
   // RomM installer-archive rows for the Downloads states.
   rommRows.push(
     fake.rommInstallerRow('Grey Meridian', 'Windows', 'installer_silent', 0.4),
-    fake.failedInstallerRow('Iron Lullaby', 'Windows', { code: 'installer_unrecognised', base_title: '', base_gog_id: '', kept: false },
+    fake.failedInstallerRow('Iron Lullaby', 'Windows', { code: 'installer_unrecognised', base_title: '', base_gog_id: '', kept: false, reason: '' },
       'Its archive holds an installer GRID doesn’t recognise (setup.exe has no GOG game info). The download was removed.'),
-    fake.failedInstallerRow('Low Tide Radio', 'Windows', { code: 'installer_dlc_base_missing', base_title: 'Pale Summit', base_gog_id: '', kept: false }, ''),
+    fake.failedInstallerRow('Low Tide Radio', 'Windows', { code: 'installer_dlc_base_missing', base_title: 'Pale Summit', base_gog_id: '', kept: false, reason: '' }, ''),
   );
   const origEmit = fake.emitDownloads.bind(fake);
   fake.emitDownloads = () => {

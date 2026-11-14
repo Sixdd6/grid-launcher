@@ -81,31 +81,16 @@ export type LineContext = {
 const WIZARD_LINE = 'Waiting for the installer’s setup window · finish it there';
 
 /**
- * How grid-core's error for an installer whose silent runs both failed
- * starts, word for word (`library::INSTALLER_SILENT_FAILED_LEAD`, plain
- * apostrophe): "Couldn't run the installer silently: there isn't enough disk
- * space. The installer was kept." It happens only where the setup window may
- * not open (TV mode); its row offers Retry and Delete installer.
- */
-export const SILENT_FAILED_LEAD = "Couldn't run the installer silently: ";
-const KEPT_TAIL = ' The installer was kept.';
-
-/**
- * The reason a failed row's installer couldn't run silently, as a sentence
- * ("There isn’t enough disk space."), or `null` for any other row. The
- * queue's older `installer_needs_wizard` code reads as the unknown reason.
+ * The reason a failed row's installer couldn't run silently (the queue's
+ * `installer_silent_failed` code, which happens only where the setup window
+ * may not open: TV mode), as a sentence ("There isn’t enough disk space."),
+ * or `null` for any other row. Its row offers Retry and Delete installer.
  */
 export function silentFailureReason(e: DownloadEntry): string | null {
-  if (e.status !== 'failed') return null;
-  const error = e.error.trim();
-  if (error.startsWith(SILENT_FAILED_LEAD)) {
-    let rest = error.slice(SILENT_FAILED_LEAD.length).trim();
-    if (rest.endsWith(KEPT_TAIL.trim())) rest = rest.slice(0, rest.length - KEPT_TAIL.trim().length).trim();
-    if (rest === '') rest = 'the installer stopped without saying why.';
-    return (rest.charAt(0).toUpperCase() + rest.slice(1)).replace(/'/g, '’');
-  }
-  if (e.failure?.code === 'installer_needs_wizard') return 'The installer stopped without saying why.';
-  return null;
+  if (e.status !== 'failed' || e.failure?.code !== 'installer_silent_failed') return null;
+  let reason = (e.failure.reason ?? '').trim().replace(/\.$/, '');
+  if (reason === '') reason = 'the installer stopped without saying why';
+  return `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`.replace(/'/g, '’');
 }
 
 /** The failed line's reason, worded from `failure` when it has the parts, else the backend's error. */
@@ -120,12 +105,6 @@ export function failureReason(e: DownloadEntry, failure: JobFailure | null = e.f
           ? `This is DLC for ${base}, which isn’t installed. Install ${base} first.`
           : `Its archive holds a DLC installer for ${base}, which isn’t installed. Install ${base} first; the download was removed.`;
       }
-      case 'installer_needs_wizard':
-        // The queue's older code for a failed silent install (grid-core now
-        // words it in the error itself).
-        return `Couldn’t run the installer silently: the installer stopped without saying why.${
-          failure.kept ? (offline ? ' The installer was kept.' : ' The download was kept.') : ''
-        }`;
       default:
         break;
     }

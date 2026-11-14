@@ -180,11 +180,14 @@ describe('TV Downloads store rows and installer cards', () => {
 
   it('Delete installer follows Retry on a failed silent install, asked first', () => {
     const error = "Couldn't run the installer silently: there isn't enough disk space. The installer was kept.";
-    const offline = row({ kind: 'store_installer', title: 'Quarry Nine', status: 'failed', error });
+    const failure = { code: 'installer_silent_failed' as const, base_title: '', base_gog_id: '', kept: true, reason: "there isn't enough disk space" };
+    const offline = row({ kind: 'store_installer', title: 'Quarry Nine', status: 'failed', error, failure });
     expect(tvStoreActions(offline, null).map((a) => a.label)).toEqual(['Retry', 'Delete installer', 'Dismiss']);
-    expect(deletesInstaller(row({ job: 'game', kind: 'base', status: 'failed', error }))).toBe(true);
+    expect(deletesInstaller(row({ job: 'game', kind: 'base', status: 'failed', error, failure }))).toBe(true);
+    // Known by its code, not its words.
+    expect(deletesInstaller(row({ kind: 'store_installer', status: 'failed', error }))).toBe(false);
     // A drive restore's installer stays on the drive; other failures have none.
-    expect(deletesInstaller(row({ kind: 'store_restore', status: 'failed', error }))).toBe(false);
+    expect(deletesInstaller(row({ kind: 'store_restore', status: 'failed', error, failure }))).toBe(false);
     expect(deletesInstaller(row({ kind: 'store_installer', status: 'failed', error: 'boom' }))).toBe(false);
     expect(deleteInstallerWords(offline)).toEqual({
       title: 'Delete Quarry Nine’s installer?',
@@ -200,6 +203,7 @@ describe('TV Downloads store rows and installer cards', () => {
       title: 'Foxglove',
       status: 'failed',
       error: "Couldn't run the installer silently: there isn't enough disk space. The installer was kept.",
+      failure: { code: 'installer_silent_failed', base_title: '', base_gog_id: '', kept: true, reason: "there isn't enough disk space" },
     });
     expect(tvFailureCard(disk)).toEqual({ text: 'Couldn’t install Foxglove silently', sub: 'There isn’t enough disk space.', action: { kind: 'retry' } });
     const reasons: [string, string][] = [
@@ -209,16 +213,22 @@ describe('TV Downloads store rows and installer cards', () => {
       ['the installer stopped without saying why', 'The installer stopped without saying why.'],
     ];
     for (const [words, sub] of reasons) {
-      const e = row({ kind: 'store_installer', title: 'Quarry Nine', status: 'failed', error: `Couldn't run the installer silently: ${words}. The installer was kept.` });
+      const e = row({
+        kind: 'store_installer',
+        title: 'Quarry Nine',
+        status: 'failed',
+        error: `Couldn't run the installer silently: ${words}. The installer was kept.`,
+        failure: { code: 'installer_silent_failed', base_title: '', base_gog_id: '', kept: true, reason: words },
+      });
       const c = tvFailureCard(e);
       expect(c?.sub).toBe(sub);
       expect(`${c?.text} ${c?.sub} ${tvStoreLine(e, 'GE-Proton10-17', '')}`).not.toMatch(/desktop/i);
     }
-    // The queue's older code reads as the unknown reason.
-    const old = row({ job: 'game', kind: 'base', title: 'Foxglove', status: 'failed', failure: { code: 'installer_needs_wizard', base_title: '', base_gog_id: '', kept: true } });
+    // A blank reason reads as the unknown one.
+    const old = row({ job: 'game', kind: 'base', title: 'Foxglove', status: 'failed', failure: { code: 'installer_silent_failed', base_title: '', base_gog_id: '', kept: true, reason: '' } });
     expect(tvFailureCard(old)).toEqual({ text: 'Couldn’t install Foxglove silently', sub: 'The installer stopped without saying why.', action: { kind: 'retry' } });
     expect(tvStoreLine(old, '', '')).not.toMatch(/desktop/i);
-    const dlc = row({ job: 'game', kind: 'base', title: 'Low Tide Radio', status: 'failed', failure: { code: 'installer_dlc_base_missing', base_title: 'Pale Summit', base_gog_id: '', kept: false } });
+    const dlc = row({ job: 'game', kind: 'base', title: 'Low Tide Radio', status: 'failed', failure: { code: 'installer_dlc_base_missing', base_title: 'Pale Summit', base_gog_id: '', kept: false, reason: '' } });
     expect(tvFailureCard(dlc)?.action).toEqual({ kind: 'install_base', title: 'Pale Summit' });
   });
 });

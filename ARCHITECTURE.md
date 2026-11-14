@@ -144,7 +144,11 @@ Modules as declared in `src/lib.rs`:
   drives (Steam) is a `JobKey::StoreExternal` row (`kind: "store_external"`,
   `admit_store_external` / `finish_store_external` with an `ExternalOutcome`): no slot, no
   waiting, never cancelled or retried by GRID, one live row per product, and a library
-  path change does not wait for it.
+  path change does not wait for it. A failed row's `failure` (`JobFailure::from_error`)
+  gives the installer failures a code (`installer_unrecognised`,
+  `installer_dlc_base_missing`, `installer_exit`, `installer_silent_failed` with its
+  reason's words), so the UI and the store notifiers know them by code, not by the error
+  text.
   `user_data_links` links an emulator's own-written directories into
   `saves/`; `layout_migration` is the one-shot startup migration to the layout below.
   `path_change` (Q2) validates a new library folder, switches `library_path` (the old

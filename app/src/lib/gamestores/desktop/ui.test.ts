@@ -22,7 +22,7 @@ describe('installer cards from Downloads rows', () => {
     expect(installerCards(new Map([[after.id, after]]), [after])).toEqual([]);
   });
   it('raises the failure card with Install <base>', () => {
-    const failed = fake.failedInstallerRow('Low Tide Radio', 'Windows', { code: 'installer_dlc_base_missing', base_title: 'Pale Summit', base_gog_id: '', kept: false }, '');
+    const failed = fake.failedInstallerRow('Low Tide Radio', 'Windows', { code: 'installer_dlc_base_missing', base_title: 'Pale Summit', base_gog_id: '', kept: false, reason: '' }, '');
     const prev = new Map([[failed.id, { ...failed, status: 'installing' as const, failure: null }]]);
     const cards = installerCards(prev, [failed]);
     expect(cards).toHaveLength(1);
@@ -50,12 +50,12 @@ describe('the Downloads formatter with store rows', () => {
   });
   it('gives a failed installer archive no generic failure card', () => {
     const fake = new FakeStores();
-    const failed = fake.failedInstallerRow('Iron Lullaby', 'Windows', { code: 'installer_unrecognised', base_title: '', base_gog_id: '', kept: false }, 'x');
+    const failed = fake.failedInstallerRow('Iron Lullaby', 'Windows', { code: 'installer_unrecognised', base_title: '', base_gog_id: '', kept: false, reason: '' }, 'x');
     expect(noticesFor({ entry: failed, from: 'installing' }, { setupActive: false })).toEqual([]);
     // Nor one whose installer couldn't run silently (TV mode words it).
     const silent: DownloadEntry = {
       ...failed,
-      failure: null,
+      failure: { code: 'installer_silent_failed', base_title: '', base_gog_id: '', kept: true, reason: 'the installer cancelled itself' },
       error: "Couldn't run the installer silently: the installer cancelled itself. The installer was kept.",
     };
     expect(noticesFor({ entry: silent, from: 'installing' }, { setupActive: false })).toEqual([]);

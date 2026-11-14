@@ -128,11 +128,6 @@ pub enum LibraryError {
     /// The installer exited with this code.
     #[error("The installer stopped with an error (exit code {0}). The download was removed.")]
     InstallerExit(i32),
-    /// No longer raised: a failed silent install is
-    /// [`LibraryError::InstallerSilentFailed`]. Kept for the queue's
-    /// `FailureCode::InstallerNeedsWizard`.
-    #[error("This installer needs its setup window. Install it in desktop mode.{}", if *kept { " The download was kept." } else { "" })]
-    InstallerNeedsWizard { kept: bool },
     /// A Windows installer whose silent runs (the full one, then the milder
     /// one) both failed where its setup window may not open (TV mode):
     /// why, read from its log and in GRID's words
@@ -150,9 +145,9 @@ pub enum LibraryError {
 
 // --- constants --------------------------------------------------------------
 
-/// How [`LibraryError::InstallerSilentFailed`]'s text starts, word for word:
-/// the UI and the store's notifier know the failure by it (the queue's
-/// `JobFailure` has no code for it).
+/// How [`LibraryError::InstallerSilentFailed`]'s text starts, word for word.
+/// The UI and the store's notifier know the failure by its queue code
+/// (`FailureCode::InstallerSilentFailed`), not by this text.
 pub const INSTALLER_SILENT_FAILED_LEAD: &str = "Couldn't run the installer silently: ";
 
 /// The key [`InstallService::remember_installer`] files a row's installer
@@ -3371,9 +3366,11 @@ impl InstallService {
             .iter()
             .find(|entry| entry.id == entry_id)
             .ok_or_else(|| LibraryError::InstallerRefused("That download is gone.".to_string()))?;
-        if entry.status != DownloadStatus::Failed
-            || !entry.error.starts_with(INSTALLER_SILENT_FAILED_LEAD)
-        {
+        let silent = entry
+            .failure
+            .as_ref()
+            .is_some_and(|failure| failure.code == queue::FailureCode::InstallerSilentFailed);
+        if entry.status != DownloadStatus::Failed || !silent {
             return Err(LibraryError::InstallerRefused(
                 "Only an installer that couldn't run silently can be deleted here.".to_string(),
             ));

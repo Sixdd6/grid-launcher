@@ -505,11 +505,16 @@ export type JobPhase =
 
 /** Why a failed row failed, when it is worded from parts (`queue::JobFailure`). */
 export type JobFailure = {
-  code: 'installer_unrecognised' | 'installer_dlc_base_missing' | 'installer_exit' | 'installer_needs_wizard';
+  code: 'installer_unrecognised' | 'installer_dlc_base_missing' | 'installer_exit' | 'installer_silent_failed';
   base_title: string;
   base_gog_id: string;
   /** The download (or installer) was kept for a retry. */
   kept: boolean;
+  /**
+   * `installer_silent_failed`: why, in GRID's words, as the end of a sentence
+   * ("there isn't enough disk space"); `''` for the other codes.
+   */
+  reason: string;
 };
 
 export type DownloadEntry = {

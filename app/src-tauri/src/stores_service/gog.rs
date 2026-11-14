@@ -1466,16 +1466,12 @@ struct JobRow {
 }
 
 /// Whether a Downloads entry failed in its installer's silent runs where
-/// no setup window may open: grid-core's `InstallerSilentFailed` (known by
-/// its words, [`grid_core::library::INSTALLER_SILENT_FAILED_LEAD`]), or the
-/// queue's older `installer_needs_wizard` code.
+/// no setup window may open: the queue's `installer_silent_failed` code
+/// (grid-core's `InstallerSilentFailed`).
 fn silent_install_failed(entry: &grid_core::library::queue::DownloadEntry) -> bool {
-    entry
-        .error
-        .starts_with(grid_core::library::INSTALLER_SILENT_FAILED_LEAD)
-        || entry.failure.as_ref().is_some_and(|failure| {
-            failure.code == grid_core::library::queue::FailureCode::InstallerNeedsWizard
-        })
+    entry.failure.as_ref().is_some_and(|failure| {
+        failure.code == grid_core::library::queue::FailureCode::InstallerSilentFailed
+    })
 }
 
 /// The tool's download size for the cards ("Installing gogdl (12 MB)…").
