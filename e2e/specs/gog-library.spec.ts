@@ -144,6 +144,76 @@ describe('gog-library', () => {
     await $(testId('store-details')).waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
   });
 
+  // Bug 2026-11-14: opening a game's details sent the grid behind them back to
+  // the top. The stage has too few games to scroll, so a tall spacer goes in
+  // front of the grid; the card is brought to the middle of the view and
+  // clicked where it is.
+  async function scrolledToCard(section: string, card: string): Promise<number> {
+    const top = await browser.execute(
+      (sectionSel, cardSel) => {
+        const scroller = document.querySelector(`${sectionSel} .scroller`) as HTMLElement | null;
+        const el = document.querySelector(cardSel) as HTMLElement | null;
+        if (!scroller || !el) throw new Error('no scroller or card');
+        if (!scroller.querySelector('[data-e2e-spacer]')) {
+          const spacer = document.createElement('div');
+          spacer.setAttribute('data-e2e-spacer', '');
+          // The scroller is a flex column: a spacer that may shrink is 0px tall.
+          spacer.style.flex = 'none';
+          spacer.style.height = '2400px';
+          scroller.prepend(spacer);
+        }
+        el.scrollIntoView({ block: 'center', behavior: 'instant' });
+        return scroller.scrollTop;
+      },
+      `[data-testid="${section}"]`,
+      card,
+    );
+    expect(top).toBeGreaterThan(1000);
+    return top;
+  }
+
+  async function scrollTopOf(section: string): Promise<number> {
+    return browser.execute(
+      (sel) => (document.querySelector(`${sel} .scroller`) as HTMLElement).scrollTop,
+      `[data-testid="${section}"]`,
+    );
+  }
+
+  /** The scroll position holds for `ms`: every reading equals `top`. */
+  async function scrollHolds(section: string, top: number, ms = 1500): Promise<void> {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      expect(Math.abs((await scrollTopOf(section)) - top)).toBeLessThanOrEqual(2);
+      await browser.pause(100);
+    }
+  }
+
+  it('keeps the Library grid’s scroll position while a store game’s details are open and after they close', async () => {
+    await openGog('installed');
+    const card = testId('library-store-card-gog-1580232252');
+    const top = await scrolledToCard('library-section', card);
+    await $(card).click();
+    await $(testId('store-details')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await scrollHolds('library-section', top);
+    await browser.keys('Escape');
+    await $(testId('store-details')).waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
+    await scrollHolds('library-section', top);
+  });
+
+  it('keeps the Server grid’s scroll position while a game’s details are open and after they close', async () => {
+    await $(testId('nav-server')).click();
+    await $(testId('platform-btn-1')).click();
+    const card = testId('game-card-901');
+    await $(card).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    const top = await scrolledToCard('server-section', card);
+    await $(card).click();
+    await $(testId('details-panel')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await scrollHolds('server-section', top);
+    await browser.keys('Escape');
+    await $(testId('details-panel')).waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
+    await scrollHolds('server-section', top);
+  });
+
   it('Settings › Stores shows the GOG card and asks before Disconnect', async () => {
     await openStoresSettings();
     await expect($(testId('store-card-pill-gog'))).toHaveText(expect.stringContaining('Connected'));
