@@ -1368,8 +1368,8 @@ missing setup steps, not Verify and repair. Built as a store-neutral job:
   `AmazonMeta.post_install_ran` on the registry row; refuses a game that lists none. No
   nile call and no login.
 - App: `StoreBackend::setup_steps_job(row, ctx) -> Result<StoreJob, String>`, default
-  refusal `NO_SETUP_STEPS` ("This store has no setup steps."); GOG and Epic implement it
-  next. Command `store_setup_steps(key)`: library idle, the game installed, not running,
+  refusal `NO_SETUP_STEPS` ("This store has no setup steps."); Epic and GOG implement it
+  (merged 2026-11-14), so only Steam refuses. Command `store_setup_steps(key)`: library idle, the game installed, not running,
   no live job for it, no backup copying it.
 - Frontend: `retriesSetupSteps` is true for a completed store row with any setup-step
   warning (`REDIST_DECLINED`, `REDIST_CANCELLED`, or a `Couldn't run …` line); Retry
@@ -1382,3 +1382,16 @@ missing setup steps, not Verify and repair. Built as a store-neutral job:
   `amazon-library`: Kettle Drum's compat-tool warning → choose "Wine (system)" in Game
   Settings → Retry → the step runs with `/silent`, the row reads "Setup steps done", and
   the fake nile's argv log (`E2E_NILE_ARGV_FILE`) has no new run.
+
+## Setup steps integration (2026-11-14)
+
+GOG's setup steps (script and redistributables) merged onto the Epic prerequisite and
+offline-installer rework: `RedistStep` carries both `root` (GOG's shared folders) and
+`in_exe_folder` (Epic), and the Windows runner gives every step its own start folder.
+`dotnet4` now means .NET 4.0 or later (GOG's rule), not 4.8. Cleanup in the same pass: a
+failed TV silent install has the queue code `installer_silent_failed` (with its reason's
+words) instead of being known by its text, and `InstallerNeedsWizard` is gone; TV's Steam
+"not installed" words say "Install Steam on this PC and sign in once, then press Check
+again." instead of deferring to desktop mode; the fake gogdl's Linux game stays running
+until stopped (tv-gog-a's Play/Stop flake), and the fake nile's argv log no longer holds
+the token marker (amazon-secrets).
