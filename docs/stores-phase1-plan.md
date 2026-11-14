@@ -777,3 +777,31 @@ Failures found and fixed at integration:
   install, update or DLC (now it does, as the desktop); the sign-in step followed the
   store's login window as WebDriver's active window.
 - `tv-shell`, `tv-settings`, `tv-layout`: their lists of Settings panes now include Stores.
+
+Parity gaps closed after integration (against the GameStores / TVStores prototypes):
+- **Conflict, cloud side.** `SaveConflict` (and `StoreSaveConflict`, the TS
+  `StoreCloudState.conflict`) gained `cloud_files` and `cloud_bytes`: the file count and
+  the sum of each file's `bytes` in cloudstorage's listing (`api::cloud_by_location`,
+  `CloudSide::add`), over the game's save locations. `cloud_bytes` is `None` / `null`
+  when any listed file has no `bytes`, and the size is then left out of the words. The
+  desktop prompt reads "· 2.0 MB", the Cloud saves tab "· 3 files · 2.0 MB", TV mode's
+  Cloud saves row "· 2.0 MB · replaces the save here"; TV mode's prompt sheet shows no size
+  (as its prototype).
+- **Offline installer space.** `InstallerInspection.free_bytes`: the free space on the
+  volume of `offline::target_dir` (the new game's folder under the GOG install folder, the
+  installed game's for an update, the base game's for a DLC). `store_free_space` reads it
+  again when the user picks another install folder. The card reads "Needs <1.4 × installer
+  size> · <free> free" on the desktop footer and TV mode's Install summary. The prototype
+  shows no low-space state for this card, so none is added and the install is not blocked.
+- **Game Settings › Executable.** `store_game_executables` (`native::store_executables`):
+  `.exe` files (Windows build) or `.sh` / ELF files without `.so` (Linux build), at most
+  four path parts deep, outside the Wine prefix and `JUNK_DIRS`, without `unins*`,
+  `setup*` and the other junk names. The desktop list is a `<select>` and TV mode's Launch
+  file a list sheet; neither has a file chooser (the prototypes have none). The store
+  dialog is not shared with RomM native games (`details/NativeSettings.svelte`, which
+  already lists candidates), so they are unchanged.
+- **Play on installed cards.** The shared notifier's "<game> installed" card for a RomM
+  install carries `{ play }`: a desktop button (`desktopAction`) and TV mode's card action.
+  The desktop launches through `launchGame`; TV mode registers `navigation.play`, which runs
+  `playGame` (Playing page). A summary card has no Play. Store install cards already had
+  Play (`notice::installed`).
