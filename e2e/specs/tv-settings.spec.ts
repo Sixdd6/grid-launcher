@@ -1,8 +1,8 @@
 // e2e-app-args:
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { APP_START_TIMEOUT, configPath, dataDir, FIXTURE_TOKEN, INSTALL_TIMEOUT, mockUrl, THROTTLED_DOWNLOAD_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
-import { axis, connectPad, focused, hints, invoke, key, NINTENDO_PAD, promptSet, waitFocused, waitPromptSet, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
+import { assertNoClipping, axis, connectPad, focused, hints, invoke, key, NINTENDO_PAD, promptSet, waitFocused, waitPromptSet, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, moveTo, pageErrors, testId, text, typeKeys, waitGone, waitOskClosed, waitText } from '../helpers/tvDetails.js';
 
 /** A controller input that moves nothing (a right-stick flick scrolls only):
@@ -13,6 +13,15 @@ async function nudgePad(): Promise<void> {
 }
 
 const SNES = 'Super Nintendo Entertainment System';
+/** With E2E_TV_SCREENS=1, screens are saved under ctr-out/tv-screens/settings/. */
+const SHOTS = process.env.E2E_TV_SCREENS === '1' ? path.resolve(process.cwd(), '..', 'ctr-out', 'tv-screens', 'settings') : '';
+async function shot(name: string): Promise<void> {
+  if (!SHOTS) return;
+  // Let the focused cover finish growing (tv.css: 150ms).
+  await browser.pause(400);
+  mkdirSync(SHOTS, { recursive: true });
+  await browser.saveScreenshot(path.join(SHOTS, `${name}.png`));
+}
 const oldRoot = () => path.join(dataDir(), 'library');
 const newRoot = () => path.join(dataDir(), 'library-new');
 
@@ -220,7 +229,11 @@ describe('tv-settings: Downloads and Settings', () => {
     await waitText('tv-row-version', /^Version\s*GRID /);
     await moveTo('r-appearance', 'ArrowUp', 10);
     await waitText('tv-pane-title', 'Appearance');
-    await waitText('tv-row-cards', /In desktop mode/);
+    // TV flows never send the player to desktop mode (2026-11-14): TV mode
+    // has its own Card size and Game labels instead.
+    expect(await $(testId('tv-row-cards')).isExisting()).toBe(false);
+    await waitText('tv-row-tv-card-size', /Every grid in TV mode.*Medium/s);
+    await waitText('tv-row-tv-card-labels', /The title under each cover.*Always visible/s);
   });
 
   it('a slider adjusts with Left / Right while focused, with the D-pad hint (item 230)', async () => {
@@ -265,6 +278,112 @@ describe('tv-settings: Downloads and Settings', () => {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'Follow system did not show dark',
     });
+  });
+
+  it("Card size and Game labels are TV mode's own: the grids follow, the desktop's keys stay (2026-11-14)", async () => {
+    const config = () => readFileSync(configPath(), 'utf-8');
+    const desktopKeys = () => {
+      const c = config();
+      return ['card_size_library', 'card_size_server', 'card_labels'].map((k) => c.match(new RegExp(`^${k} = .*$`, 'm'))?.[0] ?? `${k} (unset)`);
+    };
+    const before = desktopKeys();
+    await moveTo('s-tv-card-size', 'ArrowDown');
+    await key('Enter');
+    await waitList('Card size');
+    expect((await list()).options).toEqual(['Small', 'Medium', 'Large']);
+    await waitFocused('o1');
+    await moveTo('o2', 'ArrowDown');
+    await key('Enter');
+    await waitFocused('s-tv-card-size');
+    await waitText('tv-row-tv-card-size', /Large/);
+    await moveTo('s-tv-card-labels', 'ArrowDown');
+    await key('Enter');
+    await waitList('Game labels');
+    expect((await list()).options).toEqual(['Always visible', 'Visible on focus']);
+    await waitFocused('o0');
+    await moveTo('o1', 'ArrowDown');
+    await key('Enter');
+    await waitFocused('s-tv-card-labels');
+    await waitText('tv-row-tv-card-labels', /Visible on focus/);
+    await browser.waitUntil(() => /^tv_card_size = "large"$/m.test(config()) && /^tv_card_labels = "focus"$/m.test(config()), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the TV grid settings never reached config.toml',
+    });
+    expect(desktopKeys()).toEqual(before);
+    const root = (await browser.execute(() => {
+      const t = document.querySelector('[data-tv-root]') as HTMLElement | null;
+      return { size: t?.dataset.size, labels: t?.dataset.labels, gcw: t ? getComputedStyle(t).getPropertyValue('--gcw').trim() : '' };
+    })) as { size?: string; labels?: string; gcw: string };
+    expect(root).toEqual({ size: 'large', labels: 'focus', gcw: '12.5rem' });
+    await shot('appearance');
+
+    // The Library's grid: Large covers (a 12.5rem portrait cover's height),
+    // no title line, and the focused cover's title as a pill.
+    for (let i = 0; i < 3; i++) {
+      await key('q');
+      await browser.pause(150);
+    }
+    await waitTab('library');
+    await $(`${testId('tv-lib-grid')} .cv`).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the Library grid has no cover' });
+    await key('ArrowRight');
+    await browser.waitUntil(async () => (await browser.execute(() => !!document.querySelector('[data-testid="tv-lib-grid"] .cv.f'))) as boolean, {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'focus never entered the Library grid',
+    });
+    const grid = (await browser.execute(() => {
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      const cells = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="tv-lib-grid"] .gcell'));
+      const last = cells.sort((a, b) => Number(a.dataset.i) - Number(b.dataset.i)).at(-1)!;
+      const lastArt = last.querySelector<HTMLElement>('.cv-art')!;
+      const box = document.querySelector<HTMLElement>('[data-testid="tv-lib-grid"] .gbox')!;
+      const gridEl = document.querySelector<HTMLElement>('[data-testid="tv-lib-grid"]')!;
+      const f = document.querySelector<HTMLElement>('[data-testid="tv-lib-grid"] .cv.f')!;
+      const fl = f.querySelector<HTMLElement>('.cv-l');
+      const other = document.querySelector<HTMLElement>('[data-testid="tv-lib-grid"] .cv:not(.f) .cv-l');
+      const art = f.querySelector<HTMLElement>('.cv-art')!.getBoundingClientRect();
+      const pill = fl?.getBoundingClientRect();
+      return {
+        lastRem: lastArt.offsetHeight / rem,
+        lastBottom: last.offsetTop + lastArt.offsetHeight,
+        boxHeight: box.offsetHeight,
+        padBottom: parseFloat(getComputedStyle(gridEl).paddingBottom) / rem,
+        pill: fl ? { position: getComputedStyle(fl).position, opacity: getComputedStyle(fl).opacity, gap: pill ? (pill.top - art.bottom) / rem : null } : null,
+        otherOpacity: other ? getComputedStyle(other).opacity : '0',
+      };
+    })) as {
+      lastRem: number;
+      lastBottom: number;
+      boxHeight: number;
+      padBottom: number;
+      pill: { position: string; opacity: string; gap: number | null } | null;
+      otherOpacity: string;
+    };
+    // The last row keeps the target height: 12.5rem ÷ ¾.
+    expect(Math.abs(grid.lastRem - 12.5 / 0.75)).toBeLessThan(0.1);
+    // No label row under the last cover.
+    expect(Math.abs(grid.boxHeight - grid.lastBottom)).toBeLessThanOrEqual(1);
+    expect(grid.padBottom).toBeCloseTo(3.6, 1);
+    expect(grid.pill?.position).toBe('absolute');
+    expect(grid.pill?.opacity).toBe('1');
+    // Clear of the grown cover's ring (.42rem) with a .2rem gap.
+    expect(grid.pill?.gap ?? 0).toBeGreaterThan(0.6);
+    expect(grid.otherOpacity).toBe('0');
+    await assertNoClipping();
+    await shot('library-large-focus');
+    expect(desktopKeys()).toEqual(before);
+
+    // Back to Settings › Appearance, focus in the pane.
+    for (let i = 0; i < 3; i++) {
+      await key('e');
+      await browser.pause(150);
+    }
+    await waitTab('settings');
+    await browser.waitUntil(async () => /^(r|s)-/.test((await focused()) ?? ''), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'focus never came back to Settings' });
+    if ((await focused())?.startsWith('r-')) {
+      await waitFocused('r-appearance');
+      await key('ArrowRight');
+    }
+    await browser.waitUntil(async () => ((await focused()) ?? '').startsWith('s-'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'focus never entered the Appearance pane' });
   });
 
   it('Button prompts redraws the hints at once (items 70, 261)', async () => {
