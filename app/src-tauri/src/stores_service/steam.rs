@@ -63,8 +63,9 @@ use grid_core::stores::steam::filter;
 use grid_core::stores::steam::meta::SteamMeta;
 use grid_core::stores::steam::row::{install_path, steam_row};
 use grid_core::stores::steam::{
-    AppInfo, AppPhase, LocalAccount, ManifestState, OwnedGame, OwnedGames, SteamApiError,
-    SteamClient, SteamEndpoints, SteamId, SteamLink, SteamScan, SteamService,
+    AppInfo, AppPhase, InstallWatch, LocalAccount, ManifestRead, ManifestState, OwnedGame,
+    OwnedGames, SteamApiError, SteamClient, SteamEndpoints, SteamId, SteamLink, SteamScan,
+    SteamService, WatchEvent,
 };
 use grid_core::stores::{GameKey, StoreError, StoreKind, SyncMode};
 use secrecy::SecretString;
@@ -179,6 +180,14 @@ pub trait SteamApi: Send + Sync {
     /// libraries that couldn't be read.
     fn scan(&self, client: &SteamClient) -> SteamScan;
     fn manifest(&self, client: &SteamClient, appid: u32) -> Option<ManifestState>;
+    /// The manifest, telling a missing file from one Steam is writing (what
+    /// [`InstallWatch::step`] takes).
+    fn manifest_read(&self, client: &SteamClient, appid: u32) -> ManifestRead {
+        match self.manifest(client, appid) {
+            Some(manifest) => ManifestRead::Found(manifest),
+            None => ManifestRead::Missing,
+        }
+    }
     fn open(&self, client: &SteamClient, link: SteamLink) -> io::Result<()>;
     fn alive_check(&self, client: &SteamClient, appid: u32) -> AliveCheck;
     fn owned<'a>(
@@ -212,6 +221,9 @@ impl SteamApi for RealSteam {
     }
     fn manifest(&self, client: &SteamClient, appid: u32) -> Option<ManifestState> {
         self.0.manifest(client, appid)
+    }
+    fn manifest_read(&self, client: &SteamClient, appid: u32) -> ManifestRead {
+        self.0.manifest_read(client, appid)
     }
     fn open(&self, client: &SteamClient, link: SteamLink) -> io::Result<()> {
         self.0.open(client, link)
@@ -928,7 +940,14 @@ impl SteamStore {
         let poll = *self.poll.lock().unwrap();
         tauri::async_runtime::spawn(async move {
             let started = Instant::now();
-            let mut watch = WatchState::default();
+            // GRID's Install in Steam waits for Steam's dialog; an install
+            // Steam started by itself was already seen under way.
+            let watch = if by_grid {
+                InstallWatch::default()
+            } else {
+                InstallWatch::resumed()
+            };
+            let mut watch = watch.with_start_timeout(start_timeout);
             loop {
                 tokio::time::sleep(poll).await;
                 if stop.load(Ordering::SeqCst) {
@@ -936,16 +955,10 @@ impl SteamStore {
                 }
                 let api = this.api.clone();
                 let probe = client.clone();
-                let manifest = tokio::task::spawn_blocking(move || api.manifest(&probe, appid))
+                let read = tokio::task::spawn_blocking(move || api.manifest_read(&probe, appid))
                     .await
-                    .ok()
-                    .flatten();
-                let step = watch_step(
-                    &mut watch,
-                    manifest.as_ref(),
-                    started.elapsed(),
-                    start_timeout,
-                );
+                    .unwrap_or(ManifestRead::Unreadable);
+                let step = watch.step(&read, started.elapsed());
                 if stop.load(Ordering::SeqCst) {
                     return;
                 }
@@ -1801,59 +1814,6 @@ fn plan_scan(input: &ScanInput<'_>) -> ScanPlan {
         });
     }
     plan
-}
-
-/// An install watch's memory between polls.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct WatchState {
-    /// The manifest has shown the install under way.
-    appeared: bool,
-    /// Polls in a row without a readable installing manifest since then.
-    misses: u32,
-}
-
-/// What one poll of an install watch found.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WatchEvent {
-    /// No manifest yet (Steam's dialog is still open), or one unreadable
-    /// poll (Steam is writing the file).
-    Waiting,
-    Progress(u64, u64),
-    Installed,
-    /// The manifest never appeared in time, or went away (or stopped
-    /// installing) before completing.
-    Cancelled,
-}
-
-/// One poll of an install watch (pure). Two misses in a row after the
-/// manifest appeared end it Cancelled, so one poll that catches Steam
-/// mid-write doesn't.
-fn watch_step(
-    watch: &mut WatchState,
-    manifest: Option<&ManifestState>,
-    elapsed: Duration,
-    start_timeout: Duration,
-) -> WatchEvent {
-    let phase = manifest.map(|m| filter::phase(m.flags));
-    match (manifest, phase) {
-        (_, Some(AppPhase::Installed)) => WatchEvent::Installed,
-        (Some(m), Some(AppPhase::Installing)) => {
-            watch.appeared = true;
-            watch.misses = 0;
-            let (done, total) = filter::progress(m);
-            WatchEvent::Progress(done, total)
-        }
-        _ if watch.appeared => {
-            watch.misses += 1;
-            if watch.misses >= 2 {
-                WatchEvent::Cancelled
-            } else {
-                WatchEvent::Waiting
-            }
-        }
-        _ if elapsed >= start_timeout => WatchEvent::Cancelled,
-        _ => WatchEvent::Waiting,
-    }
 }
 
 /// The mtimes that tell the background scan something changed: the root's
@@ -3311,46 +3271,45 @@ mod tests {
 
     #[test]
     fn the_install_watch_steps() {
-        let timeout = Duration::from_secs(60);
-        let mut w = WatchState::default();
+        // grid-core's `InstallWatch`, as the app drives it.
+        let new = || InstallWatch::default().with_start_timeout(Duration::from_secs(60));
+        let missing = ManifestRead::Missing;
+        let mut w = new();
         let at = Duration::from_secs(1);
-        assert_eq!(watch_step(&mut w, None, at, timeout), WatchEvent::Waiting);
+        assert_eq!(w.step(&missing, at), WatchEvent::Waiting);
         assert_eq!(
-            watch_step(&mut w, None, Duration::from_secs(61), timeout),
+            w.step(&missing, Duration::from_secs(61)),
             WatchEvent::Cancelled,
             "the dialog was closed"
         );
-        let mut w = WatchState::default();
+        let mut w = new();
         let mut m = manifest(1, "A", 1026);
         m.bytes_to_download = 10;
         m.bytes_downloaded = 4;
+        let found = |m: &ManifestState| ManifestRead::Found(m.clone());
+        assert_eq!(w.step(&found(&m), at), WatchEvent::Progress(4, 10));
         assert_eq!(
-            watch_step(&mut w, Some(&m), at, timeout),
-            WatchEvent::Progress(4, 10)
+            w.step(&ManifestRead::Unreadable, at),
+            WatchEvent::Progress(4, 10),
+            "one unreadable poll: Steam is writing it"
         );
-        assert_eq!(
-            watch_step(&mut w, None, at, timeout),
-            WatchEvent::Waiting,
-            "one unreadable poll"
-        );
-        assert_eq!(
-            watch_step(&mut w, Some(&m), at, timeout),
-            WatchEvent::Progress(4, 10)
-        );
-        assert_eq!(watch_step(&mut w, None, at, timeout), WatchEvent::Waiting);
-        assert_eq!(watch_step(&mut w, None, at, timeout), WatchEvent::Cancelled);
-        let mut w = WatchState::default();
+        assert_eq!(w.step(&missing, at), WatchEvent::Waiting, "one miss");
+        assert_eq!(w.step(&found(&m), at), WatchEvent::Progress(4, 10));
+        assert_eq!(w.step(&missing, at), WatchEvent::Waiting);
+        assert_eq!(w.step(&missing, at), WatchEvent::Cancelled);
+        let mut w = new();
         m.flags = 4;
-        assert_eq!(
-            watch_step(&mut w, Some(&m), at, timeout),
-            WatchEvent::Installed
-        );
+        assert_eq!(w.step(&found(&m), at), WatchEvent::Installed);
         m.flags = 6;
         assert_eq!(
-            watch_step(&mut w, Some(&m), at, timeout),
+            w.step(&found(&m), at),
             WatchEvent::Installed,
             "an update queued still counts as installed"
         );
+        // An install Steam started by itself was seen already: gone ends it.
+        let mut w = InstallWatch::resumed();
+        assert_eq!(w.step(&missing, at), WatchEvent::Waiting);
+        assert_eq!(w.step(&missing, at), WatchEvent::Cancelled);
     }
 
     #[test]

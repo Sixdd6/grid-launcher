@@ -247,21 +247,50 @@ pub enum WatchEvent {
     Waiting,
 }
 
+/// Polls in a row without an installing manifest, once the install was
+/// seen, that end an install watch Cancelled (one poll that catches Steam
+/// between writes does not).
+pub const STEAM_INSTALL_END_MISSES: u8 = 2;
+
 /// An install Steam runs, as GRID follows it after `steam://install`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InstallWatch {
     /// The install was seen under way.
     seen: bool,
     /// The last progress seen.
     last: Option<(u64, u64)>,
+    /// Polls in a row, since it was seen, without an installing manifest.
+    misses: u8,
+    /// How long to wait for the manifest to appear.
+    start_timeout: Duration,
+}
+
+impl Default for InstallWatch {
+    fn default() -> InstallWatch {
+        InstallWatch {
+            seen: false,
+            last: None,
+            misses: 0,
+            start_timeout: STEAM_INSTALL_START_TIMEOUT,
+        }
+    }
 }
 
 impl InstallWatch {
-    /// A watch for an install already under way (found at startup).
+    /// A watch for an install already under way (found at startup, or one
+    /// Steam started by itself).
     pub fn resumed() -> InstallWatch {
         InstallWatch {
             seen: true,
-            last: None,
+            ..InstallWatch::default()
+        }
+    }
+
+    /// The same watch with another start timeout (tests).
+    pub fn with_start_timeout(self, start_timeout: Duration) -> InstallWatch {
+        InstallWatch {
+            start_timeout,
+            ..self
         }
     }
 
@@ -271,34 +300,44 @@ impl InstallWatch {
     /// - installing: its progress;
     /// - a manifest Steam is writing (unreadable): unchanged since the last
     ///   poll;
-    /// - missing or gone after it was seen installing: cancelled;
-    /// - missing or gone before that: waiting, until
-    ///   [`STEAM_INSTALL_START_TIMEOUT`], then cancelled.
+    /// - missing or gone after it was seen installing: waiting once, then
+    ///   cancelled after [`STEAM_INSTALL_END_MISSES`] polls in a row;
+    /// - missing or gone before that: waiting, until the start timeout
+    ///   ([`STEAM_INSTALL_START_TIMEOUT`]), then cancelled.
     pub fn step(&mut self, read: &ManifestRead, elapsed: Duration) -> WatchEvent {
-        let not_there = |watch: &InstallWatch| {
-            if watch.seen || elapsed >= STEAM_INSTALL_START_TIMEOUT {
-                WatchEvent::Cancelled
-            } else {
-                WatchEvent::Waiting
-            }
-        };
         match read {
             ManifestRead::Found(m) => match filter::phase(m.flags) {
                 AppPhase::Installed => WatchEvent::Installed,
                 AppPhase::Installing => {
                     self.seen = true;
+                    self.misses = 0;
                     let (done, total) = filter::progress(m);
                     self.last = Some((done, total));
                     WatchEvent::Progress(done, total)
                 }
-                AppPhase::Gone => not_there(self),
+                AppPhase::Gone => self.not_there(elapsed),
             },
             ManifestRead::Unreadable => match self.last {
                 Some((done, total)) => WatchEvent::Progress(done, total),
                 None if self.seen => WatchEvent::Progress(0, 0),
                 None => WatchEvent::Waiting,
             },
-            ManifestRead::Missing => not_there(self),
+            ManifestRead::Missing => self.not_there(elapsed),
+        }
+    }
+
+    fn not_there(&mut self, elapsed: Duration) -> WatchEvent {
+        if self.seen {
+            self.misses = self.misses.saturating_add(1);
+            if self.misses >= STEAM_INSTALL_END_MISSES {
+                WatchEvent::Cancelled
+            } else {
+                WatchEvent::Waiting
+            }
+        } else if elapsed >= self.start_timeout {
+            WatchEvent::Cancelled
+        } else {
+            WatchEvent::Waiting
         }
     }
 }
@@ -499,6 +538,17 @@ mod tests {
             WatchEvent::Cancelled
         );
 
+        let mut short = InstallWatch::default().with_start_timeout(S(60));
+        assert_eq!(
+            short.step(&ManifestRead::Missing, S(1)),
+            WatchEvent::Waiting
+        );
+        assert_eq!(
+            short.step(&ManifestRead::Missing, S(61)),
+            WatchEvent::Cancelled,
+            "the dialog was closed"
+        );
+
         let mut gone = InstallWatch::default();
         assert_eq!(
             gone.step(&manifest(1026, 1, 10), S(3)),
@@ -506,6 +556,17 @@ mod tests {
         );
         assert_eq!(
             gone.step(&ManifestRead::Missing, S(5)),
+            WatchEvent::Waiting,
+            "one miss"
+        );
+        assert_eq!(
+            gone.step(&manifest(1026, 2, 10), S(7)),
+            WatchEvent::Progress(2, 10),
+            "seen again: misses reset"
+        );
+        assert_eq!(gone.step(&ManifestRead::Missing, S(9)), WatchEvent::Waiting);
+        assert_eq!(
+            gone.step(&ManifestRead::Missing, S(11)),
             WatchEvent::Cancelled
         );
 
@@ -513,6 +574,10 @@ mod tests {
         uninstalling.step(&manifest(1026, 1, 10), S(3));
         assert_eq!(
             uninstalling.step(&manifest(2048, 0, 0), S(5)),
+            WatchEvent::Waiting
+        );
+        assert_eq!(
+            uninstalling.step(&manifest(2048, 0, 0), S(7)),
             WatchEvent::Cancelled
         );
     }
@@ -526,9 +591,17 @@ mod tests {
         );
         assert_eq!(
             watch.step(&ManifestRead::Missing, S(2)),
+            WatchEvent::Waiting
+        );
+        assert_eq!(
+            watch.step(&ManifestRead::Missing, S(4)),
             WatchEvent::Cancelled
         );
         let mut done = InstallWatch::default();
-        assert_eq!(done.step(&manifest(6, 0, 0), S(0)), WatchEvent::Installed);
+        assert_eq!(
+            done.step(&manifest(6, 0, 0), S(0)),
+            WatchEvent::Installed,
+            "an update queued still counts as installed"
+        );
     }
 }

@@ -106,8 +106,13 @@ fn fake_steam() -> Fake {
     }
 }
 
+/// A loopback address nothing answers on: no test here ever reaches Steam.
+fn dead_api() -> SteamEndpoints {
+    SteamEndpoints::e2e(Url::parse("http://127.0.0.1:9/").unwrap())
+}
+
 fn service_for(fake: &Fake, exe: Option<PathBuf>) -> SteamService {
-    SteamService::new(reqwest::Client::new(), SteamEndpoints::real())
+    SteamService::new(reqwest::Client::new(), dead_api())
         .with_roots_override(vec![fake.root.clone()], exe)
 }
 
@@ -130,7 +135,7 @@ fn the_override_client_and_its_accounts() {
     assert!(!format!("{accounts:?}").contains(ACCOUNT_NAME));
 
     // No root given: no client, whatever this machine has.
-    let none = SteamService::new(reqwest::Client::new(), SteamEndpoints::real())
+    let none = SteamService::new(reqwest::Client::new(), dead_api())
         .with_roots_override(vec![fake.missing.clone()], None);
     assert!(none.find_client().is_none());
 }

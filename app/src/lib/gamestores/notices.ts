@@ -168,7 +168,5 @@ export const steamUninstallNotice = (title: string) =>
   ok(`Steam opened its uninstall window for ${title}. It leaves the Library once Steam removes it.`);
 /** "Running in Steam" pressed: GRID can't stop a game Steam runs. */
 export const steamRunningNotice = (title: string) => ok(`${title} is running in Steam. Quit it from the game.`);
-/** Refresh while the profile's game details are still private. */
-export const steamStillPrivateNotice = () => err('Steam still lists no games: the profile’s game details are private');
 export const steamClientFoundNotice = () => ok(CLIENT_FOUND);
 export const steamKeyRemovedNotice = () => ok('Web API key removed from the keyring. Steam’s Available list needs it.');

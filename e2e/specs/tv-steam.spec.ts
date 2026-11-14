@@ -5,6 +5,7 @@ import { captureErrors, pageErrors, testId, text, typeKeys, waitGone, waitOskClo
 import { byK, confirmDialog, dlLines, focusOn, listOptions, pageRow, tap, tapK, waitNotice } from '../helpers/tvBackups.js';
 import { MAIN_WINDOW } from '../helpers/gogLogin.js';
 import { STEAM, waitArgv } from '../helpers/steam.js';
+import { ensureSteamKey } from '../helpers/steamSetup.js';
 
 /**
  * Stage `tv-steam` (docs/stores-phase4-plan.md package D, E2E plan and Parity
@@ -62,6 +63,9 @@ describe('tv-steam: Steam in TV mode', () => {
       await $(testId('connect-submit')).click();
     }
     await $(testId('tv-mode-button')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the shell never rendered' });
+    // The seed writes no key: save it through the app's own `steam_save`
+    // (reversed on the wire, helpers/steamSetup.ts).
+    await ensureSteamKey();
     await captureErrors();
     await $(testId('tv-mode-button')).click();
     await $(testId('tv-shell')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'TV mode never opened' });
@@ -175,7 +179,12 @@ describe('tv-steam: Steam in TV mode', () => {
     await waitText('tv-playing-line', /^Steam · running in Steam · \d+:\d\d$/);
     expect(await text('tv-store-playing')).toContain('Steam runs this game. Quit it from the game; GRID notices when it closes.');
     expect(await $(testId('tv-playing-stop')).isExisting()).toBe(false);
-    await waitGone('tv-store-playing', 'the Playing page stayed after Steam ended the game');
+    // The fake runs the game for E2E_STEAM_RUN_SECS (4 s); the watch then
+    // needs two misses in a row (2.5 s apart) to end the session.
+    await browser.waitUntil(async () => !(await $(testId('tv-store-playing')).isExisting()), {
+      timeout: 20_000,
+      timeoutMsg: 'the Playing page stayed after Steam ended the game',
+    });
     await key('Escape');
     await waitGone('tv-store-details');
   });

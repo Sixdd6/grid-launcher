@@ -60,10 +60,12 @@ impl Harness {
     /// A stub that records its argv, one argument per line, then sleeps.
     fn recording_stub(&self, name: &str) -> (PathBuf, PathBuf) {
         let record = self.root.join(format!("{name}.args"));
+        // Written aside and renamed, so `record.is_file()` never sees the
+        // file the shell has created but not yet filled.
         let exe = self.stub(
             name,
             &format!(
-                "printf '%s\\n' \"$@\" > '{}'\nsleep 30",
+                "printf '%s\\n' \"$@\" > '{0}.tmp'\nmv '{0}.tmp' '{0}'\nsleep 30",
                 record.to_string_lossy()
             ),
         );

@@ -21,7 +21,7 @@ import { selectRail } from '../../library/selection.svelte';
 import { pushToast, TOAST_DURATION_MS } from '../../stores/toasts.svelte';
 import { downloads, onSnapshot } from '../../stores/downloads.svelte';
 import { hasStoreCloud, managedByClient } from '../marks';
-import { steamClientMissing, steamKeyState } from '../steam';
+import { steamClientMissing } from '../steam';
 import {
   cancelledNotice,
   connectedNotice,
@@ -44,7 +44,6 @@ import {
   steamMissingNotice,
   steamRunningNotice,
   steamStartNotice,
-  steamStillPrivateNotice,
   steamUninstallNotice,
   steamVerifyNotice,
   stoppedNotice,
@@ -342,12 +341,12 @@ export async function signIn(source: StoreSource): Promise<void> {
 
 export const installTool = (source: StoreSource) => run('Couldn’t install the store tool', () => api.storeInstallTool(source));
 
-/** Refresh; Steam's private profile still lists nothing, so it says so instead (prototype `data-st-refresh`). */
+/**
+ * Refresh. Steam's still-private answer ("Steam still lists no games…") is the
+ * backend's `store-notice`: the request always goes out, so a profile made
+ * public since the last look refreshes instead of being refused here.
+ */
 export async function refreshStore(source: StoreSource): Promise<boolean> {
-  if (managedByClient(source) && steamKeyState(gameStores.status(source)) === 'private') {
-    showCard(steamStillPrivateNotice(), source);
-    return false;
-  }
   return run('Couldn’t refresh the store', () => api.storeRefresh(source));
 }
 

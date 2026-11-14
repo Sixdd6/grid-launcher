@@ -102,14 +102,24 @@ export function argvFile(): string {
   return process.env.E2E_STEAM_ARGV_FILE ?? path.join(dataDir(), 'steam-argv.log');
 }
 
-/** Every argv the fake `steam` was started with, oldest first. */
+/**
+ * Every argv the fake `steam` was started with, oldest first, each joined
+ * by spaces (the fake writes one JSON array per line).
+ */
 export function steamArgv(): string[] {
   const f = argvFile();
   if (!existsSync(f)) return [];
   return readFileSync(f, 'utf8')
     .split('\n')
     .map((l) => l.trim())
-    .filter((l) => l !== '');
+    .filter((l) => l !== '')
+    .map((l) => {
+      try {
+        return (JSON.parse(l) as string[]).join(' ');
+      } catch {
+        return l;
+      }
+    });
 }
 
 /** Waits until the fake `steam` was started with an argv matching `re`; answers it. */
@@ -161,8 +171,12 @@ export function dropManifest(appid: number, name: string, sizeBytes = 1024 ** 3)
   writeFileSync(path.join(dir, `appmanifest_${appid}.acf`), acf);
 }
 
-/** Puts a marker file in the fake root (`.fake-install-cancel`, `.fake-no-run`). */
-export function setMarker(name: '.fake-install-cancel' | '.fake-no-run', on = true): void {
+/**
+ * Puts a marker file in the fake root: `.fake-install-cancel` (Steam's
+ * dialog closed, no manifest ever), `.fake-install-abort` (cancelled in
+ * Steam halfway: the manifest goes), `.fake-no-run`.
+ */
+export function setMarker(name: '.fake-install-cancel' | '.fake-install-abort' | '.fake-no-run', on = true): void {
   const f = path.join(steamRoot(), name);
   if (on) writeFileSync(f, '');
   else rmSync(f, { force: true });
@@ -170,13 +184,27 @@ export function setMarker(name: '.fake-install-cancel' | '.fake-no-run', on = tr
 
 // ── Settings › Stores › Steam ───────────────────────────────────────────
 
-/** Types into the Steam card's key field (the password field), replacing what is there. */
-export async function typeKey(value: string): Promise<void> {
+/**
+ * Fills the Steam card's key field without the key crossing the WebDriver
+ * wire as text (wdio logs every command's arguments; helpers/steamSetup.ts):
+ * it goes reversed and the page turns it back. The card reads the field
+ * once, when Test or Save is pressed.
+ */
+export async function fillKey(value: string): Promise<void> {
   const change = $(testId('steam-key-change'));
   if (await change.isExisting()) await change.click();
   const field = $(testId('steam-key-field'));
   await field.waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
-  await field.setValue(value);
+  await browser.execute(
+    (id: string, reversed: string) => {
+      const el = document.querySelector<HTMLInputElement>(`[data-testid="${id}"]`);
+      if (!el) return;
+      el.value = [...reversed].reverse().join('');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    },
+    'steam-key-field',
+    [...value].reverse().join(''),
+  );
 }
 
 /** Presses Test (or Save) on the Steam card and answers the result line once "Asking Steam…" is gone. */

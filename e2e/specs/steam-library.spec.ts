@@ -5,6 +5,7 @@ import {
   coverTags,
   detailsLine,
   dropManifest,
+  fillKey,
   keyOfBadge,
   openSteam,
   openSteamDetails,
@@ -18,6 +19,7 @@ import {
   testId,
   waitArgv,
 } from '../helpers/steam.js';
+import { ensureSteamKey } from '../helpers/steamSetup.js';
 import { waitForToast } from '../helpers/toasts.js';
 
 /**
@@ -51,6 +53,9 @@ describe('steam-library', () => {
 
   before(async () => {
     await startApp();
+    // The seed writes no key: save the fixture key through the app's own
+    // `steam_save` (reversed on the wire, helpers/steamSetup.ts).
+    await ensureSteamKey();
   });
 
   it('shows the Steam group last, with 3 installed (never a tool or runtime) and 4 available', async () => {
@@ -144,7 +149,11 @@ describe('steam-library', () => {
     await waitForDownloadLine(/^Installed by Steam$/, 20_000);
     await waitForToast(`${INSTALL} installed`, { timeout: 10_000 });
     await openSteam('installed');
-    expect(await steamTitles()).toContain(INSTALL);
+    // The list follows the backend's `stores-changed`, a moment after the card.
+    await browser.waitUntil(async () => (await steamTitles()).includes(INSTALL), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: `${INSTALL} never showed in Installed`,
+    });
   });
 
   it('Details of a game installed in Steam itself: the lines, Verify and Uninstall in Steam, no Game Settings', async () => {
@@ -207,7 +216,9 @@ describe('steam-library', () => {
   });
 
   it('a Steam install that goes away ends Cancelled, with Dismiss only', async () => {
-    setMarker('.fake-install-cancel');
+    // Cancelled in Steam halfway (the manifest goes). `.fake-install-cancel`
+    // (no manifest ever) would wait out the 15-minute start timeout.
+    setMarker('.fake-install-abort');
     try {
       await openSteam('available');
       const { badge } = await steamCard(CANCEL);
@@ -226,7 +237,7 @@ describe('steam-library', () => {
       await expect(row.$('[data-testid^="download-action-retry-"]')).not.toExist();
       await expect(row.$('[data-testid^="download-action-dismiss-"]')).toExist();
     } finally {
-      setMarker('.fake-install-cancel', false);
+      setMarker('.fake-install-abort', false);
     }
   });
 
@@ -265,7 +276,7 @@ describe('steam-library', () => {
   });
 
   it('Save with the key again: Steam connected, the field cleared, Available lists the games', async () => {
-    await $(testId('steam-key-field')).setValue(STEAM.key);
+    await fillKey(STEAM.key);
     expect(await steamCardAnswer('steam-save')).toMatch(/^The key works · \d+ games owned$/);
     await waitForToast(/^Steam connected · \d+ games owned$/);
     await expect($(testId('store-card-pill-steam'))).toHaveText(expect.stringContaining('Connected'));

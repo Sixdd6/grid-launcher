@@ -8,7 +8,7 @@ import { managedBox, storeButtons, storeDetailChips, storeFacts, storeHeaderLine
 import { entrySource, storeEntryLine, storeKindLabel, storeStripLine } from './downloads';
 import { liveJobFor } from './jobs';
 import { ENABLED_STORES, isEnabledStore, managedByClient, storeCaps, storesLede } from './marks';
-import { disconnectedNotice, steamInstallNotice, steamRunningNotice, steamStillPrivateNotice, steamUninstallNotice, steamVerifyNotice } from './notices';
+import { disconnectedNotice, steamInstallNotice, steamRunningNotice, steamUninstallNotice, steamVerifyNotice } from './notices';
 import { availBlock, storeFlag, storeRailGroups, storeShown } from './rail';
 import {
   clientPlaceIsPath,
@@ -266,7 +266,6 @@ describe('cards', () => {
     expect(steamVerifyNotice('Moonlit Ferry').text).toBe('Steam is verifying Moonlit Ferry’s files. Watch it in Steam.');
     expect(steamUninstallNotice('Moonlit Ferry').text).toBe('Steam opened its uninstall window for Moonlit Ferry. It leaves the Library once Steam removes it.');
     expect(steamRunningNotice('Moonlit Ferry').text).toBe('Moonlit Ferry is running in Steam. Quit it from the game.');
-    expect(steamStillPrivateNotice()).toMatchObject({ error: true, text: 'Steam still lists no games: the profile’s game details are private' });
     expect(disconnectedNotice('steam').text).toBe('Steam disconnected. Your key was deleted from the keyring.');
   });
 });

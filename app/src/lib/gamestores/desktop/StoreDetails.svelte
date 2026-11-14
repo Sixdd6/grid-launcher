@@ -11,7 +11,7 @@
   import { downloads } from '../../stores/downloads.svelte';
   import { drives } from '../../stores/drives.svelte';
   import { gameStores } from '../../stores/gameStores.svelte';
-  import { installed } from '../../stores/installed.svelte';
+  import { installed, refresh as refreshInstalled } from '../../stores/installed.svelte';
   import { sessions } from '../../stores/sessions.svelte';
   import { compatTools } from '../../stores/compatTools.svelte';
   import {
@@ -113,6 +113,17 @@
   let tabs = $derived(game ? storeTabs(game) : (['overview', 'media'] as StoreTab[]));
   $effect(() => {
     if (!tabs.includes(tab)) tab = 'overview';
+  });
+
+  // The backend stamps `last_played_at` after a launch with no event (and a
+  // watched Steam session's scan moves it again when the game ends): re-read
+  // the registry whenever this game starts or stops playing, so the Last
+  // played line is current while Details stays open.
+  $effect(() => {
+    void playing;
+    untrack(() => {
+      refreshInstalled().catch(() => {});
+    });
   });
 
   let lastPlayedAt = $derived.by(() => {

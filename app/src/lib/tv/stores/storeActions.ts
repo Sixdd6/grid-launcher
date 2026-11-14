@@ -7,7 +7,7 @@ import { api, type StoreGame, type StoreSource } from '../../api';
 import { childPath } from '../pages/folderBrowser';
 import { toolNeededNotice } from '../../gamestores/notices';
 import { managedByClient, storeName, storeTool } from '../../gamestores/marks';
-import { steamClientMissing, steamKeyState } from '../../gamestores/steam';
+import { steamClientMissing } from '../../gamestores/steam';
 import { gameStores, refreshLibrary } from '../../stores/gameStores.svelte';
 import { pushToast, TOAST_DURATION_MS } from '../../stores/toasts.svelte';
 import { toLaunchFailure } from '../../launchError';
@@ -218,11 +218,8 @@ export function installTool(source: StoreSource): void {
 }
 
 export function refreshStore(source: StoreSource): void {
-  // Steam: a profile that is still private lists nothing (prototype `ACT.srefresh`).
-  if (managedByClient(source) && steamKeyState(gameStores.status(source)) === 'private') {
-    card('Steam still lists no games', 'error', 'The profile’s game details are private.');
-    return;
-  }
+  // Steam's still-private answer is the backend's `store-notice` (one card,
+  // and a profile made public since then refreshes).
   api.storeRefresh(source).catch(fail);
 }
 
