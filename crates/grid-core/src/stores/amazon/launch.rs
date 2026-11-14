@@ -240,6 +240,7 @@ mod tests {
                 product_id: "amzn1.adg.product.aaaa".into(),
                 version: "v1".into(),
                 exe_user_pinned: pinned,
+                ..Default::default()
             }
             .to_json(),
             ..Default::default()

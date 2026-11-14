@@ -16,8 +16,13 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use grid_core::stores::offline::exec::{
+    InstallerCommand, InstallerProcess, InstallerSpawner, Watch,
+};
+use grid_core::stores::redist::{HostProbe, RedistRunner, REDIST_CANCELLED};
 
 use grid_core::library::queue::{JobPhase, StoreJob, StoreOp, StoreProgressSink};
 use grid_core::library::registry::{InstalledGame, Registry};
@@ -153,6 +158,13 @@ case "$1" in
   "PostInstall": [{"Command": "redist\\vc.exe", "Args": ["/quiet"]}],
 }
 FUEL
+    mkdir -p "$dir/redist"; echo vc > "$dir/redist/vc.exe"; echo oal > "$dir/redist/oalinst.exe"
+    if [ -f "$C/post-two" ]; then
+      cat > "$dir/fuel.json" <<'FUEL'
+{"Main": {"Command": "bin\\Fogline.exe", "Args": ["-windowed"]},
+ "PostInstall": [{"Command": "redist\\vc.exe", "Args": ["/quiet"]}, {"Command": "redist\\oalinst.exe", "Args": ["/silent"]}]}
+FUEL
+    fi
     echo pb > "$C/manifests/$id.raw"
     if [ "$1" = update ]; then write_installed "$id" v2 "$dir"; else write_installed "$id" v1 "$dir"; fi
     log INFO CLI "Download complete"
@@ -188,10 +200,52 @@ log ERROR CLI "unknown command"
 exit 2
 "#;
 
+/// The fake runner for the `PostInstall` steps: records every command and
+/// answers with the next scripted exit (`None`: runs until killed), 0 when
+/// the script is empty.
+#[derive(Default)]
+struct Steps {
+    exits: Mutex<Vec<Option<i32>>>,
+    spawned: Mutex<Vec<InstallerCommand>>,
+}
+
+struct StepProc {
+    exit: Option<i32>,
+    polls: usize,
+}
+
+impl InstallerProcess for StepProc {
+    fn try_wait(&mut self) -> std::io::Result<Option<Option<i32>>> {
+        if self.exit.is_none() {
+            return Ok(None);
+        }
+        if self.polls == 0 {
+            return Ok(Some(self.exit));
+        }
+        self.polls -= 1;
+        Ok(None)
+    }
+    fn kill(&mut self) {}
+}
+
+impl InstallerSpawner for Steps {
+    fn spawn(&self, cmd: &InstallerCommand) -> std::io::Result<Box<dyn InstallerProcess>> {
+        self.spawned.lock().unwrap().push(cmd.clone());
+        let mut exits = self.exits.lock().unwrap();
+        let exit = if exits.is_empty() {
+            Some(0)
+        } else {
+            exits.remove(0)
+        };
+        Ok(Box::new(StepProc { exit, polls: 1 }))
+    }
+}
+
 struct Fixture {
     root: tempfile::TempDir,
     svc: AmazonService,
     registry: Arc<Registry>,
+    steps: Arc<Steps>,
 }
 
 impl Fixture {
@@ -214,6 +268,21 @@ impl Fixture {
             AmazonEndpoints::real(),
         )
         .with_tool_override(script);
+        let steps = Arc::new(Steps::default());
+        let svc = svc.with_redist_runner(RedistRunner {
+            spawner: steps.clone(),
+            which: Arc::new(|name: &str| {
+                (name == "umu-run").then(|| PathBuf::from("/usr/bin/umu-run"))
+            }),
+            host: "linux".into(),
+            watch: Watch {
+                stall: Duration::from_secs(60),
+                poll: Duration::from_millis(5),
+            },
+            timeout: Duration::from_secs(60),
+            probe: Arc::new(HostProbe),
+            system_root: None,
+        });
         let stores = data.join("stores");
         fs::create_dir_all(&stores).unwrap();
         fs::write(stores.join("library.json"), LIBRARY).unwrap();
@@ -222,7 +291,13 @@ impl Fixture {
             root,
             svc,
             registry,
+            steps,
         }
+    }
+
+    /// The `PostInstall` commands run so far.
+    fn spawned(&self) -> Vec<InstallerCommand> {
+        self.steps.spawned.lock().unwrap().clone()
     }
 
     fn set(&self, name: &str) {
@@ -466,6 +541,36 @@ async fn install_update_verify_launch_and_uninstall() {
     assert_eq!(meta.product_id, FOGLINE);
     no_token(&row.store_meta);
 
+    // fuel.json's PostInstall step ran once, silently, under umu in the
+    // game's prefix, from the game folder, with no FUEL variables.
+    let spawned = f.spawned();
+    assert_eq!(spawned.len(), 1);
+    assert_eq!(
+        spawned[0].argv,
+        vec![
+            "/usr/bin/umu-run".to_string(),
+            dir.join("redist")
+                .join("vc.exe")
+                .to_string_lossy()
+                .into_owned(),
+            "/quiet".to_string()
+        ]
+    );
+    assert_eq!(spawned[0].cwd, dir);
+    assert!(spawned[0]
+        .env
+        .contains(&("PROTONPATH".into(), "proton-ge".into())));
+    assert!(spawned[0].env.contains(&(
+        "WINEPREFIX".into(),
+        dir.join("prefix").to_string_lossy().into_owned()
+    )));
+    assert!(!spawned[0]
+        .env
+        .iter()
+        .any(|(k, _)| k.starts_with("AMAZON_GAMES") || k == "FUEL_DIR"));
+    assert_eq!(meta.post_install_ran.len(), 1, "recorded as run");
+    assert_eq!(meta.post_install_ran[0].command, "redist\\vc.exe");
+
     // The launch dry run: nile's exe, no doubled args, the five FUEL vars.
     let prep = f.svc.launch_prep(&row).await.unwrap();
     assert_eq!(prep.executable, dir.join("bin/Fogline.exe"));
@@ -513,6 +618,7 @@ async fn install_update_verify_launch_and_uninstall() {
     assert_eq!(runner.detail(), "", "\"Verified\", no count");
     assert!(reports.iter().any(|r| r.0 == 1500), "{reports:?}");
     assert!(f.argv().contains(&format!("verify {FOGLINE}")));
+    assert_eq!(f.spawned().len(), 1, "an unchanged list never runs again");
 
     f.svc.uninstall(&f.registry, FOGLINE).unwrap();
     assert!(!dir.exists(), "the folder and its prefix go");
@@ -524,6 +630,117 @@ async fn install_update_verify_launch_and_uninstall() {
     assert!(f.argv().contains(&format!("uninstall {FOGLINE}")));
     assert!(f.svc.installed().is_empty());
     assert!(f.svc.uninstall(&f.registry, FOGLINE).is_err());
+}
+
+/// A sink whose cancel turns on after `polls` questions.
+struct CancelSink(std::cell::Cell<usize>);
+
+impl StoreProgressSink for CancelSink {
+    fn progress(&mut self, _done: u64, _total: u64) {}
+    fn phase(&mut self, _phase: JobPhase) {}
+    fn cancelled(&self) -> bool {
+        let left = self.0.get();
+        if left == 0 {
+            return true;
+        }
+        self.0.set(left - 1);
+        false
+    }
+}
+
+#[tokio::test]
+async fn post_install_steps_warn_never_fail_and_rerun_when_their_list_changes() {
+    let f = Fixture::new();
+    f.sign_in().await;
+
+    // A failing step: the install still succeeds, with a warning, and the
+    // list doesn't count as run.
+    f.steps.exits.lock().unwrap().push(Some(1));
+    let (result, _) = run_job(f.svc.install_job(f.request(), f.ctx())).await;
+    assert_eq!(
+        result.unwrap(),
+        "Couldn't run vc.exe: it exited with code 1"
+    );
+    let row = f.row();
+    assert!(AmazonMeta::from_json(&row.store_meta)
+        .post_install_ran
+        .is_empty());
+
+    // A verify runs it again (it never worked), and now it counts.
+    let (result, _) = run_job(f.svc.verify_job(&row, f.ctx())).await;
+    assert_eq!(result.unwrap(), "");
+    assert_eq!(f.spawned().len(), 2);
+    let row = f.row();
+    assert_eq!(
+        AmazonMeta::from_json(&row.store_meta)
+            .post_install_ran
+            .len(),
+        1
+    );
+
+    // An update whose fuel.json lists one more step: only the new one runs
+    // (GRID's prefix marker skips vc.exe, which already worked there).
+    f.set("post-two");
+    let (result, _) = run_job(f.svc.update_job(&row, f.ctx())).await;
+    assert_eq!(result.unwrap(), "");
+    let spawned = f.spawned();
+    assert_eq!(spawned.len(), 3);
+    assert!(spawned[2].argv[1].ends_with("oalinst.exe"));
+    assert_eq!(spawned[2].argv[2], "/silent");
+    let row = f.row();
+    assert_eq!(
+        AmazonMeta::from_json(&row.store_meta)
+            .post_install_ran
+            .len(),
+        2
+    );
+
+    // No compat tool anywhere: a warning in GRID's words, nothing runs.
+    // (GRID's prefix marker would skip both steps; forget it.)
+    fs::remove_file(
+        f.game_dir()
+            .join("prefix")
+            .join(grid_core::stores::redist::PREFIX_MARKER),
+    )
+    .unwrap();
+    let mut bare = row.clone();
+    bare.native_compat_tool = String::new();
+    let mut meta = AmazonMeta::from_json(&bare.store_meta);
+    meta.post_install_ran.clear();
+    bare.store_meta = meta.to_json();
+    let (result, _) = run_job(f.svc.verify_job(&bare, f.ctx())).await;
+    let warning = result.unwrap();
+    assert!(
+        warning.starts_with("Couldn't run vc.exe: choose a compatibility tool"),
+        "{warning}"
+    );
+    assert_eq!(warning.lines().count(), 2, "{warning}");
+    no_token(&warning);
+    assert_eq!(f.spawned().len(), 3);
+}
+
+#[tokio::test]
+async fn a_cancel_during_post_install_steps_leaves_the_game_installed() {
+    let f = Fixture::new();
+    f.sign_in().await;
+    f.steps.exits.lock().unwrap().push(None);
+    let job = f.svc.install_job(f.request(), f.ctx());
+    let result = tokio::task::spawn_blocking(move || {
+        job.runner
+            .download(&AtomicBool::new(false), &mut |_, _, _| {})
+            .unwrap();
+        job.runner
+            .finalize(&mut CancelSink(std::cell::Cell::new(5)))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap();
+    assert_eq!(result.unwrap(), REDIST_CANCELLED);
+    let row = f.row();
+    assert!(AmazonMeta::from_json(&row.store_meta)
+        .post_install_ran
+        .is_empty());
+    assert!(f.game_dir().join("bin/Fogline.exe").is_file());
 }
 
 #[tokio::test]

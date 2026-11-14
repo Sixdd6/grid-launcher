@@ -2424,6 +2424,7 @@ mod tests {
                 product_id: id.into(),
                 version: version.into(),
                 exe_user_pinned: false,
+                ..Default::default()
             }
             .to_json(),
             filesize_bytes: 7_000_000,

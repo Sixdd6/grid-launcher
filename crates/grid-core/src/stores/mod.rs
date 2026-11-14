@@ -38,6 +38,7 @@ pub mod gog;
 pub mod offline;
 pub mod paths;
 pub mod progress;
+pub mod redist;
 pub mod runner;
 pub mod steam;
 pub mod tools;

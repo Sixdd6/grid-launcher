@@ -12,8 +12,14 @@
 //!
 //! Progress comes from [`crate::stores::progress::parse_nile_line`] in
 //! real bytes; before nile's first progress line the total is
-//! `install --info`'s download size. fuel.json `PostInstall` steps are
-//! never run (`docs/stores-phase3-plan.md` "User decisions" 2).
+//! `install --info`'s download size.
+//!
+//! After the row is written, the game's fuel.json `PostInstall` steps run
+//! through `stores::redist` (`docs/stores-phase3-plan.md` "User decisions"
+//! 2): after an install, and after an update or a verify when the list
+//! differs from [`AmazonMeta::post_install_ran`], the list that last
+//! worked. Their problems are the finished entry's warning, never a
+//! failed job; a cancel stops them and leaves the game installed.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,7 +28,7 @@ use std::sync::{Arc, Mutex};
 
 use super::list::{self, info_args, parse_info};
 use super::meta::AmazonMeta;
-use super::row::{amazon_row, read_fuel, FuelMain};
+use super::row::{amazon_row, read_fuel, read_post_install, FuelMain};
 use super::{AmazonInstallRequest, AmazonInstalled, AmazonJobCtx, AmazonService};
 use crate::library::queue::{JobPhase, StoreJob, StoreJobRunner, StoreOp, StoreProgressSink};
 use crate::library::registry::{InstalledGame, Registry};
@@ -30,6 +36,7 @@ use crate::library::LibraryError;
 use crate::stores::gog::install::{game_dir, removal_refusal};
 use crate::stores::gog::library_error;
 use crate::stores::progress::ProgressMerger;
+use crate::stores::redist::{run_steps, steps_due, RedistTarget};
 use crate::stores::runner::{ToolExit, ToolSignal, TIMED_OUT};
 use crate::stores::{StoreError, StoreKind};
 
@@ -413,7 +420,13 @@ impl StoreJobRunner for AmazonJob {
         let mut meta = self.old_meta().unwrap_or_default();
         meta.product_id = self.id.clone();
         meta.version = fetched.entry.version.trim().to_string();
-        let row = build_row(
+        let dir = PathBuf::from(fetched.entry.path.trim());
+        let steps = read_post_install(&dir);
+        let due = steps_due(self.op == StoreOp::Install, &steps, &meta.post_install_ran);
+        if steps.is_empty() {
+            meta.post_install_ran.clear();
+        }
+        let mut row = build_row(
             &fetched.entry,
             game.as_ref(),
             &meta,
@@ -421,9 +434,36 @@ impl StoreJobRunner for AmazonJob {
             self.old_row.as_ref(),
             &self.compat_tool,
         )?;
+        // The game is installed before its steps run: a cancel or a
+        // failed step leaves it so.
         self.ctx.registry.upsert_store(&row)?;
         sink.progress(1, 1);
-        Ok(String::new())
+        if !due {
+            return Ok(String::new());
+        }
+        let compat = match row.native_compat_tool.trim() {
+            "" => self.ctx.default_compat_tool.trim().to_string(),
+            chosen => chosen.to_string(),
+        };
+        let prefix = Some(row.native_wineprefix.trim())
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from);
+        let outcome = run_steps(
+            &steps,
+            RedistTarget {
+                game_dir: &dir,
+                compat: &compat,
+                prefix: prefix.as_deref(),
+            },
+            &self.svc.redist,
+            sink,
+        );
+        if outcome.all_worked {
+            meta.post_install_ran = steps;
+            row.store_meta = meta.to_json();
+            self.ctx.registry.upsert_store(&row)?;
+        }
+        Ok(outcome.warning())
     }
 }
 

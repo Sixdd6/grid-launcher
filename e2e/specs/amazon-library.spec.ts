@@ -1,4 +1,6 @@
-import { INSTALL_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { dataDir, INSTALL_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import {
   AMAZON,
   amazonCard,
@@ -94,6 +96,9 @@ describe('amazon-library', () => {
     await openDownloads();
     await waitForDownloadLine(/^(Downloading \d+% · |Waiting for a slot|Installing \d+%|Installed · )/);
     await waitForDownloadLine(/^Installed · /, INSTALL_TIMEOUT);
+    // No compatibility tool is chosen for it (the seed sets no default), so its
+    // PostInstall step can't run: a warning on the row, never a failed install.
+    await waitForDownloadLine(/^Installed · .+ · Couldn't run oalinst\.exe: choose a compatibility tool/, INSTALL_TIMEOUT);
     await waitForToast('Kettle Drum installed', { timeout: INSTALL_TIMEOUT });
     await openAmazon('installed');
     expect(await amazonTitles()).toContain('Kettle Drum');
@@ -142,6 +147,20 @@ describe('amazon-library', () => {
     await closeWithEscape('store-details');
     await openDownloads();
     await waitForDownloadLine(/^Verified$/, INSTALL_TIMEOUT);
+    // Fogline's fuel.json lists `oalinst.exe /silent` and the seed's row never
+    // ran it, so the verify ran it: under umu (the row's Proton), in the
+    // game's own prefix, from the game folder, with no FUEL variables.
+    const fog = path.join(dataDir(), 'library', 'Amazon Games', 'Fogline');
+    const runs = readFileSync(path.join(dataDir(), 'amazon-game-argv.log'), 'utf8').split('---\n');
+    const envs = readFileSync(path.join(dataDir(), 'amazon-game-env.log'), 'utf8').split('---\n');
+    const at = runs.findIndex((run) => run.split('\n')[0] === path.join(fog, 'oalinst.exe'));
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(runs[at].split('\n').slice(1, -1)).toEqual(['/silent']);
+    const env = envs[at].split('\n');
+    expect(env).toContain(`WINEPREFIX=${path.join(fog, 'prefix')}`);
+    expect(env).toContain('PROTONPATH=GE-Proton9-20');
+    expect(env).toContain(`CWD=${fog}`);
+    expect(env.some((line) => line.startsWith('AMAZON_GAMES_') || line.startsWith('FUEL_DIR='))).toBe(false);
   });
 
   it('updates a game the seed marks out of date: UPDATE on its cover, “Update” with no version', async () => {

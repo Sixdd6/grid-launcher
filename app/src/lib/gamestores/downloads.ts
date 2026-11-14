@@ -102,6 +102,36 @@ export function failureReason(e: DownloadEntry, failure: JobFailure | null = e.f
 }
 
 /**
+ * The backend's warning when Windows' permission prompt for a game's
+ * redistributable steps was declined (grid-core `stores::redist::REDIST_DECLINED`,
+ * word for word). Its row offers Retry.
+ */
+export const REDIST_DECLINED = "Its setup steps didn't run: Windows didn't get permission to run them";
+
+/** A finished line with the row's warnings after it, one ` · ` each ("Installed · 2.1 MB · Couldn't run oalinst.exe: …"). */
+function withWarnings(line: string, warning: string): string {
+  const extra = warning
+    .split('\n')
+    .map((w) => w.trim())
+    .filter((w) => w !== '');
+  return [line, ...extra].join(' · ');
+}
+
+/**
+ * Whether a finished store row's Retry runs the game's setup steps again:
+ * its warning says Windows' permission prompt was declined. Retry is then
+ * the game's Verify and repair, which runs the steps that didn't run.
+ */
+export function retriesSetupSteps(e: DownloadEntry): boolean {
+  return (
+    e.job === 'store' &&
+    e.status === 'completed' &&
+    e.source_id.trim() !== '' &&
+    e.error.split('\n').some((w) => w.trim() === REDIST_DECLINED)
+  );
+}
+
+/**
  * A store row's status line ("Downloading 45% · 41.2 MB/s", "Installing 90%",
  * "Verifying files 45%", the installer and restore phases, "Waiting for a
  * slot", and the completed and failed lines).
@@ -120,7 +150,7 @@ export function storeEntryLine(e: DownloadEntry, ctx: LineContext = {}): string 
     case 'failed':
       return `Failed · ${failureReason(e)}`;
     case 'completed':
-      return completedLine(e, ctx, drive);
+      return withWarnings(completedLine(e, ctx, drive), e.error);
     default:
       break;
   }

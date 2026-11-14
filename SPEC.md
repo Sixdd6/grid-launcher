@@ -1349,7 +1349,16 @@ Store screens (2026-11-13, matching the approved design):
   DLC. nile's versions are opaque ids, so no version is shown: the button reads
   "Update", the cover keeps its UPDATE tag, the card reads "<game>: an update is
   available", and Overview and the Details header leave the version out. A verify reads
-  "Verified" with no count. fuel.json `PostInstall` steps are skipped on every host. A
+  "Verified" with no count. A game's fuel.json `PostInstall` steps (redistributables
+  such as OpenAL and DirectX) run silently after its install, and after an update or a
+  verify when the list has changed since it last worked. Steps whose redistributable is
+  already installed are skipped. On Linux they run under the game's compat tool in its
+  own prefix, with no prompt. On Windows all of one job's steps run in one elevated
+  runner, so there is one permission prompt, in TV mode too. While they run, the row
+  reads "Running the installer silently". A step that fails, or a declined prompt, is a
+  warning on the Downloads row ("Couldn't run oalinst.exe: …"), never a failed install.
+  A declined prompt offers Retry, which runs Verify and repair. A cancel stops the steps
+  and leaves the game installed. A
   "Sign in again" that is cancelled leaves the store expired (nile's old login is deleted
   before a new sign-in). On a Linux system older than glibc 2.35, nile can't run, and
   Settings and the store panel say "nile can't run on this computer: it needs a newer

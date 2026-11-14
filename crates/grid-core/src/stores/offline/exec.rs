@@ -303,7 +303,9 @@ fn command(run: &ExeRun<'_>, args: Vec<String>) -> Result<InstallerCommand, Libr
     Ok(to_command(launch, run.prefix, run.compat))
 }
 
-fn to_command(launch: NativeLaunch, prefix: Option<&Path>, compat: &str) -> InstallerCommand {
+/// The [`InstallerCommand`] for a built launch: the prefix and compat
+/// value are kept only when the run is wrapped (Wine or umu).
+pub fn to_command(launch: NativeLaunch, prefix: Option<&Path>, compat: &str) -> InstallerCommand {
     let wrapped = !launch.tool_label.is_empty();
     InstallerCommand {
         argv: launch.argv,
@@ -319,8 +321,8 @@ fn to_command(launch: NativeLaunch, prefix: Option<&Path>, compat: &str) -> Inst
 }
 
 /// `which`, with GRID's managed umu-run as the fallback for `umu-run`
-/// ([`umu::locate`]'s order).
-fn which_with_managed_umu(name: &str) -> Option<PathBuf> {
+/// ([`umu::locate`]'s order). Amazon's post-install steps use it too.
+pub fn which_with_managed_umu(name: &str) -> Option<PathBuf> {
     if name != umu::UMU_RUN {
         return which_on_path(name);
     }

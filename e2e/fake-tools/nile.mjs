@@ -326,16 +326,24 @@ async function progress(total, steps, stepMs) {
   }
 }
 
-/** The game's files: its executable and its fuel.json (JSON5: a comment and trailing commas). */
+/** The redistributable step every fake game lists (Hotline Miami's OpenAL installer). */
+export const POST_INSTALL_EXE = "oalinst.exe";
+
+/**
+ * The game's files: its executable, the OpenAL installer its PostInstall
+ * step runs (`oalinst.exe /silent`, as Hotline Miami's fuel.json lists it)
+ * and its fuel.json (JSON5: a comment and trailing commas).
+ */
 function writeGame(dir, g) {
   const exe = path.join(dir, ...g.fake.executable.split(/[\\/]/));
   mkdirSync(path.dirname(exe), { recursive: true });
   writeFileSync(exe, "MZ fake amazon game\n");
+  writeFileSync(path.join(dir, POST_INSTALL_EXE), "MZ fake OpenAL installer\n");
   write(
     path.join(dir, "fuel.json"),
     `{\n  "SchemaVersion": "2",\n  // written by the fake nile\n  "Main": {\n    "Command": ${JSON.stringify(g.fake.executable)},\n    "Args": ${JSON.stringify(g.fake.args)},\n` +
       (g.fake.working_dir ? `    "WorkingSubdirOverride": ${JSON.stringify(g.fake.working_dir)},\n` : "") +
-      "  },\n  \"PostInstall\": [],\n}\n",
+      `  },\n  "PostInstall": [\n    {"Command": ${JSON.stringify(POST_INSTALL_EXE)}, "Args": ["/silent"],},\n  ],\n}\n`,
   );
   return exe;
 }
@@ -433,6 +441,7 @@ function cmdUninstall(ctx, { positional }) {
     const exe = path.join(entry.path, ...g.fake.executable.split(/[\\/]/));
     rmSync(exe, { force: true });
     rmSync(path.join(entry.path, "fuel.json"), { force: true });
+    rmSync(path.join(entry.path, POST_INSTALL_EXE), { force: true });
     removeEmptyDirs(path.dirname(exe), entry.path);
   }
   try { rmdirSync(entry.path); } catch { /* leftovers (the prefix) stay for GRID */ }

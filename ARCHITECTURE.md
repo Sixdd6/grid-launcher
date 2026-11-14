@@ -302,9 +302,21 @@ Modules as declared in `src/lib.rs`:
   `list` (nile's own `library.json` is the only owned list, deduplicated by product id
   and ASIN; `installed.json`; `install --info`; `list-updates`), `install` (install with
   `--path <the game's folder>` exactly, `install::folder_name` as nile names it; update,
-  verify, uninstall; fuel.json `PostInstall` is never run) and `launch` (`launch --json
+  verify, uninstall; after the row is written, fuel.json's `PostInstall` steps, read by
+  `row::read_post_install`, run through `stores::redist` when `redist::steps_due` says
+  so, against `AmazonMeta.post_install_ran`) and `launch` (`launch --json
   --no-wine` gives the five FUEL variables; `launch_error` gives GRID's words). Every parser ignores unknown JSON keys and non-JSON stdout lines. Nothing here may log or forward a store tool's stdout or
-  stderr. `steam` is Steam (Phase 4, built 2026-11-14): no tool, no login window, no
+  stderr. `redist` is store-neutral: a game's redistributable steps (`RedistStep`), for
+  Amazon now and GOG and Epic next. It skips what is already installed (`redist_of`
+  maps an id or a file name to a known redistributable; `already_installed` checks the
+  Windows registry, or real, non-Wine-stub system files in the host or the prefix;
+  `.grid-redist.json` in the prefix notes the steps that worked there). Then it runs the
+  rest: under the compat tool in the game's prefix (`step_command`, through
+  `launch::native::build_installer_command`), or on a Windows host in one elevated
+  PowerShell runner whose result file it reads back (`runner_script`,
+  `elevated_command`, `parse_results`). It reuses `offline::exec`'s spawner, supervisor
+  and prefix kill. Every problem is a warning line (`REDIST_DECLINED` for a declined
+  prompt), never an error. `steam` is Steam (Phase 4, built 2026-11-14): no tool, no login window, no
   GRID-run job. `mod.rs` holds `SteamEndpoints`, `SteamId`, `SteamApiError` (whose words
   never carry a URL or a status code), the owned-list, `GetItems`, client, account and
   manifest types (`ManifestRead`: found, unreadable while Steam writes it, missing),

@@ -3,6 +3,7 @@
 // commands (9b). Each throws the refusal as an `Error` with the backend's
 // message, for the screen to show under the row.
 import { api, type DownloadEntry } from '../api';
+import { retriesSetupSteps } from '../gamestores/downloads';
 
 /** Cancels a library move. A failed move row that was undone makes way. */
 export async function cancelLibraryMove(e: DownloadEntry): Promise<void> {
@@ -24,8 +25,16 @@ export function cancelEntry(e: DownloadEntry): Promise<void> {
   return e.kind === 'library_move' ? cancelLibraryMove(e) : api.cancelInstall(e.id);
 }
 
+/** Runs a store game's setup steps again (its Verify and repair, which runs
+ *  the steps that didn't run); the old row makes way for the new one. */
+export async function retrySetupSteps(e: DownloadEntry): Promise<void> {
+  await api.storeRepair(e.source_id);
+  await api.dismissDownload(e.id);
+}
+
 /** A row's Retry. */
 export function retryEntry(e: DownloadEntry): Promise<void> {
+  if (retriesSetupSteps(e)) return retrySetupSteps(e);
   return e.kind === 'library_move' ? resumeLibraryMove(e) : api.retryInstall(e.id);
 }
 

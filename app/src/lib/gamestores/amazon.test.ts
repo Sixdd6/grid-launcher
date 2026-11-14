@@ -3,8 +3,10 @@
 // capabilities — no Cloud saves chip, tab, line or Settings row, no DLC, no
 // Version, "Update" with no version, nile as the tool. The fake's Amazon data
 // is the prototype's (`stores.js` a1–a3).
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { storeEntryLine, storeStripLine } from './downloads';
+import { REDIST_DECLINED, retriesSetupSteps, storeEntryLine, storeStripLine } from './downloads';
+import { rowAction } from '../downloads/format';
 import { noticeActionLabel, toolNeededNotice, uninstalledNotice } from './notices';
 import { initialChoice, installDialogView, installRequest, optionsForStore } from './install';
 import { dlcRows, storeButtons, storeDetailChips, storeFacts, storeLines, storeTabs } from './details';
@@ -176,5 +178,31 @@ describe('Amazon Games cards and Downloads', () => {
     );
     // GOG and Epic keep their version.
     expect(storeEntryLine(row({ kind: 'store_update', status: 'completed' }), { version: '2.2' })).toBe('Updated to 2.2');
+  });
+  it('shows the setup steps: running, their warnings, and Retry only for a declined Windows prompt', () => {
+    const base = { source_id: 'amazon:amzn1.adg.product.x', title: 'Hotline Miami', platform: 'Amazon Games' };
+    expect(storeEntryLine(row({ ...base, status: 'installing', phase: 'installer_silent', install_processed_bytes: 1, install_total_bytes: 2 }))).toBe(
+      'Running the installer silently · 50%',
+    );
+    const warned = row({
+      ...base,
+      status: 'completed',
+      error: "Couldn't run oalinst.exe: it exited with code 1\nCouldn't run DXSETUP.exe: it isn't in the game folder",
+    });
+    expect(storeEntryLine(warned)).toBe(
+      "Installed · <1 MB · Couldn't run oalinst.exe: it exited with code 1 · Couldn't run DXSETUP.exe: it isn't in the game folder",
+    );
+    expect(retriesSetupSteps(warned)).toBe(false);
+    expect(rowAction(warned)).toBe('dismiss');
+    const declined = row({ ...base, status: 'completed', error: REDIST_DECLINED });
+    expect(storeEntryLine(declined)).toBe(`Installed · <1 MB · ${REDIST_DECLINED}`);
+    expect(retriesSetupSteps(declined)).toBe(true);
+    expect(rowAction(declined)).toBe('retry-dismiss');
+    expect(retriesSetupSteps({ ...declined, status: 'failed' })).toBe(false);
+    expect(storeEntryLine(row({ ...base, status: 'completed' }))).toBe('Installed · <1 MB');
+  });
+  it('matches the backend’s declined-prompt words', () => {
+    const rust = readFileSync(new URL('../../../../crates/grid-core/src/stores/redist.rs', import.meta.url), 'utf8');
+    expect(rust).toContain(JSON.stringify(REDIST_DECLINED));
   });
 });

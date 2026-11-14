@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::row::FuelStep;
+
 /// What GRID keeps about one installed Amazon game.
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 #[serde(default)]
@@ -19,6 +21,11 @@ pub struct AmazonMeta {
     pub version: String,
     /// The user picked the executable in Game Settings; an update keeps it.
     pub exe_user_pinned: bool,
+    /// The fuel.json `PostInstall` list that last ran to the end with
+    /// every step working (`post_install`). An update or a verify runs the
+    /// steps again only when the game's list differs from this one; empty
+    /// for a row from before GRID ran them.
+    pub post_install_ran: Vec<FuelStep>,
 }
 
 impl AmazonMeta {
@@ -44,6 +51,12 @@ mod tests {
             product_id: "amzn1.adg.product.11111111-2222-3333-4444-555555555555".into(),
             version: "a1b2c3".into(),
             exe_user_pinned: true,
+            post_install_ran: vec![FuelStep {
+                id: String::new(),
+                command: "oalinst.exe".into(),
+                args: vec!["/silent".into()],
+                valid_returns: vec![],
+            }],
         };
         assert_eq!(AmazonMeta::from_json(&meta.to_json()), meta);
         assert_eq!(AmazonMeta::from_json(""), AmazonMeta::default());
@@ -52,6 +65,7 @@ mod tests {
         assert_eq!(partial.version, "v9");
         assert_eq!(partial.product_id, "");
         assert!(!partial.exe_user_pinned);
+        assert!(partial.post_install_ran.is_empty(), "a row from before");
         assert!(!meta.to_json().to_lowercase().contains("token"));
     }
 }
