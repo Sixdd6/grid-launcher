@@ -4,7 +4,7 @@
 import type { StoreGame, StoreSource, StoreStatus } from '../api';
 import { availBlock, type StorePart } from './rail';
 import { canBackup, hasCloud, hasInstaller, storeName, storeTool } from './marks';
-import { agoText, plural, sizeGb } from './text';
+import { agoText, plural, sizeGb, toolSize } from './text';
 
 /** The view's title parts: "GOG" and "· Installed". */
 export function storeViewTitle(source: StoreSource, part: StorePart): { title: string; sub: string } {
@@ -149,7 +149,7 @@ export function storePanel(status: StoreStatus, part: StorePart, games: readonly
   }
   if (block === 'tool') {
     const tool = storeTool(status.source) ?? { name: 'its tool', pkg: '' };
-    const size = sizeGb(status.tool.size_bytes);
+    const size = toolSize(status.tool.size_bytes);
     const busy = status.tool.state === 'installing';
     const failed = status.tool.state === 'failed';
     return panel({

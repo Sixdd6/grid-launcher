@@ -4,7 +4,7 @@
   import { api, type StoreGame, type StoreInstallOptions } from '../../api';
   import { pickFolder } from '../../pickers';
   import { compatTools } from '../../stores/compatTools.svelte';
-  import { COMPAT_HELP, folderHelp, initialChoice, installDialogView, installRequest, type InstallChoice } from '../install';
+  import { COMPAT_HELP, folderHelp, initialChoice, installDialogView, installRequest, optionsForStore, type InstallChoice } from '../install';
   import { storeName } from '../marks';
   import { dlcShortTitle, sizeGb } from '../text';
   import StoreCoverSm from './StoreCoverSm.svelte';
@@ -26,8 +26,9 @@
       .storeInstallOptions(key)
       .then((o) => {
         if (cancelled) return;
-        opts = o;
-        choice = initialChoice(o);
+        const shown = optionsForStore(game.source, o);
+        opts = shown;
+        choice = initialChoice(shown);
       })
       .catch((err) => {
         if (!cancelled) loadError = err instanceof Error ? err.message : String(err);

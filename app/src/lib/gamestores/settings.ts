@@ -4,7 +4,7 @@
 // Epic Games).
 import type { StoreStatus } from '../api';
 import { hasCloud, hasInstaller, storeName, storesLede, storeTool } from './marks';
-import { agoText, plural, sizeGb } from './text';
+import { agoText, plural, toolSize } from './text';
 
 /** The pane's lede, naming the stores this build shows (`storesLede`). */
 export const STORES_LEDE = storesLede();
@@ -52,7 +52,7 @@ export function toolLine(status: StoreStatus): ToolLine {
   const tool = storeTool(status.source) ?? { name: 'tool', pkg: '' };
   const t = status.tool;
   if (status.connection === 'not_connected' && t.state !== 'installed' && t.state !== 'installing') {
-    return { kind: 'pending', text: `Installs when you connect · ${sizeGb(t.size_bytes)}` };
+    return { kind: 'pending', text: `Installs when you connect · ${toolSize(t.size_bytes)}` };
   }
   switch (t.state) {
     case 'installed':
@@ -69,7 +69,7 @@ export function toolLine(status: StoreStatus): ToolLine {
         button: 'Try again',
       };
     default:
-      return { kind: 'missing', text: `Not installed · ${sizeGb(t.size_bytes)}`, button: 'Install' };
+      return { kind: 'missing', text: `Not installed · ${toolSize(t.size_bytes)}`, button: 'Install' };
   }
 }
 
@@ -86,7 +86,7 @@ export function notConnectedLede(status: StoreStatus): string {
   const tool = storeTool(status.source) ?? { name: 'its tool', pkg: '' };
   return `Sign in to ${name} to see the games you own in the Library and install them. ${
     hasInstaller(status.source) ? `You can install ${name} offline installers without signing in. ` : ''
-  }GRID installs with ${tool.name} (${tool.pkg}, ${status.tool.license || 'GPL-3.0'}, ${sizeGb(status.tool.size_bytes)}), which it downloads when you connect.`;
+  }GRID installs with ${tool.name} (${tool.pkg}, ${status.tool.license || 'GPL-3.0'}, ${toolSize(status.tool.size_bytes)}), which it downloads when you connect.`;
 }
 
 export function expiredWarning(status: StoreStatus): { bold: string; rest: string } {

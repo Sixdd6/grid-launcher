@@ -28,13 +28,13 @@ const UI = {
   video_volume: 50,
 };
 
-function installedRow(title: string, source: 'gog' | 'epic' | 'romm', storeId: string, platform: string, played: number): InstalledGame {
+function installedRow(title: string, source: 'gog' | 'epic' | 'amazon' | 'romm', storeId: string, platform: string, played: number): InstalledGame {
   return {
     title,
     platform,
     source,
     store_id: storeId,
-    platform_slug: source === 'gog' ? 'gog' : source === 'epic' ? 'win' : platform.toLowerCase(),
+    platform_slug: source === 'gog' ? 'gog' : source === 'epic' || source === 'amazon' ? 'win' : platform.toLowerCase(),
     rom_id: source === 'romm' ? Number(storeId) : null,
     rom_file_name: '',
     archive_path: '',
@@ -90,6 +90,11 @@ export function installDevMock(): void {
       .gamesOf('epic')
       .filter((g) => g.installed)
       .map((g) => installedRow(g.title, 'epic', g.store_id, 'Epic Games', g.store_id === 'Starlight' ? now() - 4 * 86400 : 0)),
+    // Fogline was played last month (the prototype's a1).
+    ...fake
+      .gamesOf('amazon')
+      .filter((g) => g.installed)
+      .map((g) => installedRow(g.title, 'amazon', g.store_id, 'Amazon Games', g.title === 'Fogline' ? now() - 30 * 86400 : 0)),
     installedRow('Velvet Static', 'romm', '11', 'PlayStation', now() - 3600),
     installedRow('Cinder Peaks', 'romm', '12', 'Super Nintendo', 0),
   ];

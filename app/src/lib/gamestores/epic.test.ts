@@ -42,7 +42,7 @@ describe('Epic Games fake data', () => {
     expect(fake.library('gog').installed.length).toBe(3);
     fake.scenario('normal', 'epic');
     expect(fake.library('epic').installed.map((g) => g.title)).toEqual(['Starlight Courier', 'Vector Bloom']);
-    expect(fake.handle('stores_status', {})).toHaveLength(2);
+    expect(fake.handle('stores_status', {})).toHaveLength(3);
   });
 });
 

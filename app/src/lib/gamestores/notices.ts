@@ -6,7 +6,7 @@
 // runs, and the RomM installer-archive cards it reads from Downloads rows).
 // Pure and UI-agnostic: the desktop's cards and TV mode's both use it.
 import type { DownloadEntry, StoreNotice, StoreNoticeAction, StoreSource } from '../api';
-import { storeName, storeTool } from './marks';
+import { hasCloud, storeName, storeTool } from './marks';
 
 /** One card: its text, whether it is an error, and at most one action. */
 export type StoreCard = { text: string; error: boolean; action: StoreNoticeAction | null; sub?: string };
@@ -68,8 +68,9 @@ export const dlcQueuedNotice = (dlcTitle: string) => ok(`${dlcTitle} added to do
 export const dlcRemovedNotice = (dlcTitle: string) => ok(`${dlcTitle} removed`);
 export const cancelledNotice = (title: string) => ok(`Cancelled ${title}`);
 
+/** "Fogline uninstalled"; a store with cloud saves adds where they stay (never Amazon's, which has none). */
 export function uninstalledNotice(source: StoreSource, title: string, cloud: boolean): StoreCard {
-  return ok(`${title} uninstalled${cloud ? `. Its cloud saves stay in your ${storeName(source)} account.` : ''}`);
+  return ok(`${title} uninstalled${cloud && hasCloud(source) ? `. Its cloud saves stay in your ${storeName(source)} account.` : ''}`);
 }
 
 /** Install pressed while signed out: the dialog doesn't open. */
