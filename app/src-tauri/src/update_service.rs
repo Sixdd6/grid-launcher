@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use grid_core::library::registry::InstalledGame;
+use grid_core::library::registry::Registry;
 use grid_core::library::specials::native::SidecarOutcome;
 use grid_core::library::update_detection::{
     format_version_tag, game_has_server_update, has_newer_server_rom_version,
@@ -24,14 +25,13 @@ use grid_core::library::update_detection::{
 };
 use grid_core::library::InstallService;
 use grid_core::session::SessionManager;
-use grid_core::stores::gog::GogUpdate;
-use grid_core::stores::StoreKind;
+use grid_core::stores::{GameKey, StoreError, StoreKind};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Semaphore;
 
 use crate::commands::stores::StoreConnection;
-use crate::stores_service::GogStore;
+use crate::stores_service::{BoxFut, EpicStore, GogStore, StoresService};
 
 pub const UPDATES_CHANGED_EVENT: &str = "updates-changed";
 /// Verbatim (details_view_mixin.py:1818).
@@ -56,11 +56,11 @@ pub struct UpdateService {
     /// A pass has committed its result since the set was last cleared, so
     /// `available` reflects the server rather than an empty start.
     completed_pass: AtomicBool,
-    /// GOG's newer builds for installed GOG games, by GOG product id
+    /// The stores' newer builds for installed store games, by game key
     /// (`StoreGame.update_version`). Transient like `available`.
-    store_updates: Mutex<HashMap<String, GogUpdate>>,
-    /// One store check at a time.
-    store_check_running: AtomicBool,
+    store_updates: Mutex<HashMap<GameKey, StoreUpdate>>,
+    /// The stores whose update check runs (one at a time per store).
+    store_check_running: Mutex<std::collections::HashSet<StoreKind>>,
 }
 
 /// Collapses overlapping refresh triggers into at most one pass in flight
@@ -125,7 +125,7 @@ impl UpdateService {
             gate: PassGate::default(),
             completed_pass: AtomicBool::new(false),
             store_updates: Mutex::new(HashMap::new()),
-            store_check_running: AtomicBool::new(false),
+            store_check_running: Mutex::new(std::collections::HashSet::new()),
         })
     }
 
@@ -346,150 +346,264 @@ impl UpdateService {
         let _ = app.emit(UPDATES_CHANGED_EVENT, emitted);
     }
 
-    // --- store updates (GOG) ---------------------------------------------------
+    // --- store updates (GOG, Epic) -------------------------------------------
 
-    /// GOG's newer builds, by GOG product id.
+    /// Every store's newer builds, by game key.
     #[cfg(test)]
-    pub fn store_updates(&self) -> HashMap<String, GogUpdate> {
+    pub fn store_updates(&self) -> HashMap<GameKey, StoreUpdate> {
         self.store_updates.lock().unwrap().clone()
     }
 
     /// One store's newer versions by store id (`StoreGame.update_version`).
-    /// Only GOG's are tracked so far (Epic's land with package C).
     pub fn store_versions(&self, kind: StoreKind) -> HashMap<String, String> {
-        if kind != StoreKind::Gog {
-            return HashMap::new();
-        }
         self.store_updates
             .lock()
             .unwrap()
             .iter()
-            .map(|(id, update)| (id.clone(), update.version.clone()))
+            .filter(|(key, _)| key.store_kind() == Some(kind))
+            .filter_map(|(key, update)| match key {
+                GameKey::Store { store_id, .. } => Some((store_id.clone(), update.version.clone())),
+                GameKey::Rom(_) => None,
+            })
             .collect()
     }
 
-    /// Replaces the store set with one check's result and answers the
-    /// updates that are new since the last check (each gets a card).
-    fn commit_store_updates(&self, found: Vec<GogUpdate>) -> Vec<GogUpdate> {
+    /// Replaces one store's set with one check's result and answers the
+    /// updates that are new since the last check (each gets a card). The
+    /// other stores' updates stay.
+    fn commit_store_updates(&self, kind: StoreKind, found: Vec<StoreUpdate>) -> Vec<StoreUpdate> {
         let mut known = self.store_updates.lock().unwrap();
-        let fresh = new_store_updates(&known, &found);
-        *known = found
-            .into_iter()
-            .map(|update| (update.store_id.clone(), update))
-            .collect();
+        let fresh = new_store_updates(&known, kind, &found);
+        known.retain(|key, _| key.store_kind() != Some(kind));
+        known.extend(
+            found
+                .into_iter()
+                .map(|update| (GameKey::store(kind, update.store_id.clone()), update)),
+        );
         fresh
     }
 
     /// Emits `updates-changed` with the current RomM rows (the payload is
     /// the whole RomM set; store updates are read through `store_library`).
-    fn emit_current(&self, app: &AppHandle, stores: &GogStore) {
-        let installed = stores
-            .registry()
+    fn emit_current(&self, app: &AppHandle, registry: Option<Arc<Registry>>) {
+        let installed = registry
             .and_then(|registry| registry.all().ok())
             .unwrap_or_default();
         let _ = app.emit(UPDATES_CHANGED_EVENT, self.rows(&installed));
     }
 
-    /// Drops one game's store update (it was uninstalled). Only GOG's set
-    /// is tracked so far; another store's game changes nothing.
+    /// Drops one game's store update (it was uninstalled).
     pub fn forget_store_update(
         &self,
         app: &AppHandle,
-        stores: &GogStore,
+        stores: &StoresService,
         kind: StoreKind,
         store_id: &str,
     ) {
-        if kind == StoreKind::Gog
-            && self
-                .store_updates
-                .lock()
-                .unwrap()
-                .remove(store_id)
-                .is_some()
-        {
-            self.emit_current(app, stores);
+        let key = GameKey::store(kind, store_id.to_string());
+        if self.store_updates.lock().unwrap().remove(&key).is_some() {
+            self.emit_current(app, stores.registry());
         }
     }
 
-    /// Drops every update of the store that disconnected (GOG's set is the
-    /// only one tracked so far).
-    pub fn clear_store_updates(&self, app: &AppHandle, stores: &GogStore, kind: StoreKind) {
-        if kind != StoreKind::Gog {
-            return;
-        }
-        let had = !std::mem::take(&mut *self.store_updates.lock().unwrap()).is_empty();
+    /// Drops every update of the store that disconnected.
+    pub fn clear_store_updates(&self, app: &AppHandle, stores: &StoresService, kind: StoreKind) {
+        let had = {
+            let mut known = self.store_updates.lock().unwrap();
+            let before = known.len();
+            known.retain(|key, _| key.store_kind() != Some(kind));
+            known.len() != before
+        };
         if had {
-            self.emit_current(app, stores);
+            self.emit_current(app, stores.registry());
         }
     }
 
-    /// Asks GOG for newer builds of the installed GOG games (content-system
-    /// builds against `meta.build_id`, grid-core's `check_updates`). Runs
+    /// Asks a store for newer builds of its installed games: GOG's
+    /// content-system builds against `meta.build_id` (grid-core's
+    /// `check_updates`), Epic's owned list against `meta.version`. Runs
     /// when signed in: at startup, after a connect and on demand. A new
     /// update gets the "update 2.2 is available on GOG" card; the Library
-    /// re-reads on `updates-changed` and `stores-changed`.
-    pub fn spawn_store_check(self: &Arc<Self>, app: AppHandle, stores: Arc<GogStore>) {
-        if self.store_check_running.swap(true, Ordering::SeqCst) {
+    /// re-reads on `updates-changed` and `stores-changed`. One check per
+    /// store at a time.
+    pub fn spawn_store_check<S: StoreUpdateSource>(
+        self: &Arc<Self>,
+        app: AppHandle,
+        stores: Arc<S>,
+    ) {
+        let kind = stores.kind();
+        if !self.store_check_running.lock().unwrap().insert(kind) {
             return;
         }
         let this = self.clone();
         tauri::async_runtime::spawn(async move {
-            this.store_check(&app, &stores).await;
-            this.store_check_running.store(false, Ordering::SeqCst);
+            this.store_check(&app, stores).await;
+            this.store_check_running.lock().unwrap().remove(&kind);
         });
     }
 
-    async fn store_check(&self, app: &AppHandle, stores: &Arc<GogStore>) {
-        if stores.connection() != StoreConnection::Connected || !stores.tool_ready() {
+    async fn store_check<S: StoreUpdateSource>(&self, app: &AppHandle, stores: Arc<S>) {
+        let kind = stores.kind();
+        if !stores.ready() {
             return;
         }
         let Some(registry) = stores.registry() else {
             return;
         };
-        let rows =
-            match tokio::task::spawn_blocking(move || registry.store_rows(StoreKind::Gog)).await {
-                Ok(Ok(rows)) => rows,
-                _ => {
-                    tracing::warn!("store update check skipped: registry read failed");
-                    return;
-                }
-            };
+        let lookup = registry.clone();
+        let rows = match tokio::task::spawn_blocking(move || lookup.store_rows(kind)).await {
+            Ok(Ok(rows)) => rows,
+            _ => {
+                tracing::warn!("store update check skipped: registry read failed");
+                return;
+            }
+        };
         if rows.is_empty() {
             return;
         }
-        let found = match stores.api().check_updates(&rows).await {
+        let found = match stores.clone().find(rows.clone()).await {
             Ok(found) => found,
             Err(e) => {
-                let _ = stores.store_error(e);
+                stores.failed(e);
                 tracing::info!("store update check did not finish");
                 return;
             }
         };
-        let fresh = self.commit_store_updates(found);
+        let fresh = self.commit_store_updates(kind, found);
         for update in &fresh {
             let title = rows
                 .iter()
                 .find(|row| row.store_id == update.store_id)
                 .map(|row| row.title.clone())
                 .unwrap_or_else(|| update.store_id.clone());
-            stores.notice(crate::stores_service::notice::update_available(
-                &title,
-                &update.version,
-            ));
+            stores.update_notice(&title, &update.version);
         }
-        self.emit_current(app, stores);
+        self.emit_current(app, Some(registry));
         stores.changed();
     }
 }
 
-/// The updates in `found` that `known` does not already hold at the same
-/// version.
-fn new_store_updates(known: &HashMap<String, GogUpdate>, found: &[GogUpdate]) -> Vec<GogUpdate> {
+/// A newer build a store has for an installed game.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreUpdate {
+    /// GOG product id, Epic app name.
+    pub store_id: String,
+    /// The version the store names ("2.2", Epic's build version).
+    pub version: String,
+    /// What tells two builds apart (GOG's build id; Epic's build version).
+    pub build_id: String,
+}
+
+/// A store the update check asks ([`UpdateService::spawn_store_check`]).
+pub trait StoreUpdateSource: Send + Sync + 'static {
+    fn kind(&self) -> StoreKind;
+    /// Signed in, with the store's tool ready.
+    fn ready(&self) -> bool;
+    fn registry(&self) -> Option<Arc<Registry>>;
+    /// The newer builds for `rows` (the store's installed games).
+    fn find(
+        self: Arc<Self>,
+        rows: Vec<InstalledGame>,
+    ) -> BoxFut<'static, Result<Vec<StoreUpdate>, StoreError>>;
+    /// The check failed: an expired login flips the store's card.
+    fn failed(&self, error: StoreError);
+    /// The "update … is available" card.
+    fn update_notice(&self, title: &str, version: &str);
+    /// Emits `stores-changed`.
+    fn changed(&self);
+}
+
+impl StoreUpdateSource for GogStore {
+    fn kind(&self) -> StoreKind {
+        StoreKind::Gog
+    }
+    fn ready(&self) -> bool {
+        self.connection() == StoreConnection::Connected && self.tool_ready()
+    }
+    fn registry(&self) -> Option<Arc<Registry>> {
+        GogStore::registry(self)
+    }
+    fn find(
+        self: Arc<Self>,
+        rows: Vec<InstalledGame>,
+    ) -> BoxFut<'static, Result<Vec<StoreUpdate>, StoreError>> {
+        Box::pin(async move {
+            let found = self.api().check_updates(&rows).await?;
+            Ok(found
+                .into_iter()
+                .map(|update| StoreUpdate {
+                    store_id: update.store_id,
+                    version: update.version,
+                    build_id: update.build_id,
+                })
+                .collect())
+        })
+    }
+    fn failed(&self, error: StoreError) {
+        let _ = self.store_error(error);
+    }
+    fn update_notice(&self, title: &str, version: &str) {
+        self.notice(crate::stores_service::notice::update_available(
+            title, version,
+        ));
+    }
+    fn changed(&self) {
+        GogStore::changed(self)
+    }
+}
+
+impl StoreUpdateSource for EpicStore {
+    fn kind(&self) -> StoreKind {
+        StoreKind::Epic
+    }
+    fn ready(&self) -> bool {
+        self.connection() == StoreConnection::Connected && self.tool_ready()
+    }
+    fn registry(&self) -> Option<Arc<Registry>> {
+        EpicStore::registry(self)
+    }
+    fn find(
+        self: Arc<Self>,
+        rows: Vec<InstalledGame>,
+    ) -> BoxFut<'static, Result<Vec<StoreUpdate>, StoreError>> {
+        Box::pin(async move {
+            Ok(self
+                .find_updates(&rows)
+                .await
+                .into_iter()
+                .map(|update| StoreUpdate {
+                    store_id: update.app_name,
+                    build_id: update.version.clone(),
+                    version: update.version,
+                })
+                .collect())
+        })
+    }
+    fn failed(&self, error: StoreError) {
+        let _ = self.store_error(error);
+    }
+    fn update_notice(&self, title: &str, version: &str) {
+        self.notice(crate::stores_service::epic::notice::update_available(
+            title, version,
+        ));
+    }
+    fn changed(&self) {
+        EpicStore::changed(self)
+    }
+}
+
+/// The updates in `found` (one store's) that `known` does not already hold
+/// at the same build.
+fn new_store_updates(
+    known: &HashMap<GameKey, StoreUpdate>,
+    kind: StoreKind,
+    found: &[StoreUpdate],
+) -> Vec<StoreUpdate> {
     found
         .iter()
         .filter(|update| {
             !known
-                .get(&update.store_id)
+                .get(&GameKey::store(kind, update.store_id.clone()))
                 .is_some_and(|old| old.build_id == update.build_id && old.version == update.version)
         })
         .cloned()
@@ -573,19 +687,33 @@ mod tests {
 
     #[test]
     fn only_new_or_changed_store_updates_get_a_card() {
-        let update = |id: &str, build: &str| GogUpdate {
+        let update = |id: &str, build: &str| StoreUpdate {
             store_id: id.into(),
             version: "2.2".into(),
             build_id: build.into(),
         };
         let service = UpdateService::new();
-        let fresh = service.commit_store_updates(vec![update("1", "a"), update("2", "b")]);
+        let fresh =
+            service.commit_store_updates(StoreKind::Gog, vec![update("1", "a"), update("2", "b")]);
         assert_eq!(fresh.len(), 2);
-        let fresh = service.commit_store_updates(vec![update("1", "a"), update("2", "c")]);
+        let fresh =
+            service.commit_store_updates(StoreKind::Gog, vec![update("1", "a"), update("2", "c")]);
         assert_eq!(fresh, vec![update("2", "c")]);
         assert_eq!(service.store_updates().len(), 2);
-        assert!(service.commit_store_updates(vec![]).is_empty());
-        assert!(service.store_updates().is_empty());
+        // Epic's set is its own: the same id is another game.
+        let fresh = service.commit_store_updates(StoreKind::Epic, vec![update("1", "1.0.3")]);
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(service.store_updates().len(), 3);
+        assert_eq!(
+            service.store_versions(StoreKind::Epic),
+            HashMap::from([("1".to_string(), "2.2".to_string())])
+        );
+        assert_eq!(service.store_versions(StoreKind::Gog).len(), 2);
+        assert!(service
+            .commit_store_updates(StoreKind::Gog, vec![])
+            .is_empty());
+        assert_eq!(service.store_updates().len(), 1, "Epic's update stays");
+        assert!(service.store_versions(StoreKind::Gog).is_empty());
     }
 
     use super::*;
