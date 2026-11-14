@@ -885,6 +885,50 @@ Where the skeleton differs from, or adds to, the Step 0 block above:
    `backup::local::REASON_STORE` still refuses them.
 7. **TV specs** that list Settings panes or count stores (see the E2E plan).
 
+## Package D outcome (desktop UI)
+
+- **D1** (`feat(stores): D1 …`): `gamestores/marks.ts` has `ENABLED_STORES = ['epic', 'gog']`
+  and `storeCaps(source)` with `hasTool`, `hasCloud`, `canBackup` (GOG), `hasInstaller`
+  (GOG), `hasVersions` (GOG) and `hasLanguages` (GOG), plus `installedByTool(game)`
+  (`origin` is the store's tool name, so legendary installs can Verify), `storeLauncher`,
+  `storeOfPlatform` ("Epic Games" → `epic` for Downloads rows) and `storesLede()`.
+  `hasStoreCloud` stays as an alias of `hasCloud`. Every `source === 'gog'` in the pure
+  modules that meant a capability now reads it. TV (`tv/stores/*`, package E) imports
+  these and still has its own `source === 'gog'` checks to convert.
+- **Settings › Stores lede** names the stores this build shows: "GRID installs GOG and
+  Epic games with the open-source tools Heroic Games Launcher uses; their logins stay in
+  those tools' files in GRID's data folder." (the prototype's line, without Amazon and
+  Steam).
+- **Not connected account line**: "Not signed in · N games installed here" stays a
+  store-with-offline-installers line (GOG), as in the prototype; Epic says "Not signed
+  in".
+- **Install dialog**: Version and Language show only for a store with versions /
+  languages, whatever the backend sends, so Epic never shows them.
+- **fakeApi / devMock**: both stores; the prototype's e1–e6 (app names are made up:
+  `Starlight`, `VectorBloom`, `GlimmerDeep` with one DLC, `IronOrchard`,
+  `NorthernStatic`, `RustbeltRally`), SamPlays, legendary 0.21.1 (3.1 MB), per-store
+  scenarios (`scenario(name, 'epic')`), and new scenarios `ownedError`, `update`,
+  `cloudConflict` (Epic's conflict has `cloud_files: null`).
+- **E2E** (`helpers/epic.ts`, `specs/epic-library.spec.ts`, `specs/epic-cloud.spec.ts`):
+  written against this plan; they find covers by title, never by app name, and accept
+  either a connect form or a profile already in the Library. Pending integration with
+  package C's mock, fake legendary, seed and `scripts/e2e.sh` groups. For integration:
+  - `epic-cloud` needs the seed's conflict on **Starlight Courier** and the save-backups
+    copy at `<data>/stores/save-backups/epic/<app>/<epoch-ms>/`. It covers the prompt's
+    Don't launch and Use the cloud save; "Keep this computer's save" is covered by the
+    GOG spec and vitest, because one seeded conflict allows one resolution.
+  - `epic-library`'s update step runs only if the seed gives an installed game a newer
+    build.
+- **Parity** (dev mock beside the prototype, screenshots in the worktree's
+  `ctr-out/parity-epic/`, not committed): rail group and counts, Installed and Available
+  headers, Not supported covers and Details, installed Details, install dialog (no
+  Version, no Language, DLC), every Available panel (loading, empty, all installed,
+  expired, not connected, legendary missing / installing / failed), cloud conflict tab,
+  Settings card (connected, Disconnect confirm, expired, not connected), the failed
+  Downloads row and the strip. The Library's default Sort ("Title") is the shipped app's,
+  not an Epic difference. The login window (item 10) and backend card texts (item 12)
+  belong to package C.
+
 ## Questions for the user
 
 None. Two choices were taken here and can be reversed on request:

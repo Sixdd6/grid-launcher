@@ -1,14 +1,14 @@
 <script lang="ts">
   // Settings › Stores (GameStores README, "Settings › Stores"; prototype
   // `renderStoresPane`, `stStoreCard`). A lede, then one card per store in
-  // the rail's order. Phase 1: the GOG card only. Words come from
+  // the rail's order (Epic Games, GOG). Words come from
   // `gamestores/settings.ts`.
   import { api, type StoreStatus } from '../api';
   import Icon from '../Icon.svelte';
   import { pickFolder } from '../pickers';
   import { gameStores } from '../stores/gameStores.svelte';
   import StoreMark from '../gamestores/desktop/StoreMark.svelte';
-  import { hasStoreCloud, storeName } from '../gamestores/marks';
+  import { hasCloud, hasInstaller, storeName } from '../gamestores/marks';
   import { disconnectedNotice, storeCloudSwitchNotice, refusedNotice } from '../gamestores/notices';
   import {
     accountLine,
@@ -106,7 +106,7 @@
         {#if loginError}<p class="errline" data-testid={`store-login-error-${s.source}`}>{loginError}</p>{/if}
         <div class="g-actions">
           <button class="g-btn" data-testid={`store-connect-${s.source}`} onclick={() => signIn(s.source)}>Connect {storeName(s.source)}…</button>
-          {#if s.source === 'gog'}
+          {#if hasInstaller(s.source)}
             <button class="g-btn secondary" data-testid="store-installer-open-settings" onclick={openInstaller}>Install from installer…</button>
           {/if}
         </div>
@@ -156,7 +156,7 @@
             <dt>Install folder</dt>
             <dd class="folder"><code>{s.install_dir}</code><button class="small-btn" onclick={() => changeFolder(s)}>Change…</button></dd>
           </div>
-          {#if hasStoreCloud(s.source)}
+          {#if hasCloud(s.source)}
             <div>
               <dt>Cloud saves</dt>
               <dd>
@@ -179,7 +179,7 @@
           {:else}
             <button class="g-btn" data-testid={`store-show-${s.source}`} onclick={() => showInLibrary(s.source)}>Show in Library</button>
           {/if}
-          {#if s.source === 'gog'}
+          {#if hasInstaller(s.source)}
             <button class="g-btn secondary" data-testid="store-installer-open-settings" onclick={openInstaller}>Install from installer…</button>
           {/if}
           <button class="g-btn secondary" data-testid={`store-refresh-${s.source}`} onclick={() => refreshStore(s.source)}>Refresh games</button>

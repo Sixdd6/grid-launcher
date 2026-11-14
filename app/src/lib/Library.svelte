@@ -73,7 +73,7 @@
   import { noMatchText, storeGameMatches, storePanel, type PanelAct } from './gamestores/view';
   import { mixedCounts, mixedStoreGames, selectedToWrite, sortStoreView } from './gamestores/library';
   import { driveGogChip, driveStoreGrid, driveStorePrimary, storeBackupTitle } from './gamestores/backup';
-  import { storeMark, storeName } from './gamestores/marks';
+  import { canBackup, storeMark, storeName } from './gamestores/marks';
   import StoreViewHeader from './gamestores/desktop/StoreViewHeader.svelte';
   import StorePanel from './gamestores/desktop/StorePanel.svelte';
   import {
@@ -141,8 +141,8 @@
   );
   let storeList = $derived(sortStoreView(storeAll.filter((g) => storeGameMatches(g, search)), sort, installed.list));
   let storePanelView = $derived(storeStatus && storeSel ? storePanel(storeStatus, storeSel.part, storeAll) : null);
-  /** GOG › Installed is the one store view with Select (GOG backups). */
-  let storeSelectable = $derived(storeSel !== null && storeSel.source === 'gog' && storeSel.part === 'installed' && storeAll.length > 0);
+  /** A backup store's Installed (GOG › Installed) is the one store view with Select (GOG backups); Epic Games has none. */
+  let storeSelectable = $derived(storeSel !== null && canBackup(storeSel.source) && storeSel.part === 'installed' && storeAll.length > 0);
   let storePicks = $state<string[]>([]);
 
   let rows = $derived(

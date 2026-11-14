@@ -1,7 +1,8 @@
 // A fake of the store commands and events, with the GameStores prototype's
 // GOG and Epic Games data (`stores.js` g1–g8 and e1–e6; placeholder titles
-// only; fake markers, never a real account or token). Used by the vitest suites and, behind the dev-only VITE_FAKE_STORES
-// flag (`devMock.ts`), to click through every state in a browser. It answers
+// only; fake markers, never a real account or token). Used by the vitest
+// suites and, behind the dev-only VITE_FAKE_STORES flag (`devMock.ts`), to
+// click through every state in a browser. It answers
 // `invoke(cmd, args)` calls by command name and emits events through the
 // `emit` it is given; it never touches the network or the disk.
 import type {

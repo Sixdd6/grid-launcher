@@ -7,7 +7,7 @@
 import { emit } from '@tauri-apps/api/event';
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks';
 import type { DownloadEntry, DriveInfo, InstalledGame } from '../api';
-import { FAKE_INSTALLERS, FakeStores, NOT_HANDLED, type FakeScenario } from './fakeApi';
+import { FAKE_INSTALLERS, FakeStores, NOT_HANDLED, type FakeScenario, type FakeSource } from './fakeApi';
 
 const GB = 1024 ** 3;
 const now = () => Math.floor(Date.now() / 1000);
@@ -28,13 +28,13 @@ const UI = {
   video_volume: 50,
 };
 
-function installedRow(title: string, source: 'gog' | 'romm', storeId: string, platform: string, played: number): InstalledGame {
+function installedRow(title: string, source: 'gog' | 'epic' | 'romm', storeId: string, platform: string, played: number): InstalledGame {
   return {
     title,
     platform,
     source,
     store_id: storeId,
-    platform_slug: source === 'gog' ? 'gog' : platform.toLowerCase(),
+    platform_slug: source === 'gog' ? 'gog' : source === 'epic' ? 'win' : platform.toLowerCase(),
     rom_id: source === 'romm' ? Number(storeId) : null,
     rom_file_name: '',
     archive_path: '',
@@ -81,7 +81,15 @@ export function installDevMock(): void {
   ];
   const rommRows: DownloadEntry[] = [];
   const installed = (): InstalledGame[] => [
-    ...fake.games.filter((g) => g.installed).map((g, i) => installedRow(g.title, 'gog', g.store_id, 'GOG', i === 0 ? now() - 2 * 86400 : i === 1 ? now() - 86400 : now() - 21 * 86400)),
+    ...fake
+      .gamesOf('gog')
+      .filter((g) => g.installed)
+      .map((g, i) => installedRow(g.title, 'gog', g.store_id, 'GOG', i === 0 ? now() - 2 * 86400 : i === 1 ? now() - 86400 : now() - 21 * 86400)),
+    // Starlight Courier was played 4 days ago, Vector Bloom never (the prototype's e1, e2).
+    ...fake
+      .gamesOf('epic')
+      .filter((g) => g.installed)
+      .map((g) => installedRow(g.title, 'epic', g.store_id, 'Epic Games', g.store_id === 'Starlight' ? now() - 4 * 86400 : 0)),
     installedRow('Velvet Static', 'romm', '11', 'PlayStation', now() - 3600),
     installedRow('Cinder Peaks', 'romm', '12', 'Super Nintendo', 0),
   ];
@@ -150,7 +158,7 @@ export function installDevMock(): void {
   };
   (window as unknown as { __gridFake: unknown }).__gridFake = {
     fake,
-    scenario: (s: FakeScenario) => fake.scenario(s),
+    scenario: (s: FakeScenario, source: FakeSource = 'gog') => fake.scenario(s, source),
     installers: FAKE_INSTALLERS.map((f) => f.path),
   };
 }
