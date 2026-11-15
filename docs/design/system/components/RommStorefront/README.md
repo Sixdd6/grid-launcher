@@ -1,6 +1,6 @@
 A proposal: RomM becomes one optional storefront beside Amazon Games, Epic Games, GOG and Steam. The card is built on Game stores (what main has). It opens where a connected user lands with Open GRID on › Automatic: **Library › RomM › Discover**. Everything not listed here matches Game stores.
 
-**Status: proposed, not built (step D1).** The decisions and contracts are in `docs/romm-storefront-plan.md` (user decisions 1–13, Step 0). TV mode's version is the **TVRommStorefront** card (step D2). Source: `docs/design/prototype/romm.js` and `romm.css`, built by `applayout.py` on top of the GameStores card.
+**Status: signed off, not built (step D1; user decisions 14–17).** The decisions and contracts are in `docs/romm-storefront-plan.md` (user decisions 1–13, Step 0). TV mode's version is the **TVRommStorefront** card (step D2). Source: `docs/design/prototype/romm.js` and `romm.css`, built by `applayout.py` on top of the GameStores card.
 
 ## Try it
 
@@ -34,7 +34,7 @@ Order: **All games, Recent, Updates** → **BACKUP DRIVES** → storefront group
   | Sign-in expired | **!** "RomM sign-in expired" | **Installed** only |
   | Not connected, RomM games installed | **off** "Not connected" | **Installed** only |
   | Not connected, none installed (`in_rail` false) | — | no group |
-- **Platform rows:** the union of the server's platforms and the installed RomM platforms, sorted by label. **Count = the games in that platform's view** (the server's games plus installed games the server doesn't have). Installed games carry the dot on their covers.
+- **Platform rows:** the union of the server's platforms and the installed RomM platforms, sorted by label. **Count = RomM's game count for that platform** (user decision 14). Installed games RomM doesn't have show in the platform's grid but are not counted. Installed games carry the dot on their covers.
 - When the selected row disappears (Discover or a platform while RomM drops), selection falls back to **RomM › Installed**, or **All games** when the group is gone.
 
 ## RomM › Installed
@@ -52,7 +52,7 @@ Order: **All games, Recent, Updates** → **BACKUP DRIVES** → storefront group
 
 - The pill stays on **Library**; the rail is the Library rail.
 - **Discover** is the old Server › Discover unchanged ("Recently added · New on RomM."), except the words. While connecting at startup it shows a panel: spinner "Connecting to romm.home.lan…" · "Discover and the platforms show when RomM answers. Installed games play now."
-- **Platform screen** = the old Server platform screen (folding header, Firmware and Emulator chips that open Settings › Systems, **Backup all N…**, **Select**, search "Search title, platform or genre", Size). Counts line: "4 games on RomM · 2 installed · 1 only on this computer".
+- **Platform screen** = the old Server platform screen (folding header, Firmware and Emulator chips that open Settings › Systems, **Backup all N…**, **Select**, search "Search title, platform or genre", Size). Counts line (PlayStation): "4 games on RomM · 1 installed · plus 1 only on this computer": the first number is the rail row's count (RomM's games), "installed" counts RomM's games installed here, and the installed games RomM doesn't have are named after a "plus", not counted in it.
 - Grid = the server's games merged with installed rows (matched by `rom_id`; Play for installed, Install for the rest), plus installed rows the server doesn't have, tagged on the cover:
   - **NOT LINKED**: no `rom_id` (Hidden Kiln).
   - **NOT ON ROMM**: from another RomM server, or gone from this one (Sky Lantern).
@@ -177,7 +177,7 @@ Top bar and views
 Library rail
 - [ ] Order: All games, Recent, Updates · Backup drives · Amazon, Epic, GOG, RomM, Steam.
 - [ ] No PLATFORMS section.
-- [ ] RomM group Connected: Installed (n), Discover, platform rows with view counts.
+- [ ] RomM group Connected: Installed (n), Discover, platform rows with RomM's game counts.
 - [ ] Connecting: spinner flag, Installed + Discover.
 - [ ] Can't reach: "!" flag, Installed only.
 - [ ] Sign-in expired: "!" flag, Installed only.
@@ -196,7 +196,7 @@ RomM › Installed
 Discover and platforms
 - [ ] Discover in the Library ("New on RomM."), pill on Library.
 - [ ] Discover while connecting (spinner panel).
-- [ ] Platform screen: header, counts "… only on this computer", chips, Backup all N…, Select, search.
+- [ ] Platform screen: header, counts "N games on RomM · M installed · plus K only on this computer" (N matches the rail row), chips, Backup all N…, Select, search.
 - [ ] Merged covers: Play / Install; NOT LINKED; NOT ON ROMM; these never in Discover.
 
 Details
@@ -241,10 +241,12 @@ Backups without RomM
 - [ ] Dialog lede, locked source, Can't backup list (local reasons, unlinked), emulators line, firmware skipped.
 - [ ] Words: Backup drives lede and firmware checkbox, empty drive text.
 
-## Decisions made by the designer — confirm with the user
+## Decisions made by the designer
 
-1. **Platform row count = the games in that platform's view** (server games plus installed games the server doesn't have), not the bare server ROM count; the two only differ when installed rows aren't on the server. Installed games keep the cover dot.
-2. **Two cover tags** for installed rows the server doesn't have: **NOT LINKED** (no rom id, the plan's "Not linked") and **NOT ON ROMM** (another server, or gone from the server). Count line says "N only on this computer".
+The user signed these off with the TV card on 2026-11-15 (decisions 14–17 in the plan). Where the two cards' words differed, these words win (decision 17), and the TV card now uses them.
+
+1. **Platform row count = RomM's game count only.** Settled by the user (decision 14): installed games RomM doesn't have show in the grid but are not counted, in the rail row or the platform screen's first number. Installed games keep the cover dot. TV mode does the same.
+2. **Two cover tags** for installed rows the server doesn't have: **NOT LINKED** (no rom id, the plan's "Not linked") and **NOT ON ROMM** (another server, or gone from the server). Count line says "plus N only on this computer". Settled by the user (decision 15); TV mode has both tags.
 3. **Startup "Connecting" state:** while `romm_restore` runs for a stored connection, the group shows Installed + Discover (Discover shows a connecting panel) and a spinner flag, so Automatic can land on Discover; platform rows appear when the list loads. If the probe fails, selection falls back to Installed.
 4. **No chip for Can't reach / Sign-in expired** in the Installed header; the banner carries it (stores use a chip plus a state panel).
 5. **Welcome footer:** while nothing is connected, **Skip for now** is the way on and **Continue** is disabled; once something is connected, only **Continue** shows. A RomM connect in the welcome does not jump away at once: Choose your systems follows **Continue**, so the user can connect the other rows first.
