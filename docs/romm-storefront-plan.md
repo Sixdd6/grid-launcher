@@ -1082,4 +1082,20 @@ Checksum-matched files install as verified. A file whose name matches a known en
 has no fixed checksum (per-console keys such as Switch `prod.keys`, Wii U `keys.txt`)
 installs as "Installed · not verified". Files that match nothing are refused.
 
+### Design sign-off (user decisions 14–17, 2026-11-15)
+
+The user approved the RommStorefront (desktop) and TVRommStorefront (TV) prototypes,
+including the designers' own calls (startup Connecting state, one welcome button that reads
+Skip for now until something connects and then Continue, Choose your systems after
+Continue, More systems group, Cloud saves and RetroAchievements forms editable without
+RomM). Where the two designers differed:
+
+14. **Platform row count is RomM's game count only.** Installed games RomM doesn't have
+    show in the grid but are not counted. (The desktop prototype is changed to match.)
+15. **Two cover tags:** NOT LINKED for an installed game with no RomM link, NOT ON ROMM for
+    one from another server or removed from this one. (The TV prototype gains NOT ON ROMM.)
+16. **Never connected → GRID opens on All games** (Automatic and Library), not the first
+    Backup drive. (The TV prototype is changed to match.)
+17. Where the two prototypes' words differ, desktop (D1) wins; `romm/words.ts` is shared.
+
 No open questions remain.
