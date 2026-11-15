@@ -121,7 +121,7 @@ describe('backups-c: use without a server and install from a drive', () => {
     expect(configText()).toContain('romm:ps2/pcsx2 (playstation 2)');
   });
 
-  it('offers Play, and disables Backup to drive with its reason', async () => {
+  it('offers Play, and Backup to drive with no server', async () => {
     const platformRow = $('[data-testid^="library-rail-platform-"]');
     await platformRow.waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Library never listed the installed platform' });
     await platformRow.click();
@@ -136,12 +136,12 @@ describe('backups-c: use without a server and install from a drive', () => {
       timeout: 15_000,
       timeoutMsg: 'Play never became enabled',
     });
+    // Backups work without RomM (docs/romm-storefront-plan.md Step 2): the
+    // button stays enabled and says nothing about a server.
     const backup = $(testId('details-backup'));
-    expect(await backup.isEnabled()).toBe(false);
-    // details/actions.ts BACKUP_NEEDS_SERVER: the hover title, and the same
-    // words as the visible line under the button.
-    expect(await backup.getAttribute('title')).toBe('Connect to a server to backup games');
-    await expect($('#details-backup-offline')).toHaveText('Connect to a server to backup games.');
+    expect(await backup.isEnabled()).toBe(true);
+    expect(await backup.getAttribute('title')).toBeNull();
+    expect(await $('#details-backup-offline').isExisting()).toBe(false);
     await $(testId('details-close')).click();
   });
 });

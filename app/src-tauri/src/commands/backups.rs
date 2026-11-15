@@ -14,19 +14,21 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use grid_core::backup::local;
 use grid_core::backup::pack::{
     self, Pack, PackEmulator, PackGame, PackOs, PackState, PackStoreGame, TMP_SUFFIX,
 };
 use grid_core::backup::plan::{
     self, BackupPlan, BackupQueued, EmulatorItem, EmulatorKind, EmulatorPick, EmulatorSource,
-    LocalState, Outdated, PlanFirmwareSet, PlanGame, PlanInput, Planned, SourceChoice,
+    LocalState, Outdated, PlanFirmwareSet, PlanGame, PlanInput, PlanUnavailable, Planned,
+    SourceChoice,
 };
 use grid_core::backup::write;
 use grid_core::config::{Config, PendingDefault};
 use grid_core::images::urls::resolve_image_url;
 use grid_core::launch::compat::{discover, request_compat_default, which_on_path};
 use grid_core::launch::profiles::load_profiles;
-use grid_core::library::backup_job::BackupItem;
+use grid_core::library::backup_job::{BackupItem, BackupOrigin};
 use grid_core::library::platforms::{is_native_platform, is_windows_platform};
 use grid_core::library::queue::BackupItemKey;
 use grid_core::library::registry::InstalledGame;
@@ -43,8 +45,9 @@ use crate::drive_service::{
 };
 use crate::update_service::{local_version_label, server_version_label, UpdateService};
 
-/// Why a backup command needs a live session.
-const NEEDS_SERVER: &str = "Backing up needs a server";
+/// Why adding a computer to a pack is refused without RomM: its emulator
+/// builds are planned against the session.
+const ADDING_NEEDS_ROMM: &str = "Adding a computer needs RomM";
 
 // --- DTOs ---------------------------------------------------------------------
 
@@ -622,7 +625,7 @@ pub async fn set_drive_os(
             state
                 .session
                 .client()
-                .ok_or_else(|| "Adding a computer needs a server".to_string())?,
+                .ok_or_else(|| ADDING_NEEDS_ROMM.to_string())?,
         )
     };
     if backup_running(&install, &key) {
@@ -683,7 +686,12 @@ pub async fn set_drive_os(
             let mut target = scanned.target();
             target.name = pack.name.clone();
             let queued = install
-                .start_backup_on(client, target, items, Some(scanned.drive.free_bytes))
+                .start_backup_on(
+                    BackupOrigin::connected(client),
+                    target,
+                    items,
+                    Some(scanned.drive.free_bytes),
+                )
                 .map_err(err)?;
             outcome.batch = queued.batch;
             outcome.queued = queued.emulators;
@@ -945,6 +953,7 @@ async fn plan_games(
                     platform_label: platform.label().to_string(),
                     platform_name: platform.label().to_string(),
                     platform_slug: platform.slug.clone(),
+                    server: String::new(),
                     size,
                     largest_file,
                     local: plan::LocalState::NotInstalled,
@@ -976,6 +985,7 @@ async fn plan_games(
             platform_label: label.clone(),
             platform_name: label,
             platform_slug: detail.platform_slug.clone(),
+            server: String::new(),
             size: detail.filesize_bytes.max(0) as u64,
             largest_file: Some(detail.largest_game_file_bytes() as u64),
             local: plan::LocalState::NotInstalled,
@@ -1074,27 +1084,23 @@ async fn newer_from_details(
     newer
 }
 
-/// Plans a backup of `request` to `scanned`. With `resolve_sizes`, the
-/// emulator sizes not known yet are looked up first (dialog only).
-async fn make_plan(
+/// The games of a backup with RomM, with each one's local state and the
+/// server's firmware for their systems.
+async fn connected_games(
     install: &Arc<InstallService>,
     updates: &UpdateService,
-    client: Arc<RommClient>,
+    client: &Arc<RommClient>,
+    pack: &Pack,
     scanned: &ScannedDrive,
     request: &BackupRequest,
-    options: &PlanOptions,
-    resolve_sizes: bool,
-) -> Result<Planned, String> {
-    let pack = writable_pack(scanned)?;
-    let include_firmware = options.include_firmware;
-    let include_runtime = options.include_runtime;
-    let (mut games, platform_ids) = plan_games(&client, request, scanned.drive.fat32).await?;
+) -> Result<(Vec<PlanGame>, Vec<PlanFirmwareSet>), String> {
+    let (mut games, platform_ids) = plan_games(client, request, scanned.drive.fat32).await?;
     let server = strip_userinfo(client.server_url());
     let rom_ids: Vec<i64> = games.iter().map(|game| game.rom_id).collect();
     let mut states = local_states(
         install,
         updates,
-        &client,
+        client,
         &server,
         &rom_ids,
         pack.os.contains(&PackOs::Windows),
@@ -1127,7 +1133,102 @@ async fn make_plan(
             Err(e) => tracing::warn!(platform_id, "backup plan: firmware list failed: {e}"),
         }
     }
+    Ok((games, firmware))
+}
+
+/// The games of a backup without RomM (user decisions 8 and 12), from the
+/// installed rows `request.rom_ids` name (`platform_ids` name server
+/// platforms and are ignored): each judged against its own pack identity
+/// server ([`grid_core::backup::local::identity_server`]: the row's
+/// `source_server`, else the config's `server_url`). The ones that can't be
+/// copied from this computer come back unavailable, with why.
+async fn local_games(
+    install: &Arc<InstallService>,
+    pack: &Pack,
+    request: &BackupRequest,
+) -> Result<(Vec<PlanGame>, Vec<PlanUnavailable>), String> {
+    let config_server = Config::load(&Config::default_path())
+        .map(|config| config.server_url)
+        .unwrap_or_default();
+    let for_windows = pack.os.contains(&PackOs::Windows);
+    let install = install.clone();
+    let rom_ids = request.rom_ids.clone();
+    joined(
+        tokio::task::spawn_blocking(move || -> Result<_, String> {
+            let rows = install.registry().all().map_err(err)?;
+            let servers: HashMap<i64, String> = rows
+                .iter()
+                .filter(|row| !row.is_store())
+                .filter_map(|row| {
+                    let rom_id = row.rom_id.filter(|id| rom_ids.contains(id))?;
+                    let server = local::identity_server(row, &config_server)?;
+                    Some((rom_id, server))
+                })
+                .collect();
+            let known: Vec<i64> = rom_ids
+                .iter()
+                .copied()
+                .filter(|id| servers.contains_key(id))
+                .collect();
+            let states = install
+                .local_states_by(
+                    &known,
+                    |row| {
+                        row.rom_id
+                            .and_then(|id| servers.get(&id).cloned())
+                            .unwrap_or_default()
+                    },
+                    for_windows,
+                )
+                .map_err(err)?;
+            Ok(plan::plan_games_local(&rows, &rom_ids, &servers, &states))
+        })
+        .await,
+        "backup plan",
+    )?
+}
+
+/// Plans a backup of `request` to `scanned`, with RomM (`client`) or
+/// without it. With `resolve_sizes`, the emulator sizes not known yet are
+/// looked up first (dialog only).
+///
+/// Without RomM every game comes from this computer (`use_local` is forced
+/// on), emulators only from GRID's catalog (server-hosted builds are listed
+/// as needing RomM) and no firmware goes.
+async fn make_plan(
+    install: &Arc<InstallService>,
+    updates: &UpdateService,
+    client: Option<Arc<RommClient>>,
+    scanned: &ScannedDrive,
+    request: &BackupRequest,
+    options: &PlanOptions,
+    resolve_sizes: bool,
+) -> Result<Planned, String> {
+    let pack = writable_pack(scanned)?;
+    let include_runtime = options.include_runtime;
+    let (games, firmware, unavailable, server) = match &client {
+        Some(client) => {
+            let (games, firmware) =
+                connected_games(install, updates, client, &pack, scanned, request).await?;
+            (games, firmware, None, strip_userinfo(client.server_url()))
+        }
+        None => {
+            let (games, unavailable) = local_games(install, &pack, request).await?;
+            (games, Vec::new(), Some(unavailable), String::new())
+        }
+    };
+    let without_romm = unavailable.is_some();
+    let include_firmware = options.include_firmware && !without_romm;
+    let use_local = options.use_local || without_romm;
     let (emulators, compat) = install.backup_emulator_choices(&games);
+    let (emulators, compat) = if without_romm {
+        (
+            plan::catalog_only(emulators),
+            compat.filter(|pick| !matches!(pick.source, EmulatorSource::Server { .. })),
+        )
+    } else {
+        (emulators, compat)
+    };
     let key = scanned.key();
     // The space other queued or running jobs hold on the drive, less the
     // rows for items this plan writes again (a start skips those).
@@ -1160,12 +1261,16 @@ async fn make_plan(
             host: PackOs::host(),
             sizes,
             choices: &options.choices,
-            use_local: options.use_local,
+            use_local,
         })
     };
     let run = |sizes: &HashMap<(String, PackOs), u64>| {
         let first = run_with(sizes, 0);
-        run_with(sizes, reserved(&first))
+        let mut planned = run_with(sizes, reserved(&first));
+        if let Some(unavailable) = &unavailable {
+            plan::mark_without_romm(&mut planned, unavailable.clone());
+        }
+        planned
     };
     let planned = run(&install.emulator_sizes());
     let mut to_size: Vec<EmulatorItem> = planned.items.emulators.clone();
@@ -1186,7 +1291,7 @@ async fn make_plan(
         return Ok(planned);
     }
     install
-        .resolve_emulator_sizes(Some(client.clone()), &to_size)
+        .resolve_emulator_sizes(client.clone(), &to_size)
         .await;
     Ok(run(&install.emulator_sizes()))
 }
@@ -1207,7 +1312,7 @@ pub async fn plan_backup(
     choices: Option<Vec<SourcePick>>,
 ) -> Result<BackupPlan, String> {
     let install = install(&state)?.clone();
-    let client = state.session.client().ok_or(NEEDS_SERVER)?;
+    let client = state.session.client();
     let scanned = connected(&state, &app, &key).await?;
     let options = PlanOptions {
         include_firmware,
@@ -1244,7 +1349,7 @@ pub async fn start_backup(
 ) -> Result<BackupQueued, String> {
     ensure_library_idle(&state)?;
     let install = install(&state)?.clone();
-    let client = state.session.client().ok_or(NEEDS_SERVER)?;
+    let client = state.session.client();
     let scanned = connected(&state, &app, &key).await?;
     let options = PlanOptions {
         include_firmware,
@@ -1274,9 +1379,13 @@ pub async fn start_backup(
             scanned.drive.label
         ));
     }
+    let origin = BackupOrigin {
+        art_cache: Some(state.session.cache().dir().to_path_buf()),
+        ..client.map(BackupOrigin::connected).unwrap_or_default()
+    };
     install
         .start_backup_on(
-            client,
+            origin,
             scanned.target(),
             planned.items,
             Some(scanned.drive.free_bytes),

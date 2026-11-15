@@ -179,8 +179,8 @@ describe('backupAction', () => {
     expect(backupAction(true)).toEqual({ disabled: false, reason: '' });
   });
 
-  it('is disabled offline with the reason', () => {
-    expect(backupAction(false)).toEqual({ disabled: true, reason: 'Connect to a server to backup games' });
+  it('stays enabled with RomM off: the backup copies the installed games', () => {
+    expect(backupAction(false)).toEqual({ disabled: false, reason: '' });
   });
 });
 

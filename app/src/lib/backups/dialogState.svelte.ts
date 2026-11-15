@@ -4,9 +4,15 @@
 // above every view and over Details, and routes "Set up a drive…" to
 // Settings › Backup drives.
 import type { BackupRequest } from '../api';
+import type { UnlinkedGame } from './dialog';
 
 export type BackupDialogOpen = {
   request: BackupRequest;
+  /** Installed RomM games with no RomM link that the user asked for too
+   *  (Library › RomM › Installed's "Backup all N…"). They have no rom id,
+   *  so they can't be in `request`; with RomM off the dialog lists them
+   *  under "Can’t backup without RomM". */
+  unlinked?: UnlinkedGame[];
   /** Runs once the backup is queued: the select bar clears its selection. */
   onQueued?: () => void;
   /** Runs when the dialog sends the user elsewhere ("Set up a drive…"):
