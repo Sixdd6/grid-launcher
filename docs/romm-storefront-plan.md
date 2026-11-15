@@ -1100,6 +1100,57 @@ RomM). Where the two designers differed:
 
 No open questions remain.
 
+## Step 1 outcome (landed 2026-11-15; Steps 2–7 build on this)
+
+Commits a08ae6b, b251888, 480dae9. Gate PASS; e2e python-import, connect, connect-restore,
+open-on, first-run-setup, tv-startup, tv-settings, install pass through the wrappers.
+
+**Frozen for Steps 2–7:** `api.ts`, `shell.ts`, `stores/session.svelte.ts`, `commands.rs`.
+Anything missing there comes back to the orchestrator, not edited in a parallel step.
+
+- Rust (`session.rs`): `RommConnection { Connected, Unreachable, Expired, NotConnected }`
+  (snake_case); `RommStatus { connection, server_url, username, auth_kind, last_error,
+  installed_count, in_rail, busy }`; `SessionManager::{set_change_hook, status, prime,
+  restore_romm, reconnect}`; `connect` saves `stores.romm.connected = true`; `disconnect`
+  saves false and keeps `server_url`/`username`; a 401 sets Expired, keeps the keyring.
+  "Connecting" = `busy && connection == not_connected && server_url != ""`.
+- Config: `StoresConfig.romm: RommConfig { connected }`, `SetupState.welcomed`,
+  `romm_store_migrated`; `offline` written only while true and cleared by the migration.
+- Commands: `romm_status`, `romm_restore`, `romm_connect`, `romm_reconnect`,
+  `romm_disconnect` (`commands/romm.rs`, `ROMM_CHANGED_EVENT`); `welcome_status`,
+  `finish_welcome` (`commands/welcome.rs`). Legacy wrappers kept: `connect`,
+  `restore_session`, `retry_connect`, `disconnect`, `use_without_server`.
+  `session-unauthorized` still emitted beside `romm-changed` until Step 9.
+- TS (`api.ts`): `RommConnection`, `RommStatus`, `ROMM_CHANGED_EVENT`, `WelcomeStatus`, the
+  0.10 Systems types, `InstalledGame.source_server?`; wrappers `rommStatus`, `rommRestore`,
+  `rommConnect(serverUrl, username, secret, useToken)`, `rommReconnect`, `rommDisconnect`,
+  `welcomeStatus`, `finishWelcome`, `systemPlatforms`, `firmwareExpected(slug, emulator)`,
+  `locateFirmwareFiles(slug, emulator, paths)`, `locatePs3Firmware(emulator, path)` (the
+  last four's Rust commands come in Step 7).
+- `shell.ts`: `SessionPhase = 'loading'|'welcome'|'none'|'setup'|'shell'` (`none` = legacy
+  Connect), `SetupReturn`, `initialPlace(rommConnected, openOn)` → `{ view: 'library',
+  rail: 'romm:discover'|'all', drive: null }`, `STOREFRONT_VIEWS`, `storefrontViewForDigit`.
+  Legacy `VIEWS`/`initialView` kept until Step 9.
+- `stores/romm.svelte.ts`: `romm.status`, `romm.loaded`; `initRomm`, `refreshRomm`,
+  `restoreRomm`, `reconnectRomm`, `disconnectRomm`, `connectRomm(url, user, secret,
+  useToken, from)` (returns error text or null; `from='settings'` sets
+  `session.setupReturn='settings'` when setup is needed).
+- `stores/session.svelte.ts`: `session` is a class instance (don't spread it) with
+  `setupReturn`, `start()` (welcome, or the shell plus a background `restoreRomm`),
+  `finishWelcome()`.
+- `lib/romm/`: `platformKey` (`platformKeyer`, `serverPlatformSlug`, `platformRailKey`),
+  `order` (`STOREFRONT_ORDER`), `rail` (`rommRailGroup(status, platforms|null,
+  installedRows)` → `{ heading, flag, rows }|null`, `RommRailKey`, `rommSelectionFallback`,
+  …), `platformGames` (`platformGames(serverGames, installedRows, liveServer)`,
+  `platformGameCounts`, `localTagLabel`), `words` (all RommStorefront README strings),
+  `signIn` (`signInError`, …; `connectForm.ts` re-exports).
+- `romm/platformKey.ts` and `romm/rail.ts` import `platformSlug` (`library/rail.ts`) and
+  `platformLabel` (`server/platformLabel.ts`): keep those exports or re-export if moved.
+- **`RommSignInForm.svelte` is owned by Step 4** (in `lib/romm/`); Step 5 starts after Step 4
+  merges and reuses it.
+- Step 7 owns `platform_registry.rs` (`record(state, None)` returns early today) and adds
+  the `system_platforms` startup warm-up in `lib.rs`.
+
 ## After this rework: Discover
 
 The user wants Discover reworked once this rework lands (2026-11-15). The trigger: when
