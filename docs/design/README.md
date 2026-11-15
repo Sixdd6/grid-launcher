@@ -49,6 +49,8 @@ python3 -I docs/design/prototype/applayout.py docs/design/system/components
   archive holds a GOG installer.
 - `tvstores.js`, `tvstores.css`, `tvstores_bk.js` — the same for TV mode: the TVStores
   card, written by `tvmode.py` on top of the TV mode card.
+- `tvromm.js`, `tvromm.css` — RomM as an optional storefront in TV mode: the
+  TVRommStorefront card, written by `tvmode.py` on top of the TVStores card.
 - `glyphs/` — the controller button glyphs the TV mode card inlines (Kenney Input
   Prompts, CC0; `map.json` assigns them, `License.txt` is the pack's license).
 - `icons.json` — icon paths: the app's (`app/src/lib/icons.ts`) plus proposed ones.
