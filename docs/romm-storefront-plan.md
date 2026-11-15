@@ -1099,3 +1099,10 @@ RomM). Where the two designers differed:
 17. Where the two prototypes' words differ, desktop (D1) wins; `romm/words.ts` is shared.
 
 No open questions remain.
+
+## After this rework: Discover
+
+The user wants Discover reworked once this rework lands (2026-11-15). The trigger: when
+RomM has nothing released in the last six months for the user's systems, the New releases
+coverflow (Discover's first spot) is only an empty note; something else should take that
+spot. Design it as its own step after Step 9, not inside Steps 3/6.
