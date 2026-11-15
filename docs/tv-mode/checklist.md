@@ -12,6 +12,8 @@ Where a prototype string is the only source for a notification, the desktop's wo
 event wins (README § The shell › Notifications). Items numbered here stay numbered; the "Not to copy"
 and "Conflicts" lists at the end are not part of the build.
 
+> **RomM storefront (2026-11-15).** RomM becomes an optional storefront (`docs/romm-storefront-plan.md`): no Server tab, no Connect, no offline mode, Systems without RomM. Items marked **Superseded (RomM storefront)** are replaced by the TVRommStorefront card (`docs/design/system/components/TVRommStorefront/README.md`), which lists every replaced item. Step 6 and Step 7 re-point them when they build it.
+
 ## 1. Shell & sizing
 
 - [x] 1. TV mode is a fullscreen interface that reaches every feature on main with a game controller alone (src: README intro). (final audit: the six missing paths added in 2b25062 and 6b8461f; walk with a pad on the .rpm)
@@ -128,7 +130,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 86. Moving into a rail always lands on its selected row (the platform, filter or pane you're in), even after a redraw (src: README § The shell › Movement; tvmode.js `move`).
 - [x] 87. Moving into a row, pane or button group lands on the item last left there while it still exists, else its first item (src: README § The shell › Movement; tvmode.js `move`).
 - [x] 88. Off a grid's edge, focus goes only to what sits straight past that edge; with nothing there, it stays put (src: README § The shell › Movement; tvmode.js `move`).
-- [x] 89. Up from a grid's top row reaches Server's header chips and buttons, never the rail; on the Library, Up from the top row stays put (src: README § The shell › Movement).
+- [x] 89. Up from a grid's top row reaches Server's header chips and buttons, never the rail; on the Library, Up from the top row stays put (src: README § The shell › Movement). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Library › RomM group (Discover and platforms are Library rows now).
 - [x] 90. Left from a grid's first column goes to the rail's selected row (src: README § The shell › Movement).
 - [x] 91. An explicit link overrides geometry: Up from the Related row in Details always returns to the summary (src: README § Pages › Details; tvmode.js `move`, `detBody`).
 - [x] 92. B closes the open overlay, unless it is blocking (src: README § Try it; tvmode.js `press`).
@@ -143,7 +145,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 101. While a page's main button is disabled, Start shows an error notice with the reason, as A on the button does (src: README § Decided Start; tvmode.js `rowsPage().menu`).
 - [x] 102. Elsewhere Start opens the Menu (src: README § Decided Start).
 - [x] 103. While an overlay is open, X, Y, LT, RT, LB, RB, Menu and View do nothing unless that overlay binds them (the on-screen keyboard, the media viewer) (src: tvmode.js `press`).
-- [x] 104. Arriving on the Server tab while Discover is selected focuses Discover's content (the cover last focused there, else the first), not the rail (src: README § Tabs › Server › Discover; tvmode.js `render`).
+- [x] 104. Arriving on the Server tab while Discover is selected focuses Discover's content (the cover last focused there, else the first), not the rail (src: README § Tabs › Server › Discover; tvmode.js `render`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Library › RomM group (Discover and platforms are Library rows now).
 - [x] 105. Moving through the Library, Server or Settings rail switches the grid or pane beside it at once, without A (src: README § Tabs › Library; tvmode.js `ONF`).
 - [x] 106. A rail's selected row shows the `selected` fill and a 0.25rem `primary` bar on its left edge (src: tvmode.css `.ri.sel`). (final audit: verified in code)
 - [x] 107. Scrolling follows fixed rules and never the browser's "just enough" scroll-into-view (src: README § The shell › Scrolling). (final audit: verified in code)
@@ -165,11 +167,11 @@ and "Conflicts" lists at the end are not part of the build.
 
 - [x] 119. The top bar is 4.6rem tall on `panel` with a bottom `line` border (src: README § The shell › Top bar; tvmode.css `.top`). (final audit: verified in code)
 - [x] 120. Its left end is the GRID icon in `primary`, the "GRID" wordmark and a "TV" pill tag (src: README § Top bar; tvmode.js `paintTop`). (final audit: verified in code)
-- [x] 121. At a tab's top level the middle shows the LB glyph, the tabs Library, Server, Downloads, Settings and the RB glyph, centred, with the current tab a `primary` pill (src: README § Top bar; tvmode.js `paintTop`; tvmode.css `.tab.on`). (final audit: verified in code)
+- [x] 121. At a tab's top level the middle shows the LB glyph, the tabs Library, Server, Downloads, Settings and the RB glyph, centred, with the current tab a `primary` pill (src: README § Top bar; tvmode.js `paintTop`; tvmode.css `.tab.on`). (final audit: verified in code) **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The shell (three tabs; no connection dot or user).
 - [x] 122. On a pushed page the tabs give way to a breadcrumb: the B glyph, the tab name, "›" and the page title in bold, for example "(B) Library › Starfall Circuit" (src: README § Top bar; tvmode.js `paintTop`). (final audit: verified in code)
 - [x] 123. On the startup screens the middle is empty and the right shows only the clock (src: tvmode.js `paintTop`).
 - [x] 124. The right shows the live download while one runs: a download icon, its title, a 4rem progress bar and its percent (src: README § Top bar; tvmode.js `paintTop`).
-- [x] 125. Then the connection: a green dot and the user name when connected; a red dot and "Offline" when the server can't be reached; a grey dot and "Offline · no server" when GRID is used without a server (src: README § Top bar; README § Game backups › Use without a server; tvmode.js `paintTop`).
+- [x] 125. Then the connection: a green dot and the user name when connected; a red dot and "Offline" when the server can't be reached; a grey dot and "Offline · no server" when GRID is used without a server (src: README § Top bar; README § Game backups › Use without a server; tvmode.js `paintTop`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The shell (three tabs; no connection dot or user).
 - [x] 126. Then a clock (HH:MM, tabular figures) that stays current to the minute (src: README § Top bar; tvmode.js `paintTop`).
 
 ### Hint bar
@@ -183,8 +185,8 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 133. On startup screens there is no Back hint (src: tvmode.js `hintsNow`).
 - [x] 134. A hint is a label only: clicking it does nothing (user 2026-11-11; src: README § Decided Keyboard and controller only). (verified: tv-shell-a)
 - [x] 135. The left side shows the name of the controller in use (src: README § Hint bar; tvmode.js `paintHints`).
-- [x] 136. While the server can't be reached, the left side shows an "Offline" danger pill and "Your installed games still play. Server features return when GRID reconnects." (src: README § Hint bar; tvmode.js `paintHints`).
-- [x] 137. Without a server, the left side reads "No server. Your Library and Backup drives work without one." (src: README § Game backups › Use without a server; tvmode.js `paintHints`).
+- [x] 136. While the server can't be reached, the left side shows an "Offline" danger pill and "Your installed games still play. Server features return when GRID reconnects." (src: README § Hint bar; tvmode.js `paintHints`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The shell (no offline line in the hint bar).
+- [x] 137. Without a server, the left side reads "No server. Your Library and Backup drives work without one." (src: README § Game backups › Use without a server; tvmode.js `paintHints`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The shell (no offline line in the hint bar).
 - [x] 138. The hints repaint on every focus change, every state change and when a notification leaves (src: tvmode.js `setFocus`, `toast`). (final audit: verified in code)
 
 ## 5. Notifications & setup card
@@ -210,29 +212,29 @@ and "Conflicts" lists at the end are not part of the build.
 
 ## 6. Server › Discover
 
-- [x] 157. Discover is the first row of the Server rail, above a divider, a "PLATFORMS" heading and the platforms (src: README § Tabs › Server › Discover; tvmode.js `TABS.server.render`).
-- [x] 158. Discover shows what TV mode's Home tab showed, unchanged for now: a hero over rows that scroll sideways (src: README § Decided No Home tab).
-- [x] 159. The hero is a fixed 13.6rem tall inside the Server tab (src: README § Scrolling; tvmode.css `#srv-main .hero`).
-- [x] 160. The hero panel (up to 46rem wide) shows the focused game's platform (uppercase, muted), its title as a logo (2.6rem, one line, ellipsis), a played / install state line and two lines of summary (src: README § Discover; tvmode.js `hero`; tvmode.css `.hero-box`, `.logo`, `.hero .sum`).
-- [x] 161. The hero line reads "Files not found" for a Missing game; "Played <when> · <emulator>" (or "Installed · <emulator>", "No emulator" when none) for an installed game; "Installing… <n>%" or "Queued" while installing; else "Released <d Mon yyyy> · Not installed" (src: tvmode.js `hero`).
-- [x] 162. "<when>" reads "today", "yesterday", "<n> days ago" under 14 days, else "<n> weeks ago" (src: tvmode.js `ago`).
-- [x] 163. The hero follows focus, and shows the first cover's game when the tab opens (src: tvmode.js `setFocus`, `srvPaint`, `render`).
-- [x] 164. The rows, in order: Continue playing; New releases with "the last six months, on your systems"; Recently added with "to your server"; Updates with "<n> games", only when there are any; Your library with "<n> games" (src: README § Discover; tvmode.js `discoverHTML`).
-- [x] 165. Continue playing holds installed games with play history, most recently played first (src: tvmode.js `discoverHTML`).
-- [x] 166. New releases holds server games released in the last six months on the systems you play, newest first (src: README § Discover; tvmode.js `discoverHTML`).
-- [x] 167. Recently added holds games newly added to the server, newest first, leaving out those already in New releases (src: tvmode.js `discoverHTML`).
-- [x] 168. Updates holds installed games with an update; Your library holds every installed game (src: tvmode.js `discoverHTML`).
-- [x] 169. An empty row shows "Nothing here yet." (src: tvmode.js `discoverHTML`).
-- [x] 170. Row titles are 1.25rem semibold, with their extra text muted at 1rem (src: tvmode.css `.shelf h2`).
-- [x] 171. Discover covers carry platform tags (src: tvmode.js `discoverHTML`).
-- [x] 172. A on a cover opens Details, X plays or installs it, Y opens Search everything (src: README § Discover).
-- [x] 173. Select mode and Backup all aren't offered on Discover: RT does nothing and no Select hint shows (src: README § Discover; tvmode.js `TABS.server.rt`, `hints`).
-- [x] 174. Up from Discover's top row and Down from its bottom row do nothing (never the rail); Left from a row's first cover goes to the rail (src: README § Discover; tvmode.js `move`).
-- [x] 175. The Discover hints are Y "Search" (plus A and X for the cover) (src: tvmode.js `TABS.server.hints`).
+- [x] 157. Discover is the first row of the Server rail, above a divider, a "PLATFORMS" heading and the platforms (src: README § Tabs › Server › Discover; tvmode.js `TABS.server.render`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 158. Discover shows what TV mode's Home tab showed, unchanged for now: a hero over rows that scroll sideways (src: README § Decided No Home tab). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 159. The hero is a fixed 13.6rem tall inside the Server tab (src: README § Scrolling; tvmode.css `#srv-main .hero`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 160. The hero panel (up to 46rem wide) shows the focused game's platform (uppercase, muted), its title as a logo (2.6rem, one line, ellipsis), a played / install state line and two lines of summary (src: README § Discover; tvmode.js `hero`; tvmode.css `.hero-box`, `.logo`, `.hero .sum`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 161. The hero line reads "Files not found" for a Missing game; "Played <when> · <emulator>" (or "Installed · <emulator>", "No emulator" when none) for an installed game; "Installing… <n>%" or "Queued" while installing; else "Released <d Mon yyyy> · Not installed" (src: tvmode.js `hero`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 162. "<when>" reads "today", "yesterday", "<n> days ago" under 14 days, else "<n> weeks ago" (src: tvmode.js `ago`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 163. The hero follows focus, and shows the first cover's game when the tab opens (src: tvmode.js `setFocus`, `srvPaint`, `render`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 164. The rows, in order: Continue playing; New releases with "the last six months, on your systems"; Recently added with "to your server"; Updates with "<n> games", only when there are any; Your library with "<n> games" (src: README § Discover; tvmode.js `discoverHTML`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 165. Continue playing holds installed games with play history, most recently played first (src: tvmode.js `discoverHTML`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 166. New releases holds server games released in the last six months on the systems you play, newest first (src: README § Discover; tvmode.js `discoverHTML`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 167. Recently added holds games newly added to the server, newest first, leaving out those already in New releases (src: tvmode.js `discoverHTML`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 168. Updates holds installed games with an update; Your library holds every installed game (src: tvmode.js `discoverHTML`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 169. An empty row shows "Nothing here yet." (src: tvmode.js `discoverHTML`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 170. Row titles are 1.25rem semibold, with their extra text muted at 1rem (src: tvmode.css `.shelf h2`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 171. Discover covers carry platform tags (src: tvmode.js `discoverHTML`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 172. A on a cover opens Details, X plays or installs it, Y opens Search everything (src: README § Discover). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 173. Select mode and Backup all aren't offered on Discover: RT does nothing and no Select hint shows (src: README § Discover; tvmode.js `TABS.server.rt`, `hints`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 174. Up from Discover's top row and Down from its bottom row do nothing (never the rail); Left from a row's first cover goes to the rail (src: README § Discover; tvmode.js `move`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
+- [x] 175. The Discover hints are Y "Search" (plus A and X for the cover) (src: tvmode.js `TABS.server.hints`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › Discover (unchanged, now a Library row under RomM).
 
 ## 7. Library
 
-- [x] 176. The Library rail lists All games, Recent and Updates, a divider, then two folders: Platforms (each installed platform) and Backup drives (src: README § Tabs › Library; tvmode.js `libRailHTML`).
+- [x] 176. The Library rail lists All games, Recent and Updates, a divider, then two folders: Platforms (each installed platform) and Backup drives (src: README § Tabs › Library; tvmode.js `libRailHTML`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Library › RomM group (no Platforms folder; RomM group in name order).
 - [x] 177. Every filter row carries its game count: All games counts installed games, Recent those played in the last 30 days, Updates those with an update, each platform its installed games (src: README § Library; tvmode.js `libRailHTML`).
 - [x] 178. Moving through the rail filters the grid at once, and changing the filter clears the Library search (src: README § Library; tvmode.js `ONF.lib`).
 - [x] 179. A or Right on a filter row moves into the grid (src: README § Library).
@@ -247,7 +249,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 188. LT opens the "Sort by" list: Recently played (the default), Recently installed, Title, Platform (src: README § Library; tvmode.js `sortSheet`).
 - [x] 189. A search with no match shows "No games match “<text>”" and "Press (Y) to change the search." (src: tvmode.js `libPaint`).
 - [x] 190. An empty Updates filter shows "Everything is up to date" and "Games with a newer copy on your server show here." (src: tvmode.js `libPaint`).
-- [x] 191. Another empty filter shows "No games here yet" and "Install games from the Server tab." (src: tvmode.js `libPaint`).
+- [x] 191. Another empty filter shows "No games here yet" and "Install games from the Server tab." (src: tvmode.js `libPaint`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Library › RomM group (no Platforms folder; RomM group in name order).
 - [x] 192. A on a cover opens Details; X is its quick action (Play, or Install) (src: README § Try it).
 - [x] 193. The Library hints are Y "Search", LT "Sort", RT "Select" (src: tvmode.js `TABS.library.hints`).
 - [x] 194. While a game installs, its covers show "Queued" or the live percent (src: README § Library; tvmode.js `cover`, tick).
@@ -255,19 +257,19 @@ and "Conflicts" lists at the end are not part of the build.
 
 ## 8. Server platforms
 
-- [x] 196. Under Discover, the Server rail lists the server's platforms, each with its game count (src: README § Tabs › Server; tvmode.js `TABS.server.render`).
-- [x] 197. A platform's header reads "<n> games · <k> installed", or "<m> of <n> games match · <k> installed" while a search narrows the grid; every count is the number of games the grid shows (src: README § Server; tvmode.js `srvCount`).
-- [x] 198. The header's emulator chip reads "Emulator: <name>", or "No default emulator" in the warning style (src: README § Server; tvmode.js `srvPaint`).
-- [x] 199. The header's firmware chip reads "Firmware: <n> files · installed" or "Firmware: <n> files", or a plain unfocusable "No server firmware" (src: tvmode.js `srvPaint`).
-- [x] 200. A on the emulator or firmware chip (hint "Open in Systems") opens that system's page (src: README § Server; tvmode.js `srvPaint`).
-- [x] 201. Native platforms (Windows, Linux) have no emulator or firmware chips (src: tvmode.js `srvPaint`).
-- [x] 202. The header also has a "Search: <text>" chip while searching, then on the right the "Backup all N…" button (when the platform has games), and RT "Select" and Y "Search" chips (src: tvmode.js `srvPaint`).
-- [x] 203. Server grid covers carry no platform tag (src: tvmode.js `srvPaint`).
-- [x] 204. Y opens the keyboard titled "Search <Platform>", and the grid narrows as you type; changing the platform clears the search (src: tvmode.js `TABS.server.y`, `ONF.srv`).
-- [x] 205. A search with no match shows "No games match “<text>”" (src: tvmode.js `srvPaint`).
-- [x] 206. The hints on a platform are Y "Search" and RT "Select" (src: tvmode.js `TABS.server.hints`).
-- [x] 207. Offline, the Server tab shows one panel: "Can't reach your server", "<server URL> isn't answering. Your installed games still play from the Library.", with Try again (primary) and Open Library (src: README § Server; tvmode.js `TABS.server.render`).
-- [x] 208. Try again reconnects ("Reconnecting to <URL>…", then "Connected to <URL>"), and Open Library shows the Library tab (src: tvmode.js `reconnect`, `ACT.gotab`).
+- [x] 196. Under Discover, the Server rail lists the server's platforms, each with its game count (src: README § Tabs › Server; tvmode.js `TABS.server.render`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › a platform (moved from Server; no offline panel).
+- [x] 197. A platform's header reads "<n> games · <k> installed", or "<m> of <n> games match · <k> installed" while a search narrows the grid; every count is the number of games the grid shows (src: README § Server; tvmode.js `srvCount`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › a platform (moved from Server; no offline panel).
+- [x] 198. The header's emulator chip reads "Emulator: <name>", or "No default emulator" in the warning style (src: README § Server; tvmode.js `srvPaint`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › a platform (moved from Server; no offline panel).
+- [x] 199. The header's firmware chip reads "Firmware: <n> files · installed" or "Firmware: <n> files", or a plain unfocusable "No server firmware" (src: tvmode.js `srvPaint`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › a platform (moved from Server; no offline panel).
+- [x] 200. A on the emulator or firmware chip (hint "Open in Systems") opens that system's page (src: README § Server; tvmode.js `srvPaint`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › a platform (moved from Server; no offline panel).
+- [x] 201. Native platforms (Windows, Linux) have no emulator or firmware chips (src: tvmode.js `srvPaint`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › a platform (moved from Server; no offline panel).
+- [x] 202. The header also has a "Search: <text>" chip while searching, then on the right the "Backup all N…" button (when the platform has games), and RT "Select" and Y "Search" chips (src: tvmode.js `srvPaint`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › a platform (moved from Server; no offline panel).
+- [x] 203. Server grid covers carry no platform tag (src: tvmode.js `srvPaint`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › a platform (moved from Server; no offline panel).
+- [x] 204. Y opens the keyboard titled "Search <Platform>", and the grid narrows as you type; changing the platform clears the search (src: tvmode.js `TABS.server.y`, `ONF.srv`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › a platform (moved from Server; no offline panel).
+- [x] 205. A search with no match shows "No games match “<text>”" (src: tvmode.js `srvPaint`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › a platform (moved from Server; no offline panel).
+- [x] 206. The hints on a platform are Y "Search" and RT "Select" (src: tvmode.js `TABS.server.hints`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › a platform (moved from Server; no offline panel).
+- [x] 207. Offline, the Server tab shows one panel: "Can't reach your server", "<server URL> isn't answering. Your installed games still play from the Library.", with Try again (primary) and Open Library (src: README § Server; tvmode.js `TABS.server.render`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › a platform (moved from Server; no offline panel).
+- [x] 208. Try again reconnects ("Reconnecting to <URL>…", then "Connected to <URL>"), and Open Library shows the Library tab (src: tvmode.js `reconnect`, `ACT.gotab`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § RomM › a platform (moved from Server; no offline panel).
 
 ## 9. Downloads
 
@@ -290,7 +292,7 @@ and "Conflicts" lists at the end are not part of the build.
 
 ## 10. Settings
 
-- [x] 225. The Settings rail lists the panes in this order: Appearance, Backup drives, Cloud saves, Connection, Library, RetroAchievements, Systems, TV mode, Updates (src: README § Tabs › Settings; README § Game backups › Settings › Backup drives; tvmode.js `PANES`).
+- [x] 225. The Settings rail lists the panes in this order: Appearance, Backup drives, Cloud saves, Connection, Library, RetroAchievements, Systems, TV mode, Updates (src: README § Tabs › Settings; README § Game backups › Settings › Backup drives; tvmode.js `PANES`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Settings (Connection gone; Game stores in name order).
 - [x] 226. Moving through the rail shows each pane at once; A or Right moves into the pane (src: README § Tabs › Library "The same holds for every rail"; tvmode.js `ONF.set`).
 - [x] 227. Each pane starts with its name as a heading (1.6rem) (src: tvmode.js `setPaint`).
 - [x] 228. A switch row flips with A (hint "Switch") (src: README § Settings; tvmode.js `srowAct`).
@@ -299,7 +301,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 231. A text row shows its value, "Not set" in italics when empty, or dots when masked, and A (hint "Edit") opens the on-screen keyboard (src: README § Settings; tvmode.js `srow`, `srowAct`).
 - [x] 232. Information rows aren't focusable; action rows show a chevron, and a dangerous action's label is in `danger` (src: tvmode.js `srow`; tvmode.css `.srow.dng`).
 - [x] 233. Every change applies at once and redraws only the pane, keeping focus on the row (src: README § The shell › Focus; tvmode.js `repaint`).
-- [x] 234. Appearance › Open GRID on is a choice with the line "Here and in desktop mode" and the options "Automatic: Discover when connected, else Library", "Server › Discover" and "Library" (src: README § Decided Where GRID opens; tvmode.js `paneRows('appearance')`).
+- [x] 234. Appearance › Open GRID on is a choice with the line "Here and in desktop mode" and the options "Automatic: Discover when connected, else Library", "Server › Discover" and "Library" (src: README § Decided Where GRID opens; tvmode.js `paneRows('appearance')`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Appearance › Open GRID on.
 - [x] 235. Appearance › Theme is a choice: Follow system, Dark, Light (src: tvmode.js `paneRows('appearance')`).
 - [x] 236. Appearance › Background art is a switch with "The focused game's art, blurred, behind everything" (src: tvmode.js `paneRows('appearance')`).
 - [x] 237. Appearance › Background fade is a slider from 0 to 100 in steps of 5, shown as "<n>%" and "100% · off" at 100 (src: tvmode.js `paneRows('appearance')`).
@@ -308,8 +310,8 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 240. Appearance ends with the information row "Card size, game labels and card display" · "Desktop grids only" (src: README § Decided Implementation; tvmode.js `paneRows('appearance')`).
 - [x] 241. Cloud saves has the switches Restore before launch ("Fetch the latest cloud save before a game starts"), Upload after exit ("Send new saves when a game closes") and Skip when the local save is newer (src: tvmode.js `paneRows('cloud')`).
 - [x] 242. Cloud saves has the sliders Upload delay (0–60 in steps of 5, "<n> s") and Saves to keep per game (0–50 in steps of 1, "Unlimited" at 0) (src: tvmode.js `paneRows('cloud')`).
-- [x] 243. Connection shows Server, User and Credential ("Stored in the system keyring · verified", or "· not verified" while offline), then Reconnect and Disconnect (src: tvmode.js `paneRows('connection')`).
-- [x] 244. Disconnect (danger, "Returns to Connect. Your library and settings stay.") asks "Disconnect from <URL>?" / "GRID returns to Connect. Installed games, saves and settings stay on this computer." with Disconnect (danger), then shows Connect (src: tvmode.js `paneRows('connection')`).
+- [x] 243. Connection shows Server, User and Credential ("Stored in the system keyring · verified", or "· not verified" while offline), then Reconnect and Disconnect (src: tvmode.js `paneRows('connection')`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The RomM page (Connection pane removed).
+- [x] 244. Disconnect (danger, "Returns to Connect. Your library and settings stay.") asks "Disconnect from <URL>?" / "GRID returns to Connect. Installed games, saves and settings stay on this computer." with Disconnect (danger), then shows Connect (src: tvmode.js `paneRows('connection')`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The RomM page (Connection pane removed).
 - [x] 245. Library shows Library folder and the action Change library folder… ("Move your games, emulators and saves, or start fresh"), which opens the folder browser titled "Choose the new library folder" (src: tvmode.js `paneRows('library')`, `changeLibrary`).
 - [x] 246. Picking the current library folder or a folder inside it shows the error "Can't use that folder" / "It is the current library or inside it." (src: tvmode.js `changeLibrary`).
 - [x] 247. Picking another folder opens the list "Move to <path>?" (with the desktop's copy summary) offering Move existing files ("Runs in Downloads") and Start fresh ("Leave or delete the old files") (src: tvmode.js `changeLibrary`).
@@ -317,10 +319,10 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 249. Start fresh asks in a list "Delete the old game files, or leave them on disk?" with Leave them on disk and Delete them (<size>) (danger); Delete asks "Delete <size> of game files?" / "games/ in <old folder> is removed. Emulators and saves stay. This can't be undone." with Delete (danger) (src: tvmode.js `changeLibrary`).
 - [x] 250. RetroAchievements has Username (text), Token (masked text, "Write-only: GRID never shows it again", the keyboard opens empty), Save ("Sets the login in every emulator that supports it") and Clear (danger) (src: tvmode.js `paneRows('ra')`), in the order of item 533. (verified 2026-11-10: panes.test)
 - [x] 251. Saving the RetroAchievements login notifies "RetroAchievements login saved"; Clear notifies "RetroAchievements login cleared" (src: tvmode.js `paneRows('ra')`).
-- [x] 252. Systems starts with its heading and the buttons "Install recommended (<n>)" (primary, when systems lack an emulator), Check for updates and Add manually (src: README § Settings; tvmode.js `systemsPane`).
+- [x] 252. Systems starts with its heading and the buttons "Install recommended (<n>)" (primary, when systems lack an emulator), Check for updates and Add manually (src: README § Settings; tvmode.js `systemsPane`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Settings › Systems without RomM (Your systems, More systems).
 - [x] 253. While Install recommended runs, its button reads "Installing <n> emulators…" ("1 emulator") and can't be pressed again (src: README § The shell › Focus; tvmode.js `systemsPane`).
 - [x] 254. When Install recommended goes away (nothing missing), focus moves to the control now in its place in the same panel (src: README § The shell › Focus; tvmode.js `repaint`).
-- [x] 255. Systems lists systems with no emulator first, then those with one, then Windows (Proton) (src: tvmode.js `systemsPane`).
+- [x] 255. Systems lists systems with no emulator first, then those with one, then Windows (Proton) (src: tvmode.js `systemsPane`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Settings › Systems without RomM (Your systems, More systems).
 - [x] 256. A system row shows its name, its emulator (and core) or "Games for this system can't start yet. <Emulator> is recommended.", and a status pill: "Ready" with a green dot, or the status in the warning style (src: tvmode.js `systemsPane`).
 - [x] 257. A on a system row opens its System page (hint "Open"); X is "Change emulator", or "Install <recommended>" for a system with none (src: README § Try it; tvmode.js `systemsPane`).
 - [x] 258. Systems ends with an "Other emulators" group listing installed emulators no system uses, or the note "Every installed emulator is used by a system." (src: tvmode.js `systemsPane`).
@@ -405,12 +407,12 @@ and "Conflicts" lists at the end are not part of the build.
 
 ### System
 
-- [x] 326. A System page opens from Settings › Systems or a Server header chip, titled with the system, under it "<emulator> · <status>" (src: README § Pages › System; tvmode.js `systemPage`).
+- [x] 326. A System page opens from Settings › Systems or a Server header chip, titled with the system, under it "<emulator> · <status>" (src: README § Pages › System; tvmode.js `systemPage`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The firmware block (Install from RomM, Locate files…).
 - [x] 327. Its Emulator row shows the emulator and opens a list "Emulator for <system>" with Installed and Download groups (unfocusable headings), "(recommended)" after the recommended one, and None at the end (src: README § System; README § Overlays › Lists; tvmode.js `emuItems`, `pickEmu`).
 - [x] 328. Picking an emulator from the Download group installs it; picking an installed one makes it the system's emulator (src: README § System; tvmode.js `pickEmu`).
 - [x] 329. The page shows the version ("<version> · up to date") and, when newer, the action "Update to <version>" (src: README § System; tvmode.js `systemPage`).
 - [x] 330. A RetroArch system has a "RetroArch core" row that opens the list "Core for <system>" (src: README § System; tvmode.js `systemPage`).
-- [x] 331. A system that needs firmware has "<System> firmware · <n> files · from your server" ("Each file is checked against the size and MD5 the server lists", value Install), which notifies "Installing <System> firmware for <emulator>…" then "<System> firmware installed for <emulator>"; installed firmware shows "<System> firmware" · "Installed" (src: README § System; tvmode.js `systemPage`).
+- [x] 331. A system that needs firmware has "<System> firmware · <n> files · from your server" ("Each file is checked against the size and MD5 the server lists", value Install), which notifies "Installing <System> firmware for <emulator>…" then "<System> firmware installed for <emulator>"; installed firmware shows "<System> firmware" · "Installed" (src: README § System; tvmode.js `systemPage`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The firmware block (Install from RomM, Locate files…).
 - [x] 332. The page has Open <emulator> ("Opens the emulator on its own to change its settings…") and Emulator settings ("Program, launch options, cloud save folders") (src: README § System; tvmode.js `systemPage`).
 - [x] 333. Remove <emulator> (danger) asks "Remove <emulator>?" / "Games and saves stay. <System> games can't start until another emulator is picked." with Remove (danger), notifies "<emulator> removed" and goes back (src: README § System; tvmode.js `systemPage`).
 - [x] 334. The page ends with Setup tips as an information row (src: README § System; tvmode.js `systemPage`).
@@ -440,7 +442,7 @@ and "Conflicts" lists at the end are not part of the build.
 
 ### Folder browser
 
-- [x] 349. One folder browser page serves every path: Locate…, Change library folder, Relocate the library, Program, and Connect's Library folder (src: README § Pages › Folder browser; tvmode.js `openBrowser`).
+- [x] 349. One folder browser page serves every path: Locate…, Change library folder, Relocate the library, Program, and Connect's Library folder (src: README § Pages › Folder browser; tvmode.js `openBrowser`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome (the library folder) and The TV file browser in file mode.
 - [x] 350. It shows its title, the current path in a monospace box, then a list whose first row is "Up one folder" (absent at the root) (src: README § Folder browser; tvmode.js `openBrowser`).
 - [x] 351. A on a folder (hint "Open") opens it and focuses its first row; A on "Up one folder" (hint "Up") goes up (src: README § Folder browser; tvmode.js `openBrowser`).
 - [x] 352. Y "Use this folder" picks the folder shown and goes back; in file mode (Program) there is no Y, files show without a chevron and A on a file (hint "Choose") picks it (src: README § Folder browser; tvmode.js `openBrowser`).
@@ -468,11 +470,11 @@ and "Conflicts" lists at the end are not part of the build.
 ### Menu
 
 - [x] 362. Menu (Start) opens a 30rem panel from the right (src: README § Overlays › Menu; tvmode.css `.guide`).
-- [x] 363. The panel's head shows the clock (2.2rem) and "<user> · <server host>", or "Offline" (src: README § Menu; tvmode.js `guideMenu`).
-- [x] 364. The items, in order: Discover, Downloads (with " · <n> active" counting active and queued rows), Notifications (" · <n>"), Settings, Controls (shows the welcome card again), Reconnect, Switch to desktop mode, Quit GRID (src: README § Menu; tvmode.js `guideMenu`; Controls: user decision 2026-11-10). (verified 2026-11-10: menu.test; tv-shell-d)
-- [x] 365. Discover closes pages and shows Server › Discover with focus on its content; Downloads and Settings close pages and show that tab (src: tvmode.js `guideMenu`).
+- [x] 363. The panel's head shows the clock (2.2rem) and "<user> · <server host>", or "Offline" (src: README § Menu; tvmode.js `guideMenu`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The shell (Menu without Reconnect or the server line) and The welcome (short Menu).
+- [x] 364. The items, in order: Discover, Downloads (with " · <n> active" counting active and queued rows), Notifications (" · <n>"), Settings, Controls (shows the welcome card again), Reconnect, Switch to desktop mode, Quit GRID (src: README § Menu; tvmode.js `guideMenu`; Controls: user decision 2026-11-10). (verified 2026-11-10: menu.test; tv-shell-d) **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The shell (Menu without Reconnect or the server line) and The welcome (short Menu).
+- [x] 365. Discover closes pages and shows Server › Discover with focus on its content; Downloads and Settings close pages and show that tab (src: tvmode.js `guideMenu`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The shell (Menu without Reconnect or the server line) and The welcome (short Menu).
 - [x] 366. The Menu's hints are A "Select" and B "Close" (src: tvmode.js `guideMenu`).
-- [x] 367. On Connect and the unreachable library, Menu (Start) opens a short Menu in the Menu panel's style with only Switch to desktop mode and Quit GRID; Choose your systems keeps Start as Skip for now (src: user decision 2026-11-10, overturning tvmode.js `press` and ruling 6). (verified 2026-11-10: press.test, menu.test; tv-startup-a, tv-startup-b)
+- [x] 367. On Connect and the unreachable library, Menu (Start) opens a short Menu in the Menu panel's style with only Switch to desktop mode and Quit GRID; Choose your systems keeps Start as Skip for now (src: user decision 2026-11-10, overturning tvmode.js `press` and ruling 6). (verified 2026-11-10: press.test, menu.test; tv-startup-a, tv-startup-b) **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The shell (Menu without Reconnect or the server line) and The welcome (short Menu).
 
 ### Lists
 
@@ -514,26 +516,26 @@ and "Conflicts" lists at the end are not part of the build.
 
 ### Connect
 
-- [x] 392. Connect shows "Connect to your RomM server" and "Everything here works with a controller. A keyboard works too." (src: tvmode.js `connectPage`).
-- [x] 393. Its rows: Server ("https://…" placeholder), Sign in with (API token / Username and password, a list), then API token ("Paste or type your token") or Username ("Your RomM user") and Password ("Your password"), then Library folder (src: README § Startup screens › Connect; tvmode.js `connectPage`).
-- [x] 394. A on Server, API token, Username or Password opens the keyboard titled "Server address", "API token", "Username" or "Password"; the token and password are masked and open empty (src: tvmode.js `ACT.cfield`).
-- [x] 395. A on Library folder opens the folder browser titled "Library folder" (src: README § Connect; tvmode.js `ACT.cfield`).
-- [x] 396. View pastes from the clipboard into the field, and the hint reads View "Paste" (src: README § Connect; tvmode.js `connectPage`).
-- [x] 397. Connect (primary) is disabled until the server, credentials and library folder are filled; A on it then says "Fill in the server, the API token and the library folder first." ("the username and password" for that sign-in) (src: tvmode.js `connectPage`).
-- [x] 398. A rejected token returns to Connect with the reason in `danger` above the rows, as on the desktop (src: README § Connect; tvmode.js `connectPage`).
-- [x] 399. A successful connect notifies "Connected to <URL>" and opens Choose your systems (src: tvmode.js `ACT.connectGo`).
+- [x] 392. Connect shows "Connect to your RomM server" and "Everything here works with a controller. A keyboard works too." (src: tvmode.js `connectPage`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome (replaces Connect) and The RomM sign-in page.
+- [x] 393. Its rows: Server ("https://…" placeholder), Sign in with (API token / Username and password, a list), then API token ("Paste or type your token") or Username ("Your RomM user") and Password ("Your password"), then Library folder (src: README § Startup screens › Connect; tvmode.js `connectPage`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome (replaces Connect) and The RomM sign-in page.
+- [x] 394. A on Server, API token, Username or Password opens the keyboard titled "Server address", "API token", "Username" or "Password"; the token and password are masked and open empty (src: tvmode.js `ACT.cfield`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome (replaces Connect) and The RomM sign-in page.
+- [x] 395. A on Library folder opens the folder browser titled "Library folder" (src: README § Connect; tvmode.js `ACT.cfield`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome (replaces Connect) and The RomM sign-in page.
+- [x] 396. View pastes from the clipboard into the field, and the hint reads View "Paste" (src: README § Connect; tvmode.js `connectPage`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome (replaces Connect) and The RomM sign-in page.
+- [x] 397. Connect (primary) is disabled until the server, credentials and library folder are filled; A on it then says "Fill in the server, the API token and the library folder first." ("the username and password" for that sign-in) (src: tvmode.js `connectPage`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome (replaces Connect) and The RomM sign-in page.
+- [x] 398. A rejected token returns to Connect with the reason in `danger` above the rows, as on the desktop (src: README § Connect; tvmode.js `connectPage`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome (replaces Connect) and The RomM sign-in page.
+- [x] 399. A successful connect notifies "Connected to <URL>" and opens Choose your systems (src: tvmode.js `ACT.connectGo`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome (replaces Connect) and The RomM sign-in page.
 
 ### Choose your systems
 
-- [x] 400. Choose your systems shows "Choose your systems" and "Tick the systems you want to play. GRID installs the recommended emulator for each. (X) changes the emulator; (Menu) skips this step. You can change this later in Settings › Systems." (src: tvmode.js `choosePage`).
-- [x] 401. Each system is a row with a switch (off at first), its name, "<n> games" (Windows: "Proton for Windows games") and its emulator, the recommended one by default (src: README § Choose your systems; tvmode.js `choosePage`).
+- [x] 400. Choose your systems shows "Choose your systems" and "Tick the systems you want to play. GRID installs the recommended emulator for each. (X) changes the emulator; (Menu) skips this step. You can change this later in Settings › Systems." (src: tvmode.js `choosePage`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Choose your systems (after a RomM connect).
+- [x] 401. Each system is a row with a switch (off at first), its name, "<n> games" (Windows: "Proton for Windows games") and its emulator, the recommended one by default (src: README § Choose your systems; tvmode.js `choosePage`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Choose your systems (after a RomM connect).
 - [x] 402. A ticks or unticks the system (hint "Tick" / "Untick") (src: README § Choose your systems; tvmode.js `choosePage`).
 - [x] 403. X (hint "Change emulator") opens the list "Emulator for <system>" (Installed and Download groups, None); picking one also ticks the system (src: README § Choose your systems; tvmode.js `ACT.chEmu`).
 - [x] 404. The buttons under the list are "Install <n> emulators" ("1 emulator"; "Install emulators", disabled, with none ticked) and "Skip for now" with the Menu glyph (src: README § Choose your systems; tvmode.js `choosePage`).
 - [x] 405. Down from the last system reaches the buttons (src: README § Choose your systems).
 - [x] 406. Menu (Start) skips from anywhere on the page, and the hint reads Menu "Skip for now" (src: README § Choose your systems; README § Decided Start; tvmode.js `choosePage`).
-- [x] 407. Install installs one emulator per name ticked (each emulator once), opens where GRID opens and shows the setup card (src: README § Choose your systems; tvmode.js `ACT.chGo`).
-- [x] 408. Skip for now opens where GRID opens without installing (src: tvmode.js `ACT.chSkip`).
+- [x] 407. Install installs one emulator per name ticked (each emulator once), opens where GRID opens and shows the setup card (src: README § Choose your systems; tvmode.js `ACT.chGo`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Choose your systems (after a RomM connect).
+- [x] 408. Skip for now opens where GRID opens without installing (src: tvmode.js `ACT.chSkip`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Choose your systems (after a RomM connect).
 
 ### Unreachable library
 
@@ -544,11 +546,11 @@ and "Conflicts" lists at the end are not part of the build.
 
 ### Where GRID opens
 
-- [x] 413. With Open GRID on set to Automatic, GRID opens on Server › Discover when it is connected to a RomM server (src: README § Decided Where GRID opens; tvmode.js `openStart`).
-- [x] 414. With Automatic and the server unreachable, GRID opens on the Library (src: README § Decided Where GRID opens; tvmode.js `openStart`).
-- [x] 415. With Automatic and no server, GRID opens on the Library with the first connected Backup drive selected (its folder open, its row focused) (src: README § Decided Where GRID opens; tvmode.js `ACT.noServer`, `showDrive`).
-- [x] 416. Open GRID on set to Server › Discover or Library forces that place; forced Discover with no server opens the Server tab's not-connected panel (src: README § Decided Where GRID opens).
-- [x] 417. Opening on Discover lands focus on Discover's first cover (src: README § Discover; tvmode.js `render`).
+- [x] 413. With Open GRID on set to Automatic, GRID opens on Server › Discover when it is connected to a RomM server (src: README § Decided Where GRID opens; tvmode.js `openStart`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Where GRID opens.
+- [x] 414. With Automatic and the server unreachable, GRID opens on the Library (src: README § Decided Where GRID opens; tvmode.js `openStart`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Where GRID opens.
+- [x] 415. With Automatic and no server, GRID opens on the Library with the first connected Backup drive selected (its folder open, its row focused) (src: README § Decided Where GRID opens; tvmode.js `ACT.noServer`, `showDrive`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Where GRID opens.
+- [x] 416. Open GRID on set to Server › Discover or Library forces that place; forced Discover with no server opens the Server tab's not-connected panel (src: README § Decided Where GRID opens). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Where GRID opens.
+- [x] 417. Opening on Discover lands focus on Discover's first cover (src: README § Discover; tvmode.js `render`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Where GRID opens.
 
 ## 15. Game backups in TV mode
 
@@ -582,7 +584,7 @@ and "Conflicts" lists at the end are not part of the build.
 
 - [x] 435. Backup to drive… sits after Uninstall in Details' buttons (not on unlinked games or games viewed from a drive) and opens the Backup page titled "Backup <title>" (src: README § Details › Backup to drive; tvmode.js `details`, `ACT.backup`).
 - [x] 436. When a connected drive already has the game, the left column adds "On <pack>" (src: README § Details › Backup to drive; tvmode.js `details`).
-- [x] 437. Offline, Backup to drive… is disabled and A on it shows "Backing up needs a server." (src: README § Details › Backup to drive; tvmode.js `details`).
+- [x] 437. Offline, Backup to drive… is disabled and A on it shows "Backing up needs a server." (src: README § Details › Backup to drive; tvmode.js `details`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Details: needs RomM (backups work without RomM, decision 8).
 - [x] 438. From the time a game is queued for backup until it finishes, Uninstall, Update and Locate… on it are refused with "This game is being backed up. Wait for it to finish." (src: GB card § Backups run in Downloads).
 
 ### Select mode
@@ -596,7 +598,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 445. A bar pinned under the grid reads "<n> selected · <size>", then X "Select all <n>" (or "All <n> selected · Clear"), Y "Backup to drive…" (on a drive "Install or remove") and RT "Done" (src: README § Select mode; tvmode.js `selPaint`).
 - [x] 446. In select mode the hints are A "Pick" / "Unpick", X "Select all" / "Clear all", Y "Backup to drive…" (or "Install or remove"), RT "Done" (src: tvmode.js `selHints`).
 - [x] 447. Y with nothing picked notifies "Pick games first" / "A picks the focused game; X picks them all." (src: tvmode.js `selAct`).
-- [x] 448. Y offline notifies the error "Backing up needs a server." (src: tvmode.js `selAct`).
+- [x] 448. Y offline notifies the error "Backing up needs a server." (src: tvmode.js `selAct`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Details: needs RomM (backups work without RomM, decision 8).
 - [x] 449. On a drive, Y opens the list "<n> games on <pack>" with Install <n> games and Remove <n> from drive… (danger) (src: README § Select mode; tvmode.js `selAct`).
 - [x] 450. Install <n> games queues every picked game not installed and notifies "<n> games added to download queue" / "Copying from <label>" (src: tvmode.js `selAct`).
 - [x] 451. Remove <n> from drive… asks "Remove <n> games from <pack>?" / "Their files leave the drive. Games installed on this computer stay." with Remove from drive (danger), then notifies "<n> games removed from <pack>" (src: tvmode.js `selAct`). (desktop wording, intro rule)
@@ -607,7 +609,7 @@ and "Conflicts" lists at the end are not part of the build.
 
 - [x] 454. A Server platform header has "Backup all <n>…" (hint "Backup"), counting all the platform's games, which opens the Backup page titled "Backup <Platform> · <n> games" (src: README § A whole platform; tvmode.js `srvPaint`, `ACT.backupPlat`).
 - [x] 455. On a Library platform row, X is "Backup all <n>…", counting installed games only (src: README § A whole platform; tvmode.js `libRailHTML`, `ACT.backupPlat`).
-- [x] 456. Offline, Backup all is disabled and says "Backing up needs a server." (src: tvmode.js `srvPaint`, `ACT.backupPlat`).
+- [x] 456. Offline, Backup all is disabled and says "Backing up needs a server." (src: tvmode.js `srvPaint`, `ACT.backupPlat`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Details: needs RomM (backups work without RomM, decision 8).
 
 ### The Backup page
 
@@ -681,12 +683,12 @@ and "Conflicts" lists at the end are not part of the build.
 
 ### Use without a server
 
-- [x] 515. Connect offers "Use without a server" after an "or", beside Connect, enabled once a library folder is set, with the note "Without a server, GRID needs only the library folder. Your Library and Backup drives work offline." (src: README § Use without a server; tvmode.js `connectPage`).
-- [x] 516. Use without a server notifies "Using GRID without a server" / "Your Library and Backup drives work offline" and opens per "Where GRID opens" (src: README § Use without a server; tvmode.js `ACT.noServer`).
-- [x] 517. Without a server the top bar reads "Offline · no server" with a grey dot, and the hint bar says the Library and Backup drives work without one (src: README § Use without a server).
-- [x] 518. Without a server the Server tab shows one panel: "Not connected to a server", "Your Library and Backup drives work without one.", Connect to a server… (primary) and Open Library (src: README § Use without a server; tvmode.js `TABS.server.render`).
-- [x] 519. Connect to a server… opens Connect (src: README § Use without a server; tvmode.js `ACT.toConnect`).
-- [x] 520. Library, Backup drives, Downloads, Settings and play all work without a server; backing up is disabled with "Backing up needs a server." (src: GB card § Use without a server).
+- [x] 515. Connect offers "Use without a server" after an "or", beside Connect, enabled once a library folder is set, with the note "Without a server, GRID needs only the library folder. Your Library and Backup drives work offline." (src: README § Use without a server; tvmode.js `connectPage`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome; Library › RomM group (no "Use without a server").
+- [x] 516. Use without a server notifies "Using GRID without a server" / "Your Library and Backup drives work offline" and opens per "Where GRID opens" (src: README § Use without a server; tvmode.js `ACT.noServer`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome; Library › RomM group (no "Use without a server").
+- [x] 517. Without a server the top bar reads "Offline · no server" with a grey dot, and the hint bar says the Library and Backup drives work without one (src: README § Use without a server). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome; Library › RomM group (no "Use without a server").
+- [x] 518. Without a server the Server tab shows one panel: "Not connected to a server", "Your Library and Backup drives work without one.", Connect to a server… (primary) and Open Library (src: README § Use without a server; tvmode.js `TABS.server.render`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome; Library › RomM group (no "Use without a server").
+- [x] 519. Connect to a server… opens Connect (src: README § Use without a server; tvmode.js `ACT.toConnect`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome; Library › RomM group (no "Use without a server").
+- [x] 520. Library, Backup drives, Downloads, Settings and play all work without a server; backing up is disabled with "Backing up needs a server." (src: GB card § Use without a server). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § The welcome; Library › RomM group (no "Use without a server").
 
 ## 16. Desktop changes
 
@@ -694,8 +696,8 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 522. Starting GRID with `--tv` opens straight into TV mode (src: README § Decided Entering and leaving).
 - [x] 523. Menu › Switch to desktop mode and Settings › TV mode › Switch to desktop mode leave TV mode for the desktop window, on the same view (src: README § Decided Entering and leaving; tvmode.js `toDesktop`).
 - [x] 524. There is no other way into or out of TV mode (src: README § Decided Entering and leaving).
-- [x] 525. The desktop opens on Server › Discover when connected to a RomM server and on the Library when not (unreachable, or without a server, on the first connected Backup drive), replacing today's "always Discover" (src: README § Decided Where GRID opens).
-- [x] 526. Settings › Appearance › Open GRID on (Automatic, Server › Discover, Library) is one setting shared by the desktop and TV mode and governs both (src: README § Decided Where GRID opens; tvmode.js `paneRows('appearance')`).
+- [x] 525. The desktop opens on Server › Discover when connected to a RomM server and on the Library when not (unreachable, or without a server, on the first connected Backup drive), replacing today's "always Discover" (src: README § Decided Where GRID opens). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Where GRID opens (desktop and TV alike).
+- [x] 526. Settings › Appearance › Open GRID on (Automatic, Server › Discover, Library) is one setting shared by the desktop and TV mode and governs both (src: README § Decided Where GRID opens; tvmode.js `paneRows('appearance')`). **Superseded (RomM storefront, 2026-11-15):** see `docs/design/system/components/TVRommStorefront/README.md` § Where GRID opens (desktop and TV alike).
 - [x] 527. Card size, game labels and card display stay desktop-only settings and don't affect TV mode (src: README § Decided Implementation).
 - [x] 528. The TV mode work, the Game backups TV screens and these desktop changes ship together on `feat/tv-mode` (src: README § Decided Implementation). (P14: built and verified together on feat/tv-mode)
 

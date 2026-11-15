@@ -1,0 +1,43 @@
+/* ==== RomM as an optional storefront in TV mode (docs/romm-storefront-plan.md, Step D2). */
+/* No connection dot or user in the top bar (TV mode's clock timer redraws it). */
+.status span:has(> .dot) { display: none; }
+.ri.fold .sflag.rbusy { background: none; padding: 0; }
+.vh h1 .smono, .page-in > h1 .smono { margin-right: .45rem; vertical-align: .15rem; }
+.page-in > h1 .smono.lg { vertical-align: -.55rem; }
+
+/* A RomM row not linked to a RomM game */
+.tag.nl { top: .6rem; left: .6rem; background: rgba(0,0,0,.78); color: #fff; box-shadow: 0 0 0 1px rgba(255,255,255,.4); }
+
+/* RomM › Installed: the one-line banner for unreachable and sign-in expired */
+.rbanner { display: flex; align-items: center; gap: 1rem; padding: .5rem .6rem .5rem .9rem; border-radius: .8rem; border: 1px solid var(--warning-text); background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--text); font-size: 1rem; }
+.rbanner .rbt { flex: 1; min-width: 0; }
+.rbanner b { color: var(--text-h); }
+.rbanner .btn { min-height: 2.6rem; }
+.rbx { flex: none; display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--warning); color: #1a1a12; font-weight: 700; font-size: .9rem; }
+
+/* Needs RomM: Cloud saves, RetroAchievements, a game's Saves and Achievements tabs */
+.rneed { display: flex; align-items: center; gap: 1.2rem; padding: 1rem 1.2rem; margin: 0 0 1rem; border-radius: .8rem; background: var(--surface); border: 1px solid var(--line-strong); }
+.rneed.warn { border-color: var(--warning-text); background: color-mix(in srgb, var(--warning) 12%, transparent); }
+.rneed-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .2rem; }
+.rneed-t b { color: var(--text-h); font-size: 1.1rem; }
+.rneed-t span { color: var(--text-muted); font-size: .95rem; line-height: 1.45; }
+.rneed .btn { flex: none; }
+
+/* Discover while the startup probe runs */
+.rconnecting h2 { display: flex; align-items: center; gap: .7rem; }
+.rconnecting + .sskel { padding: 0 .2rem; }
+
+/* The welcome */
+.rstep { flex: 0 0 auto; font-size: .8rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: .4rem; }
+.start-box .srow.wrow { min-height: 4.2rem; padding: .5rem 1.2rem; }
+
+/* The file browser in file mode: a tick per picked file */
+.rck { flex: none; display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: .35rem; border: .15rem solid var(--line-strong); color: var(--on-primary); }
+.rck.on { background: var(--primary); border-color: var(--primary); }
+.rck.dir { border-color: transparent; }
+.rpicked { margin: -.4rem 0 1rem; }
+.rpicked .gli { width: 1.5rem; height: 1.5rem; vertical-align: -.35rem; }
+
+/* The firmware block and the Locate report */
+.st.rno { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
+.btn .sspin { border-color: color-mix(in srgb, currentColor 35%, transparent); border-top-color: currentColor; }

@@ -61,3 +61,19 @@ TVS = sub(TVS, 'openStart();\nhero(byId(1));', 'sBoot(); render(); hero(sG(\'g1\
 d = os.path.join(gen.OUT, 'TVStores')
 os.makedirs(d, exist_ok=True)
 open(os.path.join(d, 'preview.html'), 'w').write(TVS)
+
+# RomM as an optional storefront in TV mode (docs/romm-storefront-plan.md, Step D2): the
+# TV Game stores card plus tvromm.js / tvromm.css. No Server tab; the welcome replaces
+# Connect; RomM is a Library group and a Settings › Game stores row; Systems works
+# without RomM. It opens on Library › RomM › Discover.
+RM_CSS = open(os.path.join(HERE, 'tvromm.css')).read()
+RM_JS = open(os.path.join(HERE, 'tvromm.js')).read()
+TVR = HTML
+TVR = sub(TVR, 'subtitle="TV mode: the fullscreen, controller-first GRID.', 'subtitle="TV mode with RomM as an optional storefront: the welcome, the RomM group in the Library, RomM in Settings › Game stores, and Systems without RomM.')
+TVR = sub(TVR, '<title>TV mode</title>', '<title>TV mode: RomM storefront</title>')
+TVR = sub(TVR, '\n</style></head>', '\n' + ST_CSS + '\n' + RM_CSS + '\n</style></head>')
+TVR = sub(TVR, '/* ------------------------------------------------------------------ start */', ST_JS + '\n' + RM_JS + '\n/* ------------------------------------------------------------------ start */')
+TVR = sub(TVR, 'openStart();\nhero(byId(1));', 'sBoot(); rBoot(); hero(byId(1));')
+d = os.path.join(gen.OUT, 'TVRommStorefront')
+os.makedirs(d, exist_ok=True)
+open(os.path.join(d, 'preview.html'), 'w').write(TVR)
