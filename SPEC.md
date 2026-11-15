@@ -1434,7 +1434,16 @@ Store screens (2026-11-13, matching the approved design):
   Cancel disabled and no action (it takes no download slot and is never retried) and ends
   "Installed by Steam" or Cancelled. Games installed in Steam outside GRID
   appear by themselves within the 15 s background scan, and Details says "Installed in
-  Steam, outside GRID". Only games and demos show: Proton, the Steam runtimes,
+  Steam, outside GRID". **Uninstall in Steam…** (desktop and TV mode) has no confirm of
+  GRID's own: it opens the game's page in Steam's Library
+  (`steam://nav/games/details/<appid>`), because Steam draws its `steam://uninstall`
+  dialog cut off on Linux (user decision 2026-11-15). The card reads "<Title> is open in
+  Steam's Library. To uninstall it, select the gear icon, then Manage › Uninstall." (TV:
+  "<Title> is open in Steam" / "Select the gear icon, then Manage › Uninstall."). For up
+  to 10 minutes GRID watches for Steam to remove the game; meanwhile Details shows the box
+  "Uninstall it in Steam" with those steps, and the button reads **Show in Steam** (it
+  opens the page again). When Steam removes the game it leaves the Library with
+  "<Title> uninstalled"; after 10 minutes the box goes and the button returns. Only games and demos show: Proton, the Steam runtimes,
   redistributables and owned software are filtered out everywhere. An Available Steam
   game shows no size, and no Steam game shows Genres. Play starts the game through Steam
   and GRID watches the session (Steam's running app, else the game's process); it ends

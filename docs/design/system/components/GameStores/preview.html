@@ -2847,6 +2847,19 @@ function stPlay(g) {
   if (s.cloud && g.cloud === 'synced') { stToast('Syncing cloud saves for ' + g.t + '…'); setTimeout(go, 900); } else go();
 }
 
+/* Steam Uninstall: no GRID confirm (Steam asks). GRID opens steam://nav/games/details/<appid>
+   and watches for up to 10 minutes; the demo has Steam remove the game after 8 s. */
+function stSteamUninstall(g) {
+  var again = g.unw; g.unw = true;
+  stToast(g.t + ' is open in Steam’s Library. To uninstall it, select the gear icon, then Manage › Uninstall.');
+  if (S.stDetail) stRenderDetails();
+  if (again) return;
+  setTimeout(function () {
+    if (!g.unw) return; g.unw = false; g.inst = false; delete g.upd;
+    stToast(g.t + ' uninstalled'); renderAll(); if (S.stDetail) stRenderDetails();
+  }, 8000);
+}
+
 /* ---- Details for a store game ---- */
 function stOpenDetails(g, tab) {
   var keepFrom = ST.detFrom; closeDetails(); ST.detFrom = keepFrom;
@@ -2877,7 +2890,10 @@ function stRenderDetails() {
     b.push(S.stConfirm === 'drm' ? '<button class="g-btn destructive" data-st-d="drm-go">Remove from ' + esc(fromD.name) + '</button>' : '<button class="g-btn secondary destructive" data-st-d="drm">Remove from drive…</button>');
   } else if (s.id === 'gog' && g.inst) b.push('<button class="g-btn secondary" data-st-d="backup">Backup to drive…</button>');
   if (g.inst && !j) b.push(steam ? '<button class="g-btn secondary" data-st-d="verify">Verify in Steam</button>' : '<button class="g-btn secondary" data-st-d="verify">Verify and repair</button>');
-  if (g.inst && !j) b.push(steam ? '<button class="g-btn secondary" data-st-d="uninstall">Uninstall in Steam…</button>'
+  /* Steam's steam://uninstall dialog draws cut off on Linux, so GRID opens the game's
+     page in Steam's Library instead and watches (10 minutes) for Steam to remove it. */
+  if (g.inst && !j && steam && g.unw) b.push('<div class="st-managed"><span><b>Uninstall it in Steam</b></span><span>Steam opened ' + esc(g.t) + ' in its Library. Select the gear icon, then Manage › Uninstall. GRID removes it here when Steam is done.</span></div><button class="g-btn secondary" data-st-d="uninstall">Show in Steam</button>');
+  else if (g.inst && !j) b.push(steam ? '<button class="g-btn secondary" data-st-d="uninstall">Uninstall in Steam…</button>'
     : S.stConfirm === 'uninstall' ? '<button class="g-btn destructive confirm" data-st-d="uninstall-go">Confirm uninstall</button>' : '<button class="g-btn secondary destructive" data-st-d="uninstall">Uninstall</button>');
   if (!g.inst && s.conn !== 'ok' && !steam) lines.push('<p class="st-why">' + (s.conn === 'off' ? 'Connect ' + esc(s.name) + ' in Settings › Stores to install.' : 'Your ' + esc(s.name) + ' login expired. <button class="linkish" data-st-login="' + s.id + '">Sign in again</button>') + '</p>');
   if (g.ns) lines.push('<p class="st-why">Needs ' + esc(g.ns) + '. GRID can’t install games that start through another company’s launcher; install it from the Epic Games Launcher instead.</p>');
@@ -3203,7 +3219,7 @@ document.addEventListener('click', function (e) {
     else if (d === 'restore') stRestore(g2, bkDrive(ST.detFrom));
     else if (d === 'drm') { S.stConfirm = 'drm'; stRenderDetails(); }
     else if (d === 'drm-go') { var dd2 = bkDrive(ST.detFrom); dd2.sgames = dd2.sgames.filter(function (x) { return x.id !== g2.id; }); toast('Removed ' + g2.t + ' from ' + dd2.name); closeDetails(); renderAll(); }
-    else if (d === 'uninstall') { if (s2.id === 'steam') { stToast('Steam opened its uninstall window for ' + g2.t + '. It leaves the Library once Steam removes it.'); return; } S.stConfirm = 'uninstall'; stRenderDetails(); }
+    else if (d === 'uninstall') { if (s2.id === 'steam') { stSteamUninstall(g2); return; } S.stConfirm = 'uninstall'; stRenderDetails(); }
     else if (d === 'uninstall-go') { g2.inst = false; delete g2.upd; S.stConfirm = null; stToast(g2.t + ' uninstalled' + (s2.cloud ? '. Its cloud saves stay in your ' + s2.name + ' account.' : '')); renderAll(); stRenderDetails(); }
     return;
   }

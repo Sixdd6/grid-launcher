@@ -43,7 +43,7 @@ the Library, Details, Downloads and TV.
 - installed games from Steam's own files, including games installed outside GRID, games
   only;
 - Install in Steam, Uninstall in Steam…, Verify in Steam and Play, all through `steam://`
-  links to the Steam client;
+  links to the Steam client (Uninstall opens the game's Library page, user decision 5);
 - install progress from Steam's app manifests, and a watched session while the game runs;
 - every Steam state in the design (parity inventory below).
 
@@ -355,7 +355,11 @@ that some entries are old):
 - `steam://install/<appid>` opens Steam's install dialog (the user picks the library
   there);
 - `steam://uninstall/<appid>` opens Steam's uninstall confirmation. The wiki's text ("deletes
-  the specified apps' cache files") is out of date; Playnite uses it to uninstall;
+  the specified apps' cache files") is out of date; Playnite uses it to uninstall. **Not
+  used since user decision 5 (2026-11-15):** on Linux Steam draws this dialog cut off,
+  with no buttons, even when the link comes from a terminal;
+- `steam://nav/games/details/<appid>` opens the game's page in Steam's Library, where
+  the gear icon › Manage › Uninstall draws Steam's dialog whole. GRID's Uninstall uses it;
 - `steam://validate/<appid>` verifies the game's files;
 - `steam://rungameid/<appid>` starts the game ("Same as run, but with support for mods and
   non-Steam shortcuts").
@@ -364,7 +368,8 @@ that some entries are old):
 a browser or `xdg-open` first:
 - `steam -silent steam://rungameid/620`: Playnite's form. `-silent` keeps Steam's main
   window from popping up when Steam has to start;
-- install, uninstall and validate omit `-silent`, because they must show Steam's dialog.
+- install, the Library page (uninstall) and validate omit `-silent`, because they must
+  show Steam's window.
 
 Which executable:
 - **Linux native:** `steam` on `PATH` (usually `/usr/bin/steam`, the design's example),
@@ -406,9 +411,11 @@ watcher survives a restart: on startup, any manifest that is installing becomes 
 Downloads row again (for a game installed inside Steam too).
 
 **Uninstall and verify.**
-- Uninstall: GRID opens the link and shows the design's toast. The background scan
-  notices the manifest is gone, removes the row, and raises the uninstalled card (no cloud
-  sentence).
+- Uninstall: GRID opens `steam://nav/games/details/<appid>` (user decision 5), shows the
+  design's card ("<title> is open in Steam's Library. To uninstall it, select the gear
+  icon, then Manage › Uninstall.") and marks the game as watched for Details' "Uninstall
+  it in Steam" box. The background scan (and the 10-minute uninstall watch) notices the
+  manifest is gone, removes the row, and raises the uninstalled card (no cloud sentence).
 - Verify: the link and the toast only. Steam shows its own progress.
 
 **Is the game running (the watched session)?** `AliveCheck` must be cheap and
@@ -516,7 +523,7 @@ pub struct ManifestState { pub appid: u32, pub name: String, pub library: PathBu
                            pub flags: u32, pub size_on_disk: u64, pub build_id: u64, pub last_updated: i64,
                            pub last_played: i64, pub done: u64, pub total: u64 }
 pub enum AppPhase { Installed, Installing, Gone }               // the StateFlags reading above
-pub enum SteamLink { Install(u32), Uninstall(u32), Validate(u32), Run(u32) }  // Display: steam://…; Run adds -silent
+pub enum SteamLink { Install(u32), Uninstall(u32), Validate(u32), Run(u32) }  // Display: steam://…; Run adds -silent; Uninstall → steam://nav/games/details/<id> (user decision 5)
 pub struct SteamService;   // Clone, Send+Sync
 impl SteamService {
   pub fn new(http: reqwest::Client /* redirect none */, ep: SteamEndpoints) -> Self;
@@ -742,7 +749,8 @@ and the harness.
       the watch loop (a tokio task, 2 s);
     - progress goes to `set_progress`; the end goes to `finish_store_external`
       (`Completed{"Installed by Steam"}` / `Cancelled`), then the "installed · Play" card;
-  - **uninstall** and **verify:** open the link, show the toast; the scan does the rest.
+  - **uninstall** and **verify:** open the link (uninstall: the game's Library page, user
+    decision 5), show the toast; the scan does the rest.
 - **Launch** (`launch_watched`): not installed is an error; the client missing gives
   "Steam isn’t installed. Install Steam, then try again."; then `open(Run)`, then
   `register_watched(key, title, "Steam", "Steam", 0, alive_check)`. `AlreadyRunning` is as
@@ -773,7 +781,9 @@ and the harness.
     to `E2E_STEAM_ARGV_FILE` and acts on the link in the fake root:
     - `install/<id>`: writes the manifest 1026 with growing `BytesDownloaded` over ~6 s,
       then 4;
-    - `uninstall/<id>`: deletes the manifest;
+    - `uninstall/<id>`: deletes the manifest (since user decision 5 GRID sends
+      `nav/games/details/<id>`; the fake records it, and the spec, standing in for the
+      user in Steam, deletes the manifest);
     - `validate/<id>`: records only;
     - `-silent rungameid/<id>`: writes `RunningAppID` = id to `registry.vdf`, starts a
       sleep process, and sets it back to 0 after `E2E_STEAM_RUN_SECS` (default 4).
@@ -889,8 +899,9 @@ Desktop (GameStores):
    - Play / Install in Steam / the "Installing in Steam · 52%" box with its bar and
      "Managed by Steam. Pause or cancel it in Steam." and a disabled Cancel;
    - Verify in Steam (toast "Steam is verifying <title>’s files. Watch it in Steam.") and
-     Uninstall in Steam… (toast "Steam opened its uninstall window for <title>. It leaves
-     the Library once Steam removes it.");
+     Uninstall in Steam… (card "<title> is open in Steam's Library. To uninstall it,
+     select the gear icon, then Manage › Uninstall."; then the "Uninstall it in Steam" box
+     and Show in Steam while GRID watches; user decision 5);
    - **no Game Settings**;
    - lines: last played, "Launches through Steam", "Installed in Steam, outside GRID",
      "Steam games can’t be backed up here. Steam has its own Backup and restore.";
@@ -1223,7 +1234,8 @@ Where package C differs from, or adds to, the plan. No Step 0 frozen file change
   was seen, two polls in a row without an installing manifest end it Cancelled (one
   unreadable poll, Steam mid-write, does not); no manifest within
   `STEAM_INSTALL_START_TIMEOUT` (15 min; 5 min since user decision 4) ends it Cancelled. Package A's `watch::InstallWatch`
-  may replace it at integration. After `steam://uninstall` a short watch (2 s, up to 10
+  may replace it at integration. After the uninstall link (`steam://nav/games/details`
+  since user decision 5) a short watch (2 s, up to 10
   min) scans as soon as the manifest is gone, so the game leaves without waiting for the
   15 s scan.
 - **Counts are games only.** Test and Connect answer the owned count after the filter
@@ -1576,7 +1588,7 @@ real-account test").
   | group | specs | checks |
   |---|---|---|
   | `steam` | `steam-connect`, `steam-secrets` | **Connect:** not connected → the card; client found (`fake steam` path); the two local accounts (persona only); a bad SteamID64 (local, no request in the mock log); Test with a revoked key (rejected words); private (`…0002`); no network (mock `.fail`); Connect with the good key → "Steam connected · 4 games owned", the rail group, the pill Connected; Remove key → Installed games only + the no-key panel; Save a new key; Disconnect confirm → the group goes, no Steam row left in the registry, the keyring slot empty (`secret-tool lookup` finds nothing), the fake root's files untouched. **Secrets:** after Connect, Test, Refresh, install, launch, uninstall and Disconnect, the fake key appears in **no** GRID log line (run with debug prints on), `stores-changed`/`store-notice` event, `invoke` answer, config file, registry DB, `stores/cache/*`, session record, Downloads snapshot or DOM text (the key field is empty after Save). The mock's log shows the key arrived only as the `key` query parameter of the API host, and never on an art or GetItems request. `FAKE-ACCOUNT-NAME-not-shown` appears nowhere, and neither does the fake steam's stdout token. |
-  | `steam-library` | `steam-library` | rail counts (tools filtered: 3 installed, never Proton/runtime/redistributables), header chips, every panel (seed flags), covers by title, Install in Steam → the toast, the argv file shows `steam://install/<id>`, the teal bar and "Installing in Steam N%" on the cover, Details box and Downloads row with Cancel disabled, then "Installed by Steam" and the card; Details lines ("Installed in Steam, outside GRID", Launches through Steam, the no-backup line, no Game Settings); Play → argv `-silent steam://rungameid/<id>`, Playing chip, Stop reads Running in Steam, then the session ends when the fake clears `RunningAppID`, and `last_played_at` moved; Verify/Uninstall in Steam → argv and toasts, the game leaves Installed after the fake deletes its manifest; `.fake-install-cancel` → the row ends Cancelled; a manifest dropped into the fake root by the spec (a game installed in Steam itself) shows in Installed within the 15 s scan |
+  | `steam-library` | `steam-library` | rail counts (tools filtered: 3 installed, never Proton/runtime/redistributables), header chips, every panel (seed flags), covers by title, Install in Steam → the toast, the argv file shows `steam://install/<id>`, the teal bar and "Installing in Steam N%" on the cover, Details box and Downloads row with Cancel disabled, then "Installed by Steam" and the card; Details lines ("Installed in Steam, outside GRID", Launches through Steam, the no-backup line, no Game Settings); Play → argv `-silent steam://rungameid/<id>`, Playing chip, Stop reads Running in Steam, then the session ends when the fake clears `RunningAppID`, and `last_played_at` moved; Verify/Uninstall in Steam → argv and toasts (Uninstall: `steam://nav/games/details/<id>`, the "Uninstall it in Steam" box and Show in Steam, user decision 5), the game leaves Installed after its manifest is deleted; `.fake-install-cancel` → the row ends Cancelled; a manifest dropped into the fake root by the spec (a game installed in Steam itself) shows in Installed within the 15 s scan |
   | `tv-steam` | `tv-steam` | TV folder and panels, X Install in Steam, game page (disabled Installing in Steam with A's line), Playing page with no Stop, Downloads A-list without Cancel, Settings › Stores › Steam: the account sheet, Enter a SteamID64… and the masked key through the on-screen keyboard (the keyboard never shows the key in clear), Test results as cards, Connect Steam, Disconnect confirm |
 
 - **Existing specs:**
@@ -1670,6 +1682,22 @@ real-account test").
      "Not installed · Steam didn't start the download in 5 minutes";
    - if Steam installs the game later anyway, the background scan still adopts it;
    - once Steam's download is under way, the row stays "Managed by Steam" with no action.
+   Design: GameStores and TVStores READMEs and prototypes.
+5. **Uninstall opens the game's page in Steam's Library (2026-11-15).** On the user's Linux
+   desktop Steam draws the `steam://uninstall/<appid>` dialog cut off: the title and first
+   lines show, the buttons don't. It is Steam's bug (the same link from a terminal is cut
+   off too), while Steam's own Library › gear › Manage › Uninstall draws the dialog whole.
+   Decided, for desktop and TV mode:
+   - **Uninstall in Steam…** opens `steam://nav/games/details/<appid>` instead, with no
+     confirm of GRID's own (Steam asks);
+   - the card says where Steam's Uninstall is: "<title> is open in Steam's Library. To
+     uninstall it, select the gear icon, then Manage › Uninstall." (TV: "<title> is open
+     in Steam" / "Select the gear icon, then Manage › Uninstall."). In TV mode Steam's
+     window opens over TV mode, as for store logins; no text defers to desktop mode;
+   - GRID keeps the 10-minute uninstall watch. While it runs, Details shows the box
+     "Uninstall it in Steam" with the same steps and the button reads **Show in Steam**
+     (opens the page again). When Steam removes the game it leaves the Library with
+     "<title> uninstalled"; after 10 minutes the box goes and the button returns.
    Design: GameStores and TVStores READMEs and prototypes.
 
 Questions for the user: none open.

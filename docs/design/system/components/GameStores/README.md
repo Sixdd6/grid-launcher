@@ -44,9 +44,15 @@ A proposal: GOG (with GOG offline installers), Epic Games, Amazon Games and Stea
 ## Details for a store game
 
 - No RomM sections: no server saves list, no "not linked to a server game", no Achievements, no Related row. An installed GOG game has **Backup to drive…** and "On Couch kit" when a connected drive holds it; an Epic, Amazon or Steam game says why it can't be backed up ("Epic Games games can't be backed up: legendary installs only from Epic's servers." / "…nile installs only from Amazon's servers." / "Steam games can't be backed up here. Steam has its own Backup and restore.").
-- **Left column buttons:** Play (Stop while it runs) · Install… / Install in Steam · Cancel install · 45% (Cancel update / Cancel verify) · Not supported (disabled) · **Update to 2.2** · **Game Settings** (not Steam) · **Verify and repair** (Verify in Steam) · **Uninstall** (two clicks: "Confirm uninstall"; Steam: "Uninstall in Steam…", which opens Steam's own dialog).
+- **Left column buttons:** Play (Stop while it runs) · Install… / Install in Steam · Cancel install · 45% (Cancel update / Cancel verify) · Not supported (disabled) · **Update to 2.2** · **Game Settings** (not Steam) · **Verify and repair** (Verify in Steam) · **Uninstall** (two clicks: "Confirm uninstall"; Steam: "Uninstall in Steam…", one click, which opens the game's page in Steam's Library; see below).
 - **Lines under them:** last played; "Runs natively · Linux version" / "Runs through GE-Proton10-17 · Windows version" / "Launches through Steam"; cloud state ("Cloud saves synced 2 hours ago", "Cloud save conflict · Resolve", "Cloud saves off for this game", "This game has no cloud saves"); "Installed from an offline installer"; "Installed in Steam, outside GRID"; for a store that isn't signed in "Your GOG login expired. Sign in again"; for Not supported "Needs the EA app. GRID can't install games that start through another company's launcher; install it from the Epic Games Launcher instead."
 - **Steam install in progress:** a box "Installing in Steam · 52%" with its bar and "Managed by Steam. Pause or cancel it in Steam.", and a disabled Cancel.
+- **Steam uninstall (2026-11-15).** Steam draws its `steam://uninstall` dialog cut off on Linux (no buttons), so GRID doesn't use it.
+  - **Uninstall in Steam…** (secondary, not destructive: GRID deletes nothing) has no GRID confirm; Steam asks. It opens `steam://nav/games/details/<appid>` (the game's page in Steam's Library).
+  - Card: "**<Title> is open in Steam's Library. To uninstall it, select the gear icon, then Manage › Uninstall.**" (Steam's own menu words.)
+  - While GRID watches (up to 10 minutes): in place of the button, a box "**Uninstall it in Steam**" / "Steam opened <Title> in its Library. Select the gear icon, then Manage › Uninstall. GRID removes it here when Steam is done.", and a secondary **Show in Steam** button that opens the page again (and shows the card again; the watch is not restarted). Play, Verify in Steam and the cover stay as they are: the game is still installed.
+  - Steam removes it: the game leaves Installed with the card "<Title> uninstalled". No removal after 10 minutes: the box goes silently and **Uninstall in Steam…** returns.
+  - Prototype: Moonlit Ferry (or any installed Steam game); Steam "removes" it 8 s after the click.
 - **Waiting for Steam** (Steam's install window is open, no manifest yet; see Downloads): a box "**Waiting for Steam to start the download**" / "Steam's install window is open. If you cancelled it there, stop waiting." with no bar, and a secondary **Stop waiting** button. The cover's tag reads **WAITING** with an empty bar, and its hover button "Waiting for Steam" is disabled.
 - **Header:** title; "GOG · 2023 · Developer · Genre"; chips: store (mark + name), Playing, v2.1, Linux/Windows version, Offline installer, Not supported.
 - **Tabs:** Overview (the store's description; DLC you own with Install / Remove per DLC; facts: Store, Developer, Released, Genres, Size, Version "v2.1 · GOG v2.2", Folder), Media (the store's screenshots), **Cloud saves** (GOG and Epic, installed only).
@@ -164,7 +170,7 @@ States
 - [ ] Playing a store game; Steam "Running in Steam"
 
 Prompts
-- [ ] Uninstall (two clicks); Steam uninstall opens Steam
+- [ ] Uninstall (two clicks); Steam uninstall opens the game in Steam's Library, the "Uninstall it in Steam" box and Show in Steam while GRID watches
 - [ ] Disconnect store (inline confirm); Disconnect Steam
 - [ ] Cloud conflict (Details and before launch)
 - [ ] Installer refusals with Choose another file…
@@ -212,7 +218,7 @@ Edge cases
 8. **Progress on a store cover** is a percentage tag plus a bar along the cover's bottom edge (teal for Steam). RomM covers don't have the bar today; the same bar could go on them.
 9. **Store installs share the single download slot** with RomM installs; store tool downloads skip the queue; Steam installs run beside it.
 10. **The GOG install dialog defaults to the Linux version** when there is one ("Recommended").
-11. **Steam Uninstall and Verify** open Steam's own dialogs; GRID shows no confirm of its own.
+11. **Steam Uninstall and Verify** hand off to Steam; GRID shows no confirm of its own. **CHANGED 2026-11-15 (user decision):** Uninstall opens the game's page in Steam's Library, not `steam://uninstall` (Steam draws that dialog cut off on Linux), and says where Steam's Uninstall is.
 12. **Steam account picker** lists every account found in Steam's files, with the one signed in to Steam ticked, plus manual entry.
 13. **Login window** shows a read-only address line with a lock so the user can check the store's domain; Cancel is silent, a network error stays inside the window, a failed sign-in closes it with an error card.
 14. **Cloud conflict** is decided per game with two choices (keep this computer's, use the cloud's) and a third, Decide later / Don't launch; a launch never proceeds over a conflict without a choice.

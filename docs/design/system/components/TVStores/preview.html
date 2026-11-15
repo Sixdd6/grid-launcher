@@ -2203,7 +2203,7 @@ function sdetails(g, drv) {
     title: g.t, sid: g.id,
     render: function () {
       var s = sst(g.s), j = sJob(g), btn = [], steam = s.id === 'steam', pack = drv && sPackOf(drv, g);
-      var B = function (lab, a, pri, extra) { btn.push('<button class="btn' + (pri ? ' pri' : '') + (/Uninstall/.test(lab) ? ' dng' : '') + '" data-f data-k="sd-' + a + '" data-a="' + a + '" data-sid="' + g.id + '"' + (extra || '') + '>' + lab + '</button>'); };
+      var B = function (lab, a, pri, extra) { btn.push('<button class="btn' + (pri ? ' pri' : '') + (lab === 'Uninstall' ? ' dng' : '') + '" data-f data-k="sd-' + a + '" data-a="' + a + '" data-sid="' + g.id + '"' + (extra || '') + '>' + lab + '</button>'); };
       if (j && j.skind === 'steam' && j.wait) B('Stop waiting for Steam', 'sstopwait', 1);
       else if (j && j.skind === 'steam') B('Installing in Steam · ' + j.pct + '%', 'snop', 1, ' disabled data-why="Managed by Steam. Pause or cancel it in Steam."');
       else if (j) B('Cancel ' + (j.kind === 'update' ? 'update' : j.kind === 'repair' ? 'verify' : 'install') + (j.st === 'sactive' ? ' · ' + j.pct + '%' : ' · queued'), 'scancel', 1);
@@ -2215,13 +2215,14 @@ function sdetails(g, drv) {
       if (g.inst && g.upd && !j) B('Update to ' + g.upd, 'supdate');
       if (g.inst && !steam) B('Game settings', 'ssettings');
       if (g.inst && !j) B(steam ? 'Verify in Steam' : 'Verify and repair', 'sverify');
-      if (g.inst && !j) B(steam ? 'Uninstall in Steam…' : 'Uninstall', 'suninstall');
+      if (g.inst && !j) B(steam ? (g.unw ? 'Show in Steam' : 'Uninstall in Steam…') : 'Uninstall', 'suninstall');
       if (pack) B('Remove from drive…', 'sdrm', 0, ' data-drive="' + drv.id + '"');
       else if (s.id === 'gog' && g.inst) B('Backup to drive…', 'sbackup');
       var tabs = sTabs(g); if (tabs.indexOf(S.sdTab) < 0) S.sdTab = 'Overview';
       var lp = [];
       if (j && j.skind === 'steam' && j.wait) lp.push('<div class="smanaged"><b>Waiting for Steam to start the download.</b> Steam\'s install window is open. If you cancelled it there, stop waiting.</div>');
       else if (j && j.skind === 'steam') lp.push('<div class="smanaged"><b>Managed by Steam.</b> Pause or cancel it in Steam.<div class="pbar"><b style="width:' + j.pct + '%"></b></div></div>');
+      if (steam && g.inst && !j && g.unw) lp.push('<div class="smanaged"><b>Uninstall it in Steam.</b> Steam opened ' + esc(g.t) + ' in its Library. Select the gear icon, then Manage › Uninstall. GRID removes it here when Steam is done.</div>');
       if (g.ns) lp.push('<b>Needs ' + esc(g.ns) + '.</b> GRID can\'t install games that start through another company\'s launcher.');
       if (g.inst) lp.push('Last played <b>' + esc(g.played || 'never') + '</b>');
       lp.push(steam ? 'Launches through <b>Steam</b>' : !g.inst ? (g.builds.indexOf('linux') >= 0 ? 'Has a <b>Linux version</b>' : 'Windows only · runs through <b>' + STV.compat + '</b>') : g.os === 'linux' ? 'Runs natively · <b>Linux version</b>' : 'Runs through <b>' + STV.compat + '</b> · Windows version');
@@ -2586,7 +2587,9 @@ ACT.scancel = function (el) { var g = sG(el.dataset.sid), d = sJob(g); confirmBo
 ACT.supdate = function (el) { var g = sG(el.dataset.sid); confirmBox({ title: 'Update ' + g.t + ' to ' + g.upd + '?', body: 'Saves and settings stay.', ok: 'Update', fn: function () { sQueue(g, 'update'); toast('Update for ' + g.t + ' added to download queue'); } }); };
 ACT.ssettings = function (el) { sGameSettings(sG(el.dataset.sid)); };
 ACT.sverify = function (el) { var g = sG(el.dataset.sid); if (g.s === 'steam') { toast('Steam is verifying ' + g.t, { s: 'Watch it in Steam' }); return; } sQueue(g, 'repair'); toast('Verifying ' + g.t + '\'s files…'); };
-ACT.suninstall = function (el) { var g = sG(el.dataset.sid), s = sst(g.s); if (s.id === 'steam') { toast('Steam opened its uninstall window for ' + g.t, { s: 'It leaves the Library once Steam removes it.' }); return; } confirmBox({ title: 'Uninstall ' + g.t + '?', body: 'Its files are deleted from this computer.' + (s.cloud ? ' Its cloud saves stay in your ' + s.name + ' account.' : ''), ok: 'Uninstall', danger: 1, fn: function () { g.inst = 0; delete g.upd; toast(g.t + ' uninstalled'); repaint(); } }); };
+/* Steam: no confirm (Steam asks). GRID opens steam://nav/games/details/<appid> over TV mode
+   and watches for up to 10 minutes; the demo has Steam remove the game after 8 s. */
+ACT.suninstall = function (el) { var g = sG(el.dataset.sid), s = sst(g.s); if (s.id === 'steam') { var again = g.unw; g.unw = 1; toast(g.t + ' is open in Steam', { s: 'Select the gear icon, then Manage › Uninstall.' }); repaint(); if (!again) setTimeout(function () { if (!g.unw) return; var onIt = cur && document.body.contains(cur) && cur.dataset.k === 'sd-suninstall'; g.unw = 0; g.inst = 0; delete g.upd; toast(g.t + ' uninstalled'); /* focus on Show in Steam moves to Install in Steam */ if (onIt) { renderStage(); restoreFocus({ _k: 'sd-sinstall' }); } else repaint(); }, 8000); return; } confirmBox({ title: 'Uninstall ' + g.t + '?', body: 'Its files are deleted from this computer.' + (s.cloud ? ' Its cloud saves stay in your ' + s.name + ' account.' : ''), ok: 'Uninstall', danger: 1, fn: function () { g.inst = 0; delete g.upd; toast(g.t + ' uninstalled'); repaint(); } }); };
 ACT.sstop = function (el) { var g = sG(el.dataset.sid), s = sst(g.s); confirmBox({ title: 'Stop ' + g.t + '?', body: 'Unsaved progress in the game is lost.', ok: 'Stop game', danger: 1, fn: function () { pop(); if (s.cloud && g.cloud === 'synced') { toast('Syncing cloud saves for ' + g.t + '…'); setTimeout(function () { g.synced = 'just now'; toast('Cloud saves uploaded to ' + s.name + ' for ' + g.t); }, 1400); } } }); };
 ACT.ssync = function (el) { var g = sG(el.dataset.sid); STV.syncing = g.id; repaint(); setTimeout(function () { STV.syncing = null; g.synced = 'just now'; toast('Cloud saves synced for ' + g.t); repaint(); }, 1200); };
 ACT.skeep = function (el) { var g = sG(el.dataset.sid), s = sst(g.s), v = el.dataset.v; confirmBox({ title: v === 'local' ? 'Keep this computer\'s save?' : 'Use the cloud save?', body: v === 'local' ? 'It is uploaded to ' + s.name + ' and replaces the cloud save.' : 'It replaces the save on this computer.', ok: v === 'local' ? 'Keep and upload' : 'Use the cloud save', fn: function () { g.cloud = 'synced'; g.synced = 'just now'; toast(v === 'local' ? 'Kept this computer\'s save for ' + g.t : 'Restored the cloud save for ' + g.t); repaint(); } }); };
