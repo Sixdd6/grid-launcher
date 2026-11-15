@@ -16,8 +16,34 @@ export type RestoreOutcome =
   | { kind: 'unreachable'; server_url: string; username: string; error: string }
   /** `Config.offline`: the user chose to run without a server; no probe ran. */
   | { kind: 'offline'; server_url: string; username: string };
-/** Emitted once when a live session gets a 401 (commands.rs `SESSION_UNAUTHORIZED_EVENT`). */
+/** Emitted once when a live session gets a 401 (commands.rs `SESSION_UNAUTHORIZED_EVENT`).
+ *  Legacy: the RomM storefront reads `ROMM_CHANGED_EVENT` instead. */
 export const SESSION_UNAUTHORIZED_EVENT = 'session-unauthorized';
+
+/** RomM's connection (grid-core `session::RommConnection`). */
+export type RommConnection = 'connected' | 'unreachable' | 'expired' | 'not_connected';
+/** RomM's card and rail group (grid-core `session::RommStatus`). No secret, ever. */
+export type RommStatus = {
+  connection: RommConnection;
+  /** Credential-free; `''` when none was ever stored. */
+  server_url: string;
+  username: string;
+  /** Which credential the sign-in form asks for; `null` = unknown (token). */
+  auth_kind: AuthKind | null;
+  /** Unreachable: the probe's secret-free reason. `''` otherwise. */
+  last_error: string;
+  /** Installed RomM rows (not the hidden Emulators shelf), when the status was built. */
+  installed_count: number;
+  /** `connection !== 'not_connected' || installed_count > 0`. */
+  in_rail: boolean;
+  /** A probe (restore, reconnect, connect) is running, or the startup
+   *  restore of a stored connection has not run yet ("Connecting"). */
+  busy: boolean;
+};
+/** Emitted on every RomM status change (`commands/romm.rs`). Payload: `RommStatus`. */
+export const ROMM_CHANGED_EVENT = 'romm-changed';
+/** `welcome_status`: show the first-run welcome. */
+export type WelcomeStatus = { needed: boolean };
 export type Platform = {
   id: number;
   name: string;
@@ -882,6 +908,50 @@ export type PlatformSetup = {
 /** One ticked platform and the emulator kept or picked for it. */
 export type SetupChoice = { platform: string; source_id: string };
 
+// Systems and firmware without RomM (romm-storefront-plan 0.9, 0.10).
+// The commands are implemented in Step 7 (`commands/systems.rs`).
+
+/** Where a system row came from (grid-core `systems::PlatformOrigin`). */
+export type PlatformOrigin = 'catalog' | 'server' | 'both' | 'installed';
+/** One system (grid-core `systems::SystemPlatform`). */
+export type SystemPlatform = {
+  slug: string;
+  /** The server's label when connected and known, else the catalog name,
+   *  else the installed row's `platform`. The key for default_emulators. */
+  label: string;
+  /** Every name this slug has gone by: the lookup set for label-keyed config. */
+  aliases: string[];
+  origin: PlatformOrigin;
+  /** RomM's id; `null` without RomM. Only Install from RomM reads it. */
+  server_id: number | null;
+  /** RomM's ROM count; `null` without RomM. */
+  server_rom_count: number | null;
+  /** Installed games on this platform (any source with this slug). */
+  installed_count: number;
+};
+/** Who vouches for a firmware file's size and MD5. */
+export type FirmwareVerifiedBy = 'romm' | 'grid' | 'none';
+/** One expected firmware file (`firmware_expected`). `size`/`md5` are 0/''
+ *  for per-console files with no fixed checksum. */
+export type FirmwareExpectedFile = {
+  name: string;
+  size: number;
+  md5: string;
+  required: boolean;
+  installed: boolean;
+  verified_by: FirmwareVerifiedBy;
+};
+export type FirmwareExpected = { files: FirmwareExpectedFile[] };
+/** A picked file and the name it was installed under. */
+export type LocatedFile = { file: string; as_name: string };
+/** `locate_firmware_files`: what Locate files did with each picked file. */
+export type LocateReport = {
+  installed: LocatedFile[];
+  /** Installed, but GRID has no checksum to check it (decision 13). */
+  unverified: LocatedFile[];
+  refused: { file: string; reason: string }[];
+};
+
 /** What happened to one platform's setup default (grid-core
  *  `launch::setup::PendingOutcome`), from `startPlatformSetup` or the
  *  `setup-defaults` event. */
@@ -945,6 +1015,10 @@ export type InstalledGame = {
    */
   platform_slug: string;
   rom_id: number | null;
+  /** The RomM server the row was installed from when that was not the live
+   *  session (a drive install), credential-free; `''` for a server install.
+   *  Optional so older fixtures stay valid. */
+  source_server?: string;
   rom_file_name: string;
   archive_path: string;
   extracted_path: string;
@@ -1421,6 +1495,23 @@ export const api = {
   restoreSession: () => invoke<RestoreOutcome>('restore_session'),
   retryConnect: () => invoke<RestoreOutcome>('retry_connect'),
   disconnect: () => invoke<void>('disconnect'),
+  // RomM as a storefront (commands/romm.rs, commands/welcome.rs).
+  rommStatus: () => invoke<RommStatus>('romm_status'),
+  rommRestore: () => invoke<RommStatus>('romm_restore'),
+  rommConnect: (serverUrl: string, username: string, secret: string, useToken: boolean) =>
+    invoke<RommStatus>('romm_connect', { serverUrl, username, secret, useToken }),
+  rommReconnect: () => invoke<RommStatus>('romm_reconnect'),
+  rommDisconnect: () => invoke<RommStatus>('romm_disconnect'),
+  welcomeStatus: () => invoke<WelcomeStatus>('welcome_status'),
+  finishWelcome: () => invoke<void>('finish_welcome'),
+  // Systems and firmware without RomM (Step 7 implements the commands).
+  systemPlatforms: () => invoke<SystemPlatform[]>('system_platforms'),
+  firmwareExpected: (slug: string, emulator: string) =>
+    invoke<FirmwareExpected>('firmware_expected', { slug, emulator }),
+  locateFirmwareFiles: (slug: string, emulator: string, paths: string[]) =>
+    invoke<LocateReport>('locate_firmware_files', { slug, emulator, paths }),
+  locatePs3Firmware: (emulator: string, path: string) =>
+    invoke<boolean>('locate_ps3_firmware', { emulator, path }),
   listPlatforms: () => invoke<Platform[]>('list_platforms'),
   listGames: (platformId: number) => invoke<GameSummary[]>('list_games', { platformId }),
   getRomDetail: (romId: number) => invoke<RomDetail>('get_rom_detail', { romId }),
