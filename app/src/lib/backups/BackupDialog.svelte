@@ -10,7 +10,6 @@
   import Icon from '../Icon.svelte';
   import type { BackupDialogOpen } from './dialogState.svelte';
   import { BackupPlanStore } from './backupPlan.svelte';
-  import { anyLocal, dialogLede } from './dialog';
 
   let {
     open,
@@ -44,7 +43,9 @@
   let sources = $derived(b.sources);
   let outdated = $derived(b.outdated);
   let wine = $derived(b.wine);
-  let host = $derived(b.host);
+  let lede = $derived(b.lede);
+  let romOff = $derived(b.romOff);
+  let unavailable = $derived(b.unavailable);
   let panelEl = $state<HTMLElement | null>(null);
 
   function pick(romId: number, source: SourceChoice) {
@@ -137,7 +138,7 @@
     </button>
 
     <h3 id="backup-dialog-title" data-testid="backup-dialog-title">{open.request.title}</h3>
-    <p class="note" data-testid="backup-lede">{dialogLede(host, anyLocal(plan))}</p>
+    <p class="note" data-testid="backup-lede">{lede}</p>
 
     <section class="sub">
       <h4 id="backup-drive-heading">Drive</h4>
@@ -188,7 +189,14 @@
       <section class="sub" data-testid="backup-source">
         <h4>Source</h4>
         <label class="also">
-          <input data-testid="backup-use-local" type="checkbox" bind:checked={b.useLocal} />
+          <!-- With RomM off only installed copies can go: ticked and locked. -->
+          <input
+            data-testid="backup-use-local"
+            type="checkbox"
+            checked={romOff || b.useLocal}
+            disabled={romOff}
+            onchange={(e) => (b.useLocal = e.currentTarget.checked)}
+          />
           <span>
             <b>{local.label}</b>
             <span class="note" data-testid="backup-local-line">{local.note}</span>
@@ -271,6 +279,22 @@
       </section>
     {/if}
 
+    {#if ready.length > 0 && unavailable}
+      <section class="sub" data-testid="backup-unavailable">
+        <h4>{unavailable.title}</h4>
+        <ul class="src-list">
+          {#each unavailable.rows as r (r.key)}
+            <li data-testid="backup-unavailable-row">
+              <span class="src-name">
+                <b>{r.name}</b>
+                <span class="note">{r.sub}</span>
+              </span>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+
     {#if ready.length > 0}
       <section class="sub">
         <h4>Also copy</h4>
@@ -283,11 +307,13 @@
           </span>
         </div>
         <label class="also">
+          <!-- Firmware comes only from RomM: unticked while it is off. -->
           <input
             data-testid="backup-firmware"
             type="checkbox"
-            bind:checked={b.includeFirmware}
+            checked={b.includeFirmware && !romOff}
             disabled={firmware === null || firmware.disabled}
+            onchange={(e) => (b.includeFirmware = e.currentTarget.checked)}
           />
           <span>
             <b>Firmware</b>

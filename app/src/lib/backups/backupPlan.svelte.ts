@@ -22,11 +22,14 @@ import {
   localLine,
   noDrivesText,
   outdatedRows,
+  planLede,
   planNotes,
   runtimeLine,
   sourcePicks,
   sourceRows,
+  unavailableRows,
   wineNote,
+  withoutRomm,
   type LocalGameInfo,
   type SourceChoices,
 } from './dialog';
@@ -88,7 +91,12 @@ export class BackupPlanStore {
   });
   readonly #lookup = (romId: number) => this.localInfo.get(romId);
   host = $derived(hostOf(session.serverUrl));
-  showSource = $derived(this.ready.length > 0 && this.plan !== null && this.plan.local_available);
+  /** The plan was made with RomM off: the Source box is ticked and locked,
+   *  Firmware unticked and disabled (RommStorefront README). */
+  romOff = $derived(withoutRomm(this.plan));
+  lede = $derived(planLede(this.host, this.plan));
+  unavailable = $derived(unavailableRows(this.plan, this.open.unlinked ?? []));
+  showSource = $derived(this.ready.length > 0 && this.plan !== null && (this.plan.local_available || this.romOff));
   local = $derived(this.plan ? localLine(this.plan, this.host) : null);
   sources = $derived(this.plan && this.plan.use_local ? sourceRows(this.plan, this.choices, this.#lookup) : null);
   outdated = $derived(this.plan ? outdatedRows(this.plan, this.choices) : null);

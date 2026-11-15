@@ -21,6 +21,13 @@ import {
   sourcePicks,
   sourceRows,
   wineNote,
+  EMULATORS_ROMM_OFF,
+  FIRMWARE_ROMM_OFF,
+  planLede,
+  ROMM_OFF_LEDE,
+  unavailableRows,
+  withoutRomm,
+  type RommOffFields,
 } from './dialog';
 
 const GB = 1024 ** 3;
@@ -512,5 +519,89 @@ describe('local copies in the notes and footer', () => {
   it('leaves out the download half when nothing comes from this computer', () => {
     expect(anyLocal(plan({ ...LOCAL_PLAN, use_local: false }))).toBe(false);
     expect(footerModel(plan({ ...LOCAL_PLAN, use_local: false, needs_choice: 0 })).note).toBe('14.3 GB to write');
+  });
+});
+
+describe('a plan without RomM', () => {
+  const off = (overrides: Partial<BackupPlan> & RommOffFields = {}): BackupPlan =>
+    plan({
+      without_romm: true,
+      unavailable: [],
+      games_to_write: [1, 2],
+      use_local: true,
+      local_available: true,
+      sources: [
+        { rom_id: 1, name: 'Cinder Peaks', source: 'local', note: '' },
+        { rom_id: 2, name: 'Tux Trail', source: 'local', note: '' },
+      ],
+      local_bytes: 19.1 * GB,
+      bytes_to_write: 19.1 * GB,
+      download_bytes: 0,
+      firmware_reason: 'Needs RomM',
+      ...overrides,
+    } as Partial<BackupPlan>);
+
+  it('is told apart from a plan with RomM', () => {
+    expect(withoutRomm(off())).toBe(true);
+    expect(withoutRomm(plan())).toBe(false);
+    expect(withoutRomm(null)).toBe(false);
+  });
+
+  it('has its own lede', () => {
+    expect(planLede('romm.home.lan', off())).toBe(ROMM_OFF_LEDE);
+    expect(ROMM_OFF_LEDE).toBe(
+      'RomM isn’t connected, so GRID copies the games installed on this computer, with the art and details it has, to the drive’s gridpack folder. Nothing downloads.',
+    );
+    expect(planLede('romm.home.lan', plan())).toBe(dialogLede('romm.home.lan', false));
+  });
+
+  it('says only installed copies go', () => {
+    expect(localLine(off(), 'romm.home.lan').note).toBe('2 games from this computer (19.1 GB) · without RomM, only installed copies');
+    expect(localLine(off({ sources: [], local_bytes: 0 }), '').note).toBe(
+      'No game here can be copied · without RomM, only installed copies',
+    );
+  });
+
+  it('lists the games it can’t backup, with why, and the unlinked ones', () => {
+    const p = off({
+      unavailable: [
+        { rom_id: 3, name: 'Moss and Marrow', platform_name: 'PlayStation 2', reason: "Its files weren't found on this computer" },
+        { rom_id: 4, name: 'Far Shore', platform_name: 'PlayStation', reason: 'Installed outside the library folder' },
+      ],
+    });
+    const model = unavailableRows(p, [{ title: 'Old Rip', platform: 'Super Nintendo' }]);
+    expect(model?.title).toBe('Can’t backup without RomM · 3');
+    expect(model?.rows.map((r) => [r.name, r.sub])).toEqual([
+      ['Moss and Marrow', "PlayStation 2 · Its files weren't found on this computer. Connect RomM to back it up from the server."],
+      ['Far Shore', 'PlayStation · Installed outside the library folder. Connect RomM to back it up from the server.'],
+      ['Old Rip', 'Super Nintendo · It isn’t linked to a RomM game. Link it to its RomM game first.'],
+    ]);
+  });
+
+  it('lists nothing when every game can go, or with RomM on', () => {
+    expect(unavailableRows(off())).toBeNull();
+    expect(unavailableRows(plan(), [{ title: 'Old Rip', platform: 'SNES' }])).toBeNull();
+    expect(unavailableRows(null)).toBeNull();
+  });
+
+  it('says emulators come from GRID’s catalog and firmware needs RomM', () => {
+    const p = off({
+      emulators: [
+        { name: 'DuckStation', os: ['linux'], bytes: 40 * MB, already: false, note: '' },
+        { name: 'PCSX2', os: [], bytes: null, already: false, note: 'PCSX2 needs RomM' },
+      ],
+    });
+    expect(emulatorLine(p)).toEqual({
+      text: `DuckStation for Linux · 40 MB${EMULATORS_ROMM_OFF}`,
+      notes: ['PCSX2 needs RomM'],
+    });
+    expect(EMULATORS_ROMM_OFF).toBe(' · from GRID’s catalog; builds hosted on your RomM server are skipped');
+    expect(firmwareLine(p)).toEqual({ text: FIRMWARE_ROMM_OFF, disabled: true });
+    expect(FIRMWARE_ROMM_OFF).toBe('Needs RomM · skipped');
+  });
+
+  it('never asks to choose a copy, and starts with the games it copies', () => {
+    expect(footerModel(off())).toEqual({ note: '19.1 GB to write', button: 'Backup 2 games', disabled: false });
+    expect(footerModel(off({ games_to_write: [], sources: [] })).button).toBe('Nothing to backup');
   });
 });

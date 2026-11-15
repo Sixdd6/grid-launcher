@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use grid_core::backup::drives::drive_key;
 use grid_core::backup::pack::{self, PackOs, PackState};
 use grid_core::backup::plan::{BackupItems, GameItem};
-use grid_core::library::backup_job::DriveTarget;
+use grid_core::library::backup_job::{BackupOrigin, DriveTarget};
 use grid_core::library::queue::{DownloadEntry, DownloadStatus};
 use grid_core::library::registry::{InstalledGame, Registry};
 use grid_core::library::{InstallService, BACKING_UP_LOCAL};
@@ -222,6 +222,7 @@ impl Harness {
                     rom_id: *rom_id,
                     name: name.to_string(),
                     platform_name: "GENESIS".into(),
+                    server: String::new(),
                     local: false,
                     bytes: 0,
                 })
@@ -1504,7 +1505,12 @@ async fn a_second_batch_that_no_longer_fits_the_drive_is_refused() {
 
     let first = h
         .service
-        .start_backup_on(h.client.clone(), h.drive(), items(1, "One"), drive_free)
+        .start_backup_on(
+            BackupOrigin::connected(h.client.clone()),
+            h.drive(),
+            items(1, "One"),
+            drive_free,
+        )
         .unwrap();
     assert_eq!(first.games, 1);
     assert_eq!(h.service.reserved_at(&h.mount), 600);
@@ -1521,7 +1527,12 @@ async fn a_second_batch_that_no_longer_fits_the_drive_is_refused() {
 
     let refused = h
         .service
-        .start_backup_on(h.client.clone(), h.drive(), items(2, "Two"), drive_free)
+        .start_backup_on(
+            BackupOrigin::connected(h.client.clone()),
+            h.drive(),
+            items(2, "Two"),
+            drive_free,
+        )
         .unwrap_err();
     assert_eq!(
         refused.to_string(),
@@ -1532,7 +1543,12 @@ async fn a_second_batch_that_no_longer_fits_the_drive_is_refused() {
     // Starting the same game again is a duplicate, not a refusal.
     let again = h
         .service
-        .start_backup_on(h.client.clone(), h.drive(), items(1, "One"), drive_free)
+        .start_backup_on(
+            BackupOrigin::connected(h.client.clone()),
+            h.drive(),
+            items(1, "One"),
+            drive_free,
+        )
         .unwrap();
     assert_eq!(again.games, 0);
 
@@ -1544,9 +1560,179 @@ async fn a_second_batch_that_no_longer_fits_the_drive_is_refused() {
     .await;
     let second = h
         .service
-        .start_backup_on(h.client.clone(), h.drive(), items(2, "Two"), drive_free)
+        .start_backup_on(
+            BackupOrigin::connected(h.client.clone()),
+            h.drive(),
+            items(2, "Two"),
+            drive_free,
+        )
         .unwrap();
     assert_eq!(second.games, 1);
     let row = h.wait_terminal(2).await;
     assert_eq!(row.status, DownloadStatus::Completed, "{row:#?}");
+}
+
+/// A backup without RomM (romm-storefront plan Step 2, user decision 8):
+/// no session at all. The installed game is judged against its own server
+/// (the config's `server_url`), copied from this computer with the art GRID
+/// cached, then installed back from that pack, still with no session. The
+/// restored row names the same server and rom id, so a second backup
+/// writes the same identity.
+#[tokio::test]
+async fn without_romm_a_local_game_backs_up_and_installs_back_with_no_session() {
+    use grid_core::backup::local;
+    use grid_core::backup::plan::{self, PlanInput};
+    use std::collections::HashMap;
+
+    let _turn = PART_SIZE.lock().await;
+    let h = Harness::new().await;
+    // Harness::new writes `server_url = "http://x"`.
+    let config_server = "http://x";
+    let tree = extracted_tree();
+    let root = h.platform_dir().join("Zip Game");
+    for (name, body) in &tree {
+        let path = root.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, body).unwrap();
+    }
+    let cover = "http://x/assets/romm/resources/roms/1/cover/big.png";
+    let text = |path: &Path| path.to_string_lossy().into_owned();
+    h.registry
+        .upsert(&InstalledGame {
+            title: "Zip Game".to_string(),
+            platform: "GENESIS".to_string(),
+            platform_slug: "genesis".to_string(),
+            rom_id: Some(1),
+            rom_file_name: "Zip Game.zip".to_string(),
+            extracted_dir: text(&root),
+            extracted_path: text(&root.join(tree[0].0)),
+            server_updated_at: SERVER_UPDATED.to_string(),
+            description: "Cached details.".to_string(),
+            cover_large_path: cover.to_string(),
+            fanart_urls: "http://x/assets/fanart.jpg".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+    // Only the cover is in GRID's image cache; the fanart is not.
+    let art_cache = h.library.parent().unwrap().join("covers");
+    fs::create_dir_all(&art_cache).unwrap();
+    fs::write(
+        art_cache.join(format!(
+            "{}.png",
+            grid_core::images::cache::image_key(cover)
+        )),
+        PNG,
+    )
+    .unwrap();
+
+    // The plan, as `plan_backup` makes it without a session.
+    let rows = h.registry.all().unwrap();
+    let servers: HashMap<i64, String> = rows
+        .iter()
+        .filter_map(|row| Some((row.rom_id?, local::identity_server(row, config_server)?)))
+        .collect();
+    let states = h
+        .service
+        .local_states_by(&[1], |row| servers[&row.rom_id.unwrap()].clone(), false)
+        .unwrap();
+    let (games, unavailable) = plan::plan_games_local(&rows, &[1], &servers, &states);
+    assert!(unavailable.is_empty(), "{unavailable:#?}");
+    let pack_now = h.pack();
+    let mut planned = plan::plan(&PlanInput {
+        drive: &h.drive().key,
+        pack: &pack_now,
+        server: "",
+        fat32: false,
+        free_bytes: 1 << 40,
+        reserved_bytes: 0,
+        games: &games,
+        emulators: &[],
+        compat_tool: None,
+        firmware: &[],
+        include_firmware: false,
+        include_runtime: false,
+        host: PackOs::host(),
+        sizes: &HashMap::new(),
+        use_local: true,
+        choices: &HashMap::new(),
+    });
+    plan::mark_without_romm(&mut planned, unavailable);
+    assert_eq!(planned.plan.games_to_write, vec![1]);
+    assert_eq!(planned.items.games[0].server, config_server);
+
+    let origin = BackupOrigin {
+        client: None,
+        server: String::new(),
+        art_cache: Some(art_cache),
+    };
+    let queued = h
+        .service
+        .start_backup_on(origin, h.drive(), planned.items, None)
+        .unwrap();
+    assert_eq!(queued.games, 1);
+    let row = h.wait_terminal(1).await;
+    assert_eq!(row.status, DownloadStatus::Completed, "{row:#?}");
+    assert_eq!(row.kind, "backup_game_local");
+    assert!(
+        row.error
+            .contains("The fanart of Zip Game isn't on this computer"),
+        "a missing image is a warning: {row:#?}"
+    );
+    assert!(
+        h.server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty(),
+        "nothing may reach a server"
+    );
+
+    let game = h.pack().find_game(config_server, 1).cloned().unwrap();
+    assert_eq!(game.source.server, config_server);
+    assert_eq!(game.source.rom_id, 1);
+    assert_eq!(game.source.fs_name, "Zip Game.zip");
+    assert_eq!(game.source.server_updated_at, SERVER_UPDATED);
+    assert_eq!(game.platform, "genesis");
+    assert_eq!(game.summary, "Cached details.");
+    assert!(game.files.is_empty());
+    assert!(game.is_installed_copy());
+    assert!(game.assets.cover.is_some());
+    assert!(game.assets.fanart.is_none());
+    let installed = game.installed.clone().unwrap();
+    assert_eq!(installed.layout, pack::InstalledLayout::Extracted);
+    assert!(!installed.outdated);
+    assert!(h.staging_is_empty());
+
+    // Gone from this computer, then installed back from the drive.
+    fs::remove_dir_all(&root).unwrap();
+    h.registry.remove("Zip Game", "GENESIS").unwrap();
+    h.service
+        .install_from_drive(h.drive(), &game, None)
+        .unwrap();
+    h.wait_for("the restored row", |h| {
+        h.registry
+            .find(Some(1), "", "")
+            .ok()
+            .flatten()
+            .is_some_and(|row| Path::new(&row.extracted_dir).is_dir())
+    })
+    .await;
+    let restored = h.registry.find(Some(1), "", "").unwrap().unwrap();
+    assert_eq!(restored.rom_id, Some(1));
+    for (name, body) in &tree {
+        let path = Path::new(&restored.extracted_dir).join(name);
+        assert_eq!(&fs::read(&path).unwrap(), body, "{name}");
+    }
+    // A backup of the restored copy names the same identity, with or
+    // without the config's server.
+    assert_eq!(
+        local::identity_server(&restored, "").as_deref(),
+        Some(game.source.server.as_str())
+    );
+    assert!(h
+        .server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .is_empty());
 }

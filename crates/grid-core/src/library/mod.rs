@@ -1288,7 +1288,17 @@ pub struct InstallService {
     resolved_sizes: Mutex<HashMap<(String, crate::backup::pack::PackOs), u64>>,
     /// Every backup row admitted this session, by entry id: what `retry`
     /// rebuilds the row from.
-    backup_rows: Mutex<HashMap<u64, (backup_job::DriveTarget, backup_job::BackupItem)>>,
+    /// The origin is kept without its session ([`backup_job::BackupOrigin::detached`]).
+    backup_rows: Mutex<
+        HashMap<
+            u64,
+            (
+                backup_job::DriveTarget,
+                backup_job::BackupItem,
+                backup_job::BackupOrigin,
+            ),
+        >,
+    >,
     /// Every store job admitted this session, by entry id: what `retry`
     /// re-enqueues.
     store_rows: Mutex<HashMap<u64, StoreJob>>,
@@ -2413,7 +2423,7 @@ impl InstallService {
         let spaces = self.job_spaces.lock().unwrap();
         let excluded = rows
             .iter()
-            .filter(|(_, (drive, item))| drive.key == drive_key && exclude.contains(&item.key()))
+            .filter(|(_, (drive, item, _))| drive.key == drive_key && exclude.contains(&item.key()))
             .filter_map(|(id, _)| spaces.get(id).and_then(std::sync::Weak::upgrade))
             .fold(0u64, |sum, space| {
                 sum.saturating_add(space.drive_outstanding())
@@ -2529,12 +2539,19 @@ impl InstallService {
         items: crate::backup::plan::BackupItems,
     ) -> Result<crate::backup::plan::BackupQueued, LibraryError> {
         let free = (self.space_probe().free)(&drive.mount);
-        self.start_backup_on(client, drive, items, free)
+        self.start_backup_on(
+            backup_job::BackupOrigin::connected(client),
+            drive,
+            items,
+            free,
+        )
     }
 
-    /// [`Self::start_backup`] with the drive's free space as the caller's
-    /// drive scan read it (`None` when unknown: nothing is checked on the
-    /// drive).
+    /// [`Self::start_backup`] from `origin` (the live session, or none: a
+    /// backup without RomM, whose games each name their own server and are
+    /// copied from this computer), with the drive's free space as the
+    /// caller's drive scan read it (`None` when unknown: nothing is checked
+    /// on the drive).
     ///
     /// The rows' space is checked against the [`space`] ledger and reserved
     /// in one step, so two quick starts can never both pass: the bytes to
@@ -2544,7 +2561,7 @@ impl InstallService {
     /// the drive is skipped before the check.
     pub fn start_backup_on(
         self: &Arc<Self>,
-        client: Arc<RommClient>,
+        origin: backup_job::BackupOrigin,
         drive: backup_job::DriveTarget,
         items: crate::backup::plan::BackupItems,
         drive_free: Option<u64>,
@@ -2588,7 +2605,7 @@ impl InstallService {
         };
         for (item, space) in rows.into_iter().zip(spaces) {
             let admitted = self.admit_backup_item(
-                Some(client.clone()),
+                &origin,
                 drive.clone(),
                 item.clone(),
                 &library,
@@ -2670,7 +2687,7 @@ impl InstallService {
     /// duplicate.
     fn admit_backup_item(
         self: &Arc<Self>,
-        client: Option<Arc<RommClient>>,
+        origin: &backup_job::BackupOrigin,
         drive: backup_job::DriveTarget,
         item: backup_job::BackupItem,
         library: &Path,
@@ -2689,7 +2706,7 @@ impl InstallService {
             batch,
         };
         let mut job =
-            backup_job::BackupJob::new(drive.clone(), item.clone(), client, library.to_path_buf());
+            backup_job::BackupJob::new(drive.clone(), item.clone(), origin, library.to_path_buf());
         job.space = space;
         let admitted = self.admit_meta(
             key,
@@ -2700,7 +2717,10 @@ impl InstallService {
             meta,
         )?;
         if let Some(id) = admitted {
-            self.backup_rows.lock().unwrap().insert(id, (drive, item));
+            self.backup_rows
+                .lock()
+                .unwrap()
+                .insert(id, (drive, item, origin.detached()));
         }
         Ok(admitted.is_some())
     }
@@ -2925,15 +2945,23 @@ impl InstallService {
         // Every backup row this session admitted is remembered (the queue
         // itself does not outlive the process).
         let remembered = self.backup_rows.lock().unwrap().get(&entry_id).cloned();
-        let Some((mut drive, item)) = remembered.filter(|(_, known)| known.key() == item) else {
+        let Some((mut drive, item, remembered)) =
+            remembered.filter(|(_, known, _)| known.key() == item)
+        else {
             return Err(LibraryError::Extract(
                 "This backup can't be retried; backup again".to_string(),
             ));
         };
-        // A store game needs no server.
-        let client = match (&item, client) {
-            (backup_job::BackupItem::Store(_), _) => None,
-            (_, Some(client)) => Some(client),
+        // A store game needs no server; without RomM, a game copied from
+        // this computer and a catalog or manual emulator retry from the
+        // origin they were queued with.
+        let origin = match (&item, client) {
+            (backup_job::BackupItem::Store(_), _) => backup_job::BackupOrigin::default(),
+            (_, Some(client)) => backup_job::BackupOrigin {
+                art_cache: remembered.art_cache.clone(),
+                ..backup_job::BackupOrigin::connected(client)
+            },
+            (item, None) if retries_without_romm(item) => remembered,
             (_, None) => return Err(LibraryError::Registry("not connected".to_string())),
         };
         let not_connected = || LibraryError::Extract(format!("Connect {} to retry", drive.label));
@@ -2951,7 +2979,7 @@ impl InstallService {
             .pop();
         self.dismiss(entry_id);
         let batch = self.next_batch.fetch_add(1, Ordering::Relaxed) + 1;
-        self.admit_backup_item(client, drive, item, &library, batch, space)?;
+        self.admit_backup_item(&origin, drive, item, &library, batch, space)?;
         Ok(())
     }
 
@@ -3023,6 +3051,18 @@ impl InstallService {
         live_server: &str,
         for_windows: bool,
     ) -> Result<HashMap<i64, crate::backup::plan::LocalState>, LibraryError> {
+        self.local_states_by(rom_ids, |_| live_server.to_string(), for_windows)
+    }
+
+    /// [`Self::local_states`], each row judged against the server
+    /// `server_of` names for it: a backup without RomM compares a row with
+    /// its own pack identity server ([`crate::backup::local::identity_server`]).
+    pub fn local_states_by(
+        &self,
+        rom_ids: &[i64],
+        server_of: impl Fn(&InstalledGame) -> String,
+        for_windows: bool,
+    ) -> Result<HashMap<i64, crate::backup::plan::LocalState>, LibraryError> {
         use crate::backup::local::{self, Located};
         use crate::backup::plan::LocalState;
         let library = self.library_root()?;
@@ -3033,13 +3073,14 @@ impl InstallService {
         let mut states = HashMap::new();
         for &rom_id in rom_ids {
             let row = rows.iter().find(|row| row.game.rom_id == Some(rom_id));
+            let live_server = row.map(|row| server_of(&row.game)).unwrap_or_default();
             let located = local::locate(
                 rom_id,
                 row.map(|row| &row.game),
                 row.is_some_and(|row| row.missing),
                 &library,
                 home,
-                live_server,
+                &live_server,
             );
             let state = match located {
                 Located::NotInstalled => LocalState::NotInstalled,
@@ -6815,6 +6856,21 @@ impl StoreProgressSink for ServiceSink<'_> {
 
     fn cancelled(&self) -> bool {
         self.cancel.is_some_and(|flag| flag.load(Ordering::Relaxed))
+    }
+}
+
+/// Whether a backup row can run again with no RomM session: a game copied
+/// from this computer, or an emulator from GRID's catalog or a manual one.
+/// A download, a server-hosted emulator build and firmware need RomM.
+fn retries_without_romm(item: &backup_job::BackupItem) -> bool {
+    use crate::backup::plan::EmulatorSource;
+    match item {
+        backup_job::BackupItem::Game(game) => game.local,
+        backup_job::BackupItem::Emulator(emulator) => {
+            !matches!(emulator.pick.source, EmulatorSource::Server { .. })
+        }
+        backup_job::BackupItem::Firmware(_) => false,
+        backup_job::BackupItem::Store(_) => true,
     }
 }
 

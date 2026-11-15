@@ -26,8 +26,11 @@
  *   961, a Linux game with its `game.json`) and Moss and Marrow (rom 902, a
  *   multi-file game installed before the server's files changed, so it is
  *   out of date). TESTDRIVE is set up for Linux with an empty pack.
+ * - `backups-e`: backups-d's profile with RomM not connected (a remembered
+ *   server, nothing probed) and a fourth game whose files are gone.
  */
 
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -260,6 +263,63 @@ VALUES
   );
 }
 
+/** The RomM server backups-e's config remembers. Never contacted: RomM is not connected. */
+export const SEEDED_SERVER = 'http://romm.e2e.invalid';
+/** A fourth installed game whose files are gone, for backups-e's "Can’t backup without RomM". */
+export const MISSING_GAME = { romId: 903, title: 'Far Shore' };
+
+/**
+ * backups-e: backups-d's library and drive, with RomM not connected (romm
+ * storefront plan Step 2). The config remembers a server and user, as after
+ * Disconnect, and is already migrated and welcomed, so GRID opens the shell
+ * without probing anything. PlayStation 2's default emulator is a build from
+ * that server, so the backup lists it as needing RomM. Far Shore's row
+ * points at a folder that doesn't exist.
+ */
+function seedE() {
+  seedD();
+  const stub = path.join(dataDir, 'stubs', 'pcsx2', PCSX2_ASSET_NAME);
+  writeFileSync(
+    path.join(dataDir, 'config.toml'),
+    `schema_version = 1
+server_url = ${tomlString(SEEDED_SERVER)}
+username = "player"
+library_path = ${tomlString(library)}
+library_layout_version = 2
+romm_store_migrated = true
+
+[setup]
+welcomed = true
+
+[stores.romm]
+connected = false
+
+[[emulators]]
+name = ${tomlString(PCSX2_NAME)}
+path = ${tomlString(stub)}
+args = "%rom%"
+source_id = ${tomlString(PCSX2_SOURCE)}
+
+[default_emulators]
+"PlayStation 2" = ${tomlString(PCSX2_NAME)}
+`,
+  );
+  const gone = path.join(library, 'games', 'PlayStation 2', 'Far Shore');
+  // seedD made the registry; this adds one row to it.
+  execFileSync('sqlite3', [path.join(dataDir, 'grid-launcher.db')], {
+    stdio: ['pipe', 'inherit', 'inherit'],
+    input: `
+INSERT INTO installed_games
+  (title, platform, title_key, platform_key, platform_slug, rom_id, rom_file_name,
+   extracted_path, extracted_dir, server_updated_at, installed_at, images_version)
+VALUES
+  (${sql(MISSING_GAME.title)}, ${sql('PlayStation 2')}, ${sql('far shore')}, ${sql('playstation 2')}, 'ps2',
+   ${MISSING_GAME.romId}, 'Far Shore.zip', ${sql(path.join(gone, 'Far Shore.iso'))}, ${sql(gone)},
+   ${sql(SERVER_UPDATED_AT)}, ${Math.floor(Date.now() / 1000)}, 1);
+`,
+  });
+}
+
 switch (spec) {
   case 'backups-a':
     seedA();
@@ -271,6 +331,9 @@ switch (spec) {
     break;
   case 'backups-d':
     seedD();
+    break;
+  case 'backups-e':
+    seedE();
     break;
   // TV mode's Game backups (docs/tv-mode/plan.md P13): a and b as the
   // desktop's; c is backups-c's drive on a profile used without a server

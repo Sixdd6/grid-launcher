@@ -34,7 +34,10 @@ use crate::backup::write::{self as drive_write, FileWrite, WriteError, WriteTarg
 use crate::cloud::native::{row_wine_prefix, OwnedWinePrefix};
 use crate::cloud::ops::native::manual_paths_key_for_title;
 use crate::config::Config;
-use crate::images::urls::{extension_for, filter_to_server_host, magic_extension, server_resolver};
+use crate::images::urls::{
+    extension_for, filter_to_server_host, magic_extension, screenshot_urls_from_stored,
+    server_resolver,
+};
 use crate::launch::binary_target::Cpu;
 use crate::launch::forge::{ForgeClient, ForgeProvider, ResolvedDownload};
 use crate::launch::setup::{newest_server_build, recommendations, ServerPackage};
@@ -189,15 +192,52 @@ impl BackupItem {
     }
 }
 
+/// Where a backup's RomM games come from: the live session, or, without
+/// RomM (user decision 8), the installed copies alone.
+#[derive(Clone, Default)]
+pub struct BackupOrigin {
+    /// The server session; `None` without RomM (and for a store game).
+    pub client: Option<Arc<RommClient>>,
+    /// The server the pack names for a game whose [`GameItem::server`] is
+    /// blank: the session's, never with userinfo. Blank without RomM, where
+    /// each game names its own.
+    pub server: String,
+    /// GRID's image cache folder: a game copied without RomM takes the art
+    /// cached there, since nothing can be downloaded.
+    pub art_cache: Option<PathBuf>,
+}
+
+impl BackupOrigin {
+    /// A backup with the live session `client`.
+    pub fn connected(client: Arc<RommClient>) -> Self {
+        Self {
+            server: strip_userinfo(client.server_url()),
+            client: Some(client),
+            art_cache: None,
+        }
+    }
+
+    /// The same origin with no session: what a row remembers for a retry.
+    pub(crate) fn detached(&self) -> Self {
+        Self {
+            client: None,
+            ..self.clone()
+        }
+    }
+}
+
 /// One admitted backup row.
 pub(crate) struct BackupJob {
     pub drive: DriveTarget,
     pub item: BackupItem,
     /// The server session; `None` for a store game, which needs none.
     pub client: Option<Arc<RommClient>>,
-    /// The server, as the pack records it: never with userinfo. Blank
-    /// without a session.
+    /// The server, as the pack records it: never with userinfo. A game's
+    /// own server ([`GameItem::server`]) when set, else the session's;
+    /// blank for an emulator or store row without a session.
     pub server: String,
+    /// GRID's image cache folder ([`BackupOrigin::art_cache`]).
+    pub art_cache: Option<PathBuf>,
     /// The library root; staging goes under it.
     pub library: PathBuf,
     /// `<library>/.grid-staging/backup-<entry id>/`, set when the download
@@ -239,18 +279,21 @@ impl BackupJob {
     pub(crate) fn new(
         drive: DriveTarget,
         item: BackupItem,
-        client: Option<Arc<RommClient>>,
+        origin: &BackupOrigin,
         library: PathBuf,
     ) -> Self {
-        let server = client
-            .as_ref()
-            .map(|client| strip_userinfo(client.server_url()))
-            .unwrap_or_default();
+        let server = match &item {
+            BackupItem::Game(game) if !game.server.trim().is_empty() => {
+                strip_userinfo(game.server.trim())
+            }
+            _ => origin.server.clone(),
+        };
         Self {
             drive,
             item,
-            client,
+            client: origin.client.clone(),
             server,
+            art_cache: origin.art_cache.clone(),
             library,
             staging: PathBuf::new(),
             staged: None,
@@ -396,7 +439,14 @@ async fn download_game(
             let source = row.source_server.trim();
             source.is_empty() || pack::server_key(source) == pack::server_key(&job.server)
         });
-    stage_saves(service, job, &detail, row.as_ref(), home.as_deref()).await;
+    stage_saves(
+        service,
+        job,
+        SavesOf::detail(&detail),
+        row.as_ref(),
+        home.as_deref(),
+    )
+    .await;
     let (picked, single): (Vec<&RomFile>, bool) = match download_set(&detail)? {
         DownloadSet::Single(file) => (vec![file], true),
         DownloadSet::Multi { files, .. } => (files, false),
@@ -472,7 +522,10 @@ async fn download_local_game(
     rom_id: i64,
     cancel: &AtomicBool,
 ) -> Result<(), LibraryError> {
-    let detail = job.client()?.rom_detail(rom_id).await?;
+    let Some(client) = job.client.clone() else {
+        return download_local_game_serverless(service, job, rom_id, cancel).await;
+    };
+    let detail = client.rom_detail(rom_id).await?;
     let gone = || {
         LibraryError::Extract(format!(
             "{} is no longer installed on this computer; backup again",
@@ -507,7 +560,7 @@ async fn download_local_game(
         return Err(LibraryError::Extract(super::RUNNING_NOW.to_string()));
     }
     let for_windows = pack_for_windows(&job.drive.mount);
-    stage_saves(service, job, &detail, Some(&row), home).await;
+    stage_saves(service, job, SavesOf::detail(&detail), Some(&row), home).await;
     let outdated = game_has_server_update(
         &row,
         &ServerVersion {
@@ -599,6 +652,235 @@ async fn download_local_game(
     Ok(())
 }
 
+/// The download phase of a game copied from this computer without RomM
+/// (user decision 8, plan Step 2):
+/// 1. the registry row, read and judged again ([`local::locate`] against
+///    the game's own server, `job.server`): a game no longer eligible fails
+///    the row;
+/// 2. the metadata from the row ([`pack_game_from_row`]);
+/// 3. the art only from GRID's image cache ([`cached_assets`]): a missing
+///    image is a warning;
+/// 4. the scanned tree, always archived: with no server file list, an
+///    exact copy can't be proven, and nothing is judged out of date.
+async fn download_local_game_serverless(
+    service: &InstallService,
+    job: &mut BackupJob,
+    rom_id: i64,
+    cancel: &AtomicBool,
+) -> Result<(), LibraryError> {
+    let home = crate::platform::home_dir();
+    let home = home.as_deref();
+    let row = service
+        .registry
+        .find(Some(rom_id), "", "")?
+        .filter(|row| installed_match(row, rom_id));
+    let gone = |name: &str| {
+        LibraryError::Extract(format!(
+            "{name} is no longer installed on this computer; backup again"
+        ))
+    };
+    let Some(row) = row else {
+        return Err(gone("This game"));
+    };
+    if job.server.trim().is_empty() {
+        return Err(LibraryError::Extract(
+            crate::backup::plan::no_server_reason(&row.title),
+        ));
+    }
+    let missing =
+        anchor(&row, home).is_some_and(|anchor| fs_probe(&anchor.path) != Some(anchor.kind));
+    let source = match local::locate(rom_id, Some(&row), missing, &job.library, home, &job.server) {
+        Located::Eligible(source) => source,
+        _ => return Err(gone(&row.title)),
+    };
+    if service.game_running(rom_id) {
+        return Err(LibraryError::Extract(super::RUNNING_NOW.to_string()));
+    }
+    let for_windows = pack_for_windows(&job.drive.mount);
+    let mut game = pack_game_from_row(&row, &job.server);
+    let slug = game.platform.clone();
+    stage_saves(
+        service,
+        job,
+        SavesOf {
+            rom_id,
+            name: &row.title,
+            platform_slug: &slug,
+            platform_name: &row.platform,
+        },
+        Some(&row),
+        home,
+    )
+    .await;
+    let assets = cached_assets(job, &row)?;
+    if cancel.load(Ordering::Relaxed) {
+        return Err(LibraryError::Cancelled);
+    }
+    let scanned = source.clone();
+    let tree = tokio::task::spawn_blocking(move || local::scan_tree(&scanned, for_windows))
+        .await
+        .map_err(|e| LibraryError::Extract(format!("the scan did not finish: {e}")))?
+        .map_err(|refusal| {
+            LibraryError::Extract(format!(
+                "{} can't be copied from this computer: {}; backup again",
+                row.title,
+                lower_first(refusal.reason())
+            ))
+        })?;
+    if cancel.load(Ordering::Relaxed) {
+        return Err(LibraryError::Cancelled);
+    }
+    game.installed = Some(PackInstalled {
+        archive: ArchiveKind::Tar,
+        layout: source.layout,
+        name: source.name.clone(),
+        parts: Vec::new(),
+        tree_bytes: tree.tree_bytes,
+        tree_files: tree.tree_files,
+        launch: source.launch.clone(),
+        rom_file_name: row.rom_file_name.clone(),
+        server_updated_at: row.server_updated_at.clone(),
+        version: game.version.clone(),
+        outdated: false,
+        from_os: PackOs::host(),
+        row: local::snapshot_row(&row, &source.root, home),
+    });
+    job.staged = Some(Staged::Installed {
+        game: Box::new(game),
+        tree: Box::new(tree),
+        assets,
+    });
+    Ok(())
+}
+
+/// The pack entry of a game copied without RomM, from its registry row:
+/// the identity (`server`, the row's rom id, its ROM file name and server
+/// timestamp), the details the row keeps and its image URLs. Paths stay
+/// blank until the write phase places the files.
+pub(crate) fn pack_game_from_row(row: &InstalledGame, server: &str) -> PackGame {
+    let lines = |joined: &str| -> Vec<String> {
+        joined
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let version = rom_file_name_version(&row.rom_file_name)
+        .map(|tag| format_version_tag(&tag))
+        .unwrap_or_default();
+    PackGame {
+        platform: crate::backup::plan::row_platform_slug(row),
+        platform_name: row.platform.clone(),
+        source: PackSource {
+            server: strip_userinfo(server),
+            rom_id: row.rom_id.unwrap_or_default(),
+            igdb_id: None,
+            fs_name: row.rom_file_name.clone(),
+            server_updated_at: row.server_updated_at.clone(),
+            cover_small_path: row.cover_small_path.clone(),
+            cover_large_path: row.cover_large_path.clone(),
+            screenshot_urls: screenshot_urls_from_stored(&row.screenshot_urls),
+            fanart_urls: lines(&row.fanart_urls),
+            logo_url: String::new(),
+        },
+        name: row.title.clone(),
+        summary: row.description.clone(),
+        region: row.regions.clone(),
+        languages: row.languages.clone(),
+        tags: row.tags.clone(),
+        revision: row.revision.clone(),
+        rating: row.rating.clone(),
+        companies: split_list(&row.companies),
+        release_date: iso_date(&row.first_release_date),
+        genres: split_list(&row.genres),
+        game_modes: Vec::new(),
+        franchises: Vec::new(),
+        players: String::new(),
+        version,
+        size: 0,
+        sha1: String::new(),
+        files: Vec::new(),
+        assets: PackAssets::default(),
+        added: pack::now_rfc3339(),
+        extra: Default::default(),
+        installed: None,
+        saves: None,
+    }
+}
+
+/// A game's art from GRID's image cache, for a backup without RomM: the
+/// cover (large, else small), the first fanart and up to
+/// [`MAX_SCREENSHOTS`] screenshots, each copied into staging when it is
+/// cached. An image the row names that isn't cached is a warning, never an
+/// error. No network.
+fn cached_assets(
+    job: &mut BackupJob,
+    row: &InstalledGame,
+) -> Result<Vec<(AssetKind, StagedFile)>, LibraryError> {
+    let Some(dir) = job.art_cache.clone() else {
+        return Ok(Vec::new());
+    };
+    let cache = crate::images::cache::ImageCache::new(dir);
+    let base = job.server.trim_end_matches('/').to_string();
+    let resolve = |raw: &str| crate::images::urls::resolve_image_url(raw, &base);
+    let covers: Vec<String> = [&row.cover_large_path, &row.cover_small_path]
+        .into_iter()
+        .map(|raw| resolve(raw))
+        .filter(|url| !url.is_empty())
+        .collect();
+    let fanart = row
+        .fanart_urls
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(resolve)
+        .filter(|url| !url.is_empty());
+    let mut wanted: Vec<(AssetKind, Vec<String>, String)> = Vec::new();
+    if !covers.is_empty() {
+        wanted.push((AssetKind::Cover, covers, "cover".into()));
+    }
+    if let Some(url) = fanart {
+        wanted.push((AssetKind::Fanart, vec![url], "fanart".into()));
+    }
+    for (index, url) in screenshot_urls_from_stored(&row.screenshot_urls)
+        .iter()
+        .map(|raw| resolve(raw))
+        .filter(|url| !url.is_empty())
+        .take(MAX_SCREENSHOTS)
+        .enumerate()
+    {
+        wanted.push((
+            AssetKind::Screenshot,
+            vec![url],
+            format!("screenshot-{:02}", index + 1),
+        ));
+    }
+    let staging = job.staging.join("assets");
+    fs::create_dir_all(&staging)?;
+    let mut staged = Vec::new();
+    for (kind, urls, stem) in wanted {
+        let found = urls.iter().find_map(|url| cache.cached_path(url));
+        let copied = found.and_then(|src| {
+            let bytes = fs::read(&src).ok().filter(|bytes| !bytes.is_empty())?;
+            let ext = magic_extension(&bytes).unwrap_or("img");
+            let name = format!("{stem}.{ext}");
+            let dest = staging.join(&name);
+            fs::write(&dest, &bytes).ok()?;
+            Some(StagedFile { src: dest, name })
+        });
+        match copied {
+            Some(file) => staged.push((kind, file)),
+            None => job.warnings.push(format!(
+                "The {} of {} isn't on this computer",
+                asset_word(kind),
+                row.title
+            )),
+        }
+    }
+    Ok(staged)
+}
+
 /// Whether the drive's pack carries Windows: its names must then suit a
 /// Windows drive.
 fn pack_for_windows(mount: &Path) -> bool {
@@ -630,15 +912,15 @@ fn wine_prefix_of(
 async fn stage_saves(
     service: &InstallService,
     job: &mut BackupJob,
-    detail: &RomDetail,
+    game: SavesOf<'_>,
     row: Option<&InstalledGame>,
     home: Option<&Path>,
 ) {
-    if !is_windows_platform(&detail.platform_slug, &detail.platform_name) {
+    if !is_windows_platform(game.platform_slug, game.platform_name) {
         return;
     }
     let config = Config::load(&service.config_path).unwrap_or_default();
-    let title = row.map_or(detail.name.as_str(), |row| row.title.as_str());
+    let title = row.map_or(game.name, |row| row.title.as_str());
     let key = manual_paths_key_for_title(title);
     let list = |map: &std::collections::BTreeMap<String, Vec<String>>| {
         map.get(&key).cloned().unwrap_or_default()
@@ -656,7 +938,7 @@ async fn stage_saves(
     }
     let mut tree = None;
     if let Some(prefix) = prefix.filter(|prefix| prefix.path.is_dir()) {
-        if service.game_running(detail.id) {
+        if service.game_running(game.rom_id) {
             job.warnings.push(SAVES_RUNNING.to_string());
         } else {
             let scanned = folders.clone();
@@ -674,6 +956,27 @@ async fn stage_saves(
         }
     }
     job.saves = Some(StagedSaves { folders, tree });
+}
+
+/// The game [`stage_saves`] reads the saves of: from the server's detail,
+/// or, without RomM, from its registry row.
+#[derive(Clone, Copy)]
+struct SavesOf<'a> {
+    rom_id: i64,
+    name: &'a str,
+    platform_slug: &'a str,
+    platform_name: &'a str,
+}
+
+impl<'a> SavesOf<'a> {
+    fn detail(detail: &'a RomDetail) -> Self {
+        Self {
+            rom_id: detail.id,
+            name: &detail.name,
+            platform_slug: &detail.platform_slug,
+            platform_name: &detail.platform_name,
+        }
+    }
 }
 
 /// The warning for saves left in a prefix because the game is running.
@@ -1062,7 +1365,14 @@ impl InstallService {
             ..Default::default()
         };
         for (item, space) in rows.into_iter().zip(spaces) {
-            if self.admit_backup_item(None, drive.clone(), item, &library, batch, Some(space))? {
+            if self.admit_backup_item(
+                &BackupOrigin::default(),
+                drive.clone(),
+                item,
+                &library,
+                batch,
+                Some(space),
+            )? {
                 queued.games += 1;
             }
         }
@@ -2279,6 +2589,55 @@ fn pack_error(error: PackError, drive: &DriveTarget) -> LibraryError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pack_entry_from_a_row_carries_its_identity_and_details() {
+        let row = InstalledGame {
+            title: "Ember Run".into(),
+            platform: "Nintendo 64".into(),
+            platform_slug: "n64".into(),
+            rom_id: Some(77),
+            rom_file_name: "Ember Run (v1.02).zip".into(),
+            server_updated_at: "2026-01-01T00:00:00Z".into(),
+            description: "A run through embers.".into(),
+            regions: "USA".into(),
+            languages: "En".into(),
+            tags: "Rev 1".into(),
+            revision: "1".into(),
+            rating: "88".into(),
+            companies: "Ember Co, Ash Ltd".into(),
+            first_release_date: "1234567890".into(),
+            genres: "Action, Racing".into(),
+            cover_small_path: "https://romm.lan/assets/small.png".into(),
+            cover_large_path: "https://romm.lan/assets/big.png".into(),
+            screenshot_urls: "https://romm.lan/s1.png\nhttps://romm.lan/s2.png".into(),
+            fanart_urls: "https://romm.lan/f1.jpg\n".into(),
+            ..Default::default()
+        };
+        let game = pack_game_from_row(&row, "https://me:pw@romm.lan");
+        assert_eq!(game.source.server, "https://romm.lan");
+        assert_eq!(game.source.rom_id, 77);
+        assert_eq!(game.source.fs_name, "Ember Run (v1.02).zip");
+        assert_eq!(game.source.server_updated_at, "2026-01-01T00:00:00Z");
+        assert_eq!(game.source.igdb_id, None);
+        assert_eq!(
+            game.source.cover_large_path,
+            "https://romm.lan/assets/big.png"
+        );
+        assert_eq!(game.source.screenshot_urls.len(), 2);
+        assert_eq!(game.source.fanart_urls, vec!["https://romm.lan/f1.jpg"]);
+        assert_eq!(game.platform, "n64");
+        assert_eq!(game.platform_name, "Nintendo 64");
+        assert_eq!(game.name, "Ember Run");
+        assert_eq!(game.summary, "A run through embers.");
+        assert_eq!(game.region, "USA");
+        assert_eq!(game.companies, vec!["Ember Co", "Ash Ltd"]);
+        assert_eq!(game.genres, vec!["Action", "Racing"]);
+        assert_eq!(game.release_date, "2009-02-13");
+        assert_eq!(game.version, "v1.2");
+        assert!(game.files.is_empty());
+        assert!(game.installed.is_none());
+    }
 
     #[test]
     fn release_dates_are_iso_days() {

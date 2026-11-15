@@ -18,6 +18,7 @@ use crate::launch::profiles::EmulatorProfile;
 use crate::launch::selection::NO_EMULATOR;
 use crate::launch::setup::recommendations;
 use crate::library::platforms::{is_native_platform, is_windows_platform};
+use crate::library::registry::InstalledGame;
 use crate::stores::GameKey;
 
 /// A game named in a plan without being written (already on the drive, or too
@@ -114,6 +115,26 @@ pub struct BackupPlan {
     /// The part of `bytes_to_write` downloaded from the server.
     #[serde(default)]
     pub download_bytes: u64,
+    /// Planned with RomM not connected ([`mark_without_romm`]): every game
+    /// comes from this computer, emulators only from GRID's catalog, and no
+    /// firmware goes.
+    #[serde(default)]
+    pub without_romm: bool,
+    /// Requested games that can't be backed up without RomM, with why.
+    #[serde(default)]
+    pub unavailable: Vec<PlanUnavailable>,
+}
+
+/// A requested game a backup without RomM leaves out: it is not eligible
+/// to be copied from this computer, and it can't be downloaded either.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PlanUnavailable {
+    pub rom_id: i64,
+    pub name: String,
+    pub platform_name: String,
+    /// Why it can't be copied from this computer ("Its files weren't found
+    /// on this computer").
+    pub reason: String,
 }
 
 /// Where a game in a backup comes from.
@@ -554,6 +575,10 @@ pub struct PlanGame {
     /// The server platform name.
     pub platform_name: String,
     pub platform_slug: String,
+    /// The server its pack identity names, when it differs per game (a
+    /// backup without RomM: the row's own server). Empty means
+    /// [`PlanInput::server`].
+    pub server: String,
     /// The game's size on the server (`fs_size_bytes`).
     pub size: u64,
     /// The largest top-level game file (`largest_file_bytes`); `None` when
@@ -604,6 +629,9 @@ pub struct GameItem {
     pub rom_id: i64,
     pub name: String,
     pub platform_name: String,
+    /// The server the pack entry names; empty means the backup's own
+    /// (the live session's). Set for a backup without RomM.
+    pub server: String,
     /// Copied from this computer's install instead of downloaded.
     pub local: bool,
     /// What it writes to the drive: the local archive's size, or the
@@ -723,7 +751,12 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
             rom_id: game.rom_id,
             name: game.name.clone(),
         };
-        if input.pack.has_game(input.server, game.rom_id) {
+        let server = if game.server.is_empty() {
+            input.server
+        } else {
+            game.server.as_str()
+        };
+        if input.pack.has_game(server, game.rom_id) {
             skipped.push(entry);
             continue;
         }
@@ -791,6 +824,7 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
             rom_id: game.rom_id,
             name: game.name.clone(),
             platform_name: game.platform_name.clone(),
+            server: game.server.clone(),
             local: archive.is_some(),
             bytes: archive.unwrap_or(game.size),
         });
@@ -998,9 +1032,151 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
             needs_choice,
             local_bytes,
             download_bytes: bytes.saturating_sub(local_bytes),
+            without_romm: false,
+            unavailable: Vec::new(),
         },
         items,
     }
+}
+
+// --- without RomM (user decisions 8 and 12) ------------------------------------
+
+/// Why a game can't be backed up without RomM when GRID can't tell which
+/// server its pack entry should name.
+pub fn no_server_reason(title: &str) -> String {
+    format!("GRID doesn't know which RomM server {title} came from")
+}
+
+/// The note on an emulator whose build is hosted on the RomM server: a
+/// backup without RomM skips it.
+pub fn needs_romm_note(name: &str) -> String {
+    format!("{name} needs RomM")
+}
+
+/// `firmware_reason` of a plan made without RomM.
+pub const FIRMWARE_NEEDS_ROMM: &str = "Needs RomM";
+
+/// The RomM platform slug of an installed row: its recorded slug, else the
+/// slug the platform registry knows for its name, else its name's
+/// lowercase alphanumeric run.
+pub fn row_platform_slug(row: &InstalledGame) -> String {
+    let recorded = row.platform_slug.trim();
+    if !recorded.is_empty() {
+        return recorded.to_string();
+    }
+    let known = crate::launch::platform_slugs::slug_for_platform(&row.platform);
+    if !known.is_empty() {
+        return known;
+    }
+    row.platform
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect()
+}
+
+/// The games of a backup without RomM, from the installed rows named by
+/// `rom_ids`. Pure. `servers` holds each row's pack identity server
+/// ([`super::local::identity_server`]) and `states` its local state judged
+/// against that server.
+/// - A rom id with no installed RomM row is left out (nothing to show).
+/// - A row with no identity server, or whose install is not eligible to be
+///   copied, is [`PlanUnavailable`] with the reason.
+/// - An eligible row is a [`PlanGame`] sized by its archive, with its own
+///   server; with no server to compare against, it is never out of date.
+pub fn plan_games_local(
+    rows: &[InstalledGame],
+    rom_ids: &[i64],
+    servers: &HashMap<i64, String>,
+    states: &HashMap<i64, LocalState>,
+) -> (Vec<PlanGame>, Vec<PlanUnavailable>) {
+    let mut games: Vec<PlanGame> = Vec::new();
+    let mut unavailable: Vec<PlanUnavailable> = Vec::new();
+    for &rom_id in rom_ids {
+        if games.iter().any(|g| g.rom_id == rom_id)
+            || unavailable.iter().any(|u| u.rom_id == rom_id)
+        {
+            continue;
+        }
+        let Some(row) = rows
+            .iter()
+            .find(|row| !row.is_store() && row.rom_id == Some(rom_id))
+        else {
+            continue;
+        };
+        let refuse = |reason: String| PlanUnavailable {
+            rom_id,
+            name: row.title.clone(),
+            platform_name: row.platform.clone(),
+            reason,
+        };
+        let Some(server) = servers.get(&rom_id).filter(|s| !s.is_empty()) else {
+            unavailable.push(refuse(no_server_reason(&row.title)));
+            continue;
+        };
+        match states.get(&rom_id) {
+            Some(LocalState::Eligible {
+                layout,
+                archive_bytes,
+                ..
+            }) => games.push(PlanGame {
+                rom_id,
+                name: row.title.clone(),
+                platform_label: row.platform.clone(),
+                platform_name: row.platform.clone(),
+                platform_slug: row_platform_slug(row),
+                server: server.clone(),
+                size: *archive_bytes,
+                largest_file: None,
+                local: LocalState::Eligible {
+                    layout: *layout,
+                    archive_bytes: *archive_bytes,
+                    outdated: None,
+                },
+            }),
+            Some(LocalState::Ineligible { reason }) => unavailable.push(refuse(reason.clone())),
+            Some(LocalState::NotInstalled) | None => {
+                unavailable.push(refuse(super::local::REASON_MISSING.to_string()))
+            }
+        }
+    }
+    (games, unavailable)
+}
+
+/// The emulator choices of a backup without RomM: a build hosted on the
+/// RomM server can't be fetched, so it becomes a refusal noted "<name>
+/// needs RomM"; catalog and manual emulators stay. Pure.
+pub fn catalog_only(choices: Vec<(String, EmulatorChoice)>) -> Vec<(String, EmulatorChoice)> {
+    choices
+        .into_iter()
+        .map(|(slug, choice)| match choice {
+            EmulatorChoice::Pick(pick) if matches!(pick.source, EmulatorSource::Server { .. }) => {
+                let reason = needs_romm_note(&pick.name);
+                (
+                    slug,
+                    EmulatorChoice::Refused {
+                        name: pick.name,
+                        reason,
+                    },
+                )
+            }
+            other => (slug, other),
+        })
+        .collect()
+}
+
+/// Marks `planned` as made without RomM: the unavailable games are listed,
+/// and no firmware goes (it comes only from the server). Pure.
+pub fn mark_without_romm(planned: &mut Planned, unavailable: Vec<PlanUnavailable>) {
+    let bytes: u64 = planned.items.firmware.iter().map(|f| f.bytes).sum();
+    planned.items.firmware.clear();
+    let plan = &mut planned.plan;
+    plan.bytes_to_write = plan.bytes_to_write.saturating_sub(bytes);
+    plan.download_bytes = plan.download_bytes.saturating_sub(bytes);
+    plan.firmware.clear();
+    plan.firmware_reason = FIRMWARE_NEEDS_ROMM.to_string();
+    plan.without_romm = true;
+    plan.unavailable = unavailable;
 }
 
 /// "Linux" or "Windows".
@@ -1178,6 +1354,7 @@ mod tests {
             platform_label: slug.to_uppercase(),
             platform_name: slug.to_uppercase(),
             platform_slug: slug.to_string(),
+            server: String::new(),
             size,
             largest_file: Some(largest),
             local: LocalState::NotInstalled,
@@ -1980,5 +2157,192 @@ mod tests {
             choose_emulator(&config, &[], "Windows", "win", "Windows"),
             EmulatorChoice::None
         );
+    }
+
+    // --- without RomM ------------------------------------------------------
+
+    fn row(rom_id: Option<i64>, title: &str, slug: &str) -> InstalledGame {
+        InstalledGame {
+            title: title.to_string(),
+            platform: "PlayStation".to_string(),
+            platform_slug: slug.to_string(),
+            rom_id,
+            ..Default::default()
+        }
+    }
+
+    fn server_pick(name: &str, slug: &str) -> EmulatorPick {
+        EmulatorPick {
+            source: EmulatorSource::Server {
+                source_id: format!("romm:{slug}/{}", name.to_lowercase()),
+            },
+            ..pick(name, slug)
+        }
+    }
+
+    #[test]
+    fn plan_games_local_takes_eligible_rows_and_lists_the_rest_with_why() {
+        let rows = vec![
+            row(Some(1), "One", "psx"),
+            row(Some(2), "Two", "psx"),
+            row(Some(3), "Three", ""),
+            row(None, "Unlinked", "psx"),
+        ];
+        let servers: HashMap<i64, String> =
+            [(1, SERVER.to_string()), (2, SERVER.to_string())].into();
+        let states: HashMap<i64, LocalState> = [
+            (1, eligible(4096)),
+            (
+                2,
+                LocalState::Ineligible {
+                    reason: crate::backup::local::REASON_OUTSIDE.into(),
+                },
+            ),
+        ]
+        .into();
+        // 9 has no row at all; 1 is asked for twice.
+        let (games, unavailable) = plan_games_local(&rows, &[1, 2, 3, 9, 1], &servers, &states);
+        assert_eq!(games.len(), 1);
+        let one = &games[0];
+        assert_eq!(one.rom_id, 1);
+        assert_eq!(one.name, "One");
+        assert_eq!(one.platform_slug, "psx");
+        assert_eq!(one.platform_label, "PlayStation");
+        assert_eq!(one.server, SERVER);
+        assert_eq!(one.size, 4096);
+        assert_eq!(one.largest_file, None);
+        assert_eq!(one.local, eligible(4096));
+        assert_eq!(
+            unavailable,
+            vec![
+                PlanUnavailable {
+                    rom_id: 2,
+                    name: "Two".into(),
+                    platform_name: "PlayStation".into(),
+                    reason: "Installed outside the library folder".into(),
+                },
+                PlanUnavailable {
+                    rom_id: 3,
+                    name: "Three".into(),
+                    platform_name: "PlayStation".into(),
+                    reason: "GRID doesn't know which RomM server Three came from".into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_row_with_no_slug_takes_its_names_token() {
+        assert_eq!(row_platform_slug(&row(Some(1), "One", "")), "playstation");
+        assert_eq!(row_platform_slug(&row(Some(1), "One", " psx ")), "psx");
+    }
+
+    #[test]
+    fn catalog_only_turns_server_builds_into_needs_romm() {
+        let choices = catalog_only(vec![
+            (
+                "psx".into(),
+                EmulatorChoice::Pick(pick("DuckStation", "psx")),
+            ),
+            (
+                "ps2".into(),
+                EmulatorChoice::Pick(server_pick("PCSX2", "ps2")),
+            ),
+            ("snes".into(), EmulatorChoice::None),
+        ]);
+        assert_eq!(
+            choices,
+            vec![
+                (
+                    "psx".into(),
+                    EmulatorChoice::Pick(pick("DuckStation", "psx"))
+                ),
+                (
+                    "ps2".into(),
+                    EmulatorChoice::Refused {
+                        name: "PCSX2".into(),
+                        reason: "PCSX2 needs RomM".into()
+                    }
+                ),
+                ("snes".into(), EmulatorChoice::None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_plan_without_romm_keeps_catalog_emulators_and_lists_server_builds_and_firmware() {
+        let mut f = Fixture::new();
+        let mut local = game(1, "psx", 100, 60);
+        local.server = "https://other.lan".into();
+        local.local = eligible(700);
+        let mut ps2 = game(2, "ps2", 100, 60);
+        ps2.server = SERVER.into();
+        ps2.local = eligible(300);
+        f.games = vec![local, ps2];
+        f.emulators = catalog_only(vec![
+            (
+                "psx".into(),
+                EmulatorChoice::Pick(pick("DuckStation", "psx")),
+            ),
+            (
+                "ps2".into(),
+                EmulatorChoice::Pick(server_pick("PCSX2", "ps2")),
+            ),
+        ]);
+        f.sizes.insert(("DuckStation".into(), PackOs::Linux), 10);
+        f.sizes.insert(("DuckStation".into(), PackOs::Windows), 20);
+        let mut planned = f.run();
+        let unavailable = vec![PlanUnavailable {
+            rom_id: 3,
+            name: "Three".into(),
+            platform_name: "PSX".into(),
+            reason: "Its files weren't found on this computer".into(),
+        }];
+        mark_without_romm(&mut planned, unavailable.clone());
+        let plan = &planned.plan;
+        assert!(plan.without_romm);
+        assert_eq!(plan.unavailable, unavailable);
+        assert_eq!(plan.games_to_write, vec![1, 2]);
+        assert!(plan.sources.iter().all(|s| s.source == SourceChoice::Local));
+        // Each game keeps its own server.
+        assert_eq!(planned.items.games[0].server, "https://other.lan");
+        assert_eq!(planned.items.games[1].server, SERVER);
+        // DuckStation still goes; PCSX2 is noted, not written.
+        assert_eq!(planned.items.emulators.len(), 2);
+        assert!(planned
+            .items
+            .emulators
+            .iter()
+            .all(|e| e.pick.name == "DuckStation"));
+        let pcsx2 = plan.emulators.iter().find(|e| e.name == "PCSX2").unwrap();
+        assert!(pcsx2.os.is_empty());
+        assert_eq!(pcsx2.note, "PCSX2 needs RomM");
+        // The fixture's PSX firmware is dropped, bytes and all.
+        assert!(plan.firmware.is_empty());
+        assert!(planned.items.firmware.is_empty());
+        assert_eq!(plan.firmware_reason, FIRMWARE_NEEDS_ROMM);
+        assert_eq!(plan.bytes_to_write, 700 + 300 + 30);
+        assert_eq!(plan.download_bytes, 30);
+    }
+
+    #[test]
+    fn a_game_on_the_drive_under_its_own_server_is_skipped() {
+        let mut f = Fixture::new();
+        f.pack.games.push(
+            serde_json::from_value(serde_json::json!({
+                "platform": "psx", "platform_name": "PSX",
+                "source": { "server": "https://other.lan/", "rom_id": 1 },
+                "name": "Game 1", "size": 1, "files": [], "added": "2026-01-01T00:00:00Z"
+            }))
+            .unwrap(),
+        );
+        let mut mine = game(1, "psx", 100, 60);
+        mine.server = "https://other.lan".into();
+        // The same rom id from the live server is another game.
+        let theirs = game(1, "psx", 100, 60);
+        f.games = vec![mine];
+        assert_eq!(f.run().plan.skipped.len(), 1);
+        f.games = vec![theirs];
+        assert!(f.run().plan.skipped.is_empty());
     }
 }
