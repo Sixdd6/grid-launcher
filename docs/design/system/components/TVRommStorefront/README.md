@@ -1,6 +1,6 @@
 TV mode with RomM as one optional storefront beside Amazon Games, Epic Games, GOG and Steam. It is the TVStores card (TV mode plus the game stores) with `tvromm.js` / `tvromm.css` on top, and it opens on Library › RomM › Discover with RomM connected. Plan and decisions: `docs/romm-storefront-plan.md` (Step D2; user decisions 1–13). Everything not listed here is as in the TVMode and TVStores cards.
 
-**Status: proposed, not built.** It needs sign-off with the desktop card (RommStorefront, Step D1) before Step 1 starts.
+**Status: signed off, not built.** The user approved it with the desktop card (RommStorefront, Step D1) on 2026-11-15, with decisions 14–17: the platform count is RomM's games only, two cover tags (NOT LINKED, NOT ON ROMM), a never-connected GRID opens on All games, and where the two cards' words differed, desktop's words win (this card now uses them; `romm/words.ts` is shared).
 
 TV rules that hold everywhere below:
 - TV flows never send the player to desktop mode. A store's login window, RomM's web page ("Open in browser") and an emulator opened from its System page open over TV mode.
@@ -30,7 +30,7 @@ Click inside the card, then use the keyboard as a controller (TV mode's README h
 
 ## Library › RomM group
 
-The rail: All games, Recent, Updates, then **Backup drives**, then the storefront groups in name order: **Amazon Games, Epic Games, GOG, RomM, Steam** (`STOREFRONT_ORDER`). **The Platforms folder is gone**: platform rows live only in the RomM group. The RomM group is a folder like a store's: the RomM mark (a monogram tile "R", never a logo) and "RomM"; A opens and closes it.
+The rail: All games, Recent, Updates, then **Backup drives**, then the storefront groups in name order: **Amazon Games, Epic Games, GOG, RomM, Steam** (`STOREFRONT_ORDER`). **The Platforms folder is gone**: platform rows live only in the RomM group. The RomM group is a folder like a store's: the RomM mark (a monogram tile "R" in desktop's RomM colour, never a logo) and "RomM"; A opens and closes it. Its flags read, for screen readers, "Connecting to RomM", "Can't reach RomM", "RomM sign-in expired" and "Not connected", as on desktop.
 
 | RomM | Heading flag | Rows |
 | --- | --- | --- |
@@ -43,33 +43,35 @@ The rail: All games, Recent, Updates, then **Backup drives**, then the storefron
 
 - Installed RomM games stay mixed into All games, Recent and Updates in every state, with their platform tag.
 - **Selection falls back:** when RomM drops while Discover or a platform is open, the selection and focus move to **RomM › Installed**; when the group goes, to **All games**. A redraw never moves focus anywhere else.
-- **Platform count (decision for D1 to match):** the platform row shows the RomM game count; installed games carry the installed dot on their covers.
+- **Platform count (decision 14):** the platform row shows RomM's game count only. Installed games RomM doesn't have show in the platform's grid but are not counted. Installed games carry the installed dot on their covers.
 
 ### RomM › Installed
 
 - Header, two rows: "**RomM** · Installed" with the mark, and "12 games" ("3 of 12 games match" while a search narrows it). Then the chips: "Signed in as **sam** · romm.home.lan" (connected) or "Not connected"; **Backup all 12…** (Backups work without RomM, decision 8); RT Select; LT Sort; Y Search.
 - **The one-line banner**, between the two header rows, focusable (Up from the grid reaches it):
-  - Can't reach: "**Can't reach RomM** · romm.home.lan isn't answering. Installed games still play." with **Retry** (A "Retry"). While it runs: "Retrying…", disabled ("GRID is trying RomM now.").
-  - Sign-in expired: "**RomM sign-in expired** · Installed games still play." with **Sign in again…** (A "Sign in again"), which opens the sign-in page.
+  - Can't reach: "**Can't reach RomM** · romm.home.lan didn't answer. Installed games still play." with **Retry** (A "Retry"). While it runs: "Retrying…", disabled ("GRID is trying RomM now.").
+  - Sign-in expired: "**RomM sign-in expired** · Sign in again to browse, install and sync saves. Installed games still play." with **Sign in again…** (A "Sign in again"), which opens the sign-in page.
   - Not connected: no banner (the **off** flag says it, as for a store).
 - Grid: the installed RomM rows with the Library's sort (LT) and search (Y, "Search RomM · Installed"); covers carry platform tags. RT is Select (Game backups). Hints: Y Search, LT Sort, RT Select.
-- Empty: "No RomM games installed" + "Install games from Discover or a platform under RomM." (connected), or the needs-RomM line (other states: "Connect RomM in Settings › Game stores." / "Your RomM sign-in expired. Sign in again in Settings › Game stores." / "Can't reach RomM right now. GRID tries again when you press Retry.").
+- Empty: "No RomM games installed yet" + "Install games from Discover or a platform under it." (connected), or the needs-RomM line (other states: "Connect RomM in Settings › Game stores." / "Your RomM sign-in expired. Sign in again in Settings › Game stores." / "Can't reach RomM right now. GRID tries again when you press Retry."; TV keeps these pointers because the empty grid has no button). Search with no match: "No installed RomM games match "…"".
 
 ### RomM › Discover
 
 - What Server › Discover showed, unchanged (hero and shelves; "Recently added · on RomM"). Arriving on the Library while Discover is selected focuses Discover's content (the cover last focused there, else the first), not the rail. Y searches everything. No RT.
-- **While the startup probe runs:** a panel "Connecting to RomM…" with a spinner, "romm.home.lan · Discover shows here when RomM answers. Installed games already play." and skeleton covers. No hints but Menu. If RomM answers, Discover fills in; if not, the selection falls back to Installed with the banner and the card "Can't reach RomM" / "romm.home.lan isn't answering. Installed games still play." (View "Retry").
+- **While the startup probe runs:** a panel "Connecting to romm.home.lan…" with a spinner, "Discover and the platforms show when RomM answers. Installed games play now." and skeleton covers. No hints but Menu. If RomM answers, Discover fills in; if not, the selection falls back to Installed with the banner and the card "Can't reach RomM" / "romm.home.lan didn't answer. Installed games still play." (View "Retry").
 
 ### RomM › a platform
 
-- Server's platform view, moved: header "PlayStation" and "3 games · 2 installed" ("2 of 3 games match · 2 installed"); the emulator chip ("Emulator: **DuckStation**", or "No default emulator" in warning) and the firmware chip ("Firmware: 3 of 4 files", "Firmware: 2 files needed" in warning, "Firmware: 3 files · installed", or a plain "No firmware needed"); A on either opens the system's page ("Open in Systems"). Windows and Linux have no chips. Then **Backup all 3…**, RT Select, Y Search.
-- The grid merges RomM's games with the installed rows: installed covers show the installed dot (X Play), the rest X Install. An installed row not linked to a RomM game shows here with a **NOT LINKED** tag.
+- Server's platform view, moved: header "PlayStation" and "3 games on RomM · 1 installed" (Sega Saturn: "2 games on RomM · 1 installed · plus 1 only on this computer"; while a search narrows it, "2 of 3 games match"). The first number is the rail row's count; installed games RomM doesn't have follow a "plus" and are not counted in it, as on desktop; the emulator chip ("Emulator: **DuckStation**", or "No default emulator" in warning) and the firmware chip ("Firmware: 3 of 4 files", "Firmware: 2 files needed" in warning, "Firmware: 3 files · installed", or a plain "No firmware needed"); A on either opens the system's page ("Open in Systems"). Windows and Linux have no chips. Then **Backup all 3…**, RT Select, Y Search.
+- The grid merges RomM's games with the installed rows: installed covers show the installed dot (X Play), the rest X Install. Installed rows RomM doesn't have show here with a cover tag (decision 15), and never in Discover:
+  - **NOT LINKED**: no RomM link (Brass Comet, Sega Saturn).
+  - **NOT ON ROMM**: from another RomM server, or removed from this one (Sky Lantern, Super Nintendo). Its game page's left column starts "From another RomM server (romm.old.lan) · not on romm.home.lan".
 
 ## Settings
 
 - **Rail (alphabetical):** Appearance, Backup drives, Cloud saves, **Game stores**, Library, RetroAchievements, Systems, TV mode, Updates. **Connection is gone**; Stores is renamed **Game stores** and moves to its place by name.
 - **Game stores:** "Each one you connect gets a group in the Library, in this order." then one row per storefront in name order, RomM between GOG and Steam:
-  - RomM row: the mark, "RomM", the line "sam · romm.home.lan" ("romm.home.lan · not signed in", or "Not signed in" when no server was ever stored) and the pill **Connected** / **Can't reach** / **Sign-in expired** / **Not connected** (or a spinner with "Connecting…" / "Reconnecting…"). A opens the RomM page.
+  - RomM row: the mark, "RomM", the line "Signed in as sam · romm.home.lan" ("Not signed in · romm.home.lan", or "Your own game server" when no server was ever stored) and the pill **Connected** / **Can't reach** / **Sign-in expired** / **Not connected** (or a spinner with "Connecting…", also while it reconnects). A opens the RomM page.
 
 ### The RomM page
 
@@ -77,49 +79,49 @@ A page of rows (`rowsPage`), title "RomM" with the mark; the sub line names the 
 
 | State | Sub line | Note | Rows | Main button (Start) |
 | --- | --- | --- | --- | --- |
-| Connected | "Signed in as **sam** on romm.home.lan" | — | Server, User, Sign-in ("API token · in the system keyring"), Installed RomM games, **Edit sign-in…**, Show in Library, Open in browser, **Disconnect…** | none |
-| Can't reach | "Signed in as **sam** · can't reach romm.home.lan" | warning: "**Can't reach RomM.** romm.home.lan didn't answer: connection timed out. Installed RomM games still play; saves wait on this computer." | as connected | **Reconnect** → "Reconnecting…" (disabled: "GRID is trying RomM now.") |
-| Sign-in expired | "Sign-in expired · romm.home.lan" | warning: "**Your RomM sign-in expired.** Sign in again to browse and install, sync cloud saves and get updates. Installed RomM games still play." | as connected | **Sign in again…** |
-| Not connected | "Not signed in" | "Connect your RomM server to browse and install its games in the Library, sync emulator saves and install firmware from it. GRID keeps the sign-in in the system keyring." | Server and User (when one is stored), Installed RomM games, Show in Library (when any), Open in browser (when a server is stored) | **Connect RomM…** |
+| Connected | "Signed in as **sam** · romm.home.lan" | — | Server, User, Sign-in ("API token · kept in the OS keyring"), Installed RomM games, **Edit sign-in…**, Show in Library, Open in browser, **Disconnect…** | none |
+| Can't reach | "Signed in as **sam** · can't reach romm.home.lan" | warning: "**Can't reach RomM.** romm.home.lan: connection refused. Installed RomM games still play; browsing, installs, cloud saves and firmware downloads wait until it's back." | as connected | **Reconnect** → "Reconnecting…" (disabled: "GRID is trying RomM now.") |
+| Sign-in expired | "Sign-in expired · romm.home.lan" | warning: "**Your RomM sign-in expired.** Sign in again to browse, install and sync saves. Installed games still play." | as connected | **Sign in again…** |
+| Not connected | "Not signed in · romm.home.lan" ("Your own game server" when none is stored) | "Connect your RomM server to browse its games in the Library, install them with an emulator, and sync their saves and firmware. The 12 RomM games installed here still play." (the last sentence only while some are installed) | Server and User (when one is stored), Installed RomM games, Show in Library (when any), Open in browser (when a server is stored) | **Connect RomM…** |
 
 - **Edit sign-in…** ("Server, user and token") opens the sign-in page filled in.
 - **Open in browser** ("Opens romm.home.lan in your web browser, over TV mode"): card "Opening romm.home.lan in your browser…" / "It opens over TV mode. Close it to come back."
-- **Disconnect…** ("Installed RomM games stay", danger) asks "**Disconnect RomM?**" / "GRID deletes your RomM sign-in from this computer. Installed RomM games stay and still play. Cloud saves, firmware downloads and updates stop." with Cancel (focused) and **Disconnect**. Then card "RomM disconnected" / "Its sign-in was deleted. Installed RomM games stay." GRID stays where it is; the page shows Not connected (server and user kept for the next connect), and the Library group shows Installed only with **off** while RomM games remain.
-- **Reconnect** cards: "Reconnecting to RomM…" / "romm.home.lan", then "Connected to RomM as sam" / "romm.home.lan", or "Can't reach RomM" / "romm.home.lan didn't answer: connection timed out", or (a 401) "RomM sign-in expired" / "Installed games still play. Sign in again to install and sync." (View "Sign in again…").
+- **Disconnect…** ("Installed RomM games stay", danger) asks "**Disconnect RomM?**" / "GRID deletes your RomM sign-in from the OS keyring and stays open. Installed RomM games stay and still play. Cloud saves, firmware downloads and updates stop." with Cancel (focused) and **Disconnect**. Then card "RomM disconnected" / "Installed RomM games stay and still play." GRID stays where it is; the page shows Not connected (server and user kept for the next connect), and the Library group shows Installed only with **off** while RomM games remain.
+- **Reconnect** cards: "Reconnecting to RomM…" / "romm.home.lan", then "Connected to RomM as sam" / "romm.home.lan", or "Can't reach RomM" / "romm.home.lan didn't answer. Installed games still play.", or (a 401) "RomM sign-in expired" / "Sign in again to browse, install and sync saves. Installed games still play." (View "Sign in again…").
 
 ### The RomM sign-in page (the TV RomM form)
 
 Opened by Connect RomM…, Sign in again…, Edit sign-in…, the Installed banner, the needs-RomM panels and the welcome's RomM row. A page with the RomM mark.
 
-- Titles: "Connect RomM" / "Sign in to RomM again" / "Edit RomM sign-in". Sub lines: "Sign in to your RomM server to browse and install its games, sync saves and install firmware." / "Your sign-in expired. Enter a new API token for sam." / "Change the server, the user or the token. GRID signs in again when you save."
+- Titles: "Connect to RomM" / "Sign in to RomM again" / "Edit RomM sign-in". Sub lines: "GRID browses your RomM server, installs its games with an emulator and syncs their saves." / "RomM no longer accepts GRID's token for sam. Enter a new one." / "Change the server or the sign-in. Installed RomM games stay; GRID links them to the server's games when it connects."
 - Fields (A "Edit" opens the on-screen keyboard): **Server** ("https://…"; keyboard "RomM server address", URL kind), **Sign in with** (a list: **API token** "Recommended" / Username and password), then **API token** ("Paste or type your token"; masked, opens empty) or **Username** ("Your RomM user") and **Password** ("Your password"; masked). Server and user are filled in from the stored values; the secret never is. Sign in again opens on the token field.
-- Footer: "GRID keeps the token (password) in the system keyring and never shows it again." and **Connect** (Edit: **Save**) with the Menu glyph; Start presses it. Disabled until filled; A or Start then says "Enter your RomM server address first." / "Enter your RomM username first." / "Enter your API token first." ("password").
+- Footer: "Make a token in RomM under your user settings. GRID keeps it in the OS keyring, never in a file." (password: "GRID keeps your password in the OS keyring, never in a file.") and **Connect** (Edit: **Save**) with the Menu glyph; Start presses it. Disabled until filled; A or Start then says "Enter your RomM server address first." / "Enter your RomM username first." / "Enter your API token first." ("password").
 - **View pastes** the clipboard into the focused field: card "Pasted from the clipboard", or "Nothing to paste" / "Select the Server or token field first.". Hints: A Edit, View Paste, Menu Connect, B Back.
 - While signing in: "Connecting…" with a spinner, disabled ("GRID is signing in to RomM.").
-- Errors, in `danger` above the fields, and focus moves to the field to fix: "RomM rejected this API token. Check it, or make a new one in RomM." (token emptied; focus on the token) / "RomM rejected this username or password." / "Can't reach romm.home.lan: connection refused. Check the address and that RomM is running." (focus on Server).
+- Errors, in `danger` above the fields, and focus moves to the field to fix: "RomM rejected this token (401). Check it, or make a new one." (token emptied; focus on the token) / "RomM rejected the username or password (401)." / "Couldn't reach https://romm.home.lan. Check the address, and that the server is running." (focus on Server).
 - Success: card "Connected to RomM as sam" / "romm.home.lan". From the RomM page: back to the page, or **Choose your systems** when setup is needed (decision 9). From the welcome: back to the welcome, whose RomM row now reads Connected.
 
 ### Cloud saves and RetroAchievements: needs RomM
 
-While RomM isn't connected, each pane starts with a panel under its heading (warning-edged unless RomM is simply not connected). Its button is focused first.
+While RomM isn't connected, each pane starts with a panel under its heading (warning-edged unless RomM is simply not connected). Its button is focused first. The words are desktop's: a heading, then why, then what still works.
 
-| Pane | Not connected | Sign-in expired | Can't reach |
-| --- | --- | --- | --- |
-| Cloud saves | "**Cloud saves need RomM**" · "GRID keeps your emulator saves on your RomM server. Connect RomM to sync them; these settings apply once it's connected. Store games sync with their own store." | "**RomM sign-in expired**" · "Saves stay on this computer until you sign in again. Nothing is lost." | "**Can't reach RomM**" · "romm.home.lan isn't answering. Saves stay on this computer and upload when RomM is back." |
-| RetroAchievements | "**RomM isn't connected**" · "Your login still goes to the emulators that support it. Achievements on game pages need RomM." | "**RomM sign-in expired**" · "Your login still goes to the emulators. Achievements on game pages show again once you sign in." | "**Can't reach RomM**" · "Your login still goes to the emulators. Achievements on game pages show again when RomM is back." |
-| Button | **Set up RomM…** (opens the RomM page) | **Sign in again…** | **Retry** ("Retrying…" while it runs) |
+- **Cloud saves:** "**Cloud saves need RomM**" · "<why> GRID keeps your emulator saves and states on your RomM server. These settings apply when it's connected. GOG and Epic games sync with their own store's cloud."
+- **RetroAchievements:** "**Achievement progress needs RomM**" · "<why> Details › Achievements shows your progress from RomM. Signing in here still turns on achievements in RetroArch, DuckStation and Dolphin."
+- `<why>`: "RomM isn't connected." / "GRID can't reach romm.home.lan right now." / "Your RomM sign-in expired." / "GRID is still connecting to romm.home.lan."
+- Button (TV's own): **Set up RomM…** (not connected; opens the RomM page), **Sign in again…** (expired), **Retry** (can't reach; "Retrying…" while it runs).
 
 - The rows below stay editable: Cloud saves' preferences apply once RomM is connected; the RetroAchievements login still goes to the emulators. Save then notifies "RetroAchievements login saved" / "Sent to 3 emulators" ("… and your RomM account" while connected).
 
 ### Appearance › Open GRID on
 
-"Here and in desktop mode". Options: **Automatic: Discover when RomM is connected, else Library**, **Discover (when RomM is connected)**, **Library**. The stored values (`automatic`, `discover`, `library`) don't change.
+"Here and in desktop mode". Options: **Automatic: Discover when RomM is connected, else Library**, **Discover (when RomM is connected)**, **Library**. The stored values (`automatic`, `discover`, `library`) don't change. RomM not connected and the choice isn't Library: the line reads "Here and in desktop mode. RomM isn't connected, so GRID opens on All games."
 
 ## Where GRID opens
 
-- **Automatic:** Library › RomM › Discover when RomM is connected at startup (the config says so; the probe runs after the shell is up), else All games, else the first connected Backup drive when RomM was never connected.
+- **Automatic:** Library › RomM › Discover when RomM is connected at startup (the config says so; the probe runs after the shell is up), else All games.
 - **Discover:** Discover when RomM is connected at startup, else All games.
-- **Library:** All games, or the first Backup drive when RomM was never connected.
+- **Library:** All games.
+- **Never connected** (decision 16): All games, under any setting, not the first Backup drive.
 - If the startup probe then fails, the selection falls back to RomM › Installed (with the banner), or All games when the group is gone. A restart lands where the setting says, never on the row focused before it.
 
 ## The welcome (first run; replaces Connect)
@@ -133,7 +135,7 @@ A startup screen (the box fits between the bars; the top bar shows only the word
   - Steam "Games in Steam on this computer. A Web API key lists the rest.": A opens Steam's page (TVStores; Connect Steam with Start).
   - Connected lines: "Signed in as sam_plays", "sam · romm.home.lan", "Steam account SamPlays". A on a connected row opens a list: "Disconnect <store>" (RomM also "Edit sign-in…").
   - The button reads **Skip for now** until one is connected, then **Continue**. B goes back to step 1. Hints: A, B Back, Menu "Menu".
-- **No emulator step without RomM** (plan 0.11). With RomM connected and setup needed, **Choose your systems** follows Continue; then the shell. Without RomM, Continue / Skip goes straight to the shell (Where GRID opens: a fresh profile lands on the first Backup drive, or All games).
+- **No emulator step without RomM** (plan 0.11). With RomM connected and setup needed, **Choose your systems** follows Continue; then the shell. Without RomM, Continue / Skip goes straight to the shell (Where GRID opens: a fresh profile lands on All games).
 - **Python import:** step 1 shows "Filled in from your old GRID settings." with the folder filled in, and a dialog first: "**Settings imported from your old GRID**" / "Your library folder, RomM server and username are filled in. Sign in to RomM again: GRID doesn't copy tokens or passwords." (OK). Step 2's RomM row reads "From your old GRID: sam · romm.home.lan. Sign in again.", and its sign-in page has the server filled in.
 
 ## Choose your systems (after a RomM connect)
@@ -184,7 +186,7 @@ After the check ("Checking 5 files…" / "PlayStation firmware" or the folder), 
 ## Details: needs RomM
 
 - **Update** and **Link to a RomM game** (renamed from "Link to server game") are disabled while RomM isn't connected; A says "Updates need RomM. <fix>" / "Linking needs RomM. <fix>" (the fix as in the Installed empty text). An unlinked game's left column reads "**Not linked to a RomM game.** Link it to play."
-- The **Saves** and **Achievements** tabs show the needs-RomM panel instead: "Cloud saves need RomM" / "Saves stay on this computer. Connect RomM to back them up and sync them." (expired: "RomM sign-in expired" / "Saves stay on this computer until you sign in again."; unreachable: "Can't reach RomM" / "Saves stay on this computer and upload when RomM is back."); "Achievements need RomM" / "RomM lists this game's achievements. Connect it to see them here.". Its button (Set up RomM… / Sign in again… / Retry) takes focus when the tab opens.
+- The **Saves** and **Achievements** tabs show the needs-RomM panel instead (desktop's words): "**Cloud saves need RomM**" · "<why> This game's saves stay on this computer and still work; GRID uploads and restores them when RomM is back."; "**Achievements need RomM**" · "<why> Your progress shows here from RomM; achievements still unlock in the emulator." (`<why>` as in Cloud saves above). Its button (Set up RomM… / Sign in again… / Retry) takes focus when the tab opens.
 - **Backup to drive…** stays enabled without RomM (decision 8); Install and Play are unchanged (a game that isn't installed is reachable only through Discover and the platforms, which need RomM).
 
 ## What this replaces
@@ -205,6 +207,6 @@ In `docs/tv-mode/checklist.md` (81 items, and a note at the top): items 89 and 1
 - The prototype's states come from one `RommStatus` (plan 0.2): `connected`, `unreachable`, `expired`, `not_connected`, `busy`, `installed_count`, `in_rail`. The rail group is `rommRailGroup` (0.8); the TV Library uses the same `STOREFRONT_ORDER` as desktop.
 - **Startup probe (decision for Step 1):** while the startup probe runs with `stores.romm.connected` true, the group shows Installed and Discover, Discover shows "Connecting to RomM…", and the heading flag and the RomM pill show a spinner. Platform rows appear once RomM answers. `rommRailGroup` needs to treat busy-at-startup like this, or Discover can't be where GRID opens.
 - Selection fallback and focus: when the selected row goes away, select and focus RomM › Installed (or All games); never let a redraw focus a rail row by position, which would change the selection.
-- The Installed banner and the needs-RomM panels are focusable and reachable with Up from the grid / first in the pane; their words come from `romm/words.ts`, shared with desktop (D1's final words win where the two cards differ).
+- The Installed banner and the needs-RomM panels are focusable and reachable with Up from the grid / first in the pane; their words come from `romm/words.ts`, shared with desktop. Desktop's words won where the two cards differed (decision 17); this card now uses them, except TV's own buttons, hints and the A-says-why lines.
 - Firmware rows: dimmed action rows, A says why (no A hint). The file list is `firmware_expected`; the report is `LocateReport` (installed / unverified / refused). The TV file browser's file mode is new: multi-pick with ticks, Y checks the folder, Start checks the picks; single mode for the PUP.
 - Prototype artefacts, not design: the store groups keep the TVStores card's sample installs in the fresh-profile welcome (so they show **off**), and the OSK's key rows are wider than the stage at 1280×800, as in TV mode.

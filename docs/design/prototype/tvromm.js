@@ -9,7 +9,7 @@
    - A neutral welcome replaces Connect. Systems and firmware work without RomM.
    No top-bar connection text, no offline hint line, no Menu › Reconnect.
    Placeholder titles; the RomM mark is a monogram tile, never a logo. */
-var ROMM = { conn: 'connected', url: 'https://romm.home.lan', user: 'sam', auth: 'token', err: '', busy: false, startupProbe: false, next: 'ok', setupDone: true, hue: 'hsl(160 45% 30%)' };
+var ROMM = { conn: 'connected', url: 'https://romm.home.lan', user: 'sam', auth: 'token', err: '', busy: false, startupProbe: false, next: 'ok', setupDone: true, hue: 'hsl(258 50% 46%)' };
 var STOREFRONT_ORDER = ['amazon', 'epic', 'gog', 'romm', 'steam'];
 /* connection: connected | unreachable | expired | not_connected. While the startup probe
    runs, the stored "connected" waits for its answer: Discover shows "Connecting to RomM…". */
@@ -18,6 +18,12 @@ function rLive() { return rOn() || ROMM.startupProbe; }
 function rHost(u) { return String(u == null ? ROMM.url : u).replace(/^https?:\/\//, '').replace(/\/$/, ''); }
 function rmark(cls) { return smark({ hue: ROMM.hue, mono: 'R' }, cls); }
 function rInstalled() { return G.filter(function (g) { return g.inst; }); }
+/* Installed rows RomM doesn't have: no RomM link (NOT LINKED, Brass Comet), or from
+   another RomM server or removed from this one (NOT ON ROMM, Sky Lantern). They show
+   in their platform's grid but never count as RomM's games (decisions 14 and 15). */
+function rLocal(g) { return !!(g.unlinked || g.offRomm); }
+function rOnRomm(p) { return G.filter(function (g) { return g.p === p && !rLocal(g); }); }
+G.push({ id: 26, t: 'Sky Lantern', c: 'hsl(215 45% 40%)', p: 'SNES', inst: 1, rel: 1300, offRomm: 'romm.old.lan' });
 function rInRail() { return ROMM.conn !== 'not_connected' || ROMM.startupProbe || rInstalled().length > 0; }
 function rPlats() { return Object.keys(PLAT).filter(function (p) { return G.some(function (g) { return g.p === p; }); }).sort(function (a, b) { return PLAT[a] < PLAT[b] ? -1 : 1; }); }
 var plural = function (n, w) { return n + ' ' + w + (n === 1 ? '' : 's'); };
@@ -39,9 +45,10 @@ paintTop = function () { tvrTop(); var d = document.querySelector('#top .status 
 /* ---- Library rail: no Platforms folder; the RomM group sits between GOG and Steam ---- */
 S.folds.romm = true;
 function rFlag() {
-  if (ROMM.busy) return '<span class="sflag rbusy" aria-label="Connecting"><span class="sspin"></span></span>';
-  if (ROMM.conn === 'unreachable' || ROMM.conn === 'expired') return '<span class="sflag">!</span>';
-  if (ROMM.conn === 'not_connected') return '<span class="sflag off">off</span>';
+  if (ROMM.busy) return '<span class="sflag rbusy" aria-label="Connecting to RomM"><span class="sspin"></span></span>';
+  if (ROMM.conn === 'unreachable') return '<span class="sflag" aria-label="Can\'t reach RomM">!</span>';
+  if (ROMM.conn === 'expired') return '<span class="sflag" aria-label="RomM sign-in expired">!</span>';
+  if (ROMM.conn === 'not_connected') return '<span class="sflag off" aria-label="Not connected">off</span>';
   return '';
 }
 function rRailGroup() {
@@ -49,7 +56,7 @@ function rRailGroup() {
   var row = function (key, label, n) { return railItem(key, label, n, S.libRail === key, 'lib').replace('class="ri', 'class="ri sub'); };
   var html = row('romm:installed', 'Installed', rInstalled().length);
   if (rLive()) html += row('romm:discover', 'Discover', null);
-  if (rOn()) html += rPlats().map(function (p) { return row('platform:' + p, PLAT[p], G.filter(function (g) { return g.p === p; }).length); }).join('');
+  if (rOn()) html += rPlats().map(function (p) { return row('platform:' + p, PLAT[p], rOnRomm(p).length); }).join('');
   return folder('romm', rmark() + 'RomM', 0, '', html).replace('</button>', rFlag() + '</button>');
 }
 var tvrRail = libRailHTML;
@@ -113,14 +120,17 @@ libPaint = function () {
   if (e) e.innerHTML = e.innerHTML.replace('Install games from the Server tab.', 'Install games from RomM, a store or a Backup drive.');
 };
 function rDiscoverHTML() {
-  if (!rOn()) return '<div class="list"><div class="list-in"><div class="panel rconnecting"><h2><span class="sspin"></span>Connecting to RomM…</h2><p class="note" style="margin:0">' + esc(rHost()) + ' · Discover shows here when RomM answers. Installed games already play.</p></div><div class="sskel"><i></i><i></i><i></i><i></i><i></i></div></div></div>';
-  return discoverHTML().replace('to your server', 'on RomM');
+  if (!rOn()) return '<div class="list"><div class="list-in"><div class="panel rconnecting"><h2><span class="sspin"></span>Connecting to ' + esc(rHost()) + '…</h2><p class="note" style="margin:0">Discover and the platforms show when RomM answers. Installed games play now.</p></div><div class="sskel"><i></i><i></i><i></i><i></i><i></i></div></div></div>';
+  /* Installed rows RomM doesn't have (NOT LINKED, NOT ON ROMM) never show in Discover. */
+  var all = G, h; G = G.filter(function (g) { return !rLocal(g); });
+  try { h = discoverHTML(); } finally { G = all; }
+  return h.replace('to your server', 'on RomM');
 }
 /* The Installed view's one-line banner: unreachable or sign-in expired. Not connected
    has none: the rail's "off" flag says it, as for a store. */
 function rBanner() {
-  if (ROMM.conn === 'unreachable') return '<div class="rbanner" data-nav="h"><span class="rbx">!</span><span class="rbt"><b>Can\'t reach RomM</b> · ' + esc(rHost()) + ' isn\'t answering. Installed games still play.</span><button class="btn" data-f data-k="rb-act" data-a="rReconnect" data-al="Retry"' + (ROMM.busy ? ' disabled data-why="GRID is trying RomM now."' : '') + '>' + (ROMM.busy ? '<span class="sspin"></span>Retrying…' : 'Retry') + '</button></div>';
-  if (ROMM.conn === 'expired') return '<div class="rbanner" data-nav="h"><span class="rbx">!</span><span class="rbt"><b>RomM sign-in expired</b> · Installed games still play.</span><button class="btn" data-f data-k="rb-act" data-a="rSignIn" data-al="Sign in again">Sign in again…</button></div>';
+  if (ROMM.conn === 'unreachable') return '<div class="rbanner" data-nav="h"><span class="rbx">!</span><span class="rbt"><b>Can\'t reach RomM</b> · ' + esc(rHost()) + ' didn\'t answer. Installed games still play.</span><button class="btn" data-f data-k="rb-act" data-a="rReconnect" data-al="Retry"' + (ROMM.busy ? ' disabled data-why="GRID is trying RomM now."' : '') + '>' + (ROMM.busy ? '<span class="sspin"></span>Retrying…' : 'Retry') + '</button></div>';
+  if (ROMM.conn === 'expired') return '<div class="rbanner" data-nav="h"><span class="rbx">!</span><span class="rbt"><b>RomM sign-in expired</b> · Sign in again to browse, install and sync saves. Installed games still play.</span><button class="btn" data-f data-k="rb-act" data-a="rSignIn" data-al="Sign in again">Sign in again…</button></div>';
   return '';
 }
 function rPaintInstalled() {
@@ -130,7 +140,7 @@ function rPaintInstalled() {
   h.innerHTML = '<div class="vh-top"><h1>' + rmark() + 'RomM <span class="muted">· Installed</span></h1><span class="cnt">' + (S.libQ ? L.length + ' of ' + plural(n, 'game') + ' match' : plural(n, 'game')) + '</span></div>' + rBanner() +
     '<div class="vh-row" data-nav="h">' + chip + (S.libQ ? '<span class="chip">Search: <b>' + esc(S.libQ) + '</b></span>' : '') + '<span class="sp"></span>' + (n ? '<button class="btn" data-f data-k="rh-bk" data-a="rBackupInst" data-al="Backup">Backup all ' + n + '…</button>' : '') + '<span class="chip">' + gl('RT') + ' Select</span><span class="chip">' + gl('LT') + ' Sort: <b>' + S.libSort + '</b></span><span class="chip">' + gl('Y') + ' Search</span></div>';
   $('lib-grid').innerHTML = L.length ? L.map(function (g) { return cover(g, { k: 'rg', plat: true }); }).join('') :
-    '<div class="empty">' + (S.libQ ? '<h2>No games match “' + esc(S.libQ) + '”</h2>Press ' + gl('Y') + ' to change the search.' : '<h2>No RomM games installed</h2>' + (rOn() ? 'Install games from Discover or a platform under RomM.' : rFix())) + '</div>';
+    '<div class="empty">' + (S.libQ ? '<h2>No installed RomM games match “' + esc(S.libQ) + '”</h2>Press ' + gl('Y') + ' to change the search.' : '<h2>No RomM games installed yet</h2>' + (rOn() ? 'Install games from Discover or a platform under it.' : rFix())) + '</div>';
   selPaint(L);
 }
 /* Firmware summary for a platform header chip and the Systems rows. */
@@ -149,18 +159,24 @@ function rFwChip(s) {
 }
 function rFwMissing(s) { var f = FW[s.id]; return !!f && f.files.some(function (x) { return x.req && !x.st; }); }
 function rPaintPlatform(p) {
-  var all = G.filter(function (g) { return g.p === p; }), L = libList(), inst = all.filter(function (g) { return g.inst; }).length, s = sysOf(p), nat = p === 'WIN' || p === 'LINUX', h = $('lib-h');
+  var all = G.filter(function (g) { return g.p === p; }), rm = rOnRomm(p), loc = all.length - rm.length, L = libList(), inst = rm.filter(function (g) { return g.inst; }).length, s = sysOf(p), nat = p === 'WIN' || p === 'LINUX', h = $('lib-h');
   h.className = 'vh two';
   var chips = !nat && s ? '<button class="chip' + (s.emu ? '' : ' warn') + '" data-f data-k="ch-emu" data-a="system" data-id="' + p + '" data-al="Open in Systems">' + (s.emu ? 'Emulator: <b>' + s.emu + '</b>' : 'No default emulator') + '</button>' + rFwChip(s) : '';
-  var cnt = (S.libQ ? L.length + ' of ' + plural(all.length, 'game') + ' match' : plural(all.length, 'game')) + ' · ' + inst + ' installed';
+  /* The count is RomM's games (as the rail row); installed games RomM doesn't have are
+     named after it, not counted in it. */
+  var cnt = S.libQ ? L.length + ' of ' + plural(all.length, 'game') + ' match' : plural(rm.length, 'game') + ' on RomM · ' + inst + ' installed' + (loc ? ' · plus ' + loc + ' only on this computer' : '');
   h.innerHTML = '<div class="vh-top"><h1>' + PLAT[p] + '</h1><span class="cnt">' + cnt + '</span></div><div class="vh-row" data-nav="h">' + chips + (S.libQ ? '<span class="chip">Search: <b>' + esc(S.libQ) + '</b></span>' : '') + '<span class="sp"></span>' +
     (all.length ? '<button class="btn" data-f data-k="bk-all" data-a="backupPlat" data-id="' + p + '" data-al="Backup">Backup all ' + all.length + '…</button>' : '') + '<span class="chip">' + gl('RT') + ' Select</span><span class="chip">' + gl('Y') + ' Search</span></div>';
   $('lib-grid').innerHTML = L.length ? L.map(function (g) { return cover(g, { k: 'pg' }); }).join('') : '<div class="empty"><h2>No games match “' + esc(S.libQ) + '”</h2>Press ' + gl('Y') + ' to change the search.</div>';
   selPaint(L);
 }
-/* An installed row not linked to a RomM game shows in its platform with a tag. */
+/* Installed rows RomM doesn't have show in their platform with a tag: NOT LINKED (no
+   RomM link) or NOT ON ROMM (from another RomM server, or removed from this one). */
 var tvrCover = cover;
-cover = function (g, o) { var h = tvrCover(g, o); return g.unlinked && !g.missing ? h.replace('<span class="cv-art">', '<span class="cv-art"><span class="tag nl">NOT LINKED</span>') : h; };
+cover = function (g, o) {
+  var h = tvrCover(g, o), t = g.missing ? '' : g.unlinked ? 'NOT LINKED' : g.offRomm ? 'NOT ON ROMM' : '';
+  return t ? h.replace('<span class="cv-art">', '<span class="cv-art"><span class="tag nl">' + t + '</span>') : h;
+};
 /* Arriving on the Library while Discover is selected focuses Discover's content (the
    cover last focused there, else the first), as the Server tab did. */
 var tvrRender = render;
@@ -185,16 +201,14 @@ TABS.library.lt = function () { var k = rKind(); if (k === 'disc' || k === 'plat
 ACT.rBackupInst = function () { var L = rInstalled(); openBackup(L.map(function (g) { return g.id; }), 'Backup RomM · ' + plural(L.length, 'game')); };
 
 /* ---- Where GRID opens (desktop and TV alike) ----
-   Automatic: RomM › Discover when RomM is connected at startup (the config says so;
-   the probe runs after the shell is up), else All games, else the first Backup drive
-   when RomM was never connected. Discover: the same, but never a drive. Library: All
-   games, or the first drive when RomM was never connected. */
+   Automatic and Discover: RomM › Discover when RomM is connected at startup (the config
+   says so; the probe runs after the shell is up), else All games. Library: All games.
+   Never a Backup drive, even when RomM was never connected (decision 16). */
 openStart = function () {
   S.pages = []; S.layers.forEach(function (l) { l.el.remove(); }); S.layers = []; S.selMode = false; S.startup = false;
-  var conf = ROMM.conn === 'connected' || ROMM.startupProbe, where = CFG.startOn, d = readyDrives()[0];
+  var conf = ROMM.conn === 'connected' || ROMM.startupProbe, where = CFG.startOn;
   S.tab = 'library'; S.libQ = '';
   if (where !== 'library' && conf) { S.libRail = 'romm:discover'; S.folds.romm = true; }
-  else if (where !== 'discover' && !ROMM.url && d) { S.libRail = 'drv:' + d.id; S.folds.drives = true; }
   else S.libRail = 'all';
   TABS.library._k = 'r-' + S.libRail;
   /* A restart lands where the setting says, never on the row focused before it. */
@@ -210,28 +224,20 @@ openStart = function () {
   PANES.splice(ids().indexOf('cloud') + 1, 0, st);
 })();
 function rPill() {
-  if (ROMM.busy) return '<span class="st"><span class="sspin"></span> ' + (ROMM.conn === 'not_connected' ? 'Connecting…' : 'Reconnecting…') + '</span>';
+  if (ROMM.busy) return '<span class="st"><span class="sspin"></span> Connecting…</span>';
   return { connected: '<span class="st ok">Connected</span>', unreachable: '<span class="st warn">Can\'t reach</span>', expired: '<span class="st warn">Sign-in expired</span>', not_connected: '<span class="st">Not connected</span>' }[ROMM.conn];
 }
-function rSub() { return ROMM.conn === 'not_connected' ? (ROMM.url ? rHost() + ' · not signed in' : 'Not signed in') : ROMM.user + ' · ' + rHost(); }
+function rSub() { return ROMM.conn === 'not_connected' ? (ROMM.url ? 'Not signed in · ' + rHost() : 'Your own game server') : 'Signed in as ' + ROMM.user + ' · ' + rHost(); }
 function rStoreRow() { return '<div class="srow" data-f data-k="sto-romm" data-a="rCard" data-al="Open"><span style="margin-right:.2rem">' + rmark('lg') + '</span><div class="lab"><div class="t">RomM</div><div class="s">' + esc(rSub()) + '</div></div><div class="val">' + rPill() + '<span class="chev">' + gIcon('chevronRight', 18) + '</span></div></div>'; }
 /* Cloud saves and RetroAchievements say where they need RomM. */
 function rNeed(t, p) {
   var c = ROMM.conn, act = c === 'not_connected' ? ['rCard', 'Set up RomM…', 'Open'] : c === 'expired' ? ['rSignIn', 'Sign in again…', 'Sign in again'] : ['rReconnect', ROMM.busy ? 'Retrying…' : 'Retry', 'Retry'];
   return '<div class="rneed' + (c === 'not_connected' ? '' : ' warn') + '"><div class="rneed-t"><b>' + t + '</b><span>' + p + '</span></div><button class="btn" data-f data-k="rneed" data-a="' + act[0] + '" data-al="' + act[2] + '"' + (ROMM.busy ? ' disabled data-why="GRID is trying RomM now."' : '') + '>' + act[1] + '</button></div>';
 }
-function rNeedCloud() {
-  var c = ROMM.conn;
-  if (c === 'not_connected') return rNeed('Cloud saves need RomM', 'GRID keeps your emulator saves on your RomM server. Connect RomM to sync them; these settings apply once it\'s connected. Store games sync with their own store.');
-  if (c === 'expired') return rNeed('RomM sign-in expired', 'Saves stay on this computer until you sign in again. Nothing is lost.');
-  return rNeed('Can\'t reach RomM', esc(rHost()) + ' isn\'t answering. Saves stay on this computer and upload when RomM is back.');
-}
-function rNeedRa() {
-  var c = ROMM.conn;
-  if (c === 'not_connected') return rNeed('RomM isn\'t connected', 'Your login still goes to the emulators that support it. Achievements on game pages need RomM.');
-  if (c === 'expired') return rNeed('RomM sign-in expired', 'Your login still goes to the emulators. Achievements on game pages show again once you sign in.');
-  return rNeed('Can\'t reach RomM', 'Your login still goes to the emulators. Achievements on game pages show again when RomM is back.');
-}
+/* The panels' first sentence says why, per state (desktop's words, decision 17). */
+function rWhy() { return ROMM.startupProbe ? 'GRID is still connecting to ' + esc(rHost()) + '.' : ROMM.conn === 'unreachable' ? 'GRID can\'t reach ' + esc(rHost()) + ' right now.' : ROMM.conn === 'expired' ? 'Your RomM sign-in expired.' : 'RomM isn\'t connected.'; }
+function rNeedCloud() { return rNeed('Cloud saves need RomM', rWhy() + ' GRID keeps your emulator saves and states on your RomM server. These settings apply when it\'s connected. GOG and Epic games sync with their own store\'s cloud.'); }
+function rNeedRa() { return rNeed('Achievement progress needs RomM', rWhy() + ' Details › Achievements shows your progress from RomM. Signing in here still turns on achievements in RetroArch, DuckStation and Dolphin.'); }
 var tvrSetPaint = setPaint;
 setPaint = function () {
   tvrSetPaint();
@@ -249,6 +255,7 @@ setPaint = function () {
 var tvrRows = paneRows;
 paneRows = function (id) {
   var R = tvrRows(id);
+  if (id === 'appearance') R[0].sub = 'Here and in desktop mode' + (!rOn() && CFG.startOn !== 'library' ? '. RomM isn\'t connected, so GRID opens on All games.' : '');
   if (id === 'appearance') R[0].opts = [['auto', 'Automatic: Discover when RomM is connected, else Library'], ['discover', 'Discover (when RomM is connected)'], ['library', 'Library']];
   if (id === 'ra') R.forEach(function (r) { if (r.label === 'Save') r.fn = function () { toast('RetroAchievements login saved', { s: rOn() ? 'Sent to 3 emulators and your RomM account' : 'Sent to 3 emulators' }); }; });
   return R;
@@ -259,9 +266,9 @@ paneRows = function (id) {
 function rJump() { if (cur) cur.classList.remove('f'); cur = null; render(); }
 function rToLibrary() { S.pages = []; S.startup = false; S.tab = 'library'; S.libRail = 'romm:installed'; S.folds.romm = true; S.libQ = ''; TABS.library._k = 'r-romm:installed'; rJump(); }
 function rDisconnectBox() {
-  confirmBox({ title: 'Disconnect RomM?', body: 'GRID deletes your RomM sign-in from this computer. Installed RomM games stay and still play. Cloud saves, firmware downloads and updates stop.', ok: 'Disconnect', danger: 1, fn: function () {
+  confirmBox({ title: 'Disconnect RomM?', body: 'GRID deletes your RomM sign-in from the OS keyring and stays open. Installed RomM games stay and still play. Cloud saves, firmware downloads and updates stop.', ok: 'Disconnect', danger: 1, fn: function () {
     ROMM.conn = 'not_connected'; ROMM.err = ''; ROMM.busy = false;
-    toast('RomM disconnected', { s: 'Its sign-in was deleted. Installed RomM games stay.' }); rApply();
+    toast('RomM disconnected', { s: 'Installed RomM games stay and still play.' }); rApply();
   } });
 }
 function rCardPage() {
@@ -269,15 +276,15 @@ function rCardPage() {
     title: 'RomM', key: 'rc', h1: function () { return rmark('lg') + ' RomM'; },
     sub: function () {
       var c = ROMM.conn, u = '<b>' + esc(ROMM.user) + '</b>';
-      return c === 'connected' ? 'Signed in as ' + u + ' on ' + esc(rHost()) : c === 'unreachable' ? 'Signed in as ' + u + ' · can\'t reach ' + esc(rHost()) : c === 'expired' ? 'Sign-in expired · ' + esc(rHost()) : 'Not signed in';
+      return c === 'connected' ? 'Signed in as ' + u + ' · ' + esc(rHost()) : c === 'unreachable' ? 'Signed in as ' + u + ' · can\'t reach ' + esc(rHost()) : c === 'expired' ? 'Sign-in expired · ' + esc(rHost()) : ROMM.url ? 'Not signed in · ' + esc(rHost()) : 'Your own game server';
     },
     rows: function () {
       var R = [], c = ROMM.conn, n = rInstalled().length;
-      if (c === 'unreachable') R.push({ warn: 1, note: '<b>Can\'t reach RomM.</b> ' + esc(rHost()) + ' didn\'t answer: ' + esc(ROMM.err || 'connection timed out') + '. Installed RomM games still play; saves wait on this computer.' });
-      if (c === 'expired') R.push({ warn: 1, note: '<b>Your RomM sign-in expired.</b> Sign in again to browse and install, sync cloud saves and get updates. Installed RomM games still play.' });
-      if (c === 'not_connected') R.push({ note: 'Connect your RomM server to browse and install its games in the Library, sync emulator saves and install firmware from it. GRID keeps the sign-in in the system keyring.' });
+      if (c === 'unreachable') R.push({ warn: 1, note: '<b>Can\'t reach RomM.</b> ' + esc(rHost()) + ': ' + esc(ROMM.err || 'connection refused') + '. Installed RomM games still play; browsing, installs, cloud saves and firmware downloads wait until it\'s back.' });
+      if (c === 'expired') R.push({ warn: 1, note: '<b>Your RomM sign-in expired.</b> Sign in again to browse, install and sync saves. Installed games still play.' });
+      if (c === 'not_connected') R.push({ note: 'Connect your RomM server to browse its games in the Library, install them with an emulator, and sync their saves and firmware.' + (n ? ' The ' + plural(n, 'RomM game') + ' installed here still play.' : '') });
       if (c !== 'not_connected' || ROMM.url) { R.push({ info: 1, label: 'Server', val: esc(ROMM.url) }); R.push({ info: 1, label: 'User', val: esc(ROMM.user) }); }
-      if (c !== 'not_connected') R.push({ info: 1, label: 'Sign-in', val: (ROMM.auth === 'token' ? 'API token' : 'Password') + ' · in the system keyring' });
+      if (c !== 'not_connected') R.push({ info: 1, label: 'Sign-in', val: (ROMM.auth === 'token' ? 'API token' : 'Password') + ' · kept in the OS keyring' });
       R.push({ info: 1, label: 'Installed RomM games', val: n });
       if (c !== 'not_connected') R.push({ label: 'Edit sign-in…', sub: 'Server, user and token', al: 'Edit', fn: function () { rSignInPage('edit', 'settings'); } });
       if (n || rOn()) R.push({ label: 'Show in Library', fn: rToLibrary });
@@ -303,17 +310,17 @@ function rReconnect() {
     ROMM.busy = false;
     if (ROMM.next === 'ok') { ROMM.conn = 'connected'; ROMM.err = ''; toast('Connected to RomM as ' + ROMM.user, { s: rHost() }); }
     else if (ROMM.next === 'rejected') { ROMM.conn = 'expired'; rExpiredToast(); }
-    else { ROMM.conn = 'unreachable'; ROMM.err = 'connection timed out'; toast('Can\'t reach RomM', { err: 1, s: rHost() + ' didn\'t answer: connection timed out' }); }
+    else { ROMM.conn = 'unreachable'; ROMM.err = 'connection refused'; toast('Can\'t reach RomM', { err: 1, s: rHost() + ' didn\'t answer. Installed games still play.' }); }
     rApply();
   }, 1200);
 }
-function rExpiredToast() { toast('RomM sign-in expired', { err: 1, s: 'Installed games still play. Sign in again to install and sync.', act: ['Sign in again…', function () { rSignInPage('again', 'settings'); }] }); }
+function rExpiredToast() { toast('RomM sign-in expired', { err: 1, s: 'Sign in again to browse, install and sync saves. Installed games still play.', act: ['Sign in again…', function () { rSignInPage('again', 'settings'); }] }); }
 
 /* ---- the RomM sign-in page: the welcome's RomM row and the page's Edit / Connect /
    Sign in again. Fields open the on-screen keyboard; View pastes into the focused field. */
 function rSignInPage(mode, from) {
   var F = { url: mode === 'connect' && !ROMM.url ? '' : ROMM.url, how: ROMM.auth || 'token', user: ROMM.user, secret: '', err: '', busy: false };
-  var title = mode === 'edit' ? 'Edit RomM sign-in' : mode === 'again' ? 'Sign in to RomM again' : 'Connect RomM';
+  var title = mode === 'edit' ? 'Edit RomM sign-in' : mode === 'again' ? 'Sign in to RomM again' : 'Connect to RomM';
   var P = {
     title: title, F: F, from: from, rsign: true,
     render: function () {
@@ -321,13 +328,13 @@ function rSignInPage(mode, from) {
       var why = !F.url ? 'Enter your RomM server address first.' : F.how !== 'token' && !F.user ? 'Enter your RomM username first.' : 'Enter your ' + (F.how === 'token' ? 'API token' : 'password') + ' first.';
       /* Sign in again opens on the token: the server and user are already right. */
       var field = function (k, lab, val, mask, ph) { return '<div class="field" data-f data-k="rs-' + k + '" data-a="rSignField" data-key="' + k + '" data-al="Edit"' + (mode === 'again' && k === 'secret' ? ' data-autofocus' : '') + '><span class="lab">' + lab + '</span><span class="v' + (val ? '' : ' ph') + '">' + (val ? (mask ? '••••••••••••' : esc(val)) : ph) + '</span></div>'; };
-      var sub = mode === 'again' ? 'Your sign-in expired. Enter a new API token for ' + esc(F.user || 'your user') + '.' : mode === 'edit' ? 'Change the server, the user or the token. GRID signs in again when you save.' : 'Sign in to your RomM server to browse and install its games, sync saves and install firmware.';
+      var sub = mode === 'again' ? 'RomM no longer accepts GRID\'s token for ' + esc(F.user || 'your user') + '. Enter a new one.' : mode === 'edit' ? 'Change the server or the sign-in. Installed RomM games stay; GRID links them to the server\'s games when it connects.' : 'GRID browses your RomM server, installs its games with an emulator and syncs their saves.';
       this._main = 1;
       return '<div class="page"><div class="page-in rsign" data-nav="v"><h1>' + rmark('lg') + ' ' + esc(title) + '</h1><p class="sub">' + sub + '</p>' + (F.err ? '<p class="errline">' + esc(F.err) + '</p>' : '') +
         field('url', 'Server', F.url, 0, 'https://…') +
         '<div class="field" data-f data-k="rs-how" data-a="rSignField" data-key="how" data-al="Change"><span class="lab">Sign in with</span><span class="v">' + (F.how === 'token' ? 'API token' : 'Username and password') + '</span></div>' +
         (F.how === 'token' ? field('secret', 'API token', F.secret, 1, 'Paste or type your token') : field('user', 'Username', F.user, 0, 'Your RomM user') + field('secret', 'Password', F.secret, 1, 'Your password')) +
-        '<div class="bk-foot"><span class="muted">GRID keeps the ' + (F.how === 'token' ? 'token' : 'password') + ' in the system keyring and never shows it again.</span><button class="btn pri" data-f data-k="rs-go" data-a="rSignGo"' + (F.busy ? ' disabled data-why="GRID is signing in to RomM."' : ready ? '' : ' disabled data-why="' + why + '"') + '>' + (F.busy ? '<span class="sspin"></span>Connecting…' : gl('MENU') + (mode === 'edit' ? 'Save' : 'Connect')) + '</button></div></div></div>';
+        '<div class="bk-foot"><span class="muted">' + (F.how === 'token' ? 'Make a token in RomM under your user settings. GRID keeps it in the OS keyring, never in a file.' : 'GRID keeps your password in the OS keyring, never in a file.') + '</span><button class="btn pri" data-f data-k="rs-go" data-a="rSignGo"' + (F.busy ? ' disabled data-why="GRID is signing in to RomM."' : ready ? '' : ' disabled data-why="' + why + '"') + '>' + (F.busy ? '<span class="sspin"></span>Connecting…' : gl('MENU') + (mode === 'edit' ? 'Save' : 'Connect')) + '</button></div></div></div>';
     },
     hints: function () { return [['VIEW', 'Paste'], ['MENU', mode === 'edit' ? 'Save' : 'Connect']].concat(S.startup ? [['B', 'Back']] : []); },
     menu: function () { var b = document.querySelector('[data-k="rs-go"]'); if (b && b.disabled) { toast(b.dataset.why, { err: 1 }); return; } ACT.rSignGo(); }
@@ -345,8 +352,8 @@ ACT.rSignGo = function () {
   F.busy = true; F.err = ''; renderStage(); paintHints();
   setTimeout(function () {
     F.busy = false;
-    if (ROMM.next === 'rejected') { F.err = F.how === 'token' ? 'RomM rejected this API token. Check it, or make a new one in RomM.' : 'RomM rejected this username or password.'; F.secret = ''; renderStage(); restoreFocus({ _k: 'rs-secret' }); return; }
-    if (ROMM.next === 'unreachable') { F.err = 'Can\'t reach ' + rHost(F.url) + ': connection refused. Check the address and that RomM is running.'; renderStage(); restoreFocus({ _k: 'rs-url' }); return; }
+    if (ROMM.next === 'rejected') { F.err = F.how === 'token' ? 'RomM rejected this token (401). Check it, or make a new one.' : 'RomM rejected the username or password (401).'; F.secret = ''; renderStage(); restoreFocus({ _k: 'rs-secret' }); return; }
+    if (ROMM.next === 'unreachable') { F.err = 'Couldn\'t reach ' + F.url + '. Check the address, and that the server is running.'; renderStage(); restoreFocus({ _k: 'rs-url' }); return; }
     ROMM.url = F.url; if (F.how !== 'token') ROMM.user = F.user; else if (!ROMM.user) ROMM.user = 'sam';
     ROMM.auth = F.how; ROMM.conn = 'connected'; ROMM.err = ''; ROMM.startupProbe = false;
     toast('Connected to RomM as ' + ROMM.user, { s: rHost() });
@@ -435,7 +442,7 @@ function rChoosePage() {
     render: function () {
       var n = Object.keys(pick).filter(function (k) { return pick[k].on; }).length;
       return '<div class="start"><div class="start-box wide"><h1>Choose your systems</h1><p class="sub">' + (S.setupReturn === 'settings' ? 'RomM is connected. ' : '') + 'Tick the systems you play. GRID installs the recommended emulator for each; ' + gl('X') + ' changes it. You can change this later in Settings › Systems.</p><div class="start-body" data-nav="v">' +
-        list.map(function (s) { var p = pick[s.id], c = G.filter(function (g) { return g.p === s.id; }).length; return '<div class="srow" data-f data-k="ch-' + s.id + '" data-a="chTick" data-id="' + s.id + '" data-al="' + (p.on ? 'Untick' : 'Tick') + '" data-xl="Change emulator" data-xa="chEmu"><span class="sw' + (p.on ? ' on' : '') + '"></span><div class="lab"><div class="t">' + s.name + '</div><div class="s">' + (s.proton ? 'Proton for Windows games' : plural(c, 'game') + ' on RomM') + '</div></div><div class="val">' + esc(p.emu || 'None') + '</div></div>'; }).join('') +
+        list.map(function (s) { var p = pick[s.id], c = rOnRomm(s.id).length; return '<div class="srow" data-f data-k="ch-' + s.id + '" data-a="chTick" data-id="' + s.id + '" data-al="' + (p.on ? 'Untick' : 'Tick') + '" data-xl="Change emulator" data-xa="chEmu"><span class="sw' + (p.on ? ' on' : '') + '"></span><div class="lab"><div class="t">' + s.name + '</div><div class="s">' + (s.proton ? 'Proton for Windows games' : plural(c, 'game') + ' on RomM') + '</div></div><div class="val">' + esc(p.emu || 'None') + '</div></div>'; }).join('') +
         '</div><div class="btns start-foot" data-nav="h"><button class="btn pri" data-f data-k="ch-go" data-a="chGo"' + (n ? '' : ' disabled data-why="Tick a system first, or skip for now."') + '>' + (n ? 'Install ' + plural(n, 'emulator') : 'Install emulators') + '</button><button class="btn" data-f data-k="ch-skip" data-a="chSkip">' + gl('MENU') + 'Skip for now</button></div></div></div>';
     },
     hints: function () { return [['MENU', 'Skip for now']]; },
@@ -462,7 +469,7 @@ EMUS.PS3 = [['RPCS3', 'Installed', 1]]; EMUS.SWITCH = [['Eden', 'Installed', 1]]
 [['DC', 'Dreamcast', 'Redream'], ['GBA', 'Game Boy Advance', 'RetroArch · mGBA'], ['NDS', 'Nintendo DS', 'RetroArch · melonDS DS'], ['PSP', 'PlayStation Portable', 'PPSSPP'], ['GEN', 'Sega Genesis', 'RetroArch · Genesis Plus GX'], ['XBOX', 'Xbox', 'Xemu']].forEach(function (c) {
   SYS.push({ id: c[0], name: c[1], emu: null, rec: c[2], status: 'No emulator', cat: 1 }); EMUS[c[0]] = [[c[2], 'Download', 1]];
 });
-function rGames(s) { var L = G.filter(function (g) { return g.p === s.id; }); return { all: L.length, inst: L.filter(function (g) { return g.inst; }).length }; }
+function rGames(s) { var L = G.filter(function (g) { return g.p === s.id; }); return { all: rOnRomm(s.id).length, inst: L.filter(function (g) { return g.inst; }).length }; }
 function rYours(s) { var n = rGames(s); return !!(s.emu || s.proton || n.inst || (rOn() && n.all) || s.status === 'Installing…'); }
 function rSysStatus(s) { if (!s.emu) return s.status === 'Installing…' ? s.status : 'No emulator'; if (s.upd) return 'Update available'; if (rFwMissing(s)) return 'Firmware needed'; return 'Ready'; }
 function rSysRow(s, k) {
@@ -670,8 +677,8 @@ var tvrDetBody = detBody;
 detBody = function (g) {
   if (!rOn() && (S.detTab === 'Saves' || S.detTab === 'Achievements')) {
     var sv = S.detTab === 'Saves', c = ROMM.conn;
-    var t = sv ? (c === 'not_connected' ? 'Cloud saves need RomM' : c === 'expired' ? 'RomM sign-in expired' : 'Can\'t reach RomM') : (c === 'not_connected' ? 'Achievements need RomM' : c === 'expired' ? 'RomM sign-in expired' : 'Can\'t reach RomM');
-    var p = sv ? (c === 'not_connected' ? 'Saves stay on this computer. Connect RomM to back them up and sync them.' : c === 'expired' ? 'Saves stay on this computer until you sign in again.' : 'Saves stay on this computer and upload when RomM is back.') : (c === 'not_connected' ? 'RomM lists this game\'s achievements. Connect it to see them here.' : 'Achievements show again once RomM answers.');
+    var t = sv ? 'Cloud saves need RomM' : 'Achievements need RomM';
+    var p = rWhy() + (sv ? ' This game\'s saves stay on this computer and still work; GRID uploads and restores them when RomM is back.' : ' Your progress shows here from RomM; achievements still unlock in the emulator.');
     return rNeed(t, p).replace('data-k="rneed"', 'data-k="rneed-d"');
   }
   return tvrDetBody(g);
@@ -681,6 +688,7 @@ details = function (g, drv) {
   var o = tvrDetails(g, drv), rr = o.render;
   o.render = function () {
     var h = rr.call(this).replace('Link to server game', 'Link to a RomM game').replace('<b>Not linked to a server game.</b> Link it to your server to play.', '<b>Not linked to a RomM game.</b> Link it to play.');
+    if (g.offRomm) h = h.replace('Last played <b>', 'From another RomM server (' + esc(g.offRomm) + ') · not on ' + esc(rHost() || 'yours') + '<br>Last played <b>');
     if (!rOn()) h = h.replace(/(data-a="update" data-id="\d+")/, '$1 disabled data-why="Updates need RomM. ' + rFix() + '"').replace(/(data-a="link" data-id="\d+")/, '$1 disabled data-why="Linking needs RomM. ' + rFix() + '"');
     return h;
   };
@@ -733,10 +741,10 @@ function rFresh(imported) {
 }
 function rState(c, o) {
   o = o || {};
-  rSetNoGames(!!o.none); ROMM.conn = c; ROMM.busy = false; ROMM.startupProbe = false; ROMM.err = c === 'unreachable' ? 'connection timed out' : '';
+  rSetNoGames(!!o.none); ROMM.conn = c; ROMM.busy = false; ROMM.startupProbe = false; ROMM.err = c === 'unreachable' ? 'connection refused' : '';
   if (c !== 'not_connected' || !o.none) { ROMM.url = ROMM.url || 'https://romm.home.lan'; ROMM.user = ROMM.user || 'sam'; }
   if (o.none) { ROMM.url = ''; ROMM.user = ''; ROMM.setupDone = false; } else ROMM.setupDone = true;
-  if (c === 'unreachable') toast('Can\'t reach RomM', { err: 1, s: rHost() + ' isn\'t answering. Installed games still play.', act: ['Retry', rReconnect] });
+  if (c === 'unreachable') toast('Can\'t reach RomM', { err: 1, s: rHost() + ' didn\'t answer. Installed games still play.', act: ['Retry', rReconnect] });
   if (c === 'expired') rExpiredToast();
   rApply();
 }
@@ -758,7 +766,7 @@ function rRestart(ok) {
   setTimeout(function () {
     ROMM.startupProbe = false; ROMM.busy = false;
     if (ok) ROMM.conn = 'connected';
-    else { ROMM.conn = 'unreachable'; ROMM.err = 'connection timed out'; toast('Can\'t reach RomM', { err: 1, s: rHost() + ' isn\'t answering. Installed games still play.', act: ['Retry', rReconnect] }); }
+    else { ROMM.conn = 'unreachable'; ROMM.err = 'connection refused'; toast('Can\'t reach RomM', { err: 1, s: rHost() + ' didn\'t answer. Installed games still play.', act: ['Retry', rReconnect] }); }
     rApply();
   }, 2400);
 }

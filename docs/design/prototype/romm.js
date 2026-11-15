@@ -110,8 +110,8 @@ function rmGo(k) {
 function rmRailClick(e) { var b = e.target.closest('[data-key]'); if (b) rmGo(b.getAttribute('data-key')); }
 
 /* ---- Library rail: the RomM group, alphabetical among the stores ---- */
-/* A platform row's count is the games in its view: the server's games plus
-   installed ones the server doesn't have. Installed games carry the dot. */
+/* A platform row's count is RomM's game count only (decision 14). Installed games
+   RomM doesn't have still show in the platform's grid but are not counted. */
 function rmPlats() {
   return Object.keys(PLAT).filter(function (p) { return G.some(function (g) { return g.p === p; }); })
     .sort(function (a, b) { return PLAT[a].localeCompare(PLAT[b]); });
@@ -120,7 +120,7 @@ function rmRailHTML() {
   if (!rmInRail()) return '';
   var rows = [['romm:installed', 'Installed', rmInst().length]];
   if (rmOn() || RM.conn === 'checking') rows.push(['romm:discover', 'Discover', null]);
-  if (rmOn()) rmPlats().forEach(function (p) { rows.push(['platform:' + p, PLAT[p], G.filter(function (g) { return g.p === p; }).length]); });
+  if (rmOn()) rmPlats().forEach(function (p) { rows.push(['platform:' + p, PLAT[p], G.filter(function (g) { return g.p === p && !g.local; }).length]); });
   var cur = S.view === 'server' ? (S.platform === 'DISCOVER' ? 'romm:discover' : 'platform:' + S.platform) : S.libFilter;
   var flag = RM.conn === 'checking' ? '<span class="st-flag rm-flag-spin" title="Connecting to RomM"><span class="st-spin"></span></span>'
     : RM.conn === 'unreachable' ? '<span class="st-flag" title="Can’t reach RomM">!</span>'
@@ -207,8 +207,10 @@ renderServer = function () {
     $('discover').innerHTML = stState({ icon: rmMark('lg'), h: 'Connecting to ' + esc(rmHost()) + '…', p: 'Discover and the platforms show when RomM answers. Installed games play now.' }).replace('<h3>', '<h3><span class="st-spin"></span> ');
     DISC.sig = '';
   } else if (S.platform !== 'DISCOVER' && PLAT[S.platform]) {
-    var all = G.filter(function (g) { return g.p === S.platform; }), loc = all.filter(function (g) { return g.local; });
-    $('srv-count').textContent = bkPlural(all.length - loc.length, 'game') + ' on RomM · ' + all.filter(function (g) { return g.installed; }).length + ' installed' + (loc.length ? ' · ' + loc.length + ' only on this computer' : '');
+    /* The count is RomM's games (as the rail row); installed games RomM doesn't have
+       are named after it, not counted in it. */
+    var all = G.filter(function (g) { return g.p === S.platform; }), loc = all.filter(function (g) { return g.local; }), rm = all.filter(function (g) { return !g.local; });
+    $('srv-count').textContent = bkPlural(rm.length, 'game') + ' on RomM · ' + rm.filter(function (g) { return g.installed; }).length + ' installed' + (loc.length ? ' · plus ' + loc.length + ' only on this computer' : '');
   }
   rmSyncSrvRail();
 };
