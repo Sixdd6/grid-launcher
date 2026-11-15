@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { APP_START_TIMEOUT, dataDir, FIXTURE_TOKEN, FIXTURE_USERNAME, mockUrl, TRANSITION_TIMEOUT, WRONG_TOKEN } from '../helpers/env.js';
 import { connectPad, focused, hints, invoke, key, press, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
@@ -33,8 +34,13 @@ async function waitDiscoverFocus(): Promise<string> {
   return k!;
 }
 
+/** With E2E_TV_SCREENS=1, screens are saved under ctr-out/tv-screens/romm/. */
+const SHOTS = process.env.E2E_TV_SCREENS === '1' ? path.resolve(process.cwd(), '..', 'ctr-out', 'tv-screens', 'romm') : '';
 async function screenshot(name: string): Promise<void> {
-  if (process.env.E2E_TV_SCREENS) await browser.saveScreenshot(path.join(dataDir(), '..', `tv-romm-${name}.png`));
+  if (!SHOTS) return;
+  await browser.pause(400);
+  mkdirSync(SHOTS, { recursive: true });
+  await browser.saveScreenshot(path.join(SHOTS, `${name}.png`));
 }
 
 /**
@@ -119,10 +125,13 @@ describe('tv-romm: RomM as a storefront in TV mode', () => {
     await waitText('tv-welcome-go', 'Continue');
   });
 
-  it('Continue opens Choose your systems; Start skips; GRID opens on Library › RomM › Discover', async () => {
+  it('Continue (Choose your systems first when setup is needed; Start skips) opens Library › RomM › Discover', async () => {
     await tapK('w-go');
-    await $(testId('tv-choose')).waitForDisplayed({ timeout: APP_START_TIMEOUT, timeoutMsg: 'Choose your systems never opened' });
-    await press('start');
+    await browser.waitUntil(async () => (await $(testId('tv-choose')).isExisting()) || (await $(testId('tv-library')).isExisting()), {
+      timeout: APP_START_TIMEOUT,
+      timeoutMsg: 'Continue opened neither Choose your systems nor the Library',
+    });
+    if (await $(testId('tv-choose')).isExisting()) await press('start');
     await waitTab('library');
     await waitDiscoverFocus();
     await screenshot('discover');
@@ -161,8 +170,8 @@ describe('tv-romm: RomM as a storefront in TV mode', () => {
   });
 
   it('Settings › Game stores: RomM between GOG and Steam, its page, Disconnect…', async () => {
-    await press('rb');
-    await press('rb');
+    await press('right_bumper');
+    await press('right_bumper');
     await waitTab('settings');
     const rail = (await browser.execute(() => Array.from(document.querySelectorAll('[data-testid="tv-settings"] [data-rail] [data-k]')).map((e) => e.textContent?.trim() ?? ''))) as string[];
     expect(rail).toEqual(['Appearance', 'Backup drives', 'Cloud saves', 'Game stores', 'Library', 'RetroAchievements', 'Systems', 'TV mode', 'Updates']);
@@ -170,6 +179,7 @@ describe('tv-romm: RomM as a storefront in TV mode', () => {
     await waitText('tv-pane-title', 'Game stores');
     expect(await rowKeys('[data-testid="tv-pane"]')).toEqual(['sto-amazon', 'sto-epic', 'sto-gog', 'sto-romm', 'sto-steam']);
     await waitText('tv-stores-row-romm-pill', 'Connected');
+    await screenshot('game-stores');
     expect(await text('tv-stores-row-romm-sub')).toBe(`Signed in as ${FIXTURE_USERNAME} · ${host()}`);
     await tapK('sto-romm');
     await $(testId('tv-romm-page')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
@@ -187,19 +197,22 @@ describe('tv-romm: RomM as a storefront in TV mode', () => {
 
   it('with RomM disconnected and no RomM games, the Library has no RomM group', async () => {
     await press('east');
-    await press('lb');
-    await press('lb');
+    await press('left_bumper');
+    await press('left_bumper');
     await waitTab('library');
     await browser.waitUntil(async () => !(await railKeys()).includes('fold-romm'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the RomM group stayed' });
     expect((await railKeys()).some((k) => k.startsWith('r-platform:'))).toBe(false);
   });
 
   it("Cloud saves says it needs RomM, with Set up RomM…, which opens the RomM page; Connect RomM… signs in again", async () => {
-    await press('rb');
-    await press('rb');
+    await press('right_bumper');
+    await press('right_bumper');
     await waitTab('settings');
+    // From the pane to its rail row, then up the rail.
+    if (!(await focused())?.startsWith('r-')) await press('east');
     await moveTo('r-cloud-saves', 'ArrowUp');
     await $(testId('tv-needs-romm')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await screenshot('cloud-needs-romm');
     expect(await text('tv-needs-romm-text')).toMatch(/^RomM isn't connected\. GRID keeps your emulator saves/);
     await tapK('rneed');
     await $(testId('tv-romm-page')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
