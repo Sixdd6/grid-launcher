@@ -305,14 +305,15 @@ describe('DetailsStore', () => {
       expect(await d.removeFromDrive()).toBe(true);
     });
 
-    it('backUp opens the dialog for the game while connected', async () => {
+    it('backUp opens the dialog for the game, with RomM on or off', async () => {
       const onLeave = vi.fn();
       (await store()).backUp(onLeave);
       expect(openBackup).toHaveBeenCalledWith(expect.objectContaining({ onLeave }));
       state.connected = false;
       openBackup.mockClear();
       (await store()).backUp(onLeave);
-      expect(openBackup).not.toHaveBeenCalled();
+      // Without RomM the dialog copies the installed game (RommStorefront README).
+      expect(openBackup).toHaveBeenCalledWith(expect.objectContaining({ onLeave }));
     });
   });
 });

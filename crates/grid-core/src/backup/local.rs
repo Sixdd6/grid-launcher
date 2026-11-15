@@ -92,6 +92,23 @@ pub enum Located {
     Eligible(LocalSource),
 }
 
+/// The server a backup without RomM names in `row`'s pack entry
+/// (`PackSource.server`, never with userinfo): the row's `source_server`
+/// when set (a game installed from a drive), else `config_server` (the
+/// config's `server_url`, which Disconnect keeps). `None` when neither is
+/// known: the game then can't be backed up without RomM. Pure.
+///
+/// A row installed from the live server records no `source_server`, so a
+/// pack written without RomM names the same server, and the same rom id, as
+/// one written while connected.
+pub fn identity_server(row: &InstalledGame, config_server: &str) -> Option<String> {
+    [row.source_server.as_str(), config_server]
+        .into_iter()
+        .map(str::trim)
+        .find(|server| !server.is_empty())
+        .map(crate::romm::strip_userinfo)
+}
+
 /// Decides whether `row` (the registry row found for `rom_id`, if any) is
 /// an install GRID may copy instead of downloading. Pure: the file system
 /// is not touched; `missing` is the row's state in the last registry pass
@@ -618,6 +635,42 @@ mod tests {
             native_wineprefix: text(&dir.join("pfx")),
             ..base_row("Linux")
         }
+    }
+
+    #[test]
+    fn identity_server_prefers_the_rows_own_server_then_the_config() {
+        let mut row = base_row(PS4);
+        assert_eq!(
+            identity_server(&row, "https://user:pw@romm.home.lan").as_deref(),
+            Some("https://romm.home.lan"),
+            "the config's server, never with userinfo"
+        );
+        row.source_server = " https://other.lan ".into();
+        assert_eq!(
+            identity_server(&row, LIVE).as_deref(),
+            Some("https://other.lan")
+        );
+        row.source_server.clear();
+        assert_eq!(identity_server(&row, "  "), None);
+    }
+
+    #[test]
+    fn a_row_from_another_server_is_eligible_against_its_own() {
+        // Judged against its own identity server, a drive install's row
+        // passes the other-server check that refuses it against the live one.
+        let row = InstalledGame {
+            source_server: "https://other.lan".into(),
+            ..base_row(PS4)
+        };
+        let own = identity_server(&row, LIVE).unwrap();
+        assert_eq!(
+            locate(77, Some(&row), false, &library(), None, LIVE),
+            Located::Ineligible(REASON_OTHER_SERVER.into())
+        );
+        assert_ne!(
+            locate(77, Some(&row), false, &library(), None, &own),
+            Located::Ineligible(REASON_OTHER_SERVER.into())
+        );
     }
 
     fn located(row: &InstalledGame) -> Located {

@@ -170,15 +170,15 @@ export function launchSourceNote(launchSource: string, selected: string, shown: 
   return launchSource === 'sidecar' && selected === shown ? 'Set by game.json' : '';
 }
 
-/** Why "Backup to drive…" is disabled offline (GameBackups README). */
-export const BACKUP_NEEDS_SERVER = 'Connect to a server to backup games';
-
 /**
- * Details' "Backup to drive…": a backup downloads each game from the
- * server, so it is disabled, with the reason, while no server is connected.
+ * Details' "Backup to drive…", the select bar's and "Backup all N…". Always
+ * enabled (RommStorefront README, "Backups without RomM"): with RomM off a
+ * backup copies the games installed on this computer, and the dialog lists
+ * the ones it can't. `connected` is kept so the callers stay as they are.
  */
 export function backupAction(connected: boolean): { disabled: boolean; reason: string } {
-  return connected ? { disabled: false, reason: '' } : { disabled: true, reason: BACKUP_NEEDS_SERVER };
+  void connected;
+  return { disabled: false, reason: '' };
 }
 
 /** The line under it when connected drives hold the game: "On Couch kit", or `''`. */
