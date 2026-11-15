@@ -61,7 +61,7 @@
   import { installedOnPlatform, localTagLabel, platformGameCounts, platformGames, type RommGridItem } from '../platformGames';
   import type { RommRailRow } from '../rail';
   import { rommConnectingPanel, rommPlatformCountsLine } from '../words';
-  import RommMark from './RommMark.svelte';
+  import RommMark from '../RommMark.svelte';
   import RommPlatformHeader from './RommPlatformHeader.svelte';
 
   let {

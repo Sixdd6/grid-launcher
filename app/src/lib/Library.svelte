@@ -25,7 +25,9 @@
   import RommServerView from './romm/desktop/RommServerView.svelte';
   import RommInstalledHeader from './romm/desktop/RommInstalledHeader.svelte';
   import RommBanner from './romm/desktop/RommBanner.svelte';
-  import RommMark, { ROMM_MARK } from './romm/desktop/RommMark.svelte';
+  import RommMark from './romm/RommMark.svelte';
+  /** The RomM group heading's tile: RommMark's monogram and colour (prototype `RM_MARK`). */
+  const ROMM_MARK = { mono: 'R', hue: 'hsl(258 50% 46%)' };
   import {
     DRIVE_SORTS,
     driveChips,

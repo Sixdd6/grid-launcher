@@ -26,7 +26,7 @@ async function railOrder(): Promise<string[]> {
  * platform with RomM's game count; a platform's grid merges the server's
  * games with the installed ones (NOT LINKED, NOT ON ROMM). The seed installed
  * three Super Nintendo games: Super Mario World (rom 101), Hidden Kiln (no
- * rom id) and Sky Lantern (another server's rom 999).
+ * rom id) and Sky Lantern (rom 999, gone from the server).
  */
 describe('romm-library (b): connected', () => {
   before(async () => {
@@ -99,6 +99,18 @@ describe('romm-library (b): connected', () => {
     await expect($(testId('library-rail-platform-snes'))).toHaveAttribute('aria-current', 'page');
     await expect($(testId('nav-library'))).toHaveAttribute('aria-current', 'page');
     await shot('b-platform-snes');
+  });
+
+  it('words Details for an unlinked row', async () => {
+    await $(testId('game-card-local-hidden-kiln')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('details-unlinked-note'))).toHaveText('Not linked to a RomM game');
+    await expect($(testId('details-link-server'))).toHaveText('Link…');
+    await $(testId('details-tab-saves')).click();
+    await expect($(testId('details-link-to-sync'))).toHaveText(expect.stringContaining('Link this game to sync its saves'));
+    await shot('b-details-unlinked-saves');
+    await $(testId('details-close')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
   });
 
   it('searches the merged grid', async () => {

@@ -11,7 +11,9 @@
  *   - Super Mario World, rom 101 on the mock: merged with the server's game;
  *   - Hidden Kiln, no rom id: NOT LINKED (no server game has its title, so
  *     the relink pass after a connect leaves it alone);
- *   - Sky Lantern, rom 999 from another RomM server: NOT ON ROMM.
+ *   - Sky Lantern, rom 999, gone from the server: NOT ON ROMM. (A row from
+ *     another server is re-pointed at the live one, unlinked, on connect:
+ *     `Registry::clear_foreign_rom_ids`.)
  * - `romm-library-c`, `romm-library-d`: nothing; they relaunch on what the
  *   earlier specs left.
  *
@@ -58,7 +60,7 @@ const PLATFORM = 'Super Nintendo Entertainment System';
 const GAMES = [
   { title: 'Super Mario World', rom: 101, server: '' },
   { title: 'Hidden Kiln', rom: null, server: '' },
-  { title: 'Sky Lantern', rom: 999, server: 'http://romm.old.invalid' },
+  { title: 'Sky Lantern', rom: 999, server: '' },
 ];
 const values = GAMES.map((g, i) => {
   const dir = path.join(library, 'games', PLATFORM, g.title);

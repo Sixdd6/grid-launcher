@@ -16,8 +16,8 @@ async function shot(name: string): Promise<void> {
  * with RomM stored as connected and the server not answering. GRID opens
  * on All games; the RomM group has Installed only, with the `!` flag, and
  * RomM › Installed shows the Can't reach banner. Retry, once the server is
- * back, brings Discover and the platforms back. Then Disconnect (the
- * legacy Settings › Connection until Step 4) for part D.
+ * back, brings Discover and the platforms back. Then Disconnect on the
+ * RomM card: a platform row disappears and the selection falls back.
  */
 describe('romm-library (c): Can\'t reach RomM', () => {
   before(async () => {
@@ -64,15 +64,21 @@ describe('romm-library (c): Can\'t reach RomM', () => {
     await expect($(testId('library-rail-romm-installed-flag'))).not.toExist();
   });
 
-  // Last: disconnect for part D (the legacy Connection page still goes back to Connect).
-  it('disconnects RomM', async () => {
+  it('falls back to RomM › Installed when a platform row disappears', async () => {
+    await $(testId('library-rail-platform-snes')).click();
+    await $(testId('server-platform-header')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    // Disconnect on the RomM card (Settings › Game stores); GRID stays open.
     await $(testId('nav-settings')).click();
-    await $(testId('settings-nav-connection')).click();
-    await $(testId('settings-connection-disconnect')).waitForClickable({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('settings-connection-disconnect')).click();
-    await $(testId('connect-server-url')).waitForExist({
+    await $(testId('settings-nav-stores')).click();
+    await $(testId('romm-card-disconnect')).waitForClickable({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('romm-card-disconnect')).click();
+    await $(testId('romm-disconnect-go')).click();
+    await $(testId('nav-library')).click();
+    await browser.waitUntil(async () => (await $(testId('library-rail-romm-installed')).getAttribute('aria-current')) === 'page', {
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'Disconnect never finished',
+      timeoutMsg: 'the selection never fell back to RomM › Installed after Disconnect',
     });
+    await expect($(testId('library-rail-platform-snes'))).not.toExist();
+    await expect($(testId('library-rail-romm-installed-flag'))).toHaveText('off');
   });
 });
