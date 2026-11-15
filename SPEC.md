@@ -1,36 +1,57 @@
 # Overview
-The application is a game launcher and manager for RomM which connects to the server API specified in `openapi.json`.
+GRID is a game launcher and manager with one Library for the games you own. Its games come
+from storefronts the user connects, each optional: Amazon Games, Epic Games, GOG, RomM and
+Steam (see "Game stores"). RomM is the user's own game server: GRID browses it, installs
+its games with an emulator, and syncs their saves, using the server API specified in
+`openapi.json`. Removable Backup drives (see "Game backups") are a further source. GRID
+works with no storefront connected: the Library, Backup drives, Downloads, Settings ›
+Systems (emulators and firmware) and play need none.
 It is built in Rust with Tauri 2 and a Svelte 5 frontend, and ships as a Windows installer and a self-contained AppImage on Linux.
+
+**RomM as a storefront** (landing with the RomM storefront rework; plan
+`docs/romm-storefront-plan.md`, approved designs
+`docs/design/system/components/RommStorefront/README.md` and
+`docs/design/system/components/TVRommStorefront/README.md`). There is one RomM server at
+a time. Its state is one of **Connected**, **Connecting** (a probe is running),
+**Can't reach** (the server didn't answer), **Sign-in expired** (it answered 401) or **Not
+connected**. That state shows only where RomM shows: its group in the Library rail and
+its card in Settings › Game stores, as a store's does. There is no server chip, no
+connection dot and no separate offline mode; GRID never leaves the shell because of
+RomM's state. Installed RomM games play in every state. What needs RomM (browsing,
+installing, cloud saves, achievement progress, updates, Install from RomM for firmware,
+linking) says so where it is offered and names the fix: Open Game stores, Retry or Sign
+in again….
 
 # Top Bar
 The top bar is 58px tall: the GRID logo and wordmark on the left, a centred pill
-group with the four views (Library, Server, Downloads, Settings) in that order, and on
-the right the app-update badge when a release notice is stored, the light / dark
-toggle, a connection status dot and the server menu (Reconnect, Disconnect, Open RomM
-in browser). `Ctrl+1`..`Ctrl+4` switch views from the keyboard (not while a text field
-has focus or a dialog is open). Emulators are set up in Settings › Systems; there is
-no Emulators view.
+group with the three views (Library, Downloads, Settings) in that order, and on the
+right the app-update badge when a release notice is stored, the TV mode button and the
+light / dark toggle. There is no server chip, connection dot or server menu: RomM's
+state and its Reconnect, Disconnect and Open in browser live on its Library group and
+its Settings › Game stores card (see Overview). `Ctrl+1`..`Ctrl+3` switch views from the
+keyboard (not while a text field has focus or a dialog is open). Emulators are set up in
+Settings › Systems; there is no Emulators view, and no Server view: RomM's Discover and
+platform screens are rows of the Library's RomM group.
 
-**Where GRID opens.** The view selected when the main window first appears (after a
-restore, a connect, or first-run setup) follows Settings › Appearance › **Open GRID on**,
-one setting shared with TV mode. **Automatic** (the default): Server › Discover when GRID
-is connected to a RomM server; the Library when it is not — the server can't be reached
-(the Library opens on All games), or GRID is used without a server (the Library opens on
-the first connected Backup drive, when one is set up). **Server › Discover** and
-**Library** force that place: forced Discover with no server opens on the Server view's
-not-connected panel, and forced Library without a server still opens on the first
-connected Backup drive.
-
-**Offline mode.** After "Use without a server" (First Run Setup), the connection dot is
-grey (a choice, not a fault, so not the danger red) and the chip reads "Offline · no
-server". Its menu has one item, **Connect to a server…**, which opens the Connect screen,
-and the note "Library and backup drives work offline". Nothing is cleared until a
-connect succeeds.
+**Where GRID opens.** The view is always the Library. Which rail row is selected when
+the main window first appears (after startup, the welcome or Choose your systems) follows
+Settings › Appearance › **Open GRID on**, one setting shared with TV mode:
+- **Automatic** (the default): Library › RomM › Discover when RomM is connected at
+  startup, else All games.
+- **Discover (when RomM is connected)**: Library › RomM › Discover when RomM is connected
+  at startup, else All games (the Discover row exists only while RomM is connected).
+- **Library**: All games.
+"Connected at startup" means the config says RomM is connected: the startup probe runs
+after the shell is up, so an unreachable server never holds the window. While it runs,
+the RomM group shows its Connecting state, with Discover in it. If the probe then fails,
+the selection falls back to RomM › Installed, or All games when the group is gone. A user
+who never connected RomM opens on All games. The stored values (`automatic`, `discover`,
+`library`) are unchanged from earlier versions.
 
 **Light / dark toggle.** A 28×28 icon button showing the current mode — a sun in light,
 a moon in dark — whose label names the switch ("Switch to dark mode"). On the startup
-screens (Connect and first-run setup) it sits in the window's top-right corner, 16px in;
-in the main window it is in the top bar, left of the connection dot and username. A
+screens (the welcome and Choose your systems) it sits in the window's top-right corner,
+16px in; in the main window it is at the right end of the top bar. A
 click switches the theme and sets Settings › Appearance › Theme to match ("Follow
 system" stays a choice there). The icon spins in (300ms) and the colours ease across
 (240ms) only during the switch; with reduced motion both are instant.
@@ -116,22 +137,30 @@ failed — see Downloads". While the first-run setup card is up it counts its em
 no per-emulator queued, installed or failed cards are shown.
 
 # Main Sections
-There are several main sections to the application with buttons across the top bar to navigate between them:
-- Library
-- Server (opens on Server › Discover; GRID itself opens there when connected, see Where GRID
-  opens under Top Bar)
+There are three main sections to the application with buttons across the top bar to navigate between them:
+- Library (every storefront's games, RomM's Discover and platform screens included; see
+  Where GRID opens under Top Bar)
 - Downloads
-- Settings (emulators are set up in its Systems pane)
+- Settings (storefronts are connected in its Game stores pane, emulators set up in its
+  Systems pane)
 
-- **Library** contains a 220px filter rail — All games, Recent (played in the last 30
-  days), Updates, then each installed platform, every entry with a count — beside a
-  header (a title row with the rail entry's name and its game count, "12 games", over a
-  toolbar: search by title, sort by Recently played / Recently installed / Title /
-  Platform, card size Small / Medium / Large) and one grid of cover cards. Each rail
-  entry has its own empty state. Clicking a card opens the details sub view; the hover
-  Play launches directly. The card size is remembered as `ui.card_size_library`.
+- **Library** contains a 220px filter rail beside a header (a title row with the rail
+  entry's name and its game count, "12 games", over a toolbar: search by title, sort by
+  Recently played / Recently installed / Title / Platform, card size Small / Medium /
+  Large) and one grid of cover cards. The rail's order is:
+  1. **All games**, **Recent** (played in the last 30 days) and **Updates**, each with a
+     count. They hold every installed game, RomM and store games alike, in every RomM
+     state;
+  2. **Backup drives** (below);
+  3. the storefront groups, in name order: **Amazon Games, Epic Games, GOG, RomM,
+     Steam**. Each group shows while its storefront is connected or has installed games
+     (the store groups are described under "Game stores"; the RomM group below).
+  There is no PLATFORMS section: platform rows live only in the RomM group, and only
+  while RomM is connected. Each rail entry has its own empty state. Clicking a card opens
+  the details sub view; the hover Play launches directly. The card size is remembered as
+  `ui.card_size_library`, for every Library grid, RomM's screens included.
 
-  **Library › Backup drives.** Under the platforms, a "Backup drives" group has one row
+  **Library › Backup drives.** Under Updates, a "Backup drives" group has one row
   per connected drive with a readable pack (a read-only drive too): a drive icon, the
   pack name and its game count; pointing at the row shows the volume label. Unplugging
   the drive drops its row (the rail falls back to All games) and closes a Details opened
@@ -141,20 +170,21 @@ There are several main sections to the application with buttons across the top b
   - The grid is the drive's games, with search ("Search games on this drive"), sort
     (Title, Platform, Recently backed up, Largest first) and size. A game installed here
     shows Play; any other shows **Install**, which copies it from the drive with no
-    network. An empty drive reads "Nothing on this drive yet. Backup games from Server
-    or Library."
+    network. An empty drive reads "Nothing on this drive yet. Backup games from the
+    Library."
   - Select mode on a drive offers **Install N games** and **Remove from drive…** (two
     clicks: "Remove N from drive"); the result reads "Removed 3 games from <pack>".
 
-  **Select mode** (Library and Server, not Discover). **Select** in the toolbar turns it
-  on and reads **Done** while on. A click on a cover picks it instead of opening Details;
-  Shift-click picks a range. A picked cover shows a filled check and a ring, and its hover
-  bar is hidden. A bar pinned to the bottom of the grid shows "3 selected · 4.2 GB",
-  Select all N / All N selected, Clear and the action: **Backup to drive…** on installed
-  games and on Server. Esc or Done leaves select mode, and so does changing the rail
-  entry. A Library platform row also has **Backup all N…** in its header, for its
-  installed games that have a server id. Backing up needs a server: offline, both are
-  disabled with the reason.
+  **Select mode** (every Library grid but RomM › Discover). **Select** in the toolbar
+  turns it on and reads **Done** while on. A click on a cover picks it instead of opening
+  Details; Shift-click picks a range. A picked cover shows a filled check and a ring, and
+  its hover bar is hidden. A bar pinned to the bottom of the grid shows "3 selected · 4.2
+  GB", Select all N / All N selected, Clear and the action: **Backup to drive…** on
+  installed games and on a RomM platform screen. Esc or Done leaves select mode, and so
+  does changing the rail entry. RomM › Installed and a RomM platform screen also have
+  **Backup all N…** in their header. Backups of installed RomM games work without RomM,
+  from the installed copy (see Backups without RomM under Game backups); games that are
+  not installed need RomM to download.
 
   **Moved and missing files.** At startup and on every Library refresh, GRID checks
   that each installed game's files are still on disk. It never deletes anything, and it
@@ -177,20 +207,52 @@ There are several main sections to the application with buttons across the top b
     reason.
   - **Remove from library (keeps files)** — the same action as for a game with no server
     id below: the Library row goes, no file is touched.
-- **Server** mirrors Library: a rail with **Discover** first (a divider under it), then the
-  server's platforms (alphabetical by name) with ROM counts. A platform shows a
-  platform header (name, ROM count, installed count, a firmware chip and the platform's
-  default emulator chip), a search box that filters the loaded platform list by
-  title, platform or genre, and a grid of cover cards. The hover action is
-  Install for a game that is not installed and Play for one that is. The card size is
-  remembered as `ui.card_size_server`. Downloads and installs are queued and handled in
-  the background. A platform header has **Backup all N…** on its right, which opens the
-  Backup dialog for every game of the platform, and the toolbar has Select (see Select
-  mode above).
+- **Library › RomM** is RomM's group in the rail (between GOG and Steam). Its heading is
+  the RomM mark (a monogram "R", never a logo), **ROMM** and a flag. Its rows follow
+  RomM's state:
 
-  **Offline.** In offline mode Server shows one panel in place of the rail and grid: "Not
-  connected to a server", "Your Library and backup drives work without one. Connect to
-  browse the server and backup games." and **Connect to a server…**.
+  | RomM | Flag | Rows |
+  |---|---|---|
+  | Connected | none | **Installed** (count), **Discover** (no count), then one row per platform (count) |
+  | Connecting at startup | spinner, "Connecting to RomM" | **Installed**, **Discover** (a connecting panel) |
+  | Can't reach | **!** "Can't reach RomM" | **Installed** only |
+  | Sign-in expired | **!** "RomM sign-in expired" | **Installed** only |
+  | Not connected, RomM games installed | **off** "Not connected" | **Installed** only |
+  | Not connected, none installed | — | no group |
+
+  When the selected row goes away (RomM drops while Discover or a platform is open), the
+  selection falls back to RomM › Installed, or All games when the group is gone.
+
+  **RomM › Installed** is every installed RomM game (never the hidden Emulators shelf),
+  with platform tags and the Library's sort, size and search ("Search by title"; folded:
+  "Search installed RomM games…"). Its header reads "RomM · Installed", "11 games · 21.2
+  GB · from romm.home.lan", with a chip ("Signed in as player", which opens Settings ›
+  Game stores; "Connecting to romm.home.lan…"; "Not connected · Connect…"), **Backup all
+  N…** and **Select**. A one-line banner above the grid carries a fault:
+  - Can't reach: "**Can't reach RomM** · romm.home.lan didn't answer. Installed games
+    still play." · **Retry** (Retrying…);
+  - Sign-in expired: "**RomM sign-in expired** · Sign in again to browse, install and
+    sync saves. Installed games still play." · **Sign in again…** (the sign-in dialog);
+  - Not connected: no banner; the **off** flag and the chip say it, as for a store.
+  Empty: "No RomM games installed yet" with "Install games from Discover or a platform
+  under it." and **Open Discover** (connected), else "Install games from RomM once it's
+  connected again.". With RomM not connected RomM games show no UPDATE tag (Disconnect
+  clears updates); Can't reach and Sign-in expired keep the last known ones.
+
+  **A RomM platform** shows a platform header (name, the counts line "4 games on RomM ·
+  2 installed · 1 only on this computer", a firmware chip and the platform's default
+  emulator chip), a search box that filters the loaded platform list by title, platform
+  or genre, and a grid of cover cards. The platform rows are the union of the server's
+  platforms (with games, never the Emulators shelf) and the installed RomM platforms,
+  sorted by label; a row's count is RomM's game count only. The grid merges the server's
+  games with the installed rows (matched by ROM id, and by server): the hover action is
+  Install for a game that is not installed and Play for one that is. Installed rows the
+  server doesn't have are added, tagged on the cover **NOT LINKED** (no RomM link) or
+  **NOT ON ROMM** (from another RomM server, or gone from this one); they never show in
+  Discover and are not counted. Downloads and installs are queued and handled in the
+  background. The header has **Backup all N…** on its right, which opens the Backup
+  dialog for every game of the platform, and the toolbar has Select (see Select mode
+  above).
 
   **Header chips follow the state.** The firmware chip reads "Firmware: 3 files — no
   default emulator" until the platform has a default emulator, then "Firmware: 3 files",
@@ -202,9 +264,12 @@ There are several main sections to the application with buttons across the top b
   emulator is picked.
   Native platforms (games native to this OS, and Windows games run through Proton) and
   the Emulators shelf show neither chip, and their firmware status is never fetched.
-- **Server › Discover** is the first Server rail row and the default view: a connected app, and
-  the app after first-run setup, opens on it (unless Open GRID on says Library). It has no folding header and no search;
-  Ctrl+F does nothing there. Its lists come from the server's `created_at` and
+- **RomM › Discover** is the RomM group's second row, shown only while RomM is connected
+  (or connecting at startup). A connected app, and the app after Choose your systems,
+  opens on it (unless Open GRID on says Library). The top bar's pill stays on Library.
+  While the startup probe runs it shows a panel: a spinner, "Connecting to
+  romm.home.lan…" and "Discover and the platforms show when RomM answers. Installed games
+  play now.". It has no folding header and no search; Ctrl+F does nothing there. Its lists come from the server's `created_at` and
   `metadatum.first_release_date`, always filtered and sorted by GRID itself (RomM
   ignores an `order_by` it does not know, and lists upcoming games with future dates).
   The **preferred platforms** are the systems with a default emulator, Windows once a
@@ -248,7 +313,8 @@ There are several main sections to the application with buttons across the top b
     tint of it (88% lightness), the outline and shadow a deep shade (16%). The shade is
     computed in the backend from the cached image (a webview canvas cannot read an
     `asset://` image) and remembered for the session.
-- **Server and Library headers fold while you scroll** (one shared behaviour). Past 32px
+- **Library headers fold while you scroll** (one shared behaviour, RomM's Installed and
+  platform screens included). Past 32px
   of scroll the title row (title, counts, chips) folds up into the toolbar row, leaving
   the search field and Size (and Library's Sort) pinned to the top of the main panel;
   back within 8px of the top it unfolds (the gap stops flicker). The header floats over
@@ -257,10 +323,11 @@ There are several main sections to the application with buttons across the top b
   the chips a beat ahead; the padding tightens from 14px to 8px; the bar turns to the
   opaque overlay surface with a soft shadow and a stronger edge. Unfolding reverses it,
   the title fading in a moment late; reduced motion makes it instant. While folded the
-  search placeholder carries the hidden title's context: "Search PlayStation…" in
-  Server; in Library "Search your library…", "Search recent games…", "Search games with
-  updates…" or "Search <platform>…" (unfolded they read "Search title, platform or
-  genre" and "Search installed games"). Switching platform or rail entry starts the grid
+  search placeholder carries the hidden title's context: "Search PlayStation…" on a RomM
+  platform, "Search installed RomM games…" on RomM › Installed, and "Search your
+  library…", "Search recent games…" or "Search games with updates…" on the top rows
+  (unfolded they read "Search title, platform or genre" on a RomM platform and "Search
+  installed games" or "Search by title" elsewhere). Switching platform or rail entry starts the grid
   at the top, unfolded. Arrow-key movement keeps the selected card clear of the folded
   bar, and moving into the first row scrolls back to the top.
 - **Downloads** is a full view, capped at 1100px and centred, with three stacked
@@ -278,7 +345,8 @@ There are several main sections to the application with buttons across the top b
   "Downloading from server 45%" (network sparkline), then "Writing to <label> 70%" (disk
   sparkline); a finished row goes to Completed as "Written to <pack>"; a failed one reads
   "Failed — <reason>". A game copied from this computer reads "Getting details from
-  server" (its details and art still come from the server), then "Copying from this
+  server" (with RomM connected its details and art come from the server; without RomM
+  they come from the library and the image cache), then "Copying from this
   computer to <label> 45%" (disk sparkline), and finishes as "Copied from this computer ·
   Written to <pack>". Cancel works while it downloads and while it writes. A backup's
   game rows run first, then its emulators, then its firmware; backups and installs share
@@ -306,12 +374,11 @@ There are several main sections to the application with buttons across the top b
   that is already queued is ignored, never refused for space. A library move's space
   check counts what queued jobs hold too.
 - **Settings** is a rail of eight panes in alphabetical order — Appearance, Backup
-  drives, Cloud saves, Connection, Library, RetroAchievements, Systems, Updates — and
-  opens on the first, Appearance.
-  The panes: **Backup drives** (see Game backups below), **Connection** (server URL,
-  user, whether a credential is stored in the OS keyring and whether the session is
-  verified, Reconnect, Disconnect; offline it reads "Offline · no server", the credential
-  "Not used offline", and offers only Connect to a server…), **Library** (the library folder and Change…: the new folder is typed or
+  drives, Cloud saves, Game stores, Library, RetroAchievements, Systems, Updates — and
+  opens on the first, Appearance. There is no Connection pane: RomM is a card on Game
+  stores.
+  The panes: **Backup drives** (see Game backups below), **Game stores** (see Settings ›
+  Game stores below), **Library** (the library folder and Change…: the new folder is typed or
   picked with Browse…, and is refused when it is not a full path, is the current folder,
   is inside it or contains it, cannot be created or written, or while a download or
   install, a running game, a cloud transfer or a library move is active; then **Move
@@ -344,30 +411,117 @@ There are several main sections to the application with buttons across the top b
   remembered, so no later uninstall can remove it or its top-level folders), **Cloud saves** (restore before launch, upload after exit, skip when the
   local save is newer, upload delay, a save retention limit — default 10, 0 = unlimited;
   the server's autocleanup applies it to slotted saves and the app prunes the others; an
-  install that still has the old default 3 moves to 10 once), **RetroAchievements** (username
+  install that still has the old default 3 moves to 10 once; see Needs RomM in Settings
+  below), **RetroAchievements** (username
   and a write-only token; Save fans the credentials out to every emulator config that
   supports them, Clear removes them; saving the username, by Save or Log In, also sets it
   on the server account — the username only, never the token — when it differs from the
   server's, so the Achievements tab can show progress, and asks the server to refresh that
   progress; if the server update fails the local save still stands and a short notice
-  says so; the server-side name is never cleared), **Systems** (see Settings › Systems
+  says so; the server-side name is never cleared; the server step needs RomM, the
+  emulator step does not), **Systems** (see Settings › Systems
   below), **Updates** (the running version, when the startup check
   ran, the release notice with its Open release and Dismiss buttons, and the note that
   the launcher only ever checks — it never downloads or installs an update), and
   **Appearance**.
+- **Settings › Game stores** (renamed from Stores) reads "Game stores" · "Connect the
+  places your games come from. Each one gets a group in the Library. RomM is your own
+  game server: GRID browses it, installs its games with an emulator and syncs their
+  saves. …". It has one card per storefront in name order: Amazon Games, Epic Games,
+  GOG, **RomM**, Steam (the store cards are described under "Game stores"). **The RomM
+  card** has the RomM mark, **RomM**, a sub-line and a pill:
+
+  | State | Sub-line | Pill |
+  |---|---|---|
+  | Connected | Signed in as player · romm.home.lan | ✓ Connected |
+  | Connecting / reconnecting | same | spinner Connecting… |
+  | Can't reach | same | Can't reach (warning) |
+  | Sign-in expired | same | Sign-in expired (warning) |
+  | Not connected, server stored | Not signed in · romm.home.lan | Not connected (dashed card) |
+  | Never connected | Your own game server | Not connected (dashed card) |
+
+  - Connected: fields **Server** (a link that opens it in the browser), **User**,
+    **Sign-in** ("API token · kept in the OS keyring" / "Password · …"), **Status**
+    ("Connected · checked 2 min ago") and **Games** ("45 on the server · 11 installed
+    here"). Actions: **Show in Library** (primary), **Edit…**, **Reconnect**
+    (Reconnecting…), **Open in browser**, **Disconnect…**.
+  - Can't reach: the warning "**Can't reach RomM.** romm.home.lan: connection refused.
+    Installed RomM games still play; browsing, installs, cloud saves and firmware
+    downloads wait until it's back." and Status with the probe's reason; actions
+    **Retry** (primary), Edit…, Open in browser, Disconnect….
+  - Sign-in expired: the warning "**Your RomM sign-in expired.** Sign in again to
+    browse, install and sync saves. Installed games still play." and Status "Sign-in
+    expired · RomM answered 401"; actions **Sign in again…** (primary), Edit…, Open in
+    browser, Disconnect….
+  - Not connected: "Connect your RomM server to browse its games in the Library, install
+    them with an emulator, and sync their saves and firmware. The 11 RomM games installed
+    here still play." With a stored server it shows Server, User and Status "Not
+    connected". Actions: **Connect RomM…**, and Open in browser when a server is stored.
+  - **Disconnect…** confirms in the card: "**Disconnect RomM?** GRID deletes your RomM
+    sign-in from the OS keyring and stays open. Installed RomM games stay and still play.
+    Cloud saves, firmware downloads and updates stop." · **Disconnect** / Cancel. GRID
+    stays where it is; the card shows Not connected with the server and user kept for the
+    next connect, RomM UPDATE tags are cleared, and the Library's RomM group stays
+    (Installed only, **off**) while RomM games remain installed. The card reads
+    "RomM disconnected. Installed RomM games stay and still play."
+  - **The sign-in dialog** (`RommSignInForm`, also inline in the welcome): **Connect to
+    RomM** (button **Connect**), **Edit RomM sign-in** (filled in; "Installed RomM games
+    stay; GRID links them to the server's games when it connects."; button **Save and
+    connect**) or **Sign in to RomM again** (from expired; Server URL and Username
+    read-only; button **Sign in**). Fields: **Server URL**, **Use an API token** (on by
+    default, else the stored credential's kind), **Username** (password mode only),
+    **API token** / **Password**; the secret is never filled in. GRID keeps the secret in
+    the OS keyring, never in a file. The button is disabled until the fields are filled;
+    busy it reads "Connecting…". Errors show under the fields: the server didn't answer,
+    a 401 ("RomM rejected this token (401). Check it, or make a new one." / "RomM
+    rejected the username or password (401)."), and a token for another user ("This token
+    belongs to "guest", not "player". Use a token for player, or disconnect RomM first to
+    sign in as someone else.").
+  - A connect from the card that needs setup opens Choose your systems (see First Run
+    Setup); its Skip and Install return to Settings › Game stores.
+- **Needs RomM in Settings.** While RomM isn't connected, **Cloud saves** shows a panel
+  under its heading, "**Cloud saves need RomM**" · "<why> GRID keeps your emulator saves
+  and states on your RomM server. These settings apply when it's connected. GOG and Epic
+  games sync with their own store's cloud.", and **RetroAchievements** shows
+  "**Achievement progress needs RomM**" · "<why> Details › Achievements shows your
+  progress from RomM. Signing in here still turns on achievements in RetroArch,
+  DuckStation and Dolphin.". `<why>` is "RomM isn't connected.", "GRID can't reach
+  romm.home.lan right now.", "Your RomM sign-in expired." or "GRID is still connecting
+  to romm.home.lan."; the panel's action is **Open Game stores**, **Retry** or **Sign in
+  again…**. Both forms stay visible and editable under the panel: the RetroAchievements
+  token is written into the emulators and doesn't need RomM.
 - **Settings › Systems** holds every emulator choice, install, update and the Windows
-  (Proton) setup (it replaced the Emulators view). Every emulator entry has a name,
+  (Proton) setup (it replaced the Emulators view). It is a general emulation setup tool
+  and works the same with or without RomM. Every emulator entry has a name,
   program path, launch arguments, save strategy, ignore rules and optional custom
-  save/state directories.
-  - **One row per system on the server** (never a native platform or the Emulators
-    shelf), each with an emulator picker and a status: Ready, Update available, Firmware
-    needed, Installing… or No emulator. Systems with no emulator come first, open, with
-    a warning edge, the reason ("Games for this system can't start yet. PCSX2 is
-    recommended.") and one-click Install of the recommended emulator; a system no
-    installable emulator plays says so and points to Add an emulator manually. The rest
-    follow alphabetically. The emulator shown is the one a launch would use: the
-    system's default, else the first installed emulator that plays it, never one after
-    an explicit None.
+  save/state directories. The lede reads "Pick an emulator for each system you play.
+  GRID installs, updates and sets it up, with or without RomM." (with RomM: "… Systems on
+  your RomM server are listed with their game counts.").
+  - **Where the systems come from.** GRID ships its own platform list (`platforms.json`:
+    each system's RomM slug, its RomM default name and older names) and knows, per slug,
+    which emulators it can install on this computer. While RomM is connected, the
+    server's platforms are merged in by slug, and the server's name wins as the label.
+    Installed games add their own systems. Native platforms and the Emulators shelf are
+    never rows. Emulator choices stay keyed by the system's label; a lookup also tries the
+    system's other names, so a choice made under a RomM custom name or an older name is
+    still found.
+  - **One row per system you play** (the main list): systems with games (on RomM or
+    installed), with an emulator chosen, or installing. Server-only platforms (no
+    emulator GRID installs plays them, such as Atari Jaguar) show only while RomM is
+    connected. Each row has an emulator picker, a count line ("48 on RomM · 3 installed" /
+    "48 on RomM" with RomM; "3 installed" / "No games yet" without) and a status: Ready,
+    Update available, Firmware needed, Installing… or No emulator. Systems with no
+    emulator come first, open, with a warning edge, the reason ("Games for this system
+    can't start yet. PCSX2 is recommended.") and one-click Install of the recommended
+    emulator; a system no installable emulator plays says so and points to Add an
+    emulator manually. The rest follow alphabetically. The emulator shown is the one a
+    launch would use: the system's default, else the first installed emulator that plays
+    it, never one after an explicit None.
+  - **More systems** · "GRID can set these up too. They move up when you have games for
+    them or pick an emulator." holds the catalog systems with no games and no emulator,
+    by name, closed, with a neutral **Not set up** pill and "No games yet". Opened: "<emulator>
+    is recommended for <system>." with **Install <emulator>** and the firmware block. A
+    system moves to the main list once it has games or an emulator.
   - **The picker is the installer.** **Installed** lists the installed emulators that play
     the system; **Download** lists the rest GRID can install for it (the same options as
     first-run setup, server builds included), the recommended one first; the recommended
@@ -379,7 +533,8 @@ There are several main sections to the application with buttons across the top b
     user's own: it replaces an explicit None, and setting a default by hand drops an
     install still waiting for that system. **None** stores the explicit "(none)".
   - **Install recommended (N)** in the header installs the recommended emulator for every
-    system that has none (N counts systems), and hides when nothing is missing. **Check
+    system with games that has none (N counts those systems; More systems never count),
+    and hides when nothing is missing. **Check
     for updates** sits beside it.
   - **Opening a row** shows its emulator: the version ("· up to date" once checked),
     Update to <version> (only when one is out), Open (the emulator on its own, to change
@@ -388,12 +543,8 @@ There are several main sections to the application with buttons across the top b
     right-aligned, when it fits; near the bottom edge it opens beside the button (left,
     else right), shifted up to stay 8px inside the window. It never covers its button or
     opens upward over it, and it closes when the list scrolls, on Escape or on a click
-    elsewhere. Below are the RetroArch core select, the system's firmware line ("PlayStation
-    firmware · 3 files · from your server" with Install, Installing… while the pass runs,
-    then Installed; each server file is checked against the size and MD5 the server lists
-    before it is written; "Installing PlayStation firmware for DuckStation…" when it
-    starts and "PlayStation firmware installed for DuckStation" when it ends), the PS3
-    firmware line for RPCS3, and the Setup tips. RPCS3's firmware counts as installed
+    elsewhere. Below are the RetroArch core select, the system's firmware block (below),
+    the PS3 firmware line for RPCS3, and the Setup tips. RPCS3's firmware counts as installed
     when RPCS3's own dev_flash holds `sys/external/liblv2.sprx` (the file RPCS3 needs to
     boot a game); the version comes from `vsh/etc/version.txt`. GRID finds dev_flash the
     way RPCS3 does: the `portable` folder beside the program, else the program's folder,
@@ -403,9 +554,50 @@ There are several main sections to the application with buttons across the top b
     not "Firmware needed". When it is not installed and the background download has put
     a package beside RPCS3, the line says so and Install hands the package to RPCS3's own
     installer; the page then checks again every few seconds for two minutes, and on each
-    visit. With neither, the server firmware line offers the download. GRID does not
+    visit. With neither, the firmware block offers **Install from RomM** and **Locate
+    PS3UPDAT.PUP…** (a picked file is checked by size and MD5 against the expected set
+    when one is listed, then handed to RPCS3's installer). GRID does not
     download the package for an RPCS3 that already has firmware installed. An emulator used by several systems shows on each
     and says which others it plays.
+  - **The firmware block** reads "**Firmware** · 3 files · 2 installed" (or "all
+    installed"), then two buttons, a reason line, and one line per expected file. The
+    expected files are RomM's firmware list for the platform while RomM is connected,
+    joined by name with GRID's own table (`firmware-known.json`: per system, each file's
+    name, size, MD5, whether it is required, and the emulators that use it).
+    - **Install from RomM** (primary while a required file is missing and RomM can
+      install it; "Installing…" while the pass runs). Each server file is checked against
+      the size and MD5 the server lists before it is written; "Installing PlayStation
+      firmware for DuckStation…" when it starts and "PlayStation firmware installed for
+      DuckStation" when it ends. While RomM is not connected it is disabled with the line
+      "Install from RomM needs RomM · **Connect RomM…** · or locate files you have.";
+      when the server has no firmware for the platform, "Not on your RomM server · locate
+      files you have.".
+    - **Locate files…** (primary when RomM can't install and a required file is
+      missing) picks files on disk, or a whole folder. PlayStation 3 has **Locate
+      PS3UPDAT.PUP…** in its place.
+    - With no emulator chosen both are disabled: "Install an emulator first. GRID puts
+      firmware into its folders."
+    - File lines: the name, "Required · Japan" / "Optional · Europe" (plus "· no fixed
+      checksum" for per-console keys), and a status: **Installed · verified**,
+      **Installed · not verified**, **Missing** (required) or **Missing · optional**. The
+      row's pill reads "Firmware needed" while a required file is missing.
+  - **Locate files.** The system file chooser picks files, or a folder (a second button,
+    "Use the whole folder"; a folder is searched three levels deep, regular files only,
+    links not followed). "Checking 5 files…" runs while GRID compares each file's size and
+    MD5 with the expected set. A file over 2 GB is refused before it is read. A file whose
+    size and MD5 match an entry installs under the entry's name into the emulator's
+    folders, the same routing, verification and record as a RomM install (`scph5501
+    (1).bin → scph5501.bin`). An archive that matches nothing as a whole has its members
+    matched one by one. A file whose name matches an entry with no fixed checksum (Switch
+    `prod.keys`, Wii U `keys.txt`) installs as **Installed · not verified**. A file whose
+    name matches but whose size or MD5 differs is refused ("This isn't the scph5502.bin
+    GRID knows (size or MD5 differs)"); a picked file GRID doesn't know is refused ("GRID
+    doesn't know this file for PlayStation"); folder files that match nothing are only
+    counted ("1 other file in the folder matched nothing."). The report lists
+    **Installed · N**, **Installed · not verified · N** ("GRID has no checksum for this
+    file, so it can't check it. If games don't start, dump it from your console
+    again.") and **Not installed · N**, with **Choose other files…** / **Done** when
+    nothing was installed. Nothing about a file's contents is logged.
   - **Companions.** An emulator whose catalog profile names companions (ShadPS4 and its
     Qt launcher, today the only one) shows each under its own line, marked "Companion":
     the companion's version, Update to <version> when one is out, Open and the same ⋯
@@ -450,23 +642,30 @@ There are several main sections to the application with buttons across the top b
     with its emulator line and the systems it could play. A companion of a system's
     emulator is never here; one whose emulator no system uses (or that is installed on
     its own) stays here and says what it belongs to ("Companion to ShadPS4 (Playstation
-    4).") instead of "Not used by any system on your server."
+    4).") instead of "Not used by any system."
+  - **Later: bring your own ROMs.** Playing local ROM folders, and installing ROMs from a
+    Backup drive without RomM, come later and are not built. They will add a game source
+    whose games join Systems by slug, as installed RomM games do, and a Library group of
+    their own; Systems, firmware and the label lookup need no change for them.
 - **Appearance** (under Settings) starts with **Open GRID on**, a select with "Automatic:
-  Discover when connected, else Library", "Server › Discover" and "Library", and the help
-  text "Here and in TV mode" (see Where GRID opens under Top Bar). It applies the next time
+  Discover when RomM is connected, else Library", "Discover (when RomM is connected)" and
+  "Library", and the help text "Here and in TV mode" (see Where GRID opens under Top
+  Bar). While RomM isn't connected and the choice isn't Library, a line reads "RomM isn't
+  connected, so GRID opens on All games." It applies the next time
   GRID opens and is stored as `open_on` (`automatic`, `discover` or `library`) under `[ui]`.
   It then chooses the theme — follow the OS, dark, or light;
   the light / dark toggle sets dark or light here too —
   turns the background art on or off, sets its fade from 0 to 100 percent with a live
   preview behind the pane (0 shows the art at full strength; each step fades it toward
   the window background; 100 is fully faded, which turns the art off, so nothing is
-  fetched or built; the value reads "100% · off"), sets its blur, sets the default card size for the Library and Server
+  fetched or built; the value reads "100% · off"), sets its blur, sets the default card size for the Library
   grids, and sets **Game labels**: "Always visible" (a small label under every cover) or
   "Visible on hover" (covers only; the title shows on hover or keyboard focus), and
   **Game card display**: "Equal height" or "Equal width" (see Cards). They are stored
   under `[ui]` in `config.toml` as `theme`, `background_fade` (100 is off; a config from before 2026-11-07 stored the art's
   opacity, 0–60 with 0 off, and is converted once on load),
-  `card_size_library`, `card_size_server`, `card_labels` (`always` or `hover`) and
+  `card_size_library`, `card_size_server` (no longer read since the Server view went;
+  kept so configs round-trip), `card_labels` (`always` or `hover`) and
   `card_display` (`rows` or `columns`); card display is shared with TV mode, while card
   size and game labels are the desktop's alone: TV mode has its own (`tv_card_size`,
   `tv_card_labels`; see TV mode). `[ui]` also holds TV mode's `tv_prompts`
@@ -477,7 +676,7 @@ There are several main sections to the application with buttons across the top b
   `hardware_acceleration`. Turning it off renders on the CPU, for a machine whose window
   comes up blank with it on; the environment variable `GRID_LAUNCHER_HW_ACCEL=never`
   (or `always`) overrides the setting for one start.
-- **Cards** (both grids) are each the size of their artwork: never cropped, never boxed,
+- **Cards** (every Library grid) are each the size of their artwork: never cropped, never boxed,
   no frame. **Game card display** (Settings › Appearance) picks the layout:
   - **Equal height** (the default): rows of one height, each card as wide as its art at
     that height, each full row stretched to the window's width. The row height follows
@@ -493,8 +692,10 @@ There are several main sections to the application with buttons across the top b
   shadow. On hover or keyboard focus it lifts, and a bar at its bottom shows Play or
   Install, Cloud sync and Details. Badges sit on the cover's corners: an installed dot
   top-right, an `UPDATE` tag top-left, a cloud icon bottom-right when the platform has
-  cloud sync configured, and, in the Library only (the one grid that mixes platforms), a
-  short platform name bottom-left. The details sub view shows the whole cover too.
+  cloud sync configured, and, on every grid that mixes platforms (not a RomM platform
+  screen), a short platform name bottom-left. On a RomM platform screen an installed row
+  the server doesn't have carries **NOT LINKED** or **NOT ON ROMM**. The details sub view
+  shows the whole cover too.
   A card shows the server's large cover, falling back to the small one when there is no
   large one or it fails to load. Only a card drawn at most 200 device pixels wide (a
   portrait Small or Medium card on a 1x display) shows the small cover, which is about
@@ -525,33 +726,58 @@ There are several main sections to the application with buttons across the top b
 ## Sub Views
 
 ### First Run Setup
-On first launch, or when required configuration is missing, the Connect screen asks for:
-- Server URL
-- API token (or username and password)
-- Library folder — only while none is stored. It is pre-filled with `~/Games/GRID`
-  (`%USERPROFILE%\Games\GRID` on Windows), has Browse…, and is required: nothing can
-  install without it. A folder that cannot be stored stops the connect with the reason.
+**The welcome** (replaces the Connect screen) is a full-window screen with the theme
+toggle in the corner. It shows only while the welcome was never finished or skipped
+(`[setup] welcomed` in `config.toml`); RomM's state never brings it back. It reads
+"**Welcome to GRID**" · "One Library for the games on your RomM server and the stores you
+buy from.", then two steps:
+1. **Library folder** (required): "Games, emulators and saves go here." A field
+   pre-filled with `~/Games/GRID` (`%USERPROFILE%\Games\GRID` on Windows) and
+   **Browse…**. Empty, it reads "Choose a folder to continue." and both footer buttons
+   are disabled: nothing can install without a library folder. A folder that cannot be
+   stored stops the step with the reason. It can be changed later under Settings ›
+   Library.
+2. **Connect your games · optional**: "Connect the ones you use. Add or change them any
+   time in Settings › Game stores." One row per storefront in name order, each with its
+   mark, name, a sub-line and its action:
+   - Amazon Games, Epic Games, GOG: "Sign in on <store>'s own page. GRID never sees your
+     password." · **Connect…** opens the store's login window over the welcome;
+   - RomM: "Your own game server. GRID browses it and installs its games with an
+     emulator." · **Connect…** opens the RomM sign-in form inline (the same fields and
+     errors as the card's dialog; see Settings › Game stores) · **Connect** / Cancel;
+   - Steam: "Installed Steam games show as soon as Steam is set up here." · **Set up…**
+     opens the Steam card's form inline · Close.
+   A connected row shows "Signed in as <name>" / "Connected as player · romm.home.lan" /
+   "SteamID64 … · <persona>" with a ✓ Connected pill (RomM also has **Edit**).
 
-The Connect button stays disabled until every shown field is filled. The library folder
-can be changed later under Settings › Library.
+The footer: while nothing is connected, **Skip for now** and a disabled **Continue**, with
+"Nothing connected yet. Skip for now opens GRID with your library folder."; once something
+is connected, **Continue** only, with "Next: choose the systems you play." (after a first
+RomM connect that needs setup) or "GRID opens on your Library.". A RomM connect in the
+welcome does not leave it at once, so the other rows can be connected first. There is no
+emulator step without RomM: until local ROMs are supported (see Later: bring your own ROMs
+under Settings › Systems), a user without RomM has no games that need one, and Windows
+games need only the Proton default in Settings › Systems. With RomM connected and setup
+needed, Continue leads to Choose your systems, then the Library on RomM › Discover;
+otherwise the welcome opens the Library on All games. Either way the welcome is not shown
+again.
 
-**Use without a server.** Under Connect, after an "or" divider, **Use without a server**
-needs only the library folder (enabled once the stored folder is known, or the field is
-filled). It stores the folder, drops any typed secret, remembers the choice
-(`offline = true` in `config.toml`) and opens the shell on Library, on the first
-connected backup drive when there is one (a drive found just after the shell opens is
-picked up, unless the user has moved on by then). No request reaches any server: the next
-start skips the server probe and reads no keyring entry. Library, backup drives,
-Downloads, Settings and play work offline; backing up needs a server. A stored
-credential stays in the keyring. **Connect to a server…** (top bar menu, Server panel,
-Settings › Connection) opens the Connect screen; a connect or a Retry that succeeds
-leaves offline mode. Games installed offline stay installed, and games installed from a
-drive keep their server id (see Game backups).
+**Upgrading and importing.** A user who was connected to RomM in an earlier version is
+marked welcomed and connected: startup restores the session as before, with no new
+sign-in. A user of the earlier "Use without a server" mode is marked welcomed and not
+connected: GRID opens the shell, probes nothing and reads no keyring entry; the stored
+credential stays in the keyring, unused, until a new connect replaces it. A user imported
+from the Python version sees the welcome filled in: the notice "**Your settings from the
+previous version are filled in.** Enter your RomM token to reconnect, or skip it for
+now.", the library folder, the RomM server and username, and the RomM row open, under
+the import card ("Imported 3 emulators and 5 games from the previous version. Enter your
+RomM token to reconnect.").
 
-**Choose your systems.** After the first successful connect of a fresh install (setup
-never finished or skipped, no emulator configured, no game installed), Choose your systems
-comes before the shell. It shows the same rows as Settings › Systems: the server's systems
-that need an emulator (native PC platforms and the "Emulators" platform are left out) with
+**Choose your systems.** After the first successful RomM connect when setup is needed
+(setup never finished or skipped, no emulator configured, no game installed), wherever
+the connect happens (the welcome or the Settings › Game stores card), Choose your systems
+comes up full-window. It lists the systems with games, on RomM or installed (native PC
+platforms, the "Emulators" platform and the catalog-only systems are left out), with
 their game counts, in alphabetical order, each with a tick box, none ticked:
 - Ticking a system pre-selects GRID's recommended emulator for it; its picker offers the
   other compatible emulators installable on this system, grouped **Installed** and
@@ -590,7 +816,8 @@ their game counts, in alphabetical order, each with a tick box, none ticked:
   when only an installed Proton version was picked, **Use selected emulators** when
   everything ticked is already installed, and is disabled ("Install emulators") while
   nothing is ticked.
-- Installing opens the app at once (on Server › Discover). A card at the top of the notification
+- Installing goes on at once: from the welcome to the Library on RomM › Discover, from the
+  Settings card back to Settings › Game stores. A card at the top of the notification
   stack follows the installs, Proton included: "Setting up 3 installs · 1 done", then
   "3 installs done" and "3 systems are ready to play." (Windows counts once its Proton
   version is the default). Its bar has one segment per install: filled when done, a
@@ -603,12 +830,21 @@ their game counts, in alphabetical order, each with a tick box, none ticked:
   choice becomes the default only when a compatible core is actually installed; otherwise
   the platform is left without a default and the card says so. A chosen default waits
   for its own emulator, so a failed install that is retried still gets it.
-- **Skip for now** opens the app with nothing installed. Either way Choose your systems
-  is not shown again; changes later happen in Settings › Systems, whose **Install
-  recommended (N)** replaces reopening it. Its footnote says so. **Disconnect** returns to
-  Connect; it does not bring Choose your systems back once setup was finished or skipped.
+- **Skip for now** goes on the same way with nothing installed. Either way Choose your
+  systems is not shown again; changes later happen in Settings › Systems, whose **Install
+  recommended (N)** replaces reopening it. Its footnote says so ("You can change these
+  later in Settings › Systems."). It has no Disconnect button; a later Disconnect and
+  connect does not bring it back once setup was finished or skipped.
 
-If the server rejects the stored credential (HTTP 401), at startup or during a session, the app returns to this screen. The server URL (and username, for a password) is filled in, the credential field is empty, and a line explains why ("The server rejected your token. Enter a new one."). The stored credential stays in the OS keyring until a new connect succeeds. When the server is unreachable or denies permission (HTTP 403), the app stays open and shows "Not connected" with Retry.
+**When RomM rejects or doesn't answer.** If RomM rejects the stored credential (HTTP
+401), at startup or during a session, GRID stays where it is: RomM's state becomes **Sign-in
+expired** on its Library group (Installed only, **!**, with the "Sign in again…" banner)
+and its Settings card. **Sign in again…** opens the sign-in dialog with the server URL
+(and username, for a password) shown read-only and the credential field empty ("RomM no
+longer accepts GRID's token for player. Enter a new one."). The stored credential stays
+in the OS keyring until a new connect succeeds. When the server is unreachable or denies
+permission (HTTP 403), GRID stays open and RomM's state is **Can't reach**, with Retry on
+the banner and the card. Installed games play in both states.
 
 ### Unreachable library
 GRID cannot run without a valid library. When the library folder cannot be reached — the
@@ -627,7 +863,7 @@ folder that GRID never stored anything in is created again by the next install; 
 shows the dialog.
 
 ### Game Details View
-Clicking a game in the Library or Server sections opens a popup, at most 1040×680, centred
+Clicking a game in the Library (any rail row, RomM's screens included) opens a popup, at most 1040×680, centred
 over a dimmed and blurred shell. Esc and the ✕ close it.
 
 The left column is fixed at 240px: the large cover, then the primary action (Play, Stop,
@@ -648,8 +884,8 @@ button's hover reason. TV mode's Details does the same, and there the game's que
 adds "<rec> installs with it".
 
 **Backups in Details.** Under the install actions sits **Backup to drive…**, which opens
-the Backup dialog for this game (offline it is disabled, and a line reads "Connect to a
-server to backup games."). It is not shown for a Missing game. When connected drives
+the Backup dialog for this game. It stays enabled while RomM isn't connected (an
+installed game is copied from this computer). It is not shown for a Missing game. When connected drives
 hold the game already (same server and ROM id), a line under the actions reads "On
 <pack>" ("On Couch kit, Travel kit" for several). Details opened from a drive's grid adds
 "From <pack>" to the header line. It offers **Install from drive** in place of Install
@@ -718,6 +954,16 @@ flags and the version, then up to four tabs:
 The last tab is remembered for the rest of the session. When the remembered tab is
 Achievements and the game has none, the popup opens on Overview.
 
+**RomM games while RomM isn't connected** (not connected, can't reach, sign-in expired
+or still connecting). The Saves tab shows "**Cloud saves need RomM**" · "<why> This
+game's saves stay on this computer and still work; GRID uploads and restores them when
+RomM is back." and the Achievements tab "**Achievements need RomM**" · "<why> Your
+progress shows here from RomM; achievements still unlock in the emulator.", each with the
+fix action (Open Game stores, Retry or Sign in again…; `<why>` as in Needs RomM in
+Settings). **Update to v1.2** is disabled with the line "Updates need RomM". Backup to
+drive… stays enabled. A row from another RomM server reads "From another RomM server
+(romm.old.lan) · not on romm.home.lan".
+
 **Installed games with no server id.** A Library row can have no server ROM id: a game
 imported from the previous app, or one installed before ids were recorded. Such a row
 cannot use Play, cloud saves or update checks.
@@ -728,12 +974,15 @@ cannot use Play, cloud saves or update checks.
   display name, custom name, name or slug. It links a row only when exactly one server ROM
   matches, and never to a ROM another installed row already holds. Every other row stays
   unlinked. A linked row gets its covers from the server on the same pass.
-- For a row that stays unlinked, Details shows "Not linked to a server game" and two actions
+- For a row that stays unlinked, Details shows "Not linked to a RomM game" and two actions
   in place of Play / Install:
-  - **Link to server game** opens a searchable list of that platform's server games (the
-    same title / platform / genre search as the Server view). Choosing one links the row,
-    and Details re-opens on the linked game. Games another installed row holds are not
-    listed. Needs a connection.
+  - **Link…** opens a searchable list of that platform's RomM games (the same title /
+    platform / genre search as a RomM platform screen). Choosing one links the row, and
+    Details re-opens on the linked game. Games another installed row holds are not
+    listed. While RomM isn't connected the line reads "Not linked to a RomM game ·
+    Linking needs RomM" and Link… is not offered. While connected, its Saves tab reads
+    "**Link this game to sync its saves**" · "Cloud saves are kept per RomM game. Link
+    <title> to its game on romm.home.lan first." with **Link…**.
   - **Remove from library (keeps files)** deletes the Library row only. It never uninstalls
     and never touches a file. A confirm names the folder that stays on disk.
 
@@ -758,7 +1007,7 @@ For installed native games, the details view should expose a game settings dialo
 
 Valid launch targets should include `.exe`, `.bat`, `.cmd`, `.ps1`, and `.sh` files where relevant. On Windows, a `.bat`/`.cmd` starts through cmd.exe and a `.ps1` through `powershell.exe -NoProfile -ExecutionPolicy Bypass -File`; on Linux, a `.sh` starts through its shebang (the install sets its execute bit).
 
-On Linux, a Windows game whose compat tool is a Proton install runs through `umu-run` with `PROTONPATH` set to that tool. The launch uses a system `umu-run` on `PATH` first, else GRID's own copy: the upstream umu-launcher zipapp, downloaded into the managed compat-tools folder (one shared copy, checked against the release's published SHA-256 digest; a mismatch fails the install and deletes the download). GRID's copy is a Python program, so its launch first checks that `python3` is 3.10 or newer and otherwise fails with a message saying so. With no umu-run at all, the launch fails with "umu-run is not installed…" and the Library, Server and Details launch errors offer **Install umu-launcher**, which queues the same install; the player launches again when it finishes. GRID never updates its copy on its own.
+On Linux, a Windows game whose compat tool is a Proton install runs through `umu-run` with `PROTONPATH` set to that tool. The launch uses a system `umu-run` on `PATH` first, else GRID's own copy: the upstream umu-launcher zipapp, downloaded into the managed compat-tools folder (one shared copy, checked against the release's published SHA-256 digest; a mismatch fails the install and deletes the download). GRID's copy is a Python program, so its launch first checks that `python3` is 3.10 or newer and otherwise fails with a message saying so. With no umu-run at all, the launch fails with "umu-run is not installed…" and the Library and Details launch errors offer **Install umu-launcher**, which queues the same install; the player launches again when it finishes. GRID never updates its copy on its own.
 
 #### Launch info in `game.json`
 A native game's RomM entry can list a `game.json` file next to the archive. Besides its metadata (`version`, `year`, `tags`, `included_dlc`), it can carry an optional `launch` section:
@@ -789,8 +1038,9 @@ Rules:
 # Game backups
 GRID backs up games to a removable drive (a USB flash drive or SSD), with their art,
 details, emulators and firmware. A game installed on this computer is copied from the
-library; any other game downloads from the server. Any computer with GRID can then install
-them from that drive, with or without a network. The design is
+library; any other RomM game downloads from the RomM server. Backups of installed games
+work without RomM (see Backups without RomM). Any computer with GRID can then install
+them from that drive, with or without a network or RomM. The design is
 `docs/design/system/components/GameBackups/README.md`.
 
 Epic, Amazon and Steam games (see "Game stores") are not backed up. The Backup dialog
@@ -829,8 +1079,8 @@ are none), then the remembered drives that are not connected.
   exFAT. GRID never formats a drive.
 - **A set-up drive** shows "For Linux and Windows" with **Change…** (the same checkboxes,
   inline). Adding a computer queues that OS's build of every emulator already on the
-  drive, which needs a server. Removing one deletes those builds; games and firmware
-  stay, and it works offline. Under it: a usage bar split into Other files, GRID and Free,
+  drive, which needs RomM. Removing one deletes those builds; games and firmware
+  stay, and it works without RomM. Under it: a usage bar split into Other files, GRID and Free,
   (GRID is what the `gridpack` folder takes on the drive, art and files a backup is still
   writing included; the bar's total leaves out space the file system keeps for root, such as
   ext4's 5%), then Games, Emulators, Firmware, Last backup and the folder path, then **Show in
@@ -839,14 +1089,14 @@ are none), then the remembered drives that are not connected.
   `gridpack/`, and leaves the games installed on this computer.
 - **A remembered drive that is not connected** shows its name, label, file system and
   size, when it was last seen and its game count, with **Forget**.
-- **Every backup also copies** holds one default for the Backup dialog: "The server's
-  firmware for the systems you backup", on by default (`[backup] include_firmware`).
+- **Every backup also copies** holds one default for the Backup dialog: "Firmware from
+  RomM for the systems you backup", on by default (`[backup] include_firmware`).
   Each game always takes its art and details, and each system its emulator.
 - **What's in the gridpack folder** (collapsed) shows the layout below.
 
 ## The Backup dialog
 Opened by Details › Backup to drive…, the select bar's Backup to drive…, and Backup
-all N… (Server platform header, Library platform row). It opens over every view and over
+all N… (a RomM platform screen's header, RomM › Installed). It opens over every view and over
 Details.
 - **Title:** "Backup Cinder Peaks", "Backup 3 games" or "Backup PlayStation · 4
   games". The lede reads "GRID copies games installed on this computer and downloads the
@@ -960,6 +1210,30 @@ copying):
 - A game that is running is not copied: the plan lists it as downloading ("It's running
   right now; close it to copy it"), and a queued copy of a game launched since fails with
   that reason. Only games GRID launched are detected.
+
+## Backups without RomM
+Select, **Backup all N…** and Details › Backup to drive… work while RomM isn't connected,
+from the installed copy, as GOG games do. With RomM connected the dialog works as above.
+- The lede reads "RomM isn't connected, so GRID copies the games installed on this
+  computer, with the art and details it has, to the drive's gridpack folder. Nothing
+  downloads."
+- Source: "Copy installed games from this computer" is ticked and disabled · "8 games
+  from this computer (19.1 GB) · without RomM, only installed copies". There is no "the
+  server has newer files" choice.
+- A game that can't be copied is listed under "**Can't backup without RomM · N**": "<platform>
+  · <local reason>. Connect RomM to back it up from the server." (the reasons of Which
+  installs are copied, such as "Installed outside the library folder"). A row with no ROM
+  id reads "It isn't linked to a RomM game. Link it to its RomM game first."
+- Details and art come from the library row and the image cache (a missing image is a
+  warning, never a failure); the installed tree is always archived, never written as the
+  server's files.
+- The pack identity is the same as with RomM: the row's ROM id, and as server the row's
+  own source server (a game installed from a drive), else the stored RomM server URL
+  (Disconnect keeps it), else the game can't be backed up ("GRID doesn't know which RomM
+  server <title> came from"). A pack written without RomM installs and dedupes exactly
+  like one written with it.
+- Also copy: Emulators "… · from GRID's catalog; builds hosted on your RomM server are
+  skipped"; Firmware unticked and disabled, "Needs RomM · skipped: Sega Saturn".
 
 ## Install from a drive
 **Install** on a drive's game copies it off the drive and installs it exactly like a
@@ -1157,7 +1431,11 @@ TV mode is GRID's second interface: fullscreen, for a TV, and driven entirely wi
 controller. It reaches every feature of the desktop app. The design, with every word and
 state, is `docs/design/system/components/TVMode/README.md` (its **Decided** and
 **Consultant decisions** sections are binding); `docs/tv-mode/checklist.md` lists each
-testable statement.
+testable statement. RomM as a storefront in TV mode is
+`docs/design/system/components/TVRommStorefront/README.md`, which supersedes the TVMode
+items it names (the Server tab, Connect, the offline notices, RomM-only Systems). Where its
+words differ from the desktop's RommStorefront card, the desktop's win. No TV flow sends
+the player to desktop mode.
 
 ## Entering and leaving
 - The desktop top bar's TV button (a 28×28 icon button left of the light / dark toggle,
@@ -1169,8 +1447,8 @@ testable statement.
   Fullscreen API). Leaving restores the desktop window, and the window geometry GRID saves
   is always the desktop one, so a desktop start never opens fullscreen.
 - Where GRID opens follows the same rule as the desktop (Where GRID opens, under Top Bar):
-  Server › Discover when connected, else the Library (on the first connected Backup drive
-  without a server). A "Welcome to TV mode" card shows the first time TV mode opens
+  the Library tab, on RomM › Discover when RomM is connected at startup, else All games
+  (Settings › Appearance › Open GRID on, "Here and in desktop mode"). A "Welcome to TV mode" card shows the first time TV mode opens
   (`[ui] tv_welcomed`); Menu › Controls shows it again.
 
 ## Controllers
@@ -1198,10 +1476,11 @@ testable statement.
 - **Size.** Every measure is in rem; the root font is 1/54 of the screen height, capped at
   1/80 of its width, so the layout is the same at 720p, 1080p and 4K. No text is smaller
   than 0.85rem.
-- **Three bands:** the top bar (4.6rem: wordmark with a TV tag, the four tabs between
-  their LB / RB prompts, or a breadcrumb on a pushed page, then the live download, the
-  connection and a clock), the stage, and the hint bar (3.6rem: the controller's name or
-  the offline notice, then what each button does now). The window itself never scrolls.
+- **Three bands:** the top bar (4.6rem: wordmark with a TV tag, the three tabs between
+  their LB / RB prompts, or a breadcrumb on a pushed page, then the live download and a
+  clock; no connection dot, user or "Offline" text), the stage, and the hint bar (3.6rem:
+  the controller's name, or "Keyboard", then what each button does now; no offline line).
+  The window itself never scrolls.
 - **Focus** is a 0.2rem ring; a focused cover grows to 107%. Focus is never lost, and
   going back returns it to where it was. Movement is spatial, inside a rail, row or list
   along its axis; Right from a rail is A. Scrolling follows fixed rules (a Discover shelf
@@ -1222,20 +1501,65 @@ testable statement.
   changes the other. TV mode never sends the player to desktop mode for them (2026-11-14).
 
 ## Screens
-- **Tabs:** Library, Server (Discover first, then the platforms), Downloads, Settings (the
-  desktop's panes plus TV mode). **Pages** pushed over a tab (B goes back): Details and its
-  tabs (Overview, Media, Saves, Achievements), Playing, System, the emulator form, Game
-  settings, Link to server game, the folder browser (every path in TV mode), Search
-  everything, Notifications, the Backup page and the drive pages. **Overlays:** the Menu,
-  lists, confirmations (Cancel focused; a destructive action always asks) and the
-  on-screen keyboard.
-- **Startup:** Connect (with View to paste and Use without a server), Choose your systems
-  (Start skips) with the setup card, and the unreachable-library dialog. On Connect and
-  the unreachable-library dialog Start opens a short Menu: Switch to desktop mode and
-  Quit GRID.
+- **Tabs:** Library (the default tab), Downloads, Settings (the desktop's panes plus TV
+  mode), between LB / RB. There is no Server tab. **Pages** pushed over a tab (B goes
+  back): Details and its tabs (Overview, Media, Saves, Achievements), Playing, System, the
+  emulator form, Game settings, Link…, the folder browser (every path in TV
+  mode, and its file mode for Locate files), Search everything, Notifications, the
+  Backup page, the drive pages, the RomM page, the RomM sign-in page, More systems and
+  the Firmware check report. **Overlays:** the Menu, lists, confirmations (Cancel focused;
+  a destructive action always asks) and the on-screen keyboard.
+- **Library tab.** The rail is the desktop's: All games, Recent, Updates, Backup drives,
+  then the storefront folders in name order (Amazon Games, Epic Games, GOG, RomM, Steam);
+  there is no Platforms folder. The RomM folder's rows follow RomM's state as on the
+  desktop (Installed only unless connected; Installed, Discover's shelves and one page
+  per platform when connected; a spinner and Discover's "Connecting to RomM…" panel
+  while the startup probe runs). RomM › Installed has the one-line banner (Retry / Sign
+  in again…), focusable with Up from the grid. A platform page shows the RomM game count,
+  the emulator and firmware chips (A opens the System page), Backup all N…, RT Select and
+  Y Search, and tags installed rows the server doesn't have NOT LINKED or NOT ON ROMM.
+  When the selected row goes away, selection and focus move to RomM › Installed, or All
+  games.
+- **Menu (Start / Guide):** the clock, then Discover (only while RomM is connected or the
+  startup probe runs), Downloads, Notifications, Settings, Switch to desktop mode and Quit
+  GRID. There is no Reconnect and no user and server line.
+- **Settings › Game stores** lists one row per storefront in name order, RomM between GOG
+  and Steam, each with its line and pill (RomM: Connected / Can't reach / Sign-in expired
+  / Not connected, or a spinner). A on the RomM row opens **the RomM page**, a page of
+  rows (Server, User, Sign-in, Installed RomM games, Edit…, Show in Library, Open
+  in browser (over TV mode), Disconnect…) whose main button, pressed with Start, is
+  Retry (can't reach), Sign in again… (expired) or Connect RomM… (not connected).
+  Disconnect asks first, with Cancel focused, and GRID stays where it is. **The RomM
+  sign-in page** has Server, Sign in with (API token, recommended, or username and
+  password), and the token or the username and password; A edits a field with the
+  on-screen keyboard, View pastes the clipboard into it, and Start presses Connect (Edit:
+  Save). Errors move focus to the field to fix. A successful connect that needs setup
+  opens Choose your systems; from the RomM page its Install and Skip return to Settings ›
+  Game stores with the RomM row focused. There is no Connection pane.
+- **Settings › Systems** works without RomM, as on the desktop: "Your systems", then a
+  **More systems** row that opens a page of the catalog systems with nothing set up (X
+  installs the recommended emulator). A System page's firmware block lists the expected
+  files, then **Install from RomM** (dimmed with its reason while it can't run) and
+  **Locate files…** (**Locate PS3UPDAT.PUP…** for PlayStation 3). Locate files opens the
+  folder browser in file mode: A picks or unpicks a file (picks are kept across folders),
+  Y checks the whole folder shown (three levels deep), Start checks the picked files. The
+  **Firmware check** page reports Installed, Installed · not verified and Refused, with
+  their reasons.
+- **Needs RomM.** While RomM isn't connected, Cloud saves and RetroAchievements start
+  with a panel whose button (Open Game stores, Sign in again… or Retry) is focused first;
+  the rows below stay editable. Details' Update and Link… are disabled (A says
+  why), and its Saves and Achievements tabs show the needs-RomM panel.
+- **Startup:** the welcome (step 1, the library folder through the folder browser; step 2,
+  the storefront rows in name order, RomM through the RomM sign-in page with the
+  on-screen keyboard and View to paste; the button reads Skip for now until one is
+  connected, then Continue), Choose your systems (Start skips) with the setup card, and
+  the unreachable-library dialog. A Python import fills the welcome in and says so first.
+  On the welcome and the unreachable-library dialog Start opens a short Menu: Switch to
+  desktop mode and Quit GRID.
 - **Game backups** are the Game backups design with a controller's controls: select mode
   on RT, the Backup page as a page whose main button Start presses, Backup drives rows in
-  the Library rail, and Settings › Backup drives with a page per drive.
+  the Library rail, and Settings › Backup drives with a page per drive. Backups of
+  installed games work without RomM, as on the desktop.
 
 # Game stores
 Status: all four stores are built. Phase 1, GOG with offline installers (2026-11-13);
@@ -1249,7 +1573,10 @@ nile (2026-11-14); Phase 4, Steam through the Steam client and the Steam Web API
 `docs/design/system/components/GameStores/README.md` and
 `docs/design/system/components/TVStores/README.md`.
 
-GRID installs and launches games from external stores beside RomM games.
+GRID installs and launches games from external stores beside RomM games. RomM is a
+storefront too (see Overview): its card sits on Settings › Game stores between GOG and
+Steam (see Settings › Game stores under Main Sections), and its Library group is
+described under Library › RomM.
 
 User decisions (2026-11-13):
 - **Stores.** GOG, Epic, Amazon and Steam, plus installing GOG games from offline
@@ -1410,7 +1737,7 @@ Store screens (2026-11-13, matching the approved design):
   Settings and the store panel say "nile can't run on this computer: it needs a newer
   Linux system (glibc 2.35 or later)." Amazon games are never backed up to a drive.
 - **Steam** (Phase 4, 2026-11-14). Steam has no tool and no login window: it connects in
-  Settings › Stores › Steam with a SteamID64 (picked from the accounts signed in to this
+  Settings › Game stores › Steam with a SteamID64 (picked from the accounts signed in to this
   computer's Steam, by persona name only, or typed) and the user's own Web API key.
   Connect needs a key Steam answers for. The key lives only in the OS keyring; Settings
   shows a saved key as dots only, never any part of it, and the key field is empty after
