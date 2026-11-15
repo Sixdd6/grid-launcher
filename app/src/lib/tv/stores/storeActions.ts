@@ -7,7 +7,7 @@ import { api, type DownloadEntry, type StoreGame, type StoreSource } from '../..
 import { childPath } from '../pages/folderBrowser';
 import { toolNeededNotice } from '../../gamestores/notices';
 import { managedByClient, storeName, storeTool } from '../../gamestores/marks';
-import { steamClientMissing, STOPPED_WAITING_TV, stoppedWaitingSub } from '../../gamestores/steam';
+import { GEAR_STEPS, steamClientMissing, steamUninstallTv, STOPPED_WAITING_TV, stoppedWaitingSub } from '../../gamestores/steam';
 import { gameStores, refreshLibrary } from '../../stores/gameStores.svelte';
 import { pushToast, TOAST_DURATION_MS } from '../../stores/toasts.svelte';
 import { toLaunchFailure } from '../../launchError';
@@ -121,9 +121,14 @@ export function steamVerify(game: StoreGame): void {
   api.steamOpen(game.key, 'validate').then(() => card(`Steam is verifying ${game.title}`, 'success', 'Watch it in Steam'), fail);
 }
 
-/** Uninstall in Steam… (prototype `ACT.suninstall`): Steam asks; the game leaves once Steam removes it. */
+/**
+ * Uninstall in Steam… and Show in Steam (prototype `ACT.suninstall`): no
+ * confirm (Steam asks). Steam's Library opens on the game over TV mode, and
+ * the card says where Steam's Uninstall is; the game leaves once Steam
+ * removes it (user decision 5).
+ */
 export function steamUninstall(game: StoreGame): void {
-  api.steamOpen(game.key, 'uninstall').then(() => card(`Steam opened its uninstall window for ${game.title}`, 'success', 'It leaves the Library once Steam removes it.'), fail);
+  api.steamOpen(game.key, 'uninstall').then(() => card(steamUninstallTv(game.title), 'success', GEAR_STEPS), fail);
 }
 
 /** Check again (prototype `ACT.srecheck`): finds the Steam client again. */

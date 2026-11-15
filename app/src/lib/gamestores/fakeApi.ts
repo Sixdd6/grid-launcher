@@ -346,6 +346,7 @@ export function baseSteamStatus(): StoreStatus {
         { persona: FAKE_STEAM_PERSONA, steam_id: FAKE_STEAM_ID, most_recent: true },
         { persona: 'couchguest', steam_id: FAKE_STEAM_GUEST_ID, most_recent: false },
       ],
+      uninstalling: [],
     },
     last_error: '',
   };
@@ -1083,7 +1084,13 @@ export class FakeStores {
     this.emitDownloads();
   }
 
-  /** `steam_open`: install admits a Steam row the client "runs"; uninstall removes the game a moment later; validate only opens Steam. */
+  /**
+   * `steam_open`: install admits a Steam row the client "runs"; uninstall
+   * opens the game's Library page and watches (the store id in
+   * `steam.uninstalling`), and "Steam" removes the game 8 s later (the
+   * prototype's demo); opening it again while watched starts no second
+   * watch; validate only opens Steam.
+   */
   private steamOpen(g: StoreGame | null, action: string): void {
     if (!g || g.source !== 'steam') throw new Error('That isn’t a Steam game.');
     if (this.statuses.steam.steam?.client_path === '') throw new Error(FAKE_STEAM_NOT_INSTALLED);
@@ -1093,12 +1100,17 @@ export class FakeStores {
       this.entries.push(this.externalRow(g, 0, 10));
       this.emitDownloads();
     } else if (action === 'uninstall') {
+      const card = this.statuses.steam.steam!;
+      if (card.uninstalling.includes(g.store_id)) return;
+      card.uninstalling = [...card.uninstalling, g.store_id];
+      this.changed();
       setTimeout(() => {
+        card.uninstalling = card.uninstalling.filter((id) => id !== g.store_id);
         g.installed = false;
         g.origin = null;
         this.notice(`${g.title} uninstalled`, {}, 'steam');
         this.changed();
-      }, 2500);
+      }, 8000);
     }
   }
 

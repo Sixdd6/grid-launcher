@@ -7,7 +7,7 @@
 // Pure and UI-agnostic: the desktop's cards and TV mode's both use it.
 import type { DownloadEntry, StoreNotice, StoreNoticeAction, StoreSource } from '../api';
 import { hasCloud, managedByClient, storeName, storeTool } from './marks';
-import { CLIENT_FOUND, STEAM_NOT_INSTALLED, stoppedWaitingText } from './steam';
+import { CLIENT_FOUND, STEAM_NOT_INSTALLED, steamUninstallText, stoppedWaitingText } from './steam';
 
 /** One card: its text, whether it is an error, and at most one action. */
 export type StoreCard = { text: string; error: boolean; action: StoreNoticeAction | null; sub?: string };
@@ -164,8 +164,8 @@ export const steamInstallNotice = (title: string) =>
 /** Install in Steam (or Play) with no Steam on this computer. */
 export const steamMissingNotice = () => err(STEAM_NOT_INSTALLED);
 export const steamVerifyNotice = (title: string) => ok(`Steam is verifying ${title}’s files. Watch it in Steam.`);
-export const steamUninstallNotice = (title: string) =>
-  ok(`Steam opened its uninstall window for ${title}. It leaves the Library once Steam removes it.`);
+/** Uninstall in Steam… or Show in Steam pressed: Steam's Library opens on the game (user decision 5). */
+export const steamUninstallNotice = (title: string) => ok(steamUninstallText(title));
 /** "Running in Steam" pressed: GRID can't stop a game Steam runs. */
 export const steamRunningNotice = (title: string) => ok(`${title} is running in Steam. Quit it from the game.`);
 export const steamClientFoundNotice = () => ok(CLIENT_FOUND);

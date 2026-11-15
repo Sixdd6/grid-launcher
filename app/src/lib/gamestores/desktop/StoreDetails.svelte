@@ -248,7 +248,8 @@
         else await repairStore(g);
         break;
       case 'uninstall':
-        // Steam asks in its own uninstall window: no confirm of GRID's.
+        // Steam: no confirm of GRID's (Steam asks). Uninstall in Steam… and
+        // Show in Steam open the game's page in Steam's Library.
         if (managedByClient(g.source)) await steamUninstall(g);
         else confirm = 'uninstall';
         break;
@@ -345,6 +346,13 @@
             <!-- Keyed without `_confirm`: the second click's button is the
                  same element, so it keeps focus (and Escape still closes). -->
             {#each buttons as b (b.act.replace(/_confirm$/, ''))}
+              {#if b.box}
+                <!-- GRID watches for Steam to remove the game: where Steam's Uninstall is. -->
+                <div class="managed" data-testid="store-details-uninstall-box">
+                  <span><b>{b.box.title}</b></span>
+                  <span>{b.box.note}</span>
+                </div>
+              {/if}
               <button
                 data-testid={`store-details-${b.act.replace(/_/g, '-')}`}
                 class:secondary={!b.primary}

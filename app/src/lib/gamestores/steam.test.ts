@@ -264,7 +264,7 @@ describe('cards', () => {
   it('words the cards for what the user pressed', () => {
     expect(steamInstallNotice('Quiet Comet').text).toBe('Steam opened to install Quiet Comet. Choose the library folder there; GRID shows the progress.');
     expect(steamVerifyNotice('Moonlit Ferry').text).toBe('Steam is verifying Moonlit Ferry’s files. Watch it in Steam.');
-    expect(steamUninstallNotice('Moonlit Ferry').text).toBe('Steam opened its uninstall window for Moonlit Ferry. It leaves the Library once Steam removes it.');
+    expect(steamUninstallNotice('Moonlit Ferry').text).toBe('Moonlit Ferry is open in Steam’s Library. To uninstall it, select the gear icon, then Manage › Uninstall.');
     expect(steamRunningNotice('Moonlit Ferry').text).toBe('Moonlit Ferry is running in Steam. Quit it from the game.');
     expect(disconnectedNotice('steam').text).toBe('Steam disconnected. Your key was deleted from the keyring.');
   });

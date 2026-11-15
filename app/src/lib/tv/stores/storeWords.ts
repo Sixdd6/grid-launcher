@@ -34,11 +34,15 @@ import {
   IN_STEAM_LIBRARIES,
   MANAGED_NOTE,
   OUTSIDE_GRID,
+  SHOW_IN_STEAM,
   steamPill,
   steamRowSub,
+  steamUninstalling,
   STOP_WAITING,
   STOP_WAITING_FOR_STEAM,
   UNINSTALL_IN_STEAM,
+  UNINSTALL_IT_IN_STEAM,
+  uninstallBoxNote,
   VERIFY_IN_STEAM,
   WAITING_FOR_STEAM,
   WAITING_NOTE,
@@ -200,7 +204,7 @@ export function tvStoreButtons(o: {
 }): TvStoreButton[] {
   const { game, status, job } = o;
   const name = storeName(game.source);
-  if (managedByClient(game.source)) return tvClientButtons(game, job);
+  if (managedByClient(game.source)) return tvClientButtons(game, status, job);
   const out: TvStoreButton[] = [];
   if (job !== null) {
     const a = jobAct(job);
@@ -235,9 +239,12 @@ export function tvStoreButtons(o: {
  * Steam's buttons (prototype `sdetails`' Steam branches): "Stop waiting for
  * Steam" while Steam hasn't started the download, "Installing in Steam · 52%"
  * (disabled; A says why), Play, or Install in Steam, then Verify in Steam and
- * Uninstall in Steam…. No Game settings, Update or drive buttons.
+ * Uninstall in Steam… (not red: GRID deletes nothing; it opens the game's
+ * page in Steam's Library). While GRID watches for Steam to remove the game
+ * it reads Show in Steam, with the same act, so focus stays on it (user
+ * decision 5). No Game settings, Update or drive buttons.
  */
-function tvClientButtons(game: StoreGame, job: DownloadEntry | null): TvStoreButton[] {
+function tvClientButtons(game: StoreGame, status: StoreStatus | null, job: DownloadEntry | null): TvStoreButton[] {
   const out: TvStoreButton[] = [];
   if (job !== null && isWaitingForStore(job)) out.push({ act: 'stop_waiting', label: STOP_WAITING_FOR_STEAM, primary: true });
   else if (job !== null && isManagedRow(job)) out.push({ act: 'install', label: installingInSteam(jobPercent(job)), primary: true, disabled: true, why: MANAGED_NOTE });
@@ -245,9 +252,20 @@ function tvClientButtons(game: StoreGame, job: DownloadEntry | null): TvStoreBut
   else out.push({ act: 'install', label: INSTALL_IN_STEAM, primary: true, icon: 'download' });
   if (game.installed && job === null) {
     out.push({ act: 'verify', label: VERIFY_IN_STEAM, primary: false });
-    out.push({ act: 'uninstall', label: UNINSTALL_IN_STEAM, primary: false, danger: true });
+    out.push({ act: 'uninstall', label: steamUninstalling(status, game.store_id) ? SHOW_IN_STEAM : UNINSTALL_IN_STEAM, primary: false });
   }
   return out;
+}
+
+/**
+ * The left column's box while GRID watches for Steam to remove the game
+ * (user decision 5): "**Uninstall it in Steam.** Steam opened <title> in its
+ * Library. Select the gear icon, then Manage › Uninstall. GRID removes it
+ * here when Steam is done." `null` otherwise.
+ */
+export function tvUninstallBox(game: StoreGame, status: StoreStatus | null, job: DownloadEntry | null): { bold: string; rest: string } | null {
+  if (!managedByClient(game.source) || !game.installed || job !== null || !steamUninstalling(status, game.store_id)) return null;
+  return { bold: `${UNINSTALL_IT_IN_STEAM}.`, rest: ` ${uninstallBoxNote(game.title)}` };
 }
 
 /**

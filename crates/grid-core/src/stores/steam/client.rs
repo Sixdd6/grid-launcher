@@ -114,7 +114,7 @@ mod tests {
         );
         assert_eq!(
             shown(&native, SteamLink::Uninstall(620)),
-            ["/usr/bin/steam", "steam://uninstall/620"]
+            ["/usr/bin/steam", "steam://nav/games/details/620"]
         );
         assert_eq!(
             shown(&native, SteamLink::Validate(620)),

@@ -9,7 +9,9 @@
   // line starts "From Couch kit". A Steam game's page goes through the Steam
   // client: Install in Steam, Stop waiting for Steam (with its waiting box)
   // until Steam starts the download, the disabled "Installing in Steam · 52%"
-  // with its Managed by Steam box, Verify in Steam and Uninstall in Steam….
+  // with its Managed by Steam box, Verify in Steam and Uninstall in Steam…,
+  // which reads Show in Steam (with the "Uninstall it in Steam" box) while
+  // GRID watches for Steam to remove the game.
   import { tick } from 'svelte';
   import { api, type DriveStoreGame, type StoreCloudState, type StoreGame } from '../../api';
   import { descriptionParagraphs } from '../../gamestores/details';
@@ -64,6 +66,7 @@
     tvLeftLines,
     tvManagedBox,
     tvStoreButtons,
+    tvUninstallBox,
     tvTabs,
     tvTabStep,
     uninstallWords,
@@ -219,7 +222,8 @@
         void api.storeRepair(g.key).then(() => card(`Verifying ${g.title}’s files…`), fail);
         return;
       case 'uninstall':
-        // Steam asks in its own window: no confirm of GRID's.
+        // Steam asks: no confirm of GRID's. Uninstall in Steam… and Show in
+        // Steam open the game's page in Steam's Library.
         if (managedByClient(g.source)) {
           steamUninstall(g);
           return;
@@ -309,6 +313,7 @@
   }
 
   let managed = $derived(tvManagedBox(job));
+  let uninstallBox = $derived(game ? tvUninstallBox(game, status, job) : null);
   let cloudTab = $derived(game ? tvCloudTab(game, cloud, nowSeconds, tvStores.syncing(gameKey)) : null);
 </script>
 
@@ -319,6 +324,9 @@
       <div class="lp" data-testid="tv-det-left">
         {#if managed}
           <div class="smanaged" data-testid="tv-store-managed"><b>{managed.bold}</b>{managed.rest}{#if managed.pct !== null}<div class="pbar"><b style={`width:${managed.pct}%`}></b></div>{/if}</div>
+        {/if}
+        {#if uninstallBox}
+          <div class="smanaged" data-testid="tv-store-uninstall-box"><b>{uninstallBox.bold}</b>{uninstallBox.rest}</div>
         {/if}
         {#each lines as line (line.key)}
           <div data-testid={`tv-store-line-${line.key}`}>{#each line.segs as s, j (j)}{#if s.b}<b class:warn={s.warn}>{s.text}</b>{:else}{s.text}{/if}{/each}</div>

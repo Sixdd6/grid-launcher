@@ -22,6 +22,15 @@ export function steamClientMissing(status: StoreStatus | null): boolean {
   return card !== null && card.client_path.trim() === '';
 }
 
+/**
+ * Whether GRID watches for Steam to remove this game (Uninstall in Steam…
+ * opened its Library page less than 10 minutes ago): Details then shows the
+ * "Uninstall it in Steam" box and Show in Steam.
+ */
+export function steamUninstalling(status: StoreStatus | null, storeId: string): boolean {
+  return steamCard(status)?.uninstalling?.includes(storeId) ?? false;
+}
+
 /** The Web API key's state (`none` for a status with no card). */
 export function steamKeyState(status: StoreStatus | null): SteamCard['key'] {
   return steamCard(status)?.key ?? 'none';
@@ -40,6 +49,31 @@ export const OUTSIDE_GRID = 'Installed in Steam, outside GRID';
 export const INSTALLED_BY_STEAM = 'Installed by Steam';
 export const IN_STEAM_LIBRARIES = 'in your Steam libraries';
 export const STEAM_NOT_INSTALLED = 'Steam isn’t installed. Install Steam, then try again.';
+
+// ── Uninstall in Steam (user decision 5, 2026-11-15) ────────────────────
+// Steam draws its steam://uninstall dialog cut off on Linux, so GRID opens the
+// game's page in Steam's Library (steam://nav/games/details/<appid>) and says
+// where Steam's Uninstall is. While GRID watches (up to 10 minutes) Details
+// shows the box and Show in Steam.
+
+/** Details' button while GRID watches (opens the Library page again). */
+export const SHOW_IN_STEAM = 'Show in Steam';
+/** Where Steam's Uninstall is (TV's card subtitle). */
+export const GEAR_STEPS = 'Select the gear icon, then Manage › Uninstall.';
+/** The box's title while GRID watches (TV writes it with a full stop). */
+export const UNINSTALL_IT_IN_STEAM = 'Uninstall it in Steam';
+/** The box's note while GRID watches. */
+export function uninstallBoxNote(title: string): string {
+  return `Steam opened ${title} in its Library. ${GEAR_STEPS} GRID removes it here when Steam is done.`;
+}
+/** The desktop card after Uninstall in Steam… or Show in Steam. */
+export function steamUninstallText(title: string): string {
+  return `${title} is open in Steam’s Library. To uninstall it, select the gear icon, then Manage › Uninstall.`;
+}
+/** TV's card title after Uninstall in Steam… or Show in Steam; {@link GEAR_STEPS} is its subtitle. */
+export function steamUninstallTv(title: string): string {
+  return `${title} is open in Steam`;
+}
 
 /** The managed box in Details: "Installing in Steam · 52%". */
 export function installingInSteam(pct: number): string {

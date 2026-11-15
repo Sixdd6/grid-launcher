@@ -145,6 +145,10 @@ pub struct SteamCard {
     /// Always `""`: a saved key shows as dots only (user decision 2).
     pub key_tail: String,
     pub accounts: Vec<SteamAccount>,
+    /// The store ids of the games GRID watches for Steam to remove after
+    /// Uninstall in Steam (up to 10 minutes each): Details shows the
+    /// "Uninstall it in Steam" box and Show in Steam for them.
+    pub uninstalling: Vec<String>,
 }
 
 /// `steam_test` / `steam_save`'s answer.

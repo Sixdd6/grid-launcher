@@ -33,6 +33,13 @@
 //!   queue shows but does not drive (`admit_store_external`) and polls the
 //!   game's manifest every 2 s; a manifest Steam is installing that GRID did
 //!   not start (Steam itself, or a restart) gets a row and a watch too;
+//! - **uninstall watches.** `steam_open(uninstall)` opens the game's page in
+//!   Steam's Library (`steam://nav/games/details/<id>`, user decision 5) and
+//!   polls its manifest every 2 s for up to 10 minutes, one watch per game.
+//!   The watched games are in the status (`SteamCard::uninstalling`), so
+//!   Details shows the "Uninstall it in Steam" box and Show in Steam; a
+//!   start and an end (removed, timed out, Disconnect) each emit
+//!   `stores-changed`;
 //! - the background `store-notice` cards ([`notice`]).
 //!
 //! The store calls go through [`SteamApi`], a seam the unit tests fake.
@@ -259,6 +266,9 @@ impl SteamApi for RealSteam {
 
 // --- state ----------------------------------------------------------------------
 
+/// A live uninstall watch: set to stop it (Disconnect).
+type UninstallWatch = Arc<AtomicBool>;
+
 /// A live install watch.
 struct Watch {
     stop: Arc<AtomicBool>,
@@ -294,6 +304,9 @@ struct SteamState {
     /// rows are not "outside GRID").
     grid_installs: HashSet<u32>,
     watches: HashMap<u32, Watch>,
+    /// The games GRID watches for Steam to remove after Uninstall in Steam
+    /// (up to 10 minutes each).
+    uninstall_watches: HashMap<u32, UninstallWatch>,
     /// The mtimes the background scan compares (`None`: scan next time).
     fingerprint: Option<Vec<(PathBuf, Option<SystemTime>)>>,
     /// The library folders the last scan found.
@@ -317,6 +330,7 @@ impl Default for SteamState {
             seen_installed: HashSet::new(),
             grid_installs: HashSet::new(),
             watches: HashMap::new(),
+            uninstall_watches: HashMap::new(),
             fingerprint: None,
             libraries: Vec::new(),
         }
@@ -356,6 +370,9 @@ pub struct SteamStore {
     start_timeout: Mutex<Duration>,
     /// The install watches' poll period (tests shorten it).
     poll: Mutex<Duration>,
+    /// How long an uninstall watch waits for the manifest to go (tests
+    /// shorten it).
+    uninstall_for: Mutex<Duration>,
 }
 
 fn now() -> i64 {
@@ -388,6 +405,7 @@ impl SteamStore {
             background: AtomicBool::new(false),
             start_timeout: Mutex::new(STEAM_INSTALL_START_TIMEOUT),
             poll: Mutex::new(WATCH_POLL),
+            uninstall_for: Mutex::new(UNINSTALL_WATCH_FOR),
         })
     }
 
@@ -845,8 +863,9 @@ impl SteamStore {
 
     /// `steam_open`: hands the client an install, uninstall or validate
     /// link. Install also admits the Downloads row and starts the watch;
-    /// uninstall watches for the manifest to go. The frontend raises the
-    /// design's toast.
+    /// uninstall (the game's Library page) watches for the manifest to go,
+    /// and opening it again while that watch runs (Show in Steam) starts no
+    /// second watch. The frontend raises the design's toast.
     pub fn open(self: &Arc<Self>, store_id: &str, action: SteamOpenAction) -> Result<(), String> {
         let appid: u32 = store_id
             .trim()
@@ -1098,34 +1117,90 @@ impl SteamStore {
 
     /// After Uninstall in Steam: polls the manifest every 2 s (for up to 10
     /// minutes) and scans as soon as Steam removed it, so the game leaves
-    /// the Library without waiting for the background scan.
+    /// the Library without waiting for the background scan. One watch per
+    /// game: a game already watched (Show in Steam) keeps its watch. The
+    /// watched games are in the status; the start and the end (removed or
+    /// timed out) each emit `stores-changed`.
     fn watch_uninstall(self: &Arc<Self>, client: SteamClient, appid: u32) {
+        let stop: UninstallWatch = Arc::new(AtomicBool::new(false));
+        {
+            let mut state = self.state.lock().unwrap();
+            if state.uninstall_watches.contains_key(&appid) {
+                return;
+            }
+            state.uninstall_watches.insert(appid, stop.clone());
+        }
+        self.changed();
         let this = self.clone();
         let poll = *self.poll.lock().unwrap();
+        let watch_for = *self.uninstall_for.lock().unwrap();
         tauri::async_runtime::spawn(async move {
             let started = Instant::now();
-            while started.elapsed() < UNINSTALL_WATCH_FOR {
+            while started.elapsed() < watch_for {
                 tokio::time::sleep(poll).await;
+                if stop.load(Ordering::SeqCst) {
+                    return;
+                }
                 let api = this.api.clone();
                 let probe = client.clone();
                 let manifest = tokio::task::spawn_blocking(move || api.manifest(&probe, appid))
                     .await
                     .ok()
                     .flatten();
+                if stop.load(Ordering::SeqCst) {
+                    return;
+                }
                 let gone = manifest.map_or(true, |m| filter::phase(m.flags) == AppPhase::Gone);
                 if gone {
-                    this.state.lock().unwrap().fingerprint = None;
+                    {
+                        let mut state = this.state.lock().unwrap();
+                        this.end_uninstall_watch(&mut state, appid, &stop);
+                        state.fingerprint = None;
+                    }
+                    // The scan removes the row, raises the uninstalled card
+                    // and emits `stores-changed` (the box goes with the row).
                     this.scan_now().await;
                     return;
                 }
             }
+            // No removal in time: the box goes silently.
+            let ended = {
+                let mut state = this.state.lock().unwrap();
+                this.end_uninstall_watch(&mut state, appid, &stop)
+            };
+            if ended {
+                this.changed();
+            }
         });
+    }
+
+    /// Removes `appid`'s uninstall watch if it is still `stop`'s (a
+    /// Disconnect may have ended it, and a new one may have started since).
+    fn end_uninstall_watch(
+        &self,
+        state: &mut SteamState,
+        appid: u32,
+        stop: &UninstallWatch,
+    ) -> bool {
+        if state
+            .uninstall_watches
+            .get(&appid)
+            .is_some_and(|live| Arc::ptr_eq(live, stop))
+        {
+            state.uninstall_watches.remove(&appid);
+            true
+        } else {
+            false
+        }
     }
 
     /// Ends every live watch (Disconnect): their rows end Cancelled.
     fn stop_watches(&self) {
         let watches: Vec<Watch> = {
             let mut state = self.state.lock().unwrap();
+            for (_, stop) in state.uninstall_watches.drain() {
+                stop.store(true, Ordering::SeqCst);
+            }
             state.watches.drain().map(|(_, watch)| watch).collect()
         };
         for watch in watches {
@@ -1470,6 +1545,7 @@ struct View<'a> {
     refreshed_at: i64,
     client: Option<&'a SteamClient>,
     accounts: &'a [LocalAccount],
+    uninstalling: &'a HashMap<u32, UninstallWatch>,
 }
 
 fn view(state: &SteamState) -> View<'_> {
@@ -1482,6 +1558,7 @@ fn view(state: &SteamState) -> View<'_> {
         refreshed_at: state.refreshed_at,
         client: state.client.as_ref(),
         accounts: &state.accounts,
+        uninstalling: &state.uninstall_watches,
     }
 }
 
@@ -1569,6 +1646,13 @@ fn assemble_status(config: &SteamConfig, view: &View<'_>, rows: &[InstalledGame]
                     most_recent: account.most_recent,
                 })
                 .collect(),
+            uninstalling: if config.connected {
+                let mut ids: Vec<u32> = view.uninstalling.keys().copied().collect();
+                ids.sort_unstable();
+                ids.into_iter().map(|id| id.to_string()).collect()
+            } else {
+                Vec::new()
+            },
         }),
     }
 }
@@ -3225,19 +3309,52 @@ mod tests {
         assert!(h.rows().iter().all(|r| r.store_id != "3000060"));
     }
 
+    impl Harness {
+        /// The status's watched games (`SteamCard::uninstalling`).
+        fn uninstalling(&self) -> Vec<String> {
+            self.store.status().steam.unwrap().uninstalling
+        }
+        fn changed_events(&self) -> usize {
+            self.events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event, StoreEvent::Changed(_)))
+                .count()
+        }
+    }
+
     #[tokio::test]
-    async fn verify_and_uninstall_only_open_links() {
+    async fn uninstall_opens_the_library_page_and_watches_once_until_steam_removes_it() {
         let h = harness();
         h.store.load();
         h.connect().await;
+        assert!(h.uninstalling().is_empty());
         h.store.open("3000010", SteamOpenAction::Validate).unwrap();
+        let before = h.changed_events();
+        h.store.open("3000010", SteamOpenAction::Uninstall).unwrap();
+        assert_eq!(h.uninstalling(), ["3000010"], "the watch is in the status");
+        assert!(
+            h.changed_events() > before,
+            "the start emits stores-changed"
+        );
+        // Show in Steam: the page opens again, the watch is not restarted.
+        let started = h.changed_events();
         h.store.open("3000010", SteamOpenAction::Uninstall).unwrap();
         assert_eq!(
             h.fake.opened.lock().unwrap().as_slice(),
-            ["steam://validate/3000010", "steam://uninstall/3000010"]
+            [
+                "steam://validate/3000010",
+                "steam://nav/games/details/3000010",
+                "steam://nav/games/details/3000010"
+            ]
         );
+        assert_eq!(h.store.state.lock().unwrap().uninstall_watches.len(), 1);
+        assert_eq!(h.changed_events(), started, "no second watch, no event");
+        assert_eq!(h.uninstalling(), ["3000010"]);
         assert!(h.install.snapshot().entries.is_empty());
-        // The uninstall watch notices the manifest go.
+        // The uninstall watch notices the manifest go: the row and the
+        // watch end together, with the uninstalled card.
         h.fake
             .manifests
             .lock()
@@ -3248,6 +3365,8 @@ mod tests {
             "the row to go",
         )
         .await;
+        assert!(h.uninstalling().is_empty(), "the watch ended");
+        assert!(h.store.state.lock().unwrap().uninstall_watches.is_empty());
         assert!(h
             .messages()
             .iter()
@@ -3256,6 +3375,39 @@ mod tests {
             h.store.open("not-a-number", SteamOpenAction::Install),
             Err("That isn\u{2019}t a Steam game.".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn an_uninstall_watch_with_no_removal_ends_silently() {
+        let h = harness();
+        h.store.load();
+        h.connect().await;
+        *h.store.uninstall_for.lock().unwrap() = Duration::from_millis(150);
+        h.store.open("3000010", SteamOpenAction::Uninstall).unwrap();
+        assert_eq!(h.uninstalling(), ["3000010"]);
+        let cards = h.notices().len();
+        let started = h.changed_events();
+        wait_for(|| h.uninstalling().is_empty(), "the watch to time out").await;
+        assert!(h.changed_events() > started, "the end emits stores-changed");
+        assert_eq!(h.notices().len(), cards, "no card");
+        assert!(
+            h.rows().iter().any(|r| r.store_id == "3000010"),
+            "still installed"
+        );
+        // Uninstall in Steam… again starts a new watch.
+        h.store.open("3000010", SteamOpenAction::Uninstall).unwrap();
+        assert_eq!(h.uninstalling(), ["3000010"]);
+    }
+
+    #[tokio::test]
+    async fn disconnect_ends_the_uninstall_watches() {
+        let h = harness();
+        h.store.load();
+        h.connect().await;
+        h.store.open("3000010", SteamOpenAction::Uninstall).unwrap();
+        h.store.stop_watches();
+        assert!(h.store.state.lock().unwrap().uninstall_watches.is_empty());
+        assert!(h.uninstalling().is_empty());
     }
 
     #[tokio::test]

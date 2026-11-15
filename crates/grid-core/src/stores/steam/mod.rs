@@ -256,6 +256,10 @@ pub enum AppPhase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SteamLink {
     Install(u32),
+    /// Opens the game's page in Steam's Library
+    /// (`steam://nav/games/details/<id>`), where gear › Manage › Uninstall
+    /// draws Steam's dialog whole. Not `steam://uninstall`: Steam draws that
+    /// dialog cut off on Linux (user decision 5, 2026-11-15).
     Uninstall(u32),
     Validate(u32),
     Run(u32),
@@ -273,7 +277,7 @@ impl fmt::Display for SteamLink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SteamLink::Install(id) => write!(f, "steam://install/{id}"),
-            SteamLink::Uninstall(id) => write!(f, "steam://uninstall/{id}"),
+            SteamLink::Uninstall(id) => write!(f, "steam://nav/games/details/{id}"),
             SteamLink::Validate(id) => write!(f, "steam://validate/{id}"),
             SteamLink::Run(id) => write!(f, "steam://rungameid/{id}"),
         }
@@ -431,7 +435,7 @@ mod tests {
         assert_eq!(SteamLink::Install(620).to_string(), "steam://install/620");
         assert_eq!(
             SteamLink::Uninstall(620).to_string(),
-            "steam://uninstall/620"
+            "steam://nav/games/details/620"
         );
         assert_eq!(SteamLink::Validate(620).to_string(), "steam://validate/620");
         assert_eq!(SteamLink::Run(620).to_string(), "steam://rungameid/620");

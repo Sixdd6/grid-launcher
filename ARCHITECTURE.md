@@ -450,12 +450,18 @@ The shell owns *when* things run; grid-core owns *what* they do.
   `outside` unless GRID's own install watch saw it finish), the only writer of
   `stores/cache/steam-owned.json` and `steam-apps.json` (Disconnect deletes both; Remove
   key deletes the owned list), the install watches (grid-core's `InstallWatch` stepped
-  every 2 s, each with its store-external Downloads row) and the background
+  every 2 s, each with its store-external Downloads row), the uninstall watches (after
+  `steam_open(uninstall)`, which opens the game's Library page
+  `steam://nav/games/details/<id>`: one per game, a 2 s manifest poll for up to 10
+  minutes; a second open while one runs, Show in Steam, starts none; a start and an end,
+  removed or timed out, each emit `stores-changed`) and the background
   `store-notice` cards ("Steam connected · N games owned" / the private-connect error after
   `steam_save`, a Refresh's "Steam: N games found · M to install" and its still-private
   error, "<title> installed" · Play, "<title> uninstalled"); the frontend raises the cards
   for the other commands it calls. Its status carries `StoreStatus.steam` (`SteamCard`:
-  the client line, the SteamID64, the key's state, the local accounts; never the key). It
+  the client line, the SteamID64, the key's state, the local accounts, and `uninstalling`,
+  the store ids of the games under an uninstall watch, which drive Details' "Uninstall it
+  in Steam" box and Show in Steam; never the key). It
   holds the keyring's `SteamKeyStore` slot (`StoresService::real` takes it from
   `lib.rs`). The Steam commands (`steam_test`, `steam_save`, `steam_remove_key`,
   `steam_recheck_client`, `steam_open`, `steam_stop_waiting`) are in

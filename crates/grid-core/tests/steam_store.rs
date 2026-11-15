@@ -583,7 +583,7 @@ fn links_reach_a_fake_steam_with_its_argv() {
     );
     assert_eq!(
         opened(SteamLink::Uninstall(9100001)),
-        "steam://uninstall/9100001\n"
+        "steam://nav/games/details/9100001\n"
     );
     assert_eq!(
         opened(SteamLink::Validate(9100001)),

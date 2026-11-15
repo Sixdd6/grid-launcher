@@ -1254,6 +1254,8 @@ export type SteamCard = {
   /** Always `''`: a saved key shows as dots only (user decision 2). */
   key_tail: string;
   accounts: { persona: string; steam_id: string; most_recent: boolean }[];
+  /** Store ids GRID watches for Steam to remove after Uninstall in Steam (up to 10 minutes each). */
+  uninstalling: string[];
 };
 /** `steamTest` / `steamSave`'s answer. */
 export type SteamTestResult =

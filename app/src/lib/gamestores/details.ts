@@ -12,8 +12,12 @@ import {
   MANAGED_NOTE,
   OUTSIDE_GRID,
   RUNNING_IN_STEAM,
+  SHOW_IN_STEAM,
+  steamUninstalling,
   STOP_WAITING,
   UNINSTALL_IN_STEAM,
+  UNINSTALL_IT_IN_STEAM,
+  uninstallBoxNote,
   VERIFY_IN_STEAM,
   WAITING_FOR_STEAM,
   WAITING_NOTE,
@@ -47,6 +51,8 @@ export type StoreButton = {
   confirm?: boolean;
   disabled?: boolean;
   title?: string;
+  /** A box drawn just above the button (Steam's "Uninstall it in Steam" above Show in Steam). */
+  box?: { title: string; note: string };
 };
 
 /** Which two-click button is waiting for its second click. */
@@ -121,10 +127,13 @@ export function storeButtons(ctx: DetailsContext): StoreButton[] {
  * Steam branches): a disabled Cancel beside the managed box while Steam
  * installs, Play / Running in Steam, Install in Steam (no dialog), then
  * Verify in Steam and Uninstall in Steam… (Steam asks, so no confirm of
- * GRID's own). No Game Settings, Update or drive buttons.
+ * GRID's own; it opens the game's page in Steam's Library). While GRID
+ * watches for Steam to remove the game, the box "Uninstall it in Steam" and
+ * Show in Steam take Uninstall in Steam…'s place (user decision 5). No Game
+ * Settings, Update or drive buttons.
  */
 function clientButtons(ctx: DetailsContext): StoreButton[] {
-  const { game, job, playing } = ctx;
+  const { game, status, job, playing } = ctx;
   const out: StoreButton[] = [];
   if (job !== null && isWaitingForStore(job)) {
     out.push({ label: STOP_WAITING, act: 'stop_waiting', primary: false });
@@ -137,7 +146,11 @@ function clientButtons(ctx: DetailsContext): StoreButton[] {
   }
   if (game.installed && job === null) {
     out.push({ label: VERIFY_IN_STEAM, act: 'verify', primary: false });
-    out.push({ label: UNINSTALL_IN_STEAM, act: 'uninstall', primary: false });
+    out.push(
+      steamUninstalling(status, game.store_id)
+        ? { label: SHOW_IN_STEAM, act: 'uninstall', primary: false, box: { title: UNINSTALL_IT_IN_STEAM, note: uninstallBoxNote(game.title) } }
+        : { label: UNINSTALL_IN_STEAM, act: 'uninstall', primary: false },
+    );
   }
   return out;
 }
