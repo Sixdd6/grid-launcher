@@ -1,6 +1,6 @@
 // Search everything's results (item 355). Pure.
-import type { LabelledGame } from '../tabs/server/server.svelte';
-import { matchesTitle } from '../tabs/server/serverHeader';
+import type { LabelledGame } from '../romm/tvRomm.svelte';
+import { matchesTitle } from '../tabs/library/romm/platformHeader';
 
 /** "1 result for “x”", "3 results for “x”". */
 export function resultsHeading(n: number, query: string): string {

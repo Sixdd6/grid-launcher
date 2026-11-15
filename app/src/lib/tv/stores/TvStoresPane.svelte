@@ -1,30 +1,55 @@
 <script lang="ts">
-  // Settings › Stores (TVStores README § Settings › Stores; prototype
-  // `setPaint` for `stores`): a row per store with its mark, "Signed in as …"
-  // (or "Not signed in") and its status (Connected, Login expired, Not
-  // connected; Steam: "SteamID64 …" and Connected / Installed games only / Not
-  // connected). A opens the store's page (Steam's is TvSteamPage). One row per enabled store.
+  // Settings › Game stores (TVStores README § Settings › Stores;
+  // TVRommStorefront README § Settings › Game stores): one row per
+  // storefront in name order, RomM between GOG and Steam, each with its mark,
+  // its line ("Signed in as …", "Not signed in"; RomM "Signed in as sam ·
+  // romm.home.lan", "Not signed in · …", "Your own game server") and its
+  // status pill (RomM: Connected, Can't reach, Sign-in expired, Not
+  // connected, or a spinner with "Connecting…"). A opens the store's page,
+  // or the RomM page.
   import { ENABLED_STORES, storeName } from '../../gamestores/marks';
+  import { inStorefrontOrder } from '../../romm/order';
+  import { rommAccountLine, rommPill } from '../../romm/words';
   import { gameStores } from '../../stores/gameStores.svelte';
+  import { romm } from '../../stores/romm.svelte';
   import { tvf } from '../focus/actions';
+  import { openRommPage } from '../romm/rommActions';
+  import { GAME_STORES_NOTE, GAME_STORES_TITLE } from '../romm/rommTv';
+  import TvRommMark from '../romm/TvRommMark.svelte';
   import TvIcon from '../ui/TvIcon.svelte';
   import TvStoreMark from './TvStoreMark.svelte';
   import { openStorePage } from './storeActions';
-  import { STORES_PANE_NOTE, storeRowPill, storeRowSub } from './storeWords';
+  import { storeRowPill, storeRowSub } from './storeWords';
+
+  const rows = inStorefrontOrder<string>([...ENABLED_STORES, 'romm'], (s) => s);
+  let pill = $derived(rommPill(romm.status));
 </script>
 
-<div class="pane-h"><h1 data-testid="tv-pane-title">Stores</h1></div>
-<p class="note" style="margin-left:1.2rem">{STORES_PANE_NOTE}</p>
-{#each ENABLED_STORES as source (source)}
-  {@const st = gameStores.status(source)}
-  {#if st}
-    {@const pill = storeRowPill(st)}
-    <div class="srow" data-k={`sto-${source}`} data-al="Open" data-testid={`tv-stores-row-${source}`} use:tvf={{ a: () => openStorePage(source) }}>
-      <TvStoreMark {source} lg />
-      <div class="lab"><div class="t">{storeName(source)}</div><div class="s">{storeRowSub(st)}</div></div>
-      <div class="val"><span class="st" class:ok={pill.tone === 'ok'} class:warn={pill.tone === 'warn'}>{pill.text}</span><span class="chev"><TvIcon name="chevronRight" px={18} /></span></div>
+<div class="pane-h"><h1 data-testid="tv-pane-title">{GAME_STORES_TITLE}</h1></div>
+<p class="note" style="margin-left:1.2rem">{GAME_STORES_NOTE}</p>
+{#each rows as source (source)}
+  {#if source === 'romm'}
+    <div class="srow" data-k="sto-romm" data-al="Open" data-testid="tv-stores-row-romm" use:tvf={{ a: openRommPage }}>
+      <span style="margin-right:.2rem"><TvRommMark lg /></span>
+      <div class="lab"><div class="t">RomM</div><div class="s" data-testid="tv-stores-row-romm-sub">{rommAccountLine(romm.status)}</div></div>
+      <div class="val">
+        <span class="st" class:ok={pill.tone === 'ok'} class:warn={pill.tone === 'warn'} data-testid="tv-stores-row-romm-pill"
+          >{#if pill.tone === 'busy'}<span class="sspin"></span> {/if}{pill.text}</span
+        ><span class="chev"><TvIcon name="chevronRight" px={18} /></span>
+      </div>
     </div>
   {:else}
-    <p class="note" data-testid="tv-stores-loading"><span class="sspin"></span> Loading…</p>
+    {@const store = source as (typeof ENABLED_STORES)[number]}
+    {@const st = gameStores.status(store)}
+    {#if st}
+      {@const p = storeRowPill(st)}
+      <div class="srow" data-k={`sto-${store}`} data-al="Open" data-testid={`tv-stores-row-${store}`} use:tvf={{ a: () => openStorePage(store) }}>
+        <TvStoreMark source={store} lg />
+        <div class="lab"><div class="t">{storeName(store)}</div><div class="s">{storeRowSub(st)}</div></div>
+        <div class="val"><span class="st" class:ok={p.tone === 'ok'} class:warn={p.tone === 'warn'}>{p.text}</span><span class="chev"><TvIcon name="chevronRight" px={18} /></span></div>
+      </div>
+    {:else}
+      <p class="note" data-testid="tv-stores-loading"><span class="sspin"></span> Loading…</p>
+    {/if}
   {/if}
 {/each}

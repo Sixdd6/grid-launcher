@@ -1,19 +1,17 @@
 <script lang="ts">
   // The top bar (items 119–126; tvmode.js `paintTop`): the GRID icon,
   // wordmark and TV tag; the tabs between their LB / RB prompts, or on a page
-  // the breadcrumb, or on a startup screen nothing; then the live download,
-  // the connection and the clock.
+  // the breadcrumb, or on a startup screen nothing; then the live download
+  // and the clock (no connection dot or user: TVRommStorefront README).
   import TvIcon from './ui/TvIcon.svelte';
   import { downloads } from '../stores/downloads.svelte';
-  import { session } from '../stores/session.svelte';
   import { clock } from './clock.svelte';
   import Glyph from './glyphs/Glyph.svelte';
   import { TAB_ORDER } from './input/press';
   import { nav } from './nav.svelte';
-  import { activeDownload, connection, TAB_NAMES } from './topbar';
+  import { activeDownload, TAB_NAMES } from './topbar';
 
   let dl = $derived(nav.startup ? null : activeDownload(downloads.entries));
-  let conn = $derived(connection(session));
 </script>
 
 <header class="top" data-testid="tv-topbar">
@@ -41,9 +39,6 @@
       <span class="dlmini" data-testid="tv-topbar-download">
         <TvIcon name="download" px={16} />{dl.title} <i><b style={`width:${dl.pct}%`}></b></i> {dl.pct}%
       </span>
-    {/if}
-    {#if !nav.startup}
-      <span data-testid="tv-connection"><i class="dot" class:offline={conn.dot === 'offline'} class:none={conn.dot === 'none'}></i>{conn.text}</span>
     {/if}
     <span class="clock" data-testid="tv-clock">{clock.text}</span>
   </div>

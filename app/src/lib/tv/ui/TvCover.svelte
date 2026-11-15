@@ -23,6 +23,7 @@
     update = false,
     missing = false,
     platform = null,
+    tag = null,
     queue = null,
     picked = false,
     sel = undefined,
@@ -43,6 +44,9 @@
     missing?: boolean;
     /** The platform tag, in mixed lists. */
     platform?: string | null;
+    /** An installed row RomM doesn't have: NOT LINKED or NOT ON ROMM
+     *  (TVRommStorefront, decision 15). */
+    tag?: string | null;
     /** "Queued" or "<n>%" while installing. */
     queue?: string | null;
     /** Picked in select mode (item 441). */
@@ -84,6 +88,7 @@
     } }}
 >
   <span class="cv-art">
+    {#if tag}<span class="tag nl" data-testid={testId ? `${testId}-tag` : undefined}>{tag}</span>{/if}
     <span class="cv-img"><Image url={cover} alt={title} placeholder={title} onmeasure={(w, h) => recordShape(cover, w, h)} /></span>
     {#if missing}<span class="tag miss">MISSING</span>{:else if update}<span class="tag upd">UPDATE</span>{/if}
     {#if installed}<i class="idot" aria-label="Installed"></i>{/if}

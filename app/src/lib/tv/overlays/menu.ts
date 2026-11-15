@@ -1,27 +1,10 @@
-// The Menu panel's words (checklist items 363–364; tvmode.js `guideMenu`).
-// Pure: TvMenu draws them and runs each item.
+// The Menu panel's words (checklist items 363–364; tvmode.js `guideMenu`;
+// TVRommStorefront README § The shell). Pure: TvMenu draws them and runs
+// each item. No Reconnect and no "<user> · <server>" line: RomM's state and
+// Reconnect live on its Library group and its Game stores page.
 import type { DownloadEntry } from '../../api';
-import { hostOf } from '../../shell';
 
-export type MenuItemKey = 'discover' | 'downloads' | 'notifications' | 'settings' | 'controls' | 'reconnect' | 'desktop' | 'quit';
-
-/** The session state the Menu reads. */
-export type MenuSession = { connected: boolean; offline: boolean; username: string; serverUrl: string };
-
-/** Used without a server (not merely unable to reach one). */
-function noServer(s: Pick<MenuSession, 'connected' | 'offline'>): boolean {
-  return s.offline && !s.connected;
-}
-
-/**
- * The head's line: "<user> · <server host>", "Offline", or "Offline · no
- * server" when used without a server, like the top bar (item 363; README §
- * Consultant decisions).
- */
-export function menuHead(s: MenuSession): string {
-  if (s.connected) return `${s.username} · ${hostOf(s.serverUrl)}`;
-  return noServer(s) ? 'Offline · no server' : 'Offline';
-}
+export type MenuItemKey = 'discover' | 'downloads' | 'notifications' | 'settings' | 'controls' | 'desktop' | 'quit';
 
 /** Rows counted as active on Downloads: the ones running and the queued. */
 export function activeCount(entries: readonly DownloadEntry[]): number {
@@ -29,25 +12,24 @@ export function activeCount(entries: readonly DownloadEntry[]): number {
 }
 
 /**
- * The items, in order (item 364). Used without a server the Reconnect row
- * reads "Connect to a server…" (same row, which opens Connect).
+ * The items, in order (item 364). Discover only while RomM is connected or
+ * the startup probe runs (`rommLive`): it opens Library › RomM › Discover.
  */
-export function menuItems(active: number, notices: number, s: Pick<MenuSession, 'connected' | 'offline'> = { connected: true, offline: false }): { key: MenuItemKey; label: string }[] {
+export function menuItems(active: number, notices: number, discover = true): { key: MenuItemKey; label: string }[] {
   return [
-    { key: 'discover', label: 'Discover' },
+    ...(discover ? [{ key: 'discover' as const, label: 'Discover' }] : []),
     { key: 'downloads', label: active > 0 ? `Downloads · ${active} active` : 'Downloads' },
     { key: 'notifications', label: `Notifications · ${notices}` },
     { key: 'settings', label: 'Settings' },
     // Shows the welcome card again (user decision 2026-11-10).
     { key: 'controls', label: 'Controls' },
-    { key: 'reconnect', label: noServer(s) ? 'Connect to a server…' : 'Reconnect' },
     { key: 'desktop', label: 'Switch to desktop mode' },
     { key: 'quit', label: 'Quit GRID' },
   ];
 }
 
 /**
- * The Menu on a startup screen (Connect, Choose your systems, the
+ * The Menu on a startup screen (the welcome, Choose your systems, the
  * unreachable library): only the ways out, so a controller alone can leave
  * TV mode before GRID is set up (user decision 2026-11-10).
  */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DownloadEntry } from '../api';
-import { activeDownload, connection } from './topbar';
+import { activeDownload, TAB_NAMES } from './topbar';
 
 const entry = (o: Partial<DownloadEntry>): DownloadEntry =>
   ({
@@ -8,14 +8,6 @@ const entry = (o: Partial<DownloadEntry>): DownloadEntry =>
     downloaded_bytes: 0, total_bytes: 0, speed_bps: 0, install_processed_bytes: 0, install_total_bytes: 0,
     error: '', detail: '', drive_id: '', drive_name: '', drive_label: '', batch: 0, phase: 'none', failure: null, ...o,
   }) as DownloadEntry;
-
-describe('connection (item 125, 517)', () => {
-  it('reads the three states', () => {
-    expect(connection({ connected: true, offline: false, username: 'sam' })).toEqual({ dot: 'online', text: 'sam' });
-    expect(connection({ connected: false, offline: true, username: 'sam' })).toEqual({ dot: 'none', text: 'Offline · no server' });
-    expect(connection({ connected: false, offline: false, username: 'sam' })).toEqual({ dot: 'offline', text: 'Offline' });
-  });
-});
 
 describe('activeDownload (item 124; ruling 21)', () => {
   it('none while nothing transfers', () => {
@@ -33,5 +25,11 @@ describe('activeDownload (item 124; ruling 21)', () => {
   });
   it('a backup row shows like any other', () => {
     expect(activeDownload([entry({ job: 'backup', title: 'Velvet Static', status: 'downloading', downloaded_bytes: 1, total_bytes: 2 })])?.title).toBe('Velvet Static');
+  });
+});
+
+describe('TAB_NAMES', () => {
+  it('names three tabs, no Server', () => {
+    expect(Object.keys(TAB_NAMES)).toEqual(['library', 'downloads', 'settings']);
   });
 });

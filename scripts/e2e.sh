@@ -141,6 +141,11 @@ STAGE_GROUPS=(
   # Discover, its rows and hero, platforms with their header and search,
   # X to install, Search everything, the offline panel and Menu › Discover.
   "tv-server:specs/tv-server.spec.ts"
+  # TV mode with RomM as a storefront (romm-storefront-plan Step 6) on the
+  # Discover fixtures, --tv on a seeded profile whose welcome isn't done:
+  # the welcome, the RomM sign-in page, Choose your systems, Library › RomM,
+  # Settings › Game stores and the RomM page, Disconnect, needs-RomM.
+  "tv-romm:specs/tv-romm.spec.ts"
   # TV mode's Library tab (docs/tv-mode/plan.md P8), used without a server
   # (seeded): three installed games on two platforms and a fake Backup drive
   # (<data>/media, like `backups`) with a two-game pack. The rail and its
@@ -689,7 +694,7 @@ mock_args_for_group() {
     # The first-run-setup set plus a "Sony PlayStation 4", whose ShadPS4
     # installs with its Qt launcher companion from the mock forge.
     systems|tv-systems) printf -- '--fixtures-dir fixtures-systems' ;;
-    discover|tv-server) printf -- '--fixtures-dir fixtures-discover' ;;
+    discover|tv-server|tv-romm) printf -- '--fixtures-dir fixtures-discover' ;;
     tv-details) printf -- '--fixtures-dir fixtures-tv-details --stateful-saves' ;;
     # An "Emulators" platform with one package (rom 801) that zips the mock
     # forge's PCSX2 AppImage stub, plus a PS2 platform for the defaults.
@@ -798,6 +803,7 @@ seed_script_for_group() {
     backups|tv-backups|tv-layout) printf '%s' "$E2E_DIR/seed/backups-seed.mjs" ;;
     tv-shell) printf '%s' "$E2E_DIR/seed/tv-shell-seed.mjs" ;;
     tv-server) printf '%s' "$E2E_DIR/seed/tv-server-seed.mjs" ;;
+    tv-romm) printf '%s' "$E2E_DIR/seed/tv-romm-seed.mjs" ;;
     tv-library) printf '%s' "$E2E_DIR/seed/tv-library-seed.mjs" ;;
     tv-details) printf '%s' "$E2E_DIR/seed/tv-details-seed.mjs" ;;
     tv-settings) printf '%s' "$E2E_DIR/seed/tv-settings-seed.mjs" ;;
@@ -1088,7 +1094,7 @@ EOF
     # earlier spec saved in this run's private keyring must go too, or the
     # app would restore that session. Same best-effort clear as the
     # python-import group.
-    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */gog-*.spec.ts || "$spec" == */tv-gog-*.spec.ts || "$spec" == */epic-*.spec.ts || "$spec" == */tv-epic*.spec.ts || "$spec" == */amazon-*.spec.ts || "$spec" == */tv-amazon*.spec.ts || "$spec" == */steam-*.spec.ts || "$spec" == */tv-steam*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
+    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */tv-romm.spec.ts || "$spec" == */gog-*.spec.ts || "$spec" == */tv-gog-*.spec.ts || "$spec" == */epic-*.spec.ts || "$spec" == */tv-epic*.spec.ts || "$spec" == */amazon-*.spec.ts || "$spec" == */tv-amazon*.spec.ts || "$spec" == */steam-*.spec.ts || "$spec" == */tv-steam*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
       secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
     fi
     # Every Steam spec starts with an empty Steam Web API key slot (a spec

@@ -1,9 +1,11 @@
 <script lang="ts">
   // The Library tab (TV mode plan § P8; tvmode.js `TABS.library`,
-  // `libRailHTML`, `libPaint`, `ONF.lib`): the filter rail (All games,
-  // Recent, Updates, a divider, then the Platforms and Backup drives
-  // folders, items 176–184, 420) beside the header and a windowed grid of
-  // large covers (185–195; drives 421–424). Moving through the rail filters
+  // `libRailHTML`, `libPaint`, `ONF.lib`; TVRommStorefront README § Library ›
+  // RomM group): the filter rail (All games, Recent, Updates, a divider,
+  // the Backup drives folder, items 176–184, 420, then the storefront groups
+  // by name: Amazon Games, Epic Games, GOG, RomM, Steam) beside the header
+  // and a windowed grid of large covers (185–195; drives 421–424). The RomM
+  // group's rows show RomM › Installed, Discover or a platform. Moving through the rail filters
   // at once and clears the search; A or Right goes into the grid. Y searches
   // live, LT sorts, RT is select mode (items 439–453): on a drive Y installs
   // or removes the picked games, elsewhere it backs them up.
@@ -48,7 +50,20 @@
   import { mixedStoreGames, storeGameFromDrive } from '../../stores/libraryStores';
   import { tvDriveQuick, tvQuick } from '../../stores/storeWords';
   import { driveChips, driveCountLine, driveEmptyState, driveSortItems, emptyState, libraryGrid, countLine, searching, SEARCH_TITLE, SORT_TITLE, TV_SORTS, type EmptyState } from './libraryHeader';
-  import { backupAllLabel, FOLDER_LABELS, platformBackupIds, folderHint, folderKey, folderOf, libraryRail, NO_DRIVES, railEntry, railRowKey, type FolderId } from './libraryRail';
+  import { FOLDER_LABELS, folderKey, folderOf, libraryRail, NO_DRIVES, railEntry, railRowKey, type FolderId } from './libraryRail';
+  import { tick } from 'svelte';
+  import { rommRailGroup, rommSelectionFallback, type RommRailKey } from '../../../romm/rail';
+  import { romm } from '../../../stores/romm.svelte';
+  import { focusables } from '../../focus/dom';
+  import { focused, nav, scope, setFocus } from '../../nav.svelte';
+  import { openSearchAll } from '../../pages/searchAll';
+  import { INSTALLED_SEARCH_TITLE } from '../../romm/rommTv';
+  import { rommCatalog, rommRowKey, selectRommView, tvRomm } from '../../romm/tvRomm.svelte';
+  import TvRommDiscover from './romm/TvRommDiscover.svelte';
+  import TvRommInstalled from './romm/TvRommInstalled.svelte';
+  import TvRommPlatform from './romm/TvRommPlatform.svelte';
+  import TvRommRail from './romm/TvRommRail.svelte';
+  import { searchTitle } from './romm/platformHeader';
 
   // "Now" once per rail recompute, as the desktop's Library reads it.
   let nowSeconds = $derived.by(() => {
@@ -61,6 +76,47 @@
   let selected = $derived(railEntry(rail, librarySelection.key));
   /** A store's Installed or Available on show (game stores), else null. */
   let storeView = $derived(tvStores.view);
+
+  // ---- RomM (TVRommStorefront README § Library › RomM group). The catalog
+  // of the server GRID knows; its platforms while RomM is connected.
+  const catalog = rommCatalog();
+  let rommConnected = $derived(romm.status.connection === 'connected');
+  $effect(() => {
+    if (!rommConnected) return;
+    catalog.loadPlatforms().catch(() => {});
+    void catalog.loadLaunchDefaults();
+  });
+  $effect(() => (rommConnected ? catalog.watch() : undefined));
+  let rommGroup = $derived(rommRailGroup(romm.status, rommConnected ? catalog.platforms : null, installed.list));
+  /**
+   * The RomM row on show, after the fallback: when RomM drops while Discover
+   * or a platform is open, RomM › Installed; when the group goes, none (All
+   * games). Derived, so the rail marks the row it falls back to in the same
+   * redraw that removes the old one, and focus lands on it, never on a row by
+   * its position (which would select that row).
+   */
+  let rommKey = $derived.by((): RommRailKey | null => {
+    const v = tvRomm.view;
+    if (v === null || storeView) return null;
+    const to = rommSelectionFallback(v, rommGroup);
+    return to === 'all' ? null : (to as RommRailKey);
+  });
+  let rommRow = $derived(rommKey === null || rommGroup === null ? null : (rommGroup.rows.find((r) => r.key === rommKey) ?? null));
+
+  // The fallback written back, with focus on the row now selected.
+  $effect(() => {
+    const v = tvRomm.view;
+    const to = rommKey;
+    if (v === null || storeView || v === to) return;
+    if (to === null) selectLibRail('all');
+    else selectRommView(to);
+    void tick().then(() => {
+      if (nav.tab !== 'library' || nav.pages.length > 0 || nav.layers.length > 0) return;
+      const root = scope();
+      const el = root?.querySelector<HTMLElement>(`[data-k="${to === null ? railRowKey('all') : rommRowKey(to)}"]`) ?? null;
+      if (el) setFocus(el, { instant: true });
+    });
+  });
 
   // A row that went away (an unplugged drive, a platform's last game
   // uninstalled) falls back to All games, written back to the store.
@@ -196,17 +252,6 @@
   });
   let chips = $derived(drive ? driveChips(drive) : null);
 
-  // Each platform row's "Backup all N…" counts what its Backup page backs up.
-  let backupIds = $derived(new Map(rail.platforms.map((e) => [e.key, platformBackupIds(installed.list, e.key, updateIds, nowSeconds)])));
-
-  /** X on a Library platform row: "Backup all N…", its installed games the
-   *  server knows (item 455; offline it says why, 456). */
-  function backupPlatform(key: RailKey, label: string) {
-    const ids = backupIds.get(key) ?? platformBackupIds(installed.list, key, updateIds, nowSeconds);
-    if (ids.length === 0 && session.connected) return;
-    openBackupPage({ kind: 'platform', platform: label, count: ids.length }, ids);
-  }
-
   // ---- Select mode (items 439–453).
   const selGame = (g: TvGame): SelGame => ({ id: g.id, size: g.drive ? g.drive.game.size : (g.row?.filesize_bytes ?? 0) });
   let selGames = $derived<SelGame[]>(games.map(selGame));
@@ -214,8 +259,8 @@
   // A pick the row no longer lists goes; a search that hides one keeps it
   // (the bar counts and sizes it, Y acts on it).
   $effect(() => {
-    // A store view keeps its own picks (TvStoreView).
-    if (select.on && !storeView) selKeep(selAllGames.map((g) => g.id));
+    // A store view and a RomM view keep their own picks.
+    if (select.on && !storeView && !rommKey) selKeep(selAllGames.map((g) => g.id));
   });
 
   function pickedGames(ids: readonly string[]): TvGame[] {
@@ -271,8 +316,8 @@
   }
 
   $effect(() => {
-    // A store view registers its own (GOG › Installed).
-    if (storeView) return;
+    // A store view registers its own (GOG › Installed), a RomM view its own.
+    if (storeView || rommKey) return;
     return registerSelectGrid({
       games: () => selGames,
       all: () => selAllGames,
@@ -311,65 +356,113 @@
   /** GOG › Installed: the one store view with select mode (user decision 2026-11-13). */
   const backupInstalled = () => !!tvStores.view && canBackup(tvStores.view.source) && tvStores.view.part === 'installed';
 
+  /** Y on RomM › Installed or a platform: the grid narrows as you type. */
+  function searchRomm(title: string) {
+    const before = tvRomm.query;
+    void openKeyboard({
+      title,
+      value: tvRomm.query,
+      onInput: (v) => (tvRomm.query = v),
+      onDone: (v) => (tvRomm.query = v),
+      onCancel: () => (tvRomm.query = before),
+    });
+  }
+
+  /**
+   * Arriving on the Library while Discover is selected focuses Discover's
+   * content, the cover last focused there, else the first, not the rail
+   * (items 104, 417). Before Discover has covers, the first one to appear
+   * takes focus.
+   */
+  function arrive() {
+    if (rommKey !== 'romm:discover' || !rommConnected) return;
+    const cur = focused();
+    if (cur && cur.isConnected && !cur.closest('[data-rail]')) return;
+    const disc = scope()?.querySelector('#disc');
+    const covers = disc ? focusables(disc) : [];
+    const el = covers.find((e) => e.getAttribute('data-k') === tvRomm.discoverKey) ?? covers[0];
+    if (el) setFocus(el, { instant: true });
+    else tvRomm.pendingArrive = true;
+  }
+
+  // RomM answered while Discover is on show (the startup probe, Retry):
+  // focus goes into Discover as on arriving.
+  let wasConnected: boolean | null = null;
+  $effect(() => {
+    const on = rommConnected;
+    if (on && wasConnected === false && rommKey === 'romm:discover') void tick().then(arrive);
+    wasConnected = on;
+  });
+
   useScreen({
     // A store view has Y Search, and RT Select in GOG › Installed
-    // (tvstores.js `TABS.library.hints`); no sort.
+    // (tvstores.js `TABS.library.hints`); no sort. RomM: Discover has Y
+    // (while connected), Installed Y, LT and RT, a platform Y and RT.
     hints: () => {
       if (tvStores.view) return backupInstalled() ? [{ button: 'Y', label: 'Search' }, { button: 'RT', label: 'Select' }] : [{ button: 'Y', label: 'Search' }];
+      if (rommKey === 'romm:discover') return rommConnected ? [{ button: 'Y', label: 'Search' }] : [];
+      if (rommKey !== null && rommKey !== 'romm:installed') return [{ button: 'Y', label: 'Search' }, { button: 'RT', label: 'Select' }];
       return [
         { button: 'Y', label: 'Search' },
         { button: 'LT', label: 'Sort' },
         { button: 'RT', label: 'Select' },
       ];
     },
-    y: search,
+    get y() {
+      if (rommKey === 'romm:discover') return rommConnected ? () => openSearchAll() : undefined;
+      if (rommKey === 'romm:installed') return () => searchRomm(INSTALLED_SEARCH_TITLE);
+      if (rommKey !== null) return () => searchRomm(searchTitle(rommRow?.label ?? ''));
+      return search;
+    },
     get lt() {
+      if (rommKey !== null) return rommKey === 'romm:installed' ? sortList : undefined;
       return tvStores.view ? undefined : sortList;
     },
     get rt() {
+      if (rommKey !== null) return rommKey === 'romm:discover' ? undefined : selToggle;
       return tvStores.view && !backupInstalled() ? undefined : selToggle;
     },
+    arrive,
   });
 
   const tid = (testId: string) => testId.replace(/^library-rail-/, 'tv-lib-rail-');
-  const holds = (id: FolderId) => !storeView && !lib.folds[id] && folderOf(selected.key) === id;
+  const holds = (id: FolderId) => !storeView && !rommKey && !lib.folds[id] && folderOf(selected.key) === id;
+  /** A desktop rail row is selected while no store or RomM view shows. */
+  const ownSel = (key: string) => !storeView && !rommKey && selected.key === key;
   const coverKey = (g: TvGame) => `${driveKey !== null ? 'dg' : 'lg'}${g.id}`;
   const emptyParts = (body: string) => body.split('(Y)');
 </script>
 
+{#snippet rommRail()}
+  {#if rommGroup}<TvRommRail group={rommGroup} selected={rommKey} onSelect={selectRommView} />{/if}
+{/snippet}
+
 <div class="split" data-testid="tv-library">
   <TvRail label="Library" scroll="lib-rail">
     {#each rail.filters as e (e.key)}
-      <TvRailRow k={railRowKey(e.key)} selected={!storeView && selected.key === e.key} count={e.count} testId={tid(e.testId)} onSelect={() => selectLibRail(e.key)}>{e.label}</TvRailRow>
+      <TvRailRow k={railRowKey(e.key)} selected={ownSel(e.key)} count={e.count} testId={tid(e.testId)} onSelect={() => selectLibRail(e.key)}>{e.label}</TvRailRow>
     {/each}
     <hr />
-    <TvRailRow k={folderKey('plat')} fold={lib.folds.plat} holdsSel={holds('plat')} testId="tv-lib-fold-plat" onToggle={() => toggleFold('plat')}>{FOLDER_LABELS.plat}</TvRailRow>
-    {#if lib.folds.plat}
-      {#each rail.platforms as e (e.key)}
-        <TvRailRow
-          k={railRowKey(e.key)}
-          sub
-          selected={!storeView && selected.key === e.key}
-          count={e.count}
-          xl={backupAllLabel(backupIds.get(e.key)?.length ?? 0)}
-          testId={tid(e.testId)}
-          onSelect={() => selectLibRail(e.key)}
-          onX={() => backupPlatform(e.key, e.label)}>{e.label}</TvRailRow
-        >
-      {/each}
-    {/if}
     <TvRailRow k={folderKey('drives')} fold={lib.folds.drives} holdsSel={holds('drives')} testId="tv-lib-fold-drives" onToggle={() => toggleFold('drives')}>{FOLDER_LABELS.drives}</TvRailRow>
     {#if lib.folds.drives}
       {#each rail.drives as e (e.key)}
-        <TvRailRow k={railRowKey(e.key)} sub selected={!storeView && selected.key === e.key} count={rowCount(e.key, e.count)} testId={tid(e.testId)} onSelect={() => selectLibRail(e.key)}>{e.label}</TvRailRow>
+        <TvRailRow k={railRowKey(e.key)} sub selected={ownSel(e.key)} count={rowCount(e.key, e.count)} testId={tid(e.testId)} onSelect={() => selectLibRail(e.key)}>{e.label}</TvRailRow>
       {:else}
         <div class="ri-empty" data-testid="tv-lib-no-drives">{NO_DRIVES}</div>
       {/each}
     {/if}
-    <TvStoreRail onSelect={selectLibStore} />
+    <TvStoreRail onSelect={selectLibStore} romm={rommGroup ? rommRail : undefined} />
   </TvRail>
-  <div class="main">
-    {#if storeView}
+  <div class="main" id={rommKey === 'romm:discover' && rommConnected ? 'srv-main' : undefined}>
+    {#if rommKey === 'romm:installed'}
+      <TvRommInstalled />
+    {:else if rommKey === 'romm:discover'}
+      <TvRommDiscover {catalog} />
+    {:else if rommKey !== null && rommRow}
+      {#key rommKey}
+        <TvRommPlatform {catalog} row={rommRow} />
+      {/key}
+    {:else if storeView}
       {#key `${storeView.source}:${storeView.part}`}
         <TvStoreView source={storeView.source} part={storeView.part} query={lib.query} />
       {/key}

@@ -46,24 +46,16 @@ export function buildHints(i: HintInput): Hint[] {
   return h;
 }
 
-export type HintLeft =
-  | { kind: 'noServer'; text: string }
-  | { kind: 'offline'; pill: string; text: string }
-  | { kind: 'pad'; text: string };
+export type HintLeft = { kind: 'pad'; text: string };
 
-export const NO_SERVER_LINE = 'No server · Library and backup drives only';
-export const OFFLINE_PILL = 'Offline';
-export const OFFLINE_LINE = 'Installed games still play';
 /** Ruling 24: the left side with no controller connected. */
 export const NO_CONTROLLER_LINE = 'No controller connected';
 
 /**
- * The left side: GRID used without a server, or the server unreachable (not
- * on the startup screens); else the controller in use, or the no-controller
- * line.
+ * The left side: the controller in use, or the no-controller line. No
+ * offline or no-server line (TVRommStorefront README § The shell): RomM's
+ * state shows on its Library group and its Game stores row.
  */
-export function hintLeft(o: { noServer: boolean; offline: boolean; startup: boolean; padName: string | null }): HintLeft {
-  if (o.noServer && !o.startup) return { kind: 'noServer', text: NO_SERVER_LINE };
-  if (o.offline && !o.startup) return { kind: 'offline', pill: OFFLINE_PILL, text: OFFLINE_LINE };
+export function hintLeft(o: { padName: string | null }): HintLeft {
   return { kind: 'pad', text: o.padName ?? NO_CONTROLLER_LINE };
 }

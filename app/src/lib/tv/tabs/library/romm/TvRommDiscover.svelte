@@ -4,8 +4,11 @@
 </script>
 
 <script lang="ts">
-  // Server › Discover (items 158–175; tvmode.js `discoverHTML`, `hero`):
-  // what TV mode's Home tab showed, for now. A hero panel of a fixed height
+  // Library › RomM › Discover (items 158–175, moved from the Server tab;
+  // TVRommStorefront README § RomM › Discover; tvmode.js `discoverHTML`,
+  // `hero`). While the startup probe runs it is a panel, "Connecting to
+  // <host>…", with skeleton covers; installed rows RomM doesn't have never
+  // show here. A hero panel of a fixed height
   // for the focused game (platform, title as a logo, its state, two lines of
   // summary) over rows that scroll sideways: Continue playing, New
   // releases, Recently added, Updates (only when there are any) and Your
@@ -13,29 +16,36 @@
   // (item 108); Up from the top row and Down from the bottom one stay put,
   // and Left from a row's first cover goes to the rail (item 174).
   import { tick } from 'svelte';
-  import { api, type DiscoverFeed, type GameSummary, type LaunchDefaults } from '../../../api';
-  import { isWindowsPlatform } from '../../../details/actions';
-  import { launchTargetLine } from '../../../details/header';
-  import { cachedFeed, fetchFeed, rememberFeed, watchFeedInputs } from '../../../discover/feedStore.svelte';
-  import { isHiddenLibraryPlatform } from '../../../library';
-  import { sortGames } from '../../../library/sort';
-  import type { Catalog } from '../../../server/catalog.svelte';
-  import { downloads } from '../../../stores/downloads.svelte';
-  import { installed, matchesInstalled } from '../../../stores/installed.svelte';
-  import { session } from '../../../stores/session.svelte';
-  import { updates } from '../../../stores/updates.svelte';
-  import { focusables } from '../../focus/dom';
-  import { gameFromRow, gameFromSummary, liveInstall, type TvGame } from '../../games';
-  import { focused, scope, setFocus } from '../../nav.svelte';
-  import TvGameCover from '../../ui/TvGameCover.svelte';
-  import TvTrack from '../../ui/TvTrack.svelte';
+  import { api, type DiscoverFeed, type GameSummary, type LaunchDefaults } from '../../../../api';
+  import { isWindowsPlatform } from '../../../../details/actions';
+  import { launchTargetLine } from '../../../../details/header';
+  import { cachedFeed, fetchFeed, rememberFeed, watchFeedInputs } from '../../../../discover/feedStore.svelte';
+  import { sortGames } from '../../../../library/sort';
+  import { fromLiveServer } from '../../../../romm/platformGames';
+  import { rommInstalledRows } from '../../../../romm/rail';
+  import { rommConnectingPanel, rommHost } from '../../../../romm/words';
+  import { romm } from '../../../../stores/romm.svelte';
+  import type { Catalog } from '../../../../server/catalog.svelte';
+  import { downloads } from '../../../../stores/downloads.svelte';
+  import { installed, matchesInstalled } from '../../../../stores/installed.svelte';
+  import { updates } from '../../../../stores/updates.svelte';
+  import { focusables } from '../../../focus/dom';
+  import { gameFromRow, gameFromSummary, liveInstall, type TvGame } from '../../../games';
+  import { focused, scope, setFocus } from '../../../nav.svelte';
+  import TvGameCover from '../../../ui/TvGameCover.svelte';
+  import TvTrack from '../../../ui/TvTrack.svelte';
   import { discoverShelves, EMPTY_SHELF, heroEmulator, heroLine, heroSummary } from './discoverRows';
-  import { srv } from './server.svelte';
+  import { tvRomm } from '../../../romm/tvRomm.svelte';
 
   let { catalog }: { catalog: Catalog } = $props();
 
+  let connected = $derived(romm.status.connection === 'connected');
+  let server = $derived(romm.status.server_url);
+  let panel = $derived(rommConnectingPanel(rommHost(romm.status)));
+
   // The last feed shown, at once, while the fresh one loads (feedStore).
-  const kept = cachedFeed(session.serverUrl);
+  // svelte-ignore state_referenced_locally
+  const kept = cachedFeed(server);
   let feed = $state.raw<DiscoverFeed | null>(kept);
   let loaded = $state(kept !== null);
   let reload = $state(0);
@@ -43,13 +53,14 @@
 
   $effect(() => {
     void reload;
-    if (!session.connected) return;
+    if (!connected) return;
+    const srvUrl = server;
     let cancelled = false;
     fetchFeed()
       .then((next) => {
         if (cancelled) return;
         feed = next;
-        rememberFeed(session.serverUrl, next);
+        rememberFeed(srvUrl, next);
         loaded = true;
       })
       .catch(() => {
@@ -81,8 +92,9 @@
 
   let shelves = $derived(
     discoverShelves({
+      // RomM's own installed games: linked, from this server.
       library: sortGames(
-        installed.list.filter((r) => !isHiddenLibraryPlatform(r.platform)),
+        rommInstalledRows(installed.list).filter((r) => r.rom_id !== null && fromLiveServer(r, server)),
         'played',
       ).map((r) => gameFromRow(r, updateIds)),
       newReleases: feed ? fromFeed(feed.new_releases) : [],
@@ -119,7 +131,7 @@
       return;
     }
     const id = g.romId;
-    if (id === null || !session.connected) {
+    if (id === null || !connected) {
       summary = '';
       return;
     }
@@ -144,31 +156,42 @@
 
   function focusedCover(g: TvGame, k: string) {
     heroId = g.id;
-    srv.discoverKey = k;
+    tvRomm.discoverKey = k;
   }
 
   // Arrived before there were covers (item 417): the first to appear takes
   // focus, unless focus has moved on from the Discover row since.
   $effect(() => {
     void shelves;
-    if (!srv.pendingArrive) return;
+    if (!tvRomm.pendingArrive) return;
     void tick().then(() => {
-      if (!srv.pendingArrive) return;
+      if (!tvRomm.pendingArrive) return;
       const cur = focused();
-      if (cur && cur.getAttribute('data-k') !== 'r-discover') {
-        srv.pendingArrive = false;
+      if (cur && cur.getAttribute('data-k') !== 'r-romm:discover') {
+        tvRomm.pendingArrive = false;
         return;
       }
       const disc = scope()?.querySelector('#disc');
       const el = disc ? focusables(disc)[0] : undefined;
       if (el) {
-        srv.pendingArrive = false;
+        tvRomm.pendingArrive = false;
         setFocus(el, { instant: true });
       }
     });
   });
 </script>
 
+{#if !connected}
+  <div class="list" data-scroll="list" data-testid="tv-romm-connecting">
+    <div class="list-in">
+      <div class="panel rconnecting" id="romm-connecting">
+        <h2><span class="sspin"></span>{panel.title}</h2>
+        <p class="note" style="margin:0">{panel.text}</p>
+      </div>
+      <div class="sskel" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
+  </div>
+{:else}
 <div class="home" data-testid="tv-discover">
   <div class="hero" data-testid="tv-hero">
     {#if hero}
@@ -197,3 +220,4 @@
     {/each}
   </div>
 </div>
+{/if}

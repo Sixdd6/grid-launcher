@@ -30,8 +30,7 @@ describe('the TV Library header (items 185, 187–191)', () => {
     expect(emptyState('all', 'zz')).toEqual({ title: 'No games match “zz”', body: 'Press (Y) to change the search.' });
     expect(emptyState('updates', '')).toEqual({ title: 'Everything is up to date', body: 'Game updates show here.' });
     expect(emptyState('updates', ' ')).toEqual({ title: 'Everything is up to date', body: 'Game updates show here.' });
-    expect(emptyState('recent', '')).toEqual({ title: 'No games here yet', body: 'Install games from the Server tab.' });
-    expect(emptyState('platform:snes', '')).toEqual({ title: 'No games here yet', body: 'Install games from the Server tab.' });
+    expect(emptyState('recent', '')).toEqual({ title: 'No games here yet', body: 'Install games from RomM, a store or a Backup drive.' });
   });
 });
 
@@ -67,6 +66,6 @@ describe('a Backup drive in the Library (items 421–423)', () => {
   it('says why a drive grid is empty', () => {
     expect(driveEmptyState('Couch kit', false, '')).toEqual({ title: 'Couch kit is not connected', body: 'Plug it in to see its games.' });
     expect(driveEmptyState('Couch kit', true, 'q')).toEqual({ title: 'No games on this drive match “q”', body: 'Press (Y) to change the search.' });
-    expect(driveEmptyState('Couch kit', true, '')).toEqual({ title: 'Nothing on this drive yet', body: 'Backup games from Server or Library.' });
+    expect(driveEmptyState('Couch kit', true, '')).toEqual({ title: 'Nothing on this drive yet', body: 'Backup games from the Library.' });
   });
 });

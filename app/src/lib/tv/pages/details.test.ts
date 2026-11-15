@@ -105,10 +105,18 @@ describe('Details buttons per state (items 276–283, 431, 435, 437)', () => {
     expect(detButtons(base)[0]).toMatchObject({ primary: true, icon: 'download' });
   });
 
-  it('offline: Install and Backup to drive… are disabled, each saying why', () => {
+  it('RomM not connected: Install says why; Backup to drive… stays (decision 8)', () => {
     const [install, backup] = detButtons({ ...base, connected: false });
     expect(install).toMatchObject({ disabled: true, why: "Can't install while offline" });
-    expect(backup).toMatchObject({ disabled: true, why: BACKUP_NEEDS_SERVER });
+    expect(backup.disabled).toBeUndefined();
+  });
+
+  it('RomM not connected: Update and Link to a RomM game are disabled, saying why and where to fix it', () => {
+    const fix = 'Connect RomM in Settings › Game stores.';
+    const update = detButtons({ ...base, installed: true, updateLabel: 'Update', connected: false, rommFix: fix }).find((b) => b.kind === 'update');
+    expect(update).toMatchObject({ disabled: true, why: `Updates need RomM. ${fix}` });
+    const [link] = detButtons({ ...base, installed: true, unlinked: true, connected: false, rommFix: fix });
+    expect(link).toMatchObject({ kind: 'link', label: 'Link to a RomM game', disabled: true, why: `Linking needs RomM. ${fix}` });
   });
 
   it('queued or installing: Cancel · queued / Cancel install · n%', () => {
@@ -119,7 +127,7 @@ describe('Details buttons per state (items 276–283, 431, 435, 437)', () => {
 
   it('missing: Locate…, Remove from library, Backup to drive…; unlinked: Link, Remove, no Backup', () => {
     expect(labels({ installed: true, missing: true })).toEqual(['Locate…', 'Remove from library', 'Backup to drive…']);
-    expect(labels({ installed: true, unlinked: true })).toEqual(['Link to server game', 'Remove from library']);
+    expect(labels({ installed: true, unlinked: true })).toEqual(['Link to a RomM game', 'Remove from library']);
     expect(detButtons({ ...base, installed: true, unlinked: true })[1].danger).toBe(true);
   });
 
@@ -162,7 +170,7 @@ describe('the left column (items 272–273, 281–282, 432–433, 436)', () => {
       '<b>Files not found.</b> Locate the files to play.',
     ]);
     expect(text(leftLines({ ...left, installed: true, unlinked: true }))).toEqual([
-      '<b>Not linked to a server game.</b> Link it to your server to play.',
+      '<b>Not linked to a RomM game.</b> Link it to play.',
     ]);
   });
 

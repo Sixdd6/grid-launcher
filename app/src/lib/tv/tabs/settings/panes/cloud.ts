@@ -3,6 +3,7 @@
 // saved as soon as it changes.
 import type { CloudSettings } from '../../../../api';
 import type { Row } from '../../../rows';
+import { NEEDS_ROMM, SETTINGS_CLOUD_TEXT } from '../../../../romm/words';
 
 export function delayText(v: number): string {
   return `${v} s`;
@@ -58,3 +59,8 @@ export function cloudRows(s: CloudSettings | null, error: string | null, save: (
     },
   ];
 }
+
+/** The needs-RomM panel above the rows while RomM isn't connected
+ *  (TVRommStorefront README § Cloud saves and RetroAchievements: needs
+ *  RomM). The rows stay editable: they apply once RomM is connected. */
+export const CLOUD_NEEDS_ROMM = { title: NEEDS_ROMM.cloudSaves, text: SETTINGS_CLOUD_TEXT } as const;

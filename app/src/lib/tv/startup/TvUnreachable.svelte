@@ -19,7 +19,7 @@
   import { openStartupMenu } from '../overlays/overlays.svelte';
   import { closeLayer, openLayer, topLayer } from '../nav.svelte';
   import { useScreen } from '../screen.svelte';
-  import { parentOf } from './connectPage';
+  import { parentOf } from './welcomePage';
   import TvUnreachableDialog from './TvUnreachableDialog.svelte';
   import { RELOCATE_BROWSER_TITLE, relocatedNotice } from './unreachable';
 

@@ -1,13 +1,12 @@
 <script lang="ts">
   // The hint bar (items 127–138; tvmode.js `paintHints`): on the left the
-  // controller in use ("Keyboard" while the keyboard leads), or the offline /
-  // no-server notice; on the right what each button does now, in the glyphs
+  // controller in use ("Keyboard" while the keyboard leads; no offline line,
+  // TVRommStorefront README); on the right what each button does now, in the glyphs
   // of what was pressed last. TV mode ignores the mouse, so a hint is only a
   // label (`data-btn` names its button for the tests). It repaints with every
   // focus change, screen change and state change, since everything it reads
   // is reactive.
   import { untrack } from 'svelte';
-  import { session } from '../stores/session.svelte';
   import Glyph from './glyphs/Glyph.svelte';
   import { buildHints, hintLeft } from './hints';
   import { controllers } from './input/router.svelte';
@@ -62,23 +61,12 @@
     refresh = !untrack(() => refresh);
   });
 
-  let left = $derived(
-    hintLeft({
-      noServer: session.offline && !session.connected,
-      offline: !session.offline && !session.connected,
-      startup: nav.startup,
-      padName: controllers.hintName,
-    }),
-  );
+  let left = $derived(hintLeft({ padName: controllers.hintName }));
 </script>
 
 <footer class="hints" class:refresh-a={refresh} class:refresh-b={!refresh} data-testid="tv-hints">
   <div class="left" data-testid="tv-hints-left">
-    {#if left.kind === 'offline'}
-      <span class="offline-pill">{left.pill}</span><span>{left.text}</span>
-    {:else}
-      <span>{left.text}</span>
-    {/if}
+    <span>{left.text}</span>
   </div>
   {#each keyed as h (h.key)}
     <button class="hint" class:off={h.off} data-btn={h.button} data-testid={`tv-hint-${h.button}`} aria-disabled={h.off ? 'true' : undefined}><Glyph button={h.button} />{h.label}</button>

@@ -60,7 +60,7 @@ export function noMatch(query: string): EmptyState {
 export function emptyState(key: RailKey, query: string): EmptyState {
   if (searching(query)) return noMatch(query);
   if (key === 'updates') return { title: 'Everything is up to date', body: 'Game updates show here.' };
-  return { title: 'No games here yet', body: 'Install games from the Server tab.' };
+  return { title: 'No games here yet', body: 'Install games from RomM, a store or a Backup drive.' };
 }
 
 /**
@@ -71,7 +71,7 @@ export function driveEmptyState(name: string, connected: boolean, query: string)
   if (!connected) return { title: `${name} is not connected`, body: 'Plug it in to see its games.' };
   // The Game backups card's words (library/drive.ts `driveEmptyText`).
   if (searching(query)) return { title: `No games on this drive match “${query.trim()}”`, body: 'Press (Y) to change the search.' };
-  return { title: 'Nothing on this drive yet', body: 'Backup games from Server or Library.' };
+  return { title: 'Nothing on this drive yet', body: 'Backup games from the Library.' };
 }
 
 /**

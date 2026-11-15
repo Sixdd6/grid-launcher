@@ -7,11 +7,14 @@
   // adjust with Left / Right while focused, with the D-pad "Adjust" hint
   // (230). The rows are the pane modules' (`panes/*.ts`); this screen holds
   // what they read and runs what they ask for. Systems is its own pane
-  // (TvSystemsPane); P13 builds Backup drives.
+  // (TvSystemsPane); P13 builds Backup drives. No Connection pane: RomM is
+  // a row on Game stores (TVRommStorefront README § Settings); Cloud saves
+  // and RetroAchievements say where they need RomM, above their rows.
   import { api, type CloudSettings, type LibraryPathCheck, type RaStatus } from '../../../api';
   import { appUpdate, dismiss as dismissUpdate, refreshAppUpdateStatus } from '../../../stores/appUpdate.svelte';
   import { libraryMove } from '../../../stores/libraryMove.svelte';
-  import { connectToServer, disconnect, session } from '../../../stores/session.svelte';
+  import { romm } from '../../../stores/romm.svelte';
+  import { rommLive } from '../../../romm/rail';
   import { pushToast } from '../../../stores/toasts.svelte';
   import {
     commitBackgroundBlur,
@@ -34,9 +37,8 @@
   import { TV_PANES, TV_PANE_LABELS, type TvPane } from '../../../uiMode';
   import { openFolderBrowser } from '../../gameActions';
   import { controllers } from '../../input/router.svelte';
-  import { nav, pushPage, setPane } from '../../nav.svelte';
+  import { nav, setPane } from '../../nav.svelte';
   import { confirmBox, openKeyboard, openList, quitBox } from '../../overlays/overlays.svelte';
-  import { reconnect } from '../../reconnect';
   import type { Row } from '../../rows';
   import { useScreen } from '../../screen.svelte';
   import { settingsState } from './settingsState.svelte';
@@ -46,9 +48,8 @@
   import TvSystemsPane from './TvSystemsPane.svelte';
   import { appearanceRows } from './panes/appearance';
   import type { ChoiceSpec } from './panes/choice';
-  import { cloudRows } from './panes/cloud';
-  import { connectionRows } from './panes/connection';
-  import TvConnect from '../../startup/TvConnect.svelte';
+  import { CLOUD_NEEDS_ROMM, cloudRows } from './panes/cloud';
+  import TvNeedsRomm from '../../romm/TvNeedsRomm.svelte';
   import {
     browserStart,
     CHANGE_LIBRARY_TITLE,
@@ -62,7 +63,7 @@
     moveStartedNotice,
     refusalNotice,
   } from './panes/library';
-  import { RA_SAVED, raCanLogin, raCanSave, raRows } from './panes/ra';
+  import { RA_NEEDS_ROMM, RA_SAVED, raCanLogin, raCanSave, raRows } from './panes/ra';
   import { tvRows } from './panes/tv';
   import TvDrivesPane from './TvDrivesPane.svelte';
   import TvStoresPane from '../../stores/TvStoresPane.svelte';
@@ -354,6 +355,7 @@
         return appearanceRows(
           {
             openOn: uiSettings.openOn,
+            rommConnected: rommLive(romm.status),
             theme: uiSettings.theme,
             cardDisplay: uiSettings.cardDisplay,
             tvCardSize: uiSettings.tvCardSize,
@@ -377,18 +379,6 @@
         );
       case 'cloud-saves':
         return cloudRows(cloud, cloudError, saveCloud);
-      case 'connection':
-        return connectionRows(
-          { connected: session.connected, offline: session.offline, serverUrl: session.serverUrl, username: session.username },
-          {
-            reconnect: () => void reconnect(),
-            connectToServer,
-            disconnect: (w) => void confirmBox({ ...w, danger: true, onOk: () => void disconnect() }),
-            editConnection: () => void pushPage({ title: 'Connect', component: TvConnect, props: { edit: true } }),
-            openServerPage: () => void leaveTv(nav.tab, nav.pane).then(() => api.openServerPage().catch(() => {})),
-            openConfigFolder: () => void leaveTv(nav.tab, nav.pane).then(() => api.openConfigFolder().catch(() => {})),
-          },
-        );
       case 'library':
         return libraryRows({ path: settingsState.libPath, move: libraryMove.status }, changeLibrary);
       case 'retroachievements':
@@ -472,6 +462,11 @@
       <TvStoresPane />
     {:else}
       <div class="pane-h"><h1 data-testid="tv-pane-title">{TV_PANE_LABELS[nav.pane]}</h1></div>
+      {#if nav.pane === 'cloud-saves'}
+        <TvNeedsRomm title={CLOUD_NEEDS_ROMM.title} text={CLOUD_NEEDS_ROMM.text} autofocus={false} />
+      {:else if nav.pane === 'retroachievements'}
+        <TvNeedsRomm title={RA_NEEDS_ROMM.title} text={RA_NEEDS_ROMM.text} autofocus={false} />
+      {/if}
       <TvRows {rows} />
     {/if}
   </div>

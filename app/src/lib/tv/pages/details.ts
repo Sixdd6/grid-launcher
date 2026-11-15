@@ -6,7 +6,8 @@
 import type { CloudRecord, SaveScope, SaveType } from '../../api';
 import type { DetailsTab } from '../../details/tabs';
 import { DETAILS_TAB_LABELS } from '../../details/tabs';
-import { ago, daysSince } from '../tabs/server/discoverRows';
+import { ago, daysSince } from '../tabs/library/romm/discoverRows';
+import { NEEDS_ROMM } from '../../romm/words';
 import { formatDay } from '../../discover/feed';
 import { summaryLine, unlockDate } from '../../details/achievements';
 import type { AchievementsView } from '../../api';
@@ -41,7 +42,10 @@ export type DetState = {
   content: { update: boolean; dlc: boolean };
   /** Shown from a Backup drive: the pack's name. */
   drive: string | null;
+  /** RomM is connected (Link, Update need it). */
   connected: boolean;
+  /** Where to fix RomM when it isn't connected (`romm/rommTv.ts` `rommFix`). */
+  rommFix?: string;
 };
 
 export type DetButtonKind =
@@ -105,7 +109,12 @@ export function detButtons(s: DetState): DetButton[] {
     else out.push({ kind: 'install-drive', label: 'Install from drive', primary: true, icon: 'download' });
     out.push({ kind: 'remove-drive', label: 'Remove from drive…', danger: true });
   } else if (s.unlinked) {
-    out.push({ kind: 'link', label: 'Link to server game', primary: true });
+    out.push({
+      kind: 'link',
+      label: 'Link to a RomM game',
+      primary: true,
+      ...(s.connected ? {} : { disabled: true, why: `${NEEDS_ROMM.linking}. ${s.rommFix ?? ''}`.trim() }),
+    });
     out.push({ kind: 'remove-row', label: 'Remove from library', danger: true });
   } else if (s.missing) {
     out.push({ kind: 'locate', label: 'Locate…', primary: true });
@@ -124,15 +133,16 @@ export function detButtons(s: DetState): DetButton[] {
       ...(s.connected ? {} : { disabled: true, why: installOfflineWhy(s.title) }),
     });
   const ready = s.installed && !s.missing && !s.unlinked;
-  if (ready && s.updateLabel !== null) out.push({ kind: 'update', label: s.updateLabel });
+  if (ready && s.updateLabel !== null)
+    out.push({ kind: 'update', label: s.updateLabel, ...(s.connected ? {} : { disabled: true, why: `${NEEDS_ROMM.updates}. ${s.rommFix ?? ''}`.trim() }) });
   if (ready && s.drive === null && !s.live) {
     if (s.content.update) out.push({ kind: 'install-update', label: 'Install update' });
     if (s.content.dlc) out.push({ kind: 'install-dlc', label: 'Install DLC' });
   }
   if (ready && s.native) out.push({ kind: 'game-settings', label: 'Game settings' });
   if (ready && s.drive === null) out.push({ kind: 'uninstall', label: 'Uninstall', danger: true });
-  if (s.drive === null && !s.unlinked && !s.noId)
-    out.push({ kind: 'backup', label: 'Backup to drive…', ...(s.connected ? {} : { disabled: true, why: BACKUP_NEEDS_SERVER }) });
+  // Backups work without RomM, from the installed copy (decision 8).
+  if (s.drive === null && !s.unlinked && !s.noId) out.push({ kind: 'backup', label: 'Backup to drive…' });
   return out;
 }
 
@@ -157,6 +167,9 @@ export type LeftInput = {
   size: string;
   /** "On Couch kit" when connected drives hold the game, or ''. */
   onDrives: string;
+  /** An installed game from another RomM server, or gone from this one:
+   *  "From another RomM server (romm.old.lan) · not on romm.home.lan". */
+  otherServer?: string;
   drive: string | null;
   /** A drive copy's lines ("A copy of an installed game · v1.1", …). */
   driveCopy: string[];
@@ -186,9 +199,10 @@ export function leftLines(i: LeftInput): Line[] {
   }
   const lines: Line[] = [];
   if (i.missing) lines.push([{ text: 'Files not found.', b: true }, { text: ' Locate the files to play.' }]);
-  else if (i.unlinked) lines.push([{ text: 'Not linked to a server game.', b: true }, { text: ' Link it to your server to play.' }]);
+  else if (i.unlinked) lines.push([{ text: 'Not linked to a RomM game.', b: true }, { text: ' Link it to play.' }]);
   else if (i.noId) lines.push([{ text: 'Not on your server' }]);
   else if (i.installed) {
+    if (i.otherServer) lines.push([{ text: i.otherServer }]);
     if (i.byGogInstaller) lines.push([{ text: 'Installed by running its ' }, { text: 'GOG installer', b: true }]);
     lines.push([{ text: 'Last played ' }, { text: lastPlayedWhen(i.lastPlayedAt, i.nowSeconds), b: true }]);
     if (i.launchTarget !== '') {
