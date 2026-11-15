@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'svelte/server';
 import type { CloudPanelInfo, GameSummary, SaveType } from '../api';
 import { syntheticCloudGame } from './cloud';
@@ -9,6 +9,8 @@ import { syntheticCloudGame } from './cloud';
 vi.mock('../api', () => ({ api: { cloudRecords: vi.fn(), nativeSavePaths: vi.fn() } }));
 
 import SavesTab from './SavesTab.svelte';
+import { NOT_CONNECTED, setRommStatus } from '../stores/romm.svelte';
+import { rommStatus } from '../romm/fixtures.test-util';
 
 const game: GameSummary = { id: 1, name: 'Metroid' } as GameSummary;
 const supported: CloudPanelInfo = { supported: true, block_reason: '', scope: 'per_game' };
@@ -31,6 +33,18 @@ function html(kind: SaveType, savePanelInfo: CloudPanelInfo | null, statePanelIn
 }
 
 describe('SavesTab', () => {
+  beforeEach(() => setRommStatus(rommStatus()));
+
+  it('says cloud saves need RomM while RomM is not connected (RommStorefront README, Details)', () => {
+    setRommStatus({ ...NOT_CONNECTED });
+    const body = html('save', supported, blocked);
+    expect(body).toContain('details-saves-needs-romm');
+    expect(body).toContain('Cloud saves need RomM');
+    expect(body).toContain("RomM isn't connected. This game's saves stay on this computer and still work");
+    expect(body).toContain('Open Game stores');
+    expect(body).not.toContain('cloud-panel');
+  });
+
   it('shows the saves list straight away, with no toggle to open it', () => {
     const body = html('save', supported, blocked);
     expect(body).toContain('cloud-panel');

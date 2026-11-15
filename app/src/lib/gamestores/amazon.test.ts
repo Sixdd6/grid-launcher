@@ -130,7 +130,7 @@ describe('Amazon Games Details', () => {
     const expired = storeLines({ game: amazonGame('Lowsun'), status: amazonStatus({ connection: 'expired' }), job: null, playing: false, confirm: null }, opts);
     expect(expired[0]).toMatchObject({ text: 'Your Amazon Games login expired.', link: { label: 'Sign in again' } });
     const off = storeLines({ game: amazonGame('Lowsun'), status: amazonStatus({ connection: 'not_connected' }), job: null, playing: false, confirm: null }, opts);
-    expect(off[0].text).toBe('Connect Amazon Games in Settings › Stores to install.');
+    expect(off[0].text).toBe('Connect Amazon Games in Settings › Game stores to install.');
   });
   it('has Overview and Media only, and no version chip, Version fact or DLC', () => {
     const fog = amazonGame('Fogline', { update_version: FAKE_AMAZON_UPDATE, dlc: [{ id: 'x', title: 'x', download_bytes: 1, installed: false }] });

@@ -1,7 +1,12 @@
 <script lang="ts">
   // Settings › RetroAchievements (design §10: "current form"), moved out of
-  // Emulators.svelte (task-12-brief.md).
+  // Emulators.svelte (task-12-brief.md). Without RomM a needs-RomM panel
+  // sits under the heading; the form stays editable, since the token is
+  // written into the emulators and needs no RomM (RommStorefront README).
   import { type RaStatus } from '../api';
+  import RommNeedsPanel from '../romm/RommNeedsPanel.svelte';
+  import { NEEDS_ROMM, SETTINGS_RA_TEXT } from '../romm/words';
+  import { romm } from '../stores/romm.svelte';
   import { canLogin, canSubmit, statusLabel } from '../emulators/retroachievements';
   import { clearRaCredentials, fetchRaStatus, raLogin, saveRaToken } from './raActions';
 
@@ -97,7 +102,7 @@
 
   // Panes never unmount (Settings.svelte switches with `hidden`), so a
   // typed-but-unsubmitted password would otherwise sit in state and the DOM
-  // indefinitely. Mirrors ConnectionPage.svelte's `closeEdit` on `!active`.
+  // indefinitely.
   $effect(() => {
     if (!active) {
       raPassword = '';
@@ -106,6 +111,9 @@
   });
 </script>
 
+{#if romm.status.connection !== 'connected'}
+  <RommNeedsPanel title={NEEDS_ROMM.achievementProgress} text={SETTINGS_RA_TEXT} testId="ra-needs-romm" />
+{/if}
 <p class="g-note" data-testid="ra-status">{statusLabel(raStatus)}</p>
 <form
   class="g-form"

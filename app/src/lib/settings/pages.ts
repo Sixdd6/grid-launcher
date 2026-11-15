@@ -1,15 +1,17 @@
-// The Settings rail (design §10): nine pages (Stores from GameStores), their labels, and the rail
-// entries Settings.svelte hands to RailPane. Pure.
+// The Settings rail (design §10): eight pages (Game stores from GameStores
+// and RommStorefront; Connection is gone, its job is the RomM card's), their
+// labels, and the rail entries Settings.svelte hands to RailPane. Pure.
 
-/** Alphabetical by label (ProposedApp README, "Settings rail"). */
+/** Alphabetical by label (RommStorefront README, "Settings": Appearance,
+ *  Backup drives, Cloud saves, Game stores, Library, RetroAchievements,
+ *  Systems, Updates). The key `stores` is kept from the Stores page. */
 export const SETTINGS_PAGES = [
   'appearance',
   'backup-drives',
   'cloud-saves',
-  'connection',
+  'stores',
   'library',
   'retroachievements',
-  'stores',
   'systems',
   'updates',
 ] as const;
@@ -20,11 +22,10 @@ export type SettingsPage = (typeof SETTINGS_PAGES)[number];
 export const DEFAULT_SETTINGS_PAGE: SettingsPage = SETTINGS_PAGES[0];
 
 const LABELS: Record<SettingsPage, string> = {
-  connection: 'Connection',
   library: 'Library',
   'cloud-saves': 'Cloud saves',
   retroachievements: 'RetroAchievements',
-  stores: 'Stores',
+  stores: 'Game stores',
   systems: 'Systems',
   updates: 'Updates',
   appearance: 'Appearance',

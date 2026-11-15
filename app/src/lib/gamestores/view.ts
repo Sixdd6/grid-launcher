@@ -200,8 +200,8 @@ export function storePanel(status: StoreStatus, part: StorePart, games: readonly
     return panel({
       tone: 'err',
       title: 'Steam rejected your Web API key',
-      body: 'The key may have been revoked. Make a new key, then paste it in Settings › Stores.',
-      actions: [{ label: 'Open Settings › Stores', act: 'open_settings', primary: true }],
+      body: 'The key may have been revoked. Make a new key, then paste it in Settings › Game stores.',
+      actions: [{ label: 'Open Settings › Game stores', act: 'open_settings', primary: true }],
       testId: 'store-state-badkey',
     });
   }
