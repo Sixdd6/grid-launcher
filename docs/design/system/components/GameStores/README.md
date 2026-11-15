@@ -1,5 +1,7 @@
 A proposal: GOG (with GOG offline installers), Epic Games, Amazon Games and Steam in GRID's Library, beside the RomM games. The card is built on Game backups (what main has) and opens on Library › GOG › Installed, with a GOG install running, one queued and a Steam install that Steam runs. Everything not listed here matches Game backups.
 
+**Superseded in part by RommStorefront (2026-11-15, proposed).** The store groups and cards now sort with RomM among them (Amazon, Epic, GOG, RomM, Steam); Settings › Stores is renamed **Game stores**; the Library's PLATFORMS section, the Server view and the top-bar chip are gone. Store behaviour itself is unchanged. See `RommStorefront/README.md`.
+
 **Status: proposed, not built.** The decisions it follows are in `docs/external-stores-plan.md` (2026-11-13). TV mode's version is the **TVStores** card.
 
 ## Try it

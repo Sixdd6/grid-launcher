@@ -763,3 +763,47 @@ st = sub(st, 'bkBoot();', 'stBoot();')
 d = os.path.join(OUT, 'GameStores'); os.makedirs(d, exist_ok=True)
 open(os.path.join(d, 'preview.html'), 'w').write(st)
 print('GameStores written', len(st))
+
+# RomM as an optional storefront: GameStores (what main has) with RomM moved
+# into the Library rail and Settings › Game stores, the Server view, chip and
+# Connect screen gone, the welcome, and Settings › Systems working without
+# RomM. Its own card, so Game stores keeps showing what is on main.
+RM_JS = open(os.path.join(HERE, 'romm.js')).read()
+RM_CSS = open(os.path.join(HERE, 'romm.css')).read()
+rm = st
+rm = sub(rm, 'subtitle="Game stores: GOG (and its offline installers), Epic Games, Amazon Games and Steam in the Library, with Settings › Stores"', 'subtitle="RomM as an optional storefront: a RomM group in the Library, a RomM card in Settings › Game stores, the welcome, and Systems without RomM"')
+rm = sub(rm, '<title>Game stores</title>', '<title>RomM storefront</title>')
+# Boot first: romm.js itself calls stBoot().
+rm = sub(rm, 'stBoot();\n})();', 'rmBoot();\n})();')
+rm = sub(rm, '</style></head>', RM_CSS + '\n</style></head>')
+rm = sub(rm, '/* ---- details ---- */', RM_JS + '\n/* ---- details ---- */')
+# Three views: the Server view is gone (its Discover and platform screens are Library rows).
+rm = sub(rm, "var VIEWS = ['library','server','downloads','settings'];", "var VIEWS = ['library','downloads','settings'];")
+rm = sub(rm, "/^[1-4]$/.test(e.key)", "/^[1-3]$/.test(e.key)")
+# Settings: no Connection pane; Stores becomes Game stores, still alphabetical.
+rm = sub(rm, "var panes = [['appearance','Appearance'],['backup','Backup drives'],['cloud','Cloud saves'],['connection','Connection'],['library','Library'],['ra','RetroAchievements'],['stores','Stores'],['systems','Systems'],['updates','Updates']];",
+         "var panes = [['appearance','Appearance'],['backup','Backup drives'],['cloud','Cloud saves'],['stores','Game stores'],['library','Library'],['ra','RetroAchievements'],['systems','Systems'],['updates','Updates']];")
+# Library: no PLATFORMS section; RomM › Installed lists every installed RomM game.
+rm = sub(rm, """{key:'updates',label:'Updates',count:inst.filter(function(g){return g.update;}).length}]
+    .concat(plats.map(function(p,i){ return { key: p, label: PLAT[p], count: inst.filter(function(g){return g.p===p;}).length, heading: i===0?'PLATFORMS':undefined }; }));""",
+         """{key:'updates',label:'Updates',count:inst.filter(function(g){return g.update;}).length}];""")
+rm = sub(rm, "return f==='all' ? true : f==='recent'", "return f==='all' || f==='romm:installed' ? true : f==='recent'")
+rm = sub(rm, "$('lib-title').textContent = rows.filter(function(r){return r.sel;})[0].label;", "$('lib-title').textContent = (rows.filter(function(r){return r.sel;})[0] || { label: '' }).label;")
+rm = sub(rm, ": 'Search ' + PLAT[f] + '…'; },", ": f === 'romm:installed' ? 'Search installed RomM games…' : PLAT[f] ? 'Search ' + PLAT[f] + '…' : 'Search by title'; },")
+# Top bar: no server chip, status dot or server menu (the empty #menu stays for old handlers).
+rm = sub(rm, """      <span class="g-status-dot online" aria-hidden="true"></span>
+      <button class="g-session-chip" id="chip" aria-expanded="false">player@romm.home.lan</button>
+      <div class="menu-wrap" id="menu" hidden>
+        <div class="g-menu" role="menu"><button role="menuitem">Disconnect</button><button role="menuitem">Open RomM in browser</button><span class="g-menu-host">romm.home.lan</span></div>
+      </div>""", """      <div class="menu-wrap" id="menu" hidden></div>""")
+rm = sub(rm, '  <div class="g-scrim" id="libscrim" hidden>', '  <div class="g-scrim" id="rmscrim" hidden><div class="g-dialog bkdlg stdlg rmdlg" role="dialog" aria-modal="true" id="rmdlg"></div></div>\n  <div class="g-scrim" id="libscrim" hidden>')
+# Words: no "server" where RomM is meant.
+rm = sub(rm, 'Nothing on this drive yet. Backup games from Server or Library.', 'Nothing on this drive yet. Backup games from the Library.')
+rm = sub(rm, 'Copy games from your server to a USB drive', 'Copy games to a USB drive')
+rm = sub(rm, '> The server’s firmware for the systems you backup', '> Firmware from RomM for the systems you backup')
+rm = sub(rm, '<p class="lede">New on your server.</p>', '<p class="lede">New on RomM.</p>')
+assert 'Settings › Stores' in rm
+rm = rm.replace('Settings › Stores', 'Settings › Game stores')
+d = os.path.join(OUT, 'RommStorefront'); os.makedirs(d, exist_ok=True)
+open(os.path.join(d, 'preview.html'), 'w').write(rm)
+print('RommStorefront written', len(rm))
