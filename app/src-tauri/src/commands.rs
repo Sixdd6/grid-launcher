@@ -5,12 +5,14 @@ pub mod library_move;
 pub mod library_path;
 pub mod logging;
 pub mod relink;
+pub mod romm;
 pub mod setup;
 pub mod specials;
 pub mod store_backups;
 pub mod stores;
 pub mod tv;
 pub mod updates;
+pub mod welcome;
 
 use crate::config_write::modify_config;
 use crate::images::ImageService;
@@ -143,6 +145,14 @@ pub(crate) fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+// --- Legacy session commands -------------------------------------------
+//
+// Wrappers over the RomM state in `commands/romm.rs`, kept so the old
+// Connect screen and server chip keep working while the RomM storefront
+// steps replace them (romm-storefront-plan 0.6). Step 9 deletes them.
+
+/// Legacy Connect. As `romm_connect`, and the Connect screen counts as the
+/// welcome, so `setup.welcomed` is set too.
 #[tauri::command]
 pub async fn connect(
     state: State<'_, AppState>,
@@ -159,32 +169,36 @@ pub async fn connect(
         .connect(server_url, username, secret, use_token)
         .await
         .map_err(err)?;
-    crate::relink_service::spawn_connected_jobs(&state, app);
+    if let Err(e) = modify_config(&Config::default_path(), |c| {
+        c.setup.welcomed = true;
+        Ok(())
+    }) {
+        tracing::warn!("could not record the finished welcome: {e}");
+    }
+    romm::after_probe(&state, app);
     Ok(result)
 }
 
+/// Legacy restore. Not connected and welcomed maps to `offline`, so the old
+/// shell opens without a server.
 #[tauri::command]
 pub async fn restore_session(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<RestoreOutcome, String> {
     let outcome = state.session.restore().await.map_err(err)?;
-    match &outcome {
-        RestoreOutcome::Connected { .. } => {
-            crate::relink_service::spawn_connected_jobs(&state, app);
-        }
-        // "Use without a server": no probe ran and no client exists, so no
-        // server job starts. Drives, the library and play keep working.
-        RestoreOutcome::Offline { .. } => tracing::info!("starting without a server"),
-        _ => {}
+    if let RestoreOutcome::Offline { .. } = &outcome {
+        // No probe ran and no client exists, so no server job starts.
+        // Drives, the library and play keep working.
+        tracing::info!("starting with RomM not connected");
     }
+    romm::after_probe(&state, app);
     Ok(outcome)
 }
 
-/// "Use without a server": remembers the choice (`Config.offline`), drops
-/// any live client and clears what described the server. The keyring
-/// credential stays, so Connect or Retry can use it later; a successful
-/// connect clears the choice.
+/// Legacy "Use without a server": RomM stops being probed at startup and
+/// the welcome counts as done; any live client is dropped. The keyring
+/// credential stays, so Connect or Retry can use it later.
 #[tauri::command]
 pub async fn use_without_server(
     state: State<'_, AppState>,
@@ -199,83 +213,29 @@ pub async fn use_without_server(
     Ok(())
 }
 
-/// Event emitted the first time a live session gets a 401 (Q6). Payload:
-/// `grid_core::session::SessionUnauthorized` — server URL, username and
-/// auth kind, never the credential. The frontend shows the Connect form,
-/// pre-filled.
+/// Legacy event, emitted the first time a live session gets a 401 (Q6).
+/// Payload: `grid_core::session::SessionUnauthorized` — server URL,
+/// username and auth kind, never the credential. The old frontend shows the
+/// Connect form, pre-filled. `romm-changed` carries the same change for the
+/// RomM storefront.
 pub const SESSION_UNAUTHORIZED_EVENT: &str = "session-unauthorized";
 
-/// The chip's Retry. Answers with the same typed outcome as
-/// `restore_session` (`connected`, `unauthorized`, `unreachable`), so a
-/// rejected credential reaches the Connect form instead of an endless
-/// "Not connected". A missing stored session is still an `Err`.
+/// Legacy chip Retry: `romm_reconnect`, answering with the old typed
+/// outcome. A missing stored session is still an `Err`.
 #[tauri::command]
 pub async fn retry_connect(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<RestoreOutcome, String> {
     let outcome = state.session.retry().await.map_err(err)?;
-    if matches!(outcome, RestoreOutcome::Connected { .. }) {
-        crate::relink_service::spawn_connected_jobs(&state, app);
-    }
+    romm::after_probe(&state, app);
     Ok(outcome)
 }
 
+/// Legacy Disconnect: `romm_disconnect`.
 #[tauri::command]
 pub fn disconnect(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
-    state.session.disconnect().map_err(err)?;
-    // The update set describes a server that is no longer connected.
-    state.updates.clear(&app);
-    Ok(())
-}
-
-/// The `(label, id)` pairs `install.set_platform_ids` records. Keyed by
-/// `Platform::label()`, not `name`: `firmware_service.rs`'s `platform_id_for`
-/// looks the id up with `record.platform`, which is `RomDetail.platform_name`
-/// (the rom's own display name) — a raw-`name` key here silently missed
-/// every lookup for a custom-named platform (round 9 review finding 2).
-fn platform_id_entries(platforms: &[Platform]) -> BTreeMap<String, i64> {
-    platforms
-        .iter()
-        .map(|p| (p.label().to_string(), p.id))
-        .collect()
-}
-
-/// The `label -> slug` map fed to `grid_core::launch::set_platform_slugs`
-/// (the process-wide registry `installed_core_resolver` reads via
-/// `slug_for_platform`) and used as the base of
-/// [`platform_slugs_for_install`]. Every real reader of that registry —
-/// `resolve_launch`'s `game.platform`, `GameFirmwareContext.platform`,
-/// `InstallService`'s PS3/Xenia helpers, the cloud-ops wrapper name — reads
-/// a rom's own display name (`RomDetail.platform_name`/`InstalledGame.
-/// platform`), so the slug has to be keyed the same way, not by the server's
-/// raw platform `name` (round 9 re-review HIGH item).
-fn platform_slugs_by_label(platforms: &[Platform]) -> BTreeMap<String, String> {
-    platforms
-        .iter()
-        .map(|p| (p.label().to_string(), p.slug.clone()))
-        .collect()
-}
-
-/// [`platform_slugs_by_label`], plus a `name`-keyed fallback entry for any
-/// platform whose custom name makes its label differ from its raw `name`.
-/// Fed to `install.set_platform_slugs`, which has two kinds of reader:
-/// `set_default_emulator` / `set_retroarch_core` below, which now key by the
-/// label like everything else above — and the autoconfig backfill's
-/// `SyncContext.platforms` (`install.known_platforms()` /
-/// `autoconfig_entry::assignable_platforms`, both built from the raw server
-/// `name`, deliberately out of scope for this round), which still iterates
-/// by name. The fallback keeps that second caller resolving a slug too,
-/// without requiring it to change.
-fn platform_slugs_for_install(platforms: &[Platform]) -> BTreeMap<String, String> {
-    let mut map = platform_slugs_by_label(platforms);
-    for p in platforms {
-        let label = p.label();
-        if p.name != label {
-            map.entry(p.name.clone()).or_insert_with(|| p.slug.clone());
-        }
-    }
-    map
+    romm::disconnect_now(&state, &app)
 }
 
 /// Server platform `name` → display label, only for the platforms whose label
@@ -304,29 +264,12 @@ pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>,
         // platform). The list stays the raw `name`s the defaults key by.
         let assignable = autoconfig_entry::assignable_server_platforms(&platforms);
         install.set_known_platforms(assignable.clone());
-        // The firmware triggers need the platform *id*, not just the name,
-        // and grid-core holds no session to fetch it with. Recorded from the
-        // FULL platform list (not the assignable subset): a platform the
-        // autoconfig defaults skip can still have server firmware.
-        install.set_platform_ids(platform_id_entries(&platforms));
-        // Slug-first RetroArch core resolution (D-RC-2) needs the server's
-        // own slug for each platform; like the ids above, this is recorded
-        // from the FULL list, not the assignable subset. `install`'s copy
-        // keeps a name-keyed fallback (see `platform_slugs_for_install`) for
-        // the autoconfig backfill call below, which still iterates names.
-        install.set_platform_slugs(platform_slugs_for_install(&platforms));
+        // The label → id and label → slug maps (firmware triggers, launch
+        // core resolution): `platform_registry` owns them.
+        crate::platform_registry::record(&state, Some(&platforms));
         // The autoconfig backfill matches by raw `name` but must STORE each
         // default under the label, like every reader of `default_emulators`.
         install.set_platform_labels(platform_labels_by_name(&platforms));
-        // The label-keyed map again, into grid-core's process-wide registry:
-        // the launch resolver, cloud ops, firmware routing and the install
-        // service's PS3/Xenia helpers all read a rom's own display name
-        // (`launch::selection::installed_core_resolver`), never the server's
-        // raw platform `name` — so no name fallback belongs here. Without
-        // this those paths would fall back to fuzzy name matching and
-        // disagree with Settings › Systems about which platforms RetroArch
-        // supports.
-        grid_core::launch::set_platform_slugs(platform_slugs_by_label(&platforms));
 
         // A fresh catalog/server install that finished before the first
         // platform fetch could not assign its platform defaults; the
@@ -3329,22 +3272,6 @@ mod merge_tests {
         assert!(!is_manual_add(&config, "  dolphin  "));
     }
 
-    #[test]
-    fn platform_id_entries_keys_by_the_display_label_not_the_raw_name() {
-        let platforms = vec![Platform {
-            id: 3,
-            name: "Windows".to_string(),
-            slug: "win".to_string(),
-            rom_count: 1,
-            custom_name: Some("Windows 9x".to_string()),
-            display_name: "Windows 9x".to_string(),
-        }];
-        assert_eq!(
-            platform_id_entries(&platforms),
-            BTreeMap::from([("Windows 9x".to_string(), 3)])
-        );
-    }
-
     fn windows_9x_platform() -> Platform {
         Platform {
             id: 3,
@@ -3354,30 +3281,6 @@ mod merge_tests {
             custom_name: Some("Windows 9x".to_string()),
             display_name: "Windows 9x".to_string(),
         }
-    }
-
-    #[test]
-    fn platform_slugs_by_label_keys_by_the_display_label_not_the_raw_name() {
-        let platforms = vec![windows_9x_platform()];
-        assert_eq!(
-            platform_slugs_by_label(&platforms),
-            BTreeMap::from([("Windows 9x".to_string(), "win".to_string())])
-        );
-    }
-
-    #[test]
-    fn platform_slugs_for_install_keeps_a_name_fallback_when_it_differs_from_the_label() {
-        let platforms = vec![windows_9x_platform()];
-        // Both the label (what `set_default_emulator`/`set_retroarch_core`
-        // now pass) and the raw name (what the autoconfig backfill's
-        // `SyncContext.platforms` still iterates) resolve to the same slug.
-        assert_eq!(
-            platform_slugs_for_install(&platforms),
-            BTreeMap::from([
-                ("Windows".to_string(), "win".to_string()),
-                ("Windows 9x".to_string(), "win".to_string()),
-            ])
-        );
     }
 
     #[test]
@@ -3393,25 +3296,6 @@ mod merge_tests {
         assert_eq!(
             platform_labels_by_name(&[windows_9x_platform(), snes]),
             BTreeMap::from([("Windows".to_string(), "Windows 9x".to_string())])
-        );
-    }
-
-    #[test]
-    fn platform_slugs_for_install_has_one_entry_when_the_label_matches_the_name() {
-        let platforms = vec![Platform {
-            id: 1,
-            name: "Super Nintendo Entertainment System".to_string(),
-            slug: "snes".to_string(),
-            rom_count: 3,
-            custom_name: None,
-            display_name: "Super Nintendo Entertainment System".to_string(),
-        }];
-        assert_eq!(
-            platform_slugs_for_install(&platforms),
-            BTreeMap::from([(
-                "Super Nintendo Entertainment System".to_string(),
-                "snes".to_string()
-            )])
         );
     }
 
@@ -3448,7 +3332,8 @@ mod merge_tests {
 
         // What the frontend now sends, and what `set_retroarch_core` does
         // with it: resolve the slug from `install`'s map by that same key.
-        let slugs = platform_slugs_for_install(std::slice::from_ref(&platform));
+        let slugs =
+            crate::platform_registry::platform_slugs_for_install(std::slice::from_ref(&platform));
         let slug = slugs.get(&label).cloned().unwrap_or_default();
         assert_eq!(slug, "snes", "the label must resolve the real slug");
 
