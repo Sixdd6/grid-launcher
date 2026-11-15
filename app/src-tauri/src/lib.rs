@@ -11,6 +11,7 @@ mod images;
 mod library_move_service;
 mod logging;
 mod media_server;
+mod platform_registry;
 mod play_session_service;
 mod python_import;
 mod relink_service;
@@ -546,6 +547,22 @@ pub fn run() {
                 tracing::info!("server rejected the stored credential (401)");
                 let _ = handle.emit(commands::SESSION_UNAUTHORIZED_EVENT, info);
             }));
+            // RomM as a storefront: every status change (connect,
+            // disconnect, reconnect, restore, a 401, a probe starting or
+            // ending) reaches the frontend as `romm-changed`. The payload
+            // has no secret.
+            let handle = app.handle().clone();
+            state.session.set_change_hook(Arc::new(move || {
+                let state = handle.state::<AppState>();
+                let status = commands::romm::status_of(&state);
+                let _ = handle.emit(commands::romm::ROMM_CHANGED_EVENT, status);
+            }));
+            // Config only, never the keyring: the server URL for image
+            // filtering, the account the card shows, and "connecting" while
+            // a stored connection waits for `romm_restore`.
+            if let Err(e) = state.session.prime() {
+                tracing::warn!("RomM status: config not read: {e}");
+            }
             // The media viewer's video source. Started here rather than at
             // `AppState` construction because it serves out of the image
             // cache directory and must be handed exactly the directory the
@@ -851,6 +868,13 @@ pub fn run() {
             commands::use_without_server,
             commands::retry_connect,
             commands::disconnect,
+            commands::romm::romm_status,
+            commands::romm::romm_restore,
+            commands::romm::romm_connect,
+            commands::romm::romm_reconnect,
+            commands::romm::romm_disconnect,
+            commands::welcome::welcome_status,
+            commands::welcome::finish_welcome,
             commands::list_platforms,
             commands::list_games,
             commands::discover::discover_feed,

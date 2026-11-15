@@ -625,6 +625,18 @@ pub fn plan(python_json: &str) -> Result<(Config, Vec<InstalledGame>, usize), Im
             theme: normalize_theme(raw.theme.as_str()),
             ..Default::default()
         },
+        // RomM storefront (plan 0.4, decision 12): an imported user lands on
+        // the welcome with the folder, server and username filled in. No
+        // credential was imported, so nothing probes at startup.
+        romm_store_migrated: true,
+        setup: crate::config::SetupState {
+            welcomed: false,
+            ..Default::default()
+        },
+        stores: crate::config::StoresConfig {
+            romm: crate::config::RommConfig { connected: false },
+            ..Default::default()
+        },
         ..Config::default()
     };
 
@@ -835,6 +847,24 @@ mod tests {
         // `theme` has no top-level home in `Config`; it is `ui.theme`.
         assert_eq!(config.ui.theme, "dark");
         assert_eq!(config.schema_version, Config::default().schema_version);
+    }
+
+    /// Plan 0.4: an imported user sees the welcome, filled in, and nothing
+    /// probes RomM at startup (no credential was imported). A save and a
+    /// load keep that: the migration does not run again.
+    #[test]
+    fn an_import_lands_on_the_welcome_with_romm_not_connected() {
+        let (config, _, _) = planned();
+        assert!(config.romm_store_migrated);
+        assert!(!config.setup.welcomed);
+        assert!(!config.stores.romm.connected);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        config.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert!(!loaded.setup.welcomed);
+        assert!(!loaded.stores.romm.connected);
+        assert_eq!(loaded.server_url, "https://romm.example.test");
     }
 
     #[test]

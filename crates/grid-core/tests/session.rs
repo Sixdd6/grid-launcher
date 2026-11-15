@@ -404,11 +404,12 @@ fn stored_session(
     cred: Credential,
 ) -> (SessionManager, Arc<MemoryStore>) {
     let config_path = dir.path().join("config.toml");
-    let cfg = grid_core::config::Config {
+    let mut cfg = grid_core::config::Config {
         server_url: server_url.into(),
         username: "six".into(),
         ..Default::default()
     };
+    cfg.stores.romm.connected = true;
     cfg.save(&config_path).unwrap();
     let store = Arc::new(MemoryStore::default());
     SecretStore::save(&*store, &cred).unwrap();
@@ -657,11 +658,52 @@ async fn a_rejected_connect_does_not_fire_the_hook() {
     assert!(calls.lock().unwrap().is_empty());
 }
 
-/// Offline mode (`Config.offline`): restore answers `Offline` without a
-/// probe. The mock matches every request and expects zero calls, so any
-/// request fails the test.
+// --- RomM as a storefront (romm-storefront-plan 0.2, 0.4) ------------------
+
+use grid_core::config::Config;
+use grid_core::session::{RommConnection, RommStatus};
+
+/// A `SecretStore` that fails the test if anything reads the keyring: a
+/// not-connected start must never cause a secret-service unlock prompt.
+#[derive(Default)]
+struct NoReadStore;
+
+impl SecretStore for NoReadStore {
+    fn save(&self, _cred: &Credential) -> Result<(), SecretError> {
+        panic!("the keyring was written")
+    }
+    fn load(&self) -> Result<Option<Credential>, SecretError> {
+        panic!("the keyring was read")
+    }
+    fn clear(&self) -> Result<(), SecretError> {
+        panic!("the keyring was cleared")
+    }
+}
+
+/// Counts change-hook calls.
+fn counting_hook(mgr: &SessionManager) -> Arc<Mutex<u32>> {
+    let calls = Arc::new(Mutex::new(0));
+    let sink = calls.clone();
+    mgr.set_change_hook(Arc::new(move || *sink.lock().unwrap() += 1));
+    calls
+}
+
+fn status(mgr: &SessionManager) -> RommStatus {
+    mgr.status(0)
+}
+
+fn set_connected(dir: &tempfile::TempDir, connected: bool) {
+    let path = dir.path().join("config.toml");
+    let mut cfg = Config::load(&path).unwrap();
+    cfg.stores.romm.connected = connected;
+    cfg.save(&path).unwrap();
+}
+
+/// `stores.romm.connected = false`: restore makes no request, reads no
+/// keyring, and RomM is Not connected with the stored server and user.
+/// The mock matches every request and expects zero calls.
 #[tokio::test]
-async fn restore_while_offline_makes_no_request() {
+async fn restore_while_not_connected_makes_no_request_and_reads_no_keyring() {
     let server = MockServer::start().await;
     Mock::given(wiremock::matchers::any())
         .respond_with(ResponseTemplate::new(200))
@@ -669,17 +711,24 @@ async fn restore_while_offline_makes_no_request() {
         .mount(&server)
         .await;
     let dir = tempfile::tempdir().unwrap();
-    let (mgr, store) = stored_session(&dir, &server.uri(), token());
-    mgr.use_offline().unwrap();
-    // The keyring is left alone.
-    assert!(SecretStore::load(&*store).unwrap().is_some());
-
-    let fresh = SessionManager::new(
-        dir.path().join("config.toml"),
+    let config_path = dir.path().join("config.toml");
+    let mut cfg = Config {
+        server_url: server.uri(),
+        username: "six".into(),
+        library_path: "/lib".into(),
+        ..Default::default()
+    };
+    cfg.setup.welcomed = true;
+    cfg.save(&config_path).unwrap();
+    let mgr = SessionManager::new(
+        config_path,
         dir.path().join("covers"),
-        store.clone(),
+        Arc::new(NoReadStore),
     );
-    let outcome = fresh.restore().await.unwrap();
+    mgr.prime().unwrap();
+    assert!(!status(&mgr).busy, "nothing to restore");
+    let outcome = mgr.restore().await.unwrap();
+    // The legacy shell opens its no-server mode.
     assert_eq!(
         serde_json::to_value(&outcome).unwrap(),
         serde_json::json!({
@@ -688,62 +737,260 @@ async fn restore_while_offline_makes_no_request() {
             "username": "six",
         })
     );
-    assert!(fresh.client().is_none());
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::NotConnected);
+    assert_eq!(s.server_url, server.uri());
+    assert_eq!(s.username, "six");
+    assert!(!s.busy);
+    assert!(!s.in_rail);
+    assert!(mgr.status(3).in_rail, "installed RomM games keep the group");
+    assert!(mgr.client().is_none());
     // Image filtering still knows the configured server.
-    assert_eq!(fresh.server_url(), server.uri());
+    assert_eq!(mgr.server_url(), server.uri());
     server.verify().await;
 }
 
+/// A migrated offline config ("Use without a server" before RomM became a
+/// storefront) starts the same way: no probe, no keyring read.
 #[tokio::test]
-async fn restore_while_offline_without_a_server_is_offline() {
+async fn a_migrated_offline_config_restores_without_the_keyring() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config.toml");
-    let cfg = grid_core::config::Config {
-        offline: true,
+    std::fs::write(
+        &config_path,
+        "schema_version = 1\nserver_url = \"https://romm.example\"\nusername = \"six\"\nlibrary_path = \"/lib\"\noffline = true\n",
+    )
+    .unwrap();
+    let mgr = SessionManager::new(
+        config_path,
+        dir.path().join("covers"),
+        Arc::new(NoReadStore),
+    );
+    mgr.restore_romm().await.unwrap();
+    assert_eq!(status(&mgr).connection, RommConnection::NotConnected);
+    assert_eq!(status(&mgr).server_url, "https://romm.example");
+    assert!(matches!(
+        mgr.restore().await.unwrap(),
+        RestoreOutcome::Offline { .. }
+    ));
+}
+
+/// A migrated connected config restores with its stored credential, so a
+/// connected user never signs in again.
+#[tokio::test]
+async fn a_migrated_connected_config_restores_with_the_stored_credential() {
+    let server = MockServer::start().await;
+    mount_users_me(&server).await;
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "schema_version = 1\nserver_url = \"{}\"\nusername = \"six\"\nlibrary_path = \"/lib\"\n",
+            server.uri()
+        ),
+    )
+    .unwrap();
+    let store = Arc::new(MemoryStore::default());
+    SecretStore::save(&*store, &token()).unwrap();
+    let mgr = SessionManager::new(config_path, dir.path().join("covers"), store);
+    mgr.prime().unwrap();
+    assert!(status(&mgr).busy, "a stored connection reads as connecting");
+    mgr.restore_romm().await.unwrap();
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::Connected);
+    assert_eq!(s.auth_kind, Some(AuthKind::Token));
+    assert!(!s.busy);
+    assert!(s.in_rail);
+    assert!(mgr.client().is_some());
+}
+
+/// Connected with nothing in the keyring: Not connected, and the legacy
+/// outcome is the Connect form (prefilled), as before.
+#[tokio::test]
+async fn restore_connected_without_a_credential_is_not_connected() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    let mut cfg = Config {
+        server_url: "https://romm.example".into(),
+        username: "six".into(),
         ..Default::default()
     };
+    cfg.stores.romm.connected = true;
+    cfg.setup.welcomed = true;
     cfg.save(&config_path).unwrap();
     let mgr = SessionManager::new(
         config_path,
         dir.path().join("covers"),
         Arc::new(MemoryStore::default()),
     );
-    match mgr.restore().await.unwrap() {
-        RestoreOutcome::Offline {
-            server_url,
-            username,
-        } => {
-            assert!(server_url.is_empty());
-            assert!(username.is_empty());
-        }
-        other => panic!("expected Offline, got {other:?}"),
-    }
-    assert!(mgr.server_url().is_empty());
+    assert!(matches!(
+        mgr.restore().await.unwrap(),
+        RestoreOutcome::NoSession { .. }
+    ));
+    assert_eq!(status(&mgr).connection, RommConnection::NotConnected);
 }
 
 #[tokio::test]
-async fn use_offline_drops_the_live_client() {
+async fn the_status_follows_each_restore_outcome_and_fires_the_hook() {
+    // Connected.
     let server = MockServer::start().await;
     mount_users_me(&server).await;
     let dir = tempfile::tempdir().unwrap();
     let (mgr, _store) = stored_session(&dir, &server.uri(), token());
-    assert!(matches!(
-        mgr.restore().await.unwrap(),
-        RestoreOutcome::Connected { .. }
-    ));
-    mgr.use_offline().unwrap();
-    assert!(mgr.client().is_none());
-    let cfg = grid_core::config::Config::load(&dir.path().join("config.toml")).unwrap();
-    assert!(cfg.offline);
+    let calls = counting_hook(&mgr);
+    mgr.restore_romm().await.unwrap();
+    assert_eq!(status(&mgr).connection, RommConnection::Connected);
+    assert!(*calls.lock().unwrap() >= 2, "busy on, then the result");
+
+    // Expired (401): the auth kind is known, the keyring kept.
+    let server = MockServer::start().await;
+    mount_status(&server, "/api/users/me", 401).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (mgr, store) = stored_session(&dir, &server.uri(), token());
+    mgr.restore_romm().await.unwrap();
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::Expired);
+    assert_eq!(s.auth_kind, Some(AuthKind::Token));
+    assert!(s.last_error.is_empty());
+    assert!(SecretStore::load(&*store).unwrap().is_some());
+
+    // Unreachable: the probe's reason, secret-free.
+    let server = MockServer::start().await;
+    mount_status(&server, "/api/users/me", 503).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (mgr, _store) = stored_session(&dir, &server.uri(), token());
+    mgr.restore_romm().await.unwrap();
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::Unreachable);
+    assert!(!s.last_error.is_empty());
+    assert!(!s.last_error.contains("FAKE-TEST-TOKEN-not-real"));
+    assert!(!s.busy);
+    let wire = serde_json::to_value(&s).unwrap();
+    assert_eq!(wire["connection"], "unreachable");
 }
 
 #[tokio::test]
-async fn retry_while_offline_without_a_credential_is_no_stored_session() {
+async fn a_mid_session_401_sets_expired_keeps_the_keyring_and_fires_the_hook() {
+    let server = MockServer::start().await;
+    mount_users_me(&server).await;
+    mount_status(&server, "/api/platforms", 401).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (mgr, store) = stored_session(&dir, &server.uri(), token());
+    mgr.restore_romm().await.unwrap();
+    let calls = counting_hook(&mgr);
+    let client = mgr.client().unwrap();
+    assert!(client.platforms().await.is_err());
+    assert_eq!(*calls.lock().unwrap(), 1);
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::Expired);
+    assert_eq!(s.auth_kind, Some(AuthKind::Token));
+    assert!(s.in_rail);
+    assert!(SecretStore::load(&*store).unwrap().is_some());
+    // The config still says connected: the next start probes (and says
+    // "Sign-in expired" again) until the user signs in or disconnects.
+    let cfg = Config::load(&dir.path().join("config.toml")).unwrap();
+    assert!(cfg.stores.romm.connected);
+}
+
+#[tokio::test]
+async fn connect_sets_connected_in_the_config_and_the_status() {
+    let server = MockServer::start().await;
+    mount_users_me(&server).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mgr = SessionManager::new(
+        dir.path().join("config.toml"),
+        dir.path().join("covers"),
+        Arc::new(MemoryStore::default()),
+    );
+    let calls = counting_hook(&mgr);
+    mgr.connect(
+        server.uri(),
+        String::new(),
+        SecretString::from("FAKE-TEST-TOKEN-not-real"),
+        false,
+    )
+    .await
+    .unwrap();
+    let cfg = Config::load(&dir.path().join("config.toml")).unwrap();
+    assert!(cfg.stores.romm.connected);
+    assert!(
+        !cfg.setup.welcomed,
+        "connect alone does not finish the welcome"
+    );
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::Connected);
+    assert_eq!(s.username, "six");
+    assert_eq!(s.server_url, server.uri());
+    assert_eq!(s.auth_kind, Some(AuthKind::Basic));
+    assert!(!s.busy);
+    assert_eq!(*calls.lock().unwrap(), 2, "busy on, then connected");
+}
+
+#[tokio::test]
+async fn a_failed_connect_leaves_the_status_as_it_was() {
+    let server = MockServer::start().await;
+    mount_status(&server, "/api/users/me", 401).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mgr = SessionManager::new(
+        dir.path().join("config.toml"),
+        dir.path().join("covers"),
+        Arc::new(MemoryStore::default()),
+    );
+    let calls = counting_hook(&mgr);
+    assert!(mgr
+        .connect(
+            server.uri(),
+            String::new(),
+            SecretString::from("FAKE-TEST-TOKEN-not-real"),
+            true,
+        )
+        .await
+        .is_err());
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::NotConnected);
+    assert!(!s.busy);
+    assert!(s.server_url.is_empty());
+    assert_eq!(*calls.lock().unwrap(), 2);
+}
+
+#[tokio::test]
+async fn disconnect_keeps_the_server_and_user_and_stops_probing() {
+    let server = MockServer::start().await;
+    mount_users_me(&server).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (mgr, store) = stored_session(&dir, &server.uri(), token());
+    mgr.restore_romm().await.unwrap();
+    let calls = counting_hook(&mgr);
+    mgr.disconnect().unwrap();
+    assert_eq!(*calls.lock().unwrap(), 1);
+    assert!(mgr.client().is_none());
+    assert!(SecretStore::load(&*store).unwrap().is_none());
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::NotConnected);
+    assert_eq!(s.server_url, server.uri());
+    assert_eq!(s.username, "six");
+    assert_eq!(s.auth_kind, None);
+    let cfg = Config::load(&dir.path().join("config.toml")).unwrap();
+    assert!(!cfg.stores.romm.connected);
+    assert_eq!(cfg.server_url, server.uri());
+    assert_eq!(cfg.username, "six");
+    // The next start does not probe.
+    let fresh = SessionManager::new(
+        dir.path().join("config.toml"),
+        dir.path().join("covers"),
+        Arc::new(NoReadStore),
+    );
+    fresh.restore_romm().await.unwrap();
+    assert_eq!(status(&fresh).connection, RommConnection::NotConnected);
+}
+
+#[tokio::test]
+async fn reconnect_without_a_credential_is_no_stored_session() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config.toml");
-    let cfg = grid_core::config::Config {
+    let cfg = Config {
         server_url: "https://romm.example".into(),
-        offline: true,
         ..Default::default()
     };
     cfg.save(&config_path).unwrap();
@@ -753,55 +1000,34 @@ async fn retry_while_offline_without_a_credential_is_no_stored_session() {
         Arc::new(MemoryStore::default()),
     );
     assert!(matches!(
-        mgr.retry().await,
+        mgr.reconnect().await,
         Err(grid_core::session::SessionError::NoStoredSession)
     ));
+    assert!(!status(&mgr).busy);
 }
 
+/// Legacy "Use without a server": RomM stops probing, the welcome counts
+/// as done, the keyring stays. A later reconnect that connects turns
+/// probing back on.
 #[tokio::test]
-async fn connect_clears_offline() {
-    let server = MockServer::start().await;
-    mount_users_me(&server).await;
-    let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("config.toml");
-    let cfg = grid_core::config::Config {
-        offline: true,
-        ..Default::default()
-    };
-    cfg.save(&config_path).unwrap();
-    let store = Arc::new(MemoryStore::default());
-    let mgr = SessionManager::new(config_path.clone(), dir.path().join("covers"), store);
-    mgr.connect(
-        server.uri(),
-        "six".into(),
-        SecretString::from("FAKE-TEST-TOKEN-not-real"),
-        true,
-    )
-    .await
-    .unwrap();
-    let cfg = grid_core::config::Config::load(&config_path).unwrap();
-    assert!(!cfg.offline);
-    assert!(matches!(
-        mgr.restore().await.unwrap(),
-        RestoreOutcome::Connected { .. }
-    ));
-}
-
-#[tokio::test]
-async fn retry_that_connects_clears_offline() {
+async fn use_offline_stops_probing_and_reconnect_turns_it_back_on() {
     let server = MockServer::start().await;
     mount_users_me(&server).await;
     let dir = tempfile::tempdir().unwrap();
     let (mgr, store) = stored_session(&dir, &server.uri(), token());
+    mgr.restore_romm().await.unwrap();
     mgr.use_offline().unwrap();
-    assert!(matches!(
-        mgr.retry().await.unwrap(),
-        RestoreOutcome::Connected { .. }
-    ));
+    assert!(mgr.client().is_none());
+    assert!(SecretStore::load(&*store).unwrap().is_some());
     let config_path = dir.path().join("config.toml");
-    let cfg = grid_core::config::Config::load(&config_path).unwrap();
-    assert!(!cfg.offline);
-    // The next start probes the server again instead of answering Offline.
+    let cfg = Config::load(&config_path).unwrap();
+    assert!(!cfg.stores.romm.connected);
+    assert!(cfg.setup.welcomed);
+    assert_eq!(status(&mgr).connection, RommConnection::NotConnected);
+
+    mgr.reconnect().await.unwrap();
+    assert_eq!(status(&mgr).connection, RommConnection::Connected);
+    assert!(Config::load(&config_path).unwrap().stores.romm.connected);
     let fresh = SessionManager::new(config_path, dir.path().join("covers"), store);
     assert!(matches!(
         fresh.restore().await.unwrap(),
@@ -810,16 +1036,16 @@ async fn retry_that_connects_clears_offline() {
 }
 
 #[tokio::test]
-async fn retry_that_fails_keeps_offline() {
+async fn a_reconnect_that_fails_keeps_not_probing() {
     let server = MockServer::start().await;
     mount_status(&server, "/api/users/me", 503).await;
     let dir = tempfile::tempdir().unwrap();
     let (mgr, _store) = stored_session(&dir, &server.uri(), token());
-    mgr.use_offline().unwrap();
+    set_connected(&dir, false);
     assert!(matches!(
         mgr.retry().await.unwrap(),
         RestoreOutcome::Unreachable { .. }
     ));
-    let cfg = grid_core::config::Config::load(&dir.path().join("config.toml")).unwrap();
-    assert!(cfg.offline);
+    let cfg = Config::load(&dir.path().join("config.toml")).unwrap();
+    assert!(!cfg.stores.romm.connected);
 }

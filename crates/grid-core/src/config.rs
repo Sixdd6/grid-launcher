@@ -273,6 +273,11 @@ pub struct SetupState {
     /// (`launch::compat::apply_pending_compat_default`). Blank when none.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub pending_compat: String,
+    /// The first-run welcome (library folder, then the storefronts) was
+    /// finished or skipped. While false GRID opens on the welcome; it is
+    /// never shown because of RomM's state. Not written while false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub welcomed: bool,
 }
 
 /// One default first-run setup is waiting to apply.
@@ -356,6 +361,29 @@ pub struct StoresConfig {
     /// Not written while default, like Epic.
     #[serde(default, skip_serializing_if = "SteamConfig::is_default")]
     pub steam: SteamConfig,
+    /// RomM as a storefront (`[stores.romm]`). Not written while default.
+    /// The server URL and username stay top-level (`Config::server_url`,
+    /// `Config::username`): the Python importer and older builds read them
+    /// there.
+    #[serde(default, skip_serializing_if = "RommConfig::is_default")]
+    pub romm: RommConfig,
+}
+
+/// RomM (`[stores.romm]`). Never a credential: the RomM token or password
+/// lives only in the OS keyring (`secrets.rs`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RommConfig {
+    /// GRID probes RomM at startup with the keyring credential. False: no
+    /// probe and no keyring read at startup (RomM "Not connected").
+    #[serde(default)]
+    pub connected: bool,
+}
+
+impl RommConfig {
+    /// Whether nothing differs from the defaults.
+    pub fn is_default(&self) -> bool {
+        self == &RommConfig::default()
+    }
 }
 
 impl StoresConfig {
@@ -542,6 +570,13 @@ pub struct Config {
     /// `true`.
     #[serde(default)]
     pub background_fade_inverted: bool,
+    /// One-time migration marker for RomM as a storefront: `true` once
+    /// [`Config::load`] has turned the old `offline` flag into
+    /// `stores.romm.connected` and `setup.welcomed`. Absent in an older
+    /// config (`false`), so the migration runs once; a new config starts
+    /// `true`.
+    #[serde(default)]
+    pub romm_store_migrated: bool,
     /// Raw per-game cloud sync state, keyed by `cloud::state::game_key`.
     /// Stored as an untyped TOML table (not `SyncStateEntry`s) so foreign/
     /// future keys and mistyped fields round-trip byte-for-byte through a
@@ -613,9 +648,10 @@ pub struct Config {
     /// while empty, so such a config round-trips unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub former_library_paths: Vec<String>,
-    /// "Use without a server": the session runs offline, with no RomM
-    /// server, until the user signs in again. Off by default.
-    #[serde(default)]
+    /// The old "Use without a server" flag. Read only by the one-time
+    /// RomM storefront migration in [`Config::load`], which clears it, so it
+    /// leaves the file on the next save. Nothing else reads or sets it.
+    #[serde(default, skip_serializing_if = "is_false")]
     pub offline: bool,
     /// The GRID-managed umu-launcher, `None` until one is installed. A TOML
     /// table, so it must stay after every scalar key in this struct; not
@@ -647,6 +683,10 @@ fn default_true() -> bool {
     true
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 fn default_upload_delay_seconds() -> u64 {
     3
 }
@@ -674,6 +714,7 @@ impl Default for Config {
             cloud_save_retention_limit: default_save_retention_limit(),
             cloud_retention_default_migrated: true,
             background_fade_inverted: true,
+            romm_store_migrated: true,
             cloud_sync_state: toml::value::Table::new(),
             native_manual_save_paths: BTreeMap::new(),
             native_removed_save_paths: BTreeMap::new(),
@@ -729,7 +770,25 @@ impl Config {
         config.emulators.retain(|e| !e.name.trim().is_empty());
         config.migrate_retention_default();
         config.migrate_background_fade();
+        config.migrate_romm_store();
         Ok(config)
+    }
+
+    /// One-time migration to RomM as a storefront (romm-storefront-plan
+    /// 0.4). A connected user keeps probing at startup and never sees the
+    /// welcome; an offline user ("Use without a server") goes straight to
+    /// the shell with RomM not connected, and nothing reads the keyring.
+    /// The marker persists with the next [`Config::save`], and `offline`
+    /// is cleared so it leaves the file then.
+    fn migrate_romm_store(&mut self) {
+        if self.romm_store_migrated {
+            return;
+        }
+        let has_server = !self.server_url.trim().is_empty();
+        self.stores.romm.connected = !self.offline && has_server;
+        self.setup.welcomed = self.offline || (has_server && !self.library_path.trim().is_empty());
+        self.offline = false;
+        self.romm_store_migrated = true;
     }
 
     /// Q9 one-time migration: a stored `cloud_save_retention_limit` of 3
@@ -893,7 +952,7 @@ mod tests {
     }
 
     #[test]
-    fn backup_settings_and_offline_default_when_missing() {
+    fn backup_settings_default_when_missing() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "schema_version = 1\n").unwrap();
@@ -909,11 +968,10 @@ mod tests {
     }
 
     #[test]
-    fn backup_settings_and_offline_round_trip() {
+    fn backup_settings_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         let cfg = Config {
-            offline: true,
             backup: BackupSettings {
                 include_firmware: false,
                 drives: vec![RememberedDrive {
@@ -930,7 +988,6 @@ mod tests {
         };
         cfg.save(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("offline = true"), "written:\n{written}");
         assert!(written.contains("[backup]"), "written:\n{written}");
         assert!(written.contains("[[backup.drives]]"), "written:\n{written}");
         assert_eq!(Config::load(&path).unwrap(), cfg);
@@ -984,6 +1041,7 @@ mod tests {
                 epic: EpicConfig::default(),
                 amazon: AmazonConfig::default(),
                 steam: SteamConfig::default(),
+                romm: RommConfig::default(),
             },
             ..Default::default()
         };
@@ -2015,5 +2073,104 @@ mod tests {
         );
         assert_eq!(cfg.cloud_save_retention_limit, 7);
         assert!(cfg.extra.contains_key("cloud_state_retention_limit"));
+    }
+
+    /// RomM storefront migration (plan 0.4): (text, connected, welcomed).
+    #[test]
+    fn the_romm_store_migration_matrix() {
+        let cases = [
+            // Connected: a server and a library, not offline.
+            (
+                "schema_version = 1\nserver_url = \"https://romm.test\"\nusername = \"u\"\nlibrary_path = \"/lib\"\n",
+                true,
+                true,
+            ),
+            // Offline ("Use without a server"), with a server stored.
+            (
+                "schema_version = 1\nserver_url = \"https://romm.test\"\nlibrary_path = \"/lib\"\noffline = true\n",
+                false,
+                true,
+            ),
+            // Offline with no server at all.
+            (
+                "schema_version = 1\nlibrary_path = \"/lib\"\noffline = true\n",
+                false,
+                true,
+            ),
+            // Fresh: nothing stored.
+            ("schema_version = 1\n", false, false),
+            // Partly filled: a server but no library folder yet.
+            (
+                "schema_version = 1\nserver_url = \"https://romm.test\"\n",
+                true,
+                false,
+            ),
+            // Partly filled: a library folder but no server.
+            ("schema_version = 1\nlibrary_path = \"/lib\"\n", false, false),
+        ];
+        for (text, connected, welcomed) in cases {
+            let cfg = load_text(text);
+            assert_eq!(cfg.stores.romm.connected, connected, "{text}");
+            assert_eq!(cfg.setup.welcomed, welcomed, "{text}");
+            assert!(!cfg.offline, "{text}");
+            assert!(cfg.romm_store_migrated, "{text}");
+        }
+    }
+
+    #[test]
+    fn the_romm_store_migration_runs_once_and_drops_offline_on_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "schema_version = 1\nserver_url = \"https://romm.test\"\nlibrary_path = \"/lib\"\noffline = true\n",
+        )
+        .unwrap();
+        let cfg = Config::load(&path).unwrap();
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("offline"), "written:\n{written}");
+        assert!(
+            written.contains("romm_store_migrated = true"),
+            "written:\n{written}"
+        );
+        assert!(written.contains("welcomed = true"), "written:\n{written}");
+        // Idempotent: a later load keeps what the user changed since.
+        let mut again = Config::load(&path).unwrap();
+        assert_eq!(again, cfg);
+        again.stores.romm.connected = true;
+        again.setup.welcomed = false;
+        again.save(&path).unwrap();
+        let third = Config::load(&path).unwrap();
+        assert!(third.stores.romm.connected);
+        assert!(!third.setup.welcomed);
+    }
+
+    #[test]
+    fn an_already_migrated_config_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut cfg = Config {
+            server_url: "https://romm.test".into(),
+            username: "player".into(),
+            library_path: "/lib".into(),
+            ..Default::default()
+        };
+        cfg.stores.romm.connected = true;
+        cfg.setup.welcomed = true;
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("[stores.romm]"), "written:\n{written}");
+        assert_eq!(Config::load(&path).unwrap(), cfg);
+        // A not-connected, not-welcomed config writes neither key.
+        Config::default().save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("romm]"), "written:\n{written}");
+        // (`ui.tv_welcomed` is TV mode's own first-visit flag.)
+        assert!(
+            !written.lines().any(|l| l.starts_with("welcomed")),
+            "written:\n{written}"
+        );
+        assert_eq!(Config::load(&path).unwrap(), Config::default());
     }
 }
