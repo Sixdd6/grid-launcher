@@ -126,5 +126,5 @@ export function installRequest(game: StoreGame, choice: InstallChoice): StoreIns
 
 export const COMPAT_HELP = 'The default from Settings › Systems › Windows. GRID makes a Wine prefix for this game.';
 export function folderHelp(storeName: string): string {
-  return `The default folder for ${storeName} games is set in Settings › Stores.`;
+  return `The default folder for ${storeName} games is set in Settings › Game stores.`;
 }

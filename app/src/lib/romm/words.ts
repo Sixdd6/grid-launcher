@@ -304,7 +304,7 @@ export const OPEN_ON_ROMM_OFF = "RomM isn't connected, so GRID opens on All game
 
 export type SignInMode = 'connect' | 'edit' | 'again';
 
-export function signInCopy(mode: SignInMode, username = ''): { title: string; lede: string; button: string } {
+export function signInCopy(mode: SignInMode, username = '', useToken = true): { title: string; lede: string; button: string } {
   switch (mode) {
     case 'edit':
       return {
@@ -315,7 +315,7 @@ export function signInCopy(mode: SignInMode, username = ''): { title: string; le
     case 'again':
       return {
         title: 'Sign in to RomM again',
-        lede: `RomM no longer accepts GRID's token for ${username}. Enter a new one.`,
+        lede: `RomM no longer accepts GRID's ${useToken ? 'token' : 'password'} for ${username}. Enter a new one.`,
         button: 'Sign in',
       };
     default:

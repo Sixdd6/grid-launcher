@@ -101,8 +101,9 @@ describe('marks', () => {
     expect(storeOfPlatform('PlayStation')).toBeNull();
     expect(storeOfPlatform('')).toBeNull();
   });
-  it('words the Settings › Stores lede from the stores shown', () => {
-    const start = 'Connect the stores you buy games from. Each connected store gets a group in the Library with its Installed and Available games.';
+  it('words the Settings › Game stores lede from the stores shown', () => {
+    const start =
+      'Connect the places your games come from. Each one gets a group in the Library. RomM is your own game server: GRID browses it, installs its games with an emulator and syncs their saves.';
     expect(storesLede(['gog'])).toBe(
       `${start} GRID installs GOG games with the open-source tool Heroic Games Launcher uses; its login stays in that tool’s files in GRID’s data folder.`,
     );

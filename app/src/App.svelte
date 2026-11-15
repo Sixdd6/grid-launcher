@@ -6,7 +6,7 @@
   import ChooseSystems from './lib/setup/ChooseSystems.svelte';
   import Toast from './lib/Toast.svelte';
   import SetupProgress from './lib/setup/SetupProgress.svelte';
-  import { session, restore, listenUnauthorized, finishSetup } from './lib/stores/session.svelte';
+  import { session, restore, finishSetup } from './lib/stores/session.svelte';
   import { initSetupRun, setupRun, startSetupRun } from './lib/stores/setupRun.svelte';
   import { init as initDownloads } from './lib/stores/downloads.svelte';
   import { init as initSessions } from './lib/stores/sessions.svelte';
@@ -92,13 +92,9 @@
     };
   });
 
-  // Q6: a 401 mid-session sends the user back to Connect, pre-filled. One
-  // listener for the app's whole life, registered before `restore()` below.
-  $effect(() => {
-    const un = listenUnauthorized();
-    return () => {
-    };
-  });
+  // A 401 mid-session no longer leaves the shell (romm-storefront-plan
+  // decision 6): RomM's status turns to Sign-in expired (`romm-changed`), and
+  // its card and the needs-RomM panels offer Sign in again….
 
   // First-run setup's defaults land as emulators install, which can be long
   // after the picker handed over: one listener for the app's whole life.
@@ -141,6 +137,14 @@
   // cloud notices, the registry load): up exactly while a shell is on
   // screen — the phase is `shell` and the unreachable-library dialog is not
   // blocking — whichever shell that is.
+  // Choose your systems after a connect from the RomM card (decision 9):
+  // Skip and Done return to Settings › Game stores. Set as the picker hands
+  // over, read once when the shell mounts, dropped when TV mode takes over.
+  let backToGameStores = $state(false);
+  $effect(() => {
+    if (uiMode.mode === 'tv') backToGameStores = false;
+  });
+
   let shellUp = $derived(session.phase === 'shell' && !libraryUnreachable.blocking);
   $effect(() => {
     if (shellUp) return untrack(startShellLifetime);
@@ -163,13 +167,18 @@
   <ChooseSystems
     onDone={(started, names) => {
       if (started !== null) startSetupRun(started, names);
+      backToGameStores = session.setupReturn === 'settings';
+      session.setupReturn = null;
       finishSetup();
     }}
   />
 {:else if session.phase === 'shell' && uiSettings.loaded}
   <!-- Waits for the stored settings: Open GRID on picks the shell's first
        view, once, when it mounts. -->
-  <Shell initialView={uiMode.desktopStart?.view} initialSettingsPage={uiMode.desktopStart?.settingsPage ?? undefined} />
+  <Shell
+    initialView={backToGameStores ? 'settings' : uiMode.desktopStart?.view}
+    initialSettingsPage={backToGameStores ? 'stores' : (uiMode.desktopStart?.settingsPage ?? undefined)}
+  />
 {:else if session.phase === 'none'}
   <Connect prefill={connectPrefill(session)} />
 {/if}

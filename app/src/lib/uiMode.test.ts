@@ -17,9 +17,10 @@ describe('uiMode mapping (items 521, 523)', () => {
   it('every desktop Settings page is a TV pane, plus TV mode', () => {
     for (const p of SETTINGS_PAGES) expect(TV_PANES).toContain(tvPaneFor(p));
     expect(TV_PANES).toContain('tv');
-    // TV mode's own pane, and Stores until the desktop has its page.
+    // TV mode's own pane, and TV's Connection pane until TV mode moves to
+    // the RomM card (the desktop's Connection page is gone).
     const extra = TV_PANES.filter((p) => !(SETTINGS_PAGES as readonly string[]).includes(p));
-    expect(extra.filter((p) => p !== 'stores')).toEqual(['tv']);
+    expect(extra.filter((p) => p !== 'connection')).toEqual(['tv']);
   });
   it('Stores sits between RetroAchievements and Systems', () => {
     expect(TV_PANES.indexOf('stores')).toBe(TV_PANES.indexOf('retroachievements') + 1);
