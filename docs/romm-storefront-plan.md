@@ -1076,15 +1076,10 @@ now works without RomM.)
 - **Final:** Step 9 runs the full default suite (`scripts/e2e.sh`, all groups except
   `OPT_IN_GROUPS`) and the opt-in `large-platform-perf` once for the merged grid.
 
-### Open question for the user (not decided; ask in chat)
-- **Q1. Locate files: firmware GRID cannot verify.** Some files have no fixed hash because
-  each console's are different (Switch `prod.keys`/`title.keys`, Wii U `keys.txt`, some
-  PS2 BIOS dumps not in any table). What does Locate files do with them?
-  - (a) Accept a file whose **name** matches a known entry that has no hash, install it,
-    and list it as "Installed · not verified". Refuse files that match nothing.
-  - (b) Accept only files whose size and MD5 match a known entry. Per-console keys can then
-    come only from RomM or a Backup drive.
-  - (c) Accept any picked file, routed by name into the emulator's firmware folders, and
-    mark every unmatched file "not verified".
-  - *Recommended: (a).* It keeps the size/MD5 check wherever a hash exists, makes keys
-    possible without RomM, and still refuses stray files.
+### Locate files: unverifiable firmware (user decision 13, 2026-11-15)
+
+Checksum-matched files install as verified. A file whose name matches a known entry that
+has no fixed checksum (per-console keys such as Switch `prod.keys`, Wii U `keys.txt`)
+installs as "Installed · not verified". Files that match nothing are refused.
+
+No open questions remain.
