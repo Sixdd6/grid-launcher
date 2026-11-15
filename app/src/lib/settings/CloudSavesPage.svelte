@@ -1,8 +1,13 @@
 <script lang="ts">
   // Settings › Cloud saves (design §10: "current cloud settings form"), moved
   // out of Emulators.svelte (task-19-brief.md). The refresh is gated on the
-  // Settings view being visible.
+  // Settings view being visible. Without RomM a needs-RomM panel sits under
+  // the heading and the form stays editable (RommStorefront README, "Cloud
+  // saves and RetroAchievements"): the settings apply once it's connected.
   import { api, type CloudSettings } from '../api';
+  import RommNeedsPanel from '../romm/RommNeedsPanel.svelte';
+  import { NEEDS_ROMM, SETTINGS_CLOUD_TEXT } from '../romm/words';
+  import { romm } from '../stores/romm.svelte';
 
   let { active = true }: { active?: boolean } = $props();
 
@@ -45,6 +50,10 @@
     refreshCloudSettings();
   });
 </script>
+
+{#if romm.status.connection !== 'connected'}
+  <RommNeedsPanel title={NEEDS_ROMM.cloudSaves} text={SETTINGS_CLOUD_TEXT} testId="cloud-settings-needs-romm" />
+{/if}
 
 {#if cloudSettings}
   <form

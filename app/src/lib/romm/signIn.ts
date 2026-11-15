@@ -4,7 +4,7 @@
 // Connect form (`connectForm.ts`, which re-exports the legacy helpers until
 // the welcome replaces Connect).
 import type { RommStatus } from '../api';
-import type { SignInMode } from './words';
+import { rommHost, rommToasts, type SignInMode } from './words';
 
 export type SignInFields = {
   serverUrl: string;
@@ -68,6 +68,32 @@ export function signInError(raw: string, serverUrl: string, useToken: boolean): 
     return `Couldn't reach ${url}. Check the address, and that the server is running.`;
   }
   return text;
+}
+
+/**
+ * The username sent with a connect. A password always sends the typed one. A
+ * token identifies the account by itself, so the username is only a claim
+ * the backend checks (`UsernameMismatch`): Edit and Sign in again send the
+ * stored account, so a token for someone else is refused; a fresh Connect
+ * sends none.
+ */
+export function usernameToSend(f: Pick<SignInFields, 'username' | 'useToken'>, mode: SignInMode, storedUsername: string): string {
+  if (!f.useToken) return f.username.trim();
+  return mode === 'connect' ? '' : storedUsername.trim();
+}
+
+/** The notification after a successful sign-in from the form. */
+export function signedInToast(mode: SignInMode, status: Pick<RommStatus, 'server_url' | 'username'>): string {
+  return mode === 'again' ? rommToasts.signedInAgain(status.username) : rommToasts.connected(rommHost(status), status.username);
+}
+
+/** The notification after Reconnect or Retry: "Reconnected to <host>" from
+ *  Connected, "Connected to RomM again · <host>" from Can't reach or
+ *  Sign-in expired; `null` when it did not connect. */
+export function reconnectedToast(was: RommStatus['connection'], status: Pick<RommStatus, 'connection' | 'server_url'>): string | null {
+  if (status.connection !== 'connected') return null;
+  const host = rommHost(status);
+  return was === 'connected' ? rommToasts.reconnected(host) : rommToasts.backAgain(host);
 }
 
 // --- Legacy Connect form helpers (re-exported by `connectForm.ts`) ----------

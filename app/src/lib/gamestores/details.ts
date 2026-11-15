@@ -185,7 +185,7 @@ export function storeLines(
   if (!game.installed && status !== null && status.connection !== 'connected' && !ctx.drive && !managedByClient(game.source)) {
     out.push(
       status.connection === 'not_connected'
-        ? { kind: 'why', text: `Connect ${name} in Settings › Stores to install.`, testId: 'store-details-why' }
+        ? { kind: 'why', text: `Connect ${name} in Settings › Game stores to install.`, testId: 'store-details-why' }
         : { kind: 'why', text: `Your ${name} login expired.`, link: { label: 'Sign in again', act: 'sign_in' }, testId: 'store-details-why' },
     );
   }
@@ -425,7 +425,7 @@ export function cloudPanel(game: StoreGame, state: StoreCloudState | null, nowSe
     return { kind: 'conflict', title: 'These saves changed in two places', note: conflictNote(game.source), sides: conflictSides(game.source, state.conflict, nowSeconds) };
   }
   if (kind === 'off') {
-    return { kind: 'off', title: 'Cloud saves are off for this game', note: `Turn them on in Game Settings, or for every ${name} game in Settings › Stores.` };
+    return { kind: 'off', title: 'Cloud saves are off for this game', note: `Turn them on in Game Settings, or for every ${name} game in Settings › Game stores.` };
   }
   if (kind === 'none') return { kind: 'none', title: 'This game has no cloud saves', note: `${name} doesn’t keep saves for it.` };
   const busy = kind === 'syncing';

@@ -116,6 +116,13 @@ STAGE_GROUPS=(
   # menu near the bottom edge, two-click Remove, Install recommended (N) and
   # a manual add that sets no default.
   "systems:specs/systems.spec.ts"
+  # Settings › Game stores' RomM card (romm-storefront-plan Step 4), on a
+  # seeded profile past the welcome with RomM never connected: the cards by
+  # name, the needs-RomM panels, a first connect from the card that opens
+  # Choose your systems (first-run-setup fixtures, mock forge) and returns to
+  # Game stores on Skip, Edit…, Reconnect, Can't reach and Retry, a 401
+  # (Sign-in expired, the shell stays) and Sign in again…, and Disconnect.
+  "settings-romm:specs/settings-romm.spec.ts"
   # Game backups (docs/superpowers/plans/2026-11-09-game-backups.md, Task
   # 21) on fake drives: every child folder of <data>/media is a mounted
   # drive (GRID_LAUNCHER_E2E_DRIVE_ROOTS, e2e feature only). (a) set up a
@@ -690,7 +697,7 @@ mock_args_for_group() {
     # from e2e/fixtures so the shared set — and every assertion the other
     # groups and mock-romm/server.test.mjs make about it — stays untouched.
     emulator-catalog) printf -- '--fixtures-dir fixtures-emulator-catalog' ;;
-    first-run-setup|settings-screens|tv-startup) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
+    first-run-setup|settings-screens|tv-startup|settings-romm) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
     # The first-run-setup set plus a "Sony PlayStation 4", whose ShadPS4
     # installs with its Qt launcher companion from the mock forge.
     systems|tv-systems) printf -- '--fixtures-dir fixtures-systems' ;;
@@ -777,7 +784,7 @@ group_needs_steam() {
 }
 
 group_needs_forge() {
-  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" || "$1" == "tv-startup" || "$1" == "tv-layout" ]]
+  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "settings-romm" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" || "$1" == "tv-startup" || "$1" == "tv-layout" ]]
 }
 
 # The `launch` group's data dir is pre-seeded (Ruling A, task-7-brief.md):
@@ -802,6 +809,7 @@ seed_script_for_group() {
     library-move) printf '%s' "$E2E_DIR/seed/library-move-seed.mjs" ;;
     backups|tv-backups|tv-layout) printf '%s' "$E2E_DIR/seed/backups-seed.mjs" ;;
     tv-shell) printf '%s' "$E2E_DIR/seed/tv-shell-seed.mjs" ;;
+    settings-romm) printf '%s' "$E2E_DIR/seed/settings-romm-seed.mjs" ;;
     tv-server) printf '%s' "$E2E_DIR/seed/tv-server-seed.mjs" ;;
     tv-romm) printf '%s' "$E2E_DIR/seed/tv-romm-seed.mjs" ;;
     tv-library) printf '%s' "$E2E_DIR/seed/tv-library-seed.mjs" ;;
@@ -1222,7 +1230,7 @@ EOF
       # Only the `first-run-setup` group sees the platform picker after
       # connecting (wdio.conf.ts turns this into
       # GRID_LAUNCHER_E2E_FIRST_RUN_SETUP, read by the e2e build only).
-      if [[ "$name" == "first-run-setup" || "$name" == "settings-screens" || "$name" == "tv-startup" || "$name" == "tv-layout" ]]; then
+      if [[ "$name" == "first-run-setup" || "$name" == "settings-screens" || "$name" == "settings-romm" || "$name" == "tv-startup" || "$name" == "tv-layout" ]]; then
         export E2E_FIRST_RUN_SETUP=1
       fi
       # Only the `library-move` group: the whole run is on one disk, where

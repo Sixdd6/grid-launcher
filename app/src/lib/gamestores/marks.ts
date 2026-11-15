@@ -197,13 +197,14 @@ const LEDE_NAMES: readonly [StoreSource, string][] = [
 ];
 
 /**
- * Settings › Stores' lede, naming the stores this build shows that install
+ * Settings › Game stores' lede (RommStorefront README), naming the stores this build shows that install
  * through a tool (the prototype's line names GOG, Epic and Amazon; a store
  * that isn't shown yet isn't named).
  */
 export function storesLede(enabled: readonly StoreSource[] = ENABLED_STORES): string {
   const tools = LEDE_NAMES.filter(([s]) => enabled.includes(s)).map(([, n]) => n);
-  const start = 'Connect the stores you buy games from. Each connected store gets a group in the Library with its Installed and Available games.';
+  const start =
+    'Connect the places your games come from. Each one gets a group in the Library. RomM is your own game server: GRID browses it, installs its games with an emulator and syncs their saves.';
   const how =
     tools.length === 1
       ? ` GRID installs ${tools[0]} games with the open-source tool Heroic Games Launcher uses; its login stays in that tool’s files in GRID’s data folder.`

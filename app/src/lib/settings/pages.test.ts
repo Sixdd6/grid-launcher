@@ -12,10 +12,9 @@ describe('settings rail', () => {
       'appearance',
       'backup-drives',
       'cloud-saves',
-      'connection',
+      'stores',
       'library',
       'retroachievements',
-      'stores',
       'systems',
       'updates',
     ]);
@@ -29,7 +28,6 @@ describe('settings rail', () => {
   });
 
   it('labels every page', () => {
-    expect(settingsPageLabel('connection')).toBe('Connection');
     expect(settingsPageLabel('library')).toBe('Library');
     expect(settingsPageLabel('cloud-saves')).toBe('Cloud saves');
     expect(settingsPageLabel('retroachievements')).toBe('RetroAchievements');
@@ -37,7 +35,11 @@ describe('settings rail', () => {
     expect(settingsPageLabel('updates')).toBe('Updates');
     expect(settingsPageLabel('appearance')).toBe('Appearance');
     expect(settingsPageLabel('backup-drives')).toBe('Backup drives');
-    expect(settingsPageLabel('stores')).toBe('Stores');
+    expect(settingsPageLabel('stores')).toBe('Game stores');
+  });
+
+  it('has no Connection page (the RomM card replaced it)', () => {
+    expect((SETTINGS_PAGES as readonly string[]).includes('connection')).toBe(false);
   });
 });
 
@@ -48,14 +50,13 @@ describe('settingsRailEntries', () => {
       'settings-nav-appearance',
       'settings-nav-backup-drives',
       'settings-nav-cloud-saves',
-      'settings-nav-connection',
+      'settings-nav-stores',
       'settings-nav-library',
       'settings-nav-retroachievements',
-      'settings-nav-stores',
       'settings-nav-systems',
       'settings-nav-updates',
     ]);
-    expect(entries.map((e) => e.selected)).toEqual([false, false, false, false, false, false, false, false, true]);
+    expect(entries.map((e) => e.selected)).toEqual([false, false, false, false, false, false, false, true]);
     expect(entries[0].heading).toBe('SETTINGS');
     expect(entries.slice(1).every((e) => e.heading === undefined)).toBe(true);
   });

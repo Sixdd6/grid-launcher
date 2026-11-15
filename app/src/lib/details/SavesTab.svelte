@@ -2,6 +2,9 @@
   import type { CloudPanelInfo, InstalledGame, SaveType } from '../api';
   import CloudPanel from './CloudPanel.svelte';
   import { cloudKindLabel, shownCloudKind } from './cloud';
+  import RommNeedsPanel from '../romm/RommNeedsPanel.svelte';
+  import { DETAILS_SAVES_TEXT, NEEDS_ROMM } from '../romm/words';
+  import { romm } from '../stores/romm.svelte';
 
   // The tab always shows a list: the selected kind's cloud records, with
   // a Saves | States switch on top when the game syncs both. There is no
@@ -35,6 +38,11 @@
 </script>
 
 <div class="saves">
+  <!-- RomM not connected (RommStorefront README, "Details"): the saves stay
+       on this computer and still work; the panel says why nothing syncs. -->
+  {#if romm.status.connection !== 'connected'}
+    <RommNeedsPanel title={NEEDS_ROMM.cloudSaves} text={DETAILS_SAVES_TEXT} testId="details-saves-needs-romm" />
+  {:else}
   {#if saveSupported && stateSupported && savePanelInfo && statePanelInfo}
     <div class="switch" role="tablist" aria-label="Cloud saves or states">
       <button
@@ -72,6 +80,7 @@
         statePanelInfo?.block_reason ||
         'Cloud saves are not configured for this game.'}
     </p>
+  {/if}
   {/if}
 </div>
 

@@ -5,14 +5,22 @@
   import Icon from '../Icon.svelte';
   import AchievementBadge from './AchievementBadge.svelte';
   import { PROGRESS_HINT, showsProgressHint, summaryLine, unlockDate } from './achievements';
+  import RommNeedsPanel from '../romm/RommNeedsPanel.svelte';
+  import { DETAILS_ACHIEVEMENTS_TEXT, NEEDS_ROMM } from '../romm/words';
+  import { romm } from '../stores/romm.svelte';
 
   let { romId }: { romId: number } = $props();
+
+  // The list and the progress come from RomM: nothing to ask while it is
+  // not connected (RommStorefront README, "Details").
+  let connected = $derived(romm.status.connection === 'connected');
 
   let view = $state<AchievementsView | null>(null);
   let error = $state<string | null>(null);
 
   $effect(() => {
     const id = romId;
+    if (!connected) return;
     let cancelled = false;
     view = null;
     error = null;
@@ -31,7 +39,9 @@
 </script>
 
 <div class="achievements">
-  {#if error}
+  {#if !connected}
+    <RommNeedsPanel title={NEEDS_ROMM.achievements} text={DETAILS_ACHIEVEMENTS_TEXT} testId="details-achievements-needs-romm" />
+  {:else if error}
     <p class="notice error" role="alert" data-testid="achievements-error">{error}</p>
   {:else if view === null}
     <p class="muted">Loading achievements…</p>
