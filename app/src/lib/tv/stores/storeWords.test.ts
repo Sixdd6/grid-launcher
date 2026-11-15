@@ -104,7 +104,7 @@ describe('TV store game page', () => {
 
   it('Install… is disabled with why when signed out', () => {
     const b = tvStoreButtons({ game: storeGame(), status: status({ connection: 'not_connected' }), job: null, fromDrive: false })[0];
-    expect(b).toMatchObject({ label: 'Install…', disabled: true, why: 'Connect GOG in Settings › Stores to install.' });
+    expect(b).toMatchObject({ label: 'Install…', disabled: true, why: 'Connect GOG in Settings › Game stores to install.' });
   });
 
   it('left column: last played, how it runs, the cloud state, offline, on a drive', () => {

@@ -212,7 +212,7 @@ export function storePanel(status: StoreStatus, part: StorePart, games: readonly
       body: 'Steam lists owned games only when the profile’s game details are public. In Steam: your profile › Edit Profile › Privacy Settings › Game details: Public. Then refresh.',
       actions: [
         { label: 'Refresh', act: 'refresh', primary: true },
-        { label: 'Open Settings › Stores', act: 'open_settings', primary: false },
+        { label: 'Open Settings › Game stores', act: 'open_settings', primary: false },
       ],
       testId: 'store-state-private',
     });

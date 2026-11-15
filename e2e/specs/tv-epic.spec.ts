@@ -138,7 +138,7 @@ describe('tv-epic: Epic Games in TV mode', () => {
     expect(await $(testId('tv-pr-ver-windows')).isExisting()).toBe(false);
     expect(await $(testId('tv-pr-lang')).isExisting()).toBe(false);
     expect(await pageRow('compat')).toMatchObject({ label: 'Compatibility tool', sub: 'The default from Settings › Systems › Windows' });
-    expect(await pageRow('folder')).toMatchObject({ label: 'Install folder', sub: 'The default for Epic Games games is in Settings › Stores' });
+    expect(await pageRow('folder')).toMatchObject({ label: 'Install folder', sub: 'The default for Epic Games games is in Settings › Game stores' });
     expect(await hints()).toEqual(expect.arrayContaining(['MENU Install']));
     await key('m');
     await waitGone('tv-store-install');

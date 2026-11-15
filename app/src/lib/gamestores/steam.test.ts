@@ -144,7 +144,7 @@ describe('the panels in place of the grid', () => {
     expect([p.tone, p.title]).toEqual(['warn', 'Your Steam game details are private']);
     expect(p.actions.map((a) => [a.label, a.primary])).toEqual([
       ['Refresh', true],
-      ['Open Settings › Stores', false],
+      ['Open Settings › Game stores', false],
     ]);
   });
 

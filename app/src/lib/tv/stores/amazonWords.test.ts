@@ -61,7 +61,7 @@ describe('TV Amazon Games', () => {
     expect(launchingCard(fog)).toEqual({ text: 'Launching Fogline…' });
     expect(tvPlayingNote(fog)).toBeNull();
     const expired = tvStoreButtons({ game: amazonGame('Lowsun'), status: amazonStatus({ connection: 'expired' }), job: null, fromDrive: false })[0];
-    expect(expired).toMatchObject({ label: 'Install…', disabled: true, why: 'Your Amazon Games login expired. Sign in again in Settings › Stores.' });
+    expect(expired).toMatchObject({ label: 'Install…', disabled: true, why: 'Your Amazon Games login expired. Sign in again in Settings › Game stores.' });
   });
   it('words Settings › Stores › Amazon Games', () => {
     expect(storeRowSub(amazonStatus())).toBe('Signed in as sam.plays');
