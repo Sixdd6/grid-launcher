@@ -8,7 +8,9 @@
 import type { BackupPlan, DriveInfo, SourceChoice } from '../../api';
 import {
   anyLocal,
-  dialogLede,
+  planLede,
+  unavailableRows,
+  withoutRomm,
   driveRow,
   emulatorLine,
   localLine,
@@ -67,6 +69,11 @@ export const EACH_INLINE_MAX = 6;
 
 export const SET_UP_A_DRIVE = 'Set up a drive…';
 
+/** Why the Source switch is locked while RomM is off. */
+export const ROMM_OFF_SOURCE_WHY = 'RomM isn’t connected, so every game comes from this computer.';
+/** The Firmware switch while RomM is off: firmware comes from RomM. */
+export const ROMM_OFF_FIRMWARE = 'Needs RomM';
+
 /** The Drive section with no set-up drive connected (item 464). */
 export function noDrivesNote(connected: readonly DriveInfo[]): string {
   const raw = connected.find((d) => d.status === 'not_set_up' && !d.read_only);
@@ -76,7 +83,7 @@ export function noDrivesNote(connected: readonly DriveInfo[]): string {
 
 /** The lede (item 458), the desktop's words. */
 export function backupLede(host: string, plan: BackupPlan | null): string {
-  return dialogLede(host, anyLocal(plan));
+  return planLede(host, plan);
 }
 
 function packName(d: DriveInfo): string {
@@ -193,7 +200,17 @@ export function backupPageRows(m: BackupPageModel, act: BackupPageActions): Page
   if (plan !== null && plan.local_available) {
     R.push({ kind: 'heading', key: 'bk-h-source', text: 'Source' });
     const line = localLine(plan, m.host);
-    R.push({ kind: 'row', key: 'bk-local', toggle: m.useLocal, label: line.label, sub: line.note, run: act.toggleLocal });
+    // With RomM off every game comes from this computer: the switch is on and locked.
+    const off = withoutRomm(plan);
+    R.push({
+      kind: 'row',
+      key: 'bk-local',
+      toggle: off ? true : m.useLocal,
+      label: line.label,
+      sub: line.note,
+      ...(off ? { disabled: true, why: ROMM_OFF_SOURCE_WHY } : {}),
+      run: act.toggleLocal,
+    });
     if (plan.use_local) {
       const wine = wineNote(plan, m.lookup);
       if (wine !== '') R.push({ kind: 'note', key: 'bk-wine', text: wine });
@@ -249,6 +266,13 @@ export function backupPageRows(m: BackupPageModel, act: BackupPageActions): Page
     }
   }
 
+  // ── Without RomM: the games the backup leaves out, each with why.
+  const left = unavailableRows(plan);
+  if (left) {
+    R.push({ kind: 'heading', key: 'bk-h-unavailable', text: left.title });
+    for (const u of left.rows) R.push({ kind: 'info', key: `bk-un-${u.key}`, label: u.name, sub: u.sub });
+  }
+
   // ── Also copy (items 473–475)
   R.push({ kind: 'heading', key: 'bk-h-also', text: 'Also copy' });
   if (plan === null) {
@@ -257,7 +281,7 @@ export function backupPageRows(m: BackupPageModel, act: BackupPageActions): Page
   } else {
     const emus = emulatorLine(plan);
     R.push({ kind: 'info', key: 'bk-emus', label: 'Emulators', sub: [emus.text, ...emus.notes].join(' · '), check: true });
-    const fw = firmwareText(plan);
+    const fw = withoutRomm(plan) ? { text: ROMM_OFF_FIRMWARE, disabled: true } : firmwareText(plan);
     R.push({
       kind: 'row',
       key: 'bk-fw',

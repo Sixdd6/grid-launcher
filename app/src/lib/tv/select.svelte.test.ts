@@ -117,7 +117,7 @@ describe('select mode', () => {
   it('decides what Y does (items 443, 447–449)', () => {
     expect(selActOutcome(0, false, true)).toBe('pick-first');
     expect(selActOutcome(0, true, false)).toBe('pick-first');
-    expect(selActOutcome(2, false, false)).toBe('offline');
+    expect(selActOutcome(2, false, false)).toBe('backup');
     // A drive installs or removes without a server.
     expect(selActOutcome(2, true, false)).toBe('drive');
     expect(selActOutcome(2, false, true)).toBe('backup');
@@ -131,13 +131,13 @@ describe('select mode', () => {
     expect(g.acted).toEqual([]);
   });
 
-  it('Y offline says backing up needs a server (item 448)', () => {
+  it('Y with RomM off still opens Backup (decision 8)', () => {
     const g = grid({ connected: () => false });
     selToggle();
     selPick('a');
     selAct(g);
-    expect(toasts.calls).toEqual([['Connect to a server to backup games.', 'error']]);
-    expect(g.acted).toEqual([]);
+    expect(toasts.calls).toEqual([]);
+    expect(g.acted).toEqual([['a']]);
   });
 
   it('Y hands the picked games to the grid, in the order they were picked', () => {
