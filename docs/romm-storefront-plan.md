@@ -1151,6 +1151,17 @@ Anything missing there comes back to the orchestrator, not edited in a parallel 
 - Step 7 owns `platform_registry.rs` (`record(state, None)` returns early today) and adds
   the `system_platforms` startup warm-up in `lib.rs`.
 
+## Leftovers for Step 9 (collected from Steps 2–7)
+
+- api.ts: move Step 2's `BackupPlan.without_romm`, `unavailable` and `PlanUnavailable`
+  (typed locally in `backups/dialog.ts` as `RommOffFields`/`PlanUnavailable`) into `api.ts`.
+- `settings/BackupDrivesPage.svelte`: "The server's firmware for the systems you backup" →
+  "Firmware from RomM for the systems you backup".
+- Backup firmware line without RomM reads "Needs RomM · skipped" with no system names;
+  Step 7's `firmware-known.json` could name them.
+- Desktop: "Open Config Folder" left with the Connection page (ask the user where it goes).
+- Remove `session-unauthorized`, the legacy wrappers, `VIEWS`/`initialView`, `'none'` phase.
+
 ## After this rework: Discover
 
 The user wants Discover reworked once this rework lands (2026-11-15). The trigger: when

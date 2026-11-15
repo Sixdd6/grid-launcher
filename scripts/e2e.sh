@@ -131,8 +131,9 @@ STAGE_GROUPS=(
   # without a server installs from a seeded pack, (d) three installed games
   # (docs/superpowers/plans/2026-11-09-game-backups-local-copies.md §6.4)
   # are copied from this computer, one out of date, and one is restored
-  # from the drive. Seeded per spec.
-  "backups:specs/backups-a.spec.ts specs/backups-b.spec.ts specs/backups-c.spec.ts specs/backups-d.spec.ts"
+  # from the drive, (e) the same games backed up with RomM not connected
+  # (docs/romm-storefront-plan.md Step 2), one restored. Seeded per spec.
+  "backups:specs/backups-a.spec.ts specs/backups-b.spec.ts specs/backups-c.spec.ts specs/backups-d.spec.ts specs/backups-e.spec.ts"
   # TV mode's shell (docs/tv-mode/plan.md P5), on a profile used without a
   # server (seeded). A group whose name starts with `tv-` starts the app with
   # --tv (E2E_APP_ARGS, read by wdio.conf.ts); a spec opts out with an
@@ -1098,11 +1099,11 @@ EOF
     wdio_log="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.log"
     out_dir="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.d"
     say "running $stage (attempt $attempt)"
-    # backups-c, backups-d, tv-startup a, c and d, tv-backups c and e and tv-layout start from a fresh profile: the credential an
+    # backups-c, -d and -e, tv-startup a, c and d, tv-backups c and e and tv-layout start from a fresh profile: the credential an
     # earlier spec saved in this run's private keyring must go too, or the
     # app would restore that session. Same best-effort clear as the
     # python-import group.
-    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */tv-romm.spec.ts || "$spec" == */gog-*.spec.ts || "$spec" == */tv-gog-*.spec.ts || "$spec" == */epic-*.spec.ts || "$spec" == */tv-epic*.spec.ts || "$spec" == */amazon-*.spec.ts || "$spec" == */tv-amazon*.spec.ts || "$spec" == */steam-*.spec.ts || "$spec" == */tv-steam*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
+    if [[ "$spec" == */backups-[cde].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */tv-romm.spec.ts || "$spec" == */gog-*.spec.ts || "$spec" == */tv-gog-*.spec.ts || "$spec" == */epic-*.spec.ts || "$spec" == */tv-epic*.spec.ts || "$spec" == */amazon-*.spec.ts || "$spec" == */tv-amazon*.spec.ts || "$spec" == */steam-*.spec.ts || "$spec" == */tv-steam*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
       secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
     fi
     # Every Steam spec starts with an empty Steam Web API key slot (a spec

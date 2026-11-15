@@ -75,6 +75,66 @@ export function anyLocal(plan: BackupPlan | null): boolean {
   return plan !== null && plan.use_local && plan.sources.some((s) => s.source === 'local');
 }
 
+// ── Without RomM (RommStorefront README, "Backups without RomM") ─────────
+
+/** A requested game a backup without RomM leaves out. Mirrors `grid_core::backup::plan::PlanUnavailable`. */
+export type PlanUnavailable = { rom_id: number; name: string; platform_name: string; reason: string };
+
+/**
+ * The two fields `plan_backup` adds to a plan made with RomM off. `api.ts`
+ * is frozen while the RomM storefront steps run in parallel, so they are
+ * typed here until it gains them (see `docs/romm-storefront-plan.md`).
+ */
+export type RommOffFields = { without_romm?: boolean; unavailable?: PlanUnavailable[] };
+
+/** An installed RomM game with no RomM link, as the caller names it: it has no pack identity, so it can't go. */
+export type UnlinkedGame = { title: string; platform: string };
+
+/** The plan was made with RomM off: every game comes from this computer. */
+export function withoutRomm(plan: BackupPlan | null): boolean {
+  return plan !== null && (plan as BackupPlan & RommOffFields).without_romm === true;
+}
+
+/** The lede while RomM is off. */
+export const ROMM_OFF_LEDE =
+  'RomM isn’t connected, so GRID copies the games installed on this computer, with the art and details it has, to the drive’s gridpack folder. Nothing downloads.';
+
+/** The lede for a plan: the RomM-off one, else `dialogLede`. */
+export function planLede(host: string, plan: BackupPlan | null): string {
+  return withoutRomm(plan) ? ROMM_OFF_LEDE : dialogLede(host, anyLocal(plan));
+}
+
+export type UnavailableRow = { key: string; name: string; sub: string };
+
+/**
+ * "Can’t backup without RomM · N": one line per game the backup leaves out,
+ * "<platform> · <reason>. Connect RomM to back it up from the server.", and
+ * for a game with no RomM link "<platform> · It isn’t linked to a RomM game.
+ * Link it to its RomM game first." `null` with RomM on, or when every game
+ * can go.
+ */
+export function unavailableRows(
+  plan: BackupPlan | null,
+  unlinked: readonly UnlinkedGame[] = [],
+): { title: string; rows: UnavailableRow[] } | null {
+  if (plan === null || !withoutRomm(plan)) return null;
+  const list = (plan as BackupPlan & RommOffFields).unavailable ?? [];
+  const line = (platform: string, text: string) => [platform.trim(), text].filter((p) => p !== '').join(' · ');
+  const rows: UnavailableRow[] = [
+    ...list.map((u) => ({
+      key: `rom-${u.rom_id}`,
+      name: u.name,
+      sub: line(u.platform_name, `${u.reason.trim().replace(/\.$/, '')}. Connect RomM to back it up from the server.`),
+    })),
+    ...unlinked.map((u, i) => ({
+      key: `unlinked-${i}`,
+      name: u.title,
+      sub: line(u.platform, 'It isn’t linked to a RomM game. Link it to its RomM game first.'),
+    })),
+  ];
+  return rows.length === 0 ? null : { title: `Can’t backup without RomM · ${rows.length}`, rows };
+}
+
 // ── Drives ───────────────────────────────────────────────────────────────
 
 /**
@@ -200,8 +260,12 @@ function openChoices(plan: BackupPlan): number {
  */
 export function localLine(plan: BackupPlan, host: string): { label: string; note: string } {
   const label = 'Copy installed games from this computer';
-  if (!plan.use_local) return { label, note: `Every game downloads from ${hostName(host)}` };
   const local = plan.sources.filter((s) => s.source === 'local').length;
+  if (withoutRomm(plan)) {
+    const what = local > 0 ? `${plural(local, 'game')} from this computer (${sizeText(plan.local_bytes)})` : 'No game here can be copied';
+    return { label, note: `${what} · without RomM, only installed copies` };
+  }
+  if (!plan.use_local) return { label, note: `Every game downloads from ${hostName(host)}` };
   const ask = openChoices(plan);
   const downloaded = Math.max(0, plan.sources.length - local - ask);
   const parts = [
@@ -342,6 +406,14 @@ function sameOs(a: readonly PackOs[], b: readonly PackOs[]): boolean {
  * own remarks ("Cemu is only for Linux", a refusal's reason).
  */
 export function emulatorLine(plan: BackupPlan): { text: string; notes: string[] } {
+  const line = emulatorText(plan);
+  return withoutRomm(plan) ? { ...line, text: `${line.text}${EMULATORS_ROMM_OFF}` } : line;
+}
+
+/** What the Emulators line adds with RomM off. */
+export const EMULATORS_ROMM_OFF = ' · from GRID’s catalog; builds hosted on your RomM server are skipped';
+
+function emulatorText(plan: BackupPlan): { text: string; notes: string[] } {
   const notes = plan.emulators.map((e) => e.note.trim()).filter((n) => n !== '');
   const writing = plan.emulators.filter((e) => !e.already && e.os.length > 0);
   if (writing.length === 0) {
@@ -376,6 +448,8 @@ function emulatorBytes(writing: readonly PlanEmulator[]): number | null {
  * has none).
  */
 export function firmwareLine(plan: BackupPlan): { text: string; disabled: boolean } {
+  // Firmware comes only from RomM: unticked and disabled while it is off.
+  if (withoutRomm(plan)) return { text: FIRMWARE_ROMM_OFF, disabled: true };
   if (plan.firmware_reason.trim() !== '') return { text: plan.firmware_reason, disabled: true };
   const sets = plan.firmware.filter((f) => !f.already);
   return {
@@ -383,6 +457,9 @@ export function firmwareLine(plan: BackupPlan): { text: string; disabled: boolea
     disabled: sets.length === 0,
   };
 }
+
+/** The Firmware line with RomM off. */
+export const FIRMWARE_ROMM_OFF = 'Needs RomM · skipped';
 
 /**
  * The optional "Make Windows games work offline" checkbox, or `null` when
