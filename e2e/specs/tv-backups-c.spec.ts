@@ -138,7 +138,7 @@ describe('tv-backups-c: Backup drives without a server', () => {
     });
   });
 
-  it('the installed copy is Play, and backing up says it needs a server (items 424, 455–456, 520)', async () => {
+  it('the installed copy is Play, and Backup all opens the Backup page with no server (items 424, 455–456, 520)', async () => {
     await tap(testId('tv-tab-library'));
     await waitTab('library');
     await waitText('tv-lib-name', PACK);
@@ -150,7 +150,8 @@ describe('tv-backups-c: Backup drives without a server', () => {
     expect(await text('tv-det-left')).toContain('Installed on this computer.');
     await key('Escape');
     await waitGone('tv-details');
-    // X on the Library's platform row: Backup all needs a server.
+    // X on the Library's platform row: Backup all opens the Backup page,
+    // which copies installed games without RomM (romm-storefront plan Step 2).
     const plat = 'r-platform:playstation-2';
     await $(byK(plat)).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the PlayStation 2 row never showed' });
     await key('Escape');
@@ -161,7 +162,9 @@ describe('tv-backups-c: Backup drives without a server', () => {
     await waitFocused(plat);
     expect(await hints()).toContain('X Backup all 1…');
     await key('x');
-    await waitNotice('Connect to a server to backup games.');
+    await $(testId('tv-backup-page')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await key('Escape');
+    await waitGone('tv-backup-page');
   });
 
   it('Remove from drive… asks, removes the game and goes back (item 434)', async () => {
