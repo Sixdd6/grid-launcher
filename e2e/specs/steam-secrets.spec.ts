@@ -15,6 +15,7 @@ import {
   steamSave,
   steamStatus,
   steamTest,
+  uninstallInSteam,
   waitSteam,
   waitSteamArgv,
 } from '../helpers/steamSetup.js';
@@ -136,7 +137,10 @@ describe('steam: the Web API key never leaks', () => {
 
   it('uninstalls Quiet Comet in Steam; it leaves the Library', async () => {
     await call('steam_open', { key: COMET, action: 'uninstall' });
-    await waitSteamArgv([`steam://uninstall/${GAMES.quietComet}`]);
+    await waitSteamArgv([`steam://nav/games/details/${GAMES.quietComet}`]);
+    await waitSteam((s) => s.steam?.uninstalling.includes(String(GAMES.quietComet)) ?? false, 'the uninstall watch never showed in the status');
+    // The user uninstalls it in Steam's Library (user decision 5).
+    uninstallInSteam(GAMES.quietComet);
     await waitSteam((s) => s.installed_count === 3, 'Quiet Comet never left', 40_000);
     await call('steam_open', { key: FERRY, action: 'validate' });
     await waitSteamArgv([`steam://validate/${GAMES.moonlitFerry}`]);

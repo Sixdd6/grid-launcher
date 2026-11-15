@@ -57,6 +57,8 @@ export type SteamCard = {
   key: 'ok' | 'none' | 'bad' | 'private';
   key_tail: string;
   accounts: { persona: string; steam_id: string; most_recent: boolean }[];
+  /** Store ids GRID watches for Steam to remove (after Uninstall in Steam). */
+  uninstalling: string[];
 };
 export type SteamStatus = {
   source: string;
@@ -216,6 +218,23 @@ export function writeManifest(
 }
 
 /** registry.vdf's RunningAppID. */
+/**
+ * The user uninstalls `appid` in Steam (Library › gear › Manage ›
+ * Uninstall): GRID only opens the game's Library page
+ * (`steam://nav/games/details/<id>`, user decision 5), so the spec stands in
+ * for the user. Runs the fake client's own uninstall at once: the manifest
+ * and the game folder go, in whichever library holds them.
+ */
+export function uninstallInSteam(appid: number): void {
+  const fake = path.join(here, '..', 'fake-tools', 'steam.mjs');
+  const r = spawnSync(process.execPath, [fake, '--_work', 'uninstall', String(appid)], {
+    env: { ...process.env, GRID_LAUNCHER_E2E_STEAM_ROOT: steamRoot(), FAKE_STEAM_UNINSTALL_MS: '0' },
+    stdio: 'ignore',
+    timeout: 10_000,
+  });
+  if (r.status !== 0) throw new Error(`the fake steam's uninstall of ${appid} failed`);
+}
+
 export function runningAppId(): number {
   const text = readFileSync(registryVdf(), 'utf8');
   return Number(/"RunningAppID"\s+"(\d+)"/.exec(text)?.[1] ?? 0);

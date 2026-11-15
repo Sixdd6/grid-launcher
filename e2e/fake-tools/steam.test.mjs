@@ -70,6 +70,7 @@ const field = (text, name) => new RegExp(`"${name}"\\s+"([^"]*)"`).exec(text)?.[
 test("links parse, with -silent only before rungameid", () => {
   assert.deepEqual(parseLink(["-silent", "steam://rungameid/620"]), { action: "rungameid", appid: 620, silent: true });
   assert.deepEqual(parseLink(["steam://install/3000040"]), { action: "install", appid: 3000040, silent: false });
+  assert.deepEqual(parseLink(["steam://nav/games/details/3000010"]), { action: "details", appid: 3000010, silent: false });
   assert.deepEqual(parseLink(["steam://nonsense"]), { action: "", appid: 0, silent: false });
 });
 
@@ -123,6 +124,13 @@ test(".fake-install-cancel writes no manifest; .fake-install-abort removes it ha
   const file = path.join(other.root, "steamapps", "appmanifest_3000050.acf");
   await waitFor(() => existsSync(file), "the manifest to appear");
   await waitFor(() => !existsSync(file), "the manifest to go");
+});
+
+test("nav/games/details (GRID's Uninstall in Steam…) records only", async () => {
+  const env = fresh();
+  run(env, ["steam://nav/games/details/3000010"]);
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.ok(existsSync(path.join(env.root, "steamapps", "appmanifest_3000010.acf")), "the manifest stays");
 });
 
 test("uninstall deletes the manifest and the game folder in its library", async () => {

@@ -19,8 +19,8 @@ import {
   testId,
   waitArgv,
 } from '../helpers/steam.js';
-import { ensureSteamKey } from '../helpers/steamSetup.js';
-import { waitForToast } from '../helpers/toasts.js';
+import { ensureSteamKey, steamStatus, uninstallInSteam } from '../helpers/steamSetup.js';
+import { dismissToasts, waitForToast } from '../helpers/toasts.js';
 
 /**
  * Stage `steam-library` (GameStores README, "Steam"; docs/stores-phase4-plan.md
@@ -31,8 +31,9 @@ import { waitForToast } from '../helpers/toasts.js';
  * "Installing in Steam N%" and the managed box; a Downloads row with a
  * disabled Cancel; "Installed by Steam" and the card), the Details lines and
  * buttons (no Game Settings), Play through Steam (Playing, "Running in
- * Steam", the session ends when the fake clears RunningAppID), Verify and
- * Uninstall in Steam, a cancelled Steam install, a game installed in Steam
+ * Steam", the session ends when the fake clears RunningAppID), Verify in
+ * Steam, Uninstall in Steam… (the Library page, the "Uninstall it in Steam"
+ * box and Show in Steam while GRID watches; user decision 5), a cancelled Steam install, a game installed in Steam
  * itself appearing within the background scan, and the Settings card's key
  * states (Remove key → Installed games only and the no-key panel). Steam is
  * the first store with no tool, no login window and installs its own client
@@ -195,23 +196,71 @@ describe('steam-library', () => {
     await closeWithEscape('store-details');
   });
 
-  it('Verify in Steam and Uninstall in Steam… open Steam; the game leaves Installed once Steam removes it', async () => {
+  it('Verify in Steam opens Steam', async () => {
     await openSteam('installed');
     const badge = await openSteamDetails('Old Brick Road');
     const appid = keyOfBadge(badge).split(':')[1];
     await $(testId('store-details-verify')).click();
     await waitForToast('Steam is verifying Old Brick Road’s files. Watch it in Steam.');
     await waitArgv(new RegExp(`steam://validate/${appid}\\b`));
-    // No confirm of GRID's: Steam asks in its own window.
-    await $(testId('store-details-uninstall')).click();
-    await expect($(testId('store-details-uninstall-confirm'))).not.toExist();
-    await waitForToast('Steam opened its uninstall window for Old Brick Road. It leaves the Library once Steam removes it.');
-    await waitArgv(new RegExp(`steam://uninstall/${appid}\\b`));
-    await $(testId('store-details')).waitForExist({ reverse: true, timeout: 10_000 }).catch(() => browser.keys('Escape'));
+    await closeWithEscape('store-details');
+  });
+
+  it('Uninstall in Steam… opens the game in Steam’s Library; the box and Show in Steam while GRID watches; Steam removes it', async () => {
+    // User decision 5 (2026-11-15): steam://nav/games/details, no confirm of
+    // GRID's, the card says where Steam's Uninstall is. Harbor of Bells (owned,
+    // installed above) goes back to Install in Steam once Steam removes it.
+    await dismissToasts();
     await openSteam('installed');
-    await browser.waitUntil(async () => !(await steamTitles()).includes('Old Brick Road'), {
-      timeout: 20_000,
-      timeoutMsg: 'Old Brick Road stayed in Installed after the fake removed its manifest',
+    const badge = await openSteamDetails(INSTALL);
+    const appid = keyOfBadge(badge).split(':')[1];
+    const uninstall = $(testId('store-details-uninstall'));
+    await expect(uninstall).toHaveText('Uninstall in Steam…');
+    expect(await uninstall.getAttribute('class')).toContain('secondary');
+    expect(await uninstall.getAttribute('class')).not.toContain('destructive');
+    await expect($(testId('store-details-uninstall-box'))).not.toExist();
+    await uninstall.click();
+    await expect($(testId('store-details-uninstall-confirm'))).not.toExist();
+    const card = `${INSTALL} is open in Steam’s Library. To uninstall it, select the gear icon, then Manage › Uninstall.`;
+    await waitForToast(card);
+    await waitArgv(new RegExp(`^steam://nav/games/details/${appid}$`));
+    expect(steamArgv().some((l) => l.includes('steam://uninstall/'))).toBe(false);
+    // While GRID watches: the box above Show in Steam; Play and Verify stay.
+    const box = $(testId('store-details-uninstall-box'));
+    await box.waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the "Uninstall it in Steam" box never showed' });
+    await expect(box).toHaveText(
+      new RegExp(`^Uninstall it in Steam\\s*Steam opened ${INSTALL} in its Library\\. Select the gear icon, then Manage › Uninstall\\. GRID removes it here when Steam is done\\.$`),
+    );
+    await expect(uninstall).toHaveText('Show in Steam');
+    expect(await uninstall.getAttribute('class')).toContain('secondary');
+    await expect($(testId('store-details-play'))).toHaveText('Play');
+    await expect($(testId('store-details-verify'))).toHaveText('Verify in Steam');
+    expect((await steamStatus()).steam.uninstalling).toEqual([appid]);
+    // Show in Steam: the page and the card again, no second watch.
+    await dismissToasts();
+    await uninstall.click();
+    await waitForToast(card);
+    await browser.waitUntil(async () => steamArgv().filter((l) => l === `steam://nav/games/details/${appid}`).length === 2, {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Show in Steam never opened the Library page again',
+    });
+    expect((await steamStatus()).steam.uninstalling).toEqual([appid]);
+    // The user uninstalls it in Steam: the uninstalled card, Install in Steam, no box.
+    uninstallInSteam(Number(appid));
+    await waitForToast(`${INSTALL} uninstalled`, { timeout: 15_000 });
+    await browser.waitUntil(async () => (await $(testId('store-details-install')).isExisting()), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Install in Steam never came back',
+    });
+    await expect($(testId('store-details-install'))).toHaveText('Install in Steam');
+    await expect($(testId('store-details-uninstall-box'))).not.toExist();
+    await expect($(testId('store-details-uninstall'))).not.toExist();
+    expect((await steamStatus()).steam.uninstalling).toEqual([]);
+    await closeWithEscape('store-details');
+    await openSteam('installed');
+    await browser.waitUntil(async () => !(await steamTitles()).includes(INSTALL), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: `${INSTALL} stayed in Installed after Steam removed it`,
     });
   });
 

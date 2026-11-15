@@ -2,10 +2,10 @@
 import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { connectPad, focused, hints, key, waitFocused, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, pageErrors, testId, text, typeKeys, waitGone, waitOskClosed, waitText } from '../helpers/tvDetails.js';
-import { byK, confirmDialog, dlLines, focusOn, listOptions, pageRow, tap, tapK, waitNotice } from '../helpers/tvBackups.js';
+import { byK, confirmDialog, dlLines, focusOn, listOptions, notices, pageRow, tap, tapK, waitNotice } from '../helpers/tvBackups.js';
 import { MAIN_WINDOW } from '../helpers/gogLogin.js';
-import { setMarker, STEAM, waitArgv } from '../helpers/steam.js';
-import { ensureSteamKey } from '../helpers/steamSetup.js';
+import { setMarker, STEAM, steamArgv, waitArgv } from '../helpers/steam.js';
+import { ensureSteamKey, steamStatus, uninstallInSteam } from '../helpers/steamSetup.js';
 
 /**
  * Stage `tv-steam` (docs/stores-phase4-plan.md package D, E2E plan and Parity
@@ -16,7 +16,8 @@ import { ensureSteamKey } from '../helpers/steamSetup.js';
  * TV mode), the game page of a game Steam installs (the disabled "Installing
  * in Steam · N%", its A line and the Managed by Steam box), the Downloads
  * A-list with no Cancel, an installed game's page (Verify / Uninstall in
- * Steam, no Game settings), the Playing page with no Stop game, then
+ * Steam, no Game settings), Uninstall in Steam… (the Library page, Show in
+ * Steam and the box while GRID watches; user decision 5), the Playing page with no Stop game, then
  * Settings › Stores › Steam: the account sheet, "Enter a SteamID64…" and
  * the masked key through the on-screen keyboard (never the key in clear),
  * Test results as cards, Disconnect… (confirmed) and Connect Steam. No login
@@ -291,6 +292,63 @@ describe('tv-steam: Steam in TV mode', () => {
       timeout: 20_000,
       timeoutMsg: 'the Playing page stayed after Steam ended the game',
     });
+    await key('Escape');
+    await waitGone('tv-store-details');
+  });
+
+  it('Uninstall in Steam… (not red, no confirm) opens the game in Steam: Show in Steam keeps focus with the box; Steam removes it and focus lands on Install in Steam', async () => {
+    // User decision 5 (2026-11-15): steam://nav/games/details over TV mode.
+    // Harbor of Bells (owned, installed above) goes back to Install in Steam.
+    await tap(testId('tv-tab-library'));
+    await tap(testId('tv-lib-rail-store-steam-installed'));
+    const k = await coverK(INSTALL);
+    await focusOn(byK(k));
+    await key('Enter');
+    await $(testId('tv-store-details')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await waitText('tv-det-title', INSTALL);
+    expect(await buttons()).toEqual(['Play', 'Verify in Steam', 'Uninstall in Steam…']);
+    expect(await $(testId('tv-store-det-uninstall')).getAttribute('class')).not.toContain('dng');
+    expect(await $(testId('tv-store-uninstall-box')).isExisting()).toBe(false);
+    const card = `${INSTALL} is open in Steam | Select the gear icon, then Manage › Uninstall.`;
+    const cards = async () => (await notices()).filter((n) => n === card).length;
+    await focusOn(byK('sd-uninstall'));
+    await key('Enter');
+    await waitNotice(card, 10_000);
+    expect(await $(testId('tv-confirm')).isExisting()).toBe(false);
+    const link = await waitArgv(/^steam:\/\/nav\/games\/details\/\d+$/);
+    const appid = link.split('/').pop()!;
+    expect(steamArgv().some((l) => l.includes('steam://uninstall/'))).toBe(false);
+    // While GRID watches: Show in Steam in the same place, focus on it, and the box.
+    await browser.waitUntil(async () => (await buttons())[2] === 'Show in Steam', {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the button never read Show in Steam',
+    });
+    expect(await buttons()).toEqual(['Play', 'Verify in Steam', 'Show in Steam']);
+    await waitFocused('sd-uninstall', 'focus left Show in Steam');
+    expect(await text('tv-store-uninstall-box')).toBe(
+      `Uninstall it in Steam. Steam opened ${INSTALL} in its Library. Select the gear icon, then Manage › Uninstall. GRID removes it here when Steam is done.`,
+    );
+    expect((await steamStatus()).steam.uninstalling).toEqual([appid]);
+    // A on Show in Steam: the page and the card again, no second watch.
+    await key('Enter');
+    await browser.waitUntil(async () => (await cards()) === 2, { timeout: 10_000, timeoutMsg: 'Show in Steam never showed the card again' });
+    await browser.waitUntil(async () => steamArgv().filter((l) => l === `steam://nav/games/details/${appid}`).length === 2, {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Show in Steam never opened the Library page again',
+    });
+    expect((await steamStatus()).steam.uninstalling).toEqual([appid]);
+    await waitFocused('sd-uninstall');
+    // The user uninstalls it in Steam: the card, Install in Steam, focus on it.
+    uninstallInSteam(Number(appid));
+    await waitNotice(`${INSTALL} uninstalled`, 15_000);
+    await browser.waitUntil(async () => (await buttons())[0] === 'Install in Steam', {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Install in Steam never came back',
+    });
+    expect(await buttons()).toEqual(['Install in Steam']);
+    await waitFocused('sd-install', 'focus never moved from Show in Steam to Install in Steam');
+    expect(await $(testId('tv-store-uninstall-box')).isExisting()).toBe(false);
+    expect((await steamStatus()).steam.uninstalling).toEqual([]);
     await key('Escape');
     await waitGone('tv-store-details');
   });

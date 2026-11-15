@@ -12,8 +12,19 @@
 //                                      library with StateFlags 1026 and a
 //                                      growing BytesDownloaded over ~6 s,
 //                                      then StateFlags 4 and the game folder
-//   steam steam://uninstall/<id>       deletes the manifest and the game
-//                                      folder (in whichever library holds it)
+//   steam steam://nav/games/details/<id>
+//                                      the game's page in Steam's Library
+//                                      (GRID's Uninstall in Steam…, user
+//                                      decision 5): records only. The spec
+//                                      stands in for the user's gear ›
+//                                      Manage › Uninstall with
+//                                      `--_work uninstall <id>` below
+//                                      (helpers/steamSetup.ts
+//                                      `uninstallInSteam`)
+//   steam steam://uninstall/<id>       Steam's own uninstall (GRID no longer
+//                                      sends it): deletes the manifest and
+//                                      the game folder (in whichever library
+//                                      holds it)
 //   steam steam://validate/<id>        records only
 //   steam -silent steam://rungameid/<id>
 //                                      the game starts: LastPlayed in its
@@ -64,8 +75,9 @@ const num = (value, fallback) => {
 export function parseLink(argv) {
   const silent = argv.includes("-silent");
   const link = argv.find((a) => a.startsWith("steam://")) ?? "";
-  const m = /^steam:\/\/(install|uninstall|validate|rungameid)\/(\d+)$/.exec(link);
-  return m ? { action: m[1], appid: Number(m[2]), silent } : { action: "", appid: 0, silent };
+  const m = /^steam:\/\/(install|uninstall|validate|rungameid|nav\/games\/details)\/(\d+)$/.exec(link);
+  if (!m) return { action: "", appid: 0, silent };
+  return { action: m[1] === "nav/games/details" ? "details" : m[1], appid: Number(m[2]), silent };
 }
 
 export function steamRoot(env = process.env) {
@@ -254,7 +266,7 @@ async function main(argv, env = process.env) {
   process.stdout.write(`[fake steam] session ${FAKE_KEY}\n`);
   process.stderr.write(`[fake steam] debug ${FAKE_KEY}\n`);
   const { action, appid } = parseLink(argv);
-  if (!action || action === "validate") return 0;
+  if (!action || action === "validate" || action === "details") return 0;
   const child = spawn(process.execPath, [self, "--_work", action, String(appid)], {
     detached: true,
     stdio: "ignore",
