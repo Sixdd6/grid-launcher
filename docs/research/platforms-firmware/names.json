@@ -1,0 +1,1280 @@
+{
+ "3do": {
+  "in_ups": true,
+  "name": "3DO Interactive Multiplayer",
+  "src": "igdb",
+  "abbr": "3DO",
+  "igdb_alt": "3DO",
+  "others": [
+   "3DO",
+   "3DO",
+   "3DO",
+   "3DO Interactive Multiplayer",
+   "3DO Interactive Multiplayer",
+   "3DO",
+   "3DO"
+  ]
+ },
+ "3ds": {
+  "in_ups": true,
+  "name": "Nintendo 3DS",
+  "src": "igdb",
+  "abbr": "3DS",
+  "igdb_alt": "3DS",
+  "others": [
+   "Nintendo 3DS",
+   "Nintendo 3DS",
+   "Nintendo 3DS",
+   "Nintendo 3DS",
+   "Nintendo 3DS",
+   "Nintendo 3DS"
+  ]
+ },
+ "64dd": {
+  "in_ups": true,
+  "name": "Nintendo 64DD",
+  "src": "igdb",
+  "abbr": "64DD",
+  "igdb_alt": "Nintendo 64DD",
+  "others": [
+   "Nintendo 64DD",
+   "Nintendo 64DD",
+   "Nintendo 64DD"
+  ]
+ },
+ "acpc": {
+  "in_ups": true,
+  "name": "Amstrad CPC",
+  "src": "igdb",
+  "abbr": "ACPC",
+  "igdb_alt": "Colour Personal Computer",
+  "others": [
+   "CPC",
+   "Amstrad CPC",
+   "Amstrad CPC",
+   "Amstrad CPC",
+   "Amstrad CPC",
+   "Amstrad CPC",
+   "Amstrad CPC"
+  ]
+ },
+ "amiga": {
+  "in_ups": true,
+  "name": "Amiga",
+  "src": "igdb",
+  "abbr": "Amiga",
+  "igdb_alt": "Commodore Amiga",
+  "others": [
+   "Amiga",
+   "Amiga",
+   "Commodore Amiga",
+   "Commodore Amiga",
+   "Amiga",
+   "Amiga"
+  ]
+ },
+ "amiga-cd32": {
+  "in_ups": true,
+  "name": "Amiga CD32",
+  "src": "igdb",
+  "abbr": "Amiga CD32",
+  "igdb_alt": "",
+  "others": [
+   "Amiga CD32",
+   "Amiga CD32",
+   "Commodore Amiga CD32",
+   "Commodore CD32",
+   "Amiga CD32",
+   "Amiga CD32"
+  ]
+ },
+ "arcade": {
+  "in_ups": true,
+  "name": "Arcade",
+  "src": "igdb",
+  "abbr": "Arcade",
+  "igdb_alt": "",
+  "others": [
+   "Arcade",
+   "Arcade",
+   "Arcade",
+   "Arcade",
+   "Arcade",
+   "Arcade",
+   "Arcade"
+  ]
+ },
+ "arduboy": {
+  "in_ups": true,
+  "name": "Arduboy",
+  "src": "igdb",
+  "abbr": "Arduboy",
+  "igdb_alt": "",
+  "others": [
+   "Arduboy",
+   "Arduboy",
+   "Arduboy",
+   "Arduboy"
+  ]
+ },
+ "atari-st": {
+  "in_ups": true,
+  "name": "Atari ST/STE",
+  "src": "igdb",
+  "abbr": "Atari-ST",
+  "igdb_alt": "",
+  "others": [
+   "Atari ST",
+   "Atari ST",
+   "Atari ST",
+   "Atari ST/STE",
+   "Atari ST",
+   "Atari ST"
+  ]
+ },
+ "atari2600": {
+  "in_ups": true,
+  "name": "Atari 2600",
+  "src": "igdb",
+  "abbr": "Atari2600",
+  "igdb_alt": "Atari VCS",
+  "others": [
+   "Atari 2600",
+   "Atari 2600",
+   "Atari 2600",
+   "Atari 2600",
+   "Atari 2600",
+   "Atari 2600",
+   "Atari 2600"
+  ]
+ },
+ "atari5200": {
+  "in_ups": true,
+  "name": "Atari 5200",
+  "src": "igdb",
+  "abbr": "Atari5200",
+  "igdb_alt": "Atari 5200 SuperSystem",
+  "others": [
+   "Atari 5200",
+   "Atari 5200",
+   "Atari 5200",
+   "Atari 5200",
+   "Atari 5200",
+   "Atari 5200"
+  ]
+ },
+ "atari7800": {
+  "in_ups": true,
+  "name": "Atari 7800",
+  "src": "igdb",
+  "abbr": "Atari7800",
+  "igdb_alt": "Atari 7800 ProSystem",
+  "others": [
+   "Atari 7800",
+   "Atari 7800",
+   "Atari 7800",
+   "Atari 7800",
+   "Atari 7800",
+   "Atari 7800",
+   "Atari 7800"
+  ]
+ },
+ "c64": {
+  "in_ups": true,
+  "name": "Commodore C64/128/MAX",
+  "src": "igdb",
+  "abbr": "C64",
+  "igdb_alt": "C64/C128/MAX",
+  "others": [
+   "Commodore 64",
+   "Commodore 64",
+   "Commodore 64",
+   "Commodore MAX",
+   "Commodore 64",
+   "Commodore 64"
+  ]
+ },
+ "colecovision": {
+  "in_ups": true,
+  "name": "ColecoVision",
+  "src": "igdb",
+  "abbr": "colecovision",
+  "igdb_alt": "Coleco",
+  "others": [
+   "Colecovision",
+   "ColecoVision",
+   "ColecoVision",
+   "ColecoVision",
+   "ColecoVision",
+   "Colecovision",
+   "ColecoVision"
+  ]
+ },
+ "cps1": {
+  "in_ups": true,
+  "name": "Capcom Play System",
+  "src": "ss",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": []
+ },
+ "cps2": {
+  "in_ups": true,
+  "name": "Capcom Play System 2",
+  "src": "ss",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": []
+ },
+ "cps3": {
+  "in_ups": true,
+  "name": "Capcom Play System 3",
+  "src": "ss",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": []
+ },
+ "dc": {
+  "in_ups": true,
+  "name": "Dreamcast",
+  "src": "igdb",
+  "abbr": "DC",
+  "igdb_alt": "DC",
+  "others": [
+   "Dreamcast",
+   "Dreamcast",
+   "Dreamcast",
+   "Sega Dreamcast",
+   "Sega Dreamcast",
+   "Sega Dreamcast",
+   "Dreamcast"
+  ]
+ },
+ "dos": {
+  "in_ups": true,
+  "name": "DOS",
+  "src": "igdb",
+  "abbr": "DOS",
+  "igdb_alt": "PC DOS",
+  "others": [
+   "PC Dos",
+   "DOS",
+   "MS-DOS",
+   "Microsoft DOS"
+  ]
+ },
+ "famicom": {
+  "in_ups": true,
+  "name": "Family Computer",
+  "src": "igdb",
+  "abbr": "famicom",
+  "igdb_alt": "Famicom",
+  "others": [
+   "Famicom",
+   "Family Computer",
+   "Family Computer",
+   "Nintendo Entertainment System",
+   "Nintendo Entertainment System"
+  ]
+ },
+ "fds": {
+  "in_ups": true,
+  "name": "Family Computer Disk System",
+  "src": "igdb",
+  "abbr": "fds",
+  "igdb_alt": "Famicom Disk System, FDS",
+  "others": [
+   "Famicom",
+   "Famicom Disk System",
+   "Nintendo Famicom Disk System",
+   "Nintendo Famicom Disk System",
+   "Famicom Disk System"
+  ]
+ },
+ "gamegear": {
+  "in_ups": true,
+  "name": "Sega Game Gear",
+  "src": "igdb",
+  "abbr": "Game Gear",
+  "igdb_alt": "GG",
+  "others": [
+   "Game Gear",
+   "Game Gear",
+   "Game Gear",
+   "Sega Game Gear",
+   "Sega Game Gear",
+   "Sega Game Gear",
+   "Sega Game Gear"
+  ]
+ },
+ "gb": {
+  "in_ups": true,
+  "name": "Game Boy",
+  "src": "igdb",
+  "abbr": "Game Boy",
+  "igdb_alt": "GB",
+  "others": [
+   "Game Boy",
+   "Game Boy",
+   "Game Boy",
+   "Nintendo Game Boy",
+   "Nintendo GameBoy",
+   "Nintendo Game Boy",
+   "Game Boy"
+  ]
+ },
+ "gba": {
+  "in_ups": true,
+  "name": "Game Boy Advance",
+  "src": "igdb",
+  "abbr": "GBA",
+  "igdb_alt": "GBA",
+  "others": [
+   "Game Boy Advance",
+   "Game Boy Advance",
+   "Game Boy Advance",
+   "Nintendo Game Boy Advance",
+   "Nintendo Game Boy Advance",
+   "Nintendo Game Boy Advance",
+   "Game Boy Advance"
+  ]
+ },
+ "gbc": {
+  "in_ups": true,
+  "name": "Game Boy Color",
+  "src": "igdb",
+  "abbr": "GBC",
+  "igdb_alt": "GBC",
+  "others": [
+   "Game Boy Color",
+   "Game Boy Color",
+   "Game Boy Color",
+   "Nintendo Game Boy Color",
+   "Nintendo Game Boy Color",
+   "Nintendo Game Boy Color",
+   "Game Boy Color"
+  ]
+ },
+ "genesis": {
+  "in_ups": true,
+  "name": "Sega Mega Drive/Genesis",
+  "src": "igdb",
+  "abbr": "Genesis/MegaDrive",
+  "igdb_alt": "Sega Genesis",
+  "others": [
+   "Megadrive",
+   "Genesis/Mega Drive",
+   "Genesis/Mega Drive",
+   "Sega Genesis",
+   "Sega Mega Drive / Genesis",
+   "Sega Genesis",
+   "Sega Mega Drive/Genesis"
+  ]
+ },
+ "intellivision": {
+  "in_ups": true,
+  "name": "Intellivision",
+  "src": "igdb",
+  "abbr": "intellivision",
+  "igdb_alt": "",
+  "others": [
+   "Intellivision",
+   "Intellivision",
+   "Intellivision",
+   "Mattel Intellivision",
+   "Mattel Intellivision",
+   "Intellivision",
+   "Intellivision"
+  ]
+ },
+ "jaguar": {
+  "in_ups": true,
+  "name": "Atari Jaguar",
+  "src": "igdb",
+  "abbr": "Jaguar",
+  "igdb_alt": "",
+  "others": [
+   "Jaguar",
+   "Jaguar",
+   "Jaguar",
+   "Atari Jaguar",
+   "Atari Jaguar",
+   "Atari Jaguar",
+   "Atari Jaguar"
+  ]
+ },
+ "lynx": {
+  "in_ups": true,
+  "name": "Atari Lynx",
+  "src": "igdb",
+  "abbr": "Lynx",
+  "igdb_alt": "",
+  "others": [
+   "Lynx",
+   "Lynx",
+   "Lynx",
+   "Atari Lynx",
+   "Atari Lynx",
+   "Atari Lynx",
+   "Atari Lynx"
+  ]
+ },
+ "model1": {
+  "in_ups": true,
+  "name": "Sega Model 1",
+  "src": "lb",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": []
+ },
+ "model2": {
+  "in_ups": true,
+  "name": "Sega Model 2",
+  "src": "ss",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": [
+   "Sega Model 2"
+  ]
+ },
+ "model3": {
+  "in_ups": true,
+  "name": "Sega Model 3",
+  "src": "ss",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": [
+   "Sega Model 3"
+  ]
+ },
+ "msx": {
+  "in_ups": true,
+  "name": "MSX",
+  "src": "igdb",
+  "abbr": "MSX",
+  "igdb_alt": "",
+  "others": [
+   "MSX",
+   "MSX",
+   "MSX",
+   "Microsoft MSX",
+   "MSX",
+   "MSX",
+   "MSX"
+  ]
+ },
+ "msx2": {
+  "in_ups": true,
+  "name": "MSX2",
+  "src": "igdb",
+  "abbr": "MSX2",
+  "igdb_alt": "",
+  "others": [
+   "MSX2",
+   "MSX2",
+   "Microsoft MSX2",
+   "MSX 2"
+  ]
+ },
+ "msx2plus": {
+  "in_ups": true,
+  "name": "Microsoft MSX2+",
+  "src": "ss",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": [
+   "Microsoft MSX2+"
+  ]
+ },
+ "n64": {
+  "in_ups": true,
+  "name": "Nintendo 64",
+  "src": "igdb",
+  "abbr": "N64",
+  "igdb_alt": "N64",
+  "others": [
+   "Nintendo 64",
+   "Nintendo 64",
+   "Nintendo 64",
+   "Nintendo 64",
+   "Nintendo 64",
+   "Nintendo 64",
+   "Nintendo 64"
+  ]
+ },
+ "nds": {
+  "in_ups": true,
+  "name": "Nintendo DS",
+  "src": "igdb",
+  "abbr": "NDS",
+  "igdb_alt": "NDS",
+  "others": [
+   "Nintendo DS",
+   "Nintendo DS",
+   "Nintendo DS",
+   "Nintendo DS",
+   "Nintendo DS",
+   "Nintendo DS",
+   "Nintendo DS"
+  ]
+ },
+ "neo-geo-cd": {
+  "in_ups": true,
+  "name": "Neo Geo CD",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "NGCD",
+  "others": [
+   "Neo-Geo CD",
+   "Neo Geo CD",
+   "Neo Geo CD",
+   "SNK Neo Geo CD",
+   "Neo Geo CD",
+   "Neo Geo CD",
+   "Neo Geo CD"
+  ]
+ },
+ "neo-geo-pocket": {
+  "in_ups": true,
+  "name": "Neo Geo Pocket",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "NGP",
+  "others": [
+   "Neo-Geo Pocket",
+   "Neo Geo Pocket",
+   "Neo Geo Pocket",
+   "SNK Neo Geo Pocket",
+   "Neo Geo Pocket",
+   "Neo Geo Pocket",
+   "Neo Geo Pocket"
+  ]
+ },
+ "neo-geo-pocket-color": {
+  "in_ups": true,
+  "name": "Neo Geo Pocket Color",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "NGPC",
+  "others": [
+   "Neo-Geo Pocket Color",
+   "Neo Geo Pocket Color",
+   "Neo Geo Pocket Color",
+   "SNK Neo Geo Pocket Color",
+   "Neo Geo Pocket Color",
+   "Neo Geo Pocket Color"
+  ]
+ },
+ "neogeoaes": {
+  "in_ups": true,
+  "name": "Neo Geo AES",
+  "src": "igdb",
+  "abbr": "neogeoaes",
+  "igdb_alt": "AES",
+  "others": [
+   "Neo-Geo",
+   "Neo Geo",
+   "Neo Geo AES",
+   "SNK Neo Geo AES",
+   "Neo Geo",
+   "Neo Geo AES",
+   "Neo Geo"
+  ]
+ },
+ "neogeomvs": {
+  "in_ups": true,
+  "name": "Neo Geo MVS",
+  "src": "igdb",
+  "abbr": "neogeomvs",
+  "igdb_alt": "Neo Geo Multi Video System",
+  "others": [
+   "Neo-Geo MVS",
+   "Neo Geo",
+   "Neo Geo MVS",
+   "SNK Neo Geo MVS",
+   "Neo Geo MVS"
+  ]
+ },
+ "nes": {
+  "in_ups": true,
+  "name": "Nintendo Entertainment System",
+  "src": "igdb",
+  "abbr": "NES",
+  "igdb_alt": "NES",
+  "others": [
+   "NES",
+   "NES",
+   "NES",
+   "Nintendo Entertainment System",
+   "Nintendo Entertainment System",
+   "Nintendo Entertainment System (NES)",
+   "NES"
+  ]
+ },
+ "new-nintendo-3ds": {
+  "in_ups": true,
+  "name": "New Nintendo 3DS",
+  "src": "igdb",
+  "abbr": "New 3DS",
+  "igdb_alt": "n3DS",
+  "others": [
+   "Nintendo 3DS",
+   "New Nintendo 3DS",
+   "Nintendo New 3DS"
+  ]
+ },
+ "ngc": {
+  "in_ups": true,
+  "name": "Nintendo GameCube",
+  "src": "igdb",
+  "abbr": "NGC",
+  "igdb_alt": "GCN",
+  "others": [
+   "GameCube",
+   "GameCube",
+   "GameCube",
+   "Nintendo GameCube",
+   "Nintendo GameCube",
+   "Nintendo GameCube",
+   "Nintendo GameCube"
+  ]
+ },
+ "odyssey-2": {
+  "in_ups": true,
+  "name": "Odyssey 2 / Videopac G7000",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "Magnavox Odyssey\u00b2",
+  "others": [
+   "Videopac G7000",
+   "Odyssey 2",
+   "Odyssey 2",
+   "Magnavox Odyssey 2",
+   "Magnavox Odyssey 2",
+   "Magnavox Odyssey 2",
+   "Odyssey 2"
+  ]
+ },
+ "pc-8800-series": {
+  "in_ups": true,
+  "name": "PC-8800 Series",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": [
+   "NEC PC-8801",
+   "PC-8800 Series",
+   "PC-8800 Series",
+   "NEC PC-8801",
+   "NEC PC-8800",
+   "PC-88",
+   "NEC PC-88"
+  ]
+ },
+ "pc-fx": {
+  "in_ups": true,
+  "name": "PC-FX",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": [
+   "PC-FX",
+   "PC-FX",
+   "PC-FX",
+   "NEC PC-FX",
+   "PC-FX",
+   "NEC PC-FX"
+  ]
+ },
+ "pico": {
+  "in_ups": true,
+  "name": "Pico-8",
+  "src": "ss",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": [
+   "PICO",
+   "PICO-8",
+   "PICO-8"
+  ]
+ },
+ "pico-8": {
+  "in_ups": false,
+  "name": "Pico 8",
+  "src": "titlecase",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": []
+ },
+ "pico8": {
+  "in_ups": false,
+  "name": "Pico8",
+  "src": "titlecase",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": []
+ },
+ "pokemon-mini": {
+  "in_ups": true,
+  "name": "Pok\u00e9mon mini",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": [
+   "Pok\u00e9mon mini",
+   "Pok\u00e9mon Mini",
+   "Pok\u00e9mon Mini",
+   "Nintendo Pokemon Mini",
+   "Nintendo Pokemon Mini",
+   "Nintendo Pok\u00e9mon Mini"
+  ]
+ },
+ "ps2": {
+  "in_ups": true,
+  "name": "PlayStation 2",
+  "src": "igdb",
+  "abbr": "PS2",
+  "igdb_alt": "PS2",
+  "others": [
+   "Playstation 2",
+   "PlayStation 2",
+   "PlayStation 2",
+   "Sony Playstation 2",
+   "Sony PlayStation 2",
+   "Sony Playstation 2",
+   "PlayStation 2"
+  ]
+ },
+ "ps3": {
+  "in_ups": true,
+  "name": "PlayStation 3",
+  "src": "igdb",
+  "abbr": "PS3",
+  "igdb_alt": "PS3",
+  "others": [
+   "Playstation 3",
+   "PlayStation 3",
+   "Sony Playstation 3",
+   "Sony Playstation 3",
+   "Sony Playstation 3",
+   "PlayStation 3"
+  ]
+ },
+ "ps4": {
+  "in_ups": true,
+  "name": "PlayStation 4",
+  "src": "igdb",
+  "abbr": "PS4",
+  "igdb_alt": "PS4",
+  "others": [
+   "Playstation 4",
+   "PlayStation 4",
+   "Sony Playstation 4",
+   "Sony Playstation 4",
+   "Sony Playstation 4",
+   "PlayStation 4"
+  ]
+ },
+ "ps4--1": {
+  "in_ups": false,
+  "name": "Ps4  1",
+  "src": "titlecase",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": []
+ },
+ "ps5": {
+  "in_ups": true,
+  "name": "PlayStation 5",
+  "src": "igdb",
+  "abbr": "PS5",
+  "igdb_alt": "PS5",
+  "others": [
+   "Playstation 5",
+   "PlayStation 5",
+   "Sony Playstation 5",
+   "Sony Playstation 5",
+   "Sony Playstation 5",
+   "PlayStation 5"
+  ]
+ },
+ "psp": {
+  "in_ups": true,
+  "name": "PlayStation Portable",
+  "src": "igdb",
+  "abbr": "PSP",
+  "igdb_alt": "PSP",
+  "others": [
+   "PSP",
+   "PSP",
+   "PSP",
+   "Sony PSP",
+   "Sony Playstation Portable",
+   "Sony Playstation Portable",
+   "PlayStation Portable"
+  ]
+ },
+ "psvita": {
+  "in_ups": true,
+  "name": "PlayStation Vita",
+  "src": "igdb",
+  "abbr": "Vita",
+  "igdb_alt": "PS Vita",
+  "others": [
+   "PS Vita",
+   "PS Vita",
+   "Sony Playstation Vita",
+   "Sony PlayStation Vita",
+   "Sony Playstation Vita",
+   "PlayStation Vita"
+  ]
+ },
+ "psx": {
+  "in_ups": true,
+  "name": "PlayStation",
+  "src": "igdb",
+  "abbr": "PS1",
+  "igdb_alt": "PSX, PSOne, PS",
+  "others": [
+   "Playstation",
+   "PlayStation",
+   "PlayStation",
+   "Sony Playstation",
+   "Sony PlayStation",
+   "Sony Playstation",
+   "PlayStation"
+  ]
+ },
+ "satellaview": {
+  "in_ups": true,
+  "name": "Satellaview",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": [
+   "Satellaview",
+   "Nintendo Satellaview"
+  ]
+ },
+ "saturn": {
+  "in_ups": true,
+  "name": "Sega Saturn",
+  "src": "igdb",
+  "abbr": "Saturn",
+  "igdb_alt": "JVC Saturn, Hi-Saturn, Samsung Saturn, V-Saturn",
+  "others": [
+   "Saturn",
+   "SEGA Saturn",
+   "Sega Saturn",
+   "Sega Saturn",
+   "Sega Saturn",
+   "Sega Saturn",
+   "Sega Saturn"
+  ]
+ },
+ "sc3000": {
+  "in_ups": true,
+  "name": "Sega SC-3000",
+  "src": "lb",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": [
+   "Sega Computer 3000"
+  ]
+ },
+ "scummvm": {
+  "in_ups": true,
+  "name": "ScummVM",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": [
+   "ScummVM",
+   "ScummVM"
+  ]
+ },
+ "sega-pico": {
+  "in_ups": true,
+  "name": "Sega Pico",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "Kids Computer Pico",
+  "others": [
+   "Sega Pico",
+   "SEGA Pico",
+   "Sega Pico",
+   "Sega Pico",
+   "Sega Pico",
+   "Sega Pico"
+  ]
+ },
+ "sega32": {
+  "in_ups": true,
+  "name": "Sega 32X",
+  "src": "igdb",
+  "abbr": "Sega32",
+  "igdb_alt": "",
+  "others": [
+   "Megadrive 32X",
+   "SEGA 32X",
+   "SEGA 32X",
+   "Sega 32X",
+   "Sega 32X",
+   "Sega 32X",
+   "Sega 32X"
+  ]
+ },
+ "segacd": {
+  "in_ups": true,
+  "name": "Sega CD",
+  "src": "igdb",
+  "abbr": "Sega CD",
+  "igdb_alt": "Mega CD",
+  "others": [
+   "Mega-CD",
+   "SEGA CD",
+   "SEGA CD",
+   "Sega CD",
+   "Sega Mega CD / Sega CD",
+   "Sega CD",
+   "Sega CD"
+  ]
+ },
+ "sfam": {
+  "in_ups": true,
+  "name": "Super Famicom",
+  "src": "igdb",
+  "abbr": "SFAM",
+  "igdb_alt": "SFC",
+  "others": [
+   "Super Famicom",
+   "Super Famicom",
+   "Super Famicom",
+   "Super Nintendo Entertainment System",
+   "Super Famicom"
+  ]
+ },
+ "sg-1000": {
+  "in_ups": false,
+  "name": "SG-1000",
+  "src": "igdb-ver",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": []
+ },
+ "sg1000": {
+  "in_ups": true,
+  "name": "SG-1000",
+  "src": "igdb",
+  "abbr": "sg1000",
+  "igdb_alt": "Sega Game 1000",
+  "others": [
+   "SG-1000",
+   "SG-1000",
+   "SG-1000",
+   "Sega SG-1000",
+   "SG-1000",
+   "SEGA SG-1000",
+   "SG-1000"
+  ]
+ },
+ "sharp-x68000": {
+  "in_ups": true,
+  "name": "Sharp X68000",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": [
+   "Sharp X68000",
+   "Sharp X68000",
+   "Sharp X68000",
+   "Sharp X68000",
+   "Sharp X68000",
+   "Sharp X68000"
+  ]
+ },
+ "sms": {
+  "in_ups": true,
+  "name": "Sega Master System/Mark III",
+  "src": "igdb",
+  "abbr": "SMS",
+  "igdb_alt": "SMS, Mark III",
+  "others": [
+   "Master System",
+   "SEGA Master System",
+   "SEGA Master System",
+   "Sega Master System",
+   "Sega Master System",
+   "Sega Master System",
+   "Sega Master System"
+  ]
+ },
+ "snes": {
+  "in_ups": true,
+  "name": "Super Nintendo Entertainment System",
+  "src": "igdb",
+  "abbr": "SNES",
+  "igdb_alt": "SNES, Super Nintendo",
+  "others": [
+   "Super Nintendo",
+   "SNES",
+   "SNES",
+   "Super Nintendo Entertainment System",
+   "Super Nintendo Entertainment System",
+   "Super Nintendo (SNES)",
+   "Super Nintendo"
+  ]
+ },
+ "sufami-turbo": {
+  "in_ups": true,
+  "name": "Sufami Turbo",
+  "src": "ss",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": []
+ },
+ "supergrafx": {
+  "in_ups": true,
+  "name": "PC Engine SuperGrafx",
+  "src": "igdb",
+  "abbr": "supergrafx",
+  "igdb_alt": "SuperGrafx",
+  "others": [
+   "PC Engine SuperGrafx",
+   "SuperGrafx",
+   "SuperGrafx",
+   "PC Engine SuperGrafx"
+  ]
+ },
+ "supervision": {
+  "in_ups": true,
+  "name": "Watara/QuickShot Supervision",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": [
+   "Watara Supervision",
+   "Supervision",
+   "Watara/QuickShot Supervision",
+   "Watara Supervision",
+   "Watara Supervision",
+   "Watara Supervision"
+  ]
+ },
+ "swancrystal": {
+  "in_ups": true,
+  "name": "SwanCrystal",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": []
+ },
+ "switch": {
+  "in_ups": true,
+  "name": "Nintendo Switch",
+  "src": "igdb",
+  "abbr": "Switch",
+  "igdb_alt": "NX",
+  "others": [
+   "Switch",
+   "Nintendo Switch",
+   "Nintendo Switch",
+   "Nintendo Switch",
+   "Nintendo Switch",
+   "Nintendo Switch"
+  ]
+ },
+ "switch-2": {
+  "in_ups": true,
+  "name": "Nintendo Switch 2",
+  "src": "igdb",
+  "abbr": "Switch 2",
+  "igdb_alt": "Switch 2",
+  "others": [
+   "Nintendo Switch 2",
+   "Nintendo Switch 2",
+   "Nintendo Switch 2",
+   "Nintendo Switch 2",
+   "Nintendo Switch 2"
+  ]
+ },
+ "tg16": {
+  "in_ups": true,
+  "name": "TurboGrafx-16/PC Engine",
+  "src": "igdb",
+  "abbr": "turbografx16",
+  "igdb_alt": "TG16",
+  "others": [
+   "PC Engine",
+   "TurboGrafx-16",
+   "TurboGrafx-16",
+   "NEC TurboGrafx-16",
+   "TurboGrafx-16/PC Engine",
+   "TurboGrafx 16",
+   "TurboGrafx-16"
+  ]
+ },
+ "turbografx-cd": {
+  "in_ups": true,
+  "name": "Turbografx-16/PC Engine CD",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "TG-16CD/PCECD",
+  "others": [
+   "PC Engine CD-Rom",
+   "TurboGrafx CD",
+   "TurboGrafx CD",
+   "NEC TurboGrafx-CD",
+   "Turbografx-16/PC Engine CD",
+   "TurboGrafx CD",
+   "TurboGrafx-CD"
+  ]
+ },
+ "vectrex": {
+  "in_ups": true,
+  "name": "Vectrex",
+  "src": "igdb",
+  "abbr": "vectrex",
+  "igdb_alt": "",
+  "others": [
+   "Vectrex",
+   "Vectrex",
+   "Vectrex",
+   "GCE Vectrex",
+   "Vectrex",
+   "Vectrex",
+   "Vectrex"
+  ]
+ },
+ "virtualboy": {
+  "in_ups": true,
+  "name": "Virtual Boy",
+  "src": "igdb",
+  "abbr": "virtualboy",
+  "igdb_alt": "VB",
+  "others": [
+   "Virtual Boy",
+   "Virtual Boy",
+   "Virtual Boy",
+   "Nintendo Virtual Boy",
+   "Nintendo Virtual Boy",
+   "Nintendo Virtual Boy",
+   "Virtual Boy"
+  ]
+ },
+ "wii": {
+  "in_ups": true,
+  "name": "Wii",
+  "src": "igdb",
+  "abbr": "Wii",
+  "igdb_alt": "Revolution",
+  "others": [
+   "Wii",
+   "Wii",
+   "Wii",
+   "Nintendo Wii",
+   "Nintendo Wii",
+   "Nintendo Wii",
+   "Wii"
+  ]
+ },
+ "wiiu": {
+  "in_ups": true,
+  "name": "Wii U",
+  "src": "igdb",
+  "abbr": "WiiU",
+  "igdb_alt": "Project Cafe",
+  "others": [
+   "Wii U",
+   "Wii U",
+   "Nintendo Wii U",
+   "Nintendo WiiU",
+   "Nintendo Wii U",
+   "Wii U"
+  ]
+ },
+ "wonderswan": {
+  "in_ups": true,
+  "name": "WonderSwan",
+  "src": "igdb",
+  "abbr": "WonderSwan",
+  "igdb_alt": "WS",
+  "others": [
+   "WonderSwan",
+   "WonderSwan",
+   "WonderSwan",
+   "WonderSwan",
+   "Bandai WonderSwan",
+   "WonderSwan",
+   "WonderSwan"
+  ]
+ },
+ "wonderswan-color": {
+  "in_ups": true,
+  "name": "WonderSwan Color",
+  "src": "igdb",
+  "abbr": "",
+  "igdb_alt": "WSC",
+  "others": [
+   "WonderSwan Color",
+   "WonderSwan Color",
+   "WonderSwan Color",
+   "WonderSwan Color",
+   "Bandai WonderSwan Color",
+   "WonderSwan Color"
+  ]
+ },
+ "x68000": {
+  "in_ups": false,
+  "name": "X68000",
+  "src": "titlecase",
+  "abbr": "",
+  "igdb_alt": "",
+  "others": []
+ },
+ "xbox": {
+  "in_ups": true,
+  "name": "Xbox",
+  "src": "igdb",
+  "abbr": "XBOX",
+  "igdb_alt": "",
+  "others": [
+   "Xbox",
+   "Xbox",
+   "Microsoft Xbox",
+   "Microsoft Xbox",
+   "Microsoft Xbox",
+   "Xbox"
+  ]
+ },
+ "xbox360": {
+  "in_ups": true,
+  "name": "Xbox 360",
+  "src": "igdb",
+  "abbr": "X360",
+  "igdb_alt": "X360",
+  "others": [
+   "Xbox 360",
+   "Xbox 360",
+   "Microsoft Xbox 360",
+   "Microsoft Xbox 360",
+   "Microsoft Xbox 360",
+   "Xbox 360"
+  ]
+ },
+ "zxs": {
+  "in_ups": true,
+  "name": "ZX Spectrum",
+  "src": "igdb",
+  "abbr": "ZXS",
+  "igdb_alt": "",
+  "others": [
+   "ZX Spectrum",
+   "ZX Spectrum",
+   "Sinclair ZX Spectrum",
+   "Sinclair ZX Spectrum",
+   "Sinclair ZX Spectrum",
+   "ZX Spectrum"
+  ]
+ }
+}
