@@ -1,13 +1,14 @@
-// Settings › Appearance › Open GRID on (TV mode README § Decided "Where GRID
+// Settings › Appearance › Open GRID on (RommStorefront README "Appearance ›
+// Open GRID on"; TV mode README § Decided "Where GRID
 // opens"): one setting, `[ui] open_on`, shared by the desktop and TV mode.
-// Pure; the store persists and `shell.ts` `initialView` applies it.
+// Pure; the store persists and `shell.ts` `initialPlace` applies it.
 import type { OpenOn, TvAssignment, TvPrompts } from '../api';
 
 export const OPEN_ON_CHOICES = ['automatic', 'discover', 'library'] as const satisfies readonly OpenOn[];
 
 const LABELS: Record<OpenOn, string> = {
-  automatic: 'Automatic',
-  discover: 'Server › Discover',
+  automatic: 'Automatic: Discover when RomM is connected, else Library',
+  discover: 'Discover (when RomM is connected)',
   library: 'Library',
 };
 

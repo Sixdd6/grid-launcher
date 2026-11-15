@@ -68,6 +68,13 @@ STAGE_GROUPS=(
   "connect:specs/connect.spec.ts"
   "connect-restore:specs/connect-restore-a.spec.ts specs/connect-restore-b.spec.ts specs/connect-restore-c.spec.ts"
   "library:specs/library.spec.ts specs/library-grid.spec.ts"
+  # RomM as a storefront (romm-storefront-plan Step 3): (a) never connected,
+  # nothing installed: no RomM group; (b) connected: Installed, Discover and
+  # the platform rows, a platform merging server and installed games (NOT
+  # LINKED, NOT ON ROMM); (c) relaunch, server unreachable: Installed only
+  # with the ! flag and the Retry banner; (d) relaunch after Disconnect:
+  # Installed only with the off flag. Its seed runs before every spec.
+  "romm-library:specs/romm-library-a.spec.ts specs/romm-library-b.spec.ts specs/romm-library-c.spec.ts specs/romm-library-d.spec.ts"
   # Server › Discover against its own fixture set, whose release and added
   # dates are relative to the day the run starts (mock-romm applyRelativeDates).
   "discover:specs/discover.spec.ts"
@@ -785,6 +792,7 @@ seed_script_for_group() {
     launch) printf '%s' "$E2E_DIR/seed/launch-seed.mjs" ;;
     # Their systems set to None, so Details' Install brings no emulator.
     install|downloads) printf '%s' "$E2E_DIR/seed/no-emulator-seed.mjs" ;;
+    romm-library) printf '%s' "$E2E_DIR/seed/romm-library-seed.mjs" ;;
     emulator-catalog) printf '%s' "$E2E_DIR/seed/emulator-catalog-seed.mjs" ;;
     cloud-saves) printf '%s' "$E2E_DIR/seed/cloud-saves-seed.mjs" ;;
     images) printf '%s' "$E2E_DIR/seed/images-seed.mjs" ;;
@@ -817,7 +825,7 @@ seed_script_for_group() {
 # the run's keyring, but each starts the app on the state its own seed
 # variant writes.
 group_seeds_per_spec() {
-  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == gog || "$1" == gog-* || "$1" == tv-gog || "$1" == epic || "$1" == epic-* || "$1" == tv-epic || "$1" == amazon || "$1" == amazon-* || "$1" == tv-amazon || "$1" == steam || "$1" == steam-* || "$1" == tv-steam ]]
+  [[ "$1" == "library-move" || "$1" == "romm-library" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == gog || "$1" == gog-* || "$1" == tv-gog || "$1" == epic || "$1" == epic-* || "$1" == tv-epic || "$1" == amazon || "$1" == amazon-* || "$1" == tv-amazon || "$1" == steam || "$1" == steam-* || "$1" == tv-steam ]]
 }
 
 # Runs every spec of one group against a freshly created data dir and mock.
