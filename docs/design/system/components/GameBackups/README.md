@@ -1,5 +1,7 @@
 A proposal: backup games from the server to a USB flash drive or SSD, with their art, details, emulators and firmware. Then install them from that drive on any computer with GRID, with or without a network. The card is built on Proposed app and starts in Library on a connected drive. Everything not listed here matches Proposed app.
 
+**Superseded in part by RommStorefront (2026-11-15, proposed).** The offline mode ("Offline · no server" chip, "Use without a server", the Server view's "Not connected to a server" panel) is gone: RomM is just not connected. Backups work without RomM from the installed copy; firmware and server-hosted emulator builds are skipped as "needs RomM". See `RommStorefront/README.md`.
+
 Built on branch `feat/game-backups`. `SPEC.md` ("Game backups") describes what shipped.
 
 - **One folder per drive.** A drive is set up once. GRID makes a `gridpack` folder at the drive's root and never reads, writes or deletes anything outside it. A drive is a backup drive when `gridpack/gridpack.json` is on it, so GRID recognises it on any computer. A drive is identified by where it is mounted (its mount path, or its drive letter on Windows); a pack has no id of its own. GRID watches for removable drives (on Linux `/run/media/<user>` and `/media`, on Windows removable drive letters, on macOS `/Volumes`). A drive shows up within a few seconds of being plugged in and goes away when it is removed.

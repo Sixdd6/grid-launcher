@@ -1,0 +1,101 @@
+  /* RomM as an optional storefront: the RomM group in the Library rail, the
+     Installed banner, "not on RomM" tags, the RomM card on Settings › Game
+     stores, its sign-in dialog, the welcome, the Systems firmware block with
+     Locate files, and the needs-RomM panels. Built on the Game stores card. */
+
+  /* The welcome and its import notice sit over the app, so notifications and
+     the store login window go above it. */
+  .notes { z-index: 115; }
+  .st-login { z-index: 120; }
+  #rmscrim { z-index: 110; }
+
+  /* Library rail: the RomM heading's spinner while the startup check runs. */
+  .st-flag.rm-flag-spin { background: transparent; border: 0; padding: 0; min-width: 0; }
+  .st-flag.rm-flag-spin .st-spin { width: 8px; height: 8px; }
+
+  /* Installed view: one line above the grid when RomM can't be used. */
+  .rm-banner { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 8px 10px 8px 12px; border-radius: var(--r-row); border-left: 3px solid var(--warning); background: color-mix(in srgb, var(--warning) 12%, var(--panel)); color: var(--text); font-size: 13px; }
+  .rm-banner b { color: var(--text-h); font-weight: 600; }
+  .rm-banner .small-btn { margin-left: auto; flex: none; }
+  .g-chip-outline .st-spin { margin-right: 4px; }
+
+  /* Covers: installed games the RomM server doesn't have. */
+  .g-tag.rm-local { background: rgba(10, 10, 20, .78); color: #fff; border: 1px solid rgba(255, 255, 255, .28); letter-spacing: .06em; }
+
+  /* A needs-RomM panel: Settings › Cloud saves and RetroAchievements, Details tabs. */
+  .rm-needs { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: var(--r-row); border: 1px solid var(--line); border-left: 3px solid var(--warning); background: var(--surface); }
+  .rm-needs > div { flex: 1 1 auto; min-width: 0; }
+  .rm-needs b { display: block; color: var(--text-h); font-weight: 600; }
+  .rm-needs p { margin: 2px 0 0; font-size: 13px; color: var(--text-muted); }
+  .rm-needs .form-actions { flex: none; }
+  .rm-needs .form-actions .g-btn { padding: 6px 14px; }
+  .tabpanel .rm-needs { margin-top: 4px; }
+
+  /* Settings › Game stores: the pane's prototype controls and the RomM card. */
+  .rm-proto-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .rm-card .st-store-head { padding-right: 260px; }
+  .rm-card .kv dd .linkish { font-size: 13px; }
+  .rm-card .st-errline, .rm-card .bk-warn { max-width: 640px; }
+  .pill-s .st-spin { width: 8px; height: 8px; }
+
+  /* The RomM sign-in dialog and the Locate files dialogs. */
+  .g-dialog.rmdlg { width: 480px; }
+  .rmdlg .st-field input.field { width: 100%; box-sizing: border-box; }
+  .rmdlg .help { display: block; margin-top: -4px; }
+  .rmdlg .form-actions.bk-foot .bk-proto { margin-right: auto; }
+  .rm-pick li label { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; font-size: 13px; color: var(--text-h); }
+  .rm-pick li label:hover { background: var(--selected); }
+  .rm-pick input { accent-color: var(--primary); }
+  .rm-pick .note { margin-left: auto; font-size: 12px; }
+  .rm-rep { display: flex; flex-direction: column; gap: 6px; }
+  .rm-rep ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .rm-rep li { display: flex; flex-direction: column; gap: 2px; padding: 7px 10px; border-radius: var(--r-control); background: var(--surface); border-left: 3px solid var(--primary); font-size: 13px; color: var(--text-h); }
+  .rm-rep li code { font: 12px ui-monospace, monospace; overflow-wrap: anywhere; }
+  .rm-rep li .note { font-size: 12px; }
+  .rm-rep.nv li { border-left-color: var(--warning); }
+  .rm-rep.bad li { border-left-color: var(--danger); }
+
+  /* The welcome: step 1 the library folder, step 2 the storefront rows. */
+  .fr-card.rw { width: min(640px, 100%); gap: 20px; }
+  .rw-step { display: flex; flex-direction: column; gap: 8px; }
+  .rw-step h2 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: var(--text-h); }
+  .rw-step h2 .muted-s { font-weight: 400; }
+  .rw-step > .note { margin: 0; }
+  .rw-n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--primary); color: var(--on-primary); font-size: 12px; font-weight: 700; flex: none; }
+  .rw-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .rw-row { border: 1px solid var(--line); border-radius: var(--r-row); background: var(--surface); }
+  .rw-row.open { border-color: var(--line-strong); }
+  .rw-head { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+  .rw-id { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 auto; }
+  .rw-id b { color: var(--text-h); font-size: 14px; }
+  .rw-id .note { font-size: 12px; }
+  .rw-head .small-btn, .rw-head .pill-s { flex: none; }
+  .rw-body { display: flex; flex-direction: column; gap: 10px; padding: 2px 12px 12px 58px; }
+  .fr-card .rw-body label.st-field { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: center; gap: 10px; font-size: 13px; color: var(--text-muted); text-align: left; }
+  .rw-body .st-field input.field { width: 100%; box-sizing: border-box; }
+  .rw-body .help { margin-top: -4px; }
+  .rw-body .form-actions .g-btn { padding: 6px 14px; }
+  .rw-body .st-store { padding: 0; border: 0; background: none; }
+  .rw-body .st-store-head, .rw-body .bk-proto-corner, .rw-body .st-store > .st-lede { display: none; }
+  .rw-import { margin: 0; }
+  .fr-foot .help { text-align: right; }
+
+  /* Settings › Systems: the firmware block, and calm rows for systems with no games. */
+  .rm-fw { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .rm-fw-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; color: var(--text); }
+  .rm-fw-head b { color: var(--text-h); font-weight: 600; }
+  .rm-fw-head .acts { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; }
+  .rm-fw-why { margin: 0; font-size: 12px; color: var(--text-muted); }
+  .rm-fw-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  .rm-fw-files li { display: grid; grid-template-columns: 18px minmax(110px, max-content) minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 12px; }
+  .rm-fw-files code { font: 12px ui-monospace, monospace; color: var(--text-h); overflow-wrap: anywhere; }
+  .rm-fw-files .muted-s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rm-fw-st { color: var(--text-muted); white-space: nowrap; }
+  .rm-fw-st.warn { color: var(--warning-text); font-weight: 600; }
+  .rm-fw .st { width: 16px; height: 16px; font-size: 10px; }
+  .st.info { color: var(--text-h); background: transparent; border: 1.5px solid var(--warning); box-sizing: border-box; }
+  .st.off { color: var(--text-muted); background: transparent; border: 1px dashed var(--line-strong); box-sizing: border-box; }
+  .sysrow.rm-calm .sys-toggle b { font-weight: 500; }
+  .rm-more { margin-top: 6px; }
+  .rm-more .note { margin: -4px 0 2px; }
+  .head-acts .bk-proto { align-self: center; }
