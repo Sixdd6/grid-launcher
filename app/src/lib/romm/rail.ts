@@ -3,7 +3,7 @@
 import type { InstalledGame, Platform, RommStatus } from '../api';
 import { isHiddenLibraryPlatform } from '../library';
 import { platformLabel } from '../server/platformLabel';
-import { isEmulatorsShelf, platformKeyer, platformRailKey, serverPlatformSlug, type PlatformRailKey } from './platformKey';
+import { isEmulatorsShelf, platformKeyer, platformRailKey, railSlugs, serverPlatformSlug, type PlatformRailKey } from './platformKey';
 import { ROMM_FLAG_TITLES, ROMM_HEADING } from './words';
 
 export type RommRailKey = 'romm:installed' | 'romm:discover' | PlatformRailKey;
@@ -70,9 +70,10 @@ function byLabel(a: { label: string }, b: { label: string }): number {
  */
 export function rommPlatformRows(platforms: readonly Platform[], installedRows: readonly InstalledGame[]): RommRailRow[] {
   const bySlug = new Map<string, RommRailRow>();
+  const rails = railSlugs(platforms);
   for (const p of platforms) {
     if (p.rom_count <= 0 || isEmulatorsShelf(p)) continue;
-    const slug = serverPlatformSlug(p);
+    const slug = rails.get(p.id) ?? serverPlatformSlug(p);
     if (bySlug.has(slug)) continue;
     bySlug.set(slug, platformRow(slug, platformLabel(p), p.rom_count, p));
   }

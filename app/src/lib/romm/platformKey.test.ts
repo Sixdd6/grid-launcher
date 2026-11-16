@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { installedPlatformSlug, isEmulatorsShelf, platformKeyer, platformRailKey, serverPlatformSlug } from './platformKey';
+import { installedPlatformSlug, isEmulatorsShelf, platformKeyer, platformRailKey, railSlugs, serverPlatformSlug } from './platformKey';
 import { installed, platform } from './fixtures.test-util';
 
 describe('serverPlatformSlug', () => {
@@ -39,6 +39,31 @@ describe('installed row slug', () => {
 
   it('works with no server list (RomM off)', () => {
     expect(installedPlatformSlug(installed({ platform: 'Nintendo 64', platform_slug: '' }), [])).toBe('nintendo-64');
+  });
+});
+
+describe('two server platforms on one slug', () => {
+  // RomM allows it: a custom-named "PC Fangames & Ports" on `win` beside Windows.
+  const servers = [
+    platform({ id: 1, slug: 'win', name: 'Windows', display_name: 'Windows' }),
+    platform({ id: 3, slug: 'win', name: 'Windows', custom_name: 'PC Fangames & Ports', display_name: 'PC Fangames & Ports' }),
+  ];
+
+  it('gives the one with the higher id its own rail slug, whatever the list order', () => {
+    expect([...railSlugs(servers).entries()]).toEqual([
+      [1, 'win'],
+      [3, 'win-3'],
+    ]);
+    expect(railSlugs([...servers].reverse()).get(1)).toBe('win');
+    expect(railSlugs([...servers].reverse()).get(3)).toBe('win-3');
+  });
+
+  it('keys an installed row by the platform whose label it carries', () => {
+    const keyOf = platformKeyer(servers);
+    expect(keyOf(installed({ platform: 'PC Fangames & Ports', platform_slug: 'win' }))).toBe('win-3');
+    expect(keyOf(installed({ platform: 'Windows', platform_slug: 'win' }))).toBe('win');
+    // No label match: the slug's first platform.
+    expect(keyOf(installed({ platform: 'Elsewhere', platform_slug: 'win' }))).toBe('win');
   });
 });
 
