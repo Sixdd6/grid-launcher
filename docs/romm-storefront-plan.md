@@ -1160,6 +1160,9 @@ Anything missing there comes back to the orchestrator, not edited in a parallel 
 - Backup firmware line without RomM reads "Needs RomM · skipped" with no system names;
   Step 7's `firmware-known.json` could name them.
 - Desktop: "Open Config Folder" left with the Connection page (ask the user where it goes).
+- TV Backup page: pass the unlinked rows to `unavailableRows` (Step 6 passes none).
+- e2e: a TV Can't reach state (unit tests only so far).
+- Remove the legacy `'none'` phase branches in `App.svelte` and `TvShell.svelte`.
 - Remove `session-unauthorized`, the legacy wrappers, `VIEWS`/`initialView`, `'none'` phase.
 
 ## After this rework: Discover
