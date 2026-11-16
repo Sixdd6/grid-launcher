@@ -1167,6 +1167,15 @@ Anything missing there comes back to the orchestrator, not edited in a parallel 
 - TV Backup page: pass the unlinked rows to `unavailableRows` (Step 6 passes none).
 - e2e: a TV Can't reach state (unit tests only so far).
 - Remove the legacy `'none'` phase branches in `App.svelte` and `TvShell.svelte`.
+- Step 7: move `commands/systems.rs` from the `lib.rs` `#[path]` mount to `pub mod systems;`
+  in `commands.rs`; add `SystemPlatform.name` and `LocateReport.unmatched` to `api.ts`
+  (read through local extended types today); `FirmwareExpectedFile` region and
+  `FolderEntry` size are missing (file lines lack "· Japan", TV browser lacks sizes);
+  `Settings.svelte` should pass `SystemsPage`'s `onConnectRomm` instead of the
+  `settings-nav-stores` click fallback; TV Choose your systems' "RomM is connected."
+  sub-line (`TvChooseSystems.svelte`) is not done.
+- Step 8 (Systems e2e): `first-run-setup` expects PS2 `ready`, now `firmware` by design
+  (PCSX2 with no BIOS shows "Firmware needed"); `systems.spec` has old words and ids.
 - Remove `session-unauthorized`, the legacy wrappers, `VIEWS`/`initialView`, `'none'` phase.
 
 ## After this rework: Discover
