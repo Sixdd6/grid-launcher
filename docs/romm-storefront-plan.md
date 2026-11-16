@@ -1153,6 +1153,10 @@ Anything missing there comes back to the orchestrator, not edited in a parallel 
 
 ## Leftovers for Step 9 (collected from Steps 2–7)
 
+- **Step 8 first:** `romm-library-b` (written before the welcome landed) still types into
+  the removed Connect form; connect it through the welcome's RomM row via the new
+  `e2e/helpers/romm.ts`. Check `settings-romm` for leftover `connect-*` ids too.
+
 - api.ts: move Step 2's `BackupPlan.without_romm`, `unavailable` and `PlanUnavailable`
   (typed locally in `backups/dialog.ts` as `RommOffFields`/`PlanUnavailable`) into `api.ts`.
 - `settings/BackupDrivesPage.svelte`: "The server's firmware for the systems you backup" →
