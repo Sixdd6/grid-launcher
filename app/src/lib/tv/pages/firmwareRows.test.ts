@@ -11,6 +11,7 @@ const file = (name: string, over: Partial<FirmwareExpectedFile> = {}): FirmwareE
   required: true,
   installed: false,
   verified_by: 'grid',
+  region: '',
   ...over,
 });
 

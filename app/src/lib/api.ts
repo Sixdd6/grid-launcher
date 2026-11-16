@@ -4,21 +4,8 @@ import { toLaunchFailure } from './launchError';
 // Field names below mirror the Rust structs' actual serde output exactly
 // (see crates/grid-core/src/session.rs and romm/mod.rs) — no
 // cosmetic renames.
-export type SessionState = { connected: boolean; username: string; server_url: string };
 /** Which kind of credential the keyring holds — never its value. */
 export type AuthKind = 'token' | 'basic';
-/** Payload of `SESSION_UNAUTHORIZED_EVENT` (`grid_core::session::SessionUnauthorized`). */
-export type SessionUnauthorized = { server_url: string; username: string; auth_kind: AuthKind };
-export type RestoreOutcome =
-  | { kind: 'no_session'; server_url: string; username: string }
-  | { kind: 'connected'; state: SessionState }
-  | ({ kind: 'unauthorized' } & SessionUnauthorized)
-  | { kind: 'unreachable'; server_url: string; username: string; error: string }
-  /** `Config.offline`: the user chose to run without a server; no probe ran. */
-  | { kind: 'offline'; server_url: string; username: string };
-/** Emitted once when a live session gets a 401 (commands.rs `SESSION_UNAUTHORIZED_EVENT`).
- *  Legacy: the RomM storefront reads `ROMM_CHANGED_EVENT` instead. */
-export const SESSION_UNAUTHORIZED_EVENT = 'session-unauthorized';
 
 /** RomM's connection (grid-core `session::RommConnection`). */
 export type RommConnection = 'connected' | 'unreachable' | 'expired' | 'not_connected';
@@ -168,7 +155,8 @@ export type GamepadInput =
   | { kind: 'focus'; focused: boolean };
 export type UiMode = 'desktop' | 'tv';
 export type UiModeInfo = { mode: UiMode; started_with_tv: boolean; fullscreen: boolean };
-export type FolderEntry = { name: string; is_dir: boolean };
+/** `size`: a file's bytes; 0 for a folder. */
+export type FolderEntry = { name: string; is_dir: boolean; size: number };
 /** One folder for TV mode's folder browser (`list_folder`). */
 export type FolderListing = { path: string; parent: string | null; entries: FolderEntry[] };
 export type GameSummary = {
@@ -750,7 +738,18 @@ export type BackupPlan = {
   local_bytes: number;
   /** The part of `bytes_to_write` downloaded from the server. */
   download_bytes: number;
+  /** Planned with RomM not connected: every game comes from this computer,
+   *  emulators only from GRID's catalog, and no firmware goes. */
+  without_romm: boolean;
+  /** Requested games a backup without RomM leaves out, with why. */
+  unavailable: PlanUnavailable[];
+  /** Without RomM: the systems of the games being written whose firmware is
+   *  skipped, by name ("Needs RomM · skipped: Sega Saturn"). */
+  firmware_skipped: string[];
 };
+
+/** A requested game a backup without RomM leaves out. Mirrors `grid_core::backup::plan::PlanUnavailable`. */
+export type PlanUnavailable = { rom_id: number; name: string; platform_name: string; reason: string };
 
 /** Where a game in a backup comes from. Mirrors `grid_core::backup::plan::SourceChoice`. */
 export type SourceChoice = 'local' | 'download';
@@ -919,6 +918,9 @@ export type SystemPlatform = {
   /** The server's label when connected and known, else the catalog name,
    *  else the installed row's `platform`. The key for default_emulators. */
   label: string;
+  /** The name emulator profiles' keywords are matched against: the catalog
+   *  name, else the server's raw `name`, else the label. */
+  name: string;
   /** Every name this slug has gone by: the lookup set for label-keyed config. */
   aliases: string[];
   origin: PlatformOrigin;
@@ -940,6 +942,8 @@ export type FirmwareExpectedFile = {
   required: boolean;
   installed: boolean;
   verified_by: FirmwareVerifiedBy;
+  /** The region it is for ("Japan"); `''` when none. */
+  region: string;
 };
 export type FirmwareExpected = { files: FirmwareExpectedFile[] };
 /** A picked file and the name it was installed under. */
@@ -950,6 +954,8 @@ export type LocateReport = {
   /** Installed, but GRID has no checksum to check it (decision 13). */
   unverified: LocatedFile[];
   refused: { file: string; reason: string }[];
+  /** Files in a picked folder that matched nothing: counted, not listed. */
+  unmatched: number;
 };
 
 /** What happened to one platform's setup default (grid-core
@@ -1490,11 +1496,6 @@ export const STORE_LOGIN_EVENT = 'store-login';
 export const STORE_NOTICE_EVENT = 'store-notice';
 
 export const api = {
-  connect: (serverUrl: string, username: string, secret: string, useToken: boolean) =>
-    invoke<SessionState>('connect', { serverUrl, username, secret, useToken }),
-  restoreSession: () => invoke<RestoreOutcome>('restore_session'),
-  retryConnect: () => invoke<RestoreOutcome>('retry_connect'),
-  disconnect: () => invoke<void>('disconnect'),
   // RomM as a storefront (commands/romm.rs, commands/welcome.rs).
   rommStatus: () => invoke<RommStatus>('romm_status'),
   rommRestore: () => invoke<RommStatus>('romm_restore'),
@@ -1852,8 +1853,6 @@ export const api = {
     invoke<number>('remove_from_drive', { key, romIds, server: server ?? null }),
   getBackupSettings: () => invoke<BackupSettings>('get_backup_settings'),
   setBackupIncludeFirmware: (value: boolean) => invoke<void>('set_backup_include_firmware', { value }),
-  /** Offline mode: sets `Config.offline` and drops any live client. */
-  useWithoutServer: () => invoke<void>('use_without_server'),
   // ── External game stores (Phase 1: GOG). `key` is a game key unless noted. ──
   storesStatus: () => invoke<StoreStatus[]>('stores_status'),
   storeLibrary: (source: StoreSource) => invoke<StoreLibrary>('store_library', { source }),

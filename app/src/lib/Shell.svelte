@@ -23,7 +23,6 @@
     STOREFRONT_VIEWS,
     storefrontViewForDigit,
     viewLabel,
-    type StorefrontView,
     type View,
   } from './shell';
   // The same guard the grid views use for Ctrl+F: an accelerator must stay
@@ -45,18 +44,6 @@
     initialSettingsPage?: SettingsPage;
   } = $props();
 
-  /**
-   * A view the shell can show. RomM is a storefront (plan 0.5): Library,
-   * Downloads and Settings. The legacy Server view (still named by TV mode
-   * until Step 6, and by a stored TV start) lands on Library › RomM ›
-   * Discover.
-   */
-  function storefrontView(v: View): StorefrontView {
-    if (v !== 'server') return v;
-    selectRail('romm:discover');
-    return 'library';
-  }
-
   // Set once when the shell first mounts, by Settings › Appearance › Open
   // GRID on (plan 0.5, decision 16; App.svelte mounts the shell only once
   // the setting is loaded): Library › RomM › Discover when RomM is connected
@@ -64,10 +51,10 @@
   // If RomM then drops, the Library's rail falls back to RomM › Installed.
   // Switching views afterward is a user action — a pill, Ctrl+1..3, or `show()`.
   const forced = untrack(() => forcedView);
-  let view = $state<StorefrontView>('library');
+  let view = $state<View>('library');
   untrack(() => {
     if (forced !== undefined) {
-      view = storefrontView(forced);
+      view = forced;
       return;
     }
     const place = initialPlace(rommLive(romm.status), uiSettings.openOn);
@@ -93,7 +80,7 @@
 
   /** Programmatic navigation, for the footer strip and the update badge. */
   export function show(next: View) {
-    view = storefrontView(next);
+    view = next;
   }
 
   /** A Settings page, with one system's row opened on Systems. */

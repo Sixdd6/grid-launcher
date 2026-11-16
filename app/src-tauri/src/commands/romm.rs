@@ -3,10 +3,6 @@
 //! `grid_core::session::SessionManager`, which owns the connection state and
 //! the live client. Payloads carry the server URL, the username, the
 //! credential kind and a secret-free error only — never a token or password.
-//!
-//! The old session commands in `commands.rs` (`connect`, `restore_session`,
-//! `retry_connect`, `disconnect`, `use_without_server`) are wrappers over the
-//! same state until romm-storefront-plan Step 9 deletes them.
 
 use super::{err, AppState};
 use grid_core::library::registry::InstalledGame;
@@ -49,7 +45,7 @@ pub(crate) fn status_of(state: &AppState) -> RommStatus {
 
 /// After a probe: a live client starts the connected jobs (relink, play
 /// session flush, image replenish, update check), exactly as before.
-pub(crate) fn after_probe(state: &AppState, app: AppHandle) -> RommStatus {
+fn after_probe(state: &AppState, app: AppHandle) -> RommStatus {
     let status = status_of(state);
     if status.connection == RommConnection::Connected {
         crate::relink_service::spawn_connected_jobs(state, app);
@@ -114,16 +110,10 @@ pub async fn romm_reconnect(
 /// set. Keeps the server URL and username for prefill. The shell stays.
 #[tauri::command]
 pub fn romm_disconnect(state: State<'_, AppState>, app: AppHandle) -> Result<RommStatus, String> {
-    disconnect_now(&state, &app)?;
-    Ok(status_of(&state))
-}
-
-/// Shared by `romm_disconnect` and the legacy `disconnect`.
-pub(crate) fn disconnect_now(state: &AppState, app: &AppHandle) -> Result<(), String> {
     state.session.disconnect().map_err(err)?;
     // The update set describes a server that is no longer connected.
-    state.updates.clear(app);
-    Ok(())
+    state.updates.clear(&app);
+    Ok(status_of(&state))
 }
 
 #[cfg(test)]

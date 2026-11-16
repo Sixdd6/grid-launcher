@@ -39,7 +39,7 @@ describe('the Locate report', () => {
   });
 
   it('a folder search, and nothing installed', () => {
-    const none = reportView({ ...base, mode: 'folder', answer: { installed: [], unverified: [], refused: [] } });
+    const none = reportView({ ...base, mode: 'folder', answer: { installed: [], unverified: [], refused: [], unmatched: 0 } });
     expect(none.lede).toBe('Searched /home/player/Downloads/bios and the folders in it. Nothing was installed.');
     expect(none.nothing).toBe(true);
     expect(none.sections).toEqual([]);
@@ -53,7 +53,7 @@ describe('the Locate report', () => {
       mode: 'pup',
       folder: '/home/player/Downloads',
       picked: 1,
-      answer: { installed: [{ file: 'PS3UPDAT.PUP', as_name: 'PS3UPDAT.PUP' }], unverified: [], refused: [] },
+      answer: { installed: [{ file: 'PS3UPDAT.PUP', as_name: 'PS3UPDAT.PUP' }], unverified: [], refused: [], unmatched: 0 },
       pupVersion: '4.92',
     });
     expect(pup.title).toBe('PS3 system software');
@@ -64,7 +64,7 @@ describe('the Locate report', () => {
       mode: 'pup',
       folder: '/x',
       picked: 1,
-      answer: { installed: [], unverified: [], refused: [{ file: 'PS3UPDAT.PUP', reason: 'This PS3UPDAT.PUP isn’t the one GRID knows (size or MD5 differs)' }] },
+      answer: { installed: [], unverified: [], refused: [{ file: 'PS3UPDAT.PUP', reason: 'This PS3UPDAT.PUP isn’t the one GRID knows (size or MD5 differs)' }], unmatched: 0 },
     });
     expect(bad.sections[0].title).toBe('Not installed · 1');
   });

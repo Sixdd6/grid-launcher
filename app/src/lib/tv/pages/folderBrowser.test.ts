@@ -5,8 +5,8 @@ const listing = (path: string, parent: string | null) => ({
   path,
   parent,
   entries: [
-    { name: 'Games', is_dir: true },
-    { name: 'bsnes.AppImage', is_dir: false },
+    { name: 'Games', is_dir: true, size: 0 },
+    { name: 'bsnes.AppImage', is_dir: false, size: 1 },
   ],
 });
 

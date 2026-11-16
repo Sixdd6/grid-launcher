@@ -17,6 +17,11 @@ describe('openBackupPage', () => {
     expect(page.props).toEqual({ open: { request: { rom_ids: [901, 902], title: 'Backup 2 games' } } });
   });
 
+  it('carries the unlinked games asked for too', () => {
+    openBackupPage({ kind: 'games', count: 2 }, [901], [], [{ title: 'Loose Disc', platform: 'PlayStation' }]);
+    expect(pushPage.mock.calls[0][0].props.open.unlinked).toEqual([{ title: 'Loose Disc', platform: 'PlayStation' }]);
+  });
+
   it('passes the platform ids along for a platform', () => {
     openBackupPage({ kind: 'platform', platform: 'PlayStation', count: 1 }, [5], [7]);
     expect(pushPage.mock.calls[0][0].props.open.request).toEqual({

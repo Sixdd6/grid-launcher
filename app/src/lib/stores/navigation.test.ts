@@ -65,7 +65,7 @@ describe('navigation', () => {
     const h = handler();
     const off = registerNavigation(h);
     off();
-    navigation.go('server');
+    navigation.go('downloads');
     expect(h.calls).toEqual([]);
   });
 });

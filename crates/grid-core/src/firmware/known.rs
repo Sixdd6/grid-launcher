@@ -145,9 +145,96 @@ pub fn files_for<'a>(
         .collect()
 }
 
+/// The region a BIOS file is for ("Japan", "North America"), shown on its
+/// file line ("Required · Japan"), or `""` when the file is not tied to a
+/// region or GRID does not know. GRID's own table, by file name (System.dat
+/// carries no region), covering the systems whose BIOS is sold per region:
+/// - PlayStation `scph<n>.bin`: the model number's last digit, 0 Japan,
+///   1 North America, 2 Europe (`scph102A.bin` and friends are Europe);
+/// - PlayStation 2 `ps2-<version><r>…`: the letter after the version,
+///   `j` Japan, `a` North America, `e` Europe, `h` Asia, `c` China;
+/// - Sega Saturn `sega_101.bin` (Japan), `mpr-17933.bin` (North America
+///   and Europe);
+/// - Sega CD `bios_CD_J/U/E.bin`.
+pub fn region_of(name: &str) -> &'static str {
+    let lower = name.trim().to_lowercase();
+    const JAPAN: &str = "Japan";
+    const AMERICA: &str = "North America";
+    const EUROPE: &str = "Europe";
+    match lower.as_str() {
+        "sega_101.bin" => return JAPAN,
+        "mpr-17933.bin" => return "North America and Europe",
+        "bios_cd_j.bin" => return JAPAN,
+        "bios_cd_u.bin" => return AMERICA,
+        "bios_cd_e.bin" => return EUROPE,
+        _ => {}
+    }
+    if let Some(model) = lower
+        .strip_prefix("scph")
+        .and_then(|rest| rest.strip_suffix(".bin"))
+    {
+        let digits: String = model.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let suffix = &model[digits.len()..];
+        // `scph102a`..`c`: European PS one variants; anything else after the
+        // number (`scph9002(7502)`) is not a plain model number.
+        if digits.len() >= 3 && (suffix.is_empty() || (digits == "102" && suffix.len() == 1)) {
+            return match digits.as_bytes()[digits.len() - 1] {
+                b'0' => JAPAN,
+                b'1' => AMERICA,
+                b'2' => EUROPE,
+                _ => "",
+            };
+        }
+        return "";
+    }
+    if let Some(rest) = lower.strip_prefix("ps2-") {
+        let digits = rest.chars().take_while(|c| c.is_ascii_digit()).count();
+        if digits == 4 {
+            return match rest.as_bytes().get(4) {
+                Some(b'j') => JAPAN,
+                Some(b'a') => AMERICA,
+                Some(b'e') => EUROPE,
+                Some(b'h') => "Asia",
+                Some(b'c') => "China",
+                _ => "",
+            };
+        }
+    }
+    ""
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn region_of_reads_the_bios_name() {
+        for (name, region) in [
+            ("scph5500.bin", "Japan"),
+            ("scph5501.bin", "North America"),
+            ("SCPH5502.BIN", "Europe"),
+            ("scph1001.bin", "North America"),
+            ("scph7502.bin", "Europe"),
+            ("scph101.bin", "North America"),
+            ("scph102B.bin", "Europe"),
+            ("scph7003.bin", ""),
+            ("scph9002(7502).bin", ""),
+            ("ps1_rom.bin", ""),
+            ("ps2-0230a-20080220.bin", "North America"),
+            ("ps2-0100jd-20000117.bin", "Japan"),
+            ("ps2-0160e-20010704.bin", "Europe"),
+            ("ps2-0160h-20010730.bin", "Asia"),
+            ("ps2-0190c-20030623.bin", "China"),
+            ("ps2-0101xd-20000224.bin", ""),
+            ("sega_101.bin", "Japan"),
+            ("mpr-17933.bin", "North America and Europe"),
+            ("bios_CD_U.bin", "North America"),
+            ("dc_boot.bin", ""),
+            ("prod.keys", ""),
+        ] {
+            assert_eq!(region_of(name), region, "{name}");
+        }
+    }
 
     #[test]
     fn the_bundled_table_parses_with_its_attribution() {

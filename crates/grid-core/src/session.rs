@@ -29,7 +29,7 @@ pub struct SessionState {
 }
 
 /// Which kind of credential the keyring holds — the variant only, never its
-/// content. The Connect form uses it to show the token or the password field.
+/// content. The sign-in form uses it to show the token or the password field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthKind {
@@ -85,65 +85,9 @@ pub struct RommStatus {
     pub busy: bool,
 }
 
-/// What the unauthorized hook receives when the server answers 401 in the
-/// middle of a session: enough to pre-fill the Connect form, and no secret.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct SessionUnauthorized {
-    pub server_url: String,
-    pub username: String,
-    pub auth_kind: AuthKind,
-}
-
-/// Called at most once per live session, the first time a request on it
-/// gets a 401. Set by the app layer. Legacy: the old Connect screen listens
-/// for it; the RomM storefront reads [`RommStatus`] through the change hook.
-pub type UnauthorizedHook = Arc<dyn Fn(SessionUnauthorized) + Send + Sync>;
-
 /// Called after every change to [`RommStatus`] (connection, account, busy).
 /// Never while a session lock is held, so it may call back into the manager.
 pub type ChangeHook = Arc<dyn Fn() + Send + Sync>;
-
-/// The outcome of [`SessionManager::restore`] and [`SessionManager::retry`]
-/// for the legacy IPC (`restore_session`, `retry_connect`), built from the
-/// RomM state and the config. Removed with those commands
-/// (romm-storefront-plan Step 9).
-///
-/// `NoSession` still carries whatever the config holds so the Connect form
-/// can prefill them — the Python importer writes `server_url`/`username`
-/// but no credential, and that user must retype nothing but their token.
-/// Both are blank when there is no config at all.
-///
-/// `Unauthorized` keeps the keyring credential (user decision Q6): it is
-/// replaced only when a new connect succeeds.
-///
-/// `Offline`: RomM is not connected (`stores.romm.connected` false) and the
-/// welcome is done, so the old UI opens its "no server" shell. No probe ran
-/// and the keyring was not read.
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RestoreOutcome {
-    NoSession {
-        server_url: String,
-        username: String,
-    },
-    Connected {
-        state: SessionState,
-    },
-    Unauthorized {
-        server_url: String,
-        username: String,
-        auth_kind: AuthKind,
-    },
-    Unreachable {
-        server_url: String,
-        username: String,
-        error: String,
-    },
-    Offline {
-        server_url: String,
-        username: String,
-    },
-}
 
 /// The live client and a counter that changes every time the live client
 /// does. A 401 acts on the session only when the client that saw it is
@@ -197,7 +141,6 @@ pub struct SessionManager {
     cache: ImageCache,
     live: Arc<Mutex<Live>>,
     server_url: Mutex<String>,
-    unauthorized_hook: Arc<Mutex<Option<UnauthorizedHook>>>,
     romm: Arc<Mutex<RommState>>,
     change_hook: Arc<Mutex<Option<ChangeHook>>>,
 }
@@ -218,7 +161,6 @@ impl SessionManager {
             cache: ImageCache::new(cache_dir),
             live: Arc::new(Mutex::new(Live::default())),
             server_url: Mutex::new(String::new()),
-            unauthorized_hook: Arc::new(Mutex::new(None)),
             romm: Arc::new(Mutex::new(RommState::default())),
             change_hook: Arc::new(Mutex::new(None)),
         }
@@ -230,16 +172,6 @@ impl SessionManager {
 
     pub fn client(&self) -> Option<Arc<RommClient>> {
         self.live.lock().unwrap().client.clone()
-    }
-
-    /// Sets what runs when a live session's credential is rejected (401).
-    /// It runs once per session: the first 401 drops the live client (so
-    /// `client()` reports no connection) and later 401s on that session do
-    /// nothing. A 401 on a connect/restore/retry probe never runs it — those
-    /// report through their own return value. The keyring credential is
-    /// kept.
-    pub fn set_unauthorized_hook(&self, hook: UnauthorizedHook) {
-        *self.unauthorized_hook.lock().unwrap() = Some(hook);
     }
 
     /// Sets what runs after every [`RommStatus`] change: connect,
@@ -392,7 +324,7 @@ impl SessionManager {
         cfg.stores.romm.connected = true;
         cfg.save(&self.config_path)?;
         self.secrets.save(&cred)?;
-        self.install(client, &state, auth_kind);
+        self.install(client, auth_kind);
         *self.server_url.lock().unwrap() = server_url;
         Ok((state, auth_kind))
     }
@@ -405,25 +337,6 @@ impl SessionManager {
     /// failed probe is `Unreachable` or `Expired` in the status.
     pub async fn restore_romm(&self) -> Result<(), SessionError> {
         self.restore_inner().await.map(|_| ())
-    }
-
-    /// The legacy restore (`restore_session`): [`Self::restore_romm`], then
-    /// the outcome the old Connect/shell flow expects.
-    pub async fn restore(&self) -> Result<RestoreOutcome, SessionError> {
-        let (cfg, probe) = self.restore_inner().await?;
-        let server_url = strip_userinfo(&cfg.server_url);
-        let username = cfg.username.clone();
-        Ok(match probe {
-            Some(probe) => legacy_outcome(probe, server_url, username),
-            None if !cfg.stores.romm.connected && cfg.setup.welcomed => RestoreOutcome::Offline {
-                server_url,
-                username,
-            },
-            None => RestoreOutcome::NoSession {
-                server_url,
-                username,
-            },
-        })
     }
 
     async fn restore_inner(&self) -> Result<(Config, Option<Probe>), SessionError> {
@@ -478,17 +391,6 @@ impl SessionManager {
         self.retry_inner().await.map(|_| ())
     }
 
-    /// The legacy retry (`retry_connect`): [`Self::reconnect`], answering
-    /// with the legacy outcome.
-    pub async fn retry(&self) -> Result<RestoreOutcome, SessionError> {
-        let (cfg, probe) = self.retry_inner().await?;
-        Ok(legacy_outcome(
-            probe,
-            strip_userinfo(&cfg.server_url),
-            cfg.username,
-        ))
-    }
-
     async fn retry_inner(&self) -> Result<(Config, Probe), SessionError> {
         self.begin_probe();
         let result = self.retry_probe().await;
@@ -527,33 +429,6 @@ impl SessionManager {
         Ok((cfg, probe))
     }
 
-    /// Legacy "Use without a server": RomM stops being probed at startup
-    /// (`stores.romm.connected = false`) and the welcome counts as done
-    /// (`setup.welcomed = true`), so later starts open the shell with RomM
-    /// not connected. The keyring credential is left untouched (decision
-    /// 12). Any live client is dropped, so nothing keeps talking to the
-    /// server.
-    pub fn use_offline(&self) -> Result<(), SessionError> {
-        let mut cfg = Config::load(&self.config_path)?;
-        cfg.stores.romm.connected = false;
-        cfg.setup.welcomed = true;
-        cfg.save(&self.config_path)?;
-        self.drop_live();
-        let server_url = strip_userinfo(&cfg.server_url);
-        if !server_url.is_empty() {
-            *self.server_url.lock().unwrap() = server_url.clone();
-        }
-        {
-            let mut s = self.romm.lock().unwrap();
-            s.connection = RommConnection::NotConnected;
-            s.server_url = server_url;
-            s.username = cfg.username;
-            s.last_error.clear();
-        }
-        fire(&self.change_hook);
-        Ok(())
-    }
-
     fn drop_live(&self) {
         let mut live = self.live.lock().unwrap();
         live.client = None;
@@ -569,7 +444,7 @@ impl SessionManager {
         let auth_kind = AuthKind::of(&cred);
         match self.probe(&server_url, &cfg.username, cred).await {
             Ok((client, state)) => {
-                self.install(client, &state, auth_kind);
+                self.install(client, auth_kind);
                 Probe::Connected(state, auth_kind)
             }
             Err(SessionError::Romm(RommError::Unauthorized)) => Probe::Expired(auth_kind),
@@ -579,20 +454,14 @@ impl SessionManager {
 
     /// Makes `client` the live client and arms its 401 hook for this
     /// session only.
-    fn install(&self, mut client: RommClient, state: &SessionState, auth_kind: AuthKind) {
+    fn install(&self, mut client: RommClient, auth_kind: AuthKind) {
         let mut live = self.live.lock().unwrap();
         live.generation += 1;
         let generation = live.generation;
-        let info = SessionUnauthorized {
-            server_url: state.server_url.clone(),
-            username: state.username.clone(),
-            auth_kind,
-        };
         // Weak, so the client (held by `live`) does not keep `live` alive
         // through its own hook.
         let live_slot: Weak<Mutex<Live>> = Arc::downgrade(&self.live);
         let romm_slot: Weak<Mutex<RommState>> = Arc::downgrade(&self.romm);
-        let hook_slot = self.unauthorized_hook.clone();
         let change_slot = self.change_hook.clone();
         client.set_unauthorized_hook(Arc::new(move || {
             let Some(live_slot) = live_slot.upgrade() else {
@@ -613,12 +482,8 @@ impl SessionManager {
                 s.auth_kind = Some(auth_kind);
                 s.last_error.clear();
             }
-            // Outside the locks: the hooks may call back into the manager.
+            // Outside the locks: the hook may call back into the manager.
             fire(&change_slot);
-            let hook = hook_slot.lock().unwrap().clone();
-            if let Some(hook) = hook {
-                hook(info.clone());
-            }
         }));
         live.client = Some(Arc::new(client));
     }
@@ -699,21 +564,5 @@ fn probe_change(probe: &Probe) -> Box<dyn FnOnce(&mut RommState) + Send> {
                 s.last_error = error;
             })
         }
-    }
-}
-
-fn legacy_outcome(probe: Probe, server_url: String, username: String) -> RestoreOutcome {
-    match probe {
-        Probe::Connected(state, _) => RestoreOutcome::Connected { state },
-        Probe::Expired(auth_kind) => RestoreOutcome::Unauthorized {
-            server_url,
-            username,
-            auth_kind,
-        },
-        Probe::Unreachable(error) => RestoreOutcome::Unreachable {
-            server_url,
-            username,
-            error,
-        },
     }
 }

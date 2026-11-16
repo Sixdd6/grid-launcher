@@ -29,6 +29,9 @@ function plan(over: Partial<BackupPlan> = {}): BackupPlan {
     needs_choice: 0,
     local_bytes: 0,
     download_bytes: 10,
+    without_romm: false,
+    unavailable: [],
+    firmware_skipped: [],
     ...over,
   };
 }

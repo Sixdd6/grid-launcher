@@ -48,21 +48,12 @@
 
   let {
     active = true,
-    onConnectRomm = undefined,
+    onConnectRomm,
   }: {
     active?: boolean;
-    /** Opens Settings › Game stores (the firmware block's "Connect RomM…").
-     *  Without it the link selects the Game stores rail entry itself. */
-    onConnectRomm?: () => void;
+    /** Opens Settings › Game stores (the firmware block's "Connect RomM…"). */
+    onConnectRomm: () => void;
   } = $props();
-
-  function connectRomm() {
-    if (onConnectRomm) {
-      onConnectRomm();
-      return;
-    }
-    document.querySelector<HTMLElement>('[data-testid="settings-nav-stores"]')?.click();
-  }
 
   // --- Locate files -------------------------------------------------------
   let locating = $state<Row | null>(null);
@@ -81,6 +72,7 @@
             file: p.split(/[\\/]/).pop() ?? p,
             reason: err instanceof Error ? err.message : String(err),
           })),
+          unmatched: 0,
         }));
   }
 
@@ -409,7 +401,7 @@
       testKey={key}
       onRomm={() => s.installFromRomm(row)}
       onLocate={() => openLocate(row)}
-      onConnectRomm={connectRomm}
+      {onConnectRomm}
     />
   {/if}
 {/snippet}

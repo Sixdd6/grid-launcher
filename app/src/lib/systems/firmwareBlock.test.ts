@@ -9,6 +9,7 @@ const file = (name: string, over: Partial<FirmwareExpectedFile> = {}): FirmwareE
   required: true,
   installed: false,
   verified_by: 'grid',
+  region: '',
   ...over,
 });
 
@@ -81,6 +82,8 @@ describe('the firmware block', () => {
           file('prod.keys', { md5: '', size: 0, installed: true, verified_by: 'none' }),
           file('b.bin'),
           file('c.bin', { required: false }),
+          file('scph5500.bin', { region: 'Japan' }),
+          file('scph5502.bin', { required: false, region: 'Europe' }),
         ],
       }),
     );
@@ -88,7 +91,9 @@ describe('the firmware block', () => {
       ['a.bin', 'Required', 'Installed · verified'],
       ['prod.keys', 'Required · no fixed checksum', 'Installed · not verified'],
       ['b.bin', 'Required', 'Missing'],
+      ['scph5500.bin', 'Required · Japan', 'Missing'],
       ['c.bin', 'Optional', 'Missing · optional'],
+      ['scph5502.bin', 'Optional · Europe', 'Missing · optional'],
     ]);
   });
 

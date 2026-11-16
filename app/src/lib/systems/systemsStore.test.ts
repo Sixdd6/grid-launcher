@@ -21,6 +21,7 @@ function setup(label: string, name: string, options: SetupOption[]): PlatformSet
 const platform = (id: number, label: string, slug = label.toLowerCase()): SystemPlatform => ({
   slug,
   label,
+  name: label,
   aliases: [],
   origin: 'both',
   server_id: id,
@@ -141,7 +142,7 @@ describe('SystemsStore', () => {
   it('reads the files a system needs and builds its firmware block without RomM', async () => {
     const s = await loadedStore();
     api.firmwareExpected.mockResolvedValueOnce({
-      files: [{ name: 'dc_boot.bin', size: 4, md5: 'a'.repeat(32), required: true, installed: false, verified_by: 'grid' }],
+      files: [{ name: 'dc_boot.bin', size: 4, md5: 'a'.repeat(32), required: true, installed: false, verified_by: 'grid', region: '' }],
     });
     const dcRow = s.rows.find((r) => r.label === 'Dreamcast')!;
     s.refreshExpected(dcRow);
@@ -155,7 +156,7 @@ describe('SystemsStore', () => {
 
   it('Locate files sends the picks and re-reads the expected files', async () => {
     const s = await loadedStore();
-    api.locateFirmwareFiles = vi.fn(async () => ({ installed: [{ file: 'a.bin', as_name: 'dc_boot.bin' }], unverified: [], refused: [] }));
+    api.locateFirmwareFiles = vi.fn(async () => ({ installed: [{ file: 'a.bin', as_name: 'dc_boot.bin' }], unverified: [], refused: [], unmatched: 0 }));
     const dcRow = s.rows.find((r) => r.label === 'Dreamcast')!;
     const answer = await s.locateFiles(dcRow, ['/picks/a.bin']);
     expect(api.locateFirmwareFiles).toHaveBeenCalledWith('dreamcast', 'Redream (Sega Dreamcast)', ['/picks/a.bin']);

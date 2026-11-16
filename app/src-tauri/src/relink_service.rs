@@ -91,8 +91,8 @@ pub async fn backfill_slugs_now(
     }
 }
 
-/// The background jobs a live session starts, in one place for `connect`,
-/// `restore_session` and `retry_connect`: the play-session flush, then — in
+/// The background jobs a live session starts, in one place for
+/// `romm_connect`, `romm_restore` and `romm_reconnect`: the play-session flush, then — in
 /// order — the relink pass, the platform-slug backfill (after relink, so a
 /// row the pass just linked gets its slug too), the image replenish and the
 /// update recompute.

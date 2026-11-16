@@ -11,6 +11,8 @@ use std::path::Path;
 pub struct FolderEntry {
     pub name: String,
     pub is_dir: bool,
+    /// A file's size in bytes; `0` for a folder.
+    pub size: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -38,7 +40,8 @@ pub fn list_folder(path: &Path, files: bool) -> std::io::Result<FolderListing> {
         };
         let is_dir = meta.is_dir();
         if is_dir || files {
-            entries.push(FolderEntry { name, is_dir });
+            let size = if is_dir { 0 } else { meta.len() };
+            entries.push(FolderEntry { name, is_dir, size });
         }
     }
     sort_entries(&mut entries);
@@ -79,7 +82,7 @@ mod tests {
         fs::create_dir(dir.path().join("Games")).unwrap();
         fs::create_dir(dir.path().join(".cache")).unwrap();
         fs::write(dir.path().join("b.iso"), b"").unwrap();
-        fs::write(dir.path().join("A.bin"), b"").unwrap();
+        fs::write(dir.path().join("A.bin"), b"abc").unwrap();
         fs::write(dir.path().join(".hidden"), b"").unwrap();
         dir
     }
@@ -109,6 +112,23 @@ mod tests {
                 ("b.iso", false)
             ]
         );
+    }
+
+    #[test]
+    fn files_carry_their_size_and_folders_zero() {
+        let dir = tree();
+        let listing = list_folder(dir.path(), true).unwrap();
+        let size = |name: &str| {
+            listing
+                .entries
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap()
+                .size
+        };
+        assert_eq!(size("A.bin"), 3);
+        assert_eq!(size("b.iso"), 0);
+        assert_eq!(size("Games"), 0);
     }
 
     #[cfg(unix)]
@@ -146,14 +166,17 @@ mod tests {
             FolderEntry {
                 name: "b".into(),
                 is_dir: false,
+                size: 0,
             },
             FolderEntry {
                 name: "B".into(),
                 is_dir: false,
+                size: 0,
             },
             FolderEntry {
                 name: "a".into(),
                 is_dir: true,
+                size: 0,
             },
         ];
         sort_entries(&mut entries);

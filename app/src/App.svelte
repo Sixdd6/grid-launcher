@@ -180,17 +180,14 @@
     initialView={backToGameStores ? 'settings' : uiMode.desktopStart?.view}
     initialSettingsPage={backToGameStores ? 'stores' : (uiMode.desktopStart?.settingsPage ?? undefined)}
   />
-{:else if session.phase === 'welcome' || session.phase === 'none'}
-  <!-- The welcome replaced Connect. `none` is the legacy Connect phase, still
-       set by the old top-bar chip until Step 3 removes it: the welcome is
-       where RomM connects now. -->
+{:else if session.phase === 'welcome'}
   <Welcome />
 {/if}
 
 <!-- The startup screens (the welcome, first-run setup) carry the light /
      dark toggle in the window's top-right corner; the shell moves it into
      its top bar. -->
-{#if uiMode.mode === 'desktop' && !libraryUnreachable.blocking && (session.phase === 'welcome' || session.phase === 'none' || session.phase === 'setup')}
+{#if uiMode.mode === 'desktop' && !libraryUnreachable.blocking && (session.phase === 'welcome' || session.phase === 'setup')}
   <ThemeToggle
     corner
     testId="theme-toggle-start"

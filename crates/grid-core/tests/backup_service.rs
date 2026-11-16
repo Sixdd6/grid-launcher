@@ -1656,7 +1656,7 @@ async fn without_romm_a_local_game_backs_up_and_installs_back_with_no_session() 
         use_local: true,
         choices: &HashMap::new(),
     });
-    plan::mark_without_romm(&mut planned, unavailable);
+    plan::mark_without_romm(&mut planned, unavailable, Vec::new());
     assert_eq!(planned.plan.games_to_write, vec![1]);
     assert_eq!(planned.items.games[0].server, config_server);
 

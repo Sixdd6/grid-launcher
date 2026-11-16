@@ -1,5 +1,5 @@
 use grid_core::secrets::{Credential, MemoryStore, SecretError, SecretStore};
-use grid_core::session::{RestoreOutcome, SessionManager};
+use grid_core::session::SessionManager;
 use secrecy::SecretString;
 use std::sync::Arc;
 use wiremock::matchers::{method, path};
@@ -69,12 +69,11 @@ async fn connect_persists_and_restore_reconnects() {
         dir.path().join("covers"),
         store,
     );
-    let restored = mgr2.restore().await.expect("restore should not error");
-    let RestoreOutcome::Connected { state } = restored else {
-        panic!("expected Connected, got {restored:?}")
-    };
-    assert!(state.connected);
-    assert_eq!(state.server_url, server.uri());
+    mgr2.restore_romm().await.expect("restore should not error");
+    let s = status(&mgr2);
+    assert_eq!(s.connection, RommConnection::Connected);
+    assert_eq!(s.server_url, server.uri());
+    assert!(mgr2.client().is_some());
 }
 
 /// A server URL typed with embedded credentials must never be stored in
@@ -120,10 +119,10 @@ async fn connect_strips_userinfo_from_the_stored_and_persisted_server_url() {
         dir.path().join("covers"),
         store,
     );
-    let RestoreOutcome::Connected { state } = mgr2.restore().await.unwrap() else {
-        panic!("expected Connected")
-    };
-    assert_eq!(state.server_url, expected);
+    mgr2.restore_romm().await.unwrap();
+    let s = status(&mgr2);
+    assert_eq!(s.connection, RommConnection::Connected);
+    assert_eq!(s.server_url, expected);
     assert_eq!(mgr2.server_url(), expected);
 }
 
@@ -135,20 +134,16 @@ async fn restore_reports_no_session_without_stored_server() {
         dir.path().join("covers"),
         Arc::new(MemoryStore::default()),
     );
-    let RestoreOutcome::NoSession {
-        server_url,
-        username,
-    } = mgr.restore().await.unwrap()
-    else {
-        panic!("expected NoSession")
-    };
-    assert_eq!(server_url, "");
-    assert_eq!(username, "");
+    mgr.restore_romm().await.unwrap();
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::NotConnected);
+    assert_eq!(s.server_url, "");
+    assert_eq!(s.username, "");
 }
 
 /// A Python import writes `server_url`/`username` into config.toml but no
-/// credential, so restore is `NoSession` — and must hand both fields back
-/// for the Connect form to prefill.
+/// credential, so RomM is Not connected — and the status must hand both
+/// fields back for the sign-in form to prefill.
 #[tokio::test]
 async fn restore_reports_no_session_with_the_stored_server_when_no_credential_is_stored() {
     let dir = tempfile::tempdir().unwrap();
@@ -164,15 +159,11 @@ async fn restore_reports_no_session_with_the_stored_server_when_no_credential_is
         dir.path().join("covers"),
         Arc::new(MemoryStore::default()),
     );
-    let RestoreOutcome::NoSession {
-        server_url,
-        username,
-    } = mgr.restore().await.unwrap()
-    else {
-        panic!("expected NoSession")
-    };
-    assert_eq!(server_url, "https://romm.example.test");
-    assert_eq!(username, "importer");
+    mgr.restore_romm().await.unwrap();
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::NotConnected);
+    assert_eq!(s.server_url, "https://romm.example.test");
+    assert_eq!(s.username, "importer");
 }
 
 #[tokio::test]
@@ -213,23 +204,19 @@ async fn restore_reports_unreachable_and_retry_fails_while_down() {
         dir.path().join("covers"),
         store.clone(),
     );
-    match mgr2.restore().await.unwrap() {
-        RestoreOutcome::Unreachable {
-            server_url, error, ..
-        } => {
-            assert_eq!(server_url, uri);
-            assert!(!error.is_empty());
-        }
-        other => panic!("expected Unreachable, got {other:?}"),
-    }
+    mgr2.restore_romm().await.unwrap();
+    let s = status(&mgr2);
+    assert_eq!(s.connection, RommConnection::Unreachable);
+    assert_eq!(s.server_url, uri);
+    assert!(!s.last_error.is_empty());
     assert!(mgr2.client().is_none());
     assert_eq!(mgr2.server_url(), uri);
-    // Retry answers with a typed outcome: a dead server stays Unreachable
-    // (the shell's "Not connected + Retry"), never Unauthorized.
-    match mgr2.retry().await.unwrap() {
-        RestoreOutcome::Unreachable { error, .. } => assert!(!error.is_empty()),
-        other => panic!("expected Unreachable, got {other:?}"),
-    }
+    // A reconnect against a dead server stays Unreachable (the card's
+    // "Can't reach" + Retry), never Expired.
+    mgr2.reconnect().await.unwrap();
+    let s = status(&mgr2);
+    assert_eq!(s.connection, RommConnection::Unreachable);
+    assert!(!s.last_error.is_empty());
     assert!(mgr2.client().is_none());
 }
 
@@ -391,9 +378,9 @@ async fn token_connect_accepts_case_insensitive_username_and_stores_server_casin
     assert_eq!(cfg.username, "six");
 }
 
-// --- Q6: a rejected credential re-opens Connect ---------------------------
+// --- Q6: a rejected credential is "Sign-in expired" -----------------------
 
-use grid_core::session::{AuthKind, SessionUnauthorized};
+use grid_core::session::AuthKind;
 use std::sync::Mutex;
 
 /// A config + keyring pair as a previous run leaves them: the server URL and
@@ -430,40 +417,27 @@ async fn mount_status(server: &MockServer, route: &str, status: u16) {
 }
 
 #[tokio::test]
-async fn restore_with_a_rejected_token_reports_unauthorized_and_keeps_the_credential() {
+async fn restore_with_a_rejected_token_reports_expired_and_keeps_the_credential() {
     let server = MockServer::start().await;
     mount_status(&server, "/api/users/me", 401).await;
     let dir = tempfile::tempdir().unwrap();
     let (mgr, store) = stored_session(&dir, &server.uri(), token());
 
-    let outcome = mgr.restore().await.unwrap();
-    match outcome {
-        RestoreOutcome::Unauthorized {
-            ref server_url,
-            ref username,
-            auth_kind,
-        } => {
-            assert_eq!(server_url, &server.uri());
-            assert_eq!(username, "six");
-            assert_eq!(auth_kind, AuthKind::Token);
-        }
-        ref other => panic!("expected Unauthorized, got {other:?}"),
-    }
+    mgr.restore_romm().await.unwrap();
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::Expired);
+    assert_eq!(s.server_url, server.uri());
+    assert_eq!(s.username, "six");
+    assert_eq!(s.auth_kind, Some(AuthKind::Token));
     assert!(mgr.client().is_none());
     // User decision Q6: the keyring item stays until a new connect succeeds.
     assert!(SecretStore::load(&*store).unwrap().is_some());
     // The IPC shape carries no secret.
-    let wire = serde_json::to_string(&outcome).unwrap();
+    let wire = serde_json::to_string(&s).unwrap();
     assert!(!wire.contains("FAKE-TEST-TOKEN-not-real"), "{wire}");
-    assert_eq!(
-        serde_json::to_value(&outcome).unwrap(),
-        serde_json::json!({
-            "kind": "unauthorized",
-            "server_url": server.uri(),
-            "username": "six",
-            "auth_kind": "token",
-        })
-    );
+    let wire = serde_json::to_value(&s).unwrap();
+    assert_eq!(wire["connection"], "expired");
+    assert_eq!(wire["auth_kind"], "token");
 }
 
 #[tokio::test]
@@ -476,34 +450,25 @@ async fn restore_with_a_rejected_password_reports_basic_auth_kind() {
         password: SecretString::from("FAKE-TEST-PASSWORD"),
     };
     let (mgr, _store) = stored_session(&dir, &server.uri(), cred);
-    let outcome = mgr.restore().await.unwrap();
-    assert!(
-        matches!(
-            outcome,
-            RestoreOutcome::Unauthorized {
-                auth_kind: AuthKind::Basic,
-                ..
-            }
-        ),
-        "{outcome:?}"
-    );
-    let wire = serde_json::to_string(&outcome).unwrap();
+    mgr.restore_romm().await.unwrap();
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::Expired);
+    assert_eq!(s.auth_kind, Some(AuthKind::Basic));
+    let wire = serde_json::to_string(&s).unwrap();
     assert!(!wire.contains("FAKE-TEST-PASSWORD"), "{wire}");
 }
 
-/// 403 is "insufficient permission", not a dead credential: no Connect form.
+/// 403 is "insufficient permission", not a dead credential: not Expired.
 #[tokio::test]
 async fn restore_with_forbidden_is_not_unauthorized() {
     let server = MockServer::start().await;
     mount_status(&server, "/api/users/me", 403).await;
     let dir = tempfile::tempdir().unwrap();
     let (mgr, store) = stored_session(&dir, &server.uri(), token());
-    match mgr.restore().await.unwrap() {
-        RestoreOutcome::Unreachable { error, .. } => {
-            assert!(error.contains("permission"), "{error}");
-        }
-        other => panic!("expected Unreachable, got {other:?}"),
-    }
+    mgr.restore_romm().await.unwrap();
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::Unreachable);
+    assert!(s.last_error.contains("permission"), "{}", s.last_error);
     assert!(SecretStore::load(&*store).unwrap().is_some());
 }
 
@@ -514,67 +479,47 @@ async fn restore_with_a_network_error_stays_unreachable() {
     drop(server);
     let dir = tempfile::tempdir().unwrap();
     let (mgr, _store) = stored_session(&dir, &uri, token());
-    assert!(matches!(
-        mgr.restore().await.unwrap(),
-        RestoreOutcome::Unreachable { .. }
-    ));
+    mgr.restore_romm().await.unwrap();
+    assert_eq!(status(&mgr).connection, RommConnection::Unreachable);
 }
 
 #[tokio::test]
-async fn retry_with_a_rejected_token_reports_unauthorized() {
+async fn reconnect_with_a_rejected_token_reports_expired() {
     let server = MockServer::start().await;
     mount_status(&server, "/api/users/me", 401).await;
     let dir = tempfile::tempdir().unwrap();
     let (mgr, store) = stored_session(&dir, &server.uri(), token());
-    match mgr.retry().await.unwrap() {
-        RestoreOutcome::Unauthorized {
-            server_url,
-            username,
-            auth_kind,
-        } => {
-            assert_eq!(server_url, server.uri());
-            assert_eq!(username, "six");
-            assert_eq!(auth_kind, AuthKind::Token);
-        }
-        other => panic!("expected Unauthorized, got {other:?}"),
-    }
+    mgr.reconnect().await.unwrap();
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::Expired);
+    assert_eq!(s.server_url, server.uri());
+    assert_eq!(s.username, "six");
+    assert_eq!(s.auth_kind, Some(AuthKind::Token));
     assert!(mgr.client().is_none());
     assert!(SecretStore::load(&*store).unwrap().is_some());
 }
 
 #[tokio::test]
-async fn retry_that_connects_reports_connected() {
+async fn reconnect_that_connects_reports_connected() {
     let server = MockServer::start().await;
     mount_users_me(&server).await;
     let dir = tempfile::tempdir().unwrap();
     let (mgr, _store) = stored_session(&dir, &server.uri(), token());
-    assert!(matches!(
-        mgr.retry().await.unwrap(),
-        RestoreOutcome::Connected { .. }
-    ));
+    mgr.reconnect().await.unwrap();
+    assert_eq!(status(&mgr).connection, RommConnection::Connected);
     assert!(mgr.client().is_some());
 }
 
-/// Records every hook call.
-fn recording_hook(mgr: &SessionManager) -> Arc<Mutex<Vec<SessionUnauthorized>>> {
-    let calls = Arc::new(Mutex::new(Vec::new()));
-    let sink = calls.clone();
-    mgr.set_unauthorized_hook(Arc::new(move |info| sink.lock().unwrap().push(info)));
-    calls
-}
-
 #[tokio::test]
-async fn a_mid_session_401_fires_the_hook_once_and_keeps_the_credential() {
+async fn a_mid_session_401_changes_the_status_once_and_keeps_the_credential() {
     let server = MockServer::start().await;
     mount_users_me(&server).await;
     mount_status(&server, "/api/platforms", 401).await;
     let dir = tempfile::tempdir().unwrap();
     let (mgr, store) = stored_session(&dir, &server.uri(), token());
-    let calls = recording_hook(&mgr);
-    assert!(matches!(
-        mgr.restore().await.unwrap(),
-        RestoreOutcome::Connected { .. }
-    ));
+    mgr.restore_romm().await.unwrap();
+    assert_eq!(status(&mgr).connection, RommConnection::Connected);
+    let calls = counting_hook(&mgr);
 
     let client = mgr.client().unwrap();
     let (a, b) = tokio::join!(client.platforms(), client.platforms());
@@ -582,60 +527,62 @@ async fn a_mid_session_401_fires_the_hook_once_and_keeps_the_credential() {
     assert!(matches!(b, Err(grid_core::romm::RommError::Unauthorized)));
     assert!(client.platforms().await.is_err());
 
-    let calls = calls.lock().unwrap();
-    assert_eq!(calls.len(), 1, "one event per session, not per request");
     assert_eq!(
-        calls[0],
-        SessionUnauthorized {
-            server_url: server.uri(),
-            username: "six".into(),
-            auth_kind: AuthKind::Token,
-        }
+        *calls.lock().unwrap(),
+        1,
+        "one change per session, not per request"
     );
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::Expired);
+    assert_eq!(s.server_url, server.uri());
+    assert_eq!(s.username, "six");
+    assert_eq!(s.auth_kind, Some(AuthKind::Token));
     assert!(mgr.client().is_none(), "the dead session is dropped");
     assert!(SecretStore::load(&*store).unwrap().is_some());
 }
 
 #[tokio::test]
-async fn a_mid_session_403_does_not_fire_the_hook() {
+async fn a_mid_session_403_does_not_end_the_session() {
     let server = MockServer::start().await;
     mount_users_me(&server).await;
     mount_status(&server, "/api/platforms", 403).await;
     let dir = tempfile::tempdir().unwrap();
     let (mgr, _store) = stored_session(&dir, &server.uri(), token());
-    let calls = recording_hook(&mgr);
-    mgr.restore().await.unwrap();
+    mgr.restore_romm().await.unwrap();
+    let calls = counting_hook(&mgr);
     let client = mgr.client().unwrap();
     assert!(matches!(
         client.platforms().await,
         Err(grid_core::romm::RommError::Forbidden)
     ));
-    assert!(calls.lock().unwrap().is_empty());
+    assert_eq!(*calls.lock().unwrap(), 0);
+    assert_eq!(status(&mgr).connection, RommConnection::Connected);
     assert!(mgr.client().is_some());
 }
 
 /// A request still in flight on the old client must not throw the user out
 /// of the session that replaced it.
 #[tokio::test]
-async fn a_401_on_a_replaced_client_does_not_fire_the_hook() {
+async fn a_401_on_a_replaced_client_does_not_end_the_session() {
     let server = MockServer::start().await;
     mount_users_me(&server).await;
     mount_status(&server, "/api/platforms", 401).await;
     let dir = tempfile::tempdir().unwrap();
     let (mgr, _store) = stored_session(&dir, &server.uri(), token());
-    let calls = recording_hook(&mgr);
-    mgr.restore().await.unwrap();
+    mgr.restore_romm().await.unwrap();
     let old = mgr.client().unwrap();
-    mgr.retry().await.unwrap();
+    mgr.reconnect().await.unwrap();
+    let calls = counting_hook(&mgr);
     assert!(old.platforms().await.is_err());
-    assert!(calls.lock().unwrap().is_empty());
+    assert_eq!(*calls.lock().unwrap(), 0);
+    assert_eq!(status(&mgr).connection, RommConnection::Connected);
     assert!(mgr.client().is_some());
 }
 
-/// A 401 on the connect probe is the Connect form's own error, not a
-/// mid-session event.
+/// A 401 on the connect probe is the sign-in form's own error, not a
+/// mid-session "Sign-in expired".
 #[tokio::test]
-async fn a_rejected_connect_does_not_fire_the_hook() {
+async fn a_rejected_connect_is_not_expired() {
     let server = MockServer::start().await;
     mount_status(&server, "/api/users/me", 401).await;
     let dir = tempfile::tempdir().unwrap();
@@ -644,7 +591,6 @@ async fn a_rejected_connect_does_not_fire_the_hook() {
         dir.path().join("covers"),
         Arc::new(MemoryStore::default()),
     );
-    let calls = recording_hook(&mgr);
     let err = mgr
         .connect(
             server.uri(),
@@ -655,7 +601,7 @@ async fn a_rejected_connect_does_not_fire_the_hook() {
         .await
         .unwrap_err();
     assert_eq!(err.to_string(), "the server rejected the credentials");
-    assert!(calls.lock().unwrap().is_empty());
+    assert_eq!(status(&mgr).connection, RommConnection::NotConnected);
 }
 
 // --- RomM as a storefront (romm-storefront-plan 0.2, 0.4) ------------------
@@ -727,16 +673,7 @@ async fn restore_while_not_connected_makes_no_request_and_reads_no_keyring() {
     );
     mgr.prime().unwrap();
     assert!(!status(&mgr).busy, "nothing to restore");
-    let outcome = mgr.restore().await.unwrap();
-    // The legacy shell opens its no-server mode.
-    assert_eq!(
-        serde_json::to_value(&outcome).unwrap(),
-        serde_json::json!({
-            "kind": "offline",
-            "server_url": server.uri(),
-            "username": "six",
-        })
-    );
+    mgr.restore_romm().await.unwrap();
     let s = status(&mgr);
     assert_eq!(s.connection, RommConnection::NotConnected);
     assert_eq!(s.server_url, server.uri());
@@ -769,10 +706,7 @@ async fn a_migrated_offline_config_restores_without_the_keyring() {
     mgr.restore_romm().await.unwrap();
     assert_eq!(status(&mgr).connection, RommConnection::NotConnected);
     assert_eq!(status(&mgr).server_url, "https://romm.example");
-    assert!(matches!(
-        mgr.restore().await.unwrap(),
-        RestoreOutcome::Offline { .. }
-    ));
+    assert!(mgr.client().is_none());
 }
 
 /// A migrated connected config restores with its stored credential, so a
@@ -805,8 +739,8 @@ async fn a_migrated_connected_config_restores_with_the_stored_credential() {
     assert!(mgr.client().is_some());
 }
 
-/// Connected with nothing in the keyring: Not connected, and the legacy
-/// outcome is the Connect form (prefilled), as before.
+/// Connected with nothing in the keyring: Not connected, with the stored
+/// server and user for the sign-in form to prefill.
 #[tokio::test]
 async fn restore_connected_without_a_credential_is_not_connected() {
     let dir = tempfile::tempdir().unwrap();
@@ -824,11 +758,11 @@ async fn restore_connected_without_a_credential_is_not_connected() {
         dir.path().join("covers"),
         Arc::new(MemoryStore::default()),
     );
-    assert!(matches!(
-        mgr.restore().await.unwrap(),
-        RestoreOutcome::NoSession { .. }
-    ));
-    assert_eq!(status(&mgr).connection, RommConnection::NotConnected);
+    mgr.restore_romm().await.unwrap();
+    let s = status(&mgr);
+    assert_eq!(s.connection, RommConnection::NotConnected);
+    assert_eq!(s.server_url, "https://romm.example");
+    assert_eq!(s.username, "six");
 }
 
 #[tokio::test]
@@ -1006,33 +940,27 @@ async fn reconnect_without_a_credential_is_no_stored_session() {
     assert!(!status(&mgr).busy);
 }
 
-/// Legacy "Use without a server": RomM stops probing, the welcome counts
-/// as done, the keyring stays. A later reconnect that connects turns
-/// probing back on.
+/// Not connected with a credential still in the keyring (a migrated
+/// "Use without a server" config): a reconnect that connects turns probing
+/// back on, so the next start restores.
 #[tokio::test]
-async fn use_offline_stops_probing_and_reconnect_turns_it_back_on() {
+async fn a_reconnect_that_connects_turns_probing_back_on() {
     let server = MockServer::start().await;
     mount_users_me(&server).await;
     let dir = tempfile::tempdir().unwrap();
     let (mgr, store) = stored_session(&dir, &server.uri(), token());
+    set_connected(&dir, false);
     mgr.restore_romm().await.unwrap();
-    mgr.use_offline().unwrap();
     assert!(mgr.client().is_none());
-    assert!(SecretStore::load(&*store).unwrap().is_some());
-    let config_path = dir.path().join("config.toml");
-    let cfg = Config::load(&config_path).unwrap();
-    assert!(!cfg.stores.romm.connected);
-    assert!(cfg.setup.welcomed);
     assert_eq!(status(&mgr).connection, RommConnection::NotConnected);
 
     mgr.reconnect().await.unwrap();
     assert_eq!(status(&mgr).connection, RommConnection::Connected);
+    let config_path = dir.path().join("config.toml");
     assert!(Config::load(&config_path).unwrap().stores.romm.connected);
     let fresh = SessionManager::new(config_path, dir.path().join("covers"), store);
-    assert!(matches!(
-        fresh.restore().await.unwrap(),
-        RestoreOutcome::Connected { .. }
-    ));
+    fresh.restore_romm().await.unwrap();
+    assert_eq!(status(&fresh).connection, RommConnection::Connected);
 }
 
 #[tokio::test]
@@ -1042,10 +970,8 @@ async fn a_reconnect_that_fails_keeps_not_probing() {
     let dir = tempfile::tempdir().unwrap();
     let (mgr, _store) = stored_session(&dir, &server.uri(), token());
     set_connected(&dir, false);
-    assert!(matches!(
-        mgr.retry().await.unwrap(),
-        RestoreOutcome::Unreachable { .. }
-    ));
+    mgr.reconnect().await.unwrap();
+    assert_eq!(status(&mgr).connection, RommConnection::Unreachable);
     let cfg = Config::load(&dir.path().join("config.toml")).unwrap();
     assert!(!cfg.stores.romm.connected);
 }

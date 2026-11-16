@@ -18,8 +18,8 @@ afterEach(() => {
 });
 
 describe('App', () => {
-  it('renders a toast in the connect phase', () => {
-    session.phase = 'none';
+  it('renders a toast in the welcome phase', () => {
+    session.phase = 'welcome';
     pushToast(NOTICE);
     const { body } = render(App);
     expect(body).toContain('data-testid="toast-region"');

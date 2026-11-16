@@ -64,6 +64,7 @@ describe('withGames (rows over SystemPlatform)', () => {
   const sys = (label: string, installed: number, server: number | null): SystemPlatform => ({
     slug: label.toLowerCase(),
     label,
+    name: label,
     aliases: [],
     origin: server === null ? 'catalog' : 'both',
     server_id: server === null ? null : 1,

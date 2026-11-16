@@ -5,8 +5,8 @@
 //! - **a game session ends** — the session-finished listener
 //!   ([`PlaySessionService::install_session_finished_hook`]) queues a
 //!   qualifying session in the registry outbox, then tries a flush;
-//! - **a session comes up** — `connect`, `restore_session` and
-//!   `retry_connect` call [`PlaySessionService::spawn_flush`] on success, so
+//! - **a session comes up** — `romm_connect`, `romm_restore` and
+//!   `romm_reconnect` call [`PlaySessionService::spawn_flush`] on success, so
 //!   sessions queued offline (or in an earlier run) go out.
 //!
 //! Always on; there is no setting. Nothing here blocks the UI: every

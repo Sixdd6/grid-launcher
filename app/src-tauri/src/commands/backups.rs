@@ -1268,7 +1268,12 @@ async fn make_plan(
         let first = run_with(sizes, 0);
         let mut planned = run_with(sizes, reserved(&first));
         if let Some(unavailable) = &unavailable {
-            plan::mark_without_romm(&mut planned, unavailable.clone());
+            let skipped = plan::firmware_skipped_systems(
+                &games,
+                &planned.items.games,
+                grid_core::firmware::known::known_files(),
+            );
+            plan::mark_without_romm(&mut planned, unavailable.clone(), skipped);
         }
         planned
     };

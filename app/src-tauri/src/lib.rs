@@ -17,10 +17,6 @@ mod python_import;
 mod relink_service;
 mod store_auth;
 mod stores_service;
-// Systems and firmware without RomM (romm-storefront-plan Step 7). Lives in
-// commands/ but is mounted here while commands.rs is frozen.
-#[path = "commands/systems.rs"]
-mod systems_commands;
 pub(crate) mod test_env;
 mod update_service;
 mod youtube_relay;
@@ -547,15 +543,6 @@ pub fn run() {
             // network), so launch core resolution and firmware routing work
             // before (or without) a RomM platform fetch.
             platform_registry::record(&state, None);
-            // Q6: the first 401 on a live session sends the user back to the
-            // Connect form. grid-core fires this once per session and drops
-            // the dead client; the payload is URL, username and auth kind,
-            // never the credential. Set before `restore_session` can run.
-            let handle = app.handle().clone();
-            state.session.set_unauthorized_hook(Arc::new(move |info| {
-                tracing::info!("server rejected the stored credential (401)");
-                let _ = handle.emit(commands::SESSION_UNAUTHORIZED_EVENT, info);
-            }));
             // RomM as a storefront: every status change (connect,
             // disconnect, reconnect, restore, a 401, a probe starting or
             // ending) reaches the frontend as `romm-changed`. The payload
@@ -872,11 +859,6 @@ pub fn run() {
             commands::tv::e2e_gamepad_inject,
             #[cfg(feature = "e2e")]
             commands::tv::e2e_clipboard_write,
-            commands::connect,
-            commands::restore_session,
-            commands::use_without_server,
-            commands::retry_connect,
-            commands::disconnect,
             commands::romm::romm_status,
             commands::romm::romm_restore,
             commands::romm::romm_connect,
@@ -988,10 +970,10 @@ pub fn run() {
             commands::logging::set_debug_prints,
             commands::relink::list_server_roms_for_platform,
             commands::setup::setup_platform_options,
-            systems_commands::system_platforms,
-            systems_commands::firmware_expected,
-            systems_commands::locate_firmware_files,
-            systems_commands::locate_ps3_firmware,
+            commands::systems::system_platforms,
+            commands::systems::firmware_expected,
+            commands::systems::locate_firmware_files,
+            commands::systems::locate_ps3_firmware,
             commands::library_path::suggested_library_path,
             commands::setup::setup_status,
             commands::setup::skip_platform_setup,

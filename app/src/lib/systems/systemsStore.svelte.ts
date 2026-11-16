@@ -460,7 +460,7 @@ export class SystemsStore {
     try {
       const ok = await api.locatePs3Firmware(row.emulator, path);
       if (!ok) {
-        return { installed: [], unverified: [], refused: [{ file, reason: 'Couldn’t open RPCS3 to install firmware.' }] };
+        return { installed: [], unverified: [], refused: [{ file, reason: 'Couldn’t open RPCS3 to install firmware.' }], unmatched: 0 };
       }
       void pollUntilInstalled(
         async () => {
@@ -471,9 +471,9 @@ export class SystemsStore {
         },
         { intervalMs: 3000, attempts: 40, stopped: () => !this.#active() },
       );
-      return { installed: [{ file, as_name: 'PS3UPDAT.PUP' }], unverified: [], refused: [] };
+      return { installed: [{ file, as_name: 'PS3UPDAT.PUP' }], unverified: [], refused: [], unmatched: 0 };
     } catch (err) {
-      return { installed: [], unverified: [], refused: [{ file, reason: errorMessage(err) }] };
+      return { installed: [], unverified: [], refused: [{ file, reason: errorMessage(err) }], unmatched: 0 };
     }
   }
 

@@ -5,8 +5,6 @@ import { SETTINGS_PAGES } from './settings/pages';
 describe('uiMode mapping (items 521, 523)', () => {
   it('each desktop view opens its TV tab', () => {
     for (const v of ['library', 'downloads', 'settings'] as const) expect(tvTabFor(v)).toBe(v);
-    // No Server tab: RomM is a Library group (TVRommStorefront).
-    expect(tvTabFor('server')).toBe('library');
   });
   it('each TV tab leaves to the same desktop view', () => {
     expect(desktopViewFor('library', 'appearance')).toEqual({ view: 'library', settingsPage: null });

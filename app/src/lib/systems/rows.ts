@@ -43,11 +43,10 @@ export function serverPlatformOf(system: SystemPlatform | null | undefined): Pla
   };
 }
 
-/** The name emulator keywords match: the backend's `SystemPlatform.name`
- *  (sent beside the frozen TS type), else the label. */
+/** The name emulator keywords match: the backend's `SystemPlatform.name`,
+ *  else the label. */
 export function systemName(system: SystemPlatform): string {
-  const name = (system as SystemPlatform & { name?: string }).name;
-  return typeof name === 'string' && name !== '' ? name : system.label;
+  return system.name !== '' ? system.name : system.label;
 }
 
 export type SystemRow = {
