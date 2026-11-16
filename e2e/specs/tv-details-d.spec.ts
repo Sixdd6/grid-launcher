@@ -1,6 +1,6 @@
 import { TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { connectPad, focused, hints, hold, invoke, key, press, release, waitFocused, waitTab, XBOX_PAD } from '../helpers/tv.js';
-import { captureErrors, openLibraryDetails, pageErrors, testId, waitGone, waitText } from '../helpers/tvDetails.js';
+import { captureErrors, openLibraryDetails, pageErrors, testId, waitGone, waitText, toAllGames } from '../helpers/tvDetails.js';
 
 type Rect = { left: number; right: number; top: number; bottom: number; width: number; height: number };
 
@@ -53,11 +53,8 @@ describe('tv-details (d): the media viewer plays videos', () => {
   before(async () => {
     await $(testId('tv-shell')).waitForExist({ timeout: 60_000, timeoutMsg: 'TV mode never opened' });
     await captureErrors();
-    await waitTab('server');
     await connectPad(XBOX_PAD);
-    await key('q');
-    await waitTab('library');
-    await waitFocused('r-all');
+    await toAllGames();
   });
 
   it('a trailer that cannot play falls back to its poster, with Watch on YouTube under it', async () => {

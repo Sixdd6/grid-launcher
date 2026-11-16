@@ -10,27 +10,27 @@ const GAMES = [903, 904, 905, 906];
 /**
  * Stage `tv-backups/tv-backups-b` (docs/tv-mode/plan.md P13): the drive is
  * pulled out mid-backup. Runs on spec a's profile (the session restores from
- * the keyring; --tv opens Server › Discover) and drive, which already holds
+ * the keyring; --tv opens Library › RomM › Discover) and drive, which already holds
  * Cinder Peaks, Moss and Marrow, PCSX2 and the PS2 firmware, so this backup
  * is four throttled game rows ("Big Arcade Game" first, about ten seconds).
  */
 describe('tv-backups-b: the drive is removed mid-backup', () => {
   before(async () => {
     await $(testId('tv-shell')).waitForExist({ timeout: APP_START_TIMEOUT, timeoutMsg: 'TV mode never opened' });
-    await waitTab('server');
+    await waitTab('library');
     await captureErrors();
     await connectPad(XBOX_PAD);
   });
 
   it('queues four games picked in select mode', async () => {
-    await tapK('r-1');
-    await browser.waitUntil(async () => (await gridCovers('#srv-grid')).length === 6, { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the PlayStation 2 grid never filled' });
-    if ((await focused()) !== 'sg901') await key('ArrowRight');
-    await waitFocused('sg901');
+    await tapK('r-platform:ps2');
+    await browser.waitUntil(async () => (await gridCovers('#lib-grid')).length === 6, { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the PlayStation 2 grid never filled' });
+    if ((await focused()) !== 'pg901') await key('ArrowRight');
+    await waitFocused('pg901');
     await key('r');
     await $(testId('tv-selbar')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     // A click on a cover in select mode picks it, as A does.
-    for (const id of GAMES) await tapK(`sg${id}`);
+    for (const id of GAMES) await tapK(`pg${id}`);
     await waitText('tv-selbar-summary', /^4 selected/);
     await key('y');
     await $(testId('tv-backup-page')).waitForExist({ timeout: TRANSITION_TIMEOUT });

@@ -12,11 +12,12 @@ import {
   waitButtons,
   waitOskClosed,
   waitText,
+  toAllGames,
 } from '../helpers/tvDetails.js';
 
 /**
  * Stage `tv-details`, spec b: starts with --tv on the session spec a saved.
- * Link to server game for Mystery Cart (no server id) with the link page's
+ * Link to a RomM game for Mystery Cart (no server id) with the link page's
  * search; Locate… for Lost Cart through the folder browser (its copy is in
  * <data>/elsewhere); Game settings for My Game (Windows).
  */
@@ -24,17 +25,14 @@ describe('tv-details (b): Link, Locate…, Game settings', () => {
   before(async () => {
     await $(testId('tv-shell')).waitForExist({ timeout: 60_000, timeoutMsg: 'TV mode never opened' });
     await captureErrors();
-    await waitTab('server');
     await connectPad(XBOX_PAD);
-    await key('q');
-    await waitTab('library');
-    await waitFocused('r-all');
+    await toAllGames();
   });
 
-  it('an unlinked game offers Link to server game and Remove; its Saves tab says why (items 282, 314)', async () => {
+  it('an unlinked game offers Link to a RomM game and Remove; its Saves tab says why (items 282, 314)', async () => {
     await openLibraryDetails('Mystery Cart');
-    await waitButtons(['Link to server game', 'Remove from library']);
-    expect(await text('tv-det-left')).toBe('Not linked to a server game. Link it to your server to play.');
+    await waitButtons(['Link to a RomM game', 'Remove from library']);
+    expect(await text('tv-det-left')).toBe('Not linked to a RomM game. Link it to play.');
     await press('right_bumper');
     await press('right_bumper');
     await waitText('tv-saves-note', 'Link this game to use cloud saves.');
@@ -44,8 +42,8 @@ describe('tv-details (b): Link, Locate…, Game settings', () => {
 
   it('the link page lists the server games no row holds; Y narrows it as you type (items 346, 348)', async () => {
     await key('Enter');
-    await $(testId('tv-link-page')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Link to server game never opened' });
-    await waitText('tv-crumb', /Link to server game/);
+    await $(testId('tv-link-page')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Link to a RomM game never opened' });
+    await waitText('tv-crumb', /Link to a RomM game/);
     await waitText('tv-link-sub', 'Choose the matching Super Nintendo Entertainment System game');
     await $(testId('tv-link-604')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the server games never listed' });
     const listed = await browser.execute(() => Array.from(document.querySelectorAll('#link-list [data-k]')).map((r) => r.getAttribute('data-k')));

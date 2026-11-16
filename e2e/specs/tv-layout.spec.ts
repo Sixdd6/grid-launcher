@@ -14,6 +14,7 @@ import {
   waitTab,
   XBOX_PAD,
 } from '../helpers/tv.js';
+import { tvRailTo } from '../helpers/romm.js';
 import { captureErrors, libCover, pageErrors, testId, text, typeKeys, waitGone, waitOskClosed } from '../helpers/tvDetails.js';
 import { byK, driveRow, tap, tapK } from '../helpers/tvBackups.js';
 
@@ -23,7 +24,7 @@ import { byK, driveRow, tap, tapK } from '../helpers/tvBackups.js';
  * the `backups` fixtures (seed: backups-seed.mjs `tv-layout`, which is
  * backups-d's profile: Cinder Peaks, Tux Trail and Moss and Marrow
  * installed, TESTDRIVE set up for Linux, PCSX2 from the server), connected
- * through TV mode's own Connect, then Choose your systems, and every tab,
+ * through TV mode's welcome and RomM's sign-in page, then Choose your systems, and every tab,
  * page and overlay after it.
  *
  * On each screen, at each window size (E2E_WINDOW, else 1280x720, 1920x1080
@@ -120,7 +121,7 @@ async function back(id: string): Promise<void> {
 
 describe('tv-layout: every screen fits at 720p, 1080p and 4K', () => {
   before(async () => {
-    await $(testId('tv-connect')).waitForDisplayed({ timeout: APP_START_TIMEOUT, timeoutMsg: 'TV mode never showed Connect' });
+    await $(testId('tv-welcome')).waitForDisplayed({ timeout: APP_START_TIMEOUT, timeoutMsg: 'TV mode never showed the welcome' });
     await captureErrors();
     await connectPad(XBOX_PAD);
   });
@@ -129,45 +130,44 @@ describe('tv-layout: every screen fits at 720p, 1080p and 4K', () => {
     await browser.setWindowSize(1920, 1080).catch(() => {});
   });
 
-  it('Connect', async () => {
-    await sweep('connect', repeat('ArrowDown', 4));
+  it('The welcome and RomM\'s sign-in page', async () => {
+    await sweep('welcome', ['ArrowDown']);
+    await tapK('w-next');
+    await waitShown('tv-welcome-stores', 'the welcome\'s storefronts');
+    await sweep('welcome-stores', repeat('ArrowDown', 6));
+    await tapK('w-romm');
+    await waitShown('tv-romm-signin', 'RomM\'s sign-in page');
+    await sweep('romm-signin', repeat('ArrowDown', 4));
     // Fill it in by pasting (View): the server, then the token.
     await invoke('e2e_clipboard_write', { text: mockUrl() });
-    await tapK('cf-url');
+    await tapK('rs-url');
     await waitShown('tv-osk', 'the keyboard');
-    await sweep('connect-keyboard', ['ArrowDown', 'ArrowRight', 'ArrowRight']);
+    await sweep('signin-keyboard', ['ArrowDown', 'ArrowRight', 'ArrowRight']);
     await key('Escape');
     await waitOskClosed();
     await key('v');
-    await browser.waitUntil(async () => (await text('tv-cf-url-value')) === mockUrl(), { timeout: TRANSITION_TIMEOUT });
-    await tapK('cf-how');
+    await browser.waitUntil(async () => (await text('tv-rs-url-value')) === mockUrl(), { timeout: TRANSITION_TIMEOUT });
+    await tapK('rs-how');
     await waitShown('tv-list', 'Sign in with');
-    await sweep('connect-list');
+    await sweep('signin-list');
     await back('tv-list');
     await invoke('e2e_clipboard_write', { text: FIXTURE_TOKEN });
-    await tapK('cf-token');
+    await tapK('rs-secret');
     await waitShown('tv-osk', 'the keyboard');
     await key('Escape');
     await waitOskClosed();
     await key('v');
-    if ((await text('tv-cf-lib-value')).trim() === '') {
-      await invoke('e2e_clipboard_write', { text: path.join(dataDir(), 'library') });
-      await tapK('cf-lib');
-      await waitShown('tv-folder-browser', 'the folder browser');
-      await sweep('folder-browser', repeat('ArrowDown', 3));
-      await back('tv-folder-browser');
-      await key('v');
-    }
-    // Connect by its button: Start on Connect opens the startup Menu (user
-    // decision 2026-11-10).
-    await tap(testId('tv-connect-go'));
+    await tap(testId('tv-rs-go'));
+    await waitShown('tv-welcome-stores', 'the welcome\'s storefronts after the sign-in');
+    await browser.waitUntil(async () => (await text('tv-welcome-row-romm-pill')) === 'Connected', { timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'RomM never showed Connected' });
+    await tapK('w-go');
   });
 
   it('Choose your systems (when this profile is offered it)', async () => {
     // A profile whose systems all have an emulator goes straight to the shell.
     await browser.waitUntil(async () => (await $(testId('tv-choose')).isExisting()) || (await $(testId('tv-discover')).isExisting()), {
       timeout: TRANSITION_TIMEOUT * 3,
-      timeoutMsg: 'neither Choose your systems nor Discover showed after Connect',
+      timeoutMsg: 'neither Choose your systems nor Discover showed after Continue',
     });
     if (!(await $(testId('tv-choose')).isExisting())) return;
     await browser.waitUntil(async () => (await focused())?.startsWith('ch-') ?? false, { timeout: TRANSITION_TIMEOUT * 2 });
@@ -179,14 +179,19 @@ describe('tv-layout: every screen fits at 720p, 1080p and 4K', () => {
     }
     await key('m');
     await waitShown('tv-shell');
-    await waitTab('server');
+    await waitTab('library');
   });
 
-  it('Server › Discover, Search everything, the Menu and its pages', async () => {
+  it('Library › RomM › Discover, Search everything, the Menu and its pages', async () => {
     await waitShown('tv-discover', 'Discover');
     await sweep('discover', ['ArrowDown', 'ArrowRight', 'ArrowRight', 'ArrowDown', 'ArrowRight']);
+    // The sweeps' moves can leave Discover for the rail, where Down selects
+    // the next row: back on Discover, into its covers.
+    await tvRailTo('r-romm:discover');
+    await key('ArrowRight');
     await key('y');
     await waitShown('tv-osk', 'the search keyboard');
+    expect(await $(testId('tv-osk')).getAttribute('aria-label')).toBe('Search everything');
     await sweep('search-keyboard', ['ArrowDown', 'ArrowDown', 'ArrowRight']);
     await typeKeys('a');
     await key('Enter');
@@ -210,9 +215,9 @@ describe('tv-layout: every screen fits at 720p, 1080p and 4K', () => {
     await back('tv-confirm');
   });
 
-  it('Server › a platform, its search and select mode', async () => {
-    await tapK('r-1');
-    await browser.waitUntil(async () => (await $$('#srv-grid [data-cover]').length) > 0, { timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'the platform grid never filled' });
+  it('Library › RomM › a platform, its search and select mode', async () => {
+    await tapK('r-platform:ps2');
+    await browser.waitUntil(async () => (await $$('#lib-grid [data-cover]').length) > 0, { timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'the platform grid never filled' });
     await browser.pause(300);
     await sweep('server-platform', ['ArrowRight', 'ArrowRight', 'ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowUp']);
     await key('y');
@@ -222,11 +227,11 @@ describe('tv-layout: every screen fits at 720p, 1080p and 4K', () => {
     await waitOskClosed();
     // The sweeps' reversed moves can leave the grid for the rail, and Right
     // from the rail comes back to the cover left (item 85), so later sizes
-    // take another path and may end on another platform: back to platform 1.
-    await tapK('r-1');
-    await $(byK('sg901')).waitForExist({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: "platform 1's grid never came back" });
+    // take another path and may end on another platform: back to PlayStation 2.
+    await tapK('r-platform:ps2');
+    await $(byK('pg901')).waitForExist({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: "PlayStation 2's grid never came back" });
     // Select mode: its bar pinned under the grid.
-    await tapK('sg901');
+    await tapK('pg901');
     if (await $(testId('tv-details')).isExisting()) await back('tv-details');
     await key('r');
     await waitShown('tv-selbar', 'the select bar');
@@ -238,7 +243,7 @@ describe('tv-layout: every screen fits at 720p, 1080p and 4K', () => {
 
   it('Details of a server game, then Downloads with a live install', async () => {
     // An install, so Downloads and the top bar have a live row.
-    await tapK('sg903');
+    await tapK('pg903');
     await waitShown('tv-details', 'Details');
     await browser.pause(500);
     await sweep('details-server-game', ['ArrowRight', 'ArrowDown', 'ArrowDown']);
@@ -328,12 +333,25 @@ describe('tv-layout: every screen fits at 720p, 1080p and 4K', () => {
     await tap(testId('tv-tab-settings'));
     await waitTab('settings');
     await waitShown('tv-settings', 'Settings');
-    for (const pane of ['appearance', 'backup-drives', 'cloud-saves', 'connection', 'library', 'retroachievements', 'stores', 'systems', 'tv', 'updates']) {
+    for (const pane of ['appearance', 'backup-drives', 'cloud-saves', 'stores', 'library', 'retroachievements', 'systems', 'tv', 'updates']) {
       await tapK(`r-${pane}`);
       await browser.pause(400);
       // Up and Down only: Left and Right adjust a slider or a choice.
       await sweep(`settings-${pane}`, repeat('ArrowDown', 10));
     }
+  });
+
+  it('Settings › Game stores › RomM: the RomM page and Edit sign-in…', async () => {
+    await tapK('r-stores');
+    await browser.pause(300);
+    await tapK('sto-romm');
+    await waitShown('tv-romm-page', 'the RomM page');
+    await sweep('romm-page', repeat('ArrowDown', 8));
+    await tapK('edit');
+    await waitShown('tv-romm-signin', 'Edit RomM sign-in');
+    await sweep('romm-edit-signin', repeat('ArrowDown', 4));
+    await back('tv-romm-signin');
+    await back('tv-romm-page');
   });
 
   it('Settings › Systems: the System page, the emulator form, the Program browser', async () => {

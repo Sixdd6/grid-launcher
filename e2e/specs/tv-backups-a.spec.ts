@@ -1,5 +1,6 @@
 // e2e-app-args:
-import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { connectRomm, enterTvMode } from '../helpers/romm.js';
 import { mountOf, plugIn, readPack } from '../helpers/drives.js';
 import { connectPad, focused, hints, key, waitFocused, waitTab, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, pageErrors, testId, text, waitGone, waitText } from '../helpers/tvDetails.js';
@@ -16,14 +17,9 @@ const DRIVE = 'TESTDRIVE';
  */
 describe('tv-backups-a: set up a drive and backup two games', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({ timeout: APP_START_TIMEOUT, timeoutMsg: 'the connect form never appeared' });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the server view never rendered after connecting' });
+    await connectRomm();
     await captureErrors();
-    await $(testId('tv-mode-button')).click();
-    await $(testId('tv-shell')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'TV mode never opened' });
+    await enterTvMode();
     await connectPad(XBOX_PAD);
   });
 
@@ -84,12 +80,12 @@ describe('tv-backups-a: set up a drive and backup two games', () => {
   });
 
   it('RT starts select mode with nothing picked; Y then says how to pick (items 439, 445–447)', async () => {
-    await tap(testId('tv-tab-server'));
-    await waitTab('server');
-    await tapK('r-1');
-    await browser.waitUntil(async () => (await gridCovers('#srv-grid')).length === 6, { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the PlayStation 2 grid never filled' });
-    if ((await focused()) !== 'sg901') await key('ArrowRight');
-    await waitFocused('sg901');
+    await tap(testId('tv-tab-library'));
+    await waitTab('library');
+    await tapK('r-platform:ps2');
+    await browser.waitUntil(async () => (await gridCovers('#lib-grid')).length === 6, { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the PlayStation 2 grid never filled' });
+    if ((await focused()) !== 'pg901') await key('ArrowRight');
+    await waitFocused('pg901');
     await key('r');
     await $(testId('tv-selbar')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await waitText('tv-selbar-summary', '0 selected · 0 B');
@@ -109,11 +105,11 @@ describe('tv-backups-a: set up a drive and backup two games', () => {
     await waitText('tv-selbar-summary', /^0 selected/);
     await key('Enter');
     await waitText('tv-selbar-summary', /^1 selected/);
-    expect(await $(byK('sg901')).getAttribute('class')).toContain('pk');
-    expect(await $(`${byK('sg901')} .pick`).isExisting()).toBe(true);
+    expect(await $(byK('pg901')).getAttribute('class')).toContain('pk');
+    expect(await $(`${byK('pg901')} .pick`).isExisting()).toBe(true);
     expect(await hints()).toContain('A Unpick');
     await key('ArrowRight');
-    await waitFocused('sg902');
+    await waitFocused('pg902');
     await key('Enter');
     await waitText('tv-selbar-summary', /^2 selected/);
     expect(await $(testId('tv-details')).isExisting()).toBe(false);
@@ -149,8 +145,8 @@ describe('tv-backups-a: set up a drive and backup two games', () => {
     await waitGone('tv-backup-page');
     await waitNotice(`2 games added to the backup queue for ${DRIVE}`, 10_000);
     expect(await $(testId('tv-selbar')).isExisting()).toBe(false);
-    if (!(await $(byK('sg901')).isExisting())) throw new Error(`back on the grid? ${await screenState()}`);
-    expect(await $(byK('sg901')).getAttribute('class')).not.toContain('pk');
+    if (!(await $(byK('pg901')).isExisting())) throw new Error(`back on the grid? ${await screenState()}`);
+    expect(await $(byK('pg901')).getAttribute('class')).not.toContain('pk');
   });
 
   it('Downloads reads each backup row, with the Backup badge, until every one is written (items 483–489)', async () => {
