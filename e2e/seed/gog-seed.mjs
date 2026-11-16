@@ -6,6 +6,7 @@
  *
  * - `gog-login`, `gog-secrets`: a profile used without a server, GOG not
  *   connected, no store files (the specs sign in through the login window).
+ * - `gog-welcome`: no config at all, so the app opens on the welcome.
  * - every other GOG spec (package E's `gog-library`, `gog-cloud`,
  *   `gog-offline`, `gog-romm-installer`, `gog-backups`): a fresh profile
  *   whose connect form the spec fills (the mock RomM), already signed in to
@@ -89,6 +90,10 @@ mkdirSync(downloads, { recursive: true });
 writeFileSync(path.join(downloads, 'wren_hollow_1_0_3_12345.sh'), buildLinuxSh());
 writeFileSync(path.join(downloads, 'quarry_nine_1_2_0_54321.pkg'), buildMacPkg());
 for (const [name, bytes] of Object.entries(WINDOWS_INSTALLERS)) writeFileSync(path.join(downloads, name), bytes);
+
+// `gog-welcome`: a fresh profile (no config at all), so the app opens on the
+// welcome and the spec signs in to GOG from its row.
+if (spec === 'gog-welcome') process.exit(0);
 
 const signedOut = spec === 'gog-login' || spec === 'gog-secrets';
 if (signedOut) {

@@ -1,8 +1,7 @@
 // The RomM sign-in form's rules (RommSignInForm: the welcome's RomM row and
 // the card's Connect / Edit / Sign in again dialog), kept out of the
 // component so they can be tested without mounting it. Taken from the old
-// Connect form (`connectForm.ts`, which re-exports the legacy helpers until
-// the welcome replaces Connect).
+// Connect form, which the welcome replaced.
 import type { RommStatus } from '../api';
 import { rommHost, rommToasts, type SignInMode } from './words';
 
@@ -94,41 +93,4 @@ export function reconnectedToast(was: RommStatus['connection'], status: Pick<Rom
   if (status.connection !== 'connected') return null;
   const host = rommHost(status);
   return was === 'connected' ? rommToasts.reconnected(host) : rommToasts.backAgain(host);
-}
-
-// --- Legacy Connect form helpers (re-exported by `connectForm.ts`) ----------
-
-/**
- * Whether the form asks for a library folder, and what the field starts
- * with. A first run has no folder stored: the field is shown, pre-filled
- * with the suggested folder, and required — nothing can install without one.
- * When a folder is already stored (a rejected credential brought the form
- * back, or a Python import carried it over) the field is not shown at all;
- * Settings › Library is where it changes.
- */
-export function libraryField(stored: string, suggested: string): { show: boolean; initial: string } {
-  return stored.trim() !== '' ? { show: false, initial: '' } : { show: true, initial: suggested.trim() };
-}
-
-export type ConnectFields = SignInFields & {
-  /** `null` while the form does not ask for a folder. */
-  libraryPath: string | null;
-};
-
-/** The Connect button is enabled only once every field it shows is filled.
- *  The username is asked for only in password mode. */
-export function canConnect(f: ConnectFields): boolean {
-  if (!canSignIn(f)) return false;
-  if (f.libraryPath !== null && f.libraryPath.trim() === '') return false;
-  return true;
-}
-
-/**
- * "Use without a server" needs only the library folder: enabled once the
- * stored folder is known (`libraryKnown`) and, when the form asks for one,
- * the field is filled. The server fields play no part.
- */
-export function canUseOffline(libraryKnown: boolean, libraryPath: string | null): boolean {
-  if (!libraryKnown) return false;
-  return libraryPath === null || libraryPath.trim() !== '';
 }
