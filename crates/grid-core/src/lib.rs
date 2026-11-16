@@ -20,6 +20,7 @@ pub mod romm;
 pub mod secrets;
 pub mod session;
 pub mod stores;
+pub mod systems;
 #[cfg(test)]
 pub(crate) mod test_env;
 

@@ -22,10 +22,39 @@ pub const NO_EMULATOR: &str = "<none>";
 /// Looks up `platform` in `map`: exact key first, then a case-insensitive
 /// key scan; a blank value (after trim) at either stage is treated as
 /// absent (`mapping_value_for_platform`, selection.py:214).
+///
+/// Then the label lookup rule (romm-storefront-plan 0.9, `systems::lookup`):
+/// a key that is another name of the same platform — any key the
+/// process-wide platform registry maps to `platform`'s slug — so a default
+/// saved under the catalog name still answers for a custom server label,
+/// and the other way round.
 pub fn mapping_value_for_platform<'a>(
     map: &'a BTreeMap<String, String>,
     platform: &str,
 ) -> Option<&'a str> {
+    mapping_value_with_slugs(map, platform, slug_for_platform)
+}
+
+/// [`mapping_value_for_platform`] with the registry passed in, for tests.
+pub(crate) fn mapping_value_with_slugs<'a>(
+    map: &'a BTreeMap<String, String>,
+    platform: &str,
+    slug_of: impl Fn(&str) -> String,
+) -> Option<&'a str> {
+    if let Some(found) = mapping_value_by_name(map, platform) {
+        return Some(found);
+    }
+    let slug = slug_of(platform);
+    if slug.is_empty() {
+        return None;
+    }
+    map.iter()
+        .filter(|(_, value)| !value.trim().is_empty())
+        .find(|(key, _)| slug_of(key) == slug)
+        .map(|(_, value)| value.trim())
+}
+
+fn mapping_value_by_name<'a>(map: &'a BTreeMap<String, String>, platform: &str) -> Option<&'a str> {
     let target = platform.trim();
     if target.is_empty() {
         return None;
@@ -356,6 +385,30 @@ mod tests {
     fn mapping_blank_platform_returns_none() {
         let m = map(&[("SNES", "snes9x")]);
         assert_eq!(mapping_value_for_platform(&m, "  "), None);
+    }
+
+    #[test]
+    fn mapping_falls_back_to_another_name_of_the_same_slug() {
+        let slugs = |name: &str| match name.trim().to_lowercase().as_str() {
+            "playstation" | "ps1 classics" | "sony playstation" => "psx".to_string(),
+            "nintendo 64" => "n64".to_string(),
+            _ => String::new(),
+        };
+        let m = map(&[("PlayStation", "DuckStation"), ("Nintendo 64", "RetroArch")]);
+        assert_eq!(
+            mapping_value_with_slugs(&m, "PS1 Classics", slugs),
+            Some("DuckStation")
+        );
+        assert_eq!(
+            mapping_value_with_slugs(&m, "Sony PlayStation", slugs),
+            Some("DuckStation")
+        );
+        assert_eq!(mapping_value_with_slugs(&m, "Unknown", slugs), None);
+        let blank = map(&[("PlayStation", "  ")]);
+        assert_eq!(
+            mapping_value_with_slugs(&blank, "PS1 Classics", slugs),
+            None
+        );
     }
 
     #[test]

@@ -17,6 +17,54 @@ use crate::autoconfig::paths::{self, expand_user, resolve_best_effort};
 use crate::autoconfig::readers::rpcs3_dev_flash_candidates;
 use crate::launch::spawn::clean_env;
 
+/// A PS3 system update file starts with this magic ("SCEUF" and padding).
+const PUP_MAGIC: &[u8] = b"SCEUF\0\0\0";
+
+/// Why a picked file can't be handed to `rpcs3 --installfw`, or `None`
+/// when it can (Locate PS3UPDAT.PUP, romm-storefront-plan 0.10): it must be
+/// a regular file no bigger than the firmware cap, start with the PUP
+/// magic, and — when `expected` names a size and MD5 (RomM's list) — match
+/// them. RPCS3 then checks the PUP's own digests. Reads only the header,
+/// then (when a hash is expected) streams the file once.
+pub fn picked_pup_problem(path: &Path, expected: Option<(u64, &str)>) -> Option<String> {
+    use std::io::Read;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let not_pup = || format!("{name} isn't a PlayStation 3 system update. Choose PS3UPDAT.PUP.");
+    let Ok(meta) = std::fs::metadata(path) else {
+        return Some(not_pup());
+    };
+    if !meta.is_file() {
+        return Some(not_pup());
+    }
+    if meta.len() > super::PACK_FIRMWARE_MAX_BYTES {
+        return Some(super::local::OVERSIZE_REASON.to_string());
+    }
+    let mut head = [0u8; 8];
+    let ok = std::fs::File::open(path)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .is_ok();
+    if !ok || head != PUP_MAGIC {
+        return Some(not_pup());
+    }
+    if let Some((size, md5)) = expected.filter(|(_, md5)| !md5.trim().is_empty()) {
+        let differs = || {
+            "This isn't the PS3UPDAT.PUP GRID knows (size or MD5 differs). Download the update again."
+                .to_string()
+        };
+        if size > 0 && meta.len() != size {
+            return Some(differs());
+        }
+        match super::local::hash_file(path) {
+            Ok((_, actual)) if actual == md5.trim().to_lowercase() => {}
+            _ => return Some(differs()),
+        }
+    }
+    None
+}
+
 /// The `PS3UPDAT.PUP` sitting beside `emulator_path`, or `None` when there
 /// is none (`rpcs3_pup_path`, rpcs3.py:274-283).
 ///
@@ -192,6 +240,34 @@ pub fn ps3_platform_id(platforms: &BTreeMap<String, i64>) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_picked_pup_needs_the_magic_and_the_expected_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let pup = dir.path().join("PS3UPDAT.PUP");
+        let mut data = PUP_MAGIC.to_vec();
+        data.extend_from_slice(b"FAKE-PUP-not-real");
+        std::fs::write(&pup, &data).unwrap();
+        assert_eq!(picked_pup_problem(&pup, None), None);
+        let md5 = super::super::local::hash_file(&pup).unwrap().1;
+        assert_eq!(
+            picked_pup_problem(&pup, Some((data.len() as u64, &md5))),
+            None
+        );
+        let other = picked_pup_problem(
+            &pup,
+            Some((data.len() as u64, "00000000000000000000000000000000")),
+        );
+        assert!(other.unwrap().contains("size or MD5 differs"));
+
+        let bios = dir.path().join("scph39001.bin");
+        std::fs::write(&bios, b"FAKE-BIOS-not-real").unwrap();
+        assert_eq!(
+            picked_pup_problem(&bios, None).as_deref(),
+            Some("scph39001.bin isn't a PlayStation 3 system update. Choose PS3UPDAT.PUP.")
+        );
+        assert!(picked_pup_problem(dir.path(), None).is_some());
+    }
 
     #[test]
     fn pup_path_uses_the_directory_itself_when_the_entry_path_is_a_directory() {

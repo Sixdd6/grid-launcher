@@ -12,8 +12,9 @@ use grid_core::launch::compat::{
 };
 use grid_core::launch::profiles::load_profiles;
 use grid_core::launch::setup::{
-    apply_pending_defaults, forget_explicit_none, newest_server_build, plan_setup, platform_setup,
-    recommendations, PendingOutcome, PlatformSetup, ServerPackage, SetupChoice,
+    apply_pending_defaults, forget_explicit_none, newest_server_build, plan_setup,
+    platform_setup_systems, recommendations, PendingOutcome, PlatformSetup, ServerPackage,
+    SetupChoice,
 };
 use grid_core::launch::source::HOST_PLATFORM;
 use grid_core::library::{server_emulator_source_id, ServerEmulatorRequest};
@@ -27,21 +28,27 @@ use super::{ensure_library_idle, err, list_platforms, AppState};
 /// an emulator installed: a `Vec<PendingOutcome>`.
 pub const SETUP_DEFAULTS_EVENT: &str = "setup-defaults";
 
-/// The setup screen's rows: every server platform that needs an emulator,
-/// with the emulators GRID can install for it on this OS — catalog
-/// downloads and the server's own Emulators-platform packages — and the one
-/// it recommends. Fetches the platforms through [`list_platforms`], so the
-/// install service learns them (names, labels, slugs, ids) exactly as the
-/// Server view's fetch would, before setup queues anything.
+/// The setup and Settings › Systems rows: every system that needs an
+/// emulator (romm-storefront-plan 0.10: GRID's catalog, merged with RomM's
+/// platforms while connected), with the emulators GRID can install for it
+/// on this OS — catalog downloads and, with RomM, the server's own
+/// Emulators-platform packages — and the one it recommends. While RomM is
+/// connected the platforms are fetched through [`list_platforms`] first, so
+/// the install service learns them (names, labels, slugs, ids) exactly as
+/// the Library's fetch would, before setup queues anything.
 #[tauri::command]
 pub async fn setup_platform_options(
     state: State<'_, AppState>,
 ) -> Result<Vec<PlatformSetup>, String> {
-    let platforms = list_platforms(state.clone()).await?;
+    let platforms = match state.session.client() {
+        Some(_) => list_platforms(state.clone()).await.unwrap_or_default(),
+        None => Vec::new(),
+    };
     let packages = server_packages(&state, &platforms).await;
+    let systems = crate::systems_commands::systems_list(&state).await;
     let config = Config::load(&Config::default_path()).map_err(err)?;
-    Ok(platform_setup(
-        &platforms,
+    Ok(platform_setup_systems(
+        &systems,
         load_profiles(),
         &config,
         HOST_PLATFORM,

@@ -17,6 +17,10 @@ mod python_import;
 mod relink_service;
 mod store_auth;
 mod stores_service;
+// Systems and firmware without RomM (romm-storefront-plan Step 7). Lives in
+// commands/ but is mounted here while commands.rs is frozen.
+#[path = "commands/systems.rs"]
+mod systems_commands;
 pub(crate) mod test_env;
 mod update_service;
 mod youtube_relay;
@@ -538,6 +542,11 @@ pub fn run() {
                 );
             }
             let state = app.state::<AppState>();
+            // Systems without RomM: the platform maps start from GRID's own
+            // catalog (two small embedded JSON files, no keyring, no
+            // network), so launch core resolution and firmware routing work
+            // before (or without) a RomM platform fetch.
+            platform_registry::record(&state, None);
             // Q6: the first 401 on a live session sends the user back to the
             // Connect form. grid-core fires this once per session and drops
             // the dead client; the payload is URL, username and auth kind,
@@ -979,6 +988,10 @@ pub fn run() {
             commands::logging::set_debug_prints,
             commands::relink::list_server_roms_for_platform,
             commands::setup::setup_platform_options,
+            systems_commands::system_platforms,
+            systems_commands::firmware_expected,
+            systems_commands::locate_firmware_files,
+            systems_commands::locate_ps3_firmware,
             commands::library_path::suggested_library_path,
             commands::setup::setup_status,
             commands::setup::skip_platform_setup,

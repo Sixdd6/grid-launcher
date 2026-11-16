@@ -338,6 +338,34 @@ pub fn platform_setup(
         .collect()
 }
 
+/// [`platform_setup`] over the systems list (romm-storefront-plan 0.10):
+/// GRID's catalog merged with RomM's platforms when connected, so setup
+/// works without RomM. Each system stands in as a platform with its label
+/// as the display name, its keyword-matching `name`, and RomM's id and ROM
+/// count (0 without RomM).
+pub fn platform_setup_systems(
+    systems: &[crate::systems::SystemPlatform],
+    profiles: &[EmulatorProfile],
+    config: &Config,
+    host: &str,
+    table: &Recommendations,
+    packages: &[ServerPackage],
+) -> Vec<PlatformSetup> {
+    let platforms: Vec<Platform> = systems.iter().map(system_as_platform).collect();
+    platform_setup(&platforms, profiles, config, host, table, packages)
+}
+
+fn system_as_platform(system: &crate::systems::SystemPlatform) -> Platform {
+    Platform {
+        id: system.server_id.unwrap_or(0),
+        name: system.name.clone(),
+        slug: system.slug.clone(),
+        rom_count: system.server_rom_count.unwrap_or(0),
+        custom_name: None,
+        display_name: system.label.clone(),
+    }
+}
+
 fn platform_row(
     platform: &Platform,
     installable: &[(&EmulatorProfile, &CatalogEntry)],
@@ -722,6 +750,54 @@ mod tests {
 
     fn one(name: &str, slug: &str, host: &str) -> PlatformSetup {
         setup_for(&[platform(name, slug, 10)], host).remove(0)
+    }
+
+    #[test]
+    fn setup_over_the_catalog_works_without_romm() {
+        let systems = crate::systems::merge(crate::systems::catalog(), None, &[]);
+        let rows = platform_setup_systems(
+            &systems,
+            load_profiles(),
+            &Config::default(),
+            "linux",
+            recommendations(),
+            &[],
+        );
+        let psx = rows.iter().find(|r| r.slug == "psx").expect("PlayStation is a catalog system");
+        assert_eq!(psx.label, "PlayStation");
+        assert_eq!(psx.rom_count, 0);
+        assert_eq!(recommended_name(psx), Some("DuckStation (Playstation 1)"));
+        // A RetroArch-only system gets its core from the slug.
+        let gba = rows.iter().find(|r| r.slug == "gba").unwrap();
+        assert!(gba.core.is_some());
+        // The Emulators shelf never shows, and no native platform does.
+        assert!(rows.iter().all(|r| r.slug != "emulators" && r.slug != "win"));
+    }
+
+    #[test]
+    fn setup_over_systems_keys_rows_by_the_server_label() {
+        let server = vec![Platform {
+            id: 4,
+            name: "PlayStation".to_string(),
+            slug: "psx".to_string(),
+            rom_count: 12,
+            custom_name: Some("PS1 Classics".to_string()),
+            display_name: "PS1 Classics".to_string(),
+        }];
+        let systems = crate::systems::merge(crate::systems::catalog(), Some(&server), &[]);
+        let rows = platform_setup_systems(
+            &systems,
+            load_profiles(),
+            &Config::default(),
+            "linux",
+            recommendations(),
+            &[],
+        );
+        let psx = rows.iter().find(|r| r.slug == "psx").unwrap();
+        assert_eq!(psx.label, "PS1 Classics");
+        assert_eq!(psx.name, "PlayStation");
+        assert_eq!(psx.rom_count, 12);
+        assert_eq!(recommended_name(psx), Some("DuckStation (Playstation 1)"));
     }
 
     fn names(row: &PlatformSetup) -> Vec<&str> {

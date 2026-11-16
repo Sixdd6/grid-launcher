@@ -10,10 +10,16 @@
 //!
 //! Per-file write dispatch (`.7z`/`.rar`, `.zip`, raw) lives in [`write`].
 
+pub mod known;
+pub mod local;
 pub mod manifest;
 pub mod routing;
 pub mod rpcs3;
 mod write;
+
+/// Firmware files picked on this computer (Locate files), as a
+/// [`FirmwareSource`]: see [`local`].
+pub use local::LocalFirmwareSource;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -216,10 +222,11 @@ impl FirmwareSource for ServerFirmware<'_> {
     }
 }
 
-/// The largest firmware file read from a drive. Real firmware is far
-/// smaller (a PS3 update is about 200 MB); the cap keeps a hostile index
-/// from making GRID read a huge file into memory.
-const PACK_FIRMWARE_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// The largest firmware file read from a drive or picked by Locate files.
+/// Real firmware is far smaller (a PS3 update is about 200 MB); the cap
+/// keeps a hostile index, or a wrong pick, from making GRID read a huge
+/// file into memory.
+pub const PACK_FIRMWARE_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 /// A platform's firmware in a drive's gridpack: the index's
 /// [`PackFirmware`] entry for it, read from `<mount>/gridpack/`.
