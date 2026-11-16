@@ -84,6 +84,7 @@
   import { createHoverViewed } from './lastViewedHover';
   import { dropPendingWarms } from './backgroundPrefetch';
   import { attachScrollGate, createVisibleWarmer, scrollParent } from './visibleWarm';
+  import { attachWheelRescue } from './wheelRescue';
   import { noteViewed } from './stores/lastViewed.svelte';
   import { inputMode, noteDirectional } from './stores/inputMode.svelte';
   import type { DriveStoreGame, StoreGame } from './api';
@@ -763,7 +764,17 @@
     // follow this effect: the effect re-runs whenever the rows change — a
     // finished install, a filter — and that happens while the user is
     // scrolling, which is the one moment the pause must hold.
-    gateDetach ??= attachScrollGate(scrollParent(el) ?? window);
+    if (gateDetach === null) {
+      const scroller = scrollParent(el) ?? window;
+      // WebKitGTK's GPU scrolling drops wheel notches over a long windowed
+      // grid; the rescue scrolls them (wheelRescue.ts).
+      const detachGate = attachScrollGate(scroller);
+      const detachRescue = attachWheelRescue(scroller);
+      gateDetach = () => {
+        detachGate();
+        detachRescue();
+      };
+    }
     return () => {
       warmer.disconnect();
       // Stop watching AND drop what is still queued for this grid: the view

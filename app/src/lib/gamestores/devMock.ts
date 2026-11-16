@@ -145,7 +145,13 @@ export function installDevMock(): void {
       return null;
     },
     get_ui_settings: () => UI,
-    list_installed: () => installed(),
+    // `?many=200` adds that many filler RomM rows, for long-list checks.
+    list_installed: () => [
+      ...installed(),
+      ...Array.from({ length: Number(new URLSearchParams(window.location.search).get('many') ?? 0) }, (_, i) =>
+        installedRow(`Filler Game ${String(i + 1).padStart(3, '0')}`, 'romm', String(90000 + i), 'SNES', 0),
+      ),
+    ],
     list_downloads: () => ({ entries: [...fake.entries, ...rommRows].reverse() }),
     list_updates: () => [],
     list_compat_tools: () => ({ tools: [{ name: 'GE-Proton10-17', kind: 'proton', path: '/x', source: 'managed' }], default_tool: 'GE-Proton10-17', umu_run: { source: 'system', path: '/usr/bin/umu-run', release_tag: '', source_id: '' } }),
