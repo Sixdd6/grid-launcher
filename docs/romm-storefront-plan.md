@@ -1251,3 +1251,26 @@ spot. Design it as its own step after Step 9, not inside Steps 3/6.
   Designed first, built after Step 9.
 - **Server build beside catalog copy:** keep both; the user picks per system in Settings › Systems.
 - **"How to name builds"** links to `docs/server-emulator-packages.md` on GitHub.
+
+## Emulators row and Config folder outcome (built 2026-11-15)
+
+Built from the RommStorefront and TVRommStorefront cards' "RomM › Emulators" and
+"Settings › Library: Open config folder" sections.
+
+- **Backend.** `launch::emulators_view` sorts every Emulators-platform file into
+  Emulators, Other files and Other builds (pure, unit-tested). Emulators install through
+  the existing `install_server_emulator` (kept, as is the whole-folder plain install of
+  `install(rom_id)`); an Other file installs one file through the same download path as a
+  plain file (`install_server_file`, `JobTarget::ServerFile`, `games/Emulators/<folder>`,
+  unpacked when GRID knows the archive, never registered, no registry row: installed
+  state is read from the disk). A wrong-processor build fails with
+  `FailureCode::WrongMachine` (what it is built for), which the row and the card word.
+  Commands: `commands/romm_emulators.rs`, `config_folder_path`.
+- **Frontend.** `lib/romm/emulators.ts` (rail row, row states, words),
+  `lib/romm/emulators.svelte.ts` (the shared list and actions),
+  `RommEmulatorsView.svelte`, `TvRommEmulators.svelte`, `TvRommOtherBuilds.svelte`;
+  Settings › Library's Config folder block.
+- **Choices the cards leave open:** the rail row shows without a count while its list
+  loads or failed; a single-system folder names the server's platform for its slug
+  ("Sony PlayStation 2"), a `multi` folder the profile's systems; the catalog-copy line
+  names the entry the build registers as (the profile's full name plus " (server)").

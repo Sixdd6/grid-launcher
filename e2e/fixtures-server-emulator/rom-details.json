@@ -6,7 +6,7 @@
     "platform_id": 1,
     "platform_display_name": "Emulators",
     "fs_name": "ps2",
-    "summary": "A server Emulators-platform folder packaged to docs/server-emulator-packages.md: one Linux PCSX2 build whose zip holds the mock forge's PCSX2 AppImage stub.",
+    "summary": "A server Emulators-platform folder packaged to docs/server-emulator-packages.md: one Linux PCSX2 build whose zip holds the mock forge's PCSX2 AppImage stub, and a Windows build GRID doesn't install on Linux (RomM \u203a Emulators' Other builds).",
     "regions": [],
     "languages": [],
     "tags": [],
@@ -17,6 +17,66 @@
       {
         "id": 8011,
         "file_name": "PCSX2 (v2.0.2) (arch-linux-x64).zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      },
+      {
+        "id": 8012,
+        "file_name": "PCSX2 (v2.0.2) (arch-windows-x64).zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  },
+  "803": {
+    "id": 803,
+    "name": "pico",
+    "fs_name_no_ext": "pico",
+    "platform_id": 1,
+    "platform_display_name": "Emulators",
+    "fs_name": "pico",
+    "summary": "RomM \u203a Emulators: a Pico-8 build for 32-bit ARM only, so on a PC it is one of the Other builds (an other-processor build).",
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 8031,
+        "file_name": "Pico-8 (v0.2.7a6) (arch-linux-armhf).zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  },
+  "804": {
+    "id": 804,
+    "name": "multi",
+    "fs_name_no_ext": "multi",
+    "platform_id": 1,
+    "platform_display_name": "Emulators",
+    "fs_name": "multi",
+    "summary": "RomM \u203a Emulators' Other files: a build named to the rule for an emulator GRID doesn't know, and a file not named for GRID. Both install as plain files in the library's Emulators folder.",
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 8041,
+        "file_name": "Ares Nightly (v141) (arch-linux-x64).AppImage",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      },
+      {
+        "id": 8042,
+        "file_name": "xemu-v0.8.5-x86_64.AppImage",
         "file_size_bytes": 0,
         "is_top_level": true
       }

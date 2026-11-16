@@ -5,9 +5,11 @@ own catalog. For GRID to find them, know which platform each one serves, pick
 the right build for the computer it runs on, and spot newer versions, the
 emulators must be laid out as below.
 
-Anything in the Emulators platform that does not follow this layout is ignored
-by GRID. (GRID never shows the Emulators platform in the Library, so it is not
-installed like a ROM either.)
+GRID shows the Emulators platform in the Library, under RomM › Emulators. The
+builds that follow this layout install as emulators that Settings › Systems
+sets up and updates. Any other file there is listed under "Other files" and
+installs as a plain file in your library's Emulators folder: GRID does not set
+it up for a system or check it for updates.
 
 ## Where the files go
 
