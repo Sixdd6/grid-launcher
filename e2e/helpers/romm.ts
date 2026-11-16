@@ -238,3 +238,85 @@ export async function platformSlug(id: number): Promise<string> {
   if (!hit) throw new Error(`the mock RomM has no platform ${id}`);
   return hit.slug;
 }
+
+// --- TV mode -----------------------------------------------------------------
+// TV mode's Library rail (`[data-testid="tv-library"] [data-rail]`) holds the
+// RomM group: `r-romm:installed`, `r-romm:discover` and one
+// `r-platform:<slug>` row per platform (test ids `tv-lib-rail-…`). Moving
+// onto a row shows it. The platform screen's ids: `tv-romm-platform-header`,
+// `tv-lib-count`, `tv-lib-search`, `tv-romm-emu`, `tv-romm-fw`,
+// `tv-romm-backup-all`, covers `tv-cover-pg<rom id>` (`data-k` `pg<id>`).
+
+/** The `data-k` of the focused TV item, or null. */
+async function tvFocused(): Promise<string | null> {
+  return (await browser.execute(() => document.querySelector('[data-tv-root] .f')?.getAttribute('data-k') ?? null)) as string | null;
+}
+
+/** The TV Library rail's `data-k`s, top to bottom. */
+export async function tvRailKeys(): Promise<string[]> {
+  return (await browser.execute(() =>
+    Array.from(document.querySelectorAll('[data-testid="tv-library"] [data-rail] [data-k]')).map((e) => e.getAttribute('data-k') ?? ''),
+  )) as string[];
+}
+
+/**
+ * Moves TV focus onto the Library rail row `k` with the arrow keys: Left
+ * until focus is on the rail, then Up or Down to the row. The Library tab
+ * must be on show. Waits for the row to exist first (RomM's platform rows
+ * come once its restore and platform list have answered).
+ */
+export async function tvRailTo(k: string): Promise<void> {
+  await browser.waitUntil(async () => (await tvRailKeys()).includes(k), {
+    timeout: APP_START_TIMEOUT,
+    timeoutMsg: `the TV Library rail never showed ${k}`,
+  });
+  for (let i = 0; i < 24; i++) {
+    const f = await tvFocused();
+    if (f !== null && (await tvRailKeys()).includes(f)) break;
+    await browser.keys('ArrowLeft');
+    await browser.pause(80);
+  }
+  for (let i = 0; i < 60; i++) {
+    const f = await tvFocused();
+    if (f === k) return;
+    const keys = await tvRailKeys();
+    const at = f === null ? -1 : keys.indexOf(f);
+    await browser.keys(at === -1 || keys.indexOf(k) > at ? 'ArrowDown' : 'ArrowUp');
+    await browser.pause(80);
+  }
+  throw new Error(`TV focus never reached the rail row ${k} (focused: ${await tvFocused()})`);
+}
+
+/** TV Library › RomM › <platform>, by slug; waits for its header. */
+export async function tvOpenRommPlatform(slug: string): Promise<void> {
+  await tvRailTo(`r-platform:${slug}`);
+  await $(testId('tv-romm-platform-header')).waitForDisplayed({
+    timeout: TRANSITION_TIMEOUT,
+    timeoutMsg: `TV platform ${slug}'s header never appeared`,
+  });
+}
+
+/** TV Library › RomM › Discover; waits for it. */
+export async function tvOpenRommDiscover(): Promise<void> {
+  await tvRailTo('r-romm:discover');
+  await $(testId('tv-discover')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'TV Discover never appeared' });
+}
+
+/** TV Library › RomM › Installed; waits for its header. */
+export async function tvOpenRommInstalled(): Promise<void> {
+  await tvRailTo('r-romm:installed');
+  await $(testId('tv-romm-installed-header')).waitForDisplayed({
+    timeout: TRANSITION_TIMEOUT,
+    timeoutMsg: 'TV RomM › Installed never appeared',
+  });
+}
+
+/**
+ * From the desktop shell, the TV button: TV mode opens on the Library (RomM
+ * › Discover when RomM is connected and Open GRID on is Automatic).
+ */
+export async function enterTvMode(): Promise<void> {
+  await $(testId('tv-mode-button')).waitForDisplayed({ timeout: APP_START_TIMEOUT, timeoutMsg: 'the desktop shell never loaded' });
+  await $(testId('tv-mode-button')).click();
+  await $(testId('tv-shell')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'TV mode never opened' });
+}

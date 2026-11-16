@@ -1,6 +1,7 @@
 // Helpers the `tv-details` specs share (docs/tv-mode/plan.md P9).
 import { TRANSITION_TIMEOUT } from './env.js';
-import { focused, key, waitFocused } from './tv.js';
+import { tvRailTo } from './romm.js';
+import { focused, key, waitFocused, waitTab } from './tv.js';
 
 export const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -140,4 +141,46 @@ export async function typeKeys(s: string): Promise<void> {
 
 export async function waitOskClosed(): Promise<void> {
   await browser.waitUntil(async () => !(await $(testId('tv-osk')).isExisting()), { timeout: TRANSITION_TIMEOUT });
+}
+
+/**
+ * TV mode opens on the Library (RomM › Discover when RomM is connected):
+ * focus moves up the rail to All games.
+ */
+export async function toAllGames(): Promise<void> {
+  await waitTab('library');
+  await tvRailTo('r-all');
+  await waitFocused('r-all');
+}
+
+/**
+ * The TV welcome's step 1 on a fresh profile (no folder chosen yet, by
+ * design): A on Library folder opens the folder browser (it starts beside
+ * the suggested folder); up to a parent of `library`, down into it, then Y
+ * uses it. Focus moves on to Next.
+ */
+export async function chooseWelcomeLibrary(library: string): Promise<void> {
+  await moveTo('w-lib', 'ArrowUp');
+  await key('Enter');
+  await $(testId('tv-folder-browser')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the folder browser never opened' });
+  for (let i = 0; i < 30; i++) {
+    const at = await text('tv-fs-path');
+    if (library === at || library.startsWith(at.endsWith('/') ? at : `${at}/`)) break;
+    await moveTo('up', 'ArrowUp', 60);
+    await key('Enter');
+    await browser.waitUntil(async () => (await text('tv-fs-path')) !== at, { timeout: TRANSITION_TIMEOUT });
+  }
+  for (let i = 0; i < 30; i++) {
+    const at = await text('tv-fs-path');
+    if (at === library) break;
+    const seg = library.slice(at.length).replace(/^\/+/, '').split('/')[0];
+    await moveTo(`fs-${seg}`, 'ArrowDown', 60);
+    await key('Enter');
+    await browser.waitUntil(async () => (await text('tv-fs-path')) !== at, { timeout: TRANSITION_TIMEOUT });
+  }
+  await waitText('tv-fs-path', library);
+  await key('y');
+  await $(testId('tv-welcome')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Y never came back to the welcome' });
+  await waitText('tv-welcome-lib-value', library);
+  await waitFocused('w-next');
 }
