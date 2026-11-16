@@ -5,14 +5,14 @@
  * `group_seeds_per_spec`), and every variant empties the data dir first, so
  * each spec starts on a profile of its own:
  *
- *   node tv-startup-seed.mjs <data-dir> tv-startup-a   # a fresh profile: Connect
+ *   node tv-startup-seed.mjs <data-dir> tv-startup-a   # a fresh profile: the welcome
  *   node tv-startup-seed.mjs <data-dir> tv-startup-b   # an unreachable library
  *   node tv-startup-seed.mjs <data-dir> tv-startup-c   # fresh, one Backup drive
  *   node tv-startup-seed.mjs <data-dir> tv-startup-d   # fresh again: Install N
  *   node tv-startup-seed.mjs <data-dir> tv-startup-e   # unreachable again: Close
  *
- * - a, d: no config at all; `<data>/library` exists for Connect's library
- *   folder (the spec pastes its path).
+ * - a, d: no config at all; `<data>/library` exists for the welcome's library
+ *   folder (the spec picks it in the folder browser).
  * - b, e: `library-move-seed.mjs library-move-c` (a stored library root that
  *   does not exist, the files in `<data>/relocate-real`).
  * - c: as a, plus a fake Backup drive `<data>/media/COUCHDRIVE` holding the

@@ -1,8 +1,8 @@
 import path from 'node:path';
 import { APP_START_TIMEOUT, dataDir, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { connectPad, invoke, key, waitFocused, waitTab, XBOX_PAD } from '../helpers/tv.js';
-import { captureErrors, moveTo, pageErrors, testId, typeKeys, waitOskClosed, waitText } from '../helpers/tvDetails.js';
-import { tap } from '../helpers/tvBackups.js';
+import { captureErrors, chooseWelcomeLibrary, moveTo, pageErrors, testId, typeKeys, waitOskClosed, waitText } from '../helpers/tvDetails.js';
+import { tap, tapK } from '../helpers/tvBackups.js';
 
 /** Two installs from the mock forge, each held back a moment. */
 const SETUP_TIMEOUT = 60_000;
@@ -27,37 +27,42 @@ async function setupCard(): Promise<Card | null> {
 
 /**
  * Stage `tv-startup`, spec d (TV mode plan P12): a fresh profile again.
- * Connect (pasted server, typed token, pasted library), then Choose your
+ * The welcome (the suggested library; RomM's sign-in page with a pasted
+ * server and a typed token), Continue, then Choose your
  * systems: tick Dreamcast and PlayStation 2, Install 2 emulators. GRID
- * opens on Server › Discover with the setup card pinned at the top: one
+ * opens on Library › RomM › Discover with the setup card pinned at the top: one
  * segment per install, a step line, no countdown while anything installs;
  * once both are done, "2 installs done", the ready line, and it closes
  * after 10 seconds.
  */
 describe('tv-startup (d): Install N emulators and the setup card', () => {
   before(async () => {
-    await $(testId('tv-connect')).waitForDisplayed({ timeout: APP_START_TIMEOUT, timeoutMsg: 'TV mode never showed Connect' });
+    await $(testId('tv-welcome')).waitForDisplayed({ timeout: APP_START_TIMEOUT, timeoutMsg: 'TV mode never showed the welcome' });
     await captureErrors();
     await connectPad(XBOX_PAD);
+    await chooseWelcomeLibrary(path.join(dataDir(), 'library'));
+    await key('Enter');
+    await $(testId('tv-welcome-stores')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Next never showed step 2' });
+    await tapK('w-romm');
+    await $(testId('tv-romm-signin')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the sign-in page never opened' });
     await invoke('e2e_clipboard_write', { text: mockUrl() });
-    await waitFocused('cf-url');
+    await waitFocused('rs-url');
     await key('v');
-    await waitText('tv-cf-url-value', mockUrl());
-    await moveTo('cf-token', 'ArrowDown');
+    await waitText('tv-rs-url-value', mockUrl());
+    await moveTo('rs-secret', 'ArrowDown');
     await key('Enter');
     await typeKeys(FIXTURE_TOKEN);
     await key('Enter');
     await waitOskClosed();
-    await moveTo('cf-lib', 'ArrowDown');
-    await invoke('e2e_clipboard_write', { text: path.join(dataDir(), 'library') });
-    await key('v');
-    await waitText('tv-cf-lib-value', path.join(dataDir(), 'library'));
-    await tap(testId('tv-connect-go'));
+    await tap(testId('tv-rs-go'));
+    await $(testId('tv-welcome-stores')).waitForDisplayed({ timeout: APP_START_TIMEOUT, timeoutMsg: 'the sign-in page never went back' });
+    await waitText('tv-welcome-row-romm-pill', 'Connected');
+    await tapK('w-go');
     await $(testId('tv-choose')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'Choose your systems never opened' });
     await $(testId('tv-ch-row-ps2')).waitForExist({ timeout: TRANSITION_TIMEOUT });
   });
 
-  it('Install 2 emulators opens Server › Discover with the setup card pinned, one segment each (items 151, 152, 154, 155, 407)', async () => {
+  it('Install 2 emulators opens Library › RomM › Discover with the setup card pinned, one segment each (items 151, 152, 154, 155, 407)', async () => {
     await waitFocused('ch-dc');
     await key('Enter');
     await key('ArrowDown');
@@ -68,7 +73,7 @@ describe('tv-startup (d): Install N emulators and the setup card', () => {
     await key('ArrowDown');
     await waitFocused('ch-go');
     await key('Enter');
-    await waitTab('server');
+    await waitTab('library');
     let card: Card | null = null;
     await browser.waitUntil(async () => (card = await setupCard()) !== null, { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the setup card never showed' });
     expect(card!.title).toMatch(/^(Setting up 2 installs · [01] done|2 installs done)$/);

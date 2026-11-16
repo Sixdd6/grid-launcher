@@ -1,5 +1,6 @@
 // e2e-app-args:
-import { APP_START_TIMEOUT, FIXTURE_TOKEN, INSTALL_TIMEOUT, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { INSTALL_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { connectRomm, startScreen } from '../helpers/romm.js';
 import { connectPad, focused, hints, key, waitFocused, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, pageErrors, testId, text, waitGone, waitText } from '../helpers/tvDetails.js';
 import { byK, confirmDialog, dlLines, focusOn, pageRow, tap, tapK, waitNotice } from '../helpers/tvBackups.js';
@@ -15,7 +16,7 @@ import { AMAZON } from '../helpers/amazon.js';
  * mode, opens Library › Amazon Games, installs a game through the install
  * page (no Version, Language or DLC rows), follows it in Downloads, opens an
  * installed game (LB / RB reach Overview and Media only, no Cloud saves) and
- * its Game settings (no cloud row), then Settings › Stores › Amazon Games:
+ * its Game settings (no cloud row), then Settings › Game stores › Amazon Games:
  * its rows (no Cloud saves), the Disconnect confirm and the sign-in over TV
  * mode with the login window beside it (WebDriver goes back to the main
  * window). Green only once packages A and C are merged.
@@ -50,16 +51,8 @@ describe('tv-amazon: Amazon Games in TV mode', () => {
   const INSTALLED = 'Fogline';
 
   before(async () => {
-    // The Amazon seed may start with or without a RomM server: connect when asked.
-    await browser.waitUntil(async () => (await $(testId('connect-server-url')).isExisting()) || (await $(testId('tv-mode-button')).isExisting()), {
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'neither the connect form nor the shell appeared',
-    });
-    if (await $(testId('connect-server-url')).isExisting()) {
-      await $(testId('connect-server-url')).setValue(mockUrl());
-      await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-      await $(testId('connect-submit')).click();
-    }
+    // The Amazon seed may start on the welcome or in the shell: connect RomM on the welcome.
+    if ((await startScreen()) === 'welcome') await connectRomm();
     await $(testId('tv-mode-button')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the shell never rendered' });
     await captureErrors();
     await $(testId('tv-mode-button')).click();
@@ -199,10 +192,10 @@ describe('tv-amazon: Amazon Games in TV mode', () => {
     await waitGone('tv-store-details');
   });
 
-  it('Settings › Stores has an Amazon Games row first', async () => {
+  it('Settings › Game stores has an Amazon Games row first', async () => {
     await tap(testId('tv-tab-settings'));
     await tap(testId('tv-set-rail-stores'));
-    await waitText('tv-pane-title', 'Stores');
+    await waitText('tv-pane-title', 'Game stores');
     expect(await text('tv-stores-row-amazon')).toMatch(/Amazon Games[\s\S]*Signed in as sam\.plays[\s\S]*Connected/);
     const rows = (await $$('[data-testid^="tv-stores-row-"]').map((r) => r.getAttribute('data-testid'))) as string[];
     expect(rows[0]).toBe('tv-stores-row-amazon');

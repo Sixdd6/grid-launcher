@@ -1,5 +1,6 @@
 // e2e-app-args:
-import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { connectRomm, startScreen } from '../helpers/romm.js';
 import { connectPad, focused, hints, key, waitFocused, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, pageErrors, testId, text, typeKeys, waitGone, waitOskClosed, waitText } from '../helpers/tvDetails.js';
 import { byK, confirmDialog, dlLines, focusOn, listOptions, notices, pageRow, tap, tapK, waitNotice } from '../helpers/tvBackups.js';
@@ -18,7 +19,7 @@ import { ensureSteamKey, steamStatus, uninstallInSteam } from '../helpers/steamS
  * A-list with no Cancel, an installed game's page (Verify / Uninstall in
  * Steam, no Game settings), Uninstall in Steam… (the Library page, Show in
  * Steam and the box while GRID watches; user decision 5), the Playing page with no Stop game, then
- * Settings › Stores › Steam: the account sheet, "Enter a SteamID64…" and
+ * Settings › Game stores › Steam: the account sheet, "Enter a SteamID64…" and
  * the masked key through the on-screen keyboard (never the key in clear),
  * Test results as cards, Disconnect… (confirmed) and Connect Steam. No login
  * window opens for Steam; WebDriver stays on the main window. Green only once
@@ -54,15 +55,7 @@ describe('tv-steam: Steam in TV mode', () => {
   const INSTALLED = 'Moonlit Ferry';
 
   before(async () => {
-    await browser.waitUntil(async () => (await $(testId('connect-server-url')).isExisting()) || (await $(testId('tv-mode-button')).isExisting()), {
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'neither the connect form nor the shell appeared',
-    });
-    if (await $(testId('connect-server-url')).isExisting()) {
-      await $(testId('connect-server-url')).setValue(mockUrl());
-      await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-      await $(testId('connect-submit')).click();
-    }
+    if ((await startScreen()) === 'welcome') await connectRomm();
     await $(testId('tv-mode-button')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the shell never rendered' });
     // The seed writes no key: save it through the app's own `steam_save`
     // (reversed on the wire, helpers/steamSetup.ts).
@@ -353,10 +346,10 @@ describe('tv-steam: Steam in TV mode', () => {
     await waitGone('tv-store-details');
   });
 
-  it('Settings › Stores has the Steam row last: SteamID64 and Connected', async () => {
+  it('Settings › Game stores has the Steam row last: SteamID64 and Connected', async () => {
     await tap(testId('tv-tab-settings'));
     await tap(testId('tv-set-rail-stores'));
-    await waitText('tv-pane-title', 'Stores');
+    await waitText('tv-pane-title', 'Game stores');
     expect(await text('tv-stores-row-steam')).toMatch(new RegExp(`Steam[\\s\\S]*SteamID64 ${STEAM.steamId}[\\s\\S]*Connected`));
     const rows = (await $$('[data-testid^="tv-stores-row-"]').map((r) => r.getAttribute('data-testid'))) as string[];
     expect(rows[rows.length - 1]).toBe('tv-stores-row-steam');

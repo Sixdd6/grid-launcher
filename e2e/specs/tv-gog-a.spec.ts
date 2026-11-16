@@ -1,5 +1,6 @@
 // e2e-app-args:
-import { APP_START_TIMEOUT, FIXTURE_TOKEN, INSTALL_TIMEOUT, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { INSTALL_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { connectRomm, enterTvMode } from '../helpers/romm.js';
 import { connectPad, focused, hints, key, waitFocused, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, pageErrors, testId, text, waitGone, waitText } from '../helpers/tvDetails.js';
 import { byK, dlLines, focusOn, gridCovers, pageRow, tap, tapK, waitNotice } from '../helpers/tvBackups.js';
@@ -18,14 +19,9 @@ describe('tv-gog-a: GOG in the Library, the game page and the install page', () 
   let title = '';
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({ timeout: APP_START_TIMEOUT, timeoutMsg: 'the connect form never appeared' });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the server view never rendered after connecting' });
+    await connectRomm();
     await captureErrors();
-    await $(testId('tv-mode-button')).click();
-    await $(testId('tv-shell')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'TV mode never opened' });
+    await enterTvMode();
     await connectPad(XBOX_PAD);
   });
 

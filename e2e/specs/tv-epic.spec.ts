@@ -1,5 +1,6 @@
 // e2e-app-args:
-import { APP_START_TIMEOUT, FIXTURE_TOKEN, INSTALL_TIMEOUT, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { INSTALL_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { connectRomm, startScreen } from '../helpers/romm.js';
 import { connectPad, focused, hints, key, waitFocused, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, pageErrors, testId, text, waitGone, waitText } from '../helpers/tvDetails.js';
 import { byK, confirmDialog, dlLines, focusOn, pageRow, tap, tapK, waitNotice } from '../helpers/tvBackups.js';
@@ -14,7 +15,7 @@ import { loginWindowOpen, MAIN_WINDOW } from '../helpers/gogLogin.js';
  * EA app). Enters TV mode, opens Library › Epic Games, checks the Not
  * supported page, installs a game through the install page (no Version or
  * Language rows), follows it in Downloads, opens an installed game's tabs
- * and Game settings, then Settings › Stores › Epic Games: its rows, the
+ * and Game settings, then Settings › Game stores › Epic Games: its rows, the
  * Disconnect confirm and the sign-in over TV mode. Green only once the
  * backend packages (A, B, C) and D are merged.
  */
@@ -49,16 +50,8 @@ describe('tv-epic: Epic Games in TV mode', () => {
   const INSTALLED = 'Starlight Courier';
 
   before(async () => {
-    // The Epic seed may start with or without a RomM server: connect when asked.
-    await browser.waitUntil(async () => (await $(testId('connect-server-url')).isExisting()) || (await $(testId('tv-mode-button')).isExisting()), {
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'neither the connect form nor the shell appeared',
-    });
-    if (await $(testId('connect-server-url')).isExisting()) {
-      await $(testId('connect-server-url')).setValue(mockUrl());
-      await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-      await $(testId('connect-submit')).click();
-    }
+    // The Epic seed may start on the welcome or in the shell: connect RomM on the welcome.
+    if ((await startScreen()) === 'welcome') await connectRomm();
     await $(testId('tv-mode-button')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the shell never rendered' });
     await captureErrors();
     await $(testId('tv-mode-button')).click();
@@ -215,10 +208,10 @@ describe('tv-epic: Epic Games in TV mode', () => {
     await waitGone('tv-store-details');
   });
 
-  it('Settings › Stores has an Epic Games row before GOG’s', async () => {
+  it('Settings › Game stores has an Epic Games row before GOG’s', async () => {
     await tap(testId('tv-tab-settings'));
     await tap(testId('tv-set-rail-stores'));
-    await waitText('tv-pane-title', 'Stores');
+    await waitText('tv-pane-title', 'Game stores');
     expect(await text('tv-stores-row-epic')).toMatch(/Epic Games[\s\S]*Signed in as SamPlays[\s\S]*Connected/);
     const rows = (await $$('[data-testid^="tv-stores-row-"]').map((r) => r.getAttribute('data-testid'))) as string[];
     if (rows.includes('tv-stores-row-gog')) expect(rows.indexOf('tv-stores-row-epic')).toBeLessThan(rows.indexOf('tv-stores-row-gog'));
