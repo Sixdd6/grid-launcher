@@ -8,7 +8,26 @@
   import { updates } from './stores/updates.svelte';
   import { installedKey, visibleLibraryGames } from './library';
   import { isMissing } from './library/missing';
-  import { driveKeyOf, emptyText, entryForKey, matchesRail, railEntries, type RailEntry, type RailKey } from './library/rail';
+  import {
+    driveKeyOf,
+    emptyText,
+    entryForKey,
+    matchesRail,
+    storefrontRailEntries,
+    topRailEntries,
+    type RailEntry,
+    type RailKey,
+  } from './library/rail';
+  import { romm } from './stores/romm.svelte';
+  import { Catalog } from './server/catalog.svelte';
+  import { rommConnecting, rommInstalledRows, rommRailGroup, rommSelectionFallback, type RommRailRow } from './romm/rail';
+  import { rommHost, ROMM_INSTALLED } from './romm/words';
+  import RommServerView from './romm/desktop/RommServerView.svelte';
+  import RommInstalledHeader from './romm/desktop/RommInstalledHeader.svelte';
+  import RommBanner from './romm/desktop/RommBanner.svelte';
+  import RommMark from './romm/RommMark.svelte';
+  /** The RomM group heading's tile: RommMark's monogram and colour (prototype `RM_MARK`). */
+  const ROMM_MARK = { mono: 'R', hue: 'hsl(258 50% 46%)' };
   import {
     DRIVE_SORTS,
     driveChips,
@@ -125,15 +144,77 @@
   let romRows = $derived(installed.list.filter((r) => !isStoreRow(r)));
   let storeMix = $derived(mixedCounts(gameStores.installedGames, installed.list, nowSeconds));
   let storeGroups = $derived(storeRailGroups(gameStores.statuses, (s) => gameStores.library(s)));
+
+  // The RomM group (plan 0.3, RommStorefront README "Library rail"): one
+  // server catalog for the Library's life, which the rail's platform rows
+  // and the Discover and platform screens share. The platform list loads
+  // whenever RomM connects; until it answers, the group has no platform rows.
+  const catalog = new Catalog();
+  let platformsLoaded = $state(false);
+  let rommConnected = $derived(romm.status.connection === 'connected');
+  $effect(() => {
+    if (!rommConnected) {
+      platformsLoaded = false;
+      return;
+    }
+    let cancelled = false;
+    untrack(() => {
+      catalog
+        .loadPlatforms()
+        .then(() => {
+          if (!cancelled) platformsLoaded = true;
+        })
+        .catch(() => {
+          // The group shows Installed and Discover; a refused list leaves out the platforms.
+        });
+      void catalog.checkLibraryPath();
+      void catalog.loadLaunchDefaults();
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
+  let rommRows = $derived(rommInstalledRows(installed.list));
+  let rommGroup = $derived(rommRailGroup(romm.status, platformsLoaded ? catalog.platforms : null, installed.list));
+  let rommRowByKey = $derived(new Map<string, RommRailRow>((rommGroup?.rows ?? []).map((r) => [r.key, r])));
+
   let entries = $derived([
-    ...railEntries(romRows, updateRomIds, nowSeconds, drives.withPack).map((e) =>
+    ...topRailEntries(romRows, updateRomIds, nowSeconds, drives.withPack).map((e) =>
       e.key === 'all' || e.key === 'recent' || e.key === 'updates' ? { ...e, count: e.count + storeMix[e.key] } : e,
     ),
-    ...storeGroups.flatMap((g) =>
-      g.rows.map((r): RailEntry => ({ key: r.key, testId: r.testId, label: r.label, count: r.count.kind === 'number' ? r.count.n : 0 })),
-    ),
+    // The storefront groups by name: Amazon, Epic, GOG, RomM, Steam.
+    ...storefrontRailEntries<RailEntry>([
+      ...storeGroups.map((g) => ({
+        source: g.source,
+        entries: g.rows.map(
+          (r): RailEntry => ({ key: r.key, testId: r.testId, label: r.label, count: r.count.kind === 'number' ? r.count.n : 0 }),
+        ),
+      })),
+      ...(rommGroup === null
+        ? []
+        : [
+            {
+              source: 'romm' as const,
+              entries: rommGroup.rows.map((r): RailEntry => ({ key: r.key, testId: r.testId, label: r.label, count: r.count ?? 0 })),
+            },
+          ]),
+    ]),
   ]);
-  let selected = $derived(entryForKey(entries, librarySelection.key));
+
+  // A RomM row that disappeared (RomM dropped while Discover or a platform
+  // was open) falls back to RomM › Installed, or All games when the group is
+  // gone. A platform row waits while the platform list is still loading.
+  let selectedKey = $derived.by((): RailKey => {
+    const key = librarySelection.key;
+    if (key.startsWith('platform:') && rommConnected && !platformsLoaded) return key;
+    return rommSelectionFallback(key, rommGroup) as RailKey;
+  });
+  let selected = $derived(entryForKey(entries, selectedKey));
+
+  // Which RomM screen replaces the Library's own grid: Discover, a platform, or none.
+  let rommRow = $derived(rommRowByKey.get(selected.key) ?? null);
+  let rommScreen = $derived(rommRow !== null && rommRow.kind !== 'installed' ? rommRow : null);
+  let rommInstalledView = $derived(selected.key === 'romm:installed');
 
   // A store view (Library › GOG › Installed / Available).
   let storeSel = $derived(parseStoreRailKey(selected.key));
@@ -386,24 +467,19 @@
     });
   }
 
-  // "Backup all N…" on a Library platform row: the installed games of
-  // that platform the server knows (a row with no server id can't be
-  // downloaded again).
-  let platformBackupIds = $derived(
-    selected.key.startsWith('platform:')
-      ? visibleLibraryGames(installed.list).flatMap((r) =>
-          matchesRail(r, selected.key, updateRomIds, nowSeconds) && r.rom_id !== null ? [r.rom_id] : [],
-        )
-      : [],
-  );
+  // "Backup all N…" on RomM › Installed: every installed RomM game. The ones
+  // with a RomM id go in the request; a row with no id has no pack identity,
+  // so it goes along as `unlinked` and the dialog lists it (GameBackups
+  // without RomM: "It isn't linked to a RomM game…").
+  let rommBackupIds = $derived(rommRows.flatMap((r) => (r.rom_id === null ? [] : [r.rom_id])));
+  let rommUnlinked = $derived(rommRows.flatMap((r) => (r.rom_id === null ? [{ title: r.title, platform: r.platform }] : [])));
+  let rommBytes = $derived(rommRows.reduce((sum, r) => sum + (r.filesize_bytes || 0), 0));
 
-  function backUpPlatform() {
-    if (platformBackupIds.length === 0 || backup.disabled) return;
+  function backUpRommInstalled() {
+    if (rommRows.length === 0 || backup.disabled) return;
     openBackup({
-      request: backupRequest(
-        { kind: 'platform', platform: selected.label, count: platformBackupIds.length },
-        platformBackupIds,
-      ),
+      request: backupRequest({ kind: 'games', count: rommRows.length }, rommBackupIds),
+      unlinked: rommUnlinked,
     });
   }
 
@@ -456,7 +532,6 @@
         ? `store-${key.slice('store:'.length).replace(/:/g, '-')}`
         : key;
 
-  let firstPlatform = $derived(entries.findIndex((e) => e.key.startsWith('platform:')));
   let firstDrive = $derived(entries.findIndex((e) => e.key.startsWith('drive:')));
 
   /** Each store group's heading, mark and badge, keyed by its first row. */
@@ -466,8 +541,8 @@
   let storeCounts = $derived(new Map(storeGroups.flatMap((g) => g.rows.map((r) => [r.key as string, r.count.kind] as const))));
 
   let railRows = $derived(
-    entries.map(
-      (entry, i): RailPaneEntry<RailKey> => ({
+    entries.map((entry, i): RailPaneEntry<RailKey> => {
+      const base: RailPaneEntry<RailKey> = {
         key: entry.key,
         testId: entry.testId,
         countTestId: `library-rail-count-${slugOf(entry.key)}`,
@@ -475,22 +550,36 @@
         label: entry.label,
         count: entry.count,
         selected: entry.key === selected.key,
-        // The three fixed entries come first, then the platforms, then the
-        // backup drives; each group's heading sits on its first row.
-        heading:
-          i === firstPlatform ? 'PLATFORMS' : i === firstDrive ? 'BACKUP DRIVES' : storeHeads.get(entry.key)?.heading,
+        // The three fixed entries come first, then the backup drives, then
+        // the storefront groups; each group's heading sits on its first row.
+        heading: i === firstDrive ? 'BACKUP DRIVES' : storeHeads.get(entry.key)?.heading,
         icon: entry.key.startsWith('drive:') ? 'drive' : undefined,
         title: entry.title,
-        ...(entry.key.startsWith('store:')
-          ? {
-              indent: true,
-              countKind: storeCounts.get(entry.key) ?? 'number',
-              headingMark: storeHeads.get(entry.key)?.mark,
-              headingFlag: storeHeads.get(entry.key)?.flag,
-            }
-          : {}),
-      }),
-    ),
+      };
+      if (entry.key.startsWith('store:')) {
+        return {
+          ...base,
+          indent: true,
+          countKind: storeCounts.get(entry.key) ?? 'number',
+          headingMark: storeHeads.get(entry.key)?.mark,
+          headingFlag: storeHeads.get(entry.key)?.flag,
+        };
+      }
+      const r = rommRowByKey.get(entry.key);
+      if (r === undefined || rommGroup === null) return base;
+      // The RomM group: the RomM mark, ROMM and its flag on the Installed row;
+      // Discover has no count.
+      const first = r.kind === 'installed';
+      return {
+        ...base,
+        indent: true,
+        countTestId: r.countTestId ?? undefined,
+        count: r.count ?? undefined,
+        heading: first ? rommGroup.heading : undefined,
+        headingMark: first ? { mono: ROMM_MARK.mono, hue: ROMM_MARK.hue } : undefined,
+        headingFlag: first ? rommGroup.flag : undefined,
+      };
+    }),
   );
 
   // Which platforms have a default emulator, for the cards' cloud badge
@@ -591,7 +680,7 @@
     // art follow the hover instead (user ruling 2026-09-05).
     const directional = inputMode.directional;
     const index = focusIndex;
-    if (!active || subject !== null || !directional) return;
+    if (!active || rommScreen !== null || subject !== null || !directional) return;
     // `rows` is a fresh array on every `installed.list` refresh (replenish,
     // download and native-settings events all publish one). Tracking it here
     // would re-arm this dwell on a background refresh and, 120ms later, snap
@@ -694,7 +783,8 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (!active) return;
+    // A RomM screen (Discover, a platform) owns the keyboard while it is shown.
+    if (!active || rommScreen !== null) return;
     // One read of the document, shared by both branches below.
     const ctx = chordContext(document);
     if (leavesSelectMode(e.key, selecting, chordBlocked(ctx) || subject !== null)) {
@@ -756,10 +846,35 @@
     onSelect={onRailSelect}
   />
 
+  {#if rommScreen !== null}
+    <!-- Library › RomM › Discover or a platform (RommStorefront README): the
+         old Server screens, beside the Library rail. -->
+    {#key rommScreen.kind}
+      <RommServerView
+        {active}
+        {catalog}
+        row={rommScreen.kind === 'platform' ? rommScreen : null}
+        connecting={rommConnecting(romm.status)}
+        host={rommHost(romm.status)}
+        liveServer={romm.status.server_url}
+        installedRows={rommRows}
+      />
+    {/key}
+  {:else}
   <div class="body">
     <FoldingHeader testId="library-head" scroller={scrollEl} resetKey={selected.key} bind:folded>
       {#snippet title()}
-        {#if storeSel !== null && storeStatus !== null}
+        {#if rommInstalledView}
+          <RommInstalledHeader
+            status={romm.status}
+            count={rommRows.length}
+            bytes={rommBytes}
+            backupCount={rommRows.length}
+            backupDisabled={backup.disabled}
+            backupReason={backup.reason}
+            onBackupAll={backUpRommInstalled}
+          />
+        {:else if storeSel !== null && storeStatus !== null}
           <!-- GameStores README: "GOG · Installed", its count line, chips and actions. -->
           <StoreViewHeader
             status={storeStatus}
@@ -785,20 +900,6 @@
             {/if}
           {:else}
             <p data-testid="library-count" class="counts">{gameCountLine(items.length)}</p>
-            {#if platformBackupIds.length > 0}
-              <!-- GameBackups README: "Backup all N…" on a Library platform row, installed games only. -->
-              <div class="chips">
-                <button
-                  data-testid="library-backup-platform"
-                  class="chip link backup-all"
-                  disabled={backup.disabled}
-                  title={backup.reason || undefined}
-                  onclick={backUpPlatform}
-                >
-                  Backup all {platformBackupIds.length}…
-                </button>
-              </div>
-            {/if}
           {/if}
         </header>
         {/if}
@@ -904,8 +1005,25 @@
       <p data-testid="library-launch-error" class="error panel" role="alert">{launchError}</p>
       {#if launchError === umuOfferFor}<UmuInstallOffer />{/if}
     {/if}
+    {#if rommInstalledView}
+      <RommBanner status={romm.status} />
+    {/if}
 
-    {#if driveKey !== null}
+    {#if rommInstalledView && rommRows.length === 0}
+      <!-- RommStorefront README: "No RomM games installed yet". -->
+      <div data-testid="library-empty" class="romm-empty">
+        <span class="romm-empty-ico"><RommMark size="lg" /></span>
+        <h3>{ROMM_INSTALLED.emptyTitle}</h3>
+        <p>{rommConnected ? ROMM_INSTALLED.emptyConnected : ROMM_INSTALLED.emptyOff}</p>
+        {#if rommConnected}
+          <button data-testid="library-romm-open-discover" class="g-btn" onclick={() => onRailSelect('romm:discover')}>
+            {ROMM_INSTALLED.openDiscover}
+          </button>
+        {/if}
+      </div>
+    {:else if rommInstalledView && items.length === 0}
+      <p data-testid="library-empty" class="empty panel">{ROMM_INSTALLED.noMatch(search.trim())}</p>
+    {:else if driveKey !== null}
       {#if driveError !== null}
         <p data-testid="library-drive-error" class="error panel" role="alert">{driveError}</p>
       {:else if driveLoading}
@@ -1152,6 +1270,7 @@
       </SelectionBar>
     {/if}
   </div>
+  {/if}
 </section>
 
 {#if subject}
@@ -1273,25 +1392,7 @@
     color: var(--text-muted);
   }
 
-  .chip.link {
-    cursor: pointer;
-  }
-
-  .chip.link:hover:not(:disabled) {
-    color: var(--text-h);
-    border-color: var(--primary);
-  }
-
-  .chip.link:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-
-  .backup-all {
-    white-space: nowrap;
-  }
-
-  /* Select / Done, as on Server: the size select's height, filled while on. */
+  /* Select / Done: the size select's height, filled while on. */
   .select-btn {
     font: inherit;
     font-size: 12px;
@@ -1367,5 +1468,44 @@
   .error {
     color: var(--danger);
     font-size: 12px;
+  }
+
+  /* RomM › Installed with nothing installed: the prototype's `stState`. */
+  .romm-empty {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin: calc(var(--gutter) * 2) 2px 0;
+    padding: 34px 24px;
+    text-align: center;
+    background: var(--panel);
+    -webkit-backdrop-filter: var(--panel-blur);
+    backdrop-filter: var(--panel-blur);
+    border: 1px solid var(--line);
+    border-radius: var(--r-panel);
+  }
+
+  .romm-empty h3 {
+    margin: 0;
+    font-size: 16px;
+    color: var(--text-h);
+  }
+
+  .romm-empty p {
+    margin: 0;
+    max-width: 480px;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .romm-empty-ico {
+    display: inline-grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--r-row);
+    background: var(--field);
   }
 </style>

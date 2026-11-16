@@ -28,6 +28,8 @@
   import { normalizeOpenOn, OPEN_ON_CHOICES, OPEN_ON_HINT, openOnLabel } from './openOn';
   import SegmentedSwitch from '../SegmentedSwitch.svelte';
   import SettingRow from './SettingRow.svelte';
+  import { romm } from '../stores/romm.svelte';
+  import { OPEN_ON_ROMM_OFF } from '../romm/words';
 
   function onThemeChange(e: Event) {
     const value = (e.currentTarget as HTMLSelectElement).value as ThemeChoice;
@@ -61,7 +63,7 @@
   const labelOptions = CARD_LABEL_MODES.map((mode) => ({ value: mode, label: cardLabelsLabel(mode) }));
   const displayOptions = CARD_DISPLAYS.map((display) => ({ value: display, label: cardDisplayLabel(display) }));
 
-  function onCardSize(view: 'library' | 'server', e: Event) {
+  function onCardSize(view: 'library', e: Event) {
     setCardSize(view, normalizeCardSize((e.currentTarget as HTMLSelectElement).value)).catch(() => {});
   }
 
@@ -87,9 +89,9 @@
     api.setDebugPrints(debugPrints).catch(() => {});
   }
 
-  function sizeFor(view: 'library' | 'server') {
-    return view === 'library' ? uiSettings.cardSizeLibrary : uiSettings.cardSizeServer;
-  }
+  // RommStorefront README: with RomM not connected and a choice other than
+  // Library, GRID opens on All games, and the row says so.
+  let openOnFallback = $derived(uiSettings.openOn !== 'library' && romm.status.connection !== 'connected');
 </script>
 
 <!-- The design prototype's order (attachments/proposed-ui/30), after Open
@@ -109,6 +111,9 @@
       <option value={choice}>{openOnLabel(choice)}</option>
     {/each}
   </select>
+  {#if openOnFallback}
+    <small data-testid="open-on-romm-off" class="open-on-note">{OPEN_ON_ROMM_OFF}</small>
+  {/if}
 </SettingRow>
 
 <SettingRow label="Theme" forId="theme-select">
@@ -192,7 +197,7 @@
 
 {#each CARD_SIZE_VIEWS as v (v.view)}
   <SettingRow label={v.label} forId={v.testId}>
-    <select class="g-field" data-testid={v.testId} id={v.testId} value={sizeFor(v.view)} onchange={(e) => onCardSize(v.view, e)}>
+    <select class="g-field" data-testid={v.testId} id={v.testId} value={uiSettings.cardSizeLibrary} onchange={(e) => onCardSize(v.view, e)}>
       {#each CARD_SIZES as size (size)}
         <option value={size}>{cardSizeLabel(size)}</option>
       {/each}
@@ -226,3 +231,11 @@
     Enable debug prints
   </label>
 </SettingRow>
+
+<style>
+  /* Prototype: the "opens on All games" line beside the select. */
+  .open-on-note {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+</style>

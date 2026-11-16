@@ -7,7 +7,7 @@
 // next Steam Test result. `?tv` in the address starts TV mode instead.
 import { emit } from '@tauri-apps/api/event';
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks';
-import type { DownloadEntry, DriveInfo, GameSession, InstalledGame, SteamTestResult } from '../api';
+import type { DownloadEntry, DriveInfo, GameSession, InstalledGame, RommConnection, RommStatus, SteamTestResult } from '../api';
 import { FAKE_INSTALLERS, FakeStores, NOT_HANDLED, type FakeScenario, type FakeSource } from './fakeApi';
 
 const GB = 1024 ** 3;
@@ -18,7 +18,7 @@ const UI = {
   background_fade: 0.6,
   background_blur: 20,
   card_size_library: 'medium',
-  card_size_server: 'medium',
+  card_size_server: 'medium', // kept in the config, unread (plan 0.3)
   card_labels: 'always',
   card_display: 'rows',
   tv_card_size: 'medium',
@@ -110,8 +110,30 @@ export function installDevMock(): void {
     installedRow('Velvet Static', 'romm', '11', 'PlayStation', now() - 3600),
     installedRow('Cinder Peaks', 'romm', '12', 'Super Nintendo', 0),
   ];
+  // RomM as a storefront (romm-storefront-plan 0.2): not connected, with
+  // two RomM games installed, so the Library's RomM group shows Installed
+  // with its `off` flag. `__gridFake.romm('unreachable')` (or 'expired',
+  // 'connected', 'not_connected') switches the state for a screenshot.
+  let rommStatus: RommStatus = {
+    connection: 'not_connected',
+    server_url: 'https://romm.example.test',
+    username: 'player',
+    auth_kind: 'token',
+    last_error: '',
+    installed_count: 2,
+    in_rail: true,
+    busy: false,
+  };
+  const setRomm = (connection: RommConnection, busy = false) => {
+    rommStatus = { ...rommStatus, connection, busy, last_error: connection === 'unreachable' ? 'connection refused' : '' };
+    void emit('romm-changed', rommStatus);
+  };
   const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
     restore_session: () => ({ kind: 'offline', server_url: 'https://romm.example.test', username: 'player' }),
+    romm_status: () => rommStatus,
+    romm_restore: () => rommStatus,
+    list_platforms: () => [],
+    list_games: () => [],
     get_ui_mode: () => ({ mode: tvMode ? 'tv' : 'desktop', started_with_tv: tvMode, fullscreen: false }),
     setup_status: () => ({ needed: false }),
     clipboard_has_text: () => false,
@@ -190,6 +212,7 @@ export function installDevMock(): void {
     fake,
     scenario: (s: FakeScenario, source: FakeSource = 'gog') => fake.scenario(s, source),
     nextSteamTest: (r: SteamTestResult) => (fake.nextSteamTest = r),
+    romm: setRomm,
     endSession: () => {
       sessions.splice(0, sessions.length);
       emitSessions();

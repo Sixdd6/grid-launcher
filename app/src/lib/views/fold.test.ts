@@ -70,6 +70,11 @@ describe('librarySearchPlaceholder', () => {
     expect(librarySearchPlaceholder(false, 'drive:/m/T7', 'Couch kit')).toBe('Search games on this drive');
     expect(librarySearchPlaceholder(true, 'drive:/m/T7', 'Couch kit')).toBe('Search Couch kit…');
   });
+
+  it('searches RomM › Installed by title, naming RomM once folded (RommStorefront README)', () => {
+    expect(librarySearchPlaceholder(false, 'romm:installed', 'Installed')).toBe('Search by title');
+    expect(librarySearchPlaceholder(true, 'romm:installed', 'Installed')).toBe('Search installed RomM games…');
+  });
 });
 
 describe('gameCountLine', () => {

@@ -1,8 +1,9 @@
-// The folding grid header (Server and Library share it). Pure: the
+// The folding grid header (the Library and its RomM views share it). Pure: the
 // hysteresis, the measured heights and the search placeholders.
 // `FoldingHeader.svelte` wires these to the scroller.
 
 import type { RailKey } from '../library/rail';
+import { ROMM_INSTALLED } from '../romm/words';
 
 /** Past this many px of scroll the header folds into its toolbar row. */
 export const FOLD_AT = 32;
@@ -43,7 +44,7 @@ export function foldedClearance(toolbarPx: number): number {
   return toolbarPx + 2 * PAD_FOLDED_PX + BORDER_PX + CLEARANCE_PX;
 }
 
-/** The Server search field's placeholder; folded, it names the platform,
+/** A RomM platform screen's search placeholder; folded, it names the platform,
  *  since the title row that did is hidden. */
 export function serverSearchPlaceholder(folded: boolean, platformLabel: string): string {
   if (!folded || platformLabel.trim() === '') return 'Search title, platform or genre';
@@ -54,6 +55,8 @@ export function serverSearchPlaceholder(folded: boolean, platformLabel: string):
  *  in view, since the title row that did is hidden. */
 export function librarySearchPlaceholder(folded: boolean, key: RailKey, label: string): string {
   if (key.startsWith('drive:')) return folded ? `Search ${label.trim()}…` : 'Search games on this drive';
+  // RomM › Installed (RommStorefront README): the stores' wording, folded it names RomM.
+  if (key === 'romm:installed') return folded ? ROMM_INSTALLED.searchFolded : ROMM_INSTALLED.search;
   if (!folded) return 'Search installed games';
   if (key === 'all') return 'Search your library…';
   if (key === 'recent') return 'Search recent games…';

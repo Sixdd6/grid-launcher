@@ -12,6 +12,11 @@
   import SavesTab from './details/SavesTab.svelte';
   import AchievementsTab from './details/AchievementsTab.svelte';
   import LinkPicker from './details/LinkPicker.svelte';
+  import RommMark from './romm/RommMark.svelte';
+  import { linkToSyncPanel, NEEDS_ROMM, notLinkedLine, otherServerLine, rommHost } from './romm/words';
+  import { fromLiveServer } from './romm/platformGames';
+  import { romm } from './stores/romm.svelte';
+  import { hostOf } from './shell';
   import RemoveConfirm from './details/RemoveConfirm.svelte';
   import { keptFolder } from './details/unlinked';
   import { pickFolder } from './pickers';
@@ -83,6 +88,16 @@
   let installedRow = $derived(d.installedRow);
   let cloudGame = $derived(d.cloudGame);
   let unlinkedRow = $derived(d.unlinkedRow);
+  // RommStorefront README "Details (RomM games)": the unlinked line and a
+  // row from another RomM server.
+  let notLinked = $derived(notLinkedLine(session.connected));
+  let otherServer = $derived.by(() => {
+    const row = installedRow;
+    if (row === null || row.source !== 'romm') return null;
+    const own = row.source_server ?? '';
+    if (own.trim() === '' || fromLiveServer(row, romm.status.server_url)) return null;
+    return otherServerLine(hostOf(own), rommHost(romm.status) || 'yours');
+  });
   let heldRomIds = $derived(d.heldRomIds);
   let missing = $derived(d.missing);
   let locateError = $derived(d.locateError);
@@ -364,19 +379,18 @@
         {#if subject.romId === null}
           {#if unlinkedRow}
             <div class="action" data-testid="details-unlinked">
-              <span class="chip unlinked" data-testid="details-unlinked-note">Not linked to a server game</span>
-              <button
-                data-testid="details-link-server"
-                disabled={!session.connected}
-                aria-describedby={session.connected ? undefined : 'details-link-offline'}
-                title={session.connected ? undefined : 'Connect to a server to link this game'}
-                onclick={() => (showLinkPicker = true)}
-              >
-                Link to server game
-              </button>
-              {#if !session.connected}
-                <!-- The button's `title` is hover-only; this line is the visible reason. -->
-                <p id="details-link-offline" class="meta-line offline-note">Connect to a server to link this game.</p>
+              <!-- RommStorefront README "Details": "Not linked to a RomM game ·
+                   Link…", or "· Linking needs RomM" while RomM is off. -->
+              {#if otherServer !== null}
+                <!-- Another server's row (its id cleared on connect): not one to link here. -->
+                <p data-testid="details-other-server" class="meta-line offline-note">{otherServer}</p>
+              {:else}
+                <span class="chip unlinked" data-testid="details-unlinked-note">{notLinked.text}</span>
+              {/if}
+              {#if notLinked.action !== null && otherServer === null}
+                <button data-testid="details-link-server" onclick={() => (showLinkPicker = true)}>
+                  {notLinked.action}
+                </button>
               {/if}
               <!-- A row that is also missing already offers Remove in the notice
                    above: one Remove button, not two. -->
@@ -424,11 +438,15 @@
                 {pendingAction === 'play' ? 'Launching…' : 'Play'}
               </button>
               {#if updateLabel !== null}
+                <!-- RommStorefront README "Details": Update is disabled while
+                     RomM isn't connected, with "Updates need RomM". -->
                 <button
                   data-testid="details-update"
                   class="update"
                   class:confirm={confirmingUpdate}
-                  disabled={pending || updatePending || liveEntry !== undefined}
+                  disabled={pending || updatePending || liveEntry !== undefined || !session.connected}
+                  title={session.connected ? undefined : NEEDS_ROMM.updates}
+                  aria-describedby={session.connected ? undefined : 'details-updates-need-romm'}
                   onclick={handleUpdateClick}
                 >
                   {updatePending
@@ -476,6 +494,14 @@
               >
                 {confirmingUninstall ? 'Confirm uninstall' : 'Uninstall'}
               </button>
+              {#if updateLabel !== null && !session.connected}
+                <p id="details-updates-need-romm" data-testid="details-updates-need-romm" class="meta-line offline-note">
+                  {NEEDS_ROMM.updates}
+                </p>
+              {/if}
+              {#if otherServer !== null}
+                <p data-testid="details-other-server" class="meta-line offline-note">{otherServer}</p>
+              {/if}
               {#if missing.playBlocked !== '' || missing.uninstallBlocked !== ''}
                 <!-- The buttons' `title` is hover-only; this line is the visible reason. -->
                 <p id="details-blocked-note" class="meta-line offline-note">Play and Uninstall are unavailable until the files are found.</p>
@@ -600,6 +626,19 @@
               onScreenshotError={markMediaFailed}
               coverUrl={coverLarge ?? coverSmall}
             />
+          {:else if activeTab === 'saves' && unlinkedRow && session.connected && otherServer === null}
+            <!-- RommStorefront README "Details": an unlinked row's Saves while RomM is connected. -->
+            {@const panel = linkToSyncPanel(subject.name, rommHost(romm.status))}
+            <div class="rm-link" role="note" data-testid="details-link-to-sync">
+              <RommMark size="lg" />
+              <div>
+                <b>{panel.title}</b>
+                <p>{panel.text}</p>
+              </div>
+              <button class="g-btn secondary" data-testid="details-link-to-sync-link" onclick={() => (showLinkPicker = true)}>
+                {panel.action}
+              </button>
+            </div>
           {:else if activeTab === 'saves'}
             <SavesTab
               gameTitle={subject.name}
@@ -1047,5 +1086,40 @@
      warning text. */
   .dismiss {
     color: var(--danger);
+  }
+
+  /* Prototype `.rm-needs` (as RommNeedsPanel): "Link this game to sync its saves". */
+  .rm-link {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 4px;
+    padding: 12px 14px;
+    border-radius: var(--r-row);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--warning);
+    background: var(--surface);
+  }
+
+  .rm-link > div {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .rm-link b {
+    display: block;
+    color: var(--text-h);
+    font-weight: 600;
+  }
+
+  .rm-link p {
+    margin: 2px 0 0;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .rm-link .g-btn {
+    flex: none;
+    padding: 6px 14px;
   }
 </style>

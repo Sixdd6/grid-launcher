@@ -18,8 +18,9 @@ export function fadeForToggle(enabled: boolean, remembered: number): number {
   return artVisible(remembered) ? remembered : FADE_DEFAULT;
 }
 
-/** D-UI-9: "Size control Small / Medium / Large per view, remembered". */
+/** D-UI-9's card size, one row since the Server view went (RommStorefront
+ *  README; plan 0.3): the RomM screens use the Library's size, and
+ *  `card_size_server` stays in the config, unread. */
 export const CARD_SIZE_VIEWS = [
-  { view: 'library', label: 'Library cards', testId: 'card-size-library' },
-  { view: 'server', label: 'Server cards', testId: 'card-size-server' },
-] as const satisfies readonly { view: 'library' | 'server'; label: string; testId: string }[];
+  { view: 'library', label: 'Card size', testId: 'card-size-library' },
+] as const satisfies readonly { view: 'library'; label: string; testId: string }[];
