@@ -40,6 +40,7 @@ function setup(label: string, name: string, options: SetupOption[], core: string
 const platform = (id: number, label: string): SystemPlatform => ({
   slug: label.toLowerCase().replace(/\s+/g, ''),
   label,
+  name: label,
   aliases: [],
   origin: 'both',
   server_id: id,

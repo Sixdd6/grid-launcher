@@ -93,7 +93,7 @@
           {:else if p === 'systems'}
             <!-- Page-level activation: its fetches (and the once-per-session
                  update check) run only while it is in front. -->
-            <SystemsPage active={active && page === 'systems'} bind:this={systemsPage} />
+            <SystemsPage active={active && page === 'systems'} bind:this={systemsPage} onConnectRomm={() => show('stores')} />
           {:else if p === 'updates'}
             <UpdatesPage {active} />
           {/if}

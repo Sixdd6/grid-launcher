@@ -34,7 +34,7 @@ describe('ChooseSystems', () => {
       })),
       listCompatToolCatalog: vi.fn(async () => []),
       systemPlatforms: vi.fn(async () => [
-        { slug: 'win', label: 'Windows', aliases: [], origin: 'server', server_id: 1, server_rom_count: 7, installed_count: 0 },
+        { slug: 'win', label: 'Windows', name: 'Windows', aliases: [], origin: 'server', server_id: 1, server_rom_count: 7, installed_count: 0 },
       ]),
       startPlatformSetup: vi.fn(async () => ({ queued: ['x'], compat_set: false, errors: [] })),
       skipPlatformSetup: vi.fn(async () => {}),

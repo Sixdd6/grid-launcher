@@ -9,7 +9,6 @@
   import './stores/tvstores.css';
   import './romm/tvromm.css';
   import { startStoreEvents } from './stores/storeEvents';
-  import { api } from '../api';
   import { rommConnecting, rommLive } from '../romm/rail';
   import { libraryUnreachable } from '../stores/libraryUnreachable.svelte';
   import { romm } from '../stores/romm.svelte';
@@ -86,30 +85,6 @@
   let stageEl = $state<HTMLElement | null>(null);
   let layersEl = $state<HTMLElement | null>(null);
 
-  // Whether the welcome is needed (`welcome_status`), asked while the
-  // session reads the legacy `none` phase: until the desktop moves to
-  // `session.start()` (plan Step 5), a fresh profile, a Python import, a
-  // rejected stored credential and a 401 mid-session all read `none`. Only
-  // the first two get the welcome; the others are the shell, where RomM's
-  // status says what happened (TVRommStorefront README).
-  let welcomeNeeded = $state<boolean | null>(null);
-  $effect(() => {
-    if (session.phase !== 'none') return;
-    untrack(() => {
-      const known = welcomeNeeded;
-      const settle = (needed: boolean) => {
-        welcomeNeeded = needed;
-        if (!needed && session.phase === 'none') session.phase = 'shell';
-      };
-      if (known !== null) settle(known);
-      else
-        api
-          .welcomeStatus()
-          .then((w) => settle(w.needed))
-          .catch(() => settle(false));
-    });
-  });
-
   // What the stage shows (P12): a startup screen — the unreachable library
   // (GRID can't run without it), the welcome, Choose your systems — or the
   // tabs. Nothing until the session and the settings are known.
@@ -118,7 +93,6 @@
     if (!uiSettings.loaded || session.phase === 'loading') return 'loading';
     if (libraryUnreachable.blocking) return 'unreachable';
     if (session.phase === 'welcome') return 'welcome';
-    if (session.phase === 'none') return welcomeNeeded === true ? 'welcome' : welcomeNeeded === false ? 'shell' : 'loading';
     if (session.phase === 'setup') return 'choose';
     return 'shell';
   });
@@ -141,7 +115,6 @@
       } else if (p === 'unreachable') {
         void resetStartup({ title: 'Your library', component: TvUnreachable });
       } else {
-        if (welcomeNeeded) welcomeNeeded = false;
         startShell();
       }
     });

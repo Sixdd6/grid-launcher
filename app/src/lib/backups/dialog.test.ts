@@ -27,7 +27,6 @@ import {
   ROMM_OFF_LEDE,
   unavailableRows,
   withoutRomm,
-  type RommOffFields,
 } from './dialog';
 
 const GB = 1024 ** 3;
@@ -85,6 +84,9 @@ function plan(overrides: Partial<BackupPlan> = {}): BackupPlan {
     needs_choice: 0,
     local_bytes: 0,
     download_bytes: 11.1 * GB,
+    without_romm: false,
+    unavailable: [],
+    firmware_skipped: [],
     ...overrides,
   };
 }
@@ -523,7 +525,7 @@ describe('local copies in the notes and footer', () => {
 });
 
 describe('a plan without RomM', () => {
-  const off = (overrides: Partial<BackupPlan> & RommOffFields = {}): BackupPlan =>
+  const off = (overrides: Partial<BackupPlan> = {}): BackupPlan =>
     plan({
       without_romm: true,
       unavailable: [],
@@ -598,6 +600,11 @@ describe('a plan without RomM', () => {
     expect(EMULATORS_ROMM_OFF).toBe(' · from GRID’s catalog; builds hosted on your RomM server are skipped');
     expect(firmwareLine(p)).toEqual({ text: FIRMWARE_ROMM_OFF, disabled: true });
     expect(FIRMWARE_ROMM_OFF).toBe('Needs RomM · skipped');
+    // The systems whose firmware is skipped, by name (RommStorefront README).
+    expect(firmwareLine(off({ firmware_skipped: ['Sega Saturn', 'Sony PlayStation'] }))).toEqual({
+      text: 'Needs RomM · skipped: Sega Saturn, Sony PlayStation',
+      disabled: true,
+    });
   });
 
   it('never asks to choose a copy, and starts with the games it copies', () => {

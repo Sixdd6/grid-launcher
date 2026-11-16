@@ -10,6 +10,7 @@ pub mod setup;
 pub mod specials;
 pub mod store_backups;
 pub mod stores;
+pub mod systems;
 pub mod tv;
 pub mod updates;
 pub mod welcome;
@@ -51,7 +52,7 @@ use grid_core::library::{InstallService, InstalledRow, UninstallReport};
 use grid_core::romm::achievements;
 use grid_core::romm::{AchievementsView, GameSummary, Platform, RaUsernameSync, RomDetail};
 use grid_core::secrets::RaTokenStore;
-use grid_core::session::{RestoreOutcome, SessionManager, SessionState};
+use grid_core::session::SessionManager;
 use grid_core::stores::GameKey;
 use secrecy::SecretString;
 use serde::Serialize;
@@ -143,99 +144,6 @@ pub fn resync_all_emulators(config: &Config, install: Option<&Arc<InstallService
 pub(crate) fn err(e: impl std::fmt::Display) -> String {
     // RommError/SessionError Display are credential-free by construction.
     e.to_string()
-}
-
-// --- Legacy session commands -------------------------------------------
-//
-// Wrappers over the RomM state in `commands/romm.rs`, kept so the old
-// Connect screen and server chip keep working while the RomM storefront
-// steps replace them (romm-storefront-plan 0.6). Step 9 deletes them.
-
-/// Legacy Connect. As `romm_connect`, and the Connect screen counts as the
-/// welcome, so `setup.welcomed` is set too.
-#[tauri::command]
-pub async fn connect(
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-    server_url: String,
-    username: String,
-    secret: String,
-    use_token: bool,
-) -> Result<SessionState, String> {
-    // Wrap immediately; the plain String is dropped at the end of this scope.
-    let secret = SecretString::from(secret);
-    let result = state
-        .session
-        .connect(server_url, username, secret, use_token)
-        .await
-        .map_err(err)?;
-    if let Err(e) = modify_config(&Config::default_path(), |c| {
-        c.setup.welcomed = true;
-        Ok(())
-    }) {
-        tracing::warn!("could not record the finished welcome: {e}");
-    }
-    romm::after_probe(&state, app);
-    Ok(result)
-}
-
-/// Legacy restore. Not connected and welcomed maps to `offline`, so the old
-/// shell opens without a server.
-#[tauri::command]
-pub async fn restore_session(
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-) -> Result<RestoreOutcome, String> {
-    let outcome = state.session.restore().await.map_err(err)?;
-    if let RestoreOutcome::Offline { .. } = &outcome {
-        // No probe ran and no client exists, so no server job starts.
-        // Drives, the library and play keep working.
-        tracing::info!("starting with RomM not connected");
-    }
-    romm::after_probe(&state, app);
-    Ok(outcome)
-}
-
-/// Legacy "Use without a server": RomM stops being probed at startup and
-/// the welcome counts as done; any live client is dropped. The keyring
-/// credential stays, so Connect or Retry can use it later.
-#[tauri::command]
-pub async fn use_without_server(
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-) -> Result<(), String> {
-    let session = state.session.clone();
-    tokio::task::spawn_blocking(move || session.use_offline())
-        .await
-        .map_err(|e| format!("use_without_server did not finish: {e}"))?
-        .map_err(err)?;
-    state.updates.clear(&app);
-    Ok(())
-}
-
-/// Legacy event, emitted the first time a live session gets a 401 (Q6).
-/// Payload: `grid_core::session::SessionUnauthorized` — server URL,
-/// username and auth kind, never the credential. The old frontend shows the
-/// Connect form, pre-filled. `romm-changed` carries the same change for the
-/// RomM storefront.
-pub const SESSION_UNAUTHORIZED_EVENT: &str = "session-unauthorized";
-
-/// Legacy chip Retry: `romm_reconnect`, answering with the old typed
-/// outcome. A missing stored session is still an `Err`.
-#[tauri::command]
-pub async fn retry_connect(
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-) -> Result<RestoreOutcome, String> {
-    let outcome = state.session.retry().await.map_err(err)?;
-    romm::after_probe(&state, app);
-    Ok(outcome)
-}
-
-/// Legacy Disconnect: `romm_disconnect`.
-#[tauri::command]
-pub fn disconnect(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
-    romm::disconnect_now(&state, &app)
 }
 
 /// Server platform `name` → display label, only for the platforms whose label

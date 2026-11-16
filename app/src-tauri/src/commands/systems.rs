@@ -2,9 +2,6 @@
 //! `system_platforms`, `firmware_expected`, `locate_firmware_files` and
 //! `locate_ps3_firmware`. None of them needs RomM; each uses it when it is
 //! connected (its platform list, its firmware list for the platform).
-//!
-//! Mounted from `lib.rs` (`commands.rs` is frozen while the storefront steps
-//! run in parallel); it belongs under `commands` once that file is free.
 
 use std::path::{Path, PathBuf};
 

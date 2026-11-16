@@ -115,7 +115,8 @@ describe('backups-e: backup installed games with RomM not connected and restore 
     const firmware = $(testId('backup-firmware'));
     expect(await firmware.isSelected()).toBe(false);
     expect(await firmware.isEnabled()).toBe(false);
-    await expect($(testId('backup-firmware-text'))).toHaveText('Needs RomM · skipped');
+    // The PlayStation 2 BIOS GRID's catalog lists is skipped, by system name.
+    await expect($(testId('backup-firmware-text'))).toHaveText('Needs RomM · skipped: PlayStation 2');
   });
 
   it('copies the three installs to the drive under the remembered server', async () => {

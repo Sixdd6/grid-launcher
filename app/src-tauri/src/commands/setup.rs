@@ -45,7 +45,7 @@ pub async fn setup_platform_options(
         None => Vec::new(),
     };
     let packages = server_packages(&state, &platforms).await;
-    let systems = crate::systems_commands::systems_list(&state).await;
+    let systems = super::systems::systems_list(&state).await;
     let config = Config::load(&Config::default_path()).map_err(err)?;
     Ok(platform_setup_systems(
         &systems,

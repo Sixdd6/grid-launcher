@@ -56,6 +56,9 @@ pub struct ExpectedFile {
     pub required: bool,
     pub installed: bool,
     pub verified_by: VerifiedBy,
+    /// The region it is for ("Japan"), `""` when none
+    /// ([`crate::firmware::known::region_of`]).
+    pub region: String,
 }
 
 /// `firmware_expected`'s answer.
@@ -208,6 +211,7 @@ pub fn expected_set(
                 && !(satisfied.get(e.group.as_str()).copied().unwrap_or(false)),
             installed: *inst,
             verified_by: e.verified_by,
+            region: crate::firmware::known::region_of(&e.name).to_string(),
         })
         .collect();
     files.sort_by_key(|f| !(f.installed || f.required));
@@ -692,6 +696,7 @@ mod tests {
             } else {
                 VerifiedBy::None
             },
+            region: String::new(),
         }
     }
 

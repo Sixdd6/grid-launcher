@@ -77,22 +77,12 @@ export function anyLocal(plan: BackupPlan | null): boolean {
 
 // ── Without RomM (RommStorefront README, "Backups without RomM") ─────────
 
-/** A requested game a backup without RomM leaves out. Mirrors `grid_core::backup::plan::PlanUnavailable`. */
-export type PlanUnavailable = { rom_id: number; name: string; platform_name: string; reason: string };
-
-/**
- * The two fields `plan_backup` adds to a plan made with RomM off. `api.ts`
- * is frozen while the RomM storefront steps run in parallel, so they are
- * typed here until it gains them (see `docs/romm-storefront-plan.md`).
- */
-export type RommOffFields = { without_romm?: boolean; unavailable?: PlanUnavailable[] };
-
 /** An installed RomM game with no RomM link, as the caller names it: it has no pack identity, so it can't go. */
 export type UnlinkedGame = { title: string; platform: string };
 
 /** The plan was made with RomM off: every game comes from this computer. */
 export function withoutRomm(plan: BackupPlan | null): boolean {
-  return plan !== null && (plan as BackupPlan & RommOffFields).without_romm === true;
+  return plan !== null && plan.without_romm === true;
 }
 
 /** The lede while RomM is off. */
@@ -118,7 +108,7 @@ export function unavailableRows(
   unlinked: readonly UnlinkedGame[] = [],
 ): { title: string; rows: UnavailableRow[] } | null {
   if (plan === null || !withoutRomm(plan)) return null;
-  const list = (plan as BackupPlan & RommOffFields).unavailable ?? [];
+  const list = plan.unavailable ?? [];
   const line = (platform: string, text: string) => [platform.trim(), text].filter((p) => p !== '').join(' · ');
   const rows: UnavailableRow[] = [
     ...list.map((u) => ({
@@ -449,7 +439,10 @@ function emulatorBytes(writing: readonly PlanEmulator[]): number | null {
  */
 export function firmwareLine(plan: BackupPlan): { text: string; disabled: boolean } {
   // Firmware comes only from RomM: unticked and disabled while it is off.
-  if (withoutRomm(plan)) return { text: FIRMWARE_ROMM_OFF, disabled: true };
+  if (withoutRomm(plan)) {
+    const skipped = plan.firmware_skipped ?? [];
+    return { text: skipped.length === 0 ? FIRMWARE_ROMM_OFF : `${FIRMWARE_ROMM_OFF}: ${skipped.join(', ')}`, disabled: true };
+  }
   if (plan.firmware_reason.trim() !== '') return { text: plan.firmware_reason, disabled: true };
   const sets = plan.firmware.filter((f) => !f.already);
   return {

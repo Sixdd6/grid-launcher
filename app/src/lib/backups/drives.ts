@@ -51,15 +51,6 @@ export function driveByKey(snapshot: DrivesSnapshot, key: string): DriveInfo | n
 }
 
 /**
- * The key of the drive the offline shell opens Library on (`initialView`):
- * the first ready drive, else the first read-only one with a pack, since
- * games install from either.
- */
-export function firstLibraryDriveKey(snapshot: DrivesSnapshot): string | null {
-  return (readyDrives(snapshot)[0] ?? packDrives(snapshot)[0])?.key ?? null;
-}
-
-/**
  * Connected drives whose pack holds `romId` backed up from `serverUrl`
  * (Details' "On <pack>" line). Servers compare by `serverKey`, so userinfo,
  * host case, an explicit default port and a trailing slash do not matter.

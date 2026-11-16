@@ -47,6 +47,7 @@
     each,
     error: b.error,
     starting: b.starting,
+    unlinked: open.unlinked ?? [],
   });
 
   async function start() {

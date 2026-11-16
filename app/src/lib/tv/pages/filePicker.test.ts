@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { baseName, pickerHints, pickerSub, pickRowAction, pickRows, picksLine, tvReport } from './filePicker';
+import { baseName, pickerHints, pickerSub, pickRowAction, pickRows, pickSize, picksLine, tvReport } from './filePicker';
 
 describe('the TV file browser in file mode', () => {
   const listing = {
     path: '/run/media/USB-1TB/bios',
     parent: '/run/media/USB-1TB',
     entries: [
-      { name: 'old', is_dir: true },
-      { name: 'scph5501 (1).bin', is_dir: false },
+      { name: 'old', is_dir: true, size: 0 },
+      { name: 'scph5501 (1).bin', is_dir: false, size: 524288 },
     ],
   };
 
@@ -15,8 +15,15 @@ describe('the TV file browser in file mode', () => {
     expect(pickRows(listing)).toEqual([
       { kind: 'up', key: 'up', path: '/run/media/USB-1TB' },
       { kind: 'dir', key: 'd-old', name: 'old', path: '/run/media/USB-1TB/bios/old' },
-      { kind: 'file', key: 'f-scph5501 (1).bin', name: 'scph5501 (1).bin', path: '/run/media/USB-1TB/bios/scph5501 (1).bin' },
+      { kind: 'file', key: 'f-scph5501 (1).bin', name: 'scph5501 (1).bin', path: '/run/media/USB-1TB/bios/scph5501 (1).bin', size: '512 KB' },
     ]);
+  });
+
+  it('file sizes: KB, MB, GB, nothing for an empty file', () => {
+    expect(pickSize(524288)).toBe('512 KB');
+    expect(pickSize(197 * 1024 * 1024)).toBe('197 MB');
+    expect(pickSize(4.4 * 1024 * 1024 * 1024)).toBe('4.4 GB');
+    expect(pickSize(0)).toBe('');
   });
 
   it('A says Open, Pick, Unpick or Choose', () => {
@@ -62,6 +69,7 @@ describe('the TV Locate report', () => {
           { file: 'scph1001.bin', reason: "This isn't the scph1001.bin GRID knows (size or MD5 differs)" },
           { file: 'readme.txt', reason: "GRID doesn't know this file for PlayStation" },
         ],
+        unmatched: 0,
       },
     });
     expect(r.title).toBe('Firmware check');

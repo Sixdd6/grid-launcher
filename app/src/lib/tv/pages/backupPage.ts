@@ -22,6 +22,7 @@ import {
   wineNote,
   type LocalGameLookup,
   type SourceChoices,
+  type UnlinkedGame,
 } from '../../backups/dialog';
 import { plural, type Bar, type PageMain, type PageRow } from './pageRows';
 
@@ -48,6 +49,9 @@ export type BackupPageModel = {
   /** The chosen drive's planning failure, or a refused start. */
   error: string | null;
   starting: boolean;
+  /** Installed RomM games with no RomM link asked for too; listed under
+   *  "Can’t backup without RomM" while RomM is off. */
+  unlinked?: readonly UnlinkedGame[];
 };
 
 export type BackupPageActions = {
@@ -267,7 +271,7 @@ export function backupPageRows(m: BackupPageModel, act: BackupPageActions): Page
   }
 
   // ── Without RomM: the games the backup leaves out, each with why.
-  const left = unavailableRows(plan);
+  const left = unavailableRows(plan, m.unlinked ?? []);
   if (left) {
     R.push({ kind: 'heading', key: 'bk-h-unavailable', text: left.title });
     for (const u of left.rows) R.push({ kind: 'info', key: `bk-un-${u.key}`, label: u.name, sub: u.sub });

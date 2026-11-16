@@ -124,6 +124,7 @@
               </span>
             {/if}
             <div class="grow t">{r.name}</div>
+            {#if r.size}<span class="muted" data-testid={`tv-fp-size-${r.name}`}>{r.size}</span>{/if}
           {/if}
         </div>
       {/each}

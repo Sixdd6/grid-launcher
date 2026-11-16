@@ -129,7 +129,6 @@ export function installDevMock(): void {
     void emit('romm-changed', rommStatus);
   };
   const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
-    restore_session: () => ({ kind: 'offline', server_url: 'https://romm.example.test', username: 'player' }),
     romm_status: () => rommStatus,
     romm_restore: () => rommStatus,
     list_platforms: () => [],

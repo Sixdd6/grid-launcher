@@ -6,10 +6,8 @@ import {
   driveByKey,
   driveCardModel,
   drivesHoldingRom,
-  EMPTY_SNAPSHOT,
   emulatorNames,
   FAT32_WARNING,
-  firstLibraryDriveKey,
   formatDay,
   gridpackPath,
   hostPackOs,
@@ -82,7 +80,7 @@ describe('serverKey', () => {
   });
 });
 
-describe('readyDrives / packDrives / driveByKey / firstLibraryDriveKey', () => {
+describe('readyDrives / packDrives / driveByKey', () => {
   const ready = drive('/media/a');
   const readOnly = drive('/media/b', { status: 'read_only', read_only: true });
   const bare = drive('/media/c', { status: 'not_set_up', pack: null });
@@ -98,12 +96,6 @@ describe('readyDrives / packDrives / driveByKey / firstLibraryDriveKey', () => {
   it('finds a connected drive by key', () => {
     expect(driveByKey(s, '/media/c')?.label).toBe('/MEDIA/C');
     expect(driveByKey(s, '/media/z')).toBeNull();
-  });
-  it('opens the first ready drive, else the first read-only pack, else none', () => {
-    expect(firstLibraryDriveKey(s)).toBe('/media/a');
-    expect(firstLibraryDriveKey(snap([readOnly, bare]))).toBe('/media/b');
-    expect(firstLibraryDriveKey(snap([bare, unreadable]))).toBeNull();
-    expect(firstLibraryDriveKey(EMPTY_SNAPSHOT)).toBeNull();
   });
 });
 

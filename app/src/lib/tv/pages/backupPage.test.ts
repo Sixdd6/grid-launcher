@@ -69,6 +69,9 @@ function plan(overrides: Partial<BackupPlan> = {}): BackupPlan {
     needs_choice: 0,
     local_bytes: 0,
     download_bytes: 4.2 * GB,
+    without_romm: false,
+    unavailable: [],
+    firmware_skipped: [],
     ...overrides,
   };
 }
@@ -305,6 +308,15 @@ describe('without RomM (RommStorefront README, "Backups without RomM")', () => {
     const rows = backupPageRows(model(off()), acts());
     expect(find(rows, 'bk-h-unavailable')).toMatchObject({ text: 'Can’t backup without RomM · 1' });
     expect(find(rows, 'bk-un-rom-9')).toMatchObject({ label: 'Far Game', sub: 'SNES · Its files are not on this computer. Connect RomM to back it up from the server.' });
+  });
+
+  it('lists the unlinked games asked for too (Backup all N… on RomM › Installed)', () => {
+    const rows = backupPageRows(model(off(), { unlinked: [{ title: 'Loose Disc', platform: 'PlayStation' }] }), acts());
+    expect(find(rows, 'bk-h-unavailable')).toMatchObject({ text: 'Can’t backup without RomM · 2' });
+    expect(find(rows, 'bk-un-unlinked-0')).toMatchObject({
+      label: 'Loose Disc',
+      sub: 'PlayStation · It isn’t linked to a RomM game. Link it to its RomM game first.',
+    });
   });
 
   it('the Source and Firmware switches are locked', () => {

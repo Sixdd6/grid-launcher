@@ -20,7 +20,6 @@ import {
   driveByKey,
   drivesHoldingRom,
   EMPTY_SNAPSHOT,
-  firstLibraryDriveKey,
   packDrives,
   readyDrives,
 } from '../backups/drives';
@@ -53,10 +52,6 @@ export const drives = {
   /** Connected drives with a readable pack (read-only ones too): install sources, Library rows. */
   get withPack(): DriveInfo[] {
     return packDrives(state.snapshot);
-  },
-  /** The drive key the offline shell opens Library on, or `null`. */
-  get firstLibraryDrive(): string | null {
-    return firstLibraryDriveKey(state.snapshot);
   },
   byKey(key: string): DriveInfo | null {
     return driveByKey(state.snapshot, key);

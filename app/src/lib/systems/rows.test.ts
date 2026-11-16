@@ -63,19 +63,16 @@ function setup(label: string, name: string, options: SetupOption[], core: string
 }
 
 /** A system RomM has (server id `id`), keyed by the setup row's slug. */
-const platform = (id: number, label: string, name = label, installed = 0): SystemPlatform => {
-  const system: SystemPlatform = {
-    slug: label.toLowerCase().replace(/\s+/g, ''),
-    label,
-    aliases: name === label ? [] : [name],
-    origin: 'both',
-    server_id: id,
-    server_rom_count: 4,
-    installed_count: installed,
-  };
-  // The backend also sends the keyword-matching name beside the TS type.
-  return Object.assign(system, { name });
-};
+const platform = (id: number, label: string, name = label, installed = 0): SystemPlatform => ({
+  slug: label.toLowerCase().replace(/\s+/g, ''),
+  label,
+  name,
+  aliases: name === label ? [] : [name],
+  origin: 'both',
+  server_id: id,
+  server_rom_count: 4,
+  installed_count: installed,
+});
 
 /** A catalog-only system (no RomM). */
 const local = (label: string, installed = 0): SystemPlatform => ({

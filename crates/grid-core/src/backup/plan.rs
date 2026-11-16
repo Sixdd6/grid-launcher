@@ -123,6 +123,10 @@ pub struct BackupPlan {
     /// Requested games that can't be backed up without RomM, with why.
     #[serde(default)]
     pub unavailable: Vec<PlanUnavailable>,
+    /// Without RomM: the systems of the games being written whose firmware
+    /// is skipped ([`firmware_skipped_systems`]), by name. Empty with RomM.
+    #[serde(default)]
+    pub firmware_skipped: Vec<String>,
 }
 
 /// A requested game a backup without RomM leaves out: it is not eligible
@@ -1034,6 +1038,7 @@ pub fn plan(input: &PlanInput<'_>) -> Planned {
             download_bytes: bytes.saturating_sub(local_bytes),
             without_romm: false,
             unavailable: Vec::new(),
+            firmware_skipped: Vec::new(),
         },
         items,
     }
@@ -1167,7 +1172,11 @@ pub fn catalog_only(choices: Vec<(String, EmulatorChoice)>) -> Vec<(String, Emul
 
 /// Marks `planned` as made without RomM: the unavailable games are listed,
 /// and no firmware goes (it comes only from the server). Pure.
-pub fn mark_without_romm(planned: &mut Planned, unavailable: Vec<PlanUnavailable>) {
+pub fn mark_without_romm(
+    planned: &mut Planned,
+    unavailable: Vec<PlanUnavailable>,
+    firmware_skipped: Vec<String>,
+) {
     let bytes: u64 = planned.items.firmware.iter().map(|f| f.bytes).sum();
     planned.items.firmware.clear();
     let plan = &mut planned.plan;
@@ -1177,6 +1186,41 @@ pub fn mark_without_romm(planned: &mut Planned, unavailable: Vec<PlanUnavailable
     plan.firmware_reason = FIRMWARE_NEEDS_ROMM.to_string();
     plan.without_romm = true;
     plan.unavailable = unavailable;
+    plan.firmware_skipped = firmware_skipped;
+}
+
+/// The systems whose firmware a backup without RomM skips ("Needs RomM ·
+/// skipped: Sega Saturn"): each system of the games it writes (`written`)
+/// that GRID's catalog (`known`, `firmware-known.json`) lists a required
+/// file for, by its display label (else its platform name), sorted and
+/// without repeats. Pure.
+pub fn firmware_skipped_systems(
+    games: &[PlanGame],
+    written: &[GameItem],
+    known: &[crate::firmware::known::KnownFile],
+) -> Vec<String> {
+    let mut names: BTreeSet<String> = BTreeSet::new();
+    for game in games {
+        if !written.iter().any(|w| w.rom_id == game.rom_id) {
+            continue;
+        }
+        let label = game.platform_label.trim();
+        let name = if label.is_empty() {
+            game.platform_name.trim()
+        } else {
+            label
+        };
+        if name.is_empty() || names.contains(name) {
+            continue;
+        }
+        let needs = crate::firmware::known::files_for(known, &game.platform_slug, None)
+            .iter()
+            .any(|f| f.required);
+        if needs {
+            names.insert(name.to_string());
+        }
+    }
+    names.into_iter().collect()
 }
 
 /// "Linux" or "Windows".
@@ -2181,6 +2225,42 @@ mod tests {
     }
 
     #[test]
+    fn firmware_skipped_systems_names_each_written_system_that_needs_firmware() {
+        let known = crate::firmware::known::parse_known(
+            r#"{"files": [
+                {"slug": "saturn", "name": "sega_101.bin", "required": true},
+                {"slug": "psx", "name": "scph5501.bin", "required": true},
+                {"slug": "nes", "name": "disksys.rom", "required": false}
+            ]}"#,
+        )
+        .unwrap();
+        let mut saturn = game(1, "saturn", 1, 1);
+        saturn.platform_label = "Sega Saturn".into();
+        let mut saturn2 = game(2, "saturn", 1, 1);
+        saturn2.platform_label = "Sega Saturn".into();
+        let psx = game(3, "psx", 1, 1);
+        let nes = game(4, "nes", 1, 1);
+        let item = |rom_id: i64| GameItem {
+            rom_id,
+            name: String::new(),
+            platform_name: String::new(),
+            server: String::new(),
+            local: true,
+            bytes: 1,
+        };
+        // PSX is requested but not written (unavailable): not named. NES has
+        // only optional firmware. Saturn is named once.
+        let names = firmware_skipped_systems(
+            &[psx, saturn, saturn2, nes],
+            &[item(1), item(2), item(4)],
+            &known,
+        );
+        assert_eq!(names, vec!["Sega Saturn".to_string()]);
+        let none = firmware_skipped_systems(&[game(3, "psx", 1, 1)], &[], &known);
+        assert!(none.is_empty());
+    }
+
+    #[test]
     fn plan_games_local_takes_eligible_rows_and_lists_the_rest_with_why() {
         let rows = vec![
             row(Some(1), "One", "psx"),
@@ -2298,10 +2378,11 @@ mod tests {
             platform_name: "PSX".into(),
             reason: "Its files weren't found on this computer".into(),
         }];
-        mark_without_romm(&mut planned, unavailable.clone());
+        mark_without_romm(&mut planned, unavailable.clone(), vec!["PSX".into()]);
         let plan = &planned.plan;
         assert!(plan.without_romm);
         assert_eq!(plan.unavailable, unavailable);
+        assert_eq!(plan.firmware_skipped, vec!["PSX".to_string()]);
         assert_eq!(plan.games_to_write, vec![1, 2]);
         assert!(plan.sources.iter().all(|s| s.source == SourceChoice::Local));
         // Each game keeps its own server.

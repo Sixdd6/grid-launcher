@@ -33,17 +33,14 @@ export const TV_PANE_LABELS: Record<TvPane, string> = {
   updates: 'Updates',
 };
 
-/** The TV tab a desktop view opens. TV mode has no Server tab: the legacy
- *  Server view opens the Library, where RomM is a group. */
+/** The TV tab a desktop view opens: the same place. */
 export function tvTabFor(view: View): TvTab {
-  return view === 'server' ? 'library' : view;
+  return view;
 }
 
-/** The TV pane a desktop Settings page opens on. The legacy Connection page
- *  opens Game stores, where RomM's page is. */
+/** The TV pane a desktop Settings page opens on: the same page. */
 export function tvPaneFor(page: SettingsPage): TvPane {
-  const name: string = page;
-  return name === 'connection' ? 'stores' : (page as TvPane);
+  return page;
 }
 
 /** The desktop view a TV tab leaves to, and the Settings page when it is

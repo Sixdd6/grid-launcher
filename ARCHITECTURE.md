@@ -6,12 +6,9 @@ A stable map of where behavior lives. Update it when module ownership changes.
 - Use `openapi.json` as the source of truth for RomM server requests.
 - Build, test and release commands are in `BUILD.md`.
 
-**RomM storefront rework (target layout).** Entries marked *(target, landing with the RomM storefront rework)*
-describe the layout that `docs/romm-storefront-plan.md` (Steps 0–9) is building in
-parallel: RomM becomes one optional storefront, Systems works without it, and the Server
-view, the Connect screen, Settings › Connection and offline mode go. Until the step that
-lands each one merges, the code may still have the older shape described next to it;
-Step 9 removes the old commands and fields once nothing uses them.
+**RomM storefront rework (landed).** `docs/romm-storefront-plan.md` (Steps 0–9) made RomM
+one optional storefront: Systems works without it, and the Server view, the Connect
+screen, Settings › Connection and offline mode are gone.
 
 ## Top level
 
@@ -101,7 +98,7 @@ Modules as declared in `src/lib.rs`:
   xemu's raw-disk sync.
 - `config` — `Config` and its TOML load/atomic save, the emulator entries and UI
   settings it holds, and `data_dir_override()`. `[backup]` holds the firmware default and
-  the remembered drives (`RememberedDrive`, keyed by mount). *(target, landing with the RomM storefront rework)*
+  the remembered drives (`RememberedDrive`, keyed by mount).
   `server_url` and `username` stay top-level; `[stores.romm]` (`RommConfig { connected }`,
   whether startup probes RomM) and `[setup] welcomed` (the welcome was finished or skipped)
   are new. A one-time migration in `Config::load`, marked by `romm_store_migrated`, derives
@@ -117,7 +114,7 @@ Modules as declared in `src/lib.rs`:
   zip keep-vs-extract decision, and the RPCS3 PS3 firmware path. The install pass reads a
   `FirmwareSource`: `ServerFirmware`, or `PackFirmwareSource` for a drive's `firmware/`
   (`install_platform_firmware_from`); both verify size and MD5 the same way.
-  *(target, landing with the RomM storefront rework)* `firmware/local.rs` is Locate files: pure validation of user-picked
+  `firmware/local.rs` is Locate files: pure validation of user-picked
   files or a folder (canonicalized, regular files only, the 2 GiB cap before reading, a
   folder scanned three levels deep without following links, archives matched member by
   member through the existing extractor) against the expected set, matched by size and
@@ -401,7 +398,7 @@ Modules as declared in `src/lib.rs`:
   implementation (`MemoryStore` for tests). Secrets are `SecretString` values that cannot be
   formatted or logged.
 - `session` — `SessionManager`: connect, restore, disconnect, and the shared
-  `RommClient` and image cache handles the rest of the app reads. *(target, landing with the RomM storefront rework)*
+  `RommClient` and image cache handles the rest of the app reads.
   It is RomM's storefront facade (RomM has no `StoreBackend`): it also owns RomM's
   connection state (`RommConnection`: connected, unreachable, expired, not connected;
   the credential kind, the last secret-free error, busy) and builds `RommStatus` (no
@@ -409,9 +406,8 @@ Modules as declared in `src/lib.rs`:
   group. `set_change_hook` fires on every change; a 401 sets `Expired` and keeps the
   keyring. Restore probes only while `[stores.romm] connected` is set; otherwise it reads
   no keyring entry. The server URL is set from config whenever one is stored, so cached
-  RomM art keeps its host filter while RomM is off. `use_offline` and
-  `RestoreOutcome::Offline` go in Step 9.
-- `systems` *(target, landing with the RomM storefront rework)* — the platform model that makes Systems work without
+  RomM art keeps its host filter while RomM is off.
+- `systems` — the platform model that makes Systems work without
   RomM. `catalog.rs` parses the bundled `platforms.json` once (slug, RomM's default name,
   aliases). `merge.rs` joins the catalog, the server's platforms when a client is live,
   and the installed rows' `(label, slug)` by slug into `SystemPlatform` (slug, label,
@@ -425,7 +421,7 @@ Modules as declared in `src/lib.rs`:
 
 Data files are compiled in with `include_str!` from the repository root:
 `emulator-autoprofiles.json` (`launch/profiles.rs`), `retroarch-core-list.json` and
-`romm-platform-cores.json` (`autoconfig/cores.rs`), and *(target, landing with the RomM storefront rework)*
+`romm-platform-cores.json` (`autoconfig/cores.rs`), and
 `platforms.json` (`systems/catalog.rs`: every slug of the two slug files plus the
 profile-only systems, named as RomM names them) and `firmware-known.json` (firmware: per
 slug, each file's name, size, MD5, whether it is required and the profiles that use it;
@@ -443,10 +439,10 @@ The shell owns *when* things run; grid-core owns *what* they do.
   library move service (gate closed if a journal exists) and the library root check →
   layout migration and its relinked resync (skipped while the root is unreachable) →
   `relocate::recover` (finishes a Commit) → gates handed to the services → `.setup()`,
-  which resumes a Copy or Cleanup in the background. *(target, landing with the RomM storefront rework)* `.setup()` also
+  which resumes a Copy or Cleanup in the background. `.setup()` also
   wires `SessionManager`'s change hook to the `romm-changed` event and calls
   `platform_registry::record(None)` so launch and firmware routing work with no server.
-- `platform_registry.rs` *(target, landing with the RomM storefront rework)* — the label → slug and label → server id
+- `platform_registry.rs` — the label → slug and label → server id
   maps that launch resolution, firmware routing and cloud ops read
   (`grid_core::launch::set_platform_slugs`, `InstallService::set_platform_slugs`,
   `set_platform_ids`). `record(state, server: Option<&[Platform]>)` fills slugs from every
@@ -570,13 +566,14 @@ The shell owns *when* things run; grid-core owns *what* they do.
   when a pass has finished this session, else from each game's details (4 at a time),
   and `start_backup` refuses a plan that still waits on a pick. `install_from_drive`
   also decides what the drive brings beside the game (emulator, Proton, firmware) and
-  answers with the notices it words. *(target, landing with the RomM storefront rework)* `plan_backup` and `start_backup`
+  answers with the notices it words. `plan_backup` and `start_backup`
   take an optional client: without RomM they plan from the installed rows
   (`plan_games_local`), force the local copy, and skip server-hosted emulator builds and
-  firmware as needing RomM. `use_without_server` (commands.rs) goes in Step 9.
+  firmware as needing RomM, naming the systems whose firmware it skips
+  (`firmware_skipped_systems`, from GRID's `firmware-known.json`).
   `ensure_image` checks the image cache before the host filter, so a row installed
   from a drive shows its art whatever server it came from.
-- RomM, welcome and Systems commands *(target, landing with the RomM storefront rework)*:
+- RomM, welcome and Systems commands:
   - `commands/romm.rs` — RomM's storefront commands over `SessionManager`:
     `romm_status`, `romm_restore` (probes only when `[stores.romm] connected`; runs after
     the shell is up; spawns the connected jobs on success), `romm_connect(server_url,
@@ -584,9 +581,7 @@ The shell owns *when* things run; grid-core owns *what* they do.
     (the stored credential), `romm_disconnect` (drops the client, clears the keyring and
     updates, keeps `server_url` and `username`, stays in the shell). Each answers
     `RommStatus`, and every connection change, a 401 included, emits `romm-changed`
-    (`RommStatus`). `open_server_page` is the card's Open in browser. They replace
-    `restore_session`, `connect`, `retry_connect`, `disconnect`, `use_without_server` and
-    the `session-unauthorized` event, which stay as wrappers until Step 9.
+    (`RommStatus`). `open_server_page` is the card's Open in browser.
   - `commands/welcome.rs` — `welcome_status` (`{ needed }`: `[setup] welcomed` is false)
     and `finish_welcome`.
   - `commands/systems.rs` — `system_platforms` (`systems::merge` over the catalog, the
@@ -661,7 +656,7 @@ feature separately.
 ## `app/src`
 
 Svelte 5 with runes. `main.ts` mounts `App.svelte`, which renders the session phase
-(`shell.ts` `SessionPhase`). *(target, landing with the RomM storefront rework)* The phases are `loading`, `welcome`
+(`shell.ts` `SessionPhase`). The phases are `loading`, `welcome`
 (`lib/Welcome.svelte` with the pure `lib/welcome.ts`, only while `welcome_status` says the
 welcome is needed; never because of RomM's state), `setup` (Choose your systems, after a
 successful RomM connect when setup is needed; `session.setupReturn` says whether Done and
@@ -715,9 +710,9 @@ existed; a Disconnect or a 401 no longer leaves the shell.
   `lib/backups/backupPlan.svelte.ts` (`BackupPlanStore`: the per-drive plans, picks and
   Start), `lib/backups/driveActions.ts` (a drive's set up, rename, computers, GRID files,
   folder, forget), `lib/setup/chooseSystems.svelte.ts` (`ChooseSystems`: first-run rows,
-  ticks, the Proton row, Install, Skip; *(target, landing with the RomM storefront rework)* its rows come from
+  ticks, the Proton row, Install, Skip; its rows come from
   `setup_platform_options` over `SystemPlatform`, with no Disconnect footer),
-  `lib/connectFlow.ts` (Connect's library folder, Use without a server, the connect; *(target, landing with the RomM storefront rework)*
+  `lib/connectFlow.ts` (Connect's library folder, Use without a server, the connect;
   only the library-folder helpers survive, as `lib/welcomeFlow.ts`) and `relocateTo` in
   `stores/libraryUnreachable.svelte.ts` (the unreachable-library dialog's Relocate).
 
@@ -726,7 +721,7 @@ existed; a Disconnect or a 401 no longer leaves the shell.
   exactly, with no cosmetic renames.
 - `lib/gameKey.ts` — `gameKey(row)` and `parseGameKey`, the TypeScript mirror of
   grid-core's `GameKey` (`launchGameKey`, `GameSession.key`).
-- `lib/romm/` *(target, landing with the RomM storefront rework)* — RomM's pure modules, shared by desktop and TV:
+- `lib/romm/` — RomM's pure modules, shared by desktop and TV:
   `order.ts` (`STOREFRONT_ORDER`: amazon, epic, gog, romm, steam, for both rails, the Game
   stores pane and the welcome), `rail.ts` (`rommRailGroup`: the RomM group's heading flag
   and rows per `RommStatus`; rail keys `romm:installed`, `romm:discover`,
@@ -737,11 +732,10 @@ existed; a Disconnect or a 401 no longer leaves the shell.
   the welcome and the card's dialog, taken out of `Connect.svelte` and `connectForm.ts`),
   and `desktop/` (the RomM rail group, the Installed banner, the platform header and
   view, mounted by `Library.svelte`).
-- `lib/stores/romm.svelte.ts` *(target, landing with the RomM storefront rework)* — `romm.status` (`RommStatus`, pulled once with
+- `lib/stores/romm.svelte.ts` — `romm.status` (`RommStatus`, pulled once with
   `romm_status`, then from `romm-changed`) and `connect`, `reconnect`, `disconnect`;
   `connect` sets the `setup` phase and `setupReturn` when setup is needed.
-  `session.connected` reads it, and `session.offline`, `lastError` and `rejected` go in
-  Step 9.
+  `session.connected`, `serverUrl` and `username` read it.
 - `lib/stores/*.svelte.ts` — rune-based state shared across views: `session`, `romm`,
   `installed`, `downloads`, `sessions`, `updates`, `appUpdate`, `uiSettings`, `toasts`,
   `drives` (the latest drives snapshot from `list_drives` and `drives-changed`, and the
@@ -749,21 +743,18 @@ existed; a Disconnect or a 401 no longer leaves the shell.
   `inputMode`, `lastViewed`, `compatTools`, `pythonImport`, `libraryMove` (the 9b move status and its toasts),
   `libraryUnreachable` (while it says unreachable, `App.svelte` shows only
   `LibraryUnreachableDialog.svelte`, whose pure half is `lib/libraryUnreachable.ts`).
-- Views — *(target, landing with the RomM storefront rework)* `Library.svelte`, `Downloads.svelte`, `Settings.svelte`, plus
-  `Details.svelte` as a sub-view; `shell.ts` `VIEWS` is library, downloads, settings
-  (`Ctrl+1`..`Ctrl+3`) and `initialView` answers `{ view: 'library', rail, drive }`.
+- Views — `Library.svelte`, `Downloads.svelte`, `Settings.svelte`, plus
+  `Details.svelte` as a sub-view; `shell.ts` `STOREFRONT_VIEWS` is library, downloads,
+  settings (`Ctrl+1`..`Ctrl+3`) and `initialPlace` answers `{ view: 'library', rail, drive }`.
   **Removed:** `Server.svelte`. Its Discover and platform screens are rows of the Library's
   RomM group (`lib/romm/desktop/`), reusing `lib/discover/` and `lib/server/catalog.svelte.ts`
-  unchanged; `Shell.svelte` loses the chip and server menu. The current code, until
-  Step 3 merges: Server opens on Discover (`lib/discover/`:
-  `Discover.svelte` mounted by `Server.svelte` in place of the folding header and grid,
-  with `Coverflow`, `RecentlyAdded`, `Shot` and `GameLogo`; the pure halves are
-  `feed.ts` — action label, dates, coverflow geometry, the picture and logo colours —
-  `rotation.ts`, Recently added's pausable 10 s timer, and `filters.ts`, its platform
-  filter pills; its data is `feedStore.svelte.ts`). Server still owns Details and the
-  install/launch prompts (through `games/run.ts`); Discover calls back into it. `shell.ts` holds the view list (its order is the
-  `Ctrl+1`..`Ctrl+4` accelerators) and the session-phase mapping. Emulators live in
-  Settings › Systems; `Shell.svelte` routes the Server header's chips there with
+  unchanged; `Shell.svelte` has no chip and no server menu. Discover (`lib/discover/`:
+  `Discover.svelte`, with `Coverflow`, `RecentlyAdded`, `Shot` and `GameLogo`; the pure
+  halves are `feed.ts` — action label, dates, coverflow geometry, the picture and logo
+  colours — `rotation.ts`, Recently added's pausable 10 s timer, and `filters.ts`, its
+  platform filter pills; its data is `feedStore.svelte.ts`). `shell.ts` holds the view
+  list (its order is the `Ctrl+1`..`Ctrl+3` accelerators) and the session phases.
+  Emulators live in Settings › Systems; a platform header's chips route there with
   `Settings.show('systems', { system })`.
 - Game backups — `lib/backups/`: `BackupDialog.svelte` (one instance, mounted by
   `Shell.svelte`, opened through `dialogState.svelte.ts`) with `dialog.ts`;
@@ -774,9 +765,7 @@ existed; a Disconnect or a 401 no longer leaves the shell.
   drive and its notices); `driveArt.ts` (a drive asset as a `gridpack-asset:` URL that
   `drive_asset` copies into the image cache). Library's drive rows are `lib/library/rail.ts`
   and `lib/library/drive.ts`; Details' drive actions are in `lib/details/actions.ts` and
-  `subject.ts`. Offline mode is `session.offline` (`stores/session.svelte.ts`) and the
-  `initialView`/`chipLabel` rules in `shell.ts`; *(target, landing with the RomM storefront rework)* offline mode and `chipLabel`
-  go, and RomM's state is `stores/romm.svelte.ts`. `initialView` also applies Open GRID on
+  `subject.ts`. RomM's state is `stores/romm.svelte.ts`. `initialPlace` (`shell.ts`) applies Open GRID on
   (`[ui] open_on`, labels and normalisation in `lib/settings/openOn.ts`), the start rule
   shared by the desktop and TV mode; `App.svelte` mounts the shell only once
   `uiSettings.loaded`.
@@ -793,7 +782,7 @@ existed; a Disconnect or a 401 no longer leaves the shell.
   `lib/visibleWarm.ts` warms background art by each card's `data-index`.
 - Settings › Systems — `lib/systems/SystemsPage.svelte` (the page, mounted by
   `Settings.svelte`) with `SystemRow`, `EmulatorBlock`, `RowMenu` and `WindowsRow`
-  (*(target, landing with the RomM storefront rework)* rows from `system_platforms` and `setup_platform_options` with or without
+  (rows from `system_platforms` and `setup_platform_options` with or without
   RomM, the More systems group, and the firmware block's Install from RomM, Locate files…
   and Locate report over `firmware_expected` / `locate_firmware_files`); the
   pure halves are `rows.ts` (the row model from `setup_platform_options`, the picker
@@ -821,7 +810,7 @@ existed; a Disconnect or a 401 no longer leaves the shell.
   (`games/run.ts`, `DetailsStore`, `SystemsStore`, `BackupPlanStore`, `ChooseSystems`, the
   notifier) and owns only layout, focus and input:
   - `TvShell.svelte` (the phases loading / unreachable / connect / choose / shell, the start
-    tab, the welcome card, the theme override; *(target, landing with the RomM storefront rework)* `connect` becomes `welcome`, the
+    tab, the welcome card, the theme override; `connect` becomes `welcome`, the
     start tab is `library`, and `setupReturn` sends Choose your systems back to Settings ›
     Game stores), `TvTopBar`, `TvHintBar`, `TvStage` +
     `ScreenFrame` (one screen or page at a time), `TvToasts` + `notices.svelte.ts` (the
@@ -838,14 +827,14 @@ existed; a Disconnect or a 401 no longer leaves the shell.
     `sticks.ts`.
   - `overlays/` (list, confirm, on-screen keyboard with `osk.ts`, Menu with `menu.ts`),
     `tabs/` (`server/`, `library/`, `downloads/`, `settings/` with the pure `panes/*.ts`;
-    *(target, landing with the RomM storefront rework)* `tabs/server/` is removed and its Discover and platform screens move into
+    `tabs/server/` is removed and its Discover and platform screens move into
     `tabs/library/`'s RomM folder; `panes/connection.ts` and `reconnect.ts` are removed;
     `stores/TvStoresPane.svelte` gains the RomM row and page),
     `pages/` (Details and its tabs, Playing, the media viewer, Game settings, Link, the
     folder browser, Search everything, Notifications, the System page and emulator form,
     the Backup page and the drive pages over `TvRowsPage`; each with a pure `.ts`),
     `startup/` (Connect, Choose your systems, the unreachable library, the setup card;
-    *(target, landing with the RomM storefront rework)* `TvConnect` / `connectPage.ts` become `TvWelcome` / `welcomePage.ts`),
+    `TvConnect` / `connectPage.ts` become `TvWelcome` / `welcomePage.ts`),
     `ui/` (primitives: `TvButton`, `TvCover`, `TvGrid`, `TvRail`, `TvRows`, `TvTrack`,
     `TvSelBar`…), `select.svelte.ts` (select mode), `size.ts` (the root font rule),
     `games.ts`, `gameActions.ts`, `backupActions.ts`, `systemsTv.svelte.ts`.
@@ -861,13 +850,13 @@ existed; a Disconnect or a 401 no longer leaves the shell.
   once by `StoreLayer.svelte`, which also shows `store-notice` and sign-in cards while
   the desktop shell is up. `lib/stores/gameStores.svelte.ts` owns the store status and
   libraries for either shell. `lib/settings/StoresPage.svelte` is Settings › Stores;
-  *(target, landing with the RomM storefront rework)* it is Settings › Game stores, with its cards in `STOREFRONT_ORDER` and
+  it is Settings › Game stores, with its cards in `STOREFRONT_ORDER` and
   the RomM card in `lib/settings/RommCard.svelte` (pure half `rommCard.ts`). **Removed:**
   `lib/settings/ConnectionPage.svelte` with `connection.ts` (Settings › Connection);
   `CloudSavesPage.svelte` and `RetroAchievementsPage.svelte` show the needs-RomM panels.
   `lib/tv/stores/` is TV mode's side (TVStores README): its rail folders, pages, store
   cards (`storeEvents.ts`, started by the TV shell) and TV-only words (`storeWords.ts`).
-  Store rows never appear as a Library platform (`library/rail.ts`). *(target, landing with the RomM storefront rework)*
+  Store rows never appear as a Library platform (`library/rail.ts`).
   RomM does not join `StoreStatus` or `StoreSource`: the Library rail and the Game stores
   pane take `RommStatus` beside `StoreStatus[]`, and the Library rail's PLATFORMS section
   goes (platform rows live only in the RomM group).

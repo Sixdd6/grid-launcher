@@ -228,7 +228,7 @@
     try {
       answer = await s.locateFiles(r, paths);
     } catch (err) {
-      answer = { installed: [], unverified: [], refused: paths.map((p) => ({ file: baseName(p), reason: errText(err) })) };
+      answer = { installed: [], unverified: [], refused: paths.map((p) => ({ file: baseName(p), reason: errText(err) })), unmatched: 0 };
     }
     const report = tvReport({ system: r.label, emulator: r.emulator, folder, where: paths[0] ?? '', picked: paths.length, answer });
     pushToast(report.card.title, report.card.error ? 'error' : 'success', undefined, report.card.text ? { sub: report.card.text } : {});

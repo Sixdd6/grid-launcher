@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { APP_START_TIMEOUT, dataDir, FIXTURE_TOKEN, FIXTURE_USERNAME, mockUrl, TRANSITION_TIMEOUT, WRONG_TOKEN } from '../helpers/env.js';
+import { setServerOffline } from '../helpers/openOn.js';
 import { tvRailKeys, tvRailTo } from '../helpers/romm.js';
 import { assertNoClipping, connectPad, focused, hints, invoke, key, press, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
 import { tap, tapK } from '../helpers/tvBackups.js';
@@ -486,5 +487,10 @@ describe('tv-romm: Discover and a platform in Library › RomM', () => {
 
   it('raised no page errors here either', async () => {
     expect(await pageErrors()).toEqual([]);
+  });
+
+  it('leaves the mock RomM dropping every request, for part B', async () => {
+    // Part B relaunches on this profile (RomM connected) and finds no answer.
+    await setServerOffline(true);
   });
 });

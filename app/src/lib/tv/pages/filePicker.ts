@@ -8,11 +8,12 @@ import { isArchiveName } from '../../systems/locate';
 import { shortName } from '../../systems/rows';
 import type { Hint } from '../hints';
 import { childPath } from './folderBrowser';
+import { sizeText } from './firmwareRows';
 
 export type PickRow =
   | { kind: 'up'; key: 'up'; path: string }
   | { kind: 'dir'; key: string; name: string; path: string }
-  | { kind: 'file'; key: string; name: string; path: string };
+  | { kind: 'file'; key: string; name: string; path: string; size: string };
 
 /** Up one folder (not at a root), the folders, then the files. */
 export function pickRows(listing: FolderListing): PickRow[] {
@@ -20,9 +21,21 @@ export function pickRows(listing: FolderListing): PickRow[] {
   if (listing.parent !== null) rows.push({ kind: 'up', key: 'up', path: listing.parent });
   for (const e of listing.entries) {
     const path = childPath(listing.path, e.name);
-    rows.push(e.is_dir ? { kind: 'dir', key: `d-${e.name}`, name: e.name, path } : { kind: 'file', key: `f-${e.name}`, name: e.name, path });
+    rows.push(
+      e.is_dir
+        ? { kind: 'dir', key: `d-${e.name}`, name: e.name, path }
+        : { kind: 'file', key: `f-${e.name}`, name: e.name, path, size: pickSize(e.size) },
+    );
   }
   return rows;
+}
+
+/** A file's size on its row: "512 KB", "197 MB", "4.4 GB"; `''` for an empty file. */
+export function pickSize(bytes: number): string {
+  const gib = 1024 * 1024 * 1024;
+  if (bytes < gib) return sizeText(bytes);
+  const gb = bytes / gib;
+  return `${gb < 10 ? Math.round(gb * 10) / 10 : Math.round(gb)} GB`;
 }
 
 /** A on a row: Up, Open, Pick / Unpick (multi), Choose (single). */
@@ -116,7 +129,7 @@ export function tvReport(input: {
   if (nv.length) groups.push({ kind: 'nv', title: `Installed · not verified · ${nv.length}`, items: nv });
   if (bad.length) groups.push({ kind: 'bad', title: `Refused · ${bad.length}`, items: bad });
   const total = ok.length + nv.length;
-  const unmatched = answer.unmatched ?? 0;
+  const unmatched = answer.unmatched;
   const checked = input.folder
     ? `Checked ${input.where} for ${system} · ${emu}`
     : `Checked ${plural(input.picked, 'file')} you picked for ${system} · ${emu}`;

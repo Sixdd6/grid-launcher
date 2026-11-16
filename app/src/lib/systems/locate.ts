@@ -4,9 +4,9 @@
 import type { LocateReport } from '../api';
 import { shortName } from './rows';
 
-/** The backend's report also counts the files in a picked folder that
- *  matched nothing (`unmatched`, sent beside the frozen TS type). */
-export type LocateAnswer = LocateReport & { unmatched?: number };
+/** The backend's report, with the count of files in a picked folder that
+ *  matched nothing (`unmatched`). */
+export type LocateAnswer = LocateReport;
 
 /** How the files were picked. */
 export type LocateMode = 'files' | 'folder' | 'pup';
@@ -111,7 +111,7 @@ export function reportView(input: {
     : pup
       ? ` ${emu} installs it.`
       : ` Installed into ${emu}’s folders.`;
-  const unmatched = answer.unmatched ?? 0;
+  const unmatched = answer.unmatched;
   const installedCount = ok.length + nv.length;
   const card = nothing
     ? {

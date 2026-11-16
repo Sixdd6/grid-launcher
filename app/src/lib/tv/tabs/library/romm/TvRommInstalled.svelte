@@ -39,10 +39,13 @@
   let banner = $derived(rommBanner(status));
   let chip = $derived(installedChip(status));
   let backupIds = $derived(rows.flatMap((r) => (r.rom_id !== null ? [r.rom_id] : [])));
+  // A row with no RomM id has no pack identity: it goes along as unlinked,
+  // and the Backup page lists it with RomM off (as desktop's Backup all N…).
+  let unlinked = $derived(rows.flatMap((r) => (r.rom_id === null ? [{ title: r.title, platform: r.platform }] : [])));
   let empty = $derived(games.length === 0 ? installedEmpty(status, tvRomm.query) : null);
 
   function backupAll() {
-    openBackupPage({ kind: 'games', count: backupIds.length }, backupIds);
+    openBackupPage({ kind: 'games', count: rows.length }, backupIds, [], unlinked);
   }
 
   function bannerAct() {

@@ -70,7 +70,8 @@ export function isPupSystem(slug: string): boolean {
 
 function lineOf(f: FirmwareExpectedFile): FirmwareFileLine {
   const noHash = f.md5 === '';
-  const meta = `${f.required ? 'Required' : 'Optional'}${noHash ? ' · no fixed checksum' : ''}`;
+  const region = f.region.trim();
+  const meta = `${f.required ? 'Required' : 'Optional'}${region ? ` · ${region}` : ''}${noHash ? ' · no fixed checksum' : ''}`;
   if (f.installed) {
     const verified = f.verified_by !== 'none';
     return {
