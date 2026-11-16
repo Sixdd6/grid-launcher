@@ -67,11 +67,9 @@
   "pokemon-mini":     ["pokemini"],
   "supervision":      ["potator"],
   "arduboy":          ["arduous"],
-  "pico":             ["picodrive"],
+  "sega-pico":        ["picodrive"],
   "satellaview":      ["snes9x", "snes9x2010"],
   "sufami-turbo":     ["snes9x", "snes9x2010"],
-  "sg-1000":          ["genesis_plus_gx"],
   "pc-8800-series":   ["quasi88"],
-  "x68000":           ["px68k"],
   "sharp-x68000":     ["px68k"]
 }
