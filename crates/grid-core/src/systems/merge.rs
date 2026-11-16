@@ -45,9 +45,14 @@ fn catalog_row_named(rows: &BTreeMap<String, SystemPlatform>, names: &[&str]) ->
     rows.values()
         .find(|r| {
             r.origin == PlatformOrigin::Catalog
-                && names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).any(|n| {
-                    r.label.eq_ignore_ascii_case(n) || r.aliases.iter().any(|a| a.eq_ignore_ascii_case(n))
-                })
+                && names
+                    .iter()
+                    .map(|n| n.trim())
+                    .filter(|n| !n.is_empty())
+                    .any(|n| {
+                        r.label.eq_ignore_ascii_case(n)
+                            || r.aliases.iter().any(|a| a.eq_ignore_ascii_case(n))
+                    })
         })
         .map(|r| r.slug.clone())
 }
@@ -273,7 +278,11 @@ mod tests {
 
     #[test]
     fn a_server_slug_the_catalog_lacks_joins_the_catalog_row_of_the_same_name() {
-        let rows = merge(&catalog(), Some(&[server(1, "ps", "PlayStation", None, 5)]), &[]);
+        let rows = merge(
+            &catalog(),
+            Some(&[server(1, "ps", "PlayStation", None, 5)]),
+            &[],
+        );
         assert_eq!(rows.iter().filter(|r| r.label == "PlayStation").count(), 1);
         let psx = find(&rows, "psx");
         assert_eq!(psx.origin, PlatformOrigin::Both);
