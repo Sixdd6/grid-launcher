@@ -1,10 +1,5 @@
-import {
-  APP_START_TIMEOUT,
-  FIXTURE_TOKEN,
-  INSTALL_TIMEOUT,
-  mockUrl,
-  TRANSITION_TIMEOUT,
-} from '../helpers/env.js';
+import { INSTALL_TIMEOUT, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { connectRomm, openRommPlatform } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -49,21 +44,11 @@ async function waitForLoadedImage(selector: string, timeout: number, label: stri
  */
 describe('images (a): cover, screenshots, install, library grid', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after connecting',
-    });
+    await connectRomm();
   });
 
   it('renders the large cover and the filtered screenshot list for rom 101', async () => {
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-101')).click();
 
@@ -74,9 +59,9 @@ describe('images (a): cover, screenshots, install, library grid', () => {
 
     // Look-and-feel plan (2026-10-30): text sits on panels and overlays,
     // never on the raw art, so nothing carries a text halo any more — not
-    // the details title, and not the Server section it opens from.
+    // the details title, and not the RomM platform screen it opens from.
     const shadows = await browser.execute(() =>
-      ['[data-testid="details-panel"] h2', '[data-testid="server-section"]'].map((sel) => {
+      ['[data-testid="details-panel"] h2', '[data-testid="romm-platform-view"]'].map((sel) => {
         const el = document.querySelector(sel);
         return el ? getComputedStyle(el).textShadow : null;
       }),
@@ -348,7 +333,7 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('details-install')).click();
 
-    await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({
+    await $(`${testId('romm-platform-view')} ${testId('installed-badge-101')}`).waitForExist({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: 'the installed badge never appeared on rom 101\'s card',
     });
@@ -358,7 +343,7 @@ describe('images (a): cover, screenshots, install, library grid', () => {
   });
 
   it('renders a loaded cover for the newly installed rom 101 on the Library grid, and the seeded rom 102 row', async () => {
-    await $(testId('nav-library')).click();
+    await $(testId('library-rail-all')).click();
     await $(testId('library-card-101')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'library-card-101 never appeared after installing',
