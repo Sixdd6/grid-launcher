@@ -10,7 +10,8 @@
  * The seed's app names are package C's choice, so the specs find covers by
  * title, never by app name.
  */
-import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from './env.js';
+import { TRANSITION_TIMEOUT } from './env.js';
+import { connectRomm, startScreen } from './romm.js';
 import { testId, testIdPrefix } from './gog.js';
 
 export { testId, testIdPrefix };
@@ -24,20 +25,14 @@ export const EPIC = {
 } as const;
 
 /**
- * Brings the app to the Library: connects to the stage's mock RomM server
- * when the connect form shows (the Epic seed may also start the profile
- * without a server, in which case the Library is already there).
+ * Brings the app to the Library. The store seeds start past the welcome
+ * with RomM not connected (an old `offline = true` profile, migrated), so
+ * the Library is already there; a profile that starts on the welcome
+ * connects to the stage's mock RomM through its RomM row first
+ * (`helpers/romm.ts`).
  */
 export async function startApp(): Promise<void> {
-  await browser.waitUntil(
-    async () => (await $(testId('connect-server-url')).isExisting()) || (await $(testId('library-section')).isExisting()),
-    { timeout: APP_START_TIMEOUT, timeoutMsg: 'neither the connect form nor the Library appeared' },
-  );
-  if (await $(testId('connect-server-url')).isExisting()) {
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-  }
+  if ((await startScreen()) === 'welcome') await connectRomm();
   await $(testId('library-section')).waitForExist({ timeout: TRANSITION_TIMEOUT });
 }
 

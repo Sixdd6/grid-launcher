@@ -7,20 +7,19 @@
  * a stage that seeds a GOG library with at least one installed and one
  * available game is enough.
  */
-import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from './env.js';
+import { TRANSITION_TIMEOUT } from './env.js';
+import { connectRomm as connectRommStore } from './romm.js';
 
 export const testId = (id: string) => `[data-testid="${id}"]`;
 export const testIdPrefix = (id: string) => `[data-testid^="${id}"]`;
 
-/** Connects to the mock RomM server (the stage's GOG state comes from its seed). */
+/**
+ * Connects to the mock RomM server (the stage's GOG state comes from its
+ * seed): through the welcome's RomM row on the seed's fresh profile, else
+ * Settings › Game stores (`helpers/romm.ts`). Ends in the Library.
+ */
 export async function connectRomm(): Promise<void> {
-  await $(testId('connect-server-url')).waitForExist({
-    timeout: APP_START_TIMEOUT,
-    timeoutMsg: 'the connect form never appeared',
-  });
-  await $(testId('connect-server-url')).setValue(mockUrl());
-  await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-  await $(testId('connect-submit')).click();
+  await connectRommStore();
   await $(testId('library-section')).waitForExist({ timeout: TRANSITION_TIMEOUT });
 }
 

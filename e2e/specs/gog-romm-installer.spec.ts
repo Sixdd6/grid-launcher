@@ -18,8 +18,8 @@ const SH_ROM = process.env.E2E_GOG_ROMM_SH_ROM ?? '';
 const BAD_ROM = process.env.E2E_GOG_ROMM_BAD_ROM ?? '';
 
 async function install(rom: string): Promise<void> {
-  // Downloads may be on screen (the previous case ends there).
-  await $(testId('nav-server')).click();
+  // Downloads may be on screen (the previous case ends there): this opens
+  // Library › RomM › <platform>.
   await openPlatform(PLATFORM);
   const card = $(testId(`game-card-${rom}`));
   await card.waitForExist({ timeout: TRANSITION_TIMEOUT });
