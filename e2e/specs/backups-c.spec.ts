@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { APP_START_TIMEOUT, configPath, dataDir, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { recordedDetails, show, startRecording, waitForRecordedToast } from '../helpers/backups.js';
+import { skipWelcome } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -24,13 +25,14 @@ function configText(): string {
 }
 
 /**
- * Stage `backups/backups-c`: GRID with no server. A fresh profile (the seed
+ * Stage `backups/backups-c`: GRID with RomM never connected (the welcome's
+ * Skip for now). A fresh profile (the seed
  * removes spec a and b's config, registry and keyring item) and a seeded
  * TESTDRIVE whose pack "Travel kit" holds one PlayStation 2 game (rom 777
  * on a server this computer never saw), PCSX2 for Linux and a PS2 BIOS. The
  * mock RomM is switched off, so nothing here may need it.
  */
-describe('backups-c: use without a server and install from a drive', () => {
+describe('backups-c: RomM never connected, install from a drive', () => {
   const DRIVE = 'TESTDRIVE';
   const PACK = 'Travel kit';
   const ROM = 777;
@@ -43,46 +45,34 @@ describe('backups-c: use without a server and install from a drive', () => {
     });
     expect(res.ok).toBe(true);
 
-    await $(testId('connect-server-url')).waitForExist({
+    await $(testId('welcome')).waitForDisplayed({
       timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'a fresh profile never showed the Connect form',
+      timeoutMsg: 'a fresh profile never showed the welcome',
     });
   });
 
-  it('opens Library on the drive after "Use without a server"', async () => {
-    const libraryField = $(testId('connect-library-path'));
-    await libraryField.waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Connect never asked for a library folder' });
-    await libraryField.setValue(path.join(dataDir(), 'library'));
-    const offline = $(testId('connect-use-offline'));
-    await offline.waitForEnabled({ timeout: TRANSITION_TIMEOUT, timeoutMsg: '"Use without a server" never became enabled' });
-    await offline.click();
-
+  it('opens Library on All games after Skip for now, and lists the drive', async () => {
+    await skipWelcome(path.join(dataDir(), 'library'));
     await $(testId('library-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'offline mode did not open on Library',
+      timeoutMsg: 'Skip for now did not open on Library',
     });
-    await expect($(testId('session-chip'))).toHaveText('Offline · no server');
-    // Library opens on the first connected backup drive.
+    // Never connected: GRID opens on All games (romm-storefront-plan
+    // decision 16), not on the first Backup drive; no chip, no offline mode.
+    await expect($(testId('library-rail-all'))).toHaveAttribute('aria-current', 'page');
+    await expect($(testId('session-chip'))).not.toExist();
+    // Nothing from RomM is installed yet: no RomM group.
+    await expect($(testId('library-rail-romm-installed'))).not.toExist();
     const driveRow = $('[data-testid^="library-rail-drive-"]');
     await driveRow.waitForExist({ timeout: 10_000, timeoutMsg: 'Library never listed the backup drive' });
+    await driveRow.click();
     await browser.waitUntil(async () => (await driveRow.getAttribute('aria-current')) === 'page', {
-      timeout: 10_000,
-      timeoutMsg: 'Library did not open on the backup drive',
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the backup drive row never became the selection',
     });
     await expect($(testId('library-title'))).toHaveText(PACK);
     await expect($(testId('library-count'))).toHaveText(expect.stringContaining(`1 game`));
     await expect($(testId('library-count'))).toHaveText(expect.stringContaining(`on ${DRIVE}`));
-    // The chip's menu has one way out: Connect to a server….
-    await $(testId('session-chip')).click();
-    await expect($(testId('session-connect'))).toBeDisplayed();
-    await $(testId('session-chip')).click();
-  });
-
-  it('shows the offline panel on Server', async () => {
-    await show('server');
-    await expect($(testId('server-offline-mode'))).toBeDisplayed();
-    await expect($(testId('server-connect'))).toBeDisplayed();
-    await show('library');
   });
 
   it('installs the game from the drive with its emulator, offline', async () => {
@@ -122,9 +112,12 @@ describe('backups-c: use without a server and install from a drive', () => {
   });
 
   it('offers Play, and Backup to drive with no server', async () => {
-    const platformRow = $('[data-testid^="library-rail-platform-"]');
-    await platformRow.waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Library never listed the installed platform' });
-    await platformRow.click();
+    // RomM not connected: the installed game is under RomM › Installed (the
+    // platform rows show only while RomM is connected).
+    await expect($('[data-testid^="library-rail-platform-"]')).not.toExist();
+    const installedRow = $(testId('library-rail-romm-installed'));
+    await installedRow.waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Library never showed RomM › Installed' });
+    await installedRow.click();
     const card = $(testId(`library-card-${ROM}`));
     await card.waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await card.click();

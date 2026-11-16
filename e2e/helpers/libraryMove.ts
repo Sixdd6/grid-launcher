@@ -5,14 +5,8 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import {
-  APP_START_TIMEOUT,
-  configPath,
-  dataDir,
-  FIXTURE_TOKEN,
-  mockUrl,
-  TRANSITION_TIMEOUT,
-} from './env.js';
+import { APP_START_TIMEOUT, configPath, dataDir, TRANSITION_TIMEOUT } from './env.js';
+import { connectRomm, startScreen } from './romm.js';
 
 export const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -63,22 +57,16 @@ export function registryValue(column: 'extracted_path' | 'extracted_dir'): strin
   ).trim();
 }
 
-/** The app is on Connect or already in the shell; ends in the shell. */
+/**
+ * The app is on the welcome or already in the shell; ends in the shell with
+ * RomM connected and its platform rows listed (connects through the
+ * welcome's RomM row on a fresh profile, `helpers/romm.ts`).
+ */
 export async function reachShell(): Promise<void> {
-  const form = $(testId('connect-server-url'));
-  const shell = $(testId('platform-btn-1'));
-  await browser.waitUntil(async () => (await form.isExisting()) || (await shell.isExisting()), {
+  if ((await startScreen()) === 'welcome') await connectRomm();
+  await $(testId('library-rail-platform-snes')).waitForExist({
     timeout: APP_START_TIMEOUT,
-    timeoutMsg: 'neither the connect form nor the library appeared',
-  });
-  if (await form.isExisting()) {
-    await form.setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-  }
-  await shell.waitForExist({
-    timeout: TRANSITION_TIMEOUT * 2,
-    timeoutMsg: 'the library never rendered a platform button after connecting',
+    timeoutMsg: 'the RomM group never listed a platform after connecting',
   });
 }
 

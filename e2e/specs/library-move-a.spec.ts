@@ -14,6 +14,7 @@ import {
   testId,
   waitForMoveCompleted,
 } from '../helpers/libraryMove.js';
+import { openRommPlatform } from '../helpers/romm.js';
 
 const oldRoot = () => path.join(dataDir(), 'library');
 const newRoot = () => path.join(dataDir(), 'library-new');
@@ -111,9 +112,7 @@ describe('library-move (a): move the library to a new folder', () => {
 
   it('launches the moved game from the new folder', async () => {
     rmSync(argvFile(), { force: true });
-    await $(testId('nav-server')).click();
-    await $(testId('server-view')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-101')).click();
     await $(testId('details-panel')).waitForExist({
