@@ -1153,30 +1153,86 @@ Anything missing there comes back to the orchestrator, not edited in a parallel 
 
 ## Leftovers for Step 9 (collected from Steps 2–7)
 
-- **Step 8 first:** `romm-library-b` (written before the welcome landed) still types into
-  the removed Connect form; connect it through the welcome's RomM row via the new
-  `e2e/helpers/romm.ts`. Check `settings-romm` for leftover `connect-*` ids too.
+Each item is marked with how Step 9 settled it.
 
-- api.ts: move Step 2's `BackupPlan.without_romm`, `unavailable` and `PlanUnavailable`
-  (typed locally in `backups/dialog.ts` as `RommOffFields`/`PlanUnavailable`) into `api.ts`.
-- `settings/BackupDrivesPage.svelte`: "The server's firmware for the systems you backup" →
-  "Firmware from RomM for the systems you backup".
-- Backup firmware line without RomM reads "Needs RomM · skipped" with no system names;
-  Step 7's `firmware-known.json` could name them.
+- ~~**Step 8 first:** `romm-library-b` still types into the removed Connect form; check
+  `settings-romm` for leftover `connect-*` ids.~~ Done in Step 8 (verified: it connects with
+  `connectRomm()`; `settings-romm` has no `connect-*` ids).
+- ~~api.ts: move `BackupPlan.without_romm`, `unavailable` and `PlanUnavailable` into
+  `api.ts`.~~ Done: `BackupPlan` carries them (and `firmware_skipped`); `RommOffFields` is gone.
+- ~~`settings/BackupDrivesPage.svelte`: "The server's firmware for the systems you backup"
+  → "Firmware from RomM for the systems you backup".~~ Done.
+- ~~Backup firmware line without RomM reads "Needs RomM · skipped" with no system names.~~
+  Done: `plan::firmware_skipped_systems` names the systems of the games being written that
+  `firmware-known.json` lists required firmware for; desktop reads "Needs RomM · skipped:
+  PlayStation 2". TV's Firmware row keeps "Needs RomM" (TVRommStorefront has no names).
 - Desktop: "Open Config Folder" left with the Connection page (ask the user where it goes).
-- TV Backup page: pass the unlinked rows to `unavailableRows` (Step 6 passes none).
-- e2e: a TV Can't reach state (unit tests only so far).
-- Remove the legacy `'none'` phase branches in `App.svelte` and `TvShell.svelte`.
-- Step 7: move `commands/systems.rs` from the `lib.rs` `#[path]` mount to `pub mod systems;`
-  in `commands.rs`; add `SystemPlatform.name` and `LocateReport.unmatched` to `api.ts`
-  (read through local extended types today); `FirmwareExpectedFile` region and
-  `FolderEntry` size are missing (file lines lack "· Japan", TV browser lacks sizes);
-  `Settings.svelte` should pass `SystemsPage`'s `onConnectRomm` instead of the
-  `settings-nav-stores` click fallback; TV Choose your systems' "RomM is connected."
-  sub-line (`TvChooseSystems.svelte`) is not done.
-- Step 8 (Systems e2e): `first-run-setup` expects PS2 `ready`, now `firmware` by design
-  (PCSX2 with no BIOS shows "Firmware needed"); `systems.spec` has old words and ids.
-- Remove `session-unauthorized`, the legacy wrappers, `VIEWS`/`initialView`, `'none'` phase.
+  **Not done: waiting on the user's decision.**
+- ~~TV Backup page: pass the unlinked rows to `unavailableRows`.~~ Done: RomM › Installed's
+  Backup all N… passes them (and counts them, as desktop does).
+- ~~e2e: a TV Can't reach state.~~ Done: `tv-romm-b` (the `tv-romm` group's second launch).
+- ~~Remove the legacy `'none'` phase branches in `App.svelte` and `TvShell.svelte`.~~ Done.
+- ~~Step 7: move `commands/systems.rs` to `pub mod systems;`; add `SystemPlatform.name` and
+  `LocateReport.unmatched` to `api.ts`; `FirmwareExpectedFile` region and `FolderEntry`
+  size; `Settings.svelte` passes `onConnectRomm`; TV Choose your systems' "RomM is
+  connected." sub-line.~~ Done: the module mount, both fields (the local extended types are
+  gone), `region` (grid-core `firmware::known::region_of`, file lines "Required · Japan")
+  and `size` (TV file browser rows "512 KB"), `onConnectRomm` required (no rail-click
+  fallback). The TV sub-line had already landed in Step 6 (2b58f1e).
+- ~~Step 8 (Systems e2e): `first-run-setup` PS2 `firmware`; `systems.spec` old words.~~ Done in
+  Step 8 (verified).
+- ~~Remove `session-unauthorized`, the legacy wrappers, `VIEWS`/`initialView`, `'none'`
+  phase.~~ Done.
+
+## Step 9 outcome (landed 2026-11-15)
+
+Commits 0acf6a4 (removal and leftovers) and 45ef0e5 (e2e). `scripts/ctr.sh gate` PASS;
+`scripts/ctr.sh wincheck` PASS; the full suite `scripts/ctr.sh e2e` on a fresh build: all
+96 stages passed, no retries. Not run here: the api-tester pass and the native `.rpm`
+build the Step 9 list names (the orchestrator's call).
+
+**Removed** (each proven unused by grep, then by the gate's build and tests):
+- Rust: the `connect`, `restore_session`, `retry_connect`, `disconnect` and
+  `use_without_server` commands and their `lib.rs` registrations;
+  `SESSION_UNAUTHORIZED_EVENT` and the unauthorized hook (`SessionUnauthorized`,
+  `UnauthorizedHook`, `set_unauthorized_hook`); `RestoreOutcome`,
+  `SessionManager::{restore, retry, use_offline}` and `legacy_outcome`;
+  `commands/romm.rs` `disconnect_now` (folded into `romm_disconnect`); the `#[path]` mount
+  of `commands/systems.rs`. A 401 mid-session still sets Expired and fires `romm-changed`.
+- TS: `api.ts` `SessionState`, `SessionUnauthorized`, `RestoreOutcome`,
+  `SESSION_UNAUTHORIZED_EVENT` and the `connect`/`restoreSession`/`retryConnect`/
+  `disconnect`/`useWithoutServer` wrappers; `shell.ts` `VIEWS`, `viewForDigit`,
+  `initialView`, `ShellSession`, `applyRestore`, `applyRetry`, `offlineSession`,
+  `applyUnauthorizedEvent`, `chipLabel` and the `'none'` phase (`View` is now the
+  storefront views); `session.svelte.ts` `offline`, `lastError`, `rejected`, `busy`, the
+  no-op setters and the legacy `restore`/`connect`/`retry`/`disconnect`/`useOffline`/
+  `connectToServer`/`listenUnauthorized`; the `'server'` view in `Shell.svelte` and
+  `uiMode.ts`, and `uiMode.ts`' `'connection'` page mapping; `App.svelte`'s and
+  `TvShell.svelte`'s `'none'` branches (TvShell's `welcomeNeeded` probe with them);
+  `firstLibraryDriveKey` and `drives.firstLibraryDrive` (the offline shell's first drive);
+  the dev mock's `restore_session`; `e2e/helpers/server.ts`.
+- Tests of removed code went with it or were moved onto the API that replaced it:
+  `crates/grid-core/tests/session.rs` now checks `restore_romm`/`reconnect` through
+  `RommStatus` (each legacy outcome's case kept: Not connected with the stored server and
+  user, Connected, Expired with its auth kind and no secret on the wire, Unreachable with
+  its error, a 403 not Expired, a mid-session 401 changing the status once, a 401 on a
+  replaced client doing nothing); `shell.test.ts` keeps `viewLabel`, `hostOf`,
+  `initialPlace` and the `Ctrl+<n>` keys; `uiMode.test.ts` loses the `'server'` view case;
+  `App.svelte.test.ts` renders the toast in the welcome phase instead of `'none'`.
+
+**Behaviour changed by design:** `backups-e` now expects "Needs RomM · skipped: PlayStation
+2" (it read "Needs RomM · skipped"): its games are PlayStation 2 games, whose BIOS
+`firmware-known.json` lists as required (RommStorefront README, "Needs RomM · skipped: Sega
+Saturn").
+
+**New checks:** `tv-romm-b` (Can't reach after a connect: the rail flag, no Discover or
+platforms, the Installed banner and a failing Retry, the Game stores pill, the RomM page's
+line and Reconnect, then Reconnect with the server back); `systems-local` asserts a file
+line's region ("Required · North America"); `tv-systems-local` asserts a file row's size.
+
+**Held for the user:** "Open Config Folder" placement, and the backend install path for
+server-hosted emulator files that don't follow `docs/server-emulator-packages.md` naming
+(now unreachable from the UI; left as is).
 
 ## After this rework: Discover
 
