@@ -9,17 +9,17 @@
 # XDG_DATA_HOME and XDG_RUNTIME_DIR, all under one temp run directory.
 #
 #   scripts/e2e.sh              # build, then run every stage
-#   scripts/e2e.sh connect      # run only the named stage groups
+#   scripts/e2e.sh welcome      # run only the named stage groups
 #   E2E_SKIP_BUILD=1 scripts/e2e.sh   # skips the Rust AND frontend
 #                                             # builds: safe ONLY when nothing
 #                                             # under app/src or the
 #                                             # Rust crates has changed
 #   E2E_KEEP=1 scripts/e2e.sh   # keep the temp run directory
 #
-# When naming groups, list `python-import` FIRST: it asserts the Connect form,
-# and a group that connected earlier leaves a RomM credential in the run's
-# private keyring. The runner also clears that item with `secret-tool` before
-# the group (a silent no-op when libsecret-tools is missing).
+# When naming groups, list `python-import` FIRST: it asserts the welcome with
+# no RomM credential, and a group that connected earlier leaves one in the
+# run's private keyring. The runner also clears that item with `secret-tool`
+# before the group (a silent no-op when libsecret-tools is missing).
 #
 # Exit codes: 0 pass, 1 a stage group failed, 2 a prerequisite is missing or
 # the binary cannot be trusted to be an e2e build.
@@ -61,11 +61,15 @@ BUILD_STAMP="$REPO_DIR/target/$E2E_PROFILE/.e2e-build-stamp"
 STAGE_GROUPS=(
   # First on purpose: the run's gnome-keyring is shared by every stage, and
   # this is the one stage that needs it EMPTY (an imported profile has no
-  # credential, so the app must come up on Connect). `run_group_attempt`
+  # credential, so RomM's row must ask for the token). `run_group_attempt`
   # also clears the item when secret-tool is available, which is what makes
-  # `e2e.sh connect python-import` work too.
+  # `e2e.sh welcome python-import` work too.
   "python-import:specs/python-import.spec.ts"
-  "connect:specs/connect.spec.ts"
+  # The first-run welcome (romm-storefront-plan Step 5) on a fresh profile:
+  # the folder step, the storefront rows by name, RomM inline (a rejected
+  # token, then the fixture token), Steam's form inline, Skip for now turning
+  # into Continue, and Continue into the shell.
+  "welcome:specs/welcome.spec.ts"
   "connect-restore:specs/connect-restore-a.spec.ts specs/connect-restore-b.spec.ts specs/connect-restore-c.spec.ts"
   "library:specs/library.spec.ts specs/library-grid.spec.ts"
   # Server › Discover against its own fixture set, whose release and added
@@ -220,6 +224,10 @@ STAGE_GROUPS=(
   # takes TV mode's typed text; (secrets) after a login and an install no log
   # holds the fake store token.
   "gog:specs/gog-login.spec.ts specs/gog-secrets.spec.ts"
+  # The welcome's GOG row on a fresh profile (seed/gog-seed.mjs writes no
+  # config for it): the login window over the welcome, the connected row,
+  # Continue into the Library with no emulator step.
+  "gog-welcome:specs/gog-welcome.spec.ts"
   # Package E's desktop GOG specs, each on a profile of its own seeded by
   # seed/gog-seed.mjs: the connect form for the mock RomM (fixtures-gog: a
   # Linux platform whose archives hold a GOG .sh and an unrecognised .exe),
@@ -896,7 +904,7 @@ run_group_attempt() {
     # The keyring item is keyed by a FIXED service/account
     # (crates/grid-core/src/secrets.rs), so a credential an earlier group
     # saved into this run's shared gnome-keyring would let the app
-    # reconnect and never render the Connect screen this stage asserts on.
+    # reconnect and never ask for the token this stage asserts on.
     # Best effort — the group is also listed first, which covers a machine
     # with no secret-tool installed.
     if command -v secret-tool >/dev/null 2>&1; then
@@ -912,7 +920,7 @@ run_group_attempt() {
     # A Python user's library folder exists on the machine they import on.
     # Without it the imported RetroArch entry points into a missing folder,
     # and the 9b unreachable-library check rightly blocks startup with its
-    # dialog instead of the Connect form.
+    # dialog instead of the welcome.
     mkdir -p "$data_dir/library"
     printf 'demo' >"$data_dir/kept/Old Demo/demo.sfc"
     cat >"$python_config" <<EOF

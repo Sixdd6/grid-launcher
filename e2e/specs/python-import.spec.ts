@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import {
   APP_START_TIMEOUT,
   configPath,
@@ -21,8 +22,9 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  * and the seam between them is exactly where the notice went missing.
  *
  * The fixture holds one emulator and five games and NO credential, so the
- * app comes up on the Connect form with the imported server and account
- * already filled in and one toast telling the user what is left to do.
+ * app comes up on the welcome (romm-storefront-plan decision 12): the import
+ * notice over it, the library folder and RomM's server and username filled
+ * in, RomM's row open, and one toast telling the user what is left to do.
  *
  * Three of the games carry no rom id (Q4). After the spec connects:
  * "Super Mario World" has exactly one match on the mock (rom 101), so the
@@ -37,28 +39,40 @@ describe('python-import', () => {
     'Enter your RomM token to reconnect.';
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
+    await $(testId('welcome')).waitForExist({
       timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
+      timeoutMsg: 'the welcome never appeared — the app did not reach a usable state',
     });
   });
 
-  it('shows the import notice on the connect screen', async () => {
+  it('shows the import notice over the welcome', async () => {
     await waitForToast(NOTICE, {
-      timeoutMsg: 'no toast appeared on the connect screen after a Python import',
+      timeoutMsg: 'no toast appeared over the welcome after a Python import',
     });
+    await expect($(testId('welcome-import-notice'))).toHaveText(
+      'Your settings from the previous version are filled in. Enter your RomM token to reconnect, or skip it for now.',
+    );
+    // Saved for the side by side with the prototype's import variant.
+    const dir = path.resolve(process.cwd(), '..', 'ctr-out', 'welcome');
+    mkdirSync(dir, { recursive: true });
+    await browser.saveScreenshot(path.join(dir, '9-python-import.png'));
   });
 
-  it('prefills the connect form with the imported server url and username', async () => {
-    await expect($(testId('connect-server-url'))).toHaveValue(mockUrl());
-    // The username input is behind the "Use API token" checkbox, which is
-    // on by default; clearing it reveals the field the import filled.
-    await $(testId('connect-use-token')).click();
-    await $(testId('connect-username')).waitForDisplayed({
+  it("fills in the library folder and RomM's server and username, with RomM's row open", async () => {
+    await expect($(testId('welcome-library-path'))).toHaveValue(`${dataDir()}/library`);
+    await $(testId('welcome-romm-url')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: "RomM's row did not open after a Python import",
+    });
+    await expect($(testId('welcome-romm-url'))).toHaveValue(mockUrl());
+    // The username field is behind "Use an API token", which is on by
+    // default; clearing it reveals the field the import filled.
+    await $(testId('welcome-romm-use-token')).click();
+    await $(testId('welcome-romm-username')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the username field never appeared after turning token auth off',
     });
-    await expect($(testId('connect-username'))).toHaveValue(IMPORTED_USERNAME);
+    await expect($(testId('welcome-romm-username'))).toHaveValue(IMPORTED_USERNAME);
   });
 
   it('wrote the imported settings to config.toml and no credential', () => {
@@ -97,10 +111,14 @@ describe('python-import', () => {
 
   it('connects, and the relink pass links the row with one server match', async () => {
     // The previous test turned token auth off to reveal the username.
-    await $(testId('connect-use-token')).click();
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('connect-submit')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+    await $(testId('welcome-romm-use-token')).click();
+    await $(testId('welcome-romm-secret')).setValue(FIXTURE_TOKEN);
+    await $(testId('welcome-romm-submit')).click();
+    await $(testId('welcome-romm-url')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+    await expect($(testId('welcome-row-pill-romm'))).toHaveText('Connected');
+    // Imported emulators and games: no picker, Continue opens the shell.
+    await $(testId('welcome-continue')).click();
+    await $(testId('welcome')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
 
     await $(testId('nav-library')).click();
     // Rom 101 is "Super Mario World" on the mock: the imported row gets its
