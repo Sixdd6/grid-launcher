@@ -218,7 +218,9 @@ export async function openRommDiscover(): Promise<void> {
  */
 export async function openRommPlatform(slug: string): Promise<void> {
   await clickRail(`library-rail-platform-${slug}`, `the RomM platform ${slug}`);
-  await $(testId('server-platform-header')).waitForDisplayed({
+  // Exist, not displayed: a header folded by the grid's scroll stays folded
+  // when the same row is clicked again.
+  await $(testId('server-platform-header')).waitForExist({
     timeout: TRANSITION_TIMEOUT,
     timeoutMsg: `platform ${slug}'s header never appeared`,
   });

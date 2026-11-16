@@ -70,6 +70,9 @@ STAGE_GROUPS=(
   # token, then the fixture token), Steam's form inline, Skip for now turning
   # into Continue, and Continue into the shell.
   "welcome:specs/welcome.spec.ts"
+  # (a) connects RomM through the welcome, (b) relaunches and RomM's restore
+  # finds the session, (c) a rejected token keeps the shell with Sign-in
+  # expired.
   "connect-restore:specs/connect-restore-a.spec.ts specs/connect-restore-b.spec.ts specs/connect-restore-c.spec.ts"
   "library:specs/library.spec.ts specs/library-grid.spec.ts"
   # RomM as a storefront (romm-storefront-plan Step 3): (a) never connected,
@@ -79,14 +82,17 @@ STAGE_GROUPS=(
   # with the ! flag and the Retry banner; (d) relaunch after Disconnect:
   # Installed only with the off flag. Its seed runs before every spec.
   "romm-library:specs/romm-library-a.spec.ts specs/romm-library-b.spec.ts specs/romm-library-c.spec.ts specs/romm-library-d.spec.ts"
-  # Server › Discover against its own fixture set, whose release and added
-  # dates are relative to the day the run starts (mock-romm applyRelativeDates).
+  # Library › RomM › Discover against its own fixture set, whose release and
+  # added dates are relative to the day the run starts (mock-romm
+  # applyRelativeDates).
   "discover:specs/discover.spec.ts"
   # Where GRID opens (Settings › Appearance › Open GRID on, shared with TV
-  # mode): (a) Automatic + connected → Server › Discover, and the setting's
-  # row; (b) relaunch, server unreachable → Library; (c) forced Discover,
-  # still unreachable → the not-connected panel; (d) forced Library while
-  # connected. Each spec relaunches against the same data directory.
+  # mode): (a) Automatic + connected → Library › RomM › Discover, and the
+  # setting's row; (b) relaunch, server unreachable → falls back to RomM ›
+  # Installed with Can't reach; (c) forced Discover, still unreachable →
+  # RomM › Installed and the Appearance note; (d) forced Library while
+  # connected → All games. Each spec relaunches against the same data
+  # directory.
   "open-on:specs/open-on-a.spec.ts specs/open-on-b.spec.ts specs/open-on-c.spec.ts specs/open-on-d.spec.ts"
   # install-c: Settings › Library — change the folder, Start fresh › Leave (Q2).
   "install:specs/install-a.spec.ts specs/install-b.spec.ts specs/install-c.spec.ts"
@@ -138,15 +144,16 @@ STAGE_GROUPS=(
   # 21) on fake drives: every child folder of <data>/media is a mounted
   # drive (GRID_LAUNCHER_E2E_DRIVE_ROOTS, e2e feature only). (a) set up a
   # drive and back up two games with their emulator and firmware, (b) pull
-  # the drive mid-backup, then plug it back in, (c) a fresh profile used
-  # without a server installs from a seeded pack, (d) three installed games
+  # the drive mid-backup, then plug it back in, (c) a fresh profile with
+  # RomM never connected (the welcome's Skip for now) installs from a seeded
+  # pack, (d) three installed games
   # (docs/superpowers/plans/2026-11-09-game-backups-local-copies.md §6.4)
   # are copied from this computer, one out of date, and one is restored
   # from the drive, (e) the same games backed up with RomM not connected
   # (docs/romm-storefront-plan.md Step 2), one restored. Seeded per spec.
   "backups:specs/backups-a.spec.ts specs/backups-b.spec.ts specs/backups-c.spec.ts specs/backups-d.spec.ts specs/backups-e.spec.ts"
-  # TV mode's shell (docs/tv-mode/plan.md P5), on a profile used without a
-  # server (seeded). A group whose name starts with `tv-` starts the app with
+  # TV mode's shell (docs/tv-mode/plan.md P5), on a profile past the welcome
+  # with RomM not connected (seeded). A group whose name starts with `tv-` starts the app with
   # --tv (E2E_APP_ARGS, read by wdio.conf.ts); a spec opts out with an
   # `// e2e-app-args:` line. (a) --tv: bands, sizing, tabs, input, prompts and
   # assignments with injected controllers; (b) a desktop start: the TV button,
@@ -154,18 +161,15 @@ STAGE_GROUPS=(
   # the desktop; (d, P6) --tv again: overlays, the on-screen keyboard, the
   # Menu and the notification cards.
   "tv-shell:specs/tv-shell-a.spec.ts specs/tv-shell-b.spec.ts specs/tv-shell-c.spec.ts specs/tv-shell-d.spec.ts"
-  # TV mode's Server tab (docs/tv-mode/plan.md P7) on the Discover fixtures,
-  # with SNES given a default emulator by the seed so New releases has games.
-  # The spec connects on the desktop and enters TV mode with the TV button:
-  # Discover, its rows and hero, platforms with their header and search,
-  # X to install, Search everything, the offline panel and Menu › Discover.
-  "tv-server:specs/tv-server.spec.ts"
   # TV mode with RomM as a storefront (romm-storefront-plan Step 6) on the
   # Discover fixtures, --tv on a seeded profile whose welcome isn't done:
   # the welcome, the RomM sign-in page, Choose your systems, Library › RomM,
-  # Settings › Game stores and the RomM page, Disconnect, needs-RomM.
+  # Settings › Game stores and the RomM page, Disconnect, needs-RomM; then
+  # (tv-server's checks, the seed giving SNES a default emulator so New
+  # releases has games) Discover's rows and hero, a platform's header,
+  # search and X to install, Search everything and Menu › Discover.
   "tv-romm:specs/tv-romm.spec.ts"
-  # TV mode's Library tab (docs/tv-mode/plan.md P8), used without a server
+  # TV mode's Library tab (docs/tv-mode/plan.md P8), RomM not connected
   # (seeded): three installed games on two platforms and a fake Backup drive
   # (<data>/media, like `backups`) with a two-game pack. The rail and its
   # folders, filtering at once, the header, sort, live search, Details,
@@ -176,7 +180,7 @@ STAGE_GROUPS=(
   # no emulator) with saves that change when uploaded or deleted. (a)
   # connects on the desktop: Details' buttons, tabs, reading, the right
   # stick, Saves, Uninstall's confirmation, Playing and the gate; (b) --tv:
-  # Link to server game, Locate… through the folder browser, Game settings;
+  # Link to a RomM game, Locate… through the folder browser, Game settings;
   # (c) --tv: the platform search rule, Search everything's failure and the
   # launch card's "Set up <Platform>"; (d) --tv: the media viewer's videos
   # (a trailer's offline fallback, a server video's seek and volume).
@@ -187,7 +191,8 @@ STAGE_GROUPS=(
   # desktop and enters TV mode: Downloads' Cancel (asked first), Retry,
   # Dismiss and Y Clear completed with focus kept; the Settings rail, a
   # slider, Theme, Button prompts and assignments per injected controller,
-  # Change library folder › Start fresh › Leave, and Disconnect.
+  # Change library folder › Start fresh › Leave, and Game stores › RomM:
+  # Edit sign-in… and Disconnect….
   "tv-settings:specs/tv-settings.spec.ts"
   # TV mode's Settings › Systems, System page and emulator form
   # (docs/tv-mode/plan.md P11) on the `systems` fixtures and the mock forge
@@ -196,7 +201,7 @@ STAGE_GROUPS=(
   # TV mode: row order and pills, Windows, a Download pick, the update
   # check, Remove, None, Add manually through the file-mode browser,
   # Install recommended with focus moving to the control in its place, and
-  # a Server header chip.
+  # a RomM platform header chip.
   "tv-systems:specs/tv-systems.spec.ts"
   # Systems and firmware without RomM (romm-storefront-plan Step 7), on a
   # profile that never connected RomM (seed/systems-local-seed.mjs): the
@@ -207,31 +212,32 @@ STAGE_GROUPS=(
   "systems-local:specs/systems-local.spec.ts"
   "tv-systems-local:specs/tv-systems-local.spec.ts"
   # Windowed TV grids (plan risk R8) on the 2500-game large-platform
-  # fixtures: a Server platform and a Library of 600 seeded installed games;
+  # fixtures: a RomM platform and a Library of 600 seeded installed games;
   # focus moves through them smoothly and covers load as they scroll in.
   "tv-large-platform:specs/tv-large-platform.spec.ts"
   # TV mode's startup screens (docs/tv-mode/plan.md P12) on the
   # first-run-setup fixtures and the mock forge, each spec on a profile of
-  # its own (seeded per spec): (a) a fresh --tv start: Connect through the
-  # on-screen keyboard, Start presses Connect (and names what is missing),
-  # View pastes, a rejected token comes back with the reason, Choose your
-  # systems and Start skips; (b) an unreachable library: B does nothing,
-  # Relocate through the folder browser; (c) Use without a server opens the
-  # Library on the first Backup drive; (d) Install N emulators with the
-  # setup card; (e) the unreachable library's Close sends the quit with no question.
+  # its own (seeded per spec): (a) a fresh --tv start: the TV welcome, then
+  # RomM's sign-in page through the on-screen keyboard (View pastes, a
+  # rejected token comes back with the reason), then Choose your systems,
+  # where Start skips; (b) an unreachable library: B does nothing, Relocate
+  # through the folder browser, then the welcome; (c) Skip for now opens All
+  # games with the Backup drive in the rail; (d) Install N emulators with the
+  # setup card after a welcome connect; (e) the unreachable library's Close
+  # sends the quit with no question.
   "tv-startup:specs/tv-startup-a.spec.ts specs/tv-startup-b.spec.ts specs/tv-startup-c.spec.ts specs/tv-startup-d.spec.ts specs/tv-startup-e.spec.ts"
   # TV mode's Game backups (docs/tv-mode/plan.md P13) on the `backups`
   # fixtures and fake drives (<data>/media), seeded per spec by
   # seed/backups-seed.mjs: (a) set up a drive with Start, RT select two
   # games, Y, Start backs them up, the Downloads rows; (b) the drive pulled
-  # mid-backup; (c) used without a server: Install from drive with the
+  # mid-backup; (c) RomM not connected: Install from drive with the
   # drive's emulator, Details from a drive, Remove from drive…; (d) Change…
   # refuses the last computer, Remove GRID files asks twice, Forget.
   "tv-backups:specs/tv-backups-a.spec.ts specs/tv-backups-b.spec.ts specs/tv-backups-c.spec.ts specs/tv-backups-d.spec.ts specs/tv-backups-e.spec.ts"
   # TV mode's layout sweep (docs/tv-mode/plan.md P14) on the `backups`
   # fixtures, the mock forge and a fake drive, seeded by backups-seed.mjs
-  # `tv-layout` (backups-d's profile). A fresh --tv start: Connect, Choose
-  # your systems, then every tab, page and overlay, each at 1280x720,
+  # `tv-layout` (backups-d's profile). A fresh --tv start: the welcome, its
+  # storefronts and RomM's sign-in page, Choose your systems, then every tab, page and overlay, each at 1280x720,
   # 1920x1080 and 3840x2160 (E2E_WINDOW picks one size): no clipped focus
   # ring, no text under 0.85rem, no document scroll, the bands' rem heights.
   # E2E_TV_SCREENS=1 saves each screen under ctr-out/tv-screens/<size>/.
@@ -239,7 +245,7 @@ STAGE_GROUPS=(
   # Game stores, GOG (docs/stores-phase1-plan.md package D) against the mock
   # GOG (mock-romm/mock-gog.mjs, every GOG host at one base through
   # GRID_LAUNCHER_E2E_GOG_BASE) and the fake gogdl (fake-tools/gogdl.mjs,
-  # GRID_LAUNCHER_E2E_TOOL_GOGDL), on a profile used without a server, seeded
+  # GRID_LAUNCHER_E2E_TOOL_GOGDL), on a profile past the welcome with RomM not connected, seeded
   # per spec by seed/gog-seed.mjs: (login) the login window signs in, is
   # cancelled, fails on the page and on the code, shows a network error and
   # takes TV mode's typed text; (secrets) after a login and an install no log
@@ -268,7 +274,7 @@ STAGE_GROUPS=(
   # mock Epic (mock-romm/mock-epic.mjs: the sign-in page, the launcher
   # redirect and the art at one base through GRID_LAUNCHER_E2E_EPIC_BASE)
   # and the fake legendary (fake-tools/legendary.mjs,
-  # GRID_LAUNCHER_E2E_TOOL_LEGENDARY), on a profile used without a server,
+  # GRID_LAUNCHER_E2E_TOOL_LEGENDARY), on a profile past the welcome with RomM not connected,
   # seeded per spec by seed/epic-seed.mjs: (login) the login window signs
   # in, is cancelled, fails on the page and on the code, shows a network
   # error, refuses localhost and keeps pop-ups in itself; (secrets) after a
@@ -284,7 +290,7 @@ STAGE_GROUPS=(
   # the mock Amazon (mock-romm/mock-amazon.mjs: the sign-in page nile's login
   # URL names, the finish redirect and the art at one base through
   # GRID_LAUNCHER_E2E_AMAZON_BASE) and the fake nile (fake-tools/nile.mjs,
-  # GRID_LAUNCHER_E2E_TOOL_NILE), on a profile used without a server, seeded
+  # GRID_LAUNCHER_E2E_TOOL_NILE), on a profile past the welcome with RomM not connected, seeded
   # per spec by seed/amazon-seed.mjs: (login) the window opens nile's login
   # URL, signs in, is cancelled, fails on the page and on the code, shows a
   # network error and loads Amazon's home page as an ordinary page;
@@ -302,8 +308,8 @@ STAGE_GROUPS=(
   # GRID_LAUNCHER_E2E_STEAM_BASE), the fake Steam root
   # (fixtures-steam/, copied to <data>/steam by seed/steam-seed.mjs,
   # GRID_LAUNCHER_E2E_STEAM_ROOT) and the fake steam client
-  # (fake-tools/steam.mjs, GRID_LAUNCHER_E2E_STEAM_EXE), on a profile used
-  # without a server, seeded per spec: (connect) the client and the local
+  # (fake-tools/steam.mjs, GRID_LAUNCHER_E2E_STEAM_EXE), on a profile past
+  # the welcome with RomM not connected, seeded per spec: (connect) the client and the local
   # accounts, Test against every Web API answer, Connect, Remove key, Save,
   # Disconnect; (secrets, with RUST_LOG=debug) after a connect, a refresh,
   # an install, a launch, an uninstall and a Disconnect no log, event,
@@ -725,7 +731,7 @@ mock_args_for_group() {
     # The first-run-setup set plus a "Sony PlayStation 4", whose ShadPS4
     # installs with its Qt launcher companion from the mock forge.
     systems|tv-systems) printf -- '--fixtures-dir fixtures-systems' ;;
-    discover|tv-server|tv-romm) printf -- '--fixtures-dir fixtures-discover' ;;
+    discover|tv-romm) printf -- '--fixtures-dir fixtures-discover' ;;
     tv-details) printf -- '--fixtures-dir fixtures-tv-details --stateful-saves' ;;
     # An "Emulators" platform with one package (rom 801) that zips the mock
     # forge's PCSX2 AppImage stub, plus a PS2 platform for the defaults.
@@ -836,7 +842,6 @@ seed_script_for_group() {
     backups|tv-backups|tv-layout) printf '%s' "$E2E_DIR/seed/backups-seed.mjs" ;;
     tv-shell) printf '%s' "$E2E_DIR/seed/tv-shell-seed.mjs" ;;
     settings-romm) printf '%s' "$E2E_DIR/seed/settings-romm-seed.mjs" ;;
-    tv-server) printf '%s' "$E2E_DIR/seed/tv-server-seed.mjs" ;;
     tv-romm) printf '%s' "$E2E_DIR/seed/tv-romm-seed.mjs" ;;
     tv-library) printf '%s' "$E2E_DIR/seed/tv-library-seed.mjs" ;;
     tv-details) printf '%s' "$E2E_DIR/seed/tv-details-seed.mjs" ;;
