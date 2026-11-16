@@ -3,7 +3,9 @@
  * Seeds the `tv-romm` stage group (romm-storefront-plan Step 6): a profile
  * whose welcome is not done yet, with only a library folder stored, so the
  * TV welcome shows step 1 with the folder filled in. No RomM server, no
- * credential (e2e.sh clears the run's keyring before the spec).
+ * credential (e2e.sh clears the run's keyring before the spec). SNES has a
+ * default emulator, so Discover's New releases has games (as the Server
+ * tab's seed had, for the part of the spec folded in from it).
  *
  * Invoked by scripts/e2e.sh's `seed_script_for_group` as
  * `node tv-romm-seed.mjs <data-dir>`.
@@ -27,5 +29,8 @@ writeFileSync(
   `schema_version = 1
 library_path = ${JSON.stringify(library)}
 library_layout_version = 2
+
+[default_emulators]
+"Super Nintendo Entertainment System" = "snes9x"
 `,
 );
