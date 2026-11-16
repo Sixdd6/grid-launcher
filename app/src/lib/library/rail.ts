@@ -1,10 +1,13 @@
-// The Library rail (design §5, D-UI-2): All games, Recent, Updates, then
-// the installed platforms with counts, then (GameBackups README) one row per
-// connected backup drive under "BACKUP DRIVES". Pure — Library.svelte renders these
-// entries and asks `matchesRail` which rows an entry keeps.
+// The Library rail (RommStorefront README "Library rail"): All games,
+// Recent, Updates, then (GameBackups README) one row per connected backup
+// drive under "BACKUP DRIVES", then the storefront groups by name (Amazon,
+// Epic, GOG, RomM, Steam). The platform rows live only in the RomM group
+// (`romm/rail.ts`). Pure — Library.svelte renders these entries and asks
+// `matchesRail` which rows an entry keeps.
 import type { DriveInfo, InstalledGame } from '../api';
 import { isHiddenLibraryPlatform } from '../library';
 import { isStoreRow } from '../gameKey';
+import { inStorefrontOrder, type Storefront } from '../romm/order';
 
 /** Design §5: "Recent (played in the last 30 days)", in whole seconds. */
 export const RECENT_WINDOW_SECONDS = 30 * 24 * 60 * 60;
@@ -13,6 +16,9 @@ export type RailKey =
   | 'all'
   | 'recent'
   | 'updates'
+  // The RomM group (plan 0.3): Installed, Discover and its platform rows.
+  | 'romm:installed'
+  | 'romm:discover'
   | `platform:${string}`
   | `drive:${string}`
   // A store group's row (GameStores README): `store:gog:installed`, `store:gog:available`.
@@ -74,6 +80,11 @@ export function matchesRail(
   if (key === 'all') return true;
   if (key === 'recent') return isRecent(row, nowSeconds);
   if (key === 'updates') return hasUpdate(row, updateRomIds);
+  // RomM › Installed: every installed RomM game (the hidden Emulators shelf
+  // is left out by the caller, as for All games). Discover is not a grid of
+  // installed rows.
+  if (key === 'romm:installed') return row.source === 'romm';
+  if (key === 'romm:discover') return false;
   // A drive's grid is the drive's own games, not installed rows; a store
   // view's grid is the store's games.
   if (driveKeyOf(key) !== null || key.startsWith('store:')) return false;
@@ -81,7 +92,50 @@ export function matchesRail(
 }
 
 /**
- * The rail, in design §5's order. The synthetic "Emulators" platform is
+ * The desktop rail's fixed rows: All games, Recent and Updates (installed
+ * RomM games in every RomM state, plan 0.3), then the backup drives. No
+ * PLATFORMS section: platform rows live only in the RomM group. The
+ * storefront groups follow (`storefrontRailEntries`).
+ */
+export function topRailEntries(
+  rows: InstalledGame[],
+  updateRomIds: ReadonlySet<number>,
+  nowSeconds: number,
+  drives: readonly DriveInfo[] = [],
+): RailEntry[] {
+  return [...fixedEntries(rows, updateRomIds, nowSeconds), ...driveRailEntries(drives)];
+}
+
+function fixedEntries(rows: InstalledGame[], updateRomIds: ReadonlySet<number>, nowSeconds: number): RailEntry[] {
+  const visible = rows.filter((row) => !isHiddenLibraryPlatform(row.platform));
+  return [
+    { key: 'all', testId: 'library-rail-all', label: 'All games', count: visible.length },
+    {
+      key: 'recent',
+      testId: 'library-rail-recent',
+      label: 'Recent',
+      count: visible.filter((row) => isRecent(row, nowSeconds)).length,
+    },
+    {
+      key: 'updates',
+      testId: 'library-rail-updates',
+      label: 'Updates',
+      count: visible.filter((row) => hasUpdate(row, updateRomIds)).length,
+    },
+  ];
+}
+
+/**
+ * The storefront groups' rows in name order (decision 10, `STOREFRONT_ORDER`):
+ * Amazon, Epic, GOG, RomM, Steam. Each group's rows stay in their own order.
+ */
+export function storefrontRailEntries<E>(groups: readonly { source: Storefront; entries: readonly E[] }[]): E[] {
+  return inStorefrontOrder(groups, (g) => g.source).flatMap((g) => [...g.entries]);
+}
+
+/**
+ * Legacy (TV mode's rail until romm-storefront Step 6 moves it to the RomM
+ * group): the rail with a PLATFORMS section, in design §5's order. The synthetic "Emulators" platform is
  * excluded everywhere, counts included, exactly as the grid excludes it
  * (`isHiddenLibraryPlatform`, ported from game_views.py:297-311).
  * `drives` (the store's `withPack`: connected drives with a readable pack)
@@ -105,21 +159,7 @@ export function railEntries(
     else platforms.set(key, { label: row.platform.trim(), count: 1 });
   }
 
-  const entries: RailEntry[] = [
-    { key: 'all', testId: 'library-rail-all', label: 'All games', count: visible.length },
-    {
-      key: 'recent',
-      testId: 'library-rail-recent',
-      label: 'Recent',
-      count: visible.filter((row) => isRecent(row, nowSeconds)).length,
-    },
-    {
-      key: 'updates',
-      testId: 'library-rail-updates',
-      label: 'Updates',
-      count: visible.filter((row) => hasUpdate(row, updateRomIds)).length,
-    },
-  ];
+  const entries: RailEntry[] = fixedEntries(rows, updateRomIds, nowSeconds);
 
   const sorted = [...platforms.entries()].sort((a, b) =>
     a[1].label.toLowerCase() < b[1].label.toLowerCase() ? -1 : 1,
@@ -164,7 +204,7 @@ export function entryForKey(entries: RailEntry[], key: RailKey): RailEntry {
 }
 
 /** An empty drive's grid (GameBackups prototype). */
-export const DRIVE_EMPTY_TEXT = 'Nothing on this drive yet. Backup games from Server or Library.';
+export const DRIVE_EMPTY_TEXT = 'Nothing on this drive yet. Backup games from the Library.';
 
 /** Design §5's empty-state text, one line per rail entry, verbatim. */
 export function emptyText(entry: RailEntry): string {
@@ -172,5 +212,6 @@ export function emptyText(entry: RailEntry): string {
   if (entry.key === 'updates') return 'Everything is up to date';
   if (entry.key === 'all') return 'No games installed';
   if (driveKeyOf(entry.key) !== null) return DRIVE_EMPTY_TEXT;
+  if (entry.key === 'romm:installed') return 'No RomM games installed yet';
   return `No games installed for ${entry.label}`;
 }

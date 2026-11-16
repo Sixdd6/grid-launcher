@@ -9,10 +9,10 @@ import {
 } from './openOn';
 
 describe('Open GRID on', () => {
-  it('offers Automatic, Server › Discover and Library, in that order', () => {
+  it('offers Automatic, Discover and Library, in that order (RommStorefront README)', () => {
     expect(OPEN_ON_CHOICES.map(openOnLabel)).toEqual([
-      'Automatic',
-      'Server › Discover',
+      'Automatic: Discover when RomM is connected, else Library',
+      'Discover (when RomM is connected)',
       'Library',
     ]);
     expect(OPEN_ON_HINT).toBe('Here and in TV mode');

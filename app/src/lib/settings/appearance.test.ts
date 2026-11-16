@@ -30,9 +30,9 @@ describe('fadeForToggle', () => {
 });
 
 describe('CARD_SIZE_VIEWS', () => {
-  it('lists the two grids with their ids', () => {
-    expect(CARD_SIZE_VIEWS.map((v) => v.view)).toEqual(['library', 'server']);
-    expect(CARD_SIZE_VIEWS.map((v) => v.testId)).toEqual(['card-size-library', 'card-size-server']);
-    expect(CARD_SIZE_VIEWS.map((v) => v.label)).toEqual(['Library cards', 'Server cards']);
+  it('lists one card size, the Library one (the RomM screens share it)', () => {
+    expect(CARD_SIZE_VIEWS.map((v) => v.view)).toEqual(['library']);
+    expect(CARD_SIZE_VIEWS.map((v) => v.testId)).toEqual(['card-size-library']);
+    expect(CARD_SIZE_VIEWS.map((v) => v.label)).toEqual(['Card size']);
   });
 });

@@ -11,6 +11,8 @@ import {
   platformSlug,
   railEntries,
   RECENT_WINDOW_SECONDS,
+  storefrontRailEntries,
+  topRailEntries,
 } from './rail';
 
 const NOW = 1_800_000_000;
@@ -207,6 +209,70 @@ describe('Library › Backup drives rail rows (GameBackups README)', () => {
 
   it('says the drive is empty in the empty state', () => {
     expect(emptyText(driveRailEntries([t7])[0])).toBe(DRIVE_EMPTY_TEXT);
-    expect(DRIVE_EMPTY_TEXT).toBe('Nothing on this drive yet. Backup games from Server or Library.');
+    expect(DRIVE_EMPTY_TEXT).toBe('Nothing on this drive yet. Backup games from the Library.');
+  });
+});
+
+describe('topRailEntries (RommStorefront README "Library rail")', () => {
+  const t7 = {
+    key: '/m/T7', mount: '/m/T7', label: 'T7', fs: 'exfat', fat32: false, total_bytes: 0, free_bytes: 0,
+    read_only: false, status: 'ready', problem: '',
+    pack: { name: 'Couch kit', game_count: 2 } as PackSummary,
+  } as DriveInfo;
+  const rows = [
+    row({ rom_id: 1, platform: 'SNES', last_played_at: NOW - 100 }),
+    row({ rom_id: 2, platform: 'Arcade' }),
+    row({ rom_id: 3, platform: 'Emulators' }),
+  ];
+
+  it('has no platform rows at the top: All games, Recent, Updates, then the drives', () => {
+    expect(topRailEntries(rows, new Set([2]), NOW, [t7]).map((e) => e.key)).toEqual([
+      'all',
+      'recent',
+      'updates',
+      'drive:/m/T7',
+    ]);
+  });
+
+  it('counts installed RomM games in All games, Recent and Updates', () => {
+    const entries = topRailEntries(rows, new Set([2]), NOW);
+    expect(entries.map((e) => e.count)).toEqual([2, 1, 1]);
+  });
+});
+
+describe('storefrontRailEntries (decision 10)', () => {
+  it('orders the groups Amazon, Epic, GOG, RomM, Steam, rows kept in order', () => {
+    const groups = [
+      { source: 'steam' as const, entries: ['steam:installed'] },
+      { source: 'romm' as const, entries: ['romm:installed', 'romm:discover', 'platform:snes'] },
+      { source: 'gog' as const, entries: ['gog:installed', 'gog:available'] },
+      { source: 'amazon' as const, entries: ['amazon:installed'] },
+      { source: 'epic' as const, entries: ['epic:installed'] },
+    ];
+    expect(storefrontRailEntries(groups)).toEqual([
+      'amazon:installed',
+      'epic:installed',
+      'gog:installed',
+      'gog:available',
+      'romm:installed',
+      'romm:discover',
+      'platform:snes',
+      'steam:installed',
+    ]);
+  });
+});
+
+describe('matchesRail: the RomM group keys (plan 0.3)', () => {
+  it('keeps every installed RomM row for romm:installed, never a store row', () => {
+    expect(matchesRail(row({ source: 'romm' }), 'romm:installed', new Set(), NOW)).toBe(true);
+    expect(matchesRail(row({ source: 'gog', rom_id: null }), 'romm:installed', new Set(), NOW)).toBe(false);
+  });
+
+  it('matches no installed row for romm:discover', () => {
+    expect(matchesRail(row({ source: 'romm' }), 'romm:discover', new Set(), NOW)).toBe(false);
+  });
+
+  it('gives RomM › Installed its empty text', () => {
+    expect(emptyText({ key: 'romm:installed', testId: '', label: 'Installed', count: 0 })).toBe('No RomM games installed yet');
   });
 });

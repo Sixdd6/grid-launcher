@@ -84,8 +84,8 @@ describe('Library words', () => {
   });
 
   it('platform counts line', () => {
-    expect(rommPlatformCountsLine(4, 2, 1)).toBe('4 games on RomM · 2 installed · 1 only on this computer');
-    expect(rommPlatformCountsLine(1, 0, 0)).toBe('1 game on RomM');
+    expect(rommPlatformCountsLine(4, 1, 1)).toBe('4 games on RomM · 1 installed · plus 1 only on this computer');
+    expect(rommPlatformCountsLine(1, 0, 0)).toBe('1 game on RomM · 0 installed');
   });
 });
 
