@@ -23,7 +23,7 @@
     count: number;
     /** Their size on disk. */
     bytes: number;
-    /** The games "Backup all N…" sends (those with a RomM id). */
+    /** "Backup all N…": every installed RomM game (unlinked ones are listed by the dialog). */
     backupCount: number;
     backupDisabled: boolean;
     backupReason: string;

@@ -130,7 +130,7 @@ describe('romm-library (b): connected', () => {
     const host = new URL(mockUrl()).host;
     await expect($(testId('library-count'))).toHaveText(expect.stringMatching(new RegExp(`^3 games · .+ · from ${host.replace(/\./g, '\\.')}$`)));
     await expect($(testId('romm-installed-chip'))).toHaveText(`Signed in as ${FIXTURE_USERNAME}`);
-    await expect($(testId('library-romm-backup-all'))).toHaveText('Backup all 2…');
+    await expect($(testId('library-romm-backup-all'))).toHaveText('Backup all 3…');
     await expect($(testId('romm-banner'))).not.toExist();
     await expect($(testId('library-search'))).toHaveAttribute('placeholder', 'Search by title');
     await expect($(testId('library-card-101'))).toExist();

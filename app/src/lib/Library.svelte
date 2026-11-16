@@ -467,14 +467,20 @@
     });
   }
 
-  // "Backup all N…" on RomM › Installed: every installed RomM game with a
-  // RomM id (a row with no id has no pack identity).
+  // "Backup all N…" on RomM › Installed: every installed RomM game. The ones
+  // with a RomM id go in the request; a row with no id has no pack identity,
+  // so it goes along as `unlinked` and the dialog lists it (GameBackups
+  // without RomM: "It isn't linked to a RomM game…").
   let rommBackupIds = $derived(rommRows.flatMap((r) => (r.rom_id === null ? [] : [r.rom_id])));
+  let rommUnlinked = $derived(rommRows.flatMap((r) => (r.rom_id === null ? [{ title: r.title, platform: r.platform }] : [])));
   let rommBytes = $derived(rommRows.reduce((sum, r) => sum + (r.filesize_bytes || 0), 0));
 
   function backUpRommInstalled() {
-    if (rommBackupIds.length === 0 || backup.disabled) return;
-    openBackup({ request: backupRequest({ kind: 'games', count: rommBackupIds.length }, rommBackupIds) });
+    if (rommRows.length === 0 || backup.disabled) return;
+    openBackup({
+      request: backupRequest({ kind: 'games', count: rommRows.length }, rommBackupIds),
+      unlinked: rommUnlinked,
+    });
   }
 
   function driveCover(game: DriveGame) {
@@ -863,7 +869,7 @@
             status={romm.status}
             count={rommRows.length}
             bytes={rommBytes}
-            backupCount={rommBackupIds.length}
+            backupCount={rommRows.length}
             backupDisabled={backup.disabled}
             backupReason={backup.reason}
             onBackupAll={backUpRommInstalled}
