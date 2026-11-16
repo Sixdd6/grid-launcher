@@ -67,11 +67,60 @@ export function pillOf(status: SystemStatus, text: string | null = null): { pill
   return status === 'ready' ? { pill: 'Ready', ok: true } : { pill: text ?? STATUS_LABELS[status], ok: false };
 }
 
-/** The line under a system's name (256): its emulator and core, or why its
- *  games can't start yet. */
-export function systemSub(row: Pick<SystemRow, 'emulator' | 'recommended'>, core: string | null): string {
-  if (row.emulator === '') return missingText(row);
-  return core ? `${row.emulator} · ${core}` : row.emulator;
+/** A system's games on the TV row: "3 on RomM, 2 installed", "2 installed",
+ *  or '' (TVRommStorefront README, "Your systems"). */
+export function tvCountText(row: { serverCount?: number | null; installedCount?: number }): string {
+  const server = row.serverCount ?? 0;
+  const installed = row.installedCount ?? 0;
+  if (server > 0) return `${server} on RomM${installed > 0 ? `, ${installed} installed` : ''}`;
+  return installed > 0 ? `${installed} installed` : '';
+}
+
+/** The line under a system's name (256): its emulator and core, or that it
+ *  has none yet, then its games ("DuckStation · 3 on RomM, 2 installed",
+ *  "No emulator yet. Ymir is recommended. · 2 installed"). */
+export function systemSub(
+  row: Pick<SystemRow, 'emulator' | 'recommended'> & { serverCount?: number | null; installedCount?: number },
+  core: string | null,
+): string {
+  const base =
+    row.emulator === ''
+      ? row.recommended !== null
+        ? `No emulator yet. ${shortName(row.recommended.name)} is recommended.`
+        : missingText(row)
+      : core
+        ? `${row.emulator} · ${core}`
+        : row.emulator;
+  const count = tvCountText(row);
+  return count ? `${base} · ${count}` : base;
+}
+
+/** Without RomM, under the pane's heading. */
+export const NO_ROMM_LINE = 'Systems works without RomM. With RomM connected, its platforms join this list.';
+
+/** The More systems row and its page (a page down: the catalog is long). */
+export const MORE_SYSTEMS = {
+  label: 'More systems',
+  title: 'More systems',
+  sub: 'Systems GRID can set up from its own list. Set one up now, or when you have games for it.',
+} as const;
+
+/** The More systems row's line: how many it holds. */
+export function moreSystemsSub(count: number): string {
+  return `${count} ${count === 1 ? 'system' : 'systems'} GRID can set up`;
+}
+
+/** A row on the More systems page: "<emulator> is recommended." and X
+ *  installs it. */
+export function moreItem(row: SystemRow): { k: string; testKey: string; label: string; sub: string; x: string | null } {
+  const key = testKeyOf(row.slug || row.label);
+  return {
+    k: `sy-more-${key}`,
+    testKey: key,
+    label: row.label,
+    sub: row.recommended ? `${shortName(row.recommended.name)} is recommended` : 'No emulator GRID installs',
+    x: row.recommended ? `Install ${shortName(row.recommended.name)}` : null,
+  };
 }
 
 /** X on a system row (257): Change emulator, or Install <recommended> for

@@ -33,8 +33,8 @@ describe('ChooseSystems', () => {
         default_tool: '/proton/GE',
       })),
       listCompatToolCatalog: vi.fn(async () => []),
-      listPlatforms: vi.fn(async () => [
-        { id: 1, name: 'Windows', slug: 'win', rom_count: 7, custom_name: null, display_name: 'Windows' },
+      systemPlatforms: vi.fn(async () => [
+        { slug: 'win', label: 'Windows', aliases: [], origin: 'server', server_id: 1, server_rom_count: 7, installed_count: 0 },
       ]),
       startPlatformSetup: vi.fn(async () => ({ queued: ['x'], compat_set: false, errors: [] })),
       skipPlatformSetup: vi.fn(async () => {}),
@@ -78,6 +78,7 @@ describe('ChooseSystems', () => {
     await win.loadWindows();
     expect(api.listCompatTools).not.toHaveBeenCalled();
     const cs = await chooser();
+    await cs.load();
     await cs.loadWindows();
     expect(cs.windowsLoaded).toBe(true);
     expect(cs.windowsGames).toBe(7);

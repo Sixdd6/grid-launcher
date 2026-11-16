@@ -12,7 +12,6 @@
   import { NO_CORE_VALUE, platformCoreSelect } from '../emulators/defaults';
   import { isWindowsHost } from '../emulators/compatTools';
   import { dynamicEmulatorNotes, emulatorNotes } from '../emulators/notes';
-  import { firmwareAction } from '../emulators/firmware';
   import { emulatorUpdates } from '../stores/emulatorUpdates.svelte';
   import EmulatorForm from '../emulators/EmulatorForm.svelte';
   import Icon from '../Icon.svelte';
@@ -20,28 +19,70 @@
   import EmulatorBlock from './EmulatorBlock.svelte';
   import RowMenu from './RowMenu.svelte';
   import WindowsRow from './WindowsRow.svelte';
+  import FirmwareBlock from './FirmwareBlock.svelte';
+  import LocateDialog from './LocateDialog.svelte';
   import { ps3FirmwareView } from './ps3Firmware';
   import { SystemsStore } from './systemsStore.svelte';
+  import type { LocateMode } from './locate';
   import {
     alsoPlays,
     alsoPlaysText,
     canPlay,
     companionParent,
     companionsOf,
-    gamesText,
     installRecommendedLabel,
     missingCompanionText,
     missingText,
+    MORE_SYSTEMS_NOTE,
     otherEmulatorNote,
     pickerGroups,
+    recommendedText,
     shortName,
+    systemCountText,
+    systemsLede,
     testKeyOf,
     versionText,
     type Companion,
     type SystemRow as Row,
   } from './rows';
 
-  let { active = true }: { active?: boolean } = $props();
+  let {
+    active = true,
+    onConnectRomm = undefined,
+  }: {
+    active?: boolean;
+    /** Opens Settings › Game stores (the firmware block's "Connect RomM…").
+     *  Without it the link selects the Game stores rail entry itself. */
+    onConnectRomm?: () => void;
+  } = $props();
+
+  function connectRomm() {
+    if (onConnectRomm) {
+      onConnectRomm();
+      return;
+    }
+    document.querySelector<HTMLElement>('[data-testid="settings-nav-stores"]')?.click();
+  }
+
+  // --- Locate files -------------------------------------------------------
+  let locating = $state<Row | null>(null);
+
+  function openLocate(row: Row) {
+    locating = row;
+  }
+
+  function runLocate(row: Row, paths: string[], mode: LocateMode) {
+    return mode === 'pup'
+      ? s.locatePup(row, paths[0] ?? '')
+      : s.locateFiles(row, paths).catch((err: unknown) => ({
+          installed: [],
+          unverified: [],
+          refused: paths.map((p) => ({
+            file: p.split(/[\\/]/).pop() ?? p,
+            reason: err instanceof Error ? err.message : String(err),
+          })),
+        }));
+  }
 
   const windowsHost = isWindowsHost(navigator.platform);
 
@@ -57,12 +98,13 @@
   let loaded = $derived(s.loaded);
   let loadError = $derived(s.loadError);
   let rows = $derived(s.rows);
+  let yours = $derived(s.groups.yours);
+  let more = $derived(s.groups.more);
   let live = $derived(s.live);
   let installingRow = $derived(s.installingRow);
   let missing = $derived(s.missing);
   let others = $derived(s.others);
   let windowsGames = $derived(s.windowsGames);
-  let firmwarePending = $derived(s.firmwarePending);
   let busyRows = $derived(s.busyRows);
   let launching = $derived(s.launching);
   let updating = $derived(s.updating);
@@ -98,7 +140,15 @@
   // and on the emulator list.
   $effect(() => {
     void s.compatibilityKey;
-    s.loadCompatibility(untrack(() => s.platforms.map((p) => ({ name: p.name, slug: p.slug }))));
+    s.loadCompatibility(untrack(() => s.platformRefs));
+  });
+
+  // The files each of your systems' emulator needs (with or without RomM);
+  // a More systems row reads its own when it is opened.
+  $effect(() => {
+    void s.expectedSignature;
+    if (!active) return;
+    for (const row of untrack(() => s.groups.yours)) s.refreshExpected(row);
   });
 
   // The Eden notes' file probes and the RPCS3 firmware check, re-read when
@@ -132,19 +182,19 @@
 
   $effect(() => s.watchFirmwarePasses());
 
-  function firmwareLine(row: Row) {
-    return s.firmwareLine(row);
-  }
-
-  function installFirmware(row: Row) {
-    s.installFirmware(row);
-  }
-
   // --- Rows --------------------------------------------------------------
   let openRows = $state<Record<string, boolean>>({});
 
-  function isOpen(row: Row): boolean {
-    return row.emulator === '' || openRows[row.key] === true;
+  /** A More systems row is closed until opened; a row of yours with no
+   *  emulator is always open. */
+  function isOpen(row: Row, calm = false): boolean {
+    return (!calm && row.emulator === '') || openRows[row.key] === true;
+  }
+
+  function toggleRow(row: Row, calm = false) {
+    const next = !isOpen(row, calm);
+    openRows = { ...openRows, [row.key]: next };
+    if (next) s.refreshExpected(row);
   }
 
   // The Server header's chips: open this page on one system's row, opened
@@ -351,14 +401,24 @@
   {/if}
 {/snippet}
 
+{#snippet firmware(row: Row, key: string)}
+  {@const view = s.firmwareView(row)}
+  {#if view.files.length > 0 || view.pup}
+    <FirmwareBlock
+      {view}
+      testKey={key}
+      onRomm={() => s.installFromRomm(row)}
+      onLocate={() => openLocate(row)}
+      onConnectRomm={connectRomm}
+    />
+  {/if}
+{/snippet}
+
 <div class="systems" data-testid="systems-page">
   <div class="pane-head">
     <div class="title">
       <h2 class="g-pane-title">Systems</h2>
-      <p class="lede">
-        Each system on your server needs an emulator to play its games. Pick one here; GRID installs, updates and sets
-        it up.
-      </p>
+      <p class="lede" data-testid="systems-lede">{systemsLede(s.rommConnected)}</p>
     </div>
     <div class="head-acts">
       <button class="g-btn secondary" data-testid="systems-check-updates" disabled={checking} onclick={checkForUpdates}>
@@ -401,16 +461,15 @@
     <p class="note">Loading…</p>
   {:else}
     <ul class="sys-list" data-testid="systems-list" bind:this={listEl}>
-      {#each rows as row (row.key)}
+      {#each yours as row (row.key)}
         {@const key = testKeyOf(row.slug || row.label)}
         {@const groups = pickerGroups(row)}
         {@const st = rowStatus(row)}
-        {@const fw = firmwareLine(row)}
-        {@const core = platformCoreSelect(defaults, row.key, row.emulator, coreOptions[row.name] ?? [])}
+        {@const core = platformCoreSelect(defaults, row.key, row.emulator, coreOptions[row.name] ?? [], row.aliases)}
         <SystemRow
           testKey={key}
           label={row.label}
-          meta={gamesText(row.romCount)}
+          meta={systemCountText(row)}
           open={isOpen(row)}
           attention={row.emulator === ''}
           canToggle={row.emulator !== ''}
@@ -422,7 +481,7 @@
           pickerDisabled={busyRows[row.key] === true || installingRow(row)}
           status={st.status}
           statusText={st.text}
-          onToggle={() => (openRows = { ...openRows, [row.key]: !isOpen(row) })}
+          onToggle={() => toggleRow(row)}
           onPick={(value, select) => onPick(row, value, select)}
         >
           {#snippet body()}
@@ -439,6 +498,7 @@
                   </button>
                 </div>
               {/if}
+              {@render firmware(row, key)}
             {:else}
               {@render emulatorLine(row.emulator, row.key, row.key)}
               {@render companionLines(row)}
@@ -462,31 +522,7 @@
                   </select>
                 </label>
               {/if}
-              {#if fw && !ps3Installed(row.emulator)}
-                {@const action = firmwareAction(fw, firmwarePending[fw.key] === true, false)}
-                {#if action !== 'unavailable'}
-                  <div class="check-row" data-testid={`sys-firmware-${key}`}>
-                    {#if action === 'installed'}
-                      <span class="st ok"><Icon name="check" size={12} /></span>
-                    {:else}
-                      <span class="st warn">!</span>
-                    {/if}
-                    <span class="grow">{fw.label} <span class="muted-s">· from your server</span></span>
-                    {#if action === 'installed'}
-                      <span class="muted-s" data-testid={`sys-firmware-installed-${key}`}>Installed</span>
-                    {:else}
-                      <button
-                        class="small-btn primary"
-                        data-testid={`sys-firmware-install-${key}`}
-                        disabled={action === 'requested'}
-                        onclick={() => installFirmware(row)}
-                      >
-                        {action === 'requested' ? 'Installing…' : 'Install'}
-                      </button>
-                    {/if}
-                  </div>
-                {/if}
-              {/if}
+              {@render firmware(row, key)}
               {@render ps3Firmware(row.emulator, key)}
               {@render tips(row.emulator, key)}
             {/if}
@@ -497,6 +533,47 @@
         <WindowsRow {active} gameCount={windowsGames} />
       {/if}
     </ul>
+
+    {#if more.length > 0}
+      <section class="sub more" aria-label="More systems" data-testid="systems-more">
+        <h3>More systems</h3>
+        <p class="note">{MORE_SYSTEMS_NOTE}</p>
+        <ul class="sys-list" data-testid="systems-more-list">
+          {#each more as row (row.key)}
+            {@const key = testKeyOf(row.slug || row.label)}
+            {@const groups = pickerGroups(row)}
+            <SystemRow
+              testKey={key}
+              label={row.label}
+              meta={systemCountText(row)}
+              open={isOpen(row, true)}
+              calm
+              pickerLabel={`Emulator for ${row.label}`}
+              selected={groups.selected}
+              noneLabel="None"
+              installed={groups.installed}
+              download={groups.download}
+              pickerDisabled={busyRows[row.key] === true}
+              status="unset"
+              onToggle={() => toggleRow(row, true)}
+              onPick={(value, select) => onPick(row, value, select)}
+            >
+              {#snippet body()}
+                <div class="fix">
+                  <span data-testid={`sys-recommended-${key}`}>{recommendedText(row)}</span>
+                  {#if row.recommended !== null}
+                    <button class="small-btn" data-testid={`sys-install-${key}`} onclick={() => installRecommended(row)}>
+                      Install {shortName(row.recommended.name)}
+                    </button>
+                  {/if}
+                </div>
+                {@render firmware(row, key)}
+              {/snippet}
+            </SystemRow>
+          {/each}
+        </ul>
+      </section>
+    {/if}
 
     <section class="sub" aria-label="Other emulators">
       <h3>Other emulators</h3>
@@ -522,6 +599,17 @@
     </section>
   {/if}
 </div>
+
+{#if locating !== null}
+  {@const row = locating}
+  <LocateDialog
+    system={row.label}
+    emulator={row.emulator}
+    pup={s.firmwareView(row).pup}
+    onCheck={(paths, mode) => runLocate(row, paths, mode)}
+    onClose={() => (locating = null)}
+  />
+{/if}
 
 {#if menu !== null}
   {@const m = menu}
@@ -651,11 +739,6 @@
 
   .meta2 {
     margin: 0;
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-
-  .muted-s {
     font-size: 12px;
     color: var(--text-muted);
   }

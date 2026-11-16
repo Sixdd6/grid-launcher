@@ -13,7 +13,6 @@
   import { api } from '../../api';
   import { umuActionLabel, umuInstallBusy } from '../../emulators/compatTools';
   import { platformCoreSelect } from '../../emulators/defaults';
-  import { firmwareAction } from '../../emulators/firmware';
   import { dynamicEmulatorNotes, emulatorNotes } from '../../emulators/notes';
   import { compatTools } from '../../stores/compatTools.svelte';
   import { downloads } from '../../stores/downloads.svelte';
@@ -34,8 +33,15 @@
     versionText,
     type SystemRow,
   } from '../../systems/rows';
-  import { popPage } from '../nav.svelte';
+  import { popPage, pushPage } from '../nav.svelte';
   import { confirmBox, openList } from '../overlays/overlays.svelte';
+  import { romm } from '../../stores/romm.svelte';
+  import { rommHost } from '../../romm/words';
+  import { checkingTitle, type LocateAnswer } from '../../systems/locate';
+  import { firmwareRows } from './firmwareRows';
+  import { baseName, tvReport } from './filePicker';
+  import TvFilePicker from './TvFilePicker.svelte';
+  import TvLocateReport from './TvLocateReport.svelte';
   import { openEmulatorList, openProtonList, tvProton, useTvSystems, windowsNow } from '../systemsTv.svelte';
   import { pillOf } from '../tabs/settings/panes/systems';
   import TvButton from '../ui/TvButton.svelte';
@@ -139,18 +145,15 @@
         installing: st.status === 'installing',
       };
     }
-    const core = platformCoreSelect(s.defaults, r.key, r.emulator, s.coreOptions[r.name] ?? []);
-    const fw = s.firmwareLine(r);
+    const core = platformCoreSelect(s.defaults, r.key, r.emulator, s.coreOptions[r.name] ?? [], r.aliases);
     return {
       kind: 'emulator',
       system: r.label,
       status,
       emu: line(r.emulator, r.key),
       core: core.visible ? { options: core.options, selected: core.selected, disabled: core.disabled } : null,
-      firmware:
-        fw && !s.ps3Installed(r.emulator)
-          ? { label: fw.label, platformName: fw.platformName, action: firmwareAction(fw, s.firmwarePending[fw.key] === true, false) }
-          : null,
+      // The firmware block below the rows replaces the old server line.
+      firmware: null,
       ps3: ps3FirmwareView(s.rpcs3Firmware.get(r.emulator)),
       companions: companionLines(r),
       removing: s.removing,
@@ -158,6 +161,88 @@
   });
 
   let title = $derived(windows ? 'Windows' : emulator !== null ? emulator : (row?.label ?? system));
+
+  // --- Firmware (with or without RomM) -----------------------------------
+  // The system's expected files, read when the page opens and when its
+  // emulator changes (a More systems system isn't read by the pane).
+  $effect(() => {
+    const r = row;
+    if (!r || windows || emulator !== null) return;
+    void s.expectedKey(r);
+    s.refreshExpected(r);
+  });
+
+  let fwView = $derived(row && !windows && emulator === null ? s.firmwareView(row) : null);
+  let fwFiles = $derived(row ? (s.expected[s.expectedKey(row)] ?? []) : []);
+  let fwRows = $derived(
+    row && fwView && (fwFiles.length > 0 || fwView.pup)
+      ? firmwareRows(
+          {
+            system: row.label,
+            emulator: row.emulator,
+            host: rommHost(romm.status),
+            connection: romm.status.connection,
+            files: fwFiles,
+            view: fwView,
+          },
+          { romm: () => row && s.installFromRomm(row), locate: () => locate() },
+        )
+      : [],
+  );
+
+  function locate() {
+    const r = row;
+    if (!r || r.emulator === '') return;
+    const pup = s.firmwareView(r).pup;
+    const pageTitle = pup ? 'Locate PS3UPDAT.PUP' : `Locate ${r.label} firmware`;
+    void pushPage({
+      title: pageTitle,
+      component: TvFilePicker,
+      props: {
+        title: pageTitle,
+        emulator: r.emulator,
+        single: pup,
+        onCheck: (paths: string[], folder: boolean) => void check(r, paths, folder, pup),
+      },
+    });
+  }
+
+  async function check(r: SystemRow, paths: string[], folder: boolean, pup: boolean) {
+    if (pup) {
+      const path = paths[0] ?? '';
+      pushToast(`Checking ${baseName(path)}…`, 'success');
+      const answer = await s.locatePup(r, path);
+      if (answer.refused.length > 0) {
+        // Stays on the picker: Choose another file… is a pick away.
+        void confirmBox({ title: 'Can’t use this file', body: answer.refused[0].reason, ok: 'Choose another file…', onOk: () => {} });
+        return;
+      }
+      pushToast('Installing the PS3 firmware in RPCS3…', 'success', undefined, { sub: 'This takes a minute' });
+      await popPage();
+      return;
+    }
+    pushToast(folder ? 'Checking this folder…' : checkingTitle(paths.length), 'success', undefined, {
+      sub: folder ? paths[0] : `${r.label} firmware`,
+    });
+    let answer: LocateAnswer;
+    try {
+      answer = await s.locateFiles(r, paths);
+    } catch (err) {
+      answer = { installed: [], unverified: [], refused: paths.map((p) => ({ file: baseName(p), reason: errText(err) })) };
+    }
+    const report = tvReport({ system: r.label, emulator: r.emulator, folder, where: paths[0] ?? '', picked: paths.length, answer });
+    pushToast(report.card.title, report.card.error ? 'error' : 'success', undefined, report.card.text ? { sub: report.card.text } : {});
+    await popPage();
+    void pushPage({
+      title: report.title,
+      component: TvLocateReport,
+      props: {
+        report,
+        onMore: () => void popPage().then(locate),
+        onDone: () => void popPage(),
+      },
+    });
+  }
 
   async function installUmu() {
     if (umuRequesting) return;
@@ -230,12 +315,16 @@
 <div data-testid="tv-system-page">
   <TvPage {title} sub={pageSub(model)}>
     {#if model.kind === 'unknown'}
-      <p class="note" data-testid="tv-system-unknown">{system} isn't a system on your server that needs an emulator.</p>
+      <p class="note" data-testid="tv-system-unknown">{system} isn't a system that needs an emulator.</p>
       <div class="btns" data-nav="h">
         <TvButton k="sy-back" autofocus onA={() => void popPage()}>Back</TvButton>
       </div>
     {:else}
       <TvRows {rows} />
+      {#if fwRows.length > 0}
+        <div class="sgroup" data-testid="tv-system-firmware">Firmware</div>
+        <TvRows rows={fwRows} />
+      {/if}
     {/if}
   </TvPage>
 </div>

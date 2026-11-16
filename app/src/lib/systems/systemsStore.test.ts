@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Platform, PlatformSetup, SetupOption } from '../api';
+import type { PlatformSetup, SetupOption, SystemPlatform } from '../api';
 
 type Fn = ReturnType<typeof vi.fn>;
 type Handler = (e: { payload: unknown }) => void;
@@ -17,13 +17,15 @@ function setup(label: string, name: string, options: SetupOption[]): PlatformSet
   return { label, name, slug: label.toLowerCase(), rom_count: 4, options, recommended: options[0]?.source_id ?? null, core: null };
 }
 
-const platform = (id: number, name: string, slug = name.toLowerCase()): Platform => ({
-  id,
-  name,
+/** A system on RomM, keyed by the setup row's slug (its label, lower case). */
+const platform = (id: number, label: string, slug = label.toLowerCase()): SystemPlatform => ({
   slug,
-  rom_count: 4,
-  custom_name: null,
-  display_name: name,
+  label,
+  aliases: [],
+  origin: 'both',
+  server_id: id,
+  server_rom_count: 4,
+  installed_count: 0,
 });
 
 const ps2 = setup('PlayStation 2', 'Sony PlayStation 2', [opt('PCSX2/pcsx2', 'PCSX2 (Playstation 2)')]);
@@ -44,11 +46,12 @@ describe('SystemsStore', () => {
       listEmulators: vi.fn(async () => [{ name: 'RetroArch', source_id: 'libretro/RetroArch' }]),
       emulatorCompanions: vi.fn(async () => []),
       getLaunchDefaults: vi.fn(async () => ({ default_emulators: {}, retroarch_cores: {}, launch_args: '' })),
-      listPlatforms: vi.fn(async () => [
-        platform(1, 'Sony PlayStation 2'),
-        platform(2, 'Sega Dreamcast'),
+      systemPlatforms: vi.fn(async () => [
+        platform(1, 'PlayStation 2'),
+        platform(2, 'Dreamcast'),
         platform(3, 'Windows', 'win'),
       ]),
+      firmwareExpected: vi.fn(async () => ({ files: [] })),
       setupPlatformOptions: vi.fn(async () => [ps2, dc]),
       setupStatus: vi.fn(async () => ({ pending: [] })),
       installForSystems: vi.fn(async () => ({ errors: [] })),
@@ -89,11 +92,13 @@ describe('SystemsStore', () => {
       pushToast: (text: string, level?: string) => toasts.push([text, level]),
     }));
     vi.doMock('../notifications/notifier', () => ({ expectQueued: vi.fn() }));
+    vi.doMock('../stores/romm.svelte', () => ({ romm: { status: { connection: 'not_connected' } } }));
   });
 
   afterEach(() => {
     for (const m of [
       '../api',
+      '../stores/romm.svelte',
       '@tauri-apps/api/event',
       '../stores/downloads.svelte',
       '../stores/emulatorUpdates.svelte',
@@ -127,10 +132,55 @@ describe('SystemsStore', () => {
   });
 
   it('a refusal while loading is the page error', async () => {
-    api.listPlatforms.mockRejectedValueOnce(new Error('offline'));
+    api.systemPlatforms.mockRejectedValueOnce(new Error('offline'));
     const s = await store();
     await s.refreshAll();
     expect(s.loadError).toBe('offline');
+  });
+
+  it('reads the files a system needs and builds its firmware block without RomM', async () => {
+    const s = await loadedStore();
+    api.firmwareExpected.mockResolvedValueOnce({
+      files: [{ name: 'dc_boot.bin', size: 4, md5: 'a'.repeat(32), required: true, installed: false, verified_by: 'grid' }],
+    });
+    const dcRow = s.rows.find((r) => r.label === 'Dreamcast')!;
+    s.refreshExpected(dcRow);
+    await vi.waitFor(() => expect(s.expected['dreamcast|Redream (Sega Dreamcast)']).toHaveLength(1));
+    expect(api.firmwareExpected).toHaveBeenCalledWith('dreamcast', 'Redream (Sega Dreamcast)');
+    const view = s.firmwareView(dcRow);
+    expect(view.romm).toMatchObject({ disabled: true, why: 'needs-romm' });
+    expect(view.locate).toMatchObject({ disabled: false, primary: true });
+    expect(s.rowStatus(dcRow).status).toBe('firmware');
+  });
+
+  it('Locate files sends the picks and re-reads the expected files', async () => {
+    const s = await loadedStore();
+    api.locateFirmwareFiles = vi.fn(async () => ({ installed: [{ file: 'a.bin', as_name: 'dc_boot.bin' }], unverified: [], refused: [] }));
+    const dcRow = s.rows.find((r) => r.label === 'Dreamcast')!;
+    const answer = await s.locateFiles(dcRow, ['/picks/a.bin']);
+    expect(api.locateFirmwareFiles).toHaveBeenCalledWith('dreamcast', 'Redream (Sega Dreamcast)', ['/picks/a.bin']);
+    expect(answer.installed).toHaveLength(1);
+    expect(api.firmwareExpected).toHaveBeenCalled();
+  });
+
+  it('a PUP RPCS3 refuses comes back refused with its reason', async () => {
+    const s = await loadedStore();
+    api.locatePs3Firmware = vi.fn(async () => {
+      throw new Error("scph39001.bin isn't a PlayStation 3 system update. Choose PS3UPDAT.PUP.");
+    });
+    const answer = await s.locatePup(s.rows[0], '/x/scph39001.bin');
+    expect(answer.refused).toEqual([
+      { file: 'scph39001.bin', reason: "scph39001.bin isn't a PlayStation 3 system update. Choose PS3UPDAT.PUP." },
+    ]);
+  });
+
+  it('a system with no games and no emulator is Not set up', async () => {
+    api.systemPlatforms.mockResolvedValueOnce([{ ...platform(0, 'PlayStation 2'), origin: 'catalog', server_id: null, server_rom_count: null }]);
+    const s = await loadedStore();
+    const row = s.rows.find((r) => r.label === 'PlayStation 2')!;
+    expect(s.rowStatus(row).status).toBe('unset');
+    expect(s.groups.more.map((r) => r.label)).toEqual(['PlayStation 2']);
+    expect(s.missing).toEqual([]);
   });
 
   it('Install recommended counts its emulators while it runs and ignores a second press', async () => {

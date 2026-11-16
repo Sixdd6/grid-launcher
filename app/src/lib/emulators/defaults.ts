@@ -72,11 +72,31 @@ export type PlatformDefaultSelect = {
 export function savedDefaultFor(
   defaultEmulators: Record<string, string> | null | undefined,
   platformName: string,
+  aliases: readonly string[] = [],
 ): string {
-  if (!defaultEmulators) return '';
-  const folded = platformName.toLowerCase();
-  const key = Object.keys(defaultEmulators).find((k) => k.toLowerCase() === folded);
-  return key ? defaultEmulators[key] : '';
+  return savedFor(defaultEmulators, platformName, aliases);
+}
+
+/**
+ * A label-keyed value (`default_emulators`, `retroarch_cores`) for a system:
+ * its label first, then each other name of the same system (the label
+ * lookup rule, romm-storefront-plan 0.9: a default saved under the catalog
+ * name still answers for a custom RomM label, and the other way round).
+ * Each name is matched ignoring case; a blank value counts as absent.
+ */
+export function savedFor(
+  map: Record<string, string> | null | undefined,
+  label: string,
+  aliases: readonly string[] = [],
+): string {
+  if (!map) return '';
+  for (const name of [label, ...aliases]) {
+    const folded = name.trim().toLowerCase();
+    if (folded === '') continue;
+    const key = Object.keys(map).find((k) => k.trim().toLowerCase() === folded && map[k].trim() !== '');
+    if (key) return map[key];
+  }
+  return '';
 }
 
 /**
@@ -94,9 +114,10 @@ export function savedDefaultFor(
 export function platformDefaultSelect(
   defaults: LaunchDefaults | null,
   platformName: string,
-  compatibleNames: string[]
+  compatibleNames: string[],
+  aliases: readonly string[] = [],
 ): PlatformDefaultSelect {
-  const saved = savedDefaultFor(defaults?.default_emulators, platformName);
+  const saved = savedDefaultFor(defaults?.default_emulators, platformName, aliases);
   if (saved === NO_EMULATOR_MARKER) {
     return {
       options: compatibleNames,
@@ -134,12 +155,10 @@ export type PlatformCoreSelect = {
   disabled: boolean;
 };
 
-/** The core saved for `platformName`, or `''`. Case-insensitive lookup. */
-function savedCoreFor(defaults: LaunchDefaults | null, platformName: string): string {
-  if (!defaults) return '';
-  const folded = platformName.toLowerCase();
-  const key = Object.keys(defaults.retroarch_cores).find((k) => k.toLowerCase() === folded);
-  return key ? defaults.retroarch_cores[key] : '';
+/** The core saved for `platformName` (or one of its other names), or `''`.
+ *  Case-insensitive lookup. */
+function savedCoreFor(defaults: LaunchDefaults | null, platformName: string, aliases: readonly string[]): string {
+  return savedFor(defaults?.retroarch_cores, platformName, aliases);
 }
 
 /**
@@ -154,9 +173,10 @@ export function platformCoreSelect(
   defaults: LaunchDefaults | null,
   platformName: string,
   selectedEmulator: string,
-  coreOptions: string[]
+  coreOptions: string[],
+  aliases: readonly string[] = [],
 ): PlatformCoreSelect {
-  const saved = savedCoreFor(defaults, platformName);
+  const saved = savedCoreFor(defaults, platformName, aliases);
   const selected = coreOptions.includes(saved) ? saved : (coreOptions[0] ?? NO_CORE_VALUE);
   return {
     visible: isRetroarchName(selectedEmulator),

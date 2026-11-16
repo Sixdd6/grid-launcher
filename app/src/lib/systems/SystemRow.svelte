@@ -17,6 +17,7 @@
     meta,
     open,
     attention = false,
+    calm = false,
     canToggle = true,
     pickerLabel,
     selected,
@@ -38,6 +39,8 @@
     meta: string;
     open: boolean;
     attention?: boolean;
+    /** A More systems row: a lighter name, a neutral pill. */
+    calm?: boolean;
     canToggle?: boolean;
     pickerLabel: string;
     selected: string;
@@ -69,12 +72,14 @@
     firmware: 'warn',
     installing: '',
     none: 'warn',
+    unset: '',
   };
 </script>
 
 <li
   class="sysrow"
   class:attention
+  class:calm
   class:open
   class:tickable={tick !== null}
   class:ticked={tick?.checked ?? false}
@@ -168,7 +173,8 @@
 
   .sys-head {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(160px, 260px) 150px;
+    /* The name keeps 120px in a narrow window; the picker gives way first. */
+    grid-template-columns: minmax(120px, 1fr) minmax(140px, 260px) 150px;
     align-items: center;
     gap: 12px;
     padding: 8px 12px 8px 6px;
@@ -255,6 +261,25 @@
     color: var(--text-h);
     font-size: 14px;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sysrow.calm .sys-toggle b {
+    font-weight: 500;
+  }
+
+  /* A narrow window: the count line gives way before the system's name. */
+  .sys-toggle b,
+  .sys-tick b {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .sys-toggle .muted-s,
+  .sys-tick .muted-s {
+    flex: 0 100 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
   }

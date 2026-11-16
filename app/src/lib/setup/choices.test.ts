@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CatalogEntry, CompatTool, PlatformSetup, SetupOption } from '../api';
+import type { CatalogEntry, CompatTool, PlatformSetup, SetupOption, SystemPlatform } from '../api';
 import { protonPicker } from '../systems/proton';
 import {
   canStart,
@@ -15,6 +15,7 @@ import {
   sortRows,
   toggle,
   toInstall,
+  withGames,
 } from './choices';
 
 const opt = (source_id: string, name: string, kind: SetupOption['kind'] = 'standalone', installed = false): SetupOption => ({
@@ -56,6 +57,25 @@ describe('sortRows', () => {
       'PlayStation 5',
       'Super Nintendo',
     ]);
+  });
+});
+
+describe('withGames (rows over SystemPlatform)', () => {
+  const sys = (label: string, installed: number, server: number | null): SystemPlatform => ({
+    slug: label.toLowerCase(),
+    label,
+    aliases: [],
+    origin: server === null ? 'catalog' : 'both',
+    server_id: server === null ? null : 1,
+    server_rom_count: server,
+    installed_count: installed,
+  });
+
+  it('keeps only the systems with games, on RomM or installed here', () => {
+    const gba = row('Game Boy Advance', 0, [retroarch], 'mgba');
+    const psx = row('PlayStation', 0, [pcsx2]);
+    const kept = withGames([ps2, gba, psx], [sys('PlayStation 2', 0, 12), sys('Game Boy Advance', 0, null), sys('PlayStation', 2, null)]);
+    expect(kept.map((r) => r.label)).toEqual(['PlayStation 2', 'PlayStation']);
   });
 });
 

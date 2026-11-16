@@ -16,6 +16,7 @@ import {
   type CompanionLink,
   type EmulatorEntry,
   type EmulatorFacts,
+  type FirmwareExpectedFile,
   type FirmwarePassFinished,
   type LaunchDefaults,
   type Platform,
@@ -24,8 +25,12 @@ import {
   type ProfileSummary,
   type Rpcs3FirmwareStatus,
   type SetupChoice,
+  type SystemPlatform,
 } from '../api';
 import { isWindowsPlatform } from '../details/actions';
+import { romm } from '../stores/romm.svelte';
+import { firmwareBlock, type FirmwareBlockView } from './firmwareBlock';
+import type { LocateAnswer } from './locate';
 import { defaultEmulatorKey } from '../emulators/defaults';
 import {
   emulatorFirmwareRows,
@@ -45,6 +50,8 @@ import { SKIPPED_TOAST_MS, skippedRemovalText } from '../uninstallSkips';
 import { isRpcs3Name, pollUntilInstalled, ps3FirmwareInstalled, withPs3Firmware } from './ps3Firmware';
 import {
   buildSystemRows,
+  groupSystemRows,
+  hasGames,
   installingRecommendedLabel,
   isInstalling,
   liveEmulatorSources,
@@ -52,6 +59,7 @@ import {
   otherEmulators,
   parsePick,
   pickerGroups,
+  serverPlatformOf,
   statusOf,
   systemFirmwareRequests,
   updateAvailable,
@@ -85,7 +93,12 @@ export class SystemsStore {
   }
 
   // --- Data -----------------------------------------------------------------
-  platforms = $state<Platform[]>([]);
+  /** Every system: GRID's catalog, RomM's platforms while connected, and
+   *  the installed games' platforms (`system_platforms`). */
+  systems = $state<SystemPlatform[]>([]);
+  /** The systems RomM has, as server platforms (Install from RomM, the
+   *  Windows row's count). Empty without RomM. */
+  platforms = $derived(this.systems.flatMap((s) => serverPlatformOf(s) ?? []));
   setupRows = $state<PlatformSetup[]>([]);
   defaults = $state<LaunchDefaults | null>(null);
   emulators = $state<EmulatorEntry[]>([]);
@@ -100,22 +113,34 @@ export class SystemsStore {
   loaded = $state(false);
   loadError = $state<string | null>(null);
 
-  rows = $derived(buildSystemRows(this.setupRows, this.platforms, this.defaults, this.compatible));
+  rows = $derived(buildSystemRows(this.setupRows, this.systems, this.defaults, this.compatible));
   live = $derived(liveEmulatorSources(downloads.entries));
   installingRow = $derived((row: SystemRow) => isInstalling(row, this.pendingLabels, this.live));
-  /** The systems with no emulator whose recommendation can be installed. */
-  missing = $derived(missingRecommended(this.rows, this.installingRow));
+  /** Your systems and More systems (README "Rows (two groups)"). */
+  groups = $derived(groupSystemRows(this.rows, (row) => this.installingRow(row) || this.busyRows[row.key] === true));
+  /** Install recommended (N): only the systems with games (README). */
+  missing = $derived(
+    missingRecommended(
+      this.groups.yours.filter((r) => hasGames(r)),
+      this.installingRow,
+    ),
+  );
   others = $derived(otherEmulators(this.emulators, this.rows, this.companions));
   windowsGames = $derived(
     this.platforms
       .filter((p) => isWindowsPlatform(p.slug, platformLabel(p)))
       .reduce<number | null>((n, p) => (n ?? 0) + p.rom_count, null),
   );
+  /** RomM is connected (Install from RomM, the count lines). */
+  rommConnected = $derived(romm.status.connection === 'connected');
   /** Changes when an emulator install reaches its end: the page re-reads everything. */
   installSignature = $derived(emulatorTerminalSignature(downloads.entries));
-  /** The compatibility and core answers depend on the platforms and the emulator list. */
+  /** The platforms the compatibility and core answers are asked about:
+   *  every system row's name and slug. */
+  platformRefs = $derived(this.setupRows.map((r) => ({ name: r.name, slug: r.slug })));
+  /** The compatibility and core answers depend on the systems and the emulator list. */
   compatibilityKey = $derived(
-    JSON.stringify([this.platforms.map((p) => [p.name, p.slug]), this.emulators.map((e) => e.name)]),
+    JSON.stringify([this.platformRefs.map((p) => [p.name, p.slug]), this.emulators.map((e) => e.name)]),
   );
   /** The `compatibilityKey` the compatible answers were read for; '' before
    *  the first answer. */
@@ -181,9 +206,12 @@ export class SystemsStore {
 
   async refreshSystems(): Promise<void> {
     try {
-      const [p, s] = await Promise.all([api.listPlatforms(), api.setupPlatformOptions()]);
-      this.platforms = p;
-      this.setupRows = s;
+      // One after the other: setup's answer is built over the same systems
+      // list, and the first call records RomM's platforms for it.
+      const systems = await api.systemPlatforms();
+      const setup = await api.setupPlatformOptions();
+      this.systems = systems;
+      this.setupRows = setup;
       this.loadError = null;
     } catch (err) {
       this.loadError = errorMessage(err);
@@ -323,6 +351,7 @@ export class SystemsStore {
           pushToast(toast.text, toast.level);
         }
         this.refreshFirmwareStatus(req);
+        this.refreshExpected({ slug: req.platform.slug, emulator: req.emulator });
       }
     });
     return () => {
@@ -354,16 +383,112 @@ export class SystemsStore {
     });
   }
 
+  // --- Firmware without RomM (Locate files) -------------------------------------------
+
+  /** `firmware_expected` answers, by [`expectedKey`]. */
+  expected = $state<Record<string, FirmwareExpectedFile[]>>({});
+
+  /** Where a system's expected files are kept: its slug and emulator. */
+  expectedKey(row: Pick<SystemRow, 'slug' | 'emulator'>): string {
+    return `${row.slug}|${row.emulator}`;
+  }
+
+  /** Reads the files a system's emulator needs (with or without RomM). */
+  refreshExpected(row: Pick<SystemRow, 'slug' | 'emulator'>): void {
+    const key = this.expectedKey(row);
+    api
+      .firmwareExpected(row.slug, row.emulator)
+      .then((answer) => (this.expected = { ...this.expected, [key]: answer.files }))
+      .catch(() => {
+        const { [key]: _gone, ...rest } = this.expected;
+        this.expected = rest;
+      });
+  }
+
+  /** Changes when the systems or their emulators change: the expected
+   *  files are read again. */
+  expectedSignature = $derived(this.groups.yours.map((r) => this.expectedKey(r)).join(','));
+
+  /** A system's firmware block. */
+  firmwareView(row: SystemRow): FirmwareBlockView {
+    const pending = this.firmwarePending[this.firmwareKeyOf(row)] === true;
+    const status = row.platform !== null && row.emulator !== '' ? this.firmwareStatus[this.firmwareKeyOf(row)] : undefined;
+    return firmwareBlock({
+      system: row.label,
+      slug: row.slug,
+      emulator: row.emulator,
+      files: this.expected[this.expectedKey(row)] ?? null,
+      connection: romm.status.connection,
+      onServer: row.platform !== null,
+      serverFirmware: status === undefined ? null : status.file_count > 0 && status.available,
+      installing: pending,
+    });
+  }
+
+  firmwareKeyOf(row: SystemRow): string {
+    return row.platform === null ? '' : `${row.platform.id}:${row.emulator}`;
+  }
+
+  /** Install from RomM for a system's emulator (the server's firmware pass). */
+  installFromRomm(row: SystemRow): void {
+    if (row.platform === null || row.emulator === '') return;
+    const key = this.firmwareKeyOf(row);
+    const name = row.label;
+    this.firmwarePending = { ...this.firmwarePending, [key]: true };
+    pushToast(firmwareStartedToast(name, row.emulator));
+    api.installFirmwareForPlatform(row.platform.id, name, row.emulator).catch((err) => {
+      const { [key]: _failed, ...rest } = this.firmwarePending;
+      this.firmwarePending = rest;
+      pushToast(`Could not install ${name} firmware: ${errorMessage(err)}`, 'error');
+    });
+  }
+
+  /** Locate files: checks and installs the picked files (or a folder's).
+   *  `Err` text (no emulator, a library move) comes back as a thrown error. */
+  async locateFiles(row: SystemRow, paths: string[]): Promise<LocateAnswer> {
+    try {
+      return (await api.locateFirmwareFiles(row.slug, row.emulator, paths)) as LocateAnswer;
+    } finally {
+      this.refreshExpected(row);
+    }
+  }
+
+  /** Locate PS3UPDAT.PUP: hands the picked PUP to RPCS3. Answers the
+   *  report; a refused file comes back refused with its reason. */
+  async locatePup(row: SystemRow, path: string): Promise<LocateAnswer> {
+    const file = path.split(/[\\/]/).pop() ?? path;
+    try {
+      const ok = await api.locatePs3Firmware(row.emulator, path);
+      if (!ok) {
+        return { installed: [], unverified: [], refused: [{ file, reason: 'Couldn’t open RPCS3 to install firmware.' }] };
+      }
+      void pollUntilInstalled(
+        async () => {
+          const status = await api.rpcs3FirmwareStatus(row.emulator);
+          this.rpcs3Firmware = new Map(this.rpcs3Firmware).set(row.emulator, status);
+          if (status.installed) this.refreshExpected(row);
+          return status.installed;
+        },
+        { intervalMs: 3000, attempts: 40, stopped: () => !this.#active() },
+      );
+      return { installed: [{ file, as_name: 'PS3UPDAT.PUP' }], unverified: [], refused: [] };
+    } catch (err) {
+      return { installed: [], unverified: [], refused: [{ file, reason: errorMessage(err) }] };
+    }
+  }
+
   // --- Rows -------------------------------------------------------------------------
 
-  /** A row's status chip and, for a firmware-only install, its text. */
+  /** A row's status chip and, for a firmware-only install, its text. A More
+   *  systems row (no emulator, no games) is "Not set up". */
   rowStatus(row: SystemRow): { status: SystemStatus; text: string | null } {
-    const fw = this.firmwareLine(row);
-    const action = withPs3Firmware(
-      fw ? firmwareAction(fw, this.firmwarePending[fw.key] === true, false) : null,
-      this.ps3Installed(row.emulator),
-    );
     const installing = this.installingRow(row);
+    if (row.emulator === '' && !hasGames(row) && !installing && this.busyRows[row.key] !== true) {
+      return { status: 'unset', text: null };
+    }
+    const pending = this.firmwarePending[this.firmwareKeyOf(row)] === true;
+    const needed = row.emulator !== '' && this.firmwareView(row).needed;
+    const action = withPs3Firmware(pending ? 'requested' : needed ? 'install' : null, this.ps3Installed(row.emulator));
     const status = statusOf({
       emulator: row.emulator,
       installing: installing || this.busyRows[row.key] === true,

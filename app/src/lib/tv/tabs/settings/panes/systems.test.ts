@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import type { EmulatorEntry, LaunchDefaults, Platform, PlatformSetup, SetupOption } from '../../../../api';
+import type { EmulatorEntry, LaunchDefaults, PlatformSetup, SetupOption, SystemPlatform } from '../../../../api';
 import { buildSystemRows } from '../../../../systems/rows';
 import {
   CHECK_RUNNING,
   checkingText,
   installingCount,
+  moreItem,
+  moreSystemsSub,
+  NO_ROMM_LINE,
   OTHER_EMPTY,
+  tvCountText,
   otherItems,
   orderSystems,
   pillOf,
@@ -32,7 +36,16 @@ function setup(label: string, name: string, options: SetupOption[], core: string
   return { label, name, slug: label.toLowerCase().replace(/\s+/g, ''), rom_count: 4, options, recommended: options[0]?.source_id ?? null, core };
 }
 
-const platform = (id: number, name: string): Platform => ({ id, name, slug: name.toLowerCase(), rom_count: 4, custom_name: null, display_name: name });
+/** A system on RomM with four games there, keyed by its setup row's slug. */
+const platform = (id: number, label: string): SystemPlatform => ({
+  slug: label.toLowerCase().replace(/\s+/g, ''),
+  label,
+  aliases: [],
+  origin: 'both',
+  server_id: id,
+  server_rom_count: 4,
+  installed_count: 0,
+});
 
 const entry = (name: string): EmulatorEntry => ({ name, path: `/emu/${name}`, args: '%rom%' }) as EmulatorEntry;
 
@@ -40,7 +53,7 @@ const ymir = opt('ymir/ymir', 'Ymir (Sega Saturn)');
 const pcsx2 = opt('PCSX2/pcsx2', 'PCSX2 (Playstation 2)', { installed: true, entry: 'PCSX2 (Playstation 2)' });
 const rows = buildSystemRows(
   [setup('PlayStation 2', 'Sony PlayStation 2', [pcsx2]), setup('Saturn', 'Sega Saturn', [ymir]), setup('Zeebo', 'Zeebo', [])],
-  [platform(1, 'Sony PlayStation 2'), platform(2, 'Sega Saturn'), platform(3, 'Zeebo')],
+  [platform(1, 'PlayStation 2'), platform(2, 'Saturn'), platform(3, 'Zeebo')],
   { default_emulators: { 'PlayStation 2': 'PCSX2 (Playstation 2)' }, retroarch_cores: {}, launch_args: '' } as LaunchDefaults,
   { 'Sony PlayStation 2': ['PCSX2 (Playstation 2)'] },
 );
@@ -58,10 +71,27 @@ describe('Settings › Systems in TV mode', () => {
 
   it('a row shows its emulator (and core) or why its games cannot start (item 256)', () => {
     const [saturn, zeebo, ps2] = orderSystems(rows);
-    expect(systemSub(ps2, null)).toBe('PCSX2 (Playstation 2)');
+    expect(systemSub(ps2, null)).toBe('PCSX2 (Playstation 2) · 4 on RomM');
     expect(systemSub({ emulator: 'RetroArch', recommended: null }, 'snes9x')).toBe('RetroArch · snes9x');
-    expect(systemSub(saturn, null)).toBe("Games for this system can't start yet. Ymir is recommended.");
-    expect(systemSub(zeebo, null)).toBe('GRID has no emulator for this system. You can add your own.');
+    expect(systemSub(saturn, null)).toBe('No emulator yet. Ymir is recommended. · 4 on RomM');
+    expect(systemSub(zeebo, null)).toBe('GRID has no emulator for this system. You can add your own. · 4 on RomM');
+  });
+
+  it('a row counts its games with and without RomM (TVRommStorefront, Your systems)', () => {
+    expect(tvCountText({ serverCount: 3, installedCount: 2 })).toBe('3 on RomM, 2 installed');
+    expect(tvCountText({ serverCount: null, installedCount: 2 })).toBe('2 installed');
+    expect(tvCountText({ serverCount: null, installedCount: 0 })).toBe('');
+    expect(systemSub({ emulator: 'DuckStation', recommended: null, serverCount: null, installedCount: 2 }, null)).toBe(
+      'DuckStation · 2 installed',
+    );
+    expect(moreSystemsSub(6)).toBe('6 systems GRID can set up');
+    expect(NO_ROMM_LINE).toBe('Systems works without RomM. With RomM connected, its platforms join this list.');
+  });
+
+  it('a More systems row says what is recommended, and X installs it', () => {
+    const [saturn, zeebo] = orderSystems(rows);
+    expect(moreItem(saturn)).toEqual({ k: 'sy-more-saturn', testKey: 'saturn', label: 'Saturn', sub: 'Ymir is recommended', x: 'Install Ymir' });
+    expect(moreItem(zeebo).x).toBeNull();
   });
 
   it('the status pill: Ready with the green dot, else the status in the warning style (item 256)', () => {
@@ -107,7 +137,7 @@ describe('Settings › Systems in TV mode', () => {
   it('Other emulators: each with what it could play, or the note (item 258)', () => {
     expect(OTHER_EMPTY).toBe('No other emulators');
     expect(otherItems([entry('Mednafen')], rows, [])).toEqual([
-      { k: 'sy-other-mednafen', testKey: 'mednafen', name: 'Mednafen', note: 'Not used by any system on your server.' },
+      { k: 'sy-other-mednafen', testKey: 'mednafen', name: 'Mednafen', note: 'Not used by any system.' },
     ]);
     expect(
       otherItems([entry('Qt Launcher')], rows, [

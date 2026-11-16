@@ -26,7 +26,7 @@ export function noEmulatorWhy(label: string): string {
 }
 export const NO_PROTON = 'No Proton version available';
 export const LOADING = 'Loading your systems…';
-export const NO_SYSTEMS = 'Your server has no systems that need an emulator.';
+export const NO_SYSTEMS = 'Your RomM server has no systems that need an emulator.';
 
 export function loadFailed(error: string): string {
   return `Your systems could not be loaded: ${error}`;
@@ -49,13 +49,18 @@ function valueOf(row: PlatformSetup, sourceId: string | null): string {
   return o ? optionLabel({ ...o, installed: false }, row.core) : NO_EMULATOR;
 }
 
-/** One system's row (item 401): switch, name, "<n> games", its emulator. */
+/** The row's line (TVRommStorefront README): "<n> games on RomM". */
+export function chooseSub(romCount: number): string {
+  return `${gamesText(romCount)} on RomM`;
+}
+
+/** One system's row (item 401): switch, name, "<n> games on RomM", its emulator. */
 export function chooseRow(row: PlatformSetup, selection: Selection): ChooseRow {
   const on = row.label in selection;
   return {
     key: `ch-${row.slug || row.label}`,
     label: row.label,
-    sub: gamesText(row.rom_count),
+    sub: chooseSub(row.rom_count),
     value: valueOf(row, on ? selection[row.label] : row.recommended),
     on,
     disabled: rowState(row) === 'unavailable',

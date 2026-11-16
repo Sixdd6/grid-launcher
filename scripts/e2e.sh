@@ -174,6 +174,14 @@ STAGE_GROUPS=(
   # Install recommended with focus moving to the control in its place, and
   # a Server header chip.
   "tv-systems:specs/tv-systems.spec.ts"
+  # Systems and firmware without RomM (romm-storefront-plan Step 7), on a
+  # profile that never connected RomM (seed/systems-local-seed.mjs): the
+  # catalog systems with More systems, then Locate files with fake firmware
+  # checked against the seed's test table (E2E_FIRMWARE_KNOWN) — installed
+  # under its known name, a zip member, refusals and the folder count. The
+  # tv- group does the same through the TV file browser's file mode.
+  "systems-local:specs/systems-local.spec.ts"
+  "tv-systems-local:specs/tv-systems-local.spec.ts"
   # Windowed TV grids (plan risk R8) on the 2500-game large-platform
   # fixtures: a Server platform and a Library of 600 seeded installed games;
   # focus moves through them smoothly and covers load as they scroll in.
@@ -792,6 +800,7 @@ seed_script_for_group() {
     content) printf '%s' "$E2E_DIR/seed/content-seed.mjs" ;;
     native) printf '%s' "$E2E_DIR/seed/native-seed.mjs" ;;
     firmware) printf '%s' "$E2E_DIR/seed/firmware-seed.mjs" ;;
+    systems-local|tv-systems-local) printf '%s' "$E2E_DIR/seed/systems-local-seed.mjs" ;;
     updates) printf '%s' "$E2E_DIR/seed/updates-seed.mjs" ;;
     layout-migration) printf '%s' "$E2E_DIR/seed/layout-migration-seed.mjs" ;;
     library-move) printf '%s' "$E2E_DIR/seed/library-move-seed.mjs" ;;
@@ -1226,6 +1235,14 @@ EOF
       # (grid-core library/relocate.rs `probe_strategy`).
       if [[ "$name" == "library-move" ]]; then
         export E2E_FORCE_COPY_MOVE=1
+      fi
+      # Only the systems-local groups: Locate files checks fake firmware
+      # against the seed's test table, not the bundled firmware-known.json
+      # (wdio.conf.ts turns this into GRID_LAUNCHER_E2E_FIRMWARE_KNOWN).
+      if [[ "$name" == "systems-local" || "$name" == "tv-systems-local" ]]; then
+        export E2E_FIRMWARE_KNOWN="$data_dir/firmware-known.json"
+      else
+        unset E2E_FIRMWARE_KNOWN
       fi
       # Both of these are seed-script conventions rather than per-group
       # settings: a seed that writes the directory opts its group in, and

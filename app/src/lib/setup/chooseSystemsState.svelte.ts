@@ -14,7 +14,7 @@ import {
 import { isWindowsPlatform } from '../details/actions';
 import { platformLabel } from '../server/platformLabel';
 import { pushToast } from '../stores/toasts.svelte';
-import { shortName } from '../systems/rows';
+import { serverPlatformOf, shortName } from '../systems/rows';
 import { protonInstallSource, protonPicker } from '../systems/proton';
 import {
   choices,
@@ -25,6 +25,7 @@ import {
   sortRows,
   toggle,
   toInstall,
+  withGames,
   type Selection,
 } from './choices';
 
@@ -69,7 +70,11 @@ export class ChooseSystems {
   async load(): Promise<void> {
     this.loadError = null;
     try {
-      this.rows = sortRows(await api.setupPlatformOptions());
+      // The systems list first: setup's rows are built over it, and its
+      // installed counts say which systems have games.
+      const systems = await api.systemPlatforms();
+      this.platforms = systems.flatMap((s) => serverPlatformOf(s) ?? []);
+      this.rows = sortRows(withGames(await api.setupPlatformOptions(), systems));
     } catch (e) {
       this.loadError = String(e);
     }
@@ -78,17 +83,12 @@ export class ChooseSystems {
   /** The Windows row's Proton versions. Best effort: without them it offers less. */
   async loadWindows(): Promise<void> {
     if (this.#windowsHost) return;
-    const [t, c, p] = await Promise.allSettled([
-      api.listCompatTools(),
-      api.listCompatToolCatalog(),
-      api.listPlatforms(),
-    ]);
+    const [t, c] = await Promise.allSettled([api.listCompatTools(), api.listCompatToolCatalog()]);
     if (t.status === 'fulfilled') {
       this.tools = t.value.tools;
       this.defaultTool = t.value.default_tool;
     }
     if (c.status === 'fulfilled') this.catalog = c.value;
-    if (p.status === 'fulfilled') this.platforms = p.value;
     this.windowsLoaded = true;
   }
 

@@ -22,10 +22,14 @@
   import TvIcon from '../../ui/TvIcon.svelte';
   import { openEmulatorForm } from '../../pages/emulatorFormOpen.svelte';
   import TvSystemPage from '../../pages/TvSystemPage.svelte';
+  import TvMoreSystems from '../../pages/TvMoreSystems.svelte';
   import {
     CHECK_RUNNING,
     checkingText,
     installingCount,
+    MORE_SYSTEMS,
+    moreSystemsSub,
+    NO_ROMM_LINE,
     OTHER_EMPTY,
     OTHER_HEADING,
     otherItems,
@@ -45,16 +49,16 @@
     recButton({
       queueing: s.recommendedInstalling,
       todo: s.missing.length,
-      inFlight: installingCount(s.rows, tvRec.keys, (r) => s.installingRow(r) || s.busyRows[r.key] === true),
+      inFlight: installingCount(s.groups.yours, tvRec.keys, (r) => s.installingRow(r) || s.busyRows[r.key] === true),
     }),
   );
 
   type Entry = { item: SystemItem; row: SystemRow | null };
 
   let entries = $derived.by((): Entry[] => {
-    const list: Entry[] = orderSystems(s.rows).map((row) => {
+    const list: Entry[] = orderSystems(s.groups.yours).map((row) => {
       const st = s.rowStatus(row);
-      const core = platformCoreSelect(s.defaults, row.key, row.emulator, s.coreOptions[row.name] ?? []);
+      const core = platformCoreSelect(s.defaults, row.key, row.emulator, s.coreOptions[row.name] ?? [], row.aliases);
       return { item: systemItem(row, st.status, st.text, core.visible && !core.disabled ? core.selected : null), row };
     });
     if (!windowsHost) {
@@ -107,6 +111,7 @@
   </div>
 </div>
 
+{#if !s.rommConnected}<p class="note" data-testid="tv-sys-no-romm">{NO_ROMM_LINE}</p>{/if}
 {#if s.loadError}<p class="note err" data-testid="tv-sys-error">{s.loadError}</p>{/if}
 {#if !s.loaded}
   <p class="note" data-testid="tv-sys-loading">Loading…</p>
@@ -131,6 +136,24 @@
         </div>
       </div>
     {/each}
+    {#if s.groups.more.length > 0}
+      <div
+        class="srow"
+        data-k="sy-more"
+        data-al="Open"
+        data-testid="tv-sys-more"
+        use:tvf={{ a: () => void pushPage({ title: MORE_SYSTEMS.title, component: TvMoreSystems }) }}
+      >
+        <div class="lab">
+          <div class="t">{MORE_SYSTEMS.label}</div>
+          <div class="s">{moreSystemsSub(s.groups.more.length)}</div>
+        </div>
+        <div class="val">
+          <span class="cnt">{s.groups.more.length}</span>
+          <span class="chev"><TvIcon name="chevronRight" px={18} /></span>
+        </div>
+      </div>
+    {/if}
   </div>
   <div class="sgroup">{OTHER_HEADING}</div>
   {#if others.length === 0}

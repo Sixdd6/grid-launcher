@@ -2,7 +2,7 @@
 // selection model, kept pure so it can be tested without mounting the
 // screen. The rows are Settings › Systems' rows (`systems/SystemRow.svelte`
 // in tick mode); the Windows row's choices are `systems/proton.ts`'s.
-import type { PlatformSetup, SetupChoice, SetupCompatChoice, SetupOption } from '../api';
+import type { PlatformSetup, SetupChoice, SetupCompatChoice, SetupOption, SystemPlatform } from '../api';
 import type { PickerOption } from '../systems/rows';
 import { protonInstallSource, type ProtonPicker } from '../systems/proton';
 
@@ -13,6 +13,17 @@ export type Selection = Readonly<Record<string, string>>;
  *  list uses (the backend's `list_platforms` sorts the same way). */
 export function sortRows(rows: readonly PlatformSetup[]): PlatformSetup[] {
   return [...rows].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+}
+
+/** Choose your systems lists only the systems with games (RommStorefront
+ *  README, decision 7): on RomM (`rom_count`) or installed here. The
+ *  catalog's other systems are left to Settings › Systems. */
+export function withGames(rows: readonly PlatformSetup[], systems: readonly SystemPlatform[]): PlatformSetup[] {
+  return rows.filter((row) => {
+    if (row.rom_count > 0) return true;
+    const system = systems.find((s) => s.slug === row.slug) ?? systems.find((s) => s.label === row.label);
+    return (system?.installed_count ?? 0) > 0 || (system?.server_rom_count ?? 0) > 0;
+  });
 }
 
 /**

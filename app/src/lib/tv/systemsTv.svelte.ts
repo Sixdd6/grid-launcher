@@ -78,7 +78,14 @@ export function useTvSystems(): SystemsStore {
 
   $effect(() => {
     void s.compatibilityKey;
-    s.loadCompatibility(untrack(() => s.platforms.map((p) => ({ name: p.name, slug: p.slug }))));
+    s.loadCompatibility(untrack(() => s.platformRefs));
+  });
+
+  // The files each of your systems' emulator needs (with or without RomM);
+  // a More systems system's page reads its own.
+  $effect(() => {
+    void s.expectedSignature;
+    for (const row of untrack(() => s.groups.yours)) s.refreshExpected(row);
   });
 
   $effect(() => {

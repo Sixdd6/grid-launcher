@@ -10,6 +10,10 @@
 // defaults select offered, and the emulator shown is the one a launch would
 // use (`platformDefaultSelect`: the saved default, else the first
 // compatible one, never one after an explicit "(none)").
+//
+// Without RomM (romm-storefront-plan 0.12) the systems are GRID's own
+// catalog (`system_platforms`), merged with RomM's platforms while it is
+// connected; `setup_platform_options` answers for the same list.
 import type {
   CompanionLink,
   DownloadEntry,
@@ -19,10 +23,32 @@ import type {
   PlatformSetup,
   SetupChoice,
   SetupOption,
+  SystemPlatform,
 } from '../api';
 import { NO_DEFAULT_VALUE, NO_EMULATOR_MARKER, platformDefaultSelect, savedDefaultFor } from '../emulators/defaults';
 import { firmwareKey, type FirmwareAction, type FirmwareRequest } from '../emulators/firmware';
 import { optionLabel } from '../setup/choices';
+
+/** A system's RomM platform in the shape the server firmware commands
+ *  take, or `null` when RomM doesn't have it (or isn't connected). */
+export function serverPlatformOf(system: SystemPlatform | null | undefined): Platform | null {
+  if (!system || system.server_id === null) return null;
+  return {
+    id: system.server_id,
+    name: systemName(system),
+    slug: system.slug,
+    rom_count: system.server_rom_count ?? 0,
+    custom_name: null,
+    display_name: system.label,
+  };
+}
+
+/** The name emulator keywords match: the backend's `SystemPlatform.name`
+ *  (sent beside the frozen TS type), else the label. */
+export function systemName(system: SystemPlatform): string {
+  const name = (system as SystemPlatform & { name?: string }).name;
+  return typeof name === 'string' && name !== '' ? name : system.label;
+}
 
 export type SystemRow = {
   /** The display label: shown, and the key every default is stored under. */
@@ -31,8 +57,17 @@ export type SystemRow = {
   /** The raw server name: what `compatible_emulators` answers are keyed by. */
   name: string;
   slug: string;
+  /** RomM's game count; 0 without RomM. */
   romCount: number;
-  /** The server platform, for its id (firmware); `null` if it vanished. */
+  /** RomM's game count, `null` when RomM doesn't list the system. */
+  serverCount?: number | null;
+  /** Installed games on the system. */
+  installedCount?: number;
+  /** The system's other names (config written under them still applies). */
+  aliases?: string[];
+  /** The system as `system_platforms` answered it; `null` if it vanished. */
+  system?: SystemPlatform | null;
+  /** The server platform, for its id (Install from RomM); `null` without. */
   platform: Platform | null;
   /** The emulator a launch would use, or `''` for none. */
   emulator: string;
@@ -54,7 +89,7 @@ const byLabel = (a: string, b: string) => a.localeCompare(b, undefined, { sensit
 /** Every system row, systems with no emulator first, then alphabetical. */
 export function buildSystemRows(
   setup: readonly PlatformSetup[],
-  platforms: readonly Platform[],
+  systems: readonly SystemPlatform[],
   defaults: LaunchDefaults | null,
   compatible: Record<string, string[]>,
 ): SystemRow[] {
@@ -63,16 +98,22 @@ export function buildSystemRows(
     const recommended = row.options.find((o) => o.source_id === row.recommended) ?? null;
     const downloads = row.options.filter((o) => !o.installed);
     downloads.sort((a, b) => Number(b === recommended) - Number(a === recommended));
-    const choice = platformDefaultSelect(defaults, row.label, installed);
+    const system = systems.find((s) => s.slug === row.slug) ?? systems.find((s) => s.label === row.label) ?? null;
+    const aliases = system?.aliases ?? [];
+    const choice = platformDefaultSelect(defaults, row.label, installed, aliases);
     return {
       key: row.label,
       label: row.label,
       name: row.name,
       slug: row.slug,
       romCount: row.rom_count,
-      platform: platforms.find((p) => p.name === row.name) ?? null,
+      serverCount: system?.server_rom_count ?? null,
+      installedCount: system?.installed_count ?? 0,
+      aliases,
+      system,
+      platform: serverPlatformOf(system),
       emulator: choice.selected === NO_DEFAULT_VALUE ? '' : choice.selected,
-      explicitNone: savedDefaultFor(defaults?.default_emulators, row.label) === NO_EMULATOR_MARKER,
+      explicitNone: savedDefaultFor(defaults?.default_emulators, row.label, aliases) === NO_EMULATOR_MARKER,
       installed,
       downloads,
       recommended,
@@ -81,6 +122,64 @@ export function buildSystemRows(
   });
   return rows.sort((a, b) => Number(a.emulator !== '') - Number(b.emulator !== '') || byLabel(a.label, b.label));
 }
+
+/** Whether a system has games: installed here, or on RomM (RomM's count is
+ *  known only while it is connected). */
+export function hasGames(row: Pick<SystemRow, 'installedCount' | 'serverCount'>): boolean {
+  return (row.installedCount ?? 0) > 0 || (row.serverCount ?? 0) > 0;
+}
+
+/** The two Systems groups (RommStorefront README, "Rows (two groups)"):
+ *  your systems — with games, an emulator, or an install running, sorted as
+ *  `buildSystemRows` sorts them — and More systems — the catalog systems
+ *  GRID can set up that have none of those, by name. A system with nothing
+ *  of that and nothing GRID can install is not listed. */
+export function groupSystemRows(
+  rows: readonly SystemRow[],
+  busy: (row: SystemRow) => boolean,
+): { yours: SystemRow[]; more: SystemRow[] } {
+  const yours: SystemRow[] = [];
+  const more: SystemRow[] = [];
+  for (const row of rows) {
+    if (row.emulator !== '' || hasGames(row) || busy(row)) yours.push(row);
+    else if (row.recommended !== null) more.push(row);
+  }
+  more.sort((a, b) => byLabel(a.label, b.label));
+  return { yours, more };
+}
+
+/** A row's count line: "48 on RomM · 3 installed", "48 on RomM",
+ *  "3 installed" or "No games yet". */
+export function systemCountText(row: Pick<SystemRow, 'installedCount' | 'serverCount'>): string {
+  const server = row.serverCount ?? 0;
+  const installed = row.installedCount ?? 0;
+  if (server > 0) return `${server} on RomM${installed > 0 ? ` · ${installed} installed` : ''}`;
+  return installed > 0 ? `${installed} installed` : 'No games yet';
+}
+
+/** The Windows (Proton) row's line: "11 on RomM · runs through Proton", or
+ *  "Runs through Proton" without RomM's count. */
+export function windowsCountText(games: number | null): string {
+  return games === null ? 'Runs through Proton' : `${games} on RomM · runs through Proton`;
+}
+
+/** A More systems row, opened: "<emulator> is recommended for <system>." */
+export function recommendedText(row: Pick<SystemRow, 'recommended' | 'label'>): string {
+  return row.recommended === null
+    ? 'No emulator GRID installs plays this system. If you have one, use Add an emulator manually.'
+    : `${shortName(row.recommended.name)} is recommended for ${row.label}.`;
+}
+
+/** The Systems lede, with or without RomM. */
+export function systemsLede(rommConnected: boolean): string {
+  return (
+    'Pick an emulator for each system you play. GRID installs, updates and sets it up, with or without RomM.' +
+    (rommConnected ? ' Systems on your RomM server are listed with their game counts.' : '')
+  );
+}
+
+/** The More systems group's note. */
+export const MORE_SYSTEMS_NOTE = 'GRID can set these up too. They move up when you have games for them or pick an emulator.';
 
 /** The installed emulator name an option stands for: an installed server
  *  build's entry may carry " (server)". */
@@ -149,7 +248,7 @@ export function parsePick(value: string): PickerChoice {
 
 // --- Status ------------------------------------------------------------------
 
-export type SystemStatus = 'ready' | 'update' | 'firmware' | 'installing' | 'none';
+export type SystemStatus = 'ready' | 'update' | 'firmware' | 'installing' | 'none' | 'unset';
 
 export const STATUS_LABELS: Record<SystemStatus, string> = {
   ready: 'Ready',
@@ -157,6 +256,8 @@ export const STATUS_LABELS: Record<SystemStatus, string> = {
   firmware: 'Firmware needed',
   installing: 'Installing…',
   none: 'No emulator',
+  /** A More systems row: nothing set up, no games. */
+  unset: 'Not set up',
 };
 
 export type StatusInput = {
@@ -261,7 +362,7 @@ export function canPlay(name: string, rows: readonly SystemRow[]): string[] {
 export function otherEmulatorNote(labels: readonly string[], companionOf: string | null = null): string {
   if (companionOf !== null) return `Companion to ${companionOf}.`;
   return labels.length === 0
-    ? 'Not used by any system on your server.'
+    ? 'Not used by any system.'
     : `Not used by any system. It can play ${labels.join(', ')}.`;
 }
 

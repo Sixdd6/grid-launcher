@@ -119,6 +119,10 @@ const appEnv: Record<string, string> = {
   ...(process.env.E2E_STEAM_ROOT ? { GRID_LAUNCHER_E2E_STEAM_ROOT: process.env.E2E_STEAM_ROOT } : {}),
   ...(process.env.E2E_FAKE_STEAM ? { GRID_LAUNCHER_E2E_STEAM_EXE: process.env.E2E_FAKE_STEAM } : {}),
   ...(process.env.E2E_STEAM_ARGV_FILE ? { E2E_STEAM_ARGV_FILE: process.env.E2E_STEAM_ARGV_FILE } : {}),
+  // GRID_LAUNCHER_E2E_FIRMWARE_KNOWN replaces the bundled firmware-known.json
+  // (grid-core firmware/known.rs, e2e feature only) with a test table of fake
+  // files: e2e.sh sets E2E_FIRMWARE_KNOWN for the systems-local groups.
+  ...(process.env.E2E_FIRMWARE_KNOWN ? { GRID_LAUNCHER_E2E_FIRMWARE_KNOWN: process.env.E2E_FIRMWARE_KNOWN } : {}),
   // E2E_HOME (the tv-gog stage only) is the app's HOME: a folder in the
   // stage's data dir whose Downloads holds the fake GOG installers.
   ...(process.env.E2E_HOME ? { HOME: process.env.E2E_HOME } : {}),

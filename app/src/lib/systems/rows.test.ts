@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CompanionLink, DownloadEntry, EmulatorEntry, LaunchDefaults, Platform, PlatformSetup, SetupOption } from '../api';
+import type { CompanionLink, DownloadEntry, EmulatorEntry, LaunchDefaults, PlatformSetup, SetupOption, SystemPlatform } from '../api';
 import {
   alsoPlays,
   alsoPlaysText,
@@ -7,7 +7,13 @@ import {
   canPlay,
   companionParent,
   companionsOf,
+  groupSystemRows,
+  hasGames,
   installRecommendedLabel,
+  recommendedText,
+  systemCountText,
+  systemsLede,
+  windowsCountText,
   installingRecommendedLabel,
   isInstalling,
   liveEmulatorSources,
@@ -56,13 +62,27 @@ function setup(label: string, name: string, options: SetupOption[], core: string
   };
 }
 
-const platform = (id: number, name: string): Platform => ({
-  id,
-  name,
-  slug: name.toLowerCase(),
-  rom_count: 4,
-  custom_name: null,
-  display_name: name,
+/** A system RomM has (server id `id`), keyed by the setup row's slug. */
+const platform = (id: number, label: string, name = label, installed = 0): SystemPlatform => {
+  const system: SystemPlatform = {
+    slug: label.toLowerCase().replace(/\s+/g, ''),
+    label,
+    aliases: name === label ? [] : [name],
+    origin: 'both',
+    server_id: id,
+    server_rom_count: 4,
+    installed_count: installed,
+  };
+  // The backend also sends the keyword-matching name beside the TS type.
+  return Object.assign(system, { name });
+};
+
+/** A catalog-only system (no RomM). */
+const local = (label: string, installed = 0): SystemPlatform => ({
+  ...platform(0, label, label, installed),
+  origin: 'catalog',
+  server_id: null,
+  server_rom_count: null,
 });
 
 const defaults = (map: Record<string, string>): LaunchDefaults => ({
@@ -75,7 +95,12 @@ const ps2 = setup('PlayStation 2', 'Sony PlayStation 2', [pcsx2, pcsx2Server]);
 const dc = setup('Dreamcast', 'Sega Dreamcast', [redream]);
 const snes = setup('Super Nintendo', 'Super Nintendo', [retroarch], 'snes9x');
 const zeebo = setup('Zeebo', 'Zeebo', []);
-const platforms = [platform(1, 'Sony PlayStation 2'), platform(2, 'Sega Dreamcast'), platform(3, 'Super Nintendo'), platform(4, 'Zeebo')];
+const platforms = [
+  platform(1, 'PlayStation 2', 'Sony PlayStation 2'),
+  platform(2, 'Dreamcast', 'Sega Dreamcast'),
+  platform(3, 'Super Nintendo'),
+  platform(4, 'Zeebo'),
+];
 
 describe('buildSystemRows', () => {
   it('puts systems with no emulator first, then alphabetical', () => {
@@ -206,7 +231,7 @@ describe('emulators across systems', () => {
     const others = otherEmulators([entry('RetroArch'), entry('Snes9x'), entry('Mednafen')], rows);
     expect(others.map((e) => e.name)).toEqual(['Snes9x', 'Mednafen']);
     expect(otherEmulatorNote(canPlay('Snes9x', rows))).toBe('Not used by any system. It can play Super Nintendo.');
-    expect(otherEmulatorNote(canPlay('Mednafen', rows))).toBe('Not used by any system on your server.');
+    expect(otherEmulatorNote(canPlay('Mednafen', rows))).toBe('Not used by any system.');
   });
 
   it('asks for firmware only for each system and its own emulator', () => {
@@ -271,6 +296,60 @@ describe('companions', () => {
     expect(missingCompanionText({ profile: QT }, SHAD)).toBe(
       `${QT} is not installed. Installing or updating ShadPS4 adds it too.`,
     );
+  });
+});
+
+describe('without RomM (romm-storefront-plan 0.12)', () => {
+  const psx = setup('PlayStation', 'PlayStation', [opt('stenzek/duckstation', 'DuckStation (Playstation 1)')]);
+  const gba = setup('Game Boy Advance', 'Game Boy Advance', [retroarch], 'mgba');
+  const jag = setup('Atari Jaguar', 'Atari Jaguar', []);
+  const systems = [local('PlayStation', 2), local('Game Boy Advance'), local('Atari Jaguar')];
+  const rows = buildSystemRows([psx, gba, jag, ps2], [...systems, local('PlayStation 2')], defaults({ 'PlayStation 2': 'PCSX2' }), {
+    'Sony PlayStation 2': ['PCSX2'],
+  });
+  const groups = groupSystemRows(rows, () => false);
+
+  it('keeps systems with games or an emulator in your systems, the rest under More systems', () => {
+    expect(groups.yours.map((r) => r.label)).toEqual(['PlayStation', 'PlayStation 2']);
+    // Nothing GRID installs and no games: not listed at all.
+    expect(groups.more.map((r) => r.label)).toEqual(['Game Boy Advance']);
+    expect(rows.find((r) => r.label === 'PlayStation')?.platform).toBeNull();
+  });
+
+  it('counts games with and without RomM', () => {
+    expect(systemCountText({ serverCount: 48, installedCount: 3 })).toBe('48 on RomM · 3 installed');
+    expect(systemCountText({ serverCount: 48, installedCount: 0 })).toBe('48 on RomM');
+    expect(systemCountText({ serverCount: null, installedCount: 3 })).toBe('3 installed');
+    expect(systemCountText({ serverCount: null, installedCount: 0 })).toBe('No games yet');
+    expect(windowsCountText(11)).toBe('11 on RomM · runs through Proton');
+    expect(windowsCountText(null)).toBe('Runs through Proton');
+  });
+
+  it('Install recommended counts only systems with games', () => {
+    const missing = missingRecommended(groups.yours.filter((r) => hasGames(r)), () => false);
+    expect(missing).toEqual([{ platform: 'PlayStation', source_id: 'stenzek/duckstation' }]);
+  });
+
+  it('a busy system stays in your systems', () => {
+    expect(groupSystemRows(rows, (r) => r.label === 'Game Boy Advance').yours.map((r) => r.label)).toContain('Game Boy Advance');
+  });
+
+  it('reads a default saved under another name of the system (label lookup)', () => {
+    const custom = [{ ...platform(9, 'PS1 Classics', 'PlayStation'), slug: 'playstation', aliases: ['PlayStation', 'Sony PlayStation'] }];
+    const psxRow = setup('PS1 Classics', 'PlayStation', [opt('stenzek/duckstation', 'DuckStation')]);
+    const [row] = buildSystemRows([{ ...psxRow, slug: 'playstation' }], custom, defaults({ 'Sony PlayStation': 'DuckStation' }), {
+      PlayStation: ['DuckStation', 'Other'],
+    });
+    expect(row.emulator).toBe('DuckStation');
+    expect(row.platform?.id).toBe(9);
+  });
+
+  it('words', () => {
+    expect(systemsLede(false)).toBe(
+      'Pick an emulator for each system you play. GRID installs, updates and sets it up, with or without RomM.',
+    );
+    expect(systemsLede(true)).toContain(' Systems on your RomM server are listed with their game counts.');
+    expect(recommendedText(groups.more[0])).toBe('RetroArch is recommended for Game Boy Advance.');
   });
 });
 

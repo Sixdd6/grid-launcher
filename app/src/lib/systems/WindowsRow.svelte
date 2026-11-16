@@ -18,6 +18,7 @@
   } from '../emulators/compatTools';
   import SystemRow from './SystemRow.svelte';
   import { protonInstalling, protonInstallSource, protonPicker, protonStatus } from './proton';
+  import { windowsCountText } from './rows';
 
   let { active = true, gameCount = null }: { active?: boolean; gameCount?: number | null } = $props();
 
@@ -91,7 +92,7 @@
 <SystemRow
   testKey="windows"
   label="Windows"
-  meta={gameCount === null ? 'runs through Proton' : `${gameCount === 1 ? '1 game' : `${gameCount} games`} · runs through Proton`}
+  meta={windowsCountText(gameCount)}
   {open}
   pickerLabel="Proton version for Windows games"
   selected={picker.selected}

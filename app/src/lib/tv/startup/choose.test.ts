@@ -22,8 +22,8 @@ describe('Choose your systems rows (items 400–403)', () => {
   });
 
   it('shows each system off at first with its games and the recommended emulator', () => {
-    expect(chooseRow(ps2, {})).toEqual({ key: 'ch-ps2', label: 'PlayStation 2', sub: '3 games', value: 'PCSX2', on: false, disabled: false });
-    expect(chooseRow({ ...ps2, rom_count: 1 }, {}).sub).toBe('1 game');
+    expect(chooseRow(ps2, {})).toEqual({ key: 'ch-ps2', label: 'PlayStation 2', sub: '3 games on RomM', value: 'PCSX2', on: false, disabled: false });
+    expect(chooseRow({ ...ps2, rom_count: 1 }, {}).sub).toBe('1 game on RomM');
     expect(chooseRow(ps2, { 'PlayStation 2': 'other/play' })).toMatchObject({ on: true, value: 'Play!' });
   });
 

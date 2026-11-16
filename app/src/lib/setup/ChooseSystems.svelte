@@ -74,7 +74,7 @@
     <p class="muted" role="status">Loading your systems…</p>
   {:else}
     {#if rows.length === 0}
-      <p class="notice" role="status">Your server has no systems that need an emulator.</p>
+      <p class="notice" role="status">Your RomM server has no systems that need an emulator.</p>
     {/if}
     <ul class="sys-list">
       {#each rows as row (row.label)}
