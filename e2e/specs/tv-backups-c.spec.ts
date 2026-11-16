@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { APP_START_TIMEOUT, configPath, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { tvRailTo } from '../helpers/romm.js';
 import { mountOf } from '../helpers/drives.js';
 import { connectPad, focused, hints, invoke, key, waitFocused, waitTab, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, pageErrors, testId, text, waitButtons, waitGone, waitText } from '../helpers/tvDetails.js';
@@ -35,7 +36,7 @@ async function driveCover(): Promise<string> {
  * profile used without a server (seed `tv-backups-c`: a library folder,
  * `offline = true`) and TESTDRIVE holding the "Travel kit" pack: Travel Game
  * (PlayStation 2), PCSX2 for Linux and a PS2 BIOS. --tv opens the Library on
- * the drive. Select mode on a drive, Details from a drive, Install from
+ * All games (never connected, decision 16). Select mode on a drive, Details from a drive, Install from
  * drive (with the drive's emulator and firmware), then Remove from drive….
  */
 describe('tv-backups-c: Backup drives without a server', () => {
@@ -46,7 +47,10 @@ describe('tv-backups-c: Backup drives without a server', () => {
     await connectPad(XBOX_PAD);
   });
 
-  it('opens on the drive: its header, chips and grid (items 420–422, 516)', async () => {
+  it('opens on All games (never connected, decision 16); the drive: its header, chips and grid (items 420–422, 516)', async () => {
+    await waitFocused('r-all');
+    await waitText('tv-lib-name', 'All games');
+    await tapK(`r-drive:${mountOf(DRIVE)}`);
     await waitText('tv-lib-name', PACK);
     await waitText('tv-lib-count', new RegExp(`^1 game · .+ · on ${DRIVE}$`));
     await waitText('tv-lib-emus', 'Emulators: PCSX2 (Playstation 2)');
@@ -150,18 +154,12 @@ describe('tv-backups-c: Backup drives without a server', () => {
     expect(await text('tv-det-left')).toContain('Installed on this computer.');
     await key('Escape');
     await waitGone('tv-details');
-    // X on the Library's platform row: Backup all opens the Backup page,
-    // which copies installed games without RomM (romm-storefront plan Step 2).
-    const plat = 'r-platform:playstation-2';
-    await $(byK(plat)).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the PlayStation 2 row never showed' });
-    await key('Escape');
-    for (let i = 0; i < 12 && (await focused()) !== plat; i++) {
-      await key('ArrowUp');
-      await browser.pause(80);
-    }
-    await waitFocused(plat);
-    expect(await hints()).toContain('X Backup all 1…');
-    await key('x');
+    // RomM › Installed (the installed copy is a RomM game; RomM isn't
+    // connected): Backup all opens the Backup page, which copies installed
+    // games without RomM (romm-storefront plan Step 2).
+    await tvRailTo('r-romm:installed');
+    await waitText('tv-romm-backup-all', 'Backup all 1…');
+    await tapK('rh-bk');
     await $(testId('tv-backup-page')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await key('Escape');
     await waitGone('tv-backup-page');

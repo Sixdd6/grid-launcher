@@ -11,6 +11,7 @@ import {
   romPath,
   testId,
 } from '../helpers/libraryMove.js';
+import { openRommPlatform } from '../helpers/romm.js';
 
 const missingRoot = () => path.join(dataDir(), 'relocate-missing');
 const realRoot = () => path.join(dataDir(), 'relocate-real');
@@ -24,18 +25,18 @@ const realRoot = () => path.join(dataDir(), 'relocate-real');
  * installed row and emulator entries under it, while the files themselves
  * are in `<data>/relocate-real` (and the PCSX2 ini and xemu.toml there still
  * name the missing folder). GRID must show the blocking unreachable-library
- * dialog instead of Connect; "Relocate the library…" to the real folder
+ * dialog instead of the welcome; "Relocate the library…" to the real folder
  * rewrites every stored path, moves no file, and lets the app continue.
  */
 describe('library-move (c): relocate an unreachable library', () => {
-  it('shows the unreachable-library dialog instead of Connect', async () => {
+  it('shows the unreachable-library dialog instead of the welcome', async () => {
     await $(testId('library-unreachable')).waitForDisplayed({
       timeout: APP_START_TIMEOUT,
       timeoutMsg: 'the unreachable-library dialog never appeared',
     });
     await expect($(testId('library-unreachable-root'))).toHaveText(missingRoot());
-    expect(await $(testId('connect-server-url')).isExisting()).toBe(false);
-    expect(await $(testId('platform-btn-1')).isExisting()).toBe(false);
+    expect(await $(testId('welcome')).isExisting()).toBe(false);
+    expect(await $(testId('shell-topbar')).isExisting()).toBe(false);
   });
 
   it('relocates the library to the folder where the files are', async () => {
@@ -64,11 +65,9 @@ describe('library-move (c): relocate an unreachable library', () => {
 
   it('continues to the normal flow with the game still installed', async () => {
     await reachShell();
-    await $(testId('nav-server')).click();
-    await $(testId('server-view')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({
+    await $(`${testId('romm-platform-view')} ${testId('installed-badge-101')}`).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'rom 101 does not show as installed after the relocate',
     });

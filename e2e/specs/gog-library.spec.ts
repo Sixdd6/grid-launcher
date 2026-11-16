@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { dataDir, INSTALL_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { openRommPlatform } from '../helpers/romm.js';
 import { connectRomm, openDownloads, openGog, openStoresSettings, storeCards, testId, waitForDownloadLine } from '../helpers/gog.js';
 import { selectValue } from '../helpers/systems.js';
 import { waitForToast } from '../helpers/toasts.js';
@@ -200,18 +201,17 @@ describe('gog-library', () => {
     await scrollHolds('library-section', top);
   });
 
-  it('keeps the Server grid’s scroll position while a game’s details are open and after they close', async () => {
-    await $(testId('nav-server')).click();
-    await $(testId('platform-btn-1')).click();
+  it('keeps a RomM platform grid’s scroll position while a game’s details are open and after they close', async () => {
+    await openRommPlatform('linux');
     const card = testId('game-card-901');
     await $(card).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    const top = await scrolledToCard('server-section', card);
+    const top = await scrolledToCard('romm-platform-view', card);
     await $(card).click();
     await $(testId('details-panel')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
-    await scrollHolds('server-section', top);
+    await scrollHolds('romm-platform-view', top);
     await browser.keys('Escape');
     await $(testId('details-panel')).waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
-    await scrollHolds('server-section', top);
+    await scrollHolds('romm-platform-view', top);
   });
 
   it('Settings › Stores shows the GOG card and asks before Disconnect', async () => {

@@ -1,10 +1,10 @@
 import { TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { unplug } from '../helpers/drives.js';
+import { tvRailTo } from '../helpers/romm.js';
 import { assertNoClipping, connectPad, focused, hints, key, toastTitles, waitFocused, waitTab, XBOX_PAD } from '../helpers/tv.js';
+import { tapK } from '../helpers/tvBackups.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
-const SNES = 'r-platform:super-nintendo-entertainment-system';
-const GENESIS = 'r-platform:sega-genesis';
 
 async function text(id: string): Promise<string> {
   return ((await browser.execute((s: string) => document.querySelector(s)?.textContent ?? '', testId(id))) as string).trim();
@@ -95,7 +95,7 @@ describe('tv-library: the Library tab', () => {
     await connectPad(XBOX_PAD);
   });
 
-  it('lists All games, Recent, Updates, a divider, the Platforms and Backup drives folders, with counts (items 176–177, 183–184, 420)', async () => {
+  it('lists All games, Recent, Updates, a divider, the Backup drives folder and the RomM group, with counts (items 176–177, 183–184, 420)', async () => {
     let shape: string[] = [];
     await browser.waitUntil(
       async () => {
@@ -107,23 +107,24 @@ describe('tv-library: the Library tab', () => {
       throw new Error(`rail: ${shape.join(' | ')}`);
     });
     const drive = shape.find((k) => k.startsWith('r-drive:'))!;
-    expect(shape).toEqual(['r-all', 'r-recent', 'r-updates', 'HR', 'fold-plat', GENESIS, SNES, 'fold-drives', drive]);
+    // No PLATFORMS folder: platform rows live in the RomM group, and only
+    // while RomM is connected; with RomM off it has Installed alone
+    // (romm-storefront-plan decision 11).
+    expect(shape).toEqual(['r-all', 'r-recent', 'r-updates', 'HR', 'fold-drives', drive, 'fold-romm', 'r-romm:installed']);
     expect(await text('tv-lib-rail-all')).toBe('All games3');
     expect(await text('tv-lib-rail-recent')).toBe('Recent1');
     expect(await text('tv-lib-rail-updates')).toBe('Updates0');
-    expect(await text('tv-lib-rail-platform-super-nintendo-entertainment-system')).toBe('Super Nintendo Entertainment System2');
-    expect(await text('tv-lib-rail-platform-sega-genesis')).toBe('Sega Genesis1');
+    expect(await text('tv-lib-rail-romm-installed')).toBe('Installed3');
     expect(await browser.execute((k: string) => document.querySelector(`[data-k="${k}"]`)?.textContent?.trim(), drive)).toBe('Travel kit2');
     // Rows in a folder are indented under its header.
     const pad = await browser.execute((k: string) => {
       const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
       return parseFloat(getComputedStyle(document.querySelector(`[data-k="${k}"]`)!).paddingLeft) / rem;
-    }, SNES);
+    }, 'r-romm:installed');
     expect(pad).toBeCloseTo(2.3, 1);
-    // Used without a server, GRID opens on the first Backup drive (item 415,
-    // P12); Up through the rail (which selects as it goes) reaches All games.
-    await waitFocused(drive);
-    await railTo('r-all', 'ArrowUp');
+    // Never connected to RomM, GRID opens on All games (decision 16), not
+    // the first Backup drive.
+    await waitFocused('r-all');
     await waitText('tv-lib-name', 'All games');
     await waitText('tv-lib-count', '3 games');
     // Recently played first; never played last. Platform tags in a mixed list.
@@ -144,31 +145,36 @@ describe('tv-library: the Library tab', () => {
     await waitFocused('r-updates');
     await waitText('tv-lib-empty', /^Everything is up to date\s*Game updates show here\.$/);
     await key('ArrowDown');
-    await waitFocused('fold-plat');
+    await waitFocused('fold-drives');
     // The header still names the filter: a folder header selects nothing.
     expect(await text('tv-lib-name')).toBe('Updates');
     expect(await hints()).toContain('A Close');
     await key('ArrowDown');
-    await waitFocused(GENESIS);
-    await waitText('tv-lib-name', 'Sega Genesis');
-    await waitCovers(['lg103']);
-    // No platform tag under a single platform (item 186).
-    expect(await browser.execute(() => !!document.querySelector('[data-testid="tv-cover-lg103"] .tag.plat'))).toBe(false);
-    expect(await hints()).toEqual(['A Open', 'X Backup all 1…', 'Y Search', 'LT Sort', 'RT Select', 'MENU Menu']);
+    await key('ArrowDown');
+    await waitFocused('fold-romm');
+    await waitText('tv-lib-name', 'Travel kit');
+    await key('ArrowDown');
+    await waitFocused('r-romm:installed');
+    await waitText('tv-lib-name', /^RomM\s*· Installed$/);
+    let keys: string[] = [];
+    await browser.waitUntil(async () => (keys = await covers()).length === 3, { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'RomM › Installed never showed its three games' });
+    // Platform tags in RomM › Installed, a mixed list (item 186).
+    expect(keys.every((k) => k.startsWith('rg'))).toBe(true);
+    expect(await browser.execute(() => document.querySelectorAll('#lib-grid [data-cover] .tag.plat').length)).toBe(3);
   });
 
-  it('X on a platform row opens the Backup page, with no server too (item 455)', async () => {
+  it('Backup all on RomM › Installed opens the Backup page, with RomM off too (item 455)', async () => {
     // Backups copy installed games without RomM (romm-storefront plan Step 2).
-    await key('x');
+    await waitText('tv-romm-backup-all', 'Backup all 3…');
+    await tapK('rh-bk');
     await $('[data-testid="tv-backup-page"]').waitForExist({ timeout: TRANSITION_TIMEOUT });
     await key('Escape');
     await $('[data-testid="tv-backup-page"]').waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
   });
 
   it('A or Right goes into the grid; Up from the top row stays put; Left and B go to the selected row (items 89, 179)', async () => {
-    await key('ArrowDown');
-    await waitFocused(SNES);
-    await waitCovers(['lg101', 'lg102']);
+    await tvRailTo('r-all');
+    await waitCovers(['lg101', 'lg103', 'lg102']);
     await key('Enter');
     await waitFocused('lg101');
     await assertNoClipping();
@@ -177,45 +183,45 @@ describe('tv-library: the Library tab', () => {
     await browser.pause(300);
     expect(await focused()).toBe('lg101');
     await key('ArrowLeft');
-    await waitFocused(SNES);
+    await waitFocused('r-all');
     await key('ArrowRight');
     await waitFocused('lg101');
     await key('ArrowRight');
-    await waitFocused('lg102');
+    await waitFocused('lg103');
     await key('Escape');
-    await waitFocused(SNES);
+    await waitFocused('r-all');
     await key('ArrowRight');
-    await waitFocused('lg102', 'Right did not come back to the cover last focused');
+    await waitFocused('lg103', 'Right did not come back to the cover last focused');
   });
 
   it('A on a folder header closes and opens it; closed, the header still names the filter and stays closed for the session (items 180–183)', async () => {
     await key('Escape');
-    await waitFocused(SNES);
-    // Up through Sega Genesis selects it on the way (item 105).
-    await railTo('fold-plat', 'ArrowUp');
-    await waitText('tv-lib-name', 'Sega Genesis');
+    await waitFocused('r-all');
+    await railTo('r-romm:installed');
+    await waitText('tv-lib-name', /^RomM\s*· Installed$/);
+    await railTo('fold-romm', 'ArrowUp');
     await key('Enter');
-    await browser.waitUntil(async () => !(await railShape()).includes(SNES), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the folder never closed' });
-    expect(await browser.execute(() => document.querySelector('[data-k="fold-plat"] .chev')?.classList.contains('open'))).toBe(false);
-    expect(await browser.execute(() => document.querySelector('[data-k="fold-plat"]')?.getAttribute('aria-expanded'))).toBe('false');
+    await browser.waitUntil(async () => !(await railShape()).includes('r-romm:installed'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the folder never closed' });
+    expect(await browser.execute(() => document.querySelector('[data-k="fold-romm"] .chev')?.classList.contains('open'))).toBe(false);
+    expect(await browser.execute(() => document.querySelector('[data-k="fold-romm"]')?.getAttribute('aria-expanded'))).toBe('false');
     expect(await hints()).toContain('A Open');
-    expect(await text('tv-lib-name')).toBe('Sega Genesis');
+    expect(await text('tv-lib-name')).toMatch(/^RomM\s*· Installed$/);
     // Right still goes to the grid; B comes back to the header holding the selection.
     await key('ArrowRight');
-    await waitFocused('lg103');
+    await browser.waitUntil(async () => ((await focused()) ?? '').startsWith('rg'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Right never reached the grid' });
     await key('Escape');
-    await waitFocused('fold-plat');
-    expect(await text('tv-lib-name')).toBe('Sega Genesis');
+    await waitFocused('fold-romm');
+    expect(await text('tv-lib-name')).toMatch(/^RomM\s*· Installed$/);
     // Kept across a tab switch.
     await key('e');
-    await waitTab('server');
+    await waitTab('downloads');
     await key('q');
     await waitTab('library');
-    expect(await railShape()).not.toContain(SNES);
-    await waitFocused('fold-plat');
+    expect(await railShape()).not.toContain('r-romm:installed');
+    await waitFocused('fold-romm');
     await key('Enter');
-    await browser.waitUntil(async () => (await railShape()).includes(SNES), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the folder never opened' });
-    expect(await browser.execute(() => document.querySelector('[data-k="fold-plat"] .chev')?.classList.contains('open'))).toBe(true);
+    await browser.waitUntil(async () => (await railShape()).includes('r-romm:installed'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the folder never opened' });
+    expect(await browser.execute(() => document.querySelector('[data-k="fold-romm"] .chev')?.classList.contains('open'))).toBe(true);
   });
 
   it('LT sorts; Y searches live; Done keeps the search; B restores it; a new rail row clears it (items 185, 187–189, 193)', async () => {
@@ -348,8 +354,8 @@ describe('tv-library: the Library tab', () => {
     await waitText('tv-lib-name', 'All games');
     await key('Escape');
     await waitFocused('r-all');
-    // The note is the rail's end: the last row scrolls the rail to its very bottom.
-    await railTo('fold-drives');
+    // The RomM group ends the rail: its last row scrolls the rail to its very bottom.
+    await railTo('r-romm:installed');
     const atEnd = await browser.execute(() => {
       const nav = document.querySelector('[data-testid="tv-library"] [data-rail]') as HTMLElement;
       return nav.scrollTop + nav.clientHeight >= nav.scrollHeight - 2;

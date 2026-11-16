@@ -9,6 +9,8 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { connectRomm } from '../helpers/romm.js';
+import { findLine } from '../helpers/systems.js';
 import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
@@ -94,16 +96,7 @@ const QT_KEY = keyOf(`companion-${PS4}-${QT_LAUNCHER}`);
  */
 describe('Settings › Systems', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-library-path')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('connect-library-path')).setValue(path.join(dataDir(), 'library'));
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await connectRomm({ libraryPath: path.join(dataDir(), 'library') });
     await $(testId('nav-settings')).click();
     await $(testId('settings-nav-systems')).click();
     await $(testId('systems-list')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
@@ -143,14 +136,16 @@ describe('Settings › Systems', () => {
     await waitForToast(/^Installing Redream.*…$/, { timeoutMsg: 'no "Installing" card for Redream' });
     await waitForConfig((c) => c.includes(`"${DC}" = "${REDREAM}"`), 'Redream never became Dreamcast’s emulator');
     await waitForToast(`${REDREAM} installed`, { timeoutMsg: 'no "installed" card for Redream' });
-    await waitForStatus('dc', 'ready');
+    // Redream with no BIOS: Firmware needed (romm-storefront-plan Step 7).
+    await waitForStatus('dc', 'firmware');
     await expect($(testId('systems-install-recommended'))).toHaveText('Install recommended (3)');
   });
 
   it('a Download pick installs the emulator and makes it the system’s emulator', async () => {
     await pick('ps2', 'install:PCSX2/pcsx2');
     await waitForConfig((c) => c.includes(`"${PS2}" = "${PCSX2}"`), 'PCSX2 never became PS2’s emulator');
-    await waitForStatus('ps2', 'ready');
+    // PCSX2 with no BIOS: Firmware needed (romm-storefront-plan Step 7).
+    await waitForStatus('ps2', 'firmware');
     expect((await groups('ps2')).Installed).toEqual([`use:${PCSX2}=${PCSX2} (recommended)`]);
     // Systems with an emulator move below the ones without.
     expect(await rowOrder()).toEqual(['ps4', 'snes', 'zeebo', 'dc', 'ps2', 'windows']);
@@ -162,14 +157,16 @@ describe('Settings › Systems', () => {
     await waitForStatus('ps2', 'none', TRANSITION_TIMEOUT);
     await pick('ps2', `use:${PCSX2}`);
     await waitForConfig((c) => c.includes(`"${PS2}" = "${PCSX2}"`), 'the Installed pick never reached config.toml', TRANSITION_TIMEOUT);
-    await waitForStatus('ps2', 'ready', TRANSITION_TIMEOUT);
+    await waitForStatus('ps2', 'firmware', TRANSITION_TIMEOUT);
   });
 
   it('says when an update is out, after Check for updates', async () => {
     await fetch(`${forgeUrl()}/__e2e__/pcsx2-release/updated`, { method: 'POST' });
     await $(testId('systems-check-updates')).click();
-    await waitForStatus('ps2', 'update', TRANSITION_TIMEOUT * 2);
-    await $(testId('sys-update-sony-playstation-2')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    // Firmware needed outranks Update in the row's pill: the Update button
+    // is what says an update is out.
+    await $(testId('sys-update-sony-playstation-2')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT * 2 });
+    expect(await statusOf('ps2')).toBe('firmware');
     await expect($(testId('sys-update-sony-playstation-2'))).toHaveText(expect.stringContaining('Update to'));
   });
 
@@ -279,7 +276,8 @@ describe('Settings › Systems', () => {
       TRANSITION_TIMEOUT,
     );
     await waitForConfig((c) => c.includes(`"${DC}" = "${REDREAM}"`), 'Redream never came back as Dreamcast’s emulator');
-    await waitForStatus('dc', 'ready');
+    // Redream with no BIOS: Firmware needed (romm-storefront-plan Step 7).
+    await waitForStatus('dc', 'firmware');
   });
 
   it('adds an emulator by hand without making it any system’s emulator', async () => {
@@ -301,8 +299,9 @@ describe('Settings › Systems', () => {
     await $(testId('emu-form-save')).click();
     await $(testId('systems-sheet')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
     await waitForConfig((c) => c.includes(`name = "${dolphin}"`), 'the manual entry never reached config.toml', TRANSITION_TIMEOUT);
-    // No fixture system is a GameCube or Wii: it is nobody's emulator.
-    await $(testId('systems-other-list')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    // It shows on its systems' rows (GameCube and Wii are catalog systems
+    // since romm-storefront-plan Step 7), and is still nobody's emulator.
+    await findLine(dolphin);
     const after = config().match(/\[default_emulators\][^[]*/)?.[0] ?? '';
     expect(after).toBe(before);
     expect(after).not.toContain('Dolphin');

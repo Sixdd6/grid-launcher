@@ -1,12 +1,12 @@
 {
   "801": {
     "id": 801,
-    "name": "PCSX2",
-    "fs_name_no_ext": "pcsx2-server",
+    "name": "ps2",
+    "fs_name_no_ext": "ps2",
     "platform_id": 1,
     "platform_display_name": "Emulators",
-    "fs_name": "pcsx2-server.zip",
-    "summary": "A server Emulators-platform package: one zip holding a Linux PCSX2 AppImage stub.",
+    "fs_name": "ps2",
+    "summary": "A server Emulators-platform folder packaged to docs/server-emulator-packages.md: one Linux PCSX2 build whose zip holds the mock forge's PCSX2 AppImage stub.",
     "regions": [],
     "languages": [],
     "tags": [],
@@ -14,7 +14,12 @@
     "fs_size_bytes": 0,
     "updated_at": "2026-01-01T00:00:00Z",
     "files": [
-      { "id": 8011, "file_name": "pcsx2-server.zip", "file_size_bytes": 0, "is_top_level": true }
+      {
+        "id": 8011,
+        "file_name": "PCSX2 (v2.0.2) (arch-linux-x64).zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
     ],
     "metadatum": null
   }

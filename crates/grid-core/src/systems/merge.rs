@@ -39,10 +39,29 @@ fn push_alias(row: &mut SystemPlatform, name: &str) {
     row.aliases.push(name.to_string());
 }
 
+/// The slug of the catalog row whose label or alias equals one of `names`
+/// (ignoring case), if any.
+fn catalog_row_named(rows: &BTreeMap<String, SystemPlatform>, names: &[&str]) -> Option<String> {
+    rows.values()
+        .find(|r| {
+            r.origin == PlatformOrigin::Catalog
+                && names
+                    .iter()
+                    .map(|n| n.trim())
+                    .filter(|n| !n.is_empty())
+                    .any(|n| {
+                        r.label.eq_ignore_ascii_case(n)
+                            || r.aliases.iter().any(|a| a.eq_ignore_ascii_case(n))
+                    })
+        })
+        .map(|r| r.slug.clone())
+}
+
 /// Joins the three sources by slug (slug aliases folded to the catalog's
 /// slug):
 /// - every catalog platform (`Catalog`);
-/// - a server platform the catalog knows takes over its label (`Both`), one
+/// - a server platform the catalog knows (by slug, else by a name or alias
+///   equal to the server's label or name) takes over its label (`Both`), one
 ///   it does not know is added (`Server`); the Emulators shelf is dropped;
 /// - an installed row counts toward its slug (`platform_slug`, else the
 ///   platform whose label or alias equals the row's `platform`, else the
@@ -77,9 +96,17 @@ pub fn merge(
         if is_emulators_platform(p.label()) || is_emulators_platform(&p.name) {
             continue;
         }
-        let slug = canonical_slug(&p.slug);
+        let mut slug = canonical_slug(&p.slug);
         if slug.is_empty() {
             continue;
+        }
+        // A server slug the catalog doesn't list, on a platform whose name
+        // is a catalog platform's name or alias (a server's `ps` named
+        // "PlayStation"), joins that catalog row: one row per system.
+        if !rows.contains_key(&slug) {
+            if let Some(found) = catalog_row_named(&rows, &[p.label(), &p.name]) {
+                slug = found;
+            }
         }
         let label = p.label().to_string();
         let row = rows.entry(slug.clone()).or_insert_with(|| SystemPlatform {
@@ -247,6 +274,21 @@ mod tests {
         );
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].origin, PlatformOrigin::Both);
+    }
+
+    #[test]
+    fn a_server_slug_the_catalog_lacks_joins_the_catalog_row_of_the_same_name() {
+        let rows = merge(
+            &catalog(),
+            Some(&[server(1, "ps", "PlayStation", None, 5)]),
+            &[],
+        );
+        assert_eq!(rows.iter().filter(|r| r.label == "PlayStation").count(), 1);
+        let psx = find(&rows, "psx");
+        assert_eq!(psx.origin, PlatformOrigin::Both);
+        assert_eq!(psx.server_id, Some(1));
+        assert_eq!(psx.server_rom_count, Some(5));
+        assert!(rows.iter().all(|r| r.slug != "ps"));
     }
 
     #[test]

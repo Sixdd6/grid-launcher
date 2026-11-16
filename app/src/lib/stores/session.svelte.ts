@@ -12,8 +12,8 @@ import {
 import { initRomm, phaseAfterWelcome, refreshRomm, restoreRomm, romm, setupNeeded } from './romm.svelte';
 
 /**
- * The app's startup phase and the legacy session fields. `connected` is a
- * getter over RomM's status (`romm.svelte.ts`), so its ~30 readers do not
+ * The app's startup phase and the legacy session fields. `connected`,
+ * `serverUrl` and `username` are getters over RomM's status (`romm.svelte.ts`), so its ~30 readers do not
  * change (romm-storefront-plan 0.7). `offline`, `lastError` and `rejected`
  * stay for the legacy chip and Connect screen until Step 9; the RomM
  * storefront code does not write them.
@@ -23,8 +23,6 @@ class Session {
   /** Where Choose your systems returns (plan 0.5). Set with `phase = 'setup'`;
    *  kept after Skip/Done so the shell can open Settings › Game stores. */
   setupReturn = $state<SetupReturn | null>(null);
-  serverUrl = $state('');
-  username = $state('');
   lastError = $state<string | null>(null);
   offline = $state(false);
   rejected = $state<AuthKind | undefined>(undefined);
@@ -34,6 +32,20 @@ class Session {
   get connected(): boolean {
     return romm.status.connection === 'connected';
   }
+
+  /** RomM's stored server and user, from its status like `connected`: the
+   *  RomM storefront flow (welcome, Game stores card, background restore)
+   *  never runs the legacy `assign`, so a field of its own went stale (empty)
+   *  and Details' "On <drive>" line, the Backup dialog's host and Discover's
+   *  feed cache read nothing. The legacy writes are ignored until Step 9. */
+  get serverUrl(): string {
+    return romm.status.server_url;
+  }
+  set serverUrl(_value: string) {}
+  get username(): string {
+    return romm.status.username;
+  }
+  set username(_value: string) {}
 }
 
 export const session = new Session();

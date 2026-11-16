@@ -1,5 +1,6 @@
 // e2e-app-args:
-import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { connectRomm, enterTvMode } from '../helpers/romm.js';
 import { assertNoClipping, axis, connectPad, focused, hints, key, press, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
 import {
   bodyScroll,
@@ -9,6 +10,7 @@ import {
   pageErrors,
   testId,
   text,
+  toAllGames,
   waitButtons,
   waitGone,
   waitText,
@@ -33,19 +35,11 @@ async function lines(sel: string): Promise<string[]> {
  */
 describe('tv-details (a): Details, Saves and Playing', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({ timeout: APP_START_TIMEOUT, timeoutMsg: 'the connect form never appeared' });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('tv-mode-button')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the desktop shell never loaded' });
+    await connectRomm();
     await captureErrors();
-    await $(testId('tv-mode-button')).click();
-    await $(testId('tv-shell')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'TV mode never opened' });
-    await waitTab('server');
+    await enterTvMode();
     await connectPad(XBOX_PAD);
-    await key('q');
-    await waitTab('library');
-    await waitFocused('r-all');
+    await toAllGames();
   });
 
   it('A on a cover pushes Details: left lines, header, buttons, the first button focused (items 270–277)', async () => {

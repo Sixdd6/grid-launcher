@@ -8,6 +8,7 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { connectRomm, openRommPlatform, openLibrary } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -46,11 +47,7 @@ describe('content', () => {
   }
 
   async function showServer() {
-    await $(testId('nav-server')).click();
-    await $(testId('server-view')).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server view never came back',
-    });
+    await openLibrary();
   }
 
   /** Waits for a download row to reach `Completed`, on the Downloads view. */
@@ -77,17 +74,7 @@ describe('content', () => {
   }
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after connecting',
-    });
+    await connectRomm();
 
     // The seed already wrote library_path, so no library-path banner step.
     // Prove the Downloads pill reaches its view once, up front; the tests
@@ -97,7 +84,7 @@ describe('content', () => {
 
   it('installs the PS4 base game and then offers Install Update', async () => {
     await showServer();
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('ps4');
     await openDetails(501);
     await $(testId('details-install')).click();
     await waitCompleted(1, 'the PS4 base install');
@@ -138,7 +125,7 @@ describe('content', () => {
     await $(testId('details-close')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
 
-    await $(testId('platform-btn-2')).click();
+    await openRommPlatform('xbox360');
     await openDetails(601);
     await $(testId('details-install')).click();
     await waitCompleted(3, 'the Xbox 360 base install');

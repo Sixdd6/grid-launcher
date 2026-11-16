@@ -1,5 +1,5 @@
 import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
-import { openPlatform } from '../helpers/server.js';
+import { connectRomm, openRommPlatform } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -107,19 +107,9 @@ async function msUntilCover(id: number, limit: number): Promise<number> {
  */
 describe('large platform: windowed grid, bounded cover loading', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the platform rail never appeared after connecting',
-    });
+    await connectRomm();
     // Server opens on Discover: select the 2500-game platform.
-    await openPlatform(1);
+    await openRommPlatform('arcade');
   });
 
   it('renders only the rows near the screen, at the full list’s height', async () => {

@@ -1,29 +1,22 @@
-import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { expectStartView, openAppearance, setServerOffline } from '../helpers/openOn.js';
+import { connectRomm } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
 /**
  * Stage `open-on`, part A: Where GRID opens (TV mode README § Decided), with
- * Open GRID on at its default, Automatic. A connect lands on Server ›
- * Discover, and Settings › Appearance shows Open GRID on as its first row.
+ * Open GRID on at its default, Automatic. A connect on the welcome lands on
+ * Library › RomM › Discover, and Settings › Appearance shows Open GRID on as its first row.
  * Parts B–D relaunch against the same data directory.
  */
-describe('open-on (a): Automatic and connected opens Server › Discover', () => {
+describe('open-on (a): Automatic and connected opens Library › RomM › Discover', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
+    await connectRomm();
   });
 
-  it('opens on Server › Discover', async () => {
-    await expectStartView('server');
-    await $(testId('server-rail-discover')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await expect($(testId('server-rail-discover'))).toHaveAttribute('aria-current', 'page');
+  it('opens on Library › RomM › Discover', async () => {
+    await expectStartView('romm:discover');
+    await expect($(testId('discover'))).toBeDisplayed();
   });
 
   it('shows Open GRID on first in Settings › Appearance', async () => {
@@ -46,11 +39,13 @@ describe('open-on (a): Automatic and connected opens Server › Discover', () =>
       hint: 'Here and in TV mode',
       value: 'automatic',
       options: [
-        ['automatic', 'Automatic'],
-        ['discover', 'Server › Discover'],
+        ['automatic', 'Automatic: Discover when RomM is connected, else Library'],
+        ['discover', 'Discover (when RomM is connected)'],
         ['library', 'Library'],
       ],
     });
+    // Connected: no "opens on All games" note.
+    await expect($(testId('open-on-romm-off'))).not.toExist();
   });
 
   // Last: part B starts against an unreachable server.

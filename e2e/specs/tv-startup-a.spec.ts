@@ -1,8 +1,8 @@
 import path from 'node:path';
-import { APP_START_TIMEOUT, dataDir, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT, WRONG_TOKEN } from '../helpers/env.js';
+import { APP_START_TIMEOUT, dataDir, FIXTURE_TOKEN, FIXTURE_USERNAME, mockUrl, TRANSITION_TIMEOUT, WRONG_TOKEN } from '../helpers/env.js';
 import { assertLayoutAtSizes, connectPad, focused, hints, invoke, key, press, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
-import { captureErrors, moveTo, pageErrors, testId, text, typeKeys, waitOskClosed, waitText } from '../helpers/tvDetails.js';
-import { tap } from '../helpers/tvBackups.js';
+import { captureErrors, chooseWelcomeLibrary, moveTo, pageErrors, testId, text, typeKeys, waitOskClosed, waitText } from '../helpers/tvDetails.js';
+import { tap, tapK } from '../helpers/tvBackups.js';
 
 const MASK = '••••••••••••';
 
@@ -16,10 +16,10 @@ async function listTitle(): Promise<string> {
   return (await $(testId('tv-list')).getAttribute('aria-label')) ?? '';
 }
 
-/** A Connect row as "<label> <value>". */
+/** A sign-in page row as "<label> <value>". */
 async function fieldText(k: string): Promise<string> {
   return (await browser.execute((id: string) => {
-    const el = document.querySelector(`[data-testid="tv-cf-${id}"]`);
+    const el = document.querySelector(`[data-testid="tv-rs-${id}"]`);
     return `${el?.querySelector('.lab')?.textContent ?? ''} ${el?.querySelector('.v')?.textContent ?? ''}`.trim();
   }, k)) as string;
 }
@@ -48,54 +48,47 @@ async function expectBoxFits(): Promise<void> {
 }
 
 /**
- * Stage `tv-startup`, spec a (TV mode plan P12): a fresh profile started
- * with --tv. Connect through the on-screen keyboard: Start opens the startup
- * Menu (Switch to desktop mode, Quit GRID), the Connect button names what is
- * missing while it is disabled, View pastes from the
- * clipboard (seeded with the mock's non-secret address and the library
- * path), the folder browser and B, a rejected token comes back with the
- * reason, then Choose your systems, where Start skips, and GRID opens on
- * Server › Discover with its first cover focused.
+ * Stage `tv-startup`, spec a (TV mode plan P12; romm-storefront-plan Step
+ * 6): a fresh profile started with --tv. The welcome (which replaced
+ * Connect) in a box that fits: Start opens the startup Menu (Switch to
+ * desktop mode, Quit GRID); the library folder's browser and B. Then RomM's
+ * sign-in page through the on-screen keyboard: View pastes from the
+ * clipboard (seeded with the mock's non-secret address), Sign in with, the
+ * button names what is missing while it is disabled, a rejected token comes
+ * back with the reason; a good one connects, Continue opens Choose your
+ * systems, where Start skips, and GRID opens on Library › RomM › Discover
+ * with its first cover focused.
  */
-describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
-  const library = path.join(dataDir(), 'library');
-
+describe('tv-startup (a): the welcome, RomM sign-in and Choose your systems in TV mode', () => {
   before(async () => {
-    await $(testId('tv-connect')).waitForDisplayed({ timeout: APP_START_TIMEOUT, timeoutMsg: 'TV mode never showed Connect' });
+    await $(testId('tv-welcome')).waitForDisplayed({ timeout: APP_START_TIMEOUT, timeoutMsg: 'TV mode never showed the welcome' });
     await captureErrors();
     await connectPad(XBOX_PAD);
   });
 
-  it('shows Connect in a box that fits, with the startup top bar and hints (items 123, 132, 133, 389, 391–393)', async () => {
-    await waitText('tv-connect', /^Connect to your RomM server/);
-    expect(await $(`${testId('tv-connect')} h1`).getText()).toBe('Connect to your RomM server');
-    expect(await $(`${testId('tv-connect')} .sub`).getText()).toBe('Enter your server address and sign in.');
-    expect(await rowKeys('#cf-rows')).toEqual(['cf-url', 'cf-how', 'cf-token', 'cf-lib']);
-    expect(await fieldText('url')).toBe('Server https://…');
-    expect(await fieldText('how')).toBe('Sign in with API token');
-    expect(await fieldText('token')).toBe('API token Paste or type your token');
-    expect(await fieldText('lib')).toMatch(/^Library folder/);
+  it('shows the welcome in a box that fits, with the startup top bar and hints (items 123, 132, 133, 389, 391–393)', async () => {
+    expect(await $(`${testId('tv-welcome')} h1`).getText()).toBe('Welcome to GRID');
+    expect(await rowKeys('#wel-rows')).toEqual(['w-lib']);
+    // A fresh profile has no folder chosen yet: Next waits for one.
+    expect(await text('tv-welcome-lib-value')).toBe('Choose a folder');
+    expect(await $(testId('tv-welcome-next')).getAttribute('aria-disabled')).toBe('true');
+    expect(await $(testId('tv-welcome-next')).getAttribute('data-why')).toBe('Choose a folder to continue.');
     // The box doesn't repeat the wordmark (391).
-    expect(await $$(`${testId('tv-connect')} .brand`).length).toBe(0);
+    expect(await $$(`${testId('tv-welcome')} .brand`).length).toBe(0);
     // Top bar: no tabs, no connection, only the clock (123).
     expect(await $(testId('tv-tabs')).isExisting()).toBe(false);
     expect(await $(testId('tv-connection')).isExisting()).toBe(false);
     expect(await $(testId('tv-clock')).isExisting()).toBe(true);
-    await waitFocused('cf-url');
+    await waitFocused('w-lib');
     // No Back (132); Menu opens the startup Menu (user decision 2026-11-10).
-    expect(await hints()).toEqual(['A Edit', 'VIEW Paste', 'MENU Menu']);
+    expect(await hints()).toEqual(['A Choose', 'MENU Menu']);
     await expectBoxFits();
   });
 
-  it('Connect names what is missing while it is disabled (item 397)', async () => {
-    expect(await $(testId('tv-connect-go')).getAttribute('aria-disabled')).toBe('true');
-    expect(await $(testId('tv-connect-go')).getAttribute('data-why')).toBe('Fill in the server, the API token and the library folder first.');
-  });
-
   it('Start opens the startup Menu: Switch to desktop mode and Quit GRID; B closes it (user decision 2026-11-10)', async () => {
-    await waitFocused('cf-url');
+    await waitFocused('w-lib');
     await press('start');
-    await $(testId('tv-menu')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Start opened no Menu on Connect' });
+    await $(testId('tv-menu')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Start opened no Menu on the welcome' });
     await waitFocused('gm0');
     const labels = (await browser.execute(() =>
       Array.from(document.querySelectorAll('[data-testid="tv-menu"] .opt')).map((e) => e.textContent?.trim() ?? ''),
@@ -115,52 +108,84 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     await waitFocused('gm0');
     await press('east');
     await browser.waitUntil(async () => !(await $(testId('tv-menu')).isExisting()), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'B never closed the Menu' });
-    await waitFocused('cf-url');
-    expect(await $(testId('tv-connect')).isExisting()).toBe(true);
+    await waitFocused('w-lib');
+    expect(await $(testId('tv-welcome')).isExisting()).toBe(true);
+  });
+
+  it('Library folder opens the folder browser; B steps back to the welcome, never past it; Y uses a folder (items 97, 395)', async () => {
+    await key('Enter');
+    await $(testId('tv-folder-browser')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the folder browser never opened' });
+    expect(await $(`${testId('tv-folder-browser')} h1`).getText()).toBe('Library folder');
+    expect(await hints()).not.toContain('B Back');
+    await key('Escape');
+    await $(testId('tv-welcome')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'B never came back to the welcome' });
+    await waitFocused('w-lib');
+    await key('Escape');
+    await browser.pause(300);
+    expect(await $(testId('tv-welcome')).isExisting()).toBe(true);
+    expect(await text('tv-welcome-lib-value')).toBe('Choose a folder');
+    await chooseWelcomeLibrary(path.join(dataDir(), 'library'));
+    expect(await $(testId('tv-welcome-next')).getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it("Next shows the storefronts; RomM's row opens its sign-in page, the button naming what is missing (item 397)", async () => {
+    await waitFocused('w-next');
+    await key('Enter');
+    await $(testId('tv-welcome-stores')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Next never showed step 2' });
+    await tapK('w-romm');
+    await $(testId('tv-romm-signin')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the sign-in page never opened' });
+    expect(await rowKeys('#rs-rows')).toEqual(['rs-url', 'rs-how', 'rs-secret']);
+    expect(await fieldText('url')).toBe('Server URL https://…');
+    expect(await fieldText('how')).toBe('Sign in with API token');
+    expect(await fieldText('secret')).toBe('API token Paste or type your token');
+    expect(await $(testId('tv-rs-go')).getAttribute('aria-disabled')).toBe('true');
+    expect(await $(testId('tv-rs-go')).getAttribute('data-why')).toBe('Enter your RomM server address first.');
+    await waitFocused('rs-url');
   });
 
   it('View pastes the clipboard into the focused field (item 396), and says so when there is nothing to paste', async () => {
     await invoke('e2e_clipboard_write', { text: '' });
     await press('select');
     await waitToast('Nothing to paste');
-    expect(await text('tv-cf-url-value')).toBe('https://…');
+    expect(await text('tv-rs-url-value')).toBe('https://…');
     await invoke('e2e_clipboard_write', { text: mockUrl() });
     await press('select');
-    await waitText('tv-cf-url-value', mockUrl());
+    await waitText('tv-rs-url-value', mockUrl());
     await waitToast('Pasted from the clipboard');
   });
 
-  it('A on Server opens the keyboard titled "Server address" with its value; B keeps it (item 394)', async () => {
+  it('A on Server URL opens the keyboard titled "RomM server address" with its value; B keeps it (item 394)', async () => {
     await key('Enter');
-    expect(await oskTitle()).toBe('Server address');
+    expect(await oskTitle()).toBe('RomM server address');
     expect(await text('tv-osk-value')).toBe(mockUrl());
     await key('Escape');
     await waitOskClosed();
-    await waitFocused('cf-url');
-    expect(await text('tv-cf-url-value')).toBe(mockUrl());
+    await waitFocused('rs-url');
+    expect(await text('tv-rs-url-value')).toBe(mockUrl());
   });
 
-  it('Sign in with switches to Username and password, which Connect then names (items 393, 397)', async () => {
+  it('Sign in with switches to Username and password, which the button then names (items 393, 397)', async () => {
     await key('ArrowDown');
-    await waitFocused('cf-how');
-    expect(await hints()).toEqual(['A Change', 'VIEW Paste', 'MENU Menu']);
+    await waitFocused('rs-how');
+    expect(await hints()).toContain('A Change');
+    expect(await hints()).toContain('VIEW Paste');
     await key('Enter');
     expect(await listTitle()).toBe('Sign in with');
     await tap(testId('tv-opt-password'));
-    await waitText('tv-cf-how-value', 'Username and password');
-    expect(await rowKeys('#cf-rows')).toEqual(['cf-url', 'cf-how', 'cf-user', 'cf-password', 'cf-lib']);
+    await waitText('tv-rs-how-value', 'Username and password');
+    expect(await rowKeys('#rs-rows')).toEqual(['rs-url', 'rs-how', 'rs-user', 'rs-secret']);
     expect(await fieldText('user')).toBe('Username Your RomM user');
-    expect(await fieldText('password')).toBe('Password Your password');
-    expect(await $(testId('tv-connect-go')).getAttribute('data-why')).toBe('Fill in the server, the username and password and the library folder first.');
-    await waitFocused('cf-how');
+    expect(await fieldText('secret')).toBe('Password Your password');
+    expect(await $(testId('tv-rs-go')).getAttribute('data-why')).toBe('Enter your RomM username first.');
+    await waitFocused('rs-how');
     await key('Enter');
     await listTitle();
     await tap(testId('tv-opt-token'));
-    await waitText('tv-cf-how-value', 'API token');
+    await waitText('tv-rs-how-value', 'API token');
   });
 
   it('the API token opens masked and empty, and shows only as dots (item 394)', async () => {
-    await moveTo('cf-token', 'ArrowDown');
+    await moveTo('rs-secret', 'ArrowDown');
     await key('Enter');
     expect(await oskTitle()).toBe('API token');
     expect(await text('tv-osk-value')).toBe('');
@@ -168,53 +193,33 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     expect(await text('tv-osk-value')).not.toContain(WRONG_TOKEN);
     await key('Enter');
     await waitOskClosed();
-    await waitText('tv-cf-token-value', MASK);
-    expect(await text('tv-connect')).not.toContain(WRONG_TOKEN);
+    await waitText('tv-rs-secret-value', MASK);
+    expect(await text('tv-romm-signin')).not.toContain(WRONG_TOKEN);
   });
 
-  it('Library folder opens the folder browser; B steps back to Connect, never past it (items 97, 395)', async () => {
-    await moveTo('cf-lib', 'ArrowDown');
-    await key('Enter');
-    await $(testId('tv-folder-browser')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the folder browser never opened' });
-    expect(await $(`${testId('tv-folder-browser')} h1`).getText()).toBe('Library folder');
-    expect(await hints()).not.toContain('B Back');
-    await key('Escape');
-    await $(testId('tv-connect')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'B never came back to Connect' });
-    await waitFocused('cf-lib');
-    await key('Escape');
-    await browser.pause(300);
-    expect(await $(testId('tv-connect')).isExisting()).toBe(true);
-    // A path can be pasted too.
-    await invoke('e2e_clipboard_write', { text: library });
-    await key('v');
-    await waitText('tv-cf-lib-value', library);
-  });
-
-  it('a rejected token comes back to Connect with the reason above the rows (items 398, 515)', async () => {
-    expect(await $(testId('tv-connect-go')).getAttribute('aria-disabled')).toBeNull();
-    expect(await $(testId('tv-connect-offline')).getAttribute('aria-disabled')).toBeNull();
-    expect(await $(`${testId('tv-connect')} .or`).getText()).toBe('or');
-    expect(await text('tv-connect-offline')).toBe('Use without a server');
-    expect(await $(`${testId('tv-connect')} .note`).getText()).toBe(
-      'No server? Choose a library folder to play offline.',
-    );
-    await tap(testId('tv-connect-go'));
-    await $(testId('tv-connect-reason')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'the rejected token gave no reason' });
-    expect((await text('tv-connect-reason')).length).toBeGreaterThan(0);
-    expect(await text('tv-connect-reason')).not.toContain(WRONG_TOKEN);
+  it('a rejected token comes back with the reason above the rows (items 398, 515)', async () => {
+    expect(await $(testId('tv-rs-go')).getAttribute('aria-disabled')).toBeNull();
+    await tap(testId('tv-rs-go'));
+    await $(testId('tv-rs-error')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'the rejected token gave no reason' });
+    expect((await text('tv-rs-error')).length).toBeGreaterThan(0);
+    expect(await text('tv-rs-error')).not.toContain(WRONG_TOKEN);
     expect(await $(testId('tv-choose')).isExisting()).toBe(false);
     // The token is asked for again.
-    await waitText('tv-cf-token-value', 'Paste or type your token');
+    await waitText('tv-rs-secret-value', 'Paste or type your token');
   });
 
-  it('Connect: "Connected to <URL>", then Choose your systems (items 399, 400)', async () => {
-    await moveTo('cf-token', 'ArrowUp');
+  it('a good token: "Connected to RomM as <user>", RomM connected on step 2, Continue opens Choose your systems (items 399, 400)', async () => {
+    await waitFocused('rs-secret');
     await key('Enter');
     await typeKeys(FIXTURE_TOKEN);
     await key('Enter');
     await waitOskClosed();
-    await tap(testId('tv-connect-go'));
-    await waitToast(/^Connected to http/);
+    await tap(testId('tv-rs-go'));
+    await waitToast(`Connected to RomM as ${FIXTURE_USERNAME}`);
+    await $(testId('tv-welcome-stores')).waitForDisplayed({ timeout: APP_START_TIMEOUT, timeoutMsg: 'the sign-in page never went back' });
+    await waitText('tv-welcome-row-romm-pill', 'Connected');
+    await waitText('tv-welcome-go', 'Continue');
+    await tapK('w-go');
     await $(testId('tv-choose')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'Choose your systems never opened' });
   });
 
@@ -234,7 +239,7 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     expect(await $$('#ch-rows .sw.on').length).toBe(0);
     const ps2 = await chooseText('ps2');
     expect(ps2[0]).toBe('Sony PlayStation 2');
-    expect(ps2[1]).toMatch(/^\d+ games?$/);
+    expect(ps2[1]).toMatch(/^\d+ games? on RomM$/);
     expect(ps2[2]).toBe('PCSX2');
     expect((await chooseText('windows')).slice(0, 2)).toEqual(['Windows', 'Proton for Windows games']);
     expect(await text('tv-ch-val-zeebo')).toBe('No emulator available');
@@ -287,10 +292,10 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
     await waitFocused('ch-skip');
   });
 
-  it('Start skips from anywhere; GRID opens on Server › Discover with its first cover focused (items 406, 408, 413, 417)', async () => {
+  it('Start skips from anywhere; GRID opens on Library › RomM › Discover with its first cover focused (items 406, 408, 413, 417)', async () => {
     await moveTo('ch-dc', 'ArrowUp', 8);
     await press('start');
-    await waitTab('server');
+    await waitTab('library');
     expect(await $(testId('tv-choose')).isExisting()).toBe(false);
     // Discover's first cover takes focus; these fixtures may give Discover
     // no covers at all (no dates), and then the Discover row keeps it.
@@ -299,7 +304,7 @@ describe('tv-startup (a): Connect and Choose your systems in TV mode', () => {
         (await browser.execute(() => {
           const covers = document.querySelectorAll('#disc [data-cover]');
           const f = document.querySelector('[data-tv-root] .f');
-          return covers.length ? f === covers[0] : f?.getAttribute('data-k') === 'r-discover';
+          return covers.length ? f === covers[0] : f?.getAttribute('data-k') === 'r-romm:discover';
         })) as boolean,
       { timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: `Discover's first cover never took focus (focused: ${await focused()})` },
     );

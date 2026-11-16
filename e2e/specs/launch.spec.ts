@@ -9,6 +9,7 @@ import {
   REAP_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { connectRomm, openRommPlatform } from '../helpers/romm.js';
 import { dismissToasts, waitForToast } from '../helpers/toasts.js';
 import { editEmulator, lineKey, openRow, openSystems, pick, saveSheet } from '../helpers/systems.js';
 
@@ -59,7 +60,7 @@ describe('launch', () => {
   }
 
   async function openDetails() {
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-101')).click();
     await $(testId('details-panel')).waitForExist({
@@ -71,7 +72,7 @@ describe('launch', () => {
   const SNES_LINE = lineKey(PLATFORM);
 
   async function closeSystems() {
-    await $(testId('nav-server')).click();
+    await $(testId('nav-library')).click();
     await $(testId('settings-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,
@@ -99,17 +100,7 @@ describe('launch', () => {
   }
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after connecting',
-    });
+    await connectRomm();
   });
 
   it('plays the pre-seeded installed game, passing the rom path to the emulator, then stops it', async () => {
@@ -192,6 +183,9 @@ describe('launch', () => {
       },
     );
 
+    // The Library is on the RomM platform the game was played from: the
+    // sort belongs to All games.
+    await $(testId('library-rail-all')).click();
     await selectValue('library-sort', 'played');
     const firstCard = await $(`${testId('library-grid')} > *:first-child`);
     await firstCard.waitForExist({
@@ -200,9 +194,9 @@ describe('launch', () => {
     });
     expect(await firstCard.getAttribute('data-testid')).toBe('library-card-101');
 
-    // Back to the Server view the following tests start from.
-    await $(testId('nav-server')).click();
-    await $(testId('platform-btn-1')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    // Back to the RomM platform the following tests start from.
+    await $(testId('nav-library')).click();
+    await openRommPlatform('snes');
   });
 
   it('shows "exited immediately" after switching the default to the instant-exit stub', async () => {

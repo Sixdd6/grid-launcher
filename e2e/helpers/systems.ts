@@ -215,7 +215,12 @@ export async function findLine(name: string, timeout = TRANSITION_TIMEOUT): Prom
       { timeout },
     )
     .catch(() => undefined);
-  if (key === '') throw new Error(`Settings › Systems never showed an emulator line for ${name}`);
+  if (key === '') {
+    const seen = await browser.execute(() =>
+      Array.from(document.querySelectorAll('[data-testid^="sys-emu-name-"]')).map((el) => el.textContent?.trim() ?? ''),
+    );
+    throw new Error(`Settings › Systems never showed an emulator line for ${name} (lines: ${JSON.stringify(seen)})`);
+  }
   return key;
 }
 

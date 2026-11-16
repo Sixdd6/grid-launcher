@@ -14,7 +14,7 @@ const realRoot = () => path.join(dataDir(), 'relocate-real');
  * dialog: B and Start do nothing, the hints show only A "Select". Relocate
  * the library… opens the folder browser, B there comes back to the dialog,
  * and a picked folder relocates the library ("Library relocated to <path>" /
- * "No files were moved"), after which Connect follows (no server is stored).
+ * "No files were moved"), after which the welcome follows (no server is stored).
  */
 describe('tv-startup (b): the unreachable library', () => {
   before(async () => {
@@ -31,7 +31,7 @@ describe('tv-startup (b): the unreachable library', () => {
     await waitFocused('ur-relocate');
     expect(await hints()).toEqual(['A Select', 'MENU Menu']);
     expect(await $(testId('tv-tabs')).isExisting()).toBe(false);
-    expect(await $(testId('tv-connect')).isExisting()).toBe(false);
+    expect(await $(testId('tv-welcome')).isExisting()).toBe(false);
   });
 
   it('B does nothing on it; Start opens the startup Menu over it, and B comes back (items 92, 411; user decision 2026-11-10)', async () => {
@@ -87,7 +87,7 @@ describe('tv-startup (b): the unreachable library', () => {
         ?.querySelector('.ts')?.textContent ?? '',
     )) as string;
     expect(sub.trim()).toBe('No files were moved');
-    await $(testId('tv-connect')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'Connect never followed the relocate' });
+    await $(testId('tv-welcome')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: 'the welcome never followed the relocate' });
     expect(await $(testId('tv-unreachable')).isExisting()).toBe(false);
   });
 

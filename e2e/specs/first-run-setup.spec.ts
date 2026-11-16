@@ -138,11 +138,11 @@ describe('first-run setup: choose systems, install their emulators', () => {
 
   it('lands in the app while everything installs, one bar segment per install', async () => {
     await $(testId('setup-install')).click();
-    await $(testId('platform-btn-1')).waitForExist({
+    await $(testId('library-rail-platform-ps2')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the shell never opened after starting setup',
     });
-    // The app opens on Server › Discover after first-run setup too.
+    // The app opens on Library › RomM › Discover after first-run setup too.
     await $(testId('discover')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await $(testId('setup-progress')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     // One segment per install, Proton included, each named by its title.
@@ -210,11 +210,12 @@ describe('first-run setup: choose systems, install their emulators', () => {
       },
       { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the chosen defaults never reached config.toml' },
     );
-    // The Server view stayed in front the whole time: its header must pick
-    // the new default up without being left and re-entered. Selecting a
-    // platform in the rail re-reads nothing, so Dreamcast's chip can only show
-    // Redream if the view refreshed its defaults while it stayed open.
-    await $(testId('platform-btn-2')).click();
+    // The Library stayed in front the whole time: a platform header must pick
+    // the new default up without the view being left and re-entered.
+    // Selecting a platform in the rail re-reads nothing, so Dreamcast's chip
+    // can only show Redream if the view refreshed its defaults while it
+    // stayed open.
+    await $(testId('library-rail-platform-dc')).click();
     await browser.waitUntil(
       async () => (await $(testId('server-emulator-chip')).getText()).includes('Redream'),
       { timeout: TRANSITION_TIMEOUT, timeoutMsg: "the Server header never showed Dreamcast's new default" },
@@ -241,8 +242,10 @@ describe('first-run setup: choose systems, install their emulators', () => {
 
   it('carries on in Settings › Systems, where Install recommended replaces the chooser', async () => {
     await openSystems();
-    await expect($(testId('sys-status-ps2'))).toHaveAttribute('data-status', 'ready');
-    await expect($(testId('sys-status-dc'))).toHaveAttribute('data-status', 'ready');
+    // PCSX2 and Redream need a BIOS and this run installs none: Firmware needed
+    // (romm-storefront-plan Step 7 shows the firmware state on every system).
+    await expect($(testId('sys-status-ps2'))).toHaveAttribute('data-status', 'firmware');
+    await expect($(testId('sys-status-dc'))).toHaveAttribute('data-status', 'firmware');
     await expect($(testId('sys-status-windows'))).toHaveAttribute('data-status', 'ready');
     // The server's PCSX2 build is installed: the picker lists it under Installed.
     expect(((await groups('ps2')).Installed ?? []).some((o) => o.startsWith('use:PCSX2 (Playstation 2)'))).toBe(true);

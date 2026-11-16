@@ -12,15 +12,17 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  */
 describe('connect-restore (b): relaunch', () => {
   it('restores the session without re-entering credentials', async () => {
-    await $(testId('platform-btn-1')).waitForExist({
+    await $(testId('library-rail-platform-snes')).waitForExist({
       timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the library never appeared — the stored session was not restored',
+      timeoutMsg: 'the RomM platform rows never appeared — the stored session was not restored',
     });
-    // Where GRID opens, Automatic and connected: Server › Discover.
-    await expect($(testId('nav-server'))).toHaveAttribute('aria-current', 'page');
-    await expect($(testId('server-rail-discover'))).toHaveAttribute('aria-current', 'page');
-    await expect($(testId('connect-submit'))).not.toExist();
-    await expect($(testId('connect-secret'))).not.toExist();
+    // Where GRID opens, Automatic and connected: Library › RomM › Discover.
+    await expect($(testId('nav-library'))).toHaveAttribute('aria-current', 'page');
+    await expect($(testId('library-rail-romm-discover'))).toHaveAttribute('aria-current', 'page');
+    // No welcome and no sign-in form: nothing asked for the token again.
+    await expect($(testId('welcome'))).not.toExist();
+    await expect($(testId('romm-signin-dialog'))).not.toExist();
+    await expect($(testId('library-rail-romm-installed-flag'))).not.toExist();
   });
 
   // Last on purpose: part C starts against a server that has revoked the

@@ -7,6 +7,7 @@ import {
   INSTALL_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { openRommPlatform } from '../helpers/romm.js';
 import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
@@ -29,10 +30,7 @@ const extractedDir = () =>
  */
 describe('install (b): relaunch, badge persists, then uninstall', () => {
   before(async () => {
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the library never appeared — the stored session was not restored',
-    });
+    await openRommPlatform('snes');
   });
 
   it('keeps the installed badge across a restart', async () => {
@@ -40,9 +38,9 @@ describe('install (b): relaunch, badge persists, then uninstall', () => {
     // and been restored — otherwise the banner from install-a would be back.
     await expect($(testId('library-path-banner'))).not.toExist();
 
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({
+    await $(`${testId('romm-platform-view')} ${testId('installed-badge-101')}`).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the installed badge did not survive the restart',
     });
@@ -79,7 +77,7 @@ describe('install (b): relaunch, badge persists, then uninstall', () => {
       timeoutMsg: 'no "uninstalled" card after uninstalling',
     });
 
-    await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({
+    await $(`${testId('romm-platform-view')} ${testId('installed-badge-101')}`).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,
       timeoutMsg: 'the installed badge was still there after uninstalling',

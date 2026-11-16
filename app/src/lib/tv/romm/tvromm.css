@@ -30,7 +30,7 @@ html[data-ui='tv'] .tv .sskel { display: flex; gap: 1rem; padding: 0 .2rem; }
 html[data-ui='tv'] .tv .sskel i { flex: none; width: 10rem; aspect-ratio: 3 / 4; border-radius: .6rem; background: var(--field); opacity: .6; }
 
 /* The welcome */
-html[data-ui='tv'] .tv .rstep { flex: 0 0 auto; font-size: .8rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: .4rem; }
+html[data-ui='tv'] .tv .rstep { flex: 0 0 auto; font-size: .85rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: .4rem; }
 html[data-ui='tv'] .tv .start-box .srow.wrow { min-height: 4.2rem; padding: .5rem 1.2rem; }
 
 html[data-ui='tv'] .tv .btn .sspin { border-color: color-mix(in srgb, currentColor 35%, transparent); border-top-color: currentColor; }

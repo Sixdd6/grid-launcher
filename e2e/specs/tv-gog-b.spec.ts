@@ -1,7 +1,8 @@
 // e2e-app-args:
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { connectRomm, enterTvMode } from '../helpers/romm.js';
 import { connectPad, focused, hints, key, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, pageErrors, testId, text, waitGone, waitText } from '../helpers/tvDetails.js';
 import { byK, confirmDialog, dlLines, listOptions, notices, pageRow, tap, waitNotice } from '../helpers/tvBackups.js';
@@ -17,7 +18,7 @@ import { loginWindowOpen, MAIN_WINDOW } from '../helpers/gogLogin.js';
  */
 const DATA = process.env.E2E_DATA_DIR ?? '';
 
-/** Opens the installer `name` from ~/Downloads through Settings › Stores › GOG's Install from installer…. */
+/** Opens the installer `name` from ~/Downloads through Settings › Game stores › GOG's Install from installer…. */
 async function openTvInstaller(name: string): Promise<void> {
   await tap(testId('tv-pr-installer'));
   await $(testId('tv-folder-browser')).waitForExist({ timeout: TRANSITION_TIMEOUT });
@@ -38,16 +39,11 @@ async function waitTvRowLine(title: string, re: RegExp, timeout = 60_000): Promi
   });
 }
 
-describe('tv-gog-b: Settings › Stores, signing in, offline installers, backups', () => {
+describe('tv-gog-b: Settings › Game stores, signing in, offline installers, backups', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({ timeout: APP_START_TIMEOUT, timeoutMsg: 'the connect form never appeared' });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the server view never rendered after connecting' });
+    await connectRomm();
     await captureErrors();
-    await $(testId('tv-mode-button')).click();
-    await $(testId('tv-shell')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'TV mode never opened' });
+    await enterTvMode();
     await connectPad(XBOX_PAD);
   });
 
@@ -55,15 +51,15 @@ describe('tv-gog-b: Settings › Stores, signing in, offline installers, backups
     expect(await pageErrors()).toEqual([]);
   });
 
-  it('Settings › Stores sits between RetroAchievements and Systems with a GOG row', async () => {
+  it('Settings › Game stores sits among the panes by name, between Cloud saves and Library, with a GOG row', async () => {
     await key('e');
     await key('e');
     await tap(testId('tv-set-rail-stores'));
-    await waitText('tv-pane-title', 'Stores');
+    await waitText('tv-pane-title', 'Game stores');
     const rail = await $$('[data-testid^="tv-set-rail-"]').map((r) => r.getAttribute('data-testid'));
     const at = rail.indexOf('tv-set-rail-stores');
-    expect(rail[at - 1]).toBe('tv-set-rail-retroachievements');
-    expect(rail[at + 1]).toBe('tv-set-rail-systems');
+    expect(rail[at - 1]).toBe('tv-set-rail-cloud-saves');
+    expect(rail[at + 1]).toBe('tv-set-rail-library');
     expect(await text('tv-stores-row-gog')).toMatch(/GOG[\s\S]*Signed in as [\s\S]*Connected/);
   });
 

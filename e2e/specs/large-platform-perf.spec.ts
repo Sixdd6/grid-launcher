@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl } from '../helpers/env.js';
+import { connectRomm } from '../helpers/romm.js';
 
 /**
  * Stage `large-platform-perf` (opt-in, measurement only): how a large
@@ -12,7 +13,7 @@ import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl } from '../helpers/env.js';
  * Against the mock it uses the `large-platform` fixture (2500 generated
  * games). With E2E_LIVE_URL, E2E_LIVE_TOKEN and E2E_LIVE_PLATFORM it connects
  * to a real RomM server instead, network included; the token is read from
- * the environment and typed into the Connect form by the test, never logged.
+ * the environment and typed into the welcome's RomM form by the test, never logged.
  *
  * Frame times are requestAnimationFrame intervals: ~16ms is 60fps, and a
  * longer one means the main thread was busy that long. The container renders
@@ -23,7 +24,17 @@ const testId = (id: string) => `[data-testid="${id}"]`;
 
 const LIVE_URL = process.env.E2E_LIVE_URL ?? '';
 const PLATFORM_ID = Number(process.env.E2E_LIVE_PLATFORM ?? '1');
-const PLATFORM_BTN = testId(`platform-btn-${PLATFORM_ID}`);
+/** The platform's Library rail row (`library-rail-platform-<slug>`), set once its slug is known. */
+let PLATFORM_BTN = '';
+
+/** The slug of platform `id` on the server under test. */
+async function platformSlugOn(url: string, token: string, id: number): Promise<string> {
+  const res = await fetch(`${url}/api/platforms`, { headers: { Authorization: `Bearer ${token}` } });
+  const body = (await res.json()) as { id: number; slug: string }[] | { items: { id: number; slug: string }[] };
+  const hit = (Array.isArray(body) ? body : body.items).find((p) => p.id === id);
+  if (!hit) throw new Error(`the server has no platform ${id}`);
+  return hit.slug;
+}
 const GRID = testId('server-grid');
 /** The window size, `WIDTHxHEIGHT` (E2E_WINDOW); 1600x1000 by default. The
  *  test display is 4K, so up to 3840x2160 works. */
@@ -235,10 +246,10 @@ async function browse(label: string, moveMs: number, restMs = 0): Promise<void> 
 
 describe('large platform: performance probe (measurement only)', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({ timeout: APP_START_TIMEOUT });
-    await $(testId('connect-server-url')).setValue(LIVE_URL || mockUrl());
-    await $(testId('connect-secret')).setValue(LIVE_URL ? (process.env.E2E_LIVE_TOKEN ?? '') : FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
+    const url = LIVE_URL || mockUrl();
+    const token = LIVE_URL ? (process.env.E2E_LIVE_TOKEN ?? '') : FIXTURE_TOKEN;
+    await connectRomm({ url, token });
+    PLATFORM_BTN = testId(`library-rail-platform-${await platformSlugOn(url, token, PLATFORM_ID)}`);
     await $(PLATFORM_BTN).waitForExist({ timeout: 30_000 });
     await browser.setWindowSize(WINDOW_W, WINDOW_H);
     console.log(`PERF mode: ${LIVE_URL ? 'live server' : 'mock'}, platform ${PLATFORM_ID}, window ${WINDOW_W}x${WINDOW_H}`);
@@ -321,7 +332,7 @@ describe('large platform: performance probe (measurement only)', () => {
       ],
       [
         'art at full opacity, art and scroller layers',
-        '[data-testid="background-art"]{will-change:transform}[data-testid="background-art"] .layer.visible{opacity:1!important}[data-testid="server-section"] .scroller{will-change:transform}',
+        '[data-testid="background-art"]{will-change:transform}[data-testid="background-art"] .layer.visible{opacity:1!important}[data-testid="romm-platform-view"] .scroller{will-change:transform}',
       ],
     ];
     const art = await browser.execute(() =>

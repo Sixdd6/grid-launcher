@@ -1,10 +1,6 @@
 import { createHash } from 'node:crypto';
-import {
-  APP_START_TIMEOUT,
-  FIXTURE_TOKEN,
-  mockUrl,
-  TRANSITION_TIMEOUT,
-} from '../helpers/env.js';
+import { mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { connectRomm, openRommPlatform } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -20,36 +16,27 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  */
 describe('library', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after connecting',
-    });
+    await connectRomm();
+    await openRommPlatform('snes');
   });
 
   it('renders the platforms from the fixtures', async () => {
-    await expect($(testId('platform-btn-1'))).toExist();
-    await expect($(testId('platform-btn-2'))).toExist();
+    await expect($(testId('library-rail-platform-snes'))).toExist();
+    await expect($(testId('library-rail-platform-arcade'))).toExist();
     // Platform 3's `name` is "Windows" but its `custom_name`/`display_name`
     // is "Windows 9x" (RomM's platform settings) — the rail must show the
     // display name, not the plain name, and platform 1 must not pick up a
     // stray "Windows" substring from anywhere else on the page.
-    await expect($(testId('platform-btn-3'))).toHaveText(expect.stringContaining('Windows 9x'));
-    const platform1Text = await $(testId('platform-btn-1')).getText();
+    await expect($(testId('library-rail-platform-win'))).toHaveText(expect.stringContaining('Windows 9x'));
+    const platform1Text = await $(testId('library-rail-platform-snes')).getText();
     expect(platform1Text).not.toContain('Windows');
   });
 
   it('omits the Server header emulator chip for a native platform, and shows it again for one that is not', async () => {
-    await $(testId('platform-btn-3')).click();
+    await openRommPlatform('win');
     await expect($(testId('server-emulator-chip'))).not.toExist();
 
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await expect($(testId('server-emulator-chip'))).toExist();
     await expect($(testId('server-emulator-chip'))).toHaveText(
       expect.stringContaining('No default emulator'),
@@ -57,7 +44,7 @@ describe('library', () => {
   });
 
   it('selecting platform 1 shows its games, including the null-name game rendering its fs_name_no_ext', async () => {
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
 
     await $(testId('game-card-101')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
@@ -96,7 +83,7 @@ describe('library', () => {
   // it proves the bytes were actually decoded by the webview through the
   // asset protocol, not merely that a request reached the mock.
   it('renders a real, loaded cover image for a game that has one', async () => {
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     const img = $(`${testId('game-card-101')} img:not(.backdrop)`);
     await img.waitForExist({
       timeout: TRANSITION_TIMEOUT,
@@ -114,7 +101,11 @@ describe('library', () => {
   });
 
   it('ArrowRight moves the focused card', async () => {
-    await $(testId('platform-btn-1')).click();
+    // A platform row resets the grid's focus when it is selected anew (the
+    // previous case opened card 102, so a re-click of the same row would keep
+    // that focus): go through another platform first.
+    await openRommPlatform('arcade');
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
 
     // User ruling 2026-09-05: selection follows the active input method. The
@@ -148,7 +139,7 @@ describe('library', () => {
   // the band around the card root's centre free; this is that contract's
   // end-to-end check.
   it('opens Details, not the hover action, when the card itself is clicked', async () => {
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-103')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-103')).click();
 
@@ -171,7 +162,7 @@ describe('library', () => {
     // otherwise swallow the platform-button click below.
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
 
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-101')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
@@ -217,7 +208,7 @@ describe('library', () => {
   // sets `focusIndex` to the clicked card, and the dwell only runs while a
   // directional input (the keyboard) is the active mode.
   it("closing details keeps that game's background", async () => {
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-103')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-103')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
@@ -255,7 +246,7 @@ describe('library', () => {
   // (hardcore) earned. Badges come from RomM's own badge_path, so the
   // locked row's lock badge loads through the image cache.
   it('shows the Achievements tab with RomM progress for a game that lists achievements', async () => {
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-101')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });

@@ -1,9 +1,5 @@
-import {
-  APP_START_TIMEOUT,
-  FIXTURE_TOKEN,
-  mockUrl,
-  TRANSITION_TIMEOUT,
-} from '../helpers/env.js';
+import { TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { openRommPlatform } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -40,42 +36,16 @@ describe('library and server chrome', () => {
 
   before(async () => {
     // The group's first spec already connected, and this process re-uses the
-    // data dir, so `restore_session` normally brings the rail straight back
-    // and the connect form never renders. Wait for whichever of the two
-    // arrives, then only type credentials if the form is the one that did.
-    await browser.waitUntil(
-      async () =>
-        (await $(testId('platform-btn-1')).isExisting()) ||
-        (await $(testId('connect-submit')).isExisting()),
-      {
-        timeout: APP_START_TIMEOUT,
-        timeoutMsg:
-          'neither the restored Server rail nor the connect form appeared — the app did not reach a usable state',
-      },
-    );
-    if (await $(testId('connect-submit')).isExisting()) {
-      await $(testId('connect-server-url')).setValue(mockUrl());
-      await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-      await $(testId('connect-submit')).click();
-    }
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the Server rail never rendered a platform entry after connecting',
-    });
-  });
-
-  it('gives each Server rail entry both its old test id and its new rail id', async () => {
-    // Design §11 adds `server-rail-<id>`; every existing spec still clicks
-    // `platform-btn-<id>`. Both live on one element.
-    await expect($(testId('platform-btn-1'))).toHaveAttribute('data-rail', 'server-rail-1');
-    await expect($(testId('platform-btn-2'))).toHaveAttribute('data-rail', 'server-rail-2');
+    // data dir, so the shell opens at once and RomM's restore brings the
+    // platform rows back.
+    await openRommPlatform('snes');
   });
 
   it('heads the selected platform with its name and counts', async () => {
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await expect($(testId('server-platform-header'))).toBeDisplayed();
-    await expect($(testId('server-platform-counts'))).toHaveText('3 games · 0 installed');
+    await expect($(testId('server-platform-counts'))).toHaveText('3 games on RomM · 0 installed');
     await expect($(testId('server-firmware-chip'))).toBeDisplayed();
     await expect($(testId('server-emulator-chip'))).toBeDisplayed();
   });
@@ -94,15 +64,11 @@ describe('library and server chrome', () => {
     );
     await expect($(testId('sys-row-snes'))).toBeDisplayedInViewport();
 
-    await $(testId('nav-server')).click();
-    await $(testId('server-view')).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server view never came back',
-    });
+    await openRommPlatform('snes');
   });
 
   it('filters the Server grid client-side from its search box', async () => {
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
 
     await $(testId('server-search')).setValue('chrono');
@@ -121,7 +87,7 @@ describe('library and server chrome', () => {
   });
 
   it('matches the Server search box against a game genre and its platform label', async () => {
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
 
     // "Platformer" is only in Super Mario World's genres, never in its title.
@@ -153,14 +119,14 @@ describe('library and server chrome', () => {
   });
 
   it('Ctrl+F focuses the active view search box', async () => {
-    await $(testId('nav-server')).click();
+    await openRommPlatform('snes');
     await browser.keys(['Control', 'f']);
     const focused = await browser.execute(
       () => document.activeElement?.getAttribute('data-testid') ?? '',
     );
     expect(focused).toBe('server-search');
 
-    await $(testId('nav-library')).click();
+    await $(testId('library-rail-all')).click();
     await browser.keys(['Control', 'f']);
     const libraryFocused = await browser.execute(
       () => document.activeElement?.getAttribute('data-testid') ?? '',
@@ -168,25 +134,23 @@ describe('library and server chrome', () => {
     expect(libraryFocused).toBe('library-search');
   });
 
-  it('Ctrl+1..4 switch between the four views, and there is no fifth', async () => {
+  it('Ctrl+1..3 switch between the three views, and there is no fourth', async () => {
     const views = await browser.execute(() =>
       Array.from(document.querySelectorAll('[data-testid="shell-topbar"] nav [data-testid^="nav-"]')).map(
         (b) => (b as HTMLElement).dataset.testid,
       ),
     );
-    expect(views).toEqual(['nav-library', 'nav-server', 'nav-downloads', 'nav-settings']);
+    expect(views).toEqual(['nav-library', 'nav-downloads', 'nav-settings']);
     // Focus off any text field: the accelerators stand aside for one.
     await browser.execute(() => (document.activeElement as HTMLElement | null)?.blur());
     const shown = async (view: string) => $(testId(`${view}-view`)).isDisplayed();
-    await browser.keys(['Control', '4']);
-    await browser.waitUntil(() => shown('settings'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Ctrl+4 never opened Settings' });
     await browser.keys(['Control', '3']);
-    await browser.waitUntil(() => shown('downloads'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Ctrl+3 never opened Downloads' });
-    await browser.keys(['Control', '5']);
+    await browser.waitUntil(() => shown('settings'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Ctrl+3 never opened Settings' });
+    await browser.keys(['Control', '2']);
+    await browser.waitUntil(() => shown('downloads'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Ctrl+2 never opened Downloads' });
+    await browser.keys(['Control', '4']);
     await browser.pause(300);
     expect(await shown('downloads')).toBe(true);
-    await browser.keys(['Control', '2']);
-    await browser.waitUntil(() => shown('server'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Ctrl+2 never opened Server' });
     await browser.keys(['Control', '1']);
     await browser.waitUntil(() => shown('library'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Ctrl+1 never opened Library' });
   });
@@ -214,15 +178,18 @@ describe('library and server chrome', () => {
     await $(testId('library-rail-all')).click();
   });
 
-  it('remembers each grid card size across a view switch', async () => {
-    await $(testId('nav-server')).click();
+  it('shares one card size between a RomM platform and the Library grids', async () => {
+    // The Server view's own card size went with the Server view
+    // (romm-storefront-plan Step 3): a platform screen uses the Library's.
+    await openRommPlatform('snes');
     await selectValue('server-size', 'large');
-    await $(testId('nav-library')).click();
+    await $(testId('library-rail-all')).click();
+    await expect($(testId('library-size'))).toHaveValue('large');
     await selectValue('library-size', 'small');
 
-    await $(testId('nav-server')).click();
-    await expect($(testId('server-size'))).toHaveValue('large');
-    await $(testId('nav-library')).click();
+    await openRommPlatform('snes');
+    await expect($(testId('server-size'))).toHaveValue('small');
+    await $(testId('library-rail-all')).click();
     await expect($(testId('library-size'))).toHaveValue('small');
   });
 });

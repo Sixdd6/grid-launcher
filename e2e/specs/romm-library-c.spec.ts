@@ -13,8 +13,8 @@ async function shot(name: string): Promise<void> {
 
 /**
  * Stage `romm-library`, part C (romm-storefront-plan Step 3): a relaunch
- * with RomM stored as connected and the server not answering. GRID opens
- * on All games; the RomM group has Installed only, with the `!` flag, and
+ * with RomM stored as connected and the server not answering. GRID falls
+ * back from Discover to RomM › Installed; the RomM group has Installed only, with the `!` flag, and
  * RomM › Installed shows the Can't reach banner. Retry, once the server is
  * back, brings Discover and the platforms back. Then Disconnect on the
  * RomM card: a platform row disappears and the selection falls back.
@@ -27,10 +27,18 @@ describe('romm-library (c): Can\'t reach RomM', () => {
     });
   });
 
-  it('opens on All games, with the installed RomM games in it', async () => {
-    await expect($(testId('library-rail-all'))).toHaveAttribute('aria-current', 'page');
-    await expect($(testId('library-card-101'))).toExist();
+  it('opens on Discover while connecting, then falls back to RomM › Installed', async () => {
+    // Open GRID on › Automatic with RomM stored as connected: Library › RomM
+    // › Discover while the startup probe runs; when it fails, the selection
+    // falls back to RomM › Installed (SPEC "Where GRID opens").
+    await browser.waitUntil(async () => (await $(testId('library-rail-romm-installed')).getAttribute('aria-current')) === 'page', {
+      timeout: APP_START_TIMEOUT,
+      timeoutMsg: 'the selection never fell back to RomM › Installed after the failed probe',
+    });
+    // All games still holds the installed RomM games.
     await expect($(testId('library-rail-count-all'))).toHaveText('3');
+    await $(testId('library-rail-all')).click();
+    await expect($(testId('library-card-101'))).toExist();
   });
 
   it('shows the RomM group with Installed only and the ! flag', async () => {

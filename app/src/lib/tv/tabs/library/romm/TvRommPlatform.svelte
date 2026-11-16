@@ -55,17 +55,17 @@
   type Cell = { item: RommGridItem; game: TvGame; tag: string | null };
   const cellOf = (item: RommGridItem): Cell =>
     item.kind === 'server'
-      ? { item, game: gameFromSummary(item.game, label, slug, item.installed, updateIds), tag: null }
+      ? { item, game: gameFromSummary(item.game, label, platform?.slug ?? slug, item.installed, updateIds), tag: null }
       : { item, game: gameFromRow(item.row, updateIds), tag: localTagLabel(item.tag) };
   let all = $derived(items.map(cellOf));
   let shown = $derived(searching(tvRomm.query) ? all.filter((c) => matchesTitle(c.game.title, tvRomm.query)) : all);
-  let chips = $derived(headerChips(label, slug, savedDefaultFor(catalog.defaultEmulators, label), catalog.firmware));
+  let chips = $derived(headerChips(label, platform?.slug ?? slug, savedDefaultFor(catalog.defaultEmulators, label), catalog.firmware));
 
   // One firmware status read per platform shown, and again on a reconnect.
   $effect(() => {
     const id = platform?.id ?? null;
     const name = label;
-    const withChips = showsChips(label, slug);
+    const withChips = showsChips(label, platform?.slug ?? slug);
     catalog.firmware = null;
     if (id === null || name === '' || !withChips || !connected) return;
     void catalog.refreshFirmwareStatus(id, name);

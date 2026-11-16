@@ -73,6 +73,17 @@ describe('rommPlatformRows', () => {
   it('drops empty server platforms and the Emulators shelf, adds installed-only platforms', () => {
     expect(rommPlatformRows(servers, rows).map((r) => r.slug)).toEqual(['n64', 'saturn', 'snes']);
   });
+  it('keeps both of two server platforms on one slug, each with its own row', () => {
+    const two = [
+      platform({ id: 1, slug: 'win', name: 'Windows', display_name: 'Windows' }),
+      platform({ id: 3, slug: 'win', name: 'Windows', custom_name: 'PC Fangames & Ports', display_name: 'PC Fangames & Ports' }),
+    ];
+    const got = rommPlatformRows(two, []);
+    expect(got.map((r) => [r.testId, r.platform?.id])).toEqual([
+      ['library-rail-platform-win-3', 3],
+      ['library-rail-platform-win', 1],
+    ]);
+  });
 });
 
 describe('connecting and live', () => {

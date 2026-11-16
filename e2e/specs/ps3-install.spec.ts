@@ -9,6 +9,7 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { connectRomm, openRommPlatform, openLibrary } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -43,28 +44,11 @@ describe('ps3-install', () => {
   }
 
   async function showServer() {
-    await $(testId('nav-server')).click();
-    await $(testId('server-view')).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server view never came back',
-    });
+    await openLibrary();
   }
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    // A fresh profile has no library folder: Connect asks for one.
-    await $(testId('connect-library-path')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('connect-library-path')).setValue(library());
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after connecting',
-    });
+    await connectRomm({ libraryPath: library() });
 
     // Prove the Downloads pill reaches its view once, up front; the test
     // below switches back and forth as it needs it.
@@ -77,7 +61,7 @@ describe('ps3-install', () => {
 
   it('installs the PS3 game through to a Completed download row', async () => {
     await showServer();
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('ps3');
     await $(testId('game-card-401')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-401')).click();
 
@@ -96,7 +80,7 @@ describe('ps3-install', () => {
       },
     );
 
-    await $(`${testId('server-view')} ${testId('installed-badge-401')}`).waitForExist({
+    await $(`${testId('romm-platform-view')} ${testId('installed-badge-401')}`).waitForExist({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: "the installed badge never appeared on rom 401's card",
     });

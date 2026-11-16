@@ -6,8 +6,8 @@ the right build for the computer it runs on, and spot newer versions, the
 emulators must be laid out as below.
 
 Anything in the Emulators platform that does not follow this layout is ignored
-by GRID's platform setup. It can still be installed from the Server view like
-any other ROM.
+by GRID. (GRID never shows the Emulators platform in the Library, so it is not
+installed like a ROM either.)
 
 ## Where the files go
 

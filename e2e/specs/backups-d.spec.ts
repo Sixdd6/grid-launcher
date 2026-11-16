@@ -5,6 +5,7 @@ import path from 'node:path';
 import { APP_START_TIMEOUT, dataDir, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { FAKE_DRIVE_FILE, mountOf, packDir, readPack } from '../helpers/drives.js';
 import { backupRows, show, startRecording } from '../helpers/backups.js';
+import { connectRomm } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -68,17 +69,7 @@ describe('backups-d: backup installed games from this computer and restore one',
     });
     expect(res.ok).toBe(true);
 
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server view never rendered a platform button after connecting',
-    });
+    await connectRomm();
   });
 
   it('opens the Backup dialog for the three games with the checkbox ticked and their sources listed', async () => {

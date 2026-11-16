@@ -1,7 +1,12 @@
 import path from 'node:path';
 import { dataDir, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { connectPad, focused, hints, invoke, key, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
-import { captureErrors, moveTo, openLibraryDetails, pageErrors, testId, text, typeKeys, waitGone, waitOskClosed, waitText } from '../helpers/tvDetails.js';
+import { tvOpenRommPlatform } from '../helpers/romm.js';
+import { captureErrors, moveTo, openLibraryDetails, pageErrors, testId, text, toAllGames, typeKeys, waitGone, waitOskClosed, waitText } from '../helpers/tvDetails.js';
+
+/** The SNES platform's counts line: RomM's five games, how many are installed, and
+ *  the installed games RomM doesn't have (Mystery Cart has no server id). */
+const COUNT = /^5 games on RomM · \d installed( · plus \d only on this computer)?$/;
 
 /** The save locations listed, raw over expanded. */
 async function locations(): Promise<{ raw: string; expanded: string }[]> {
@@ -50,37 +55,35 @@ describe('tv-details (c): search rules, Search everything failure, Set up <Platf
   before(async () => {
     await $(testId('tv-shell')).waitForExist({ timeout: 60_000, timeoutMsg: 'TV mode never opened' });
     await captureErrors();
-    await waitTab('server');
+    await waitTab('library');
     await connectPad(XBOX_PAD);
   });
 
   it('a blank platform search is no filter, and B restores the search it had (consultant ruling, item 385)', async () => {
     await browser.waitUntil(async () => (await focused()) !== null, { timeout: TRANSITION_TIMEOUT });
-    await key('Escape');
-    await waitFocused('r-discover');
-    await moveTo('r-1', 'ArrowDown', 6);
-    await waitText('tv-srv-count', /^5 games · \d installed$/);
+    await tvOpenRommPlatform('snes');
+    await waitText('tv-lib-count', COUNT);
     await key('y');
     await typeKeys('save');
     await key('Enter');
     await waitOskClosed();
-    await waitText('tv-srv-search', 'Search: save');
-    await waitText('tv-srv-count', /^3 of 5 games match · \d installed$/);
+    await waitText('tv-lib-search', 'Search: save');
+    await waitText('tv-lib-count', /^3 of \d+ games match$/);
     await key('y');
     await browser.keys(['Backspace', 'Backspace', 'Backspace', 'Backspace']);
-    await waitGone('tv-srv-search', 'an emptied search still showed its chip');
-    await waitText('tv-srv-count', /^5 games · \d installed$/);
-    expect(await $(testId('tv-srv-nomatch')).isExisting()).toBe(false);
+    await waitGone('tv-lib-search', 'an emptied search still showed its chip');
+    await waitText('tv-lib-count', COUNT);
+    expect(await $(testId('tv-lib-empty')).isExisting()).toBe(false);
     await key('Escape');
     await waitOskClosed();
-    await waitText('tv-srv-search', 'Search: save');
+    await waitText('tv-lib-search', 'Search: save');
   });
 
   it('Search everything with the server not answering shows the failure and Try again (consultant ruling)', async () => {
     await key('Escape');
-    await moveTo('r-discover', 'ArrowUp', 6);
+    await moveTo('r-romm:discover', 'ArrowUp', 12);
     await key('ArrowRight');
-    await browser.waitUntil(async () => ((await focused()) ?? '').length > 0 && (await focused()) !== 'r-discover', { timeout: TRANSITION_TIMEOUT });
+    await browser.waitUntil(async () => ((await focused()) ?? '').length > 0 && (await focused()) !== 'r-romm:discover', { timeout: TRANSITION_TIMEOUT });
     await setOffline(true);
     try {
       await key('y');
@@ -99,9 +102,7 @@ describe('tv-details (c): search rules, Search everything failure, Set up <Platf
   });
 
   it('a launch with no emulator offers "Set up <Platform>"; View opens the system page (item 318)', async () => {
-    await key('q');
-    await waitTab('library');
-    await waitFocused('r-all');
+    await toAllGames();
     await openLibraryDetails('No Emu Game');
     await waitFocused('db-play');
     await key('Enter');
@@ -131,18 +132,19 @@ describe('tv-details (c): search rules, Search everything failure, Set up <Platf
     await invoke('uninstall_game', { romId: 602 });
     await invoke('set_library_path', { path: '' });
     try {
+      // The Library reads the registry again each time its tab shows.
       await key('e');
-      await waitTab('server');
-      await browser.waitUntil(async () => (await focused()) !== null, { timeout: TRANSITION_TIMEOUT });
-      await key('Escape');
-      await moveTo('r-1', 'ArrowDown', 6);
+      await waitTab('downloads');
+      await key('q');
+      await waitTab('library');
+      await tvOpenRommPlatform('snes');
       await key('ArrowRight');
-      await browser.waitUntil(async () => ((await focused()) ?? '').startsWith('sg'), { timeout: TRANSITION_TIMEOUT });
-      for (let i = 0; i < 8 && (await focused()) !== 'sg602'; i++) {
+      await browser.waitUntil(async () => ((await focused()) ?? '').startsWith('pg'), { timeout: TRANSITION_TIMEOUT });
+      for (let i = 0; i < 8 && (await focused()) !== 'pg602'; i++) {
         await key('ArrowRight');
         await browser.pause(80);
       }
-      await waitFocused('sg602');
+      await waitFocused('pg602');
       expect(await hints()).toContain('X Install');
       await key('x');
       await $(testId('tv-confirm')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'no library-folder prompt' });
@@ -166,11 +168,7 @@ describe('tv-details (c): search rules, Search everything failure, Set up <Platf
   });
 
   it('a native game’s Saves lists its save locations; one is added through the browser and removed, asked first (checklist 531)', async () => {
-    await key('q');
-    await waitTab('library');
-    // The Library remembers the cover left there (No Emu Game): B goes to the rail.
-    if ((await focused()) !== 'r-all') await key('Escape');
-    await waitFocused('r-all');
+    await toAllGames();
     await openLibraryDetails('My Game');
     for (let i = 0; i < 4 && !(await $(testId('tv-saves-locs-heading')).isExisting()); i++) {
       await key('e');

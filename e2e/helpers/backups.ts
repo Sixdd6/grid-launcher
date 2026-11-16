@@ -34,8 +34,8 @@ export async function driveStatus(label: string): Promise<string> {
   return (await $(`${driveCard(label)} [data-testid="backup-drive-status"]`).getText()).trim();
 }
 
-/** Switches to one of the top-level views. */
-export async function show(view: 'server' | 'library' | 'downloads' | 'settings'): Promise<void> {
+/** Switches to one of the top-level views (Library, Downloads, Settings). */
+export async function show(view: 'library' | 'downloads' | 'settings'): Promise<void> {
   await $(testId(`nav-${view}`)).click();
   await $(testId(`${view}-view`)).waitForDisplayed({
     timeout: TRANSITION_TIMEOUT,

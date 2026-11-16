@@ -1,8 +1,10 @@
 // e2e-app-args:
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { APP_START_TIMEOUT, configPath, dataDir, FIXTURE_TOKEN, INSTALL_TIMEOUT, mockUrl, THROTTLED_DOWNLOAD_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
-import { assertNoClipping, axis, connectPad, focused, hints, invoke, key, NINTENDO_PAD, promptSet, waitFocused, waitPromptSet, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
+import { configPath, dataDir, FIXTURE_TOKEN, INSTALL_TIMEOUT, THROTTLED_DOWNLOAD_TIMEOUT, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { connectRomm, enterTvMode, tvRailTo } from '../helpers/romm.js';
+import { tapK } from '../helpers/tvBackups.js';
+import { assertNoClipping, axis, connectPad, currentTab, focused, hints, invoke, key, NINTENDO_PAD, promptSet, waitFocused, waitPromptSet, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
 import { captureErrors, moveTo, pageErrors, testId, text, typeKeys, waitGone, waitOskClosed, waitText } from '../helpers/tvDetails.js';
 
 /** A controller input that moves nothing (a right-stick flick scrolls only):
@@ -98,19 +100,15 @@ async function confirm(title: string | RegExp, words?: { body: string; ok: strin
  * mode and works through Downloads on throttled installs (rom 301 is the
  * big one; 201 and 101 are small), then Settings: the rail, a slider, Theme,
  * Button prompts and assignments with injected controllers, Change library
- * folder › Start fresh › Leave, and Disconnect.
+ * folder › Start fresh › Leave, Game stores › RomM's Edit sign-in… and
+ * Disconnect….
  */
 describe('tv-settings: Downloads and Settings', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({ timeout: APP_START_TIMEOUT, timeoutMsg: 'the connect form never appeared' });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('tv-mode-button')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the desktop shell never loaded' });
+    await connectRomm();
     await captureErrors();
-    await $(testId('tv-mode-button')).click();
-    await $(testId('tv-shell')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'TV mode never opened' });
-    await waitTab('server');
+    await enterTvMode();
+    await waitTab('library');
     await connectPad(XBOX_PAD);
     await key('e');
     await waitTab('downloads');
@@ -213,10 +211,9 @@ describe('tv-settings: Downloads and Settings', () => {
     const panes: [string, string][] = [
       ['backup-drives', 'Backup drives'],
       ['cloud-saves', 'Cloud saves'],
-      ['connection', 'Connection'],
+      ['stores', 'Game stores'],
       ['library', 'Library'],
       ['retroachievements', 'RetroAchievements'],
-      ['stores', 'Stores'],
       ['systems', 'Systems'],
       ['tv', 'TV mode'],
       ['updates', 'Updates'],
@@ -319,11 +316,13 @@ describe('tv-settings: Downloads and Settings', () => {
 
     // The Library's grid: Large covers (a 12.5rem portrait cover's height),
     // no title line, and the focused cover's title as a pill.
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 3 && (await currentTab()) !== 'library'; i++) {
       await key('q');
       await browser.pause(150);
     }
     await waitTab('library');
+    // GRID opened on RomM › Discover: All games holds the installed games.
+    await tvRailTo('r-all');
     await $(`${testId('tv-lib-grid')} .cv`).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the Library grid has no cover' });
     await key('ArrowRight');
     await browser.waitUntil(async () => (await browser.execute(() => !!document.querySelector('[data-testid="tv-lib-grid"] .cv.f'))) as boolean, {
@@ -373,7 +372,7 @@ describe('tv-settings: Downloads and Settings', () => {
     expect(desktopKeys()).toEqual(before);
 
     // Back to Settings › Appearance, focus in the pane.
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 3 && (await currentTab()) !== 'settings'; i++) {
       await key('e');
       await browser.pause(150);
     }
@@ -487,50 +486,47 @@ describe('tv-settings: Downloads and Settings', () => {
     expect(existsSync(path.join(oldRoot(), 'games', SNES))).toBe(true);
   });
 
-  it('Edit connection… opens Connect as a page: B keeps the session, Connect reconnects and comes back (ruling E1–3)', async () => {
+  it('Game stores › RomM › Edit sign-in… opens the sign-in page: B keeps the session, a token signs in again and comes back (ruling E1–3)', async () => {
     await key('Escape');
-    await moveTo('r-connection', 'ArrowUp');
-    await waitText('tv-row-credential', /Saved · verified/);
-    await key('ArrowRight');
-    await waitFocused('s-reconnect');
-    await seek('s-server-page');
-    await seek('s-config-folder');
-    await seek('s-edit');
+    await moveTo('r-stores', 'ArrowUp');
+    await waitText('tv-pane-title', 'Game stores');
+    await waitText('tv-stores-row-romm-pill', 'Connected');
+    await tapK('sto-romm');
+    await $(testId('tv-romm-page')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the RomM page never opened' });
+    await seek('edit');
     await key('Enter');
-    await $(testId('tv-edit-connection')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Edit connection never opened' });
-    await waitText('tv-crumb', /Connect/);
-    await waitText('tv-cf-url-value', /^http/);
-    expect(await $(testId('tv-cf-lib')).isExisting()).toBe(false);
-    expect(await $(testId('tv-connect-offline')).isExisting()).toBe(false);
+    await $(testId('tv-romm-signin')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Edit sign-in… never opened' });
+    await waitText('tv-crumb', /Edit RomM sign-in/);
+    await waitText('tv-rs-url-value', /^http/);
     // B: back with nothing changed.
     await key('Escape');
-    await waitGone('tv-edit-connection');
-    await waitFocused('s-edit');
-    await waitText('tv-row-credential', /Saved · verified/);
-    // Again, with the token typed: Connect reconnects and comes back.
+    await waitGone('tv-romm-signin');
+    await waitFocused('edit');
+    await waitText('tv-rows-sub', /^Signed in as /);
+    // Again, with the token typed: it signs in and comes back.
     await key('Enter');
-    await $(testId('tv-edit-connection')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
-    await seek('cf-token');
+    await $(testId('tv-romm-signin')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await seek('rs-secret');
     await key('Enter');
     await typeKeys(FIXTURE_TOKEN);
     await key('Enter');
     await waitOskClosed();
-    await moveTo('cf-go', 'ArrowDown');
+    await moveTo('rs-go', 'ArrowDown');
     await key('Enter');
-    await waitToast(/^Connected to http/);
-    await waitGone('tv-edit-connection');
-    await waitText('tv-row-credential', /Saved · verified/);
+    await waitToast(/^Connected to RomM as /);
+    await waitGone('tv-romm-signin');
+    await waitText('tv-rows-sub', /^Signed in as /);
   });
 
-  it('Disconnect asks first, then returns to Connect (items 243–244)', async () => {
-    await waitFocused('s-edit');
-    await seek('s-disconnect');
+  it('Disconnect… asks first, then GRID stays in the shell with RomM not signed in (items 243–244, decision 5)', async () => {
+    await seek('disconnect');
     await key('Enter');
-    await confirm(/^Disconnect from .+\?$/);
-    await browser.waitUntil(async () => /Connect to your RomM server/.test(await text('tv-stage')), {
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'Disconnect did not return to Connect',
-    });
+    await confirm('Disconnect RomM?');
+    await waitToast('RomM disconnected');
+    await waitText('tv-rows-sub', /^Not signed in · /);
+    // GRID stays where it is: the RomM page over the shell, no welcome.
+    expect(await $(testId('tv-romm-page')).isExisting()).toBe(true);
+    expect(await $(testId('tv-welcome')).isExisting()).toBe(false);
   });
 
   it('raised no page errors', async () => {

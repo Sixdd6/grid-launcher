@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Options } from '@wdio/types';
@@ -225,4 +226,17 @@ export const config: WebdriverIO.Config = {
   },
 
   reporters: ['spec'],
+  // A failed test leaves a screenshot under ctr-out/failures/ (git-ignored),
+  // named by its spec and title, for reading a failure without a rerun.
+  afterTest: async (test, _context, result) => {
+    if (result.passed) return;
+    try {
+      const dir = path.resolve(here, '..', 'ctr-out', 'failures');
+      mkdirSync(dir, { recursive: true });
+      const name = `${path.basename(specFile, '.spec.ts')}-${test.title}`.replace(/[^\w.-]+/g, '_').slice(0, 120);
+      await browser.saveScreenshot(path.join(dir, `${name}.png`));
+    } catch {
+      // A screenshot is a convenience; the failure itself is already reported.
+    }
+  },
 };

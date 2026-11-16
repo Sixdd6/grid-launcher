@@ -12,7 +12,7 @@ import {
   startRecording,
   waitForRecordedToast,
 } from '../helpers/backups.js';
-import { openPlatform } from '../helpers/server.js';
+import { connectRomm, openLibrary, openRommPlatform } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -36,17 +36,7 @@ describe('backups-a: set up a drive and backup two games', () => {
   const DRIVE = 'TESTDRIVE';
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server view never rendered a platform button after connecting',
-    });
+    await connectRomm();
   });
 
   it('lists a newly plugged-in drive as Not set up', async () => {
@@ -87,8 +77,7 @@ describe('backups-a: set up a drive and backup two games', () => {
   });
 
   it('backs up two games picked in Server select mode', async () => {
-    await show('server');
-    await openPlatform(1);
+    await openRommPlatform('ps2');
     await $(testId('server-select')).click();
     await expect($(testId('server-select'))).toHaveText('Done');
     await $(testId('game-card-901')).click();
@@ -196,7 +185,11 @@ describe('backups-a: set up a drive and backup two games', () => {
   });
 
   it('shows "On TESTDRIVE" in Details for a backed-up game', async () => {
-    await show('server');
+    // The platform screen is still the one select mode scrolled (its header
+    // folded): open it afresh.
+    await openLibrary();
+    await $(testId('library-rail-all')).click();
+    await openRommPlatform('ps2');
     await $(testId('game-card-901')).click();
     await $(testId('details-panel')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,

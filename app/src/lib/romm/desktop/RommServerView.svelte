@@ -138,7 +138,8 @@
 
   let cloudPlatforms = $derived(catalog.cloudPlatforms);
   let defaultEmulator = $derived(savedDefaultFor(catalog.defaultEmulators, platformName));
-  let chipsShown = $derived(showsChips(platformName, row?.slug ?? ''));
+  // The server's own slug decides nativeness (a row's slug can be `<slug>-<id>`, `railSlugs`).
+  let chipsShown = $derived(showsChips(platformName, serverPlatform?.slug ?? row?.slug ?? ''));
   let firmware = $derived(catalog.firmware);
   let firmwareLinks = $derived(firmwareChipLinks(firmware));
 

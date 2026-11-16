@@ -23,12 +23,33 @@ export function isEmulatorsShelf(p: Pick<Platform, 'slug' | 'display_name' | 'na
   return isHiddenLibraryPlatform(platformLabel(p)) || isHiddenLibraryPlatform(p.slug);
 }
 
+/**
+ * Each server platform's rail slug, by platform id: its slug, or
+ * `<slug>-<id>` when a platform with a lower id has that slug already (the
+ * list's own order, by label, does not decide). RomM allows two platforms on
+ * one slug (a custom-named "PC Fangames & Ports" on `win` beside Windows);
+ * each still gets its own rail row.
+ */
+export function railSlugs(serverPlatforms: readonly Platform[]): Map<number, string> {
+  const out = new Map<number, string>();
+  const taken = new Set<string>();
+  for (const p of [...serverPlatforms].sort((a, b) => a.id - b.id)) {
+    const slug = serverPlatformSlug(p);
+    const rail = taken.has(slug) ? `${slug}-${p.id}` : slug;
+    taken.add(slug);
+    out.set(p.id, rail);
+  }
+  return out;
+}
+
 /** Resolves installed rows to platform slugs against one server list. */
 export type PlatformKeyer = (row: Pick<InstalledGame, 'platform' | 'platform_slug'>) => string;
 
 /**
  * The slug for an installed row (plan 0.3):
- * 1. its `platform_slug` when not empty;
+ * 1. its `platform_slug` when not empty (when two server platforms share
+ *    that slug, the one whose label equals the row's `platform` decides,
+ *    by its rail slug, `railSlugs`);
  * 2. else the slug of the server platform whose label equals the row's
  *    `platform`;
  * 3. else the row's platform name token (`platformSlug`).
@@ -36,14 +57,20 @@ export type PlatformKeyer = (row: Pick<InstalledGame, 'platform' | 'platform_slu
  * server's slug wins. Builds its label index once, so keying n rows is O(n).
  */
 export function platformKeyer(serverPlatforms: readonly Platform[]): PlatformKeyer {
+  const rails = railSlugs(serverPlatforms);
   const byLabel = new Map<string, string>();
+  const seen = new Set<string>();
+  const shared = new Set<string>();
   for (const p of serverPlatforms) {
+    const slug = serverPlatformSlug(p);
+    if (seen.has(slug)) shared.add(slug);
+    seen.add(slug);
     const label = platformLabel(p).trim();
-    if (label !== '' && !byLabel.has(label)) byLabel.set(label, serverPlatformSlug(p));
+    if (label !== '' && !byLabel.has(label)) byLabel.set(label, rails.get(p.id) ?? slug);
   }
   return (row) => {
     const own = row.platform_slug.trim();
-    if (own !== '') return own;
+    if (own !== '') return shared.has(own) ? (byLabel.get(row.platform.trim()) ?? own) : own;
     return byLabel.get(row.platform.trim()) ?? platformSlug(row.platform);
   };
 }

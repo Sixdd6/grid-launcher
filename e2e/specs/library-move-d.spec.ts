@@ -21,9 +21,10 @@ const copyDir = () => path.join(elsewhere(), TITLE);
 
 /** Leaves the Library and comes back: every activation re-reads the list. */
 async function refreshLibrary(): Promise<void> {
-  await $(testId('nav-server')).click();
-  await $(testId('server-view')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+  await $(testId('nav-downloads')).click();
+  await $(testId('downloads-view')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
   await $(testId('nav-library')).click();
+  await $(testId('library-rail-all')).click();
   await $(testId('library-card-101')).waitForExist({
     timeout: TRANSITION_TIMEOUT,
     timeoutMsg: 'library-card-101 never appeared',

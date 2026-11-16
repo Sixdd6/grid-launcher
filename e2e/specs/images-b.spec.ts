@@ -21,28 +21,34 @@ async function waitForLoadedImage(selector: string, timeout: number, label: stri
  * Stage `images`, part B: a second launch of the same binary against the
  * data dir part A left behind, with the mock still in "offline" mode (part
  * A's last step). `restore_session` finds a stored session but an
- * unreachable server (`RestoreOutcome::Unreachable`) — R2's startup routing
- * puts the shell on the Library section with the chip reading "Not
- * connected", and rom 101's already-cached cover (fetched during part A)
+ * unreachable server — the shell opens with RomM's Library group flagged
+ * Can't reach and the selection on RomM › Installed (romm-storefront-plan decision 6: no chip), and rom 101's already-cached cover (fetched during part A)
  * still renders with no server round trip needed.
  *
  * Flipping the mock back online and clicking Retry is what finally lets the
  * seeded rom 102 row (migrated v1 -> v2 on this same open, with empty image
- * columns until now) get replenished: `retry_connect` only spawns the
- * replenish job on a SUCCESSFUL retry, which fetches rom 102's detail and
+ * columns until now) get replenished: RomM › Installed's Retry only
+ * spawns the replenish job on a SUCCESSFUL reconnect, which fetches rom 102's detail and
  * its grid cover (the large one, else — as for rom 102 — the small one).
  */
 describe('images (b): offline startup, cached cover, retry, replenish', () => {
   before(async () => {
-    await $(testId('session-chip')).waitForExist({
+    await $(testId('library-rail')).waitForDisplayed({
       timeout: APP_START_TIMEOUT,
       timeoutMsg: 'the shell never appeared — the app did not reach a usable state',
     });
   });
 
   it('starts on the Library section, disconnected, with rom 101\'s cover already cached', async () => {
-    await expect($(testId('session-chip'))).toHaveText('Not connected');
+    await browser.waitUntil(
+      async () => (await $(testId('library-rail-romm-installed-flag')).getAttribute('title').catch(() => null)) === "Can't reach RomM",
+      { timeout: APP_START_TIMEOUT, timeoutMsg: "the RomM group never flagged Can't reach" },
+    );
     await expect($(testId('library-section'))).toBeDisplayed();
+    // Connecting at startup opened RomM › Discover; the server didn't answer,
+    // so the selection fell back to RomM › Installed. Rom 101 is in All games.
+    await expect($(testId('library-rail-romm-installed'))).toHaveAttribute('aria-current', 'page');
+    await $(testId('library-rail-all')).click();
 
     await $(testId('library-card-101')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
@@ -69,12 +75,15 @@ describe('images (b): offline startup, cached cover, retry, replenish', () => {
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
   });
 
-  it('shows the offline state on the Server section', async () => {
-    await $(testId('nav-server')).click();
-    await $(testId('server-offline')).waitForExist({
+  it("shows Can't reach RomM on RomM › Installed", async () => {
+    await $(testId('library-rail-romm-installed')).click();
+    await $(testId('romm-banner')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'server-offline never appeared on the Server section',
+      timeoutMsg: "RomM › Installed never showed the Can't reach banner",
     });
+    await expect($(testId('romm-banner'))).toHaveAttribute('data-kind', 'unreachable');
+    await expect($(testId('romm-banner-action'))).toHaveText('Retry');
+    await expect($(testId('library-rail-romm-discover'))).not.toExist();
   });
 
   it('reconnects via Retry once the mock comes back, and replenishes the seeded rom 102 cover', async () => {
@@ -84,28 +93,19 @@ describe('images (b): offline startup, cached cover, retry, replenish', () => {
     });
     expect(res.ok).toBe(true);
 
-    // Reconnect lives inside the session chip's menu (Shell.svelte), not as
-    // a standalone button: the chip has to be opened first.
-    await $(testId('session-chip')).click();
-    await $(testId('session-retry')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'session-retry never appeared in the session menu',
+    // Retry lives on RomM › Installed's banner (and the Settings card).
+    await $(testId('romm-banner-action')).click();
+    await $(testId('library-rail-romm-discover')).waitForExist({
+      timeout: TRANSITION_TIMEOUT * 2,
+      timeoutMsg: 'Retry never reconnected RomM',
     });
-    await $(testId('session-retry')).click();
-
-    await browser.waitUntil(
-      async () => (await $(testId('session-chip')).getText()).startsWith('e2euser @'),
-      {
-        timeout: TRANSITION_TIMEOUT,
-        timeoutMsg: 'the session chip never showed the connected e2euser@host label after Retry',
-      },
-    );
-    await $(testId('platform-btn-1')).waitForExist({
+    await $(testId('library-rail-platform-snes')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after retrying',
+      timeoutMsg: 'the RomM group never listed a platform after retrying',
     });
+    await expect($(testId('romm-banner'))).not.toExist();
 
-    await $(testId('nav-library')).click();
+    await $(testId('library-rail-all')).click();
     // The migrated-then-replenished seeded row (rom 102): its cover only
     // appears once the post-retry replenish job has fetched rom 102's
     // detail (finding empty image columns from the v1->v2 migration) and

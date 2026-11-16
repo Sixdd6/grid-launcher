@@ -1,7 +1,8 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { APP_START_TIMEOUT, dataDir, FIXTURE_TOKEN, FIXTURE_USERNAME, mockUrl, TRANSITION_TIMEOUT, WRONG_TOKEN } from '../helpers/env.js';
-import { connectPad, focused, hints, invoke, key, press, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
+import { tvRailKeys, tvRailTo } from '../helpers/romm.js';
+import { assertNoClipping, connectPad, focused, hints, invoke, key, press, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
 import { tap, tapK } from '../helpers/tvBackups.js';
 import { captureErrors, moveTo, pageErrors, testId, text, typeKeys, waitOskClosed, waitText } from '../helpers/tvDetails.js';
 
@@ -51,7 +52,12 @@ async function screenshot(name: string): Promise<void> {
  * GRID opening on Library › RomM › Discover, the shell without a Server tab
  * or connection text, Settings › Game stores with RomM between GOG and
  * Steam, the RomM page, Disconnect (the group goes: no installed RomM
- * games), Cloud saves' needs-RomM panel, and Connect RomM… again.
+ * games), Cloud saves' needs-RomM panel, and Connect RomM… again. Then
+ * (folded in from the Server tab's spec, docs/tv-mode/plan.md P7) Discover's
+ * hero and rows, a platform's header, chips, search and X to install, Search
+ * everything and Menu › Discover. The seed gives SNES a default emulator, so
+ * New releases has games: 501, 502, 505; Recently added (less those) 503,
+ * 504, 601, 602.
  */
 describe('tv-romm: RomM as a storefront in TV mode', () => {
   before(async () => {
@@ -230,6 +236,255 @@ describe('tv-romm: RomM as a storefront in TV mode', () => {
   });
 
   it('raised no page errors', async () => {
+    expect(await pageErrors()).toEqual([]);
+  });
+});
+
+const SNES = 'Super Nintendo Entertainment System';
+
+/** Types on the on-screen keyboard with the physical keyboard (keys too). */
+async function typeRaw(s: string): Promise<void> {
+  await $(testId('tv-osk')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+  for (const ch of s) await browser.keys(ch);
+}
+
+describe('tv-romm: Discover and a platform in Library › RomM', () => {
+  before(async () => {
+    // Back from the RomM page to the Library.
+    await press('east');
+    await $(testId('tv-romm-page')).waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
+    await tap(testId('tv-tab-library'));
+    await waitTab('library');
+  });
+
+  it("Discover: its first cover, the hero and the rows in order; the RomM group's rows (items 104, 157–164, 417)", async () => {
+    await tvRailTo('r-romm:discover');
+    await $(testId('tv-discover')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await key('ArrowRight');
+    await waitFocused('n501', 'Right from Discover did not focus its first cover');
+    await waitText('tv-hero-title', 'Starlit Run');
+    await waitText('tv-hero-line', /^Released \d{1,2} [A-Z][a-z]{2} \d{4} · Not installed$/);
+    await waitText('tv-hero-summary', 'A Discover fixture game.');
+    expect(await text('tv-hero-platform')).toBe(SNES);
+    const shelves = await browser.execute(() =>
+      Array.from(document.querySelectorAll('#disc [data-shelf]')).map((s) => ({
+        title: s.querySelector('h2')?.childNodes[0]?.textContent ?? '',
+        extra: s.querySelector('h2 span')?.textContent ?? null,
+        covers: Array.from(s.querySelectorAll('[data-k]')).map((c) => c.getAttribute('data-k')),
+        empty: s.querySelector('.empty')?.textContent ?? null,
+      })),
+    );
+    expect(shelves).toEqual([
+      { title: 'Continue playing', extra: null, covers: [], empty: 'Nothing here yet.' },
+      { title: 'New releases', extra: 'last six months', covers: ['n501', 'n502', 'n505'], empty: null },
+      { title: 'Recently added', extra: 'on RomM', covers: ['r503', 'r504', 'r601', 'r602'], empty: null },
+      { title: 'Your library', extra: '0 games', covers: [], empty: 'Nothing here yet.' },
+    ]);
+    // Discover covers carry platform tags (item 171).
+    expect(await browser.execute(() => document.querySelector('[data-testid="tv-cover-r601"] .tag.plat')?.textContent)).toBe('Arcade');
+    // The RomM group: Installed, Discover, then the platforms by name; the
+    // backend leaves out empty ones (N64).
+    const rail = await tvRailKeys();
+    expect(rail.slice(rail.indexOf('fold-romm'))).toEqual(['fold-romm', 'r-romm:installed', 'r-romm:discover', 'r-platform:arcade', 'r-platform:snes']);
+    expect(await text('tv-lib-rail-platform-snes')).toBe(`${SNES}5`);
+    expect(await hints()).toEqual(['A Details', 'X Install', 'Y Search', 'MENU Menu']);
+    await assertNoClipping();
+  });
+
+  it('Up from the top row and Down from the bottom row stay put; a shelf title scrolls to the top (items 108–109, 174)', async () => {
+    const heroHeight = await browser.execute(() => document.querySelector('[data-testid="tv-hero"]')!.getBoundingClientRect().height);
+    await key('ArrowUp');
+    await browser.pause(300);
+    expect(await focused()).toBe('n501');
+    await key('ArrowDown');
+    await waitFocused('r503');
+    await waitText('tv-hero-title', 'Old Classic');
+    await browser.waitUntil(
+      async () =>
+        browser.execute(() => {
+          const disc = document.getElementById('disc')!;
+          const shelf = document.querySelector('[data-testid="tv-shelf-r"]')!;
+          const want = Math.min(disc.scrollTop + shelf.getBoundingClientRect().top - disc.getBoundingClientRect().top, disc.scrollHeight - disc.clientHeight);
+          return Math.abs(disc.scrollTop - want) < 2 && disc.scrollTop > 0;
+        }),
+      { timeout: TRANSITION_TIMEOUT, timeoutMsg: "the Recently added shelf's title never scrolled to the top" },
+    );
+    await assertNoClipping();
+    await key('ArrowDown');
+    await browser.pause(300);
+    expect(await focused()).toBe('r503');
+    // The hero keeps its height whatever is focused.
+    expect(await browser.execute(() => document.querySelector('[data-testid="tv-hero"]')!.getBoundingClientRect().height)).toBe(heroHeight);
+    await key('ArrowRight');
+    await waitFocused('r504');
+    await waitText('tv-hero-title', 'Upcoming Thing');
+    await assertNoClipping();
+  });
+
+  it('A opens Details over the tab, and B comes back to the cover (items 93, 172)', async () => {
+    await key('Enter');
+    await $(testId('tv-details')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'A never opened Details' });
+    await waitText('tv-crumb', /Upcoming Thing/);
+    await key('Escape');
+    await waitFocused('r504', 'B did not come back to the cover');
+  });
+
+  it("Left from a row's first cover goes to the rail; coming back focuses the cover last focused (items 104, 174)", async () => {
+    await key('ArrowLeft');
+    await waitFocused('r503');
+    await key('ArrowLeft');
+    await waitFocused('r-romm:discover');
+    // Right comes back to the cover left, in its own row, not the first row.
+    await key('ArrowRight');
+    await waitFocused('r503', 'Right from the rail did not come back to the cover left');
+    await key('e');
+    await waitTab('downloads');
+    await key('q');
+    await waitTab('library');
+    await waitFocused('r503', 'coming back to the Library did not focus the cover last focused');
+  });
+
+  it('a platform: counts, chips, and Y narrows the grid as you type (items 196–206)', async () => {
+    await key('ArrowLeft');
+    await waitFocused('r-romm:discover');
+    await key('ArrowDown');
+    await waitFocused('r-platform:arcade');
+    await waitText('tv-lib-count', '2 games on RomM · 0 installed');
+    await key('ArrowDown');
+    await waitFocused('r-platform:snes');
+    await waitText('tv-lib-count', '5 games on RomM · 0 installed');
+    expect(await text('tv-lib-name')).toBe(SNES);
+    expect(await text('tv-romm-emu')).toBe('Emulator: snes9x');
+    expect(await text('tv-romm-backup-all')).toBe('Backup all 5…');
+    expect(await hints()).toEqual(['A Open', 'Y Search', 'RT Select', 'MENU Menu']);
+    await key('ArrowRight');
+    await waitFocused('pg501');
+    await assertNoClipping();
+    // Up from the top row reaches the header, never the rail.
+    await key('ArrowUp');
+    await browser.waitUntil(async () => (await focused()) !== 'pg501', { timeout: TRANSITION_TIMEOUT });
+    expect(await browser.execute(() => !!document.querySelector('[data-testid="tv-romm-platform-header"] .f'))).toBe(true);
+    // The emulator chip opens the system's page (item 200).
+    await waitFocused('ch-emu');
+    expect(await hints()).toContain('A Open in Systems');
+    await key('Enter');
+    await $(testId('tv-system-page')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the chip never opened the system page' });
+    await waitText('tv-crumb', new RegExp(SNES));
+    await key('Escape');
+    await waitFocused('ch-emu');
+    // Left and Right stay on the header's second row, firmware chip or not:
+    // Right runs to Backup all and stops there, Left runs back.
+    const row = async () => (await browser.execute(() => !!document.querySelector('[data-testid="tv-romm-platform-header"] .vh-row .f'))) as boolean;
+    for (let i = 0; i < 3 && (await focused()) !== 'bk-all'; i++) {
+      const was = await focused();
+      await key('ArrowRight');
+      await browser.waitUntil(async () => (await focused()) !== was, { timeout: TRANSITION_TIMEOUT, timeoutMsg: `Right from ${was} did not move` });
+      expect(await row()).toBe(true);
+    }
+    await waitFocused('bk-all');
+    await key('ArrowRight');
+    await browser.pause(300);
+    expect(await focused()).toBe('bk-all');
+    for (let i = 0; i < 3 && (await focused()) !== 'ch-emu'; i++) {
+      const was = await focused();
+      await key('ArrowLeft');
+      await browser.waitUntil(async () => (await focused()) !== was, { timeout: TRANSITION_TIMEOUT, timeoutMsg: `Left from ${was} did not move` });
+      expect(await row()).toBe(true);
+    }
+    await waitFocused('ch-emu');
+    await key('ArrowDown');
+    await waitFocused('pg501');
+
+    await key('y');
+    await typeRaw('neon');
+    await waitText('tv-lib-count', '1 of 5 games match');
+    await waitText('tv-lib-search', 'Search: neon');
+    await key('Enter');
+    await waitOskClosed();
+    expect(await browser.execute(() => Array.from(document.querySelectorAll('#lib-grid [data-k]')).map((c) => c.getAttribute('data-k')))).toEqual(['pg502']);
+    await key('y');
+    await typeRaw('zz');
+    await waitText('tv-lib-empty', 'No games match “zz”');
+    await key('Enter');
+    // A new platform clears the search (item 204).
+    await key('Escape');
+    await waitFocused('r-platform:snes');
+    await key('ArrowUp');
+    await waitFocused('r-platform:arcade');
+    await key('ArrowDown');
+    await waitFocused('r-platform:snes');
+    await waitText('tv-lib-count', '5 games on RomM · 0 installed');
+    await expect($(testId('tv-lib-search'))).not.toExist();
+  });
+
+  it('X installs: the notice, then every cover of the game shows it installed (items 172, 195)', async () => {
+    await key('ArrowRight');
+    await waitFocused('pg501');
+    await key('x');
+    await waitToast('Starlit Run added to download queue');
+    await browser.waitUntil(async () => browser.execute(() => !!document.querySelector('[data-testid="tv-cover-pg501"] .idot')), {
+      timeout: 30_000,
+      timeoutMsg: 'the installed dot never came on',
+    });
+    await waitText('tv-lib-count', '5 games on RomM · 1 installed');
+    await browser.waitUntil(async () => (await hints()).includes('X Play'), { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'X never became Play' });
+  });
+
+  it('Search everything: results on Done, then Y searches again live (items 353–355, ruling 17)', async () => {
+    await key('Escape');
+    await waitFocused('r-platform:snes');
+    await key('ArrowUp');
+    await waitFocused('r-platform:arcade');
+    await key('ArrowUp');
+    await waitFocused('r-romm:discover');
+    // The install shows on Discover too.
+    await browser.waitUntil(async () => browser.execute(() => !!document.querySelector('[data-testid="tv-cover-n501"] .idot')), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: "Discover's cover never showed the install",
+    });
+    await expect($(testId('tv-cover-l501'))).toExist();
+    await key('y');
+    await $(testId('tv-osk')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    // Done with nothing typed just closes the keyboard (item 354): Menu is
+    // Done on the keyboard (a physical M would type).
+    await press('start');
+    await waitOskClosed();
+    await expect($(testId('tv-search-all'))).not.toExist();
+
+    await key('y');
+    await typeRaw('ar');
+    await key('Enter');
+    await $(testId('tv-search-all')).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'Done never pushed the results' });
+    await waitText('tv-search-heading', '4 results for “ar”');
+    expect(await text('tv-crumb')).toContain('Search: ar');
+    expect(await browser.execute(() => Array.from(document.querySelectorAll('[data-testid="tv-search-all"] [data-k]')).map((c) => c.getAttribute('data-k')))).toEqual([
+      'sr601',
+      'sr602',
+      'sr505',
+      'sr501',
+    ]);
+    expect(await hints()).toContain('Y Search');
+    await key('y');
+    await typeRaw('c');
+    await waitText('tv-search-heading', '2 results for “arc”');
+    await typeRaw('zzz');
+    await waitText('tv-search-none', 'Nothing matches. Try fewer letters.');
+    await key('Enter');
+    await waitText('tv-crumb', /Search: zzz/);
+    await key('Escape');
+    await waitTab('library');
+  });
+
+  it('Menu › Discover selects Discover and focuses its content (item 365)', async () => {
+    await tvRailTo('r-platform:arcade');
+    await key('m');
+    await tap(testId('tv-menu-discover'));
+    await waitDiscoverFocus();
+    await expect($(testId('tv-lib-rail-romm-discover'))).toHaveAttribute('aria-current', 'true');
+    await assertNoClipping();
+  });
+
+  it('raised no page errors here either', async () => {
     expect(await pageErrors()).toEqual([]);
   });
 });

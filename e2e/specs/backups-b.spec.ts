@@ -12,7 +12,7 @@ import {
   waitForRecordedToast,
   type Row,
 } from '../helpers/backups.js';
-import { openPlatform } from '../helpers/server.js';
+import { openRommPlatform } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -31,10 +31,10 @@ describe('backups-b: the drive is removed mid-backup', () => {
   const GAMES = [903, 904, 905, 906];
 
   before(async () => {
-    // The restored session opens on Server.
-    await $(testId('platform-btn-1')).waitForExist({
+    // The restored session lists RomM's platforms in the Library.
+    await $(testId('library-rail-platform-ps2')).waitForExist({
       timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the restored session never rendered the Server view',
+      timeoutMsg: 'the restored session never listed the RomM platforms',
     });
     await openBackupDrives(DRIVE);
     await browser.waitUntil(async () => (await driveStatus(DRIVE)) === 'Ready for backups', {
@@ -44,8 +44,7 @@ describe('backups-b: the drive is removed mid-backup', () => {
   });
 
   it('queues four games to the drive', async () => {
-    await show('server');
-    await openPlatform(1);
+    await openRommPlatform('ps2');
     await $(testId('server-select')).click();
     for (const id of GAMES) await $(testId(`game-card-${id}`)).click();
     await expect($(testId('server-selection-count'))).toHaveText(expect.stringContaining('4 selected'));

@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl } from '../helpers/env.js';
+import { connectRomm, openRommPlatform } from '../helpers/romm.js';
 
 /**
  * Stage `ui-screens` (opt-in, screenshots only): the main views at several
@@ -8,15 +9,16 @@ import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl } from '../helpers/env.js';
  * (git-ignored) for a design review. Nothing is asserted.
  *
  * Against the mock by default. With E2E_LIVE_URL, E2E_LIVE_TOKEN and
- * E2E_LIVE_PLATFORM it connects to a real RomM server instead, so the
+ * E2E_LIVE_PLATFORM (a platform slug) it connects to a real RomM server instead, so the
  * screens carry real covers and background art; the token is read from the
- * environment and typed into the Connect form, never logged. The run only
+ * environment and typed into the welcome's RomM form, never logged. The run only
  * reads from the server.
  */
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 const LIVE_URL = process.env.E2E_LIVE_URL ?? '';
-const PLATFORM_ID = Number(process.env.E2E_LIVE_PLATFORM ?? '1');
+/** The platform's slug (Library › RomM › <platform>, `library-rail-platform-<slug>`). */
+const PLATFORM = process.env.E2E_LIVE_PLATFORM ?? 'snes';
 const OUT = path.resolve(process.cwd(), '..', 'ctr-out', 'ui-screens');
 
 async function shot(name: string): Promise<void> {
@@ -53,8 +55,7 @@ async function appearance(theme: string, fade: number): Promise<void> {
 }
 
 async function openServerPlatform(): Promise<void> {
-  await $(testId('nav-server')).click();
-  await $(testId(`platform-btn-${PLATFORM_ID}`)).click();
+  await openRommPlatform(PLATFORM);
   await browser.waitUntil(
     () => browser.execute(() => (document.querySelector('[data-testid="server-grid"]')?.children.length ?? 0) > 0),
     { timeout: 60_000 },
@@ -74,13 +75,11 @@ async function hoverFirstCard(): Promise<void> {
 
 describe('ui screens: the main views for a design review', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({ timeout: APP_START_TIMEOUT });
+    await $(testId('welcome')).waitForExist({ timeout: APP_START_TIMEOUT });
     await browser.setWindowSize(1600, 1000);
-    await shot('00-connect');
-    await $(testId('connect-server-url')).setValue(LIVE_URL || mockUrl());
-    await $(testId('connect-secret')).setValue(LIVE_URL ? (process.env.E2E_LIVE_TOKEN ?? '') : FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId(`platform-btn-${PLATFORM_ID}`)).waitForExist({ timeout: 60_000 });
+    await shot('00-welcome');
+    await connectRomm({ url: LIVE_URL || mockUrl(), token: LIVE_URL ? (process.env.E2E_LIVE_TOKEN ?? '') : FIXTURE_TOKEN });
+    await $(testId(`library-rail-platform-${PLATFORM}`)).waitForExist({ timeout: 60_000 });
   });
 
   for (const theme of ['dark', 'light']) {
@@ -173,8 +172,7 @@ describe('ui screens: the main views for a design review', () => {
     for (const display of ['rows', 'columns']) {
       await appearance('dark', 70);
       await pickSwitch('card-display', display);
-      await $(testId('nav-server')).click();
-      await $(testId(`platform-btn-${mixed}`)).click();
+      await openRommPlatform(mixed);
       await browser.pause(6000);
       await shot(`mixed-${display}`);
     }
