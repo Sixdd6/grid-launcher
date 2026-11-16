@@ -1,12 +1,11 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import Connect from './lib/Connect.svelte';
-  import { connectPrefill } from './lib/connectPrefill';
+  import Welcome from './lib/Welcome.svelte';
   import Shell from './lib/Shell.svelte';
   import ChooseSystems from './lib/setup/ChooseSystems.svelte';
   import Toast from './lib/Toast.svelte';
   import SetupProgress from './lib/setup/SetupProgress.svelte';
-  import { session, restore, listenUnauthorized, finishSetup } from './lib/stores/session.svelte';
+  import { session, start, finishSetup } from './lib/stores/session.svelte';
   import { initSetupRun, setupRun, startSetupRun } from './lib/stores/setupRun.svelte';
   import { init as initDownloads } from './lib/stores/downloads.svelte';
   import { init as initSessions } from './lib/stores/sessions.svelte';
@@ -27,7 +26,7 @@
   import { initUiMode, uiMode } from './lib/stores/uiMode.svelte';
   import TvShell from './lib/tv/TvShell.svelte';
 
-  let restored = false; // restore() must fire once on mount, not on every phase change
+  let started = false; // start() must fire once on mount, not on every phase change
 
   // Which interface is on screen (TV mode plan § 1.1): `--tv` has already
   // put Rust in TV mode by now, so ask before mounting either shell.
@@ -43,9 +42,9 @@
     else delete root.dataset.ui;
   });
 
-  // Declared before the restore effect below, and reading no reactive state,
-  // so it registers once and as early as possible: `restore_session` and
-  // `connect` both spawn the replenish job on the Rust side, and a job that
+  // Declared before the start effect below, and reading no reactive state,
+  // so it registers once and as early as possible: `romm_restore` and
+  // `romm_connect` both spawn the replenish job on the Rust side, and a job that
   // finished before the listener existed would leave the Library showing the
   // stale, cover-less rows until the next refresh. Registering it in
   // Shell.svelte was too late — the shell only mounts once the session is
@@ -66,7 +65,7 @@
 
   // The import ran before the window existed, so its notice is a pull with
   // nothing to unsubscribe from — but it belongs with the other pre-shell
-  // effects so the toast appears at the first paint, not after a connect.
+  // effects so the toast appears at the first paint, over the welcome.
   $effect(() => {
     initPythonImport();
   });
@@ -92,13 +91,9 @@
     };
   });
 
-  // Q6: a 401 mid-session sends the user back to Connect, pre-filled. One
-  // listener for the app's whole life, registered before `restore()` below.
-  $effect(() => {
-    const un = listenUnauthorized();
-    return () => {
-    };
-  });
+  // A 401 mid-session no longer leaves the shell (romm-storefront-plan
+  // decision 6): RomM's status turns to Sign-in expired (`romm-changed`), and
+  // its card and the needs-RomM panels offer Sign in again….
 
   // First-run setup's defaults land as emulators install, which can be long
   // after the picker handed over: one listener for the app's whole life.
@@ -119,9 +114,11 @@
   });
 
   $effect(() => {
-    if (!restored) {
-      restored = true;
-      restore();
+    // Startup (romm-storefront-plan 0.5): the welcome while it was never
+    // finished, else the shell at once with RomM's restore in the background.
+    if (!started) {
+      started = true;
+      void start();
     }
     const unDownloads = session.phase === 'shell' ? initDownloads() : undefined;
     const unSessions = session.phase === 'shell' ? initSessions() : undefined;
@@ -141,6 +138,14 @@
   // cloud notices, the registry load): up exactly while a shell is on
   // screen — the phase is `shell` and the unreachable-library dialog is not
   // blocking — whichever shell that is.
+  // Choose your systems after a connect from the RomM card (decision 9):
+  // Skip and Done return to Settings › Game stores. Set as the picker hands
+  // over, read once when the shell mounts, dropped when TV mode takes over.
+  let backToGameStores = $state(false);
+  $effect(() => {
+    if (uiMode.mode === 'tv') backToGameStores = false;
+  });
+
   let shellUp = $derived(session.phase === 'shell' && !libraryUnreachable.blocking);
   $effect(() => {
     if (shellUp) return untrack(startShellLifetime);
@@ -163,21 +168,29 @@
   <ChooseSystems
     onDone={(started, names) => {
       if (started !== null) startSetupRun(started, names);
+      backToGameStores = session.setupReturn === 'settings';
+      session.setupReturn = null;
       finishSetup();
     }}
   />
 {:else if session.phase === 'shell' && uiSettings.loaded}
   <!-- Waits for the stored settings: Open GRID on picks the shell's first
        view, once, when it mounts. -->
-  <Shell initialView={uiMode.desktopStart?.view} initialSettingsPage={uiMode.desktopStart?.settingsPage ?? undefined} />
-{:else if session.phase === 'none'}
-  <Connect prefill={connectPrefill(session)} />
+  <Shell
+    initialView={backToGameStores ? 'settings' : uiMode.desktopStart?.view}
+    initialSettingsPage={backToGameStores ? 'stores' : (uiMode.desktopStart?.settingsPage ?? undefined)}
+  />
+{:else if session.phase === 'welcome' || session.phase === 'none'}
+  <!-- The welcome replaced Connect. `none` is the legacy Connect phase, still
+       set by the old top-bar chip until Step 3 removes it: the welcome is
+       where RomM connects now. -->
+  <Welcome />
 {/if}
 
-<!-- The startup screens (Connect, first-run setup) carry the light / dark
-     toggle in the window's top-right corner; the shell moves it into its
-     top bar. -->
-{#if uiMode.mode === 'desktop' && !libraryUnreachable.blocking && (session.phase === 'none' || session.phase === 'setup')}
+<!-- The startup screens (the welcome, first-run setup) carry the light /
+     dark toggle in the window's top-right corner; the shell moves it into
+     its top bar. -->
+{#if uiMode.mode === 'desktop' && !libraryUnreachable.blocking && (session.phase === 'welcome' || session.phase === 'none' || session.phase === 'setup')}
   <ThemeToggle
     corner
     testId="theme-toggle-start"
@@ -194,8 +207,9 @@
 
 <!-- Outside the phase branch: the startup Python-import notice is pushed
      before any session exists, and the user it was written for sees the
-     Connect form, not the shell. `position: fixed` global chrome, so it
-     needs no layout slot of its own. -->
+     welcome, not the shell; a store sign-in's card shows over the welcome
+     too. `position: fixed` global chrome, so it needs no layout slot of its
+     own. -->
 <!-- TV mode draws the same events as its own cards (lib/tv/TvToasts). -->
 {#if uiMode.mode !== 'tv'}
   <Toast lead={session.phase === 'shell' && setupRun.active ? setupCard : undefined} />

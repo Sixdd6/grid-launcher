@@ -18,8 +18,9 @@ async function screenshot(name: string): Promise<void> {
 }
 
 /**
- * Stage `first-run-setup`: a fresh profile connects, Connect asks for a
- * library folder, and Choose your systems follows: the same rows as
+ * Stage `first-run-setup`: a fresh profile sets its library folder and
+ * connects RomM on the welcome, and Choose your systems follows Continue
+ * (romm-storefront-plan decision 9): the same rows as
  * Settings › Systems (`sys-row-<slug>`), each with a tick box
  * (`sys-tick-<slug>`), plus Windows, which picks the default Proton version.
  *
@@ -45,18 +46,32 @@ describe('first-run setup: choose systems, install their emulators', () => {
   const library = path.join(dataDir(), 'library');
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
+    await $(testId('welcome')).waitForExist({
       timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
+      timeoutMsg: 'the welcome never appeared — the app did not reach a usable state',
     });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-library-path')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('connect-library-path')).setValue(library);
-    await $(testId('connect-submit')).click();
+    await $(testId('welcome-library-path')).setValue(library);
+    await $(testId('welcome-connect-romm')).click();
+    await $(testId('welcome-romm-url')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('welcome-romm-url')).setValue(mockUrl());
+    await $(testId('welcome-romm-secret')).setValue(FIXTURE_TOKEN);
+    await $(testId('welcome-romm-submit')).click();
   });
 
-  it('shows Choose your systems after connecting, with what each system offers', async () => {
+  it('stays on the welcome after the RomM connect; Continue leads to the picker', async () => {
+    await $(testId('welcome-row-pill-romm')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: "RomM's row never showed Connected",
+    });
+    await expect($(testId('setup-view'))).not.toExist();
+    await browser.waitUntil(async () => (await $(testId('welcome-help')).getText()) === 'Next: choose the systems you play.', {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the footer never said the picker comes next',
+    });
+    await $(testId('welcome-continue')).click();
+  });
+
+  it('shows Choose your systems after Continue, with what each system offers', async () => {
     await $(testId('setup-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'Choose your systems never appeared after connecting',

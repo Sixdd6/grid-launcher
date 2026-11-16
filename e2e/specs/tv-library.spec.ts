@@ -1,6 +1,6 @@
 import { TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { unplug } from '../helpers/drives.js';
-import { assertNoClipping, connectPad, focused, hints, key, toastTitles, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
+import { assertNoClipping, connectPad, focused, hints, key, toastTitles, waitFocused, waitTab, XBOX_PAD } from '../helpers/tv.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 const SNES = 'r-platform:super-nintendo-entertainment-system';
@@ -157,9 +157,12 @@ describe('tv-library: the Library tab', () => {
     expect(await hints()).toEqual(['A Open', 'X Backup all 1…', 'Y Search', 'LT Sort', 'RT Select', 'MENU Menu']);
   });
 
-  it('X on a platform row says backing up needs a server (item 455)', async () => {
+  it('X on a platform row opens the Backup page, with no server too (item 455)', async () => {
+    // Backups copy installed games without RomM (romm-storefront plan Step 2).
     await key('x');
-    await waitToast('Connect to a server to backup games.');
+    await $('[data-testid="tv-backup-page"]').waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await key('Escape');
+    await $('[data-testid="tv-backup-page"]').waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
   });
 
   it('A or Right goes into the grid; Up from the top row stays put; Left and B go to the selected row (items 89, 179)', async () => {

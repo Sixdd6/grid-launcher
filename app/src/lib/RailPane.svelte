@@ -24,7 +24,7 @@
     title?: string;
     /** A store group's heading (GameStores README): its monogram tile before the heading text. */
     headingMark?: { mono: string; hue: string };
-    /** The store heading's badge: `!` (needs attention) or `off` (not connected). */
+    /** The store heading's badge: `!` (needs attention), `off` (not connected) or `busy` (a spinner: RomM connecting). */
     headingFlag?: { text: string; title: string } | null;
     /** A store group's rows sit indented under their heading. */
     indent?: boolean;
@@ -59,7 +59,15 @@
           <span class="rail-mark" style:--st-hue={entry.headingMark.hue} aria-hidden="true" data-mono={entry.headingMark.mono}></span>
         {/if}
         {entry.heading}
-        {#if entry.headingFlag}
+        {#if entry.headingFlag?.text === 'busy'}
+          <!-- RommStorefront prototype `.rm-flag-spin`: a spinner while RomM connects. -->
+          <span
+            class="rail-flag busy"
+            title={entry.headingFlag.title}
+            aria-label={entry.headingFlag.title}
+            data-testid={`${entry.testId}-flag`}><span class="rail-spin small"></span></span
+          >
+        {:else if entry.headingFlag}
           <span
             class="rail-flag"
             class:off={entry.headingFlag.text === 'off'}
@@ -232,6 +240,18 @@
     background: var(--field);
     color: var(--text-muted);
     border: 1px solid var(--line-strong);
+  }
+
+  .rail-flag.busy {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    min-width: 0;
+  }
+
+  .rail-spin.small {
+    width: 8px;
+    height: 8px;
   }
 
   .rail-item.indent {

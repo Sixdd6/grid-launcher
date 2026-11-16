@@ -179,7 +179,7 @@ mock RomM server. CI runs it on every release and manual dispatch, and both buil
 for it.
 
     scripts/e2e.sh                   # build, then run every stage group
-    scripts/e2e.sh connect           # run only the named stage groups
+    scripts/e2e.sh welcome           # run only the named stage groups
     scripts/e2e.sh library install   # any number of names
     E2E_SKIP_BUILD=1 scripts/e2e.sh  # skip the Rust AND frontend builds
     E2E_KEEP=1 scripts/e2e.sh        # keep the temp run directory

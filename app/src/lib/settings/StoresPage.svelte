@@ -1,9 +1,11 @@
 <script lang="ts">
-  // Settings › Stores (GameStores README, "Settings › Stores"; prototype
-  // `renderStoresPane`, `stStoreCard`). A lede, then one card per store in
-  // the rail's order (Amazon Games, Epic Games, GOG, Steam). Words come from
-  // `gamestores/settings.ts`; Steam, which has no tool and no login, has its
-  // own card (`SteamCard.svelte`).
+  // Settings › Game stores (GameStores README, "Settings › Stores";
+  // RommStorefront README, "Game stores"; prototype `renderStoresPane`,
+  // `stStoreCard`, `rmCard`). A lede, then one card per storefront by name
+  // (`STOREFRONT_ORDER`: Amazon Games, Epic Games, GOG, RomM, Steam). Words
+  // come from `gamestores/settings.ts`; Steam, which has no tool and no
+  // login, has its own card (`SteamCard.svelte`), and so does RomM
+  // (`RommCard.svelte`).
   import { api, type StoreStatus } from '../api';
   import Icon from '../Icon.svelte';
   import { pickFolder } from '../pickers';
@@ -11,6 +13,8 @@
   import StoreMark from '../gamestores/desktop/StoreMark.svelte';
   import { hasCloud, hasInstaller, managedByClient, storeName } from '../gamestores/marks';
   import SteamCard from './SteamCard.svelte';
+  import RommCard from './RommCard.svelte';
+  import { inStorefrontOrder } from '../romm/order';
   import { disconnectedNotice, storeCloudSwitchNotice, refusedNotice } from '../gamestores/notices';
   import {
     accountLine,
@@ -37,6 +41,8 @@
   });
 
   let statuses = $derived(gameStores.statuses);
+  /** The cards by name; `null` is RomM's. */
+  let cards = $derived(inStorefrontOrder<StoreStatus | null>([...statuses, null], (s) => s?.source ?? 'romm'));
 
   async function disconnect(s: StoreStatus) {
     confirmFor = null;
@@ -75,8 +81,10 @@
     <p class="g-note">Looking for stores…</p>
   {/if}
 
-  {#each statuses as s (s.source)}
-    {#if managedByClient(s.source)}
+  {#each cards as s (s?.source ?? 'romm')}
+    {#if s === null}
+      <RommCard {active} />
+    {:else if managedByClient(s.source)}
       <SteamCard status={s} {active} />
     {:else}
     {@const pill = storePill(s)}

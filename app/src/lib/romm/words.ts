@@ -209,11 +209,12 @@ export function rommConnectingPanel(host: string): { title: string; text: string
 
 export const ROMM_DISCOVER_LEDE = 'New on RomM.';
 
-/** The platform screen's counts line: "4 games on RomM · 2 installed · 1 only on this computer". */
+/** The platform screen's counts line: "4 games on RomM · 1 installed · plus 1 only on this computer"
+ *  (prototype `renderServer`). The first number is the rail row's (RomM's games); the
+ *  installed games RomM doesn't have are named after "plus", not counted in it. */
 export function rommPlatformCountsLine(onRomm: number, installed: number, onlyHere: number): string {
-  const parts = [onRomm === 1 ? '1 game on RomM' : `${onRomm} games on RomM`];
-  if (installed > 0) parts.push(`${installed} installed`);
-  if (onlyHere > 0) parts.push(`${onlyHere} only on this computer`);
+  const parts = [onRomm === 1 ? '1 game on RomM' : `${onRomm} games on RomM`, `${installed} installed`];
+  if (onlyHere > 0) parts.push(`plus ${onlyHere} only on this computer`);
   return parts.join(' · ');
 }
 
@@ -303,7 +304,7 @@ export const OPEN_ON_ROMM_OFF = "RomM isn't connected, so GRID opens on All game
 
 export type SignInMode = 'connect' | 'edit' | 'again';
 
-export function signInCopy(mode: SignInMode, username = ''): { title: string; lede: string; button: string } {
+export function signInCopy(mode: SignInMode, username = '', useToken = true): { title: string; lede: string; button: string } {
   switch (mode) {
     case 'edit':
       return {
@@ -314,7 +315,7 @@ export function signInCopy(mode: SignInMode, username = ''): { title: string; le
     case 'again':
       return {
         title: 'Sign in to RomM again',
-        lede: `RomM no longer accepts GRID's token for ${username}. Enter a new one.`,
+        lede: `RomM no longer accepts GRID's ${useToken ? 'token' : 'password'} for ${username}. Enter a new one.`,
         button: 'Sign in',
       };
     default:

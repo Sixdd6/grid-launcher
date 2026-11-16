@@ -1,5 +1,6 @@
 <script lang="ts">
-  // Server › Discover: the first Server rail row and the default view.
+  // Library › RomM › Discover (RommStorefront README): the old Server ›
+  // Discover, moved into the Library unchanged but for its words.
   // New releases (a coverflow of the newest games on the preferred
   // platforms) and Recently added (newest on the server, minus the
   // coverflow's games), with platform filter pills across its top. The lists
@@ -11,6 +12,7 @@
   import { session } from '../stores/session.svelte';
   import Coverflow from './Coverflow.svelte';
   import RecentlyAdded from './RecentlyAdded.svelte';
+  import { ROMM_DISCOVER_LEDE } from '../romm/words';
   import { discoverAction, liveInstallStatus } from './feed';
   import { filterPills, keptFilter, listKey, nextFilter, shownList, type Filtered } from './filters';
   import { cachedFeed, fetchFeed, PlatformLists, rememberFeed, watchFeedInputs } from './feedStore.svelte';
@@ -22,12 +24,12 @@
     onPrimary,
     onOpenSystems,
   }: {
-    /** Server is the front view and Discover is selected. */
+    /** The Library is the front view and RomM › Discover is selected. */
     active: boolean;
     /** The platform label a game shows (and is matched as installed by). */
     labelFor: (game: GameSummary) => string;
     onOpen: (game: GameSummary) => void;
-    /** Install or Play, through Server's own flow. */
+    /** Install or Play, through the RomM screen's own flow. */
     onPrimary: (game: GameSummary) => void;
     /** Opens Settings › Systems. */
     onOpenSystems: () => void;
@@ -158,7 +160,7 @@
   <section data-testid="discover-recent" class="panel sec" aria-labelledby="discover-recent-h">
     <header class="head">
       <h2 id="discover-recent-h">Recently added</h2>
-      <p class="lede">New on your server.</p>
+      <p class="lede">{ROMM_DISCOVER_LEDE}</p>
     </header>
     {#if pills.length > 0}
       <div data-testid="discover-filters" class="filters" role="group" aria-label="Filter by platform">

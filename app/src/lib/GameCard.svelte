@@ -85,7 +85,7 @@
     onHoverEnd: () => void;
     /** Store covers (GameStores README): the job's "38%" / "QUEUED", UPDATE,
      *  SAVE CONFLICT, NOT SUPPORTED tags, after the card's own. */
-    extraTags?: { text: string; tone: 'queue' | 'update' | 'conflict' | 'unsupported' }[];
+    extraTags?: { text: string; tone: 'queue' | 'update' | 'conflict' | 'unsupported' | 'local' }[];
     /** A running install's bar along the cover's bottom edge (0–100); `null` for none. */
     progress?: number | null;
     /** The bar's colour: `managed` is the disk graph's teal, for an install the store's client runs (Steam). */
@@ -566,6 +566,14 @@
     color: var(--text-h);
     letter-spacing: 0.06em;
     border: 1px solid var(--line-strong);
+  }
+
+  /* RommStorefront prototype `.g-tag.rm-local`: NOT LINKED / NOT ON ROMM. */
+  .tag.st-local {
+    background: rgba(10, 10, 20, 0.78);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    letter-spacing: 0.06em;
   }
 
   .cprog {

@@ -1,7 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import Library from './Library.svelte';
-  import Server from './Server.svelte';
   import Downloads from './Downloads.svelte';
   import DownloadsFooter from './DownloadsFooter.svelte';
   import BackgroundArt from './BackgroundArt.svelte';
@@ -10,17 +9,23 @@
   import ThemeToggle from './ThemeToggle.svelte';
   import BackupDialog from './backups/BackupDialog.svelte';
   import { backupDialog, closeBackup } from './backups/dialogState.svelte';
-  import { drives } from './stores/drives.svelte';
   import { driveRailKey } from './library/rail';
-  import { librarySelection, selectRail } from './library/selection.svelte';
-  import { api } from './api';
-  import { session, retry, disconnect, connectToServer } from './stores/session.svelte';
+  import { selectRail } from './library/selection.svelte';
+  import { romm } from './stores/romm.svelte';
+  import { rommLive } from './romm/rail';
   import { appUpdate } from './stores/appUpdate.svelte';
   import { noteInput, notePointerAt } from './stores/inputMode.svelte';
   import { registerNavigation } from './stores/navigation.svelte';
   import type { SettingsPage } from './settings/pages';
   import { toggleTheme, uiSettings } from './stores/uiSettings.svelte';
-  import { chipLabel, hostOf, initialView, VIEWS, viewForDigit, viewLabel, type View } from './shell';
+  import {
+    initialPlace,
+    STOREFRONT_VIEWS,
+    storefrontViewForDigit,
+    viewLabel,
+    type StorefrontView,
+    type View,
+  } from './shell';
   // The same guard the grid views use for Ctrl+F: an accelerator must stay
   // out of the way while focus sits in a text-entry control (where
   // Ctrl+<n> can be an editor chord) or a modal dialog owns the screen and
@@ -40,32 +45,34 @@
     initialSettingsPage?: SettingsPage;
   } = $props();
 
-  // Set once when the shell first mounts, by Settings › Appearance › Open
-  // GRID on (TV mode README § Decided "Where GRID opens"; App.svelte mounts
-  // the shell only once the setting is loaded). Automatic: Server › Discover
-  // when the restored/just-connected session is online, Library when not;
-  // offline mode opens Library on the first connected backup drive
-  // (GameBackups README, "Use without a server"). Switching views afterward
-  // is a user action — a pill, Ctrl+1..4, or `show()`.
-  // Read once: the shell's first view is decided when it mounts.
-  const forced = untrack(() => forcedView);
-  const start =
-    forced !== undefined
-      ? { view: forced, drive: null }
-      : initialView(session.connected, session.offline, drives.firstLibraryDrive, uiSettings.openOn);
-  let view = $state<View>(start.view);
-  if (start.drive !== null) selectRail(driveRailKey(start.drive));
+  /**
+   * A view the shell can show. RomM is a storefront (plan 0.5): Library,
+   * Downloads and Settings. The legacy Server view (still named by TV mode
+   * until Step 6, and by a stored TV start) lands on Library › RomM ›
+   * Discover.
+   */
+  function storefrontView(v: View): StorefrontView {
+    if (v !== 'server') return v;
+    selectRail('romm:discover');
+    return 'library';
+  }
 
-  // The drives store may not have its first snapshot when the shell mounts.
-  // Offline, apply the drive half once it arrives, unless the user has moved
-  // on (another view, or another Library row) by then.
-  const startRail = librarySelection.key;
-  let driveStartSettled = forced !== undefined || start.drive !== null || !session.offline || session.connected;
-  $effect(() => {
-    if (driveStartSettled || !drives.loaded) return;
-    driveStartSettled = true;
-    const first = drives.firstLibraryDrive;
-    if (first !== null && view === 'library' && librarySelection.key === startRail) selectRail(driveRailKey(first));
+  // Set once when the shell first mounts, by Settings › Appearance › Open
+  // GRID on (plan 0.5, decision 16; App.svelte mounts the shell only once
+  // the setting is loaded): Library › RomM › Discover when RomM is connected
+  // (or connecting at startup) and the choice isn't Library, else All games.
+  // If RomM then drops, the Library's rail falls back to RomM › Installed.
+  // Switching views afterward is a user action — a pill, Ctrl+1..3, or `show()`.
+  const forced = untrack(() => forcedView);
+  let view = $state<StorefrontView>('library');
+  untrack(() => {
+    if (forced !== undefined) {
+      view = storefrontView(forced);
+      return;
+    }
+    const place = initialPlace(rommLive(romm.status), uiSettings.openOn);
+    view = place.view;
+    selectRail(place.rail);
   });
 
   /** Library on a backup drive (Settings › Backup drives' Show in Library). */
@@ -83,12 +90,10 @@
     settingsPageApplied = true;
     settings.show(initialSettingsPage);
   });
-  let serverMenuOpen = $state(false);
-  let sessionEl = $state<HTMLElement | null>(null);
 
   /** Programmatic navigation, for the footer strip and the update badge. */
   export function show(next: View) {
-    view = next;
+    view = storefrontView(next);
   }
 
   /** A Settings page, with one system's row opened on Systems. */
@@ -101,18 +106,12 @@
   // land here while the desktop shell is mounted.
   $effect(() => registerNavigation({ go: show, goSettings: showSettings }));
 
-  // Ctrl+1..4 (design §3). Alt/Shift are excluded so this never steals a
-  // window-manager or text-editing chord; Meta is accepted alongside Ctrl so
-  // the same accelerator works on macOS.
+  // Ctrl+1..3 (RommStorefront README "Removed"). Alt/Shift are excluded so
+  // this never steals a window-manager or text-editing chord; Meta is
+  // accepted alongside Ctrl so the same accelerator works on macOS.
   function onKeydown(e: KeyboardEvent) {
-    // Escape dismisses the server menu. Nothing is preventDefault-ed: other
-    // Escape handlers (the details panel) still see the key.
-    if (e.key === 'Escape' && serverMenuOpen) {
-      serverMenuOpen = false;
-      return;
-    }
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
-    const next = viewForDigit(e.key);
+    const next = storefrontViewForDigit(e.key);
     if (next === null || chordBlocked(chordContext(document))) return;
     e.preventDefault();
     view = next;
@@ -129,21 +128,8 @@
     notePointerAt(e.clientX, e.clientY);
   }
 
-  /** A click anywhere outside the session cluster closes the server menu. */
-  function onWindowPointerDown(e: MouseEvent) {
+  function onWindowPointerDown() {
     noteInput('pointer');
-    if (!serverMenuOpen) return;
-    const target = e.target as Node | null;
-    if (target !== null && sessionEl?.contains(target)) return;
-    serverMenuOpen = false;
-  }
-
-  function openServer() {
-    serverMenuOpen = false;
-    api.openServerPage().catch(() => {
-      // The opener refuses a URL it cannot browse to (userinfo, or none
-      // stored). Nothing to report: the menu item is a convenience.
-    });
   }
 </script>
 
@@ -162,7 +148,7 @@
   </div>
 
   <nav class="pills" aria-label="Views">
-    {#each VIEWS as v (v)}
+    {#each STOREFRONT_VIEWS as v (v)}
       <button
         data-testid={`nav-${v}`}
         class="pill"
@@ -175,7 +161,9 @@
     {/each}
   </nav>
 
-  <div class="session" bind:this={sessionEl}>
+  <!-- No server chip or menu (decision 6): RomM's status shows on its
+       Library group and its Settings card, like the stores. -->
+  <div class="session">
     {#if appUpdate.notice}
       <button
         data-testid="app-update-badge"
@@ -203,83 +191,15 @@
     <!-- A failed save is not worth an error here: the theme is already
          applied, the same trade the Appearance select makes. -->
     <ThemeToggle resolved={uiSettings.resolved} onToggle={() => toggleTheme().catch(() => {})} />
-    <span
-      data-testid="session-dot"
-      class="status-dot"
-      class:online={session.connected}
-      class:offline={session.offline && !session.connected}
-      aria-hidden="true"
-    ></span>
-    <button
-      data-testid="session-chip"
-      class="chip"
-      title={session.lastError ?? undefined}
-      aria-expanded={serverMenuOpen}
-      onclick={() => (serverMenuOpen = !serverMenuOpen)}
-    >
-      {chipLabel(session)}
-    </button>
-    {#if serverMenuOpen}
-      <div class="server-menu" role="menu">
-        {#if session.offline && !session.connected}
-          <!-- Offline mode (GameBackups README): one way out, back to the
-               Connect screen. Nothing is cleared until a connect succeeds. -->
-          <button
-            data-testid="session-connect"
-            role="menuitem"
-            onclick={() => { serverMenuOpen = false; connectToServer(); }}
-          >
-            Connect to a server…
-          </button>
-          <span class="menu-host" role="none">Library and backup drives work offline</span>
-        {:else}
-        {#if !session.connected}
-          <button
-            data-testid="session-retry"
-            role="menuitem"
-            disabled={session.busy}
-            onclick={() => { serverMenuOpen = false; retry(); }}
-          >
-            Reconnect
-          </button>
-        {/if}
-        <button
-          data-testid="session-disconnect"
-          role="menuitem"
-          onclick={() => { serverMenuOpen = false; disconnect(); }}
-        >
-          Disconnect
-        </button>
-        <button data-testid="session-open-romm" role="menuitem" onclick={openServer}>
-          Open RomM in browser
-        </button>
-        <span class="menu-host" role="none">{hostOf(session.serverUrl)}</span>
-        {/if}
-      </div>
-    {/if}
   </div>
 </header>
 
-{#if !session.connected && session.lastError}
-  <p data-testid="session-error" class="error-line">{session.lastError}</p>
-{/if}
-
-<!-- All four views stay mounted and switch with `hidden` (design §3), so
+<!-- The three views stay mounted and switch with `hidden` (design §3), so
      selections and in-flight fetches survive a switch. Scroll offsets do
      not: each view scrolls inside its own container, and a `display: none`
      subtree drops its scroll position. -->
 <div data-testid="library-view" class="view" hidden={view !== 'library'}>
   <Library active={view === 'library'} />
-</div>
-<div data-testid="server-view" class="view" hidden={view !== 'server'}>
-  <Server
-    active={view === 'server'}
-    onOpenSystems={(system) => {
-      // The emulator and firmware chips open Settings › Systems on the
-      // platform's row, opened (ProposedApp README).
-      showSettings('systems', { system });
-    }}
-  />
 </div>
 <div data-testid="downloads-view" class="view scrolls" hidden={view !== 'downloads'}>
   <Downloads />
@@ -400,42 +320,6 @@
     min-width: 0;
   }
 
-  .status-dot {
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--danger);
-  }
-
-  .status-dot.online {
-    background: var(--success);
-  }
-
-  /* Offline mode is chosen, not a fault: grey, not the danger red. */
-  .status-dot.offline {
-    background: var(--text-muted);
-  }
-
-  .chip {
-    font: inherit;
-    font-size: 13px;
-    padding: 5px 10px;
-    border-radius: var(--r-chip);
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--text-h);
-    cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 260px;
-  }
-
-  .chip:hover {
-    border-color: var(--border);
-  }
-
   .tv-btn {
     color: var(--text-h);
   }
@@ -454,63 +338,6 @@
     background: var(--primary);
     color: var(--on-primary);
     cursor: pointer;
-  }
-
-  .server-menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    z-index: 6;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    min-width: 200px;
-    padding: 4px;
-    border-radius: var(--r-row);
-    border: 1px solid var(--line);
-    background: var(--overlay);
-    box-shadow: var(--shadow-overlay);
-  }
-
-  .server-menu button {
-    font: inherit;
-    font-size: 13px;
-    text-align: left;
-    padding: 7px 10px;
-    border: none;
-    border-radius: var(--r-control);
-    background: transparent;
-    color: var(--text-h);
-    cursor: pointer;
-  }
-
-  .server-menu button:hover:not(:disabled) {
-    background: var(--surface);
-  }
-
-  .server-menu button:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-
-  .menu-host {
-    padding: 6px 10px 4px;
-    border-top: 1px solid var(--border);
-    margin-top: 4px;
-    color: var(--text-muted);
-    font-size: 11px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .error-line {
-    flex: none;
-    margin: 0;
-    padding: 4px 16px;
-    background: var(--panel);
-    color: var(--danger);
-    font-size: 11px;
   }
 
   .view {

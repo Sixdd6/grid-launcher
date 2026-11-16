@@ -62,7 +62,7 @@ describe('Appearance pane (items 234–240, 527)', () => {
 
   it('offers the Open GRID on and Theme options, with a check on the current value', () => {
     const open = byKey<ChoiceRow>(rows, 'open-on');
-    expect(open.options.map((o) => o[1])).toEqual(['Automatic', 'Server › Discover', 'Library']);
+    expect(open.options.map((o) => o[1])).toEqual(['Automatic: Discover when RomM is connected, else Library', 'Discover (when RomM is connected)', 'Library']);
     expect(byKey<ChoiceRow>(rows, 'theme').options.map((o) => o[1])).toEqual(['Follow system', 'Dark', 'Light']);
     byKey<ChoiceRow>(rows, 'theme').choose();
     const spec = acts.open.mock.calls[0][0] as ChoiceSpec;

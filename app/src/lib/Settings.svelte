@@ -12,7 +12,6 @@
     settingsRailEntries,
     type SettingsPage,
   } from './settings/pages';
-  import ConnectionPage from './settings/ConnectionPage.svelte';
   import LibraryPage from './settings/LibraryPage.svelte';
   import CloudSavesPage from './settings/CloudSavesPage.svelte';
   import RetroAchievementsPage from './settings/RetroAchievementsPage.svelte';
@@ -77,10 +76,6 @@
             <!-- Page-level activation: the backup default and the "last
                  seen" clock are re-read each time the page comes forward. -->
             <BackupDrivesPage active={active && page === 'backup-drives'} onShowInLibrary={onShowDriveInLibrary} />
-          {:else if p === 'connection'}
-            <!-- Page-level activation, unlike the other panes: the edit form
-                 holds a plain secret, so leaving this page must close it. -->
-            <ConnectionPage active={active && page === 'connection'} />
           {:else if p === 'library'}
             <!-- Page-level activation: the path is re-read each time the page
                  comes forward. -->
@@ -88,11 +83,12 @@
           {:else if p === 'cloud-saves'}
             <CloudSavesPage {active} />
           {:else if p === 'retroachievements'}
-            <!-- Page-level activation, like the connection page: the login
-                 form holds a plain-typed password, so leaving this page must
-                 clear it. -->
+            <!-- Page-level activation, like Game stores: the login form holds
+                 a plain-typed password, so leaving this page must clear it. -->
             <RetroAchievementsPage active={active && page === 'retroachievements'} />
           {:else if p === 'stores'}
+            <!-- Page-level activation: the RomM card's sign-in dialog holds a
+                 plain secret, so leaving this page must close it. -->
             <StoresPage active={active && page === 'stores'} />
           {:else if p === 'systems'}
             <!-- Page-level activation: its fetches (and the once-per-session

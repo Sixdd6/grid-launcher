@@ -9,17 +9,17 @@
 # XDG_DATA_HOME and XDG_RUNTIME_DIR, all under one temp run directory.
 #
 #   scripts/e2e.sh              # build, then run every stage
-#   scripts/e2e.sh connect      # run only the named stage groups
+#   scripts/e2e.sh welcome      # run only the named stage groups
 #   E2E_SKIP_BUILD=1 scripts/e2e.sh   # skips the Rust AND frontend
 #                                             # builds: safe ONLY when nothing
 #                                             # under app/src or the
 #                                             # Rust crates has changed
 #   E2E_KEEP=1 scripts/e2e.sh   # keep the temp run directory
 #
-# When naming groups, list `python-import` FIRST: it asserts the Connect form,
-# and a group that connected earlier leaves a RomM credential in the run's
-# private keyring. The runner also clears that item with `secret-tool` before
-# the group (a silent no-op when libsecret-tools is missing).
+# When naming groups, list `python-import` FIRST: it asserts the welcome with
+# no RomM credential, and a group that connected earlier leaves one in the
+# run's private keyring. The runner also clears that item with `secret-tool`
+# before the group (a silent no-op when libsecret-tools is missing).
 #
 # Exit codes: 0 pass, 1 a stage group failed, 2 a prerequisite is missing or
 # the binary cannot be trusted to be an e2e build.
@@ -61,13 +61,24 @@ BUILD_STAMP="$REPO_DIR/target/$E2E_PROFILE/.e2e-build-stamp"
 STAGE_GROUPS=(
   # First on purpose: the run's gnome-keyring is shared by every stage, and
   # this is the one stage that needs it EMPTY (an imported profile has no
-  # credential, so the app must come up on Connect). `run_group_attempt`
+  # credential, so RomM's row must ask for the token). `run_group_attempt`
   # also clears the item when secret-tool is available, which is what makes
-  # `e2e.sh connect python-import` work too.
+  # `e2e.sh welcome python-import` work too.
   "python-import:specs/python-import.spec.ts"
-  "connect:specs/connect.spec.ts"
+  # The first-run welcome (romm-storefront-plan Step 5) on a fresh profile:
+  # the folder step, the storefront rows by name, RomM inline (a rejected
+  # token, then the fixture token), Steam's form inline, Skip for now turning
+  # into Continue, and Continue into the shell.
+  "welcome:specs/welcome.spec.ts"
   "connect-restore:specs/connect-restore-a.spec.ts specs/connect-restore-b.spec.ts specs/connect-restore-c.spec.ts"
   "library:specs/library.spec.ts specs/library-grid.spec.ts"
+  # RomM as a storefront (romm-storefront-plan Step 3): (a) never connected,
+  # nothing installed: no RomM group; (b) connected: Installed, Discover and
+  # the platform rows, a platform merging server and installed games (NOT
+  # LINKED, NOT ON ROMM); (c) relaunch, server unreachable: Installed only
+  # with the ! flag and the Retry banner; (d) relaunch after Disconnect:
+  # Installed only with the off flag. Its seed runs before every spec.
+  "romm-library:specs/romm-library-a.spec.ts specs/romm-library-b.spec.ts specs/romm-library-c.spec.ts specs/romm-library-d.spec.ts"
   # Server › Discover against its own fixture set, whose release and added
   # dates are relative to the day the run starts (mock-romm applyRelativeDates).
   "discover:specs/discover.spec.ts"
@@ -116,6 +127,13 @@ STAGE_GROUPS=(
   # menu near the bottom edge, two-click Remove, Install recommended (N) and
   # a manual add that sets no default.
   "systems:specs/systems.spec.ts"
+  # Settings › Game stores' RomM card (romm-storefront-plan Step 4), on a
+  # seeded profile past the welcome with RomM never connected: the cards by
+  # name, the needs-RomM panels, a first connect from the card that opens
+  # Choose your systems (first-run-setup fixtures, mock forge) and returns to
+  # Game stores on Skip, Edit…, Reconnect, Can't reach and Retry, a 401
+  # (Sign-in expired, the shell stays) and Sign in again…, and Disconnect.
+  "settings-romm:specs/settings-romm.spec.ts"
   # Game backups (docs/superpowers/plans/2026-11-09-game-backups.md, Task
   # 21) on fake drives: every child folder of <data>/media is a mounted
   # drive (GRID_LAUNCHER_E2E_DRIVE_ROOTS, e2e feature only). (a) set up a
@@ -124,8 +142,9 @@ STAGE_GROUPS=(
   # without a server installs from a seeded pack, (d) three installed games
   # (docs/superpowers/plans/2026-11-09-game-backups-local-copies.md §6.4)
   # are copied from this computer, one out of date, and one is restored
-  # from the drive. Seeded per spec.
-  "backups:specs/backups-a.spec.ts specs/backups-b.spec.ts specs/backups-c.spec.ts specs/backups-d.spec.ts"
+  # from the drive, (e) the same games backed up with RomM not connected
+  # (docs/romm-storefront-plan.md Step 2), one restored. Seeded per spec.
+  "backups:specs/backups-a.spec.ts specs/backups-b.spec.ts specs/backups-c.spec.ts specs/backups-d.spec.ts specs/backups-e.spec.ts"
   # TV mode's shell (docs/tv-mode/plan.md P5), on a profile used without a
   # server (seeded). A group whose name starts with `tv-` starts the app with
   # --tv (E2E_APP_ARGS, read by wdio.conf.ts); a spec opts out with an
@@ -221,6 +240,10 @@ STAGE_GROUPS=(
   # takes TV mode's typed text; (secrets) after a login and an install no log
   # holds the fake store token.
   "gog:specs/gog-login.spec.ts specs/gog-secrets.spec.ts"
+  # The welcome's GOG row on a fresh profile (seed/gog-seed.mjs writes no
+  # config for it): the login window over the welcome, the connected row,
+  # Continue into the Library with no emulator step.
+  "gog-welcome:specs/gog-welcome.spec.ts"
   # Package E's desktop GOG specs, each on a profile of its own seeded by
   # seed/gog-seed.mjs: the connect form for the mock RomM (fixtures-gog: a
   # Linux platform whose archives hold a GOG .sh and an unrecognised .exe),
@@ -693,7 +716,7 @@ mock_args_for_group() {
     # from e2e/fixtures so the shared set — and every assertion the other
     # groups and mock-romm/server.test.mjs make about it — stays untouched.
     emulator-catalog) printf -- '--fixtures-dir fixtures-emulator-catalog' ;;
-    first-run-setup|settings-screens|tv-startup) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
+    first-run-setup|settings-screens|tv-startup|settings-romm) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
     # The first-run-setup set plus a "Sony PlayStation 4", whose ShadPS4
     # installs with its Qt launcher companion from the mock forge.
     systems|tv-systems) printf -- '--fixtures-dir fixtures-systems' ;;
@@ -780,7 +803,7 @@ group_needs_steam() {
 }
 
 group_needs_forge() {
-  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" || "$1" == "tv-startup" || "$1" == "tv-layout" ]]
+  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" || "$1" == "settings-romm" || "$1" == "systems" || "$1" == "tv-systems" || "$1" == "settings-screens" || "$1" == "tv-startup" || "$1" == "tv-layout" ]]
 }
 
 # The `launch` group's data dir is pre-seeded (Ruling A, task-7-brief.md):
@@ -793,6 +816,7 @@ seed_script_for_group() {
     launch) printf '%s' "$E2E_DIR/seed/launch-seed.mjs" ;;
     # Their systems set to None, so Details' Install brings no emulator.
     install|downloads) printf '%s' "$E2E_DIR/seed/no-emulator-seed.mjs" ;;
+    romm-library) printf '%s' "$E2E_DIR/seed/romm-library-seed.mjs" ;;
     emulator-catalog) printf '%s' "$E2E_DIR/seed/emulator-catalog-seed.mjs" ;;
     cloud-saves) printf '%s' "$E2E_DIR/seed/cloud-saves-seed.mjs" ;;
     images) printf '%s' "$E2E_DIR/seed/images-seed.mjs" ;;
@@ -806,6 +830,7 @@ seed_script_for_group() {
     library-move) printf '%s' "$E2E_DIR/seed/library-move-seed.mjs" ;;
     backups|tv-backups|tv-layout) printf '%s' "$E2E_DIR/seed/backups-seed.mjs" ;;
     tv-shell) printf '%s' "$E2E_DIR/seed/tv-shell-seed.mjs" ;;
+    settings-romm) printf '%s' "$E2E_DIR/seed/settings-romm-seed.mjs" ;;
     tv-server) printf '%s' "$E2E_DIR/seed/tv-server-seed.mjs" ;;
     tv-library) printf '%s' "$E2E_DIR/seed/tv-library-seed.mjs" ;;
     tv-details) printf '%s' "$E2E_DIR/seed/tv-details-seed.mjs" ;;
@@ -826,7 +851,7 @@ seed_script_for_group() {
 # the run's keyring, but each starts the app on the state its own seed
 # variant writes.
 group_seeds_per_spec() {
-  [[ "$1" == "library-move" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == gog || "$1" == gog-* || "$1" == tv-gog || "$1" == epic || "$1" == epic-* || "$1" == tv-epic || "$1" == amazon || "$1" == amazon-* || "$1" == tv-amazon || "$1" == steam || "$1" == steam-* || "$1" == tv-steam ]]
+  [[ "$1" == "library-move" || "$1" == "romm-library" || "$1" == "backups" || "$1" == "tv-startup" || "$1" == "tv-backups" || "$1" == "tv-layout" || "$1" == gog || "$1" == gog-* || "$1" == tv-gog || "$1" == epic || "$1" == epic-* || "$1" == tv-epic || "$1" == amazon || "$1" == amazon-* || "$1" == tv-amazon || "$1" == steam || "$1" == steam-* || "$1" == tv-steam ]]
 }
 
 # Runs every spec of one group against a freshly created data dir and mock.
@@ -897,7 +922,7 @@ run_group_attempt() {
     # The keyring item is keyed by a FIXED service/account
     # (crates/grid-core/src/secrets.rs), so a credential an earlier group
     # saved into this run's shared gnome-keyring would let the app
-    # reconnect and never render the Connect screen this stage asserts on.
+    # reconnect and never ask for the token this stage asserts on.
     # Best effort — the group is also listed first, which covers a machine
     # with no secret-tool installed.
     if command -v secret-tool >/dev/null 2>&1; then
@@ -913,7 +938,7 @@ run_group_attempt() {
     # A Python user's library folder exists on the machine they import on.
     # Without it the imported RetroArch entry points into a missing folder,
     # and the 9b unreachable-library check rightly blocks startup with its
-    # dialog instead of the Connect form.
+    # dialog instead of the welcome.
     mkdir -p "$data_dir/library"
     printf 'demo' >"$data_dir/kept/Old Demo/demo.sfc"
     cat >"$python_config" <<EOF
@@ -1093,11 +1118,11 @@ EOF
     wdio_log="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.log"
     out_dir="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.d"
     say "running $stage (attempt $attempt)"
-    # backups-c, backups-d, tv-startup a, c and d, tv-backups c and e and tv-layout start from a fresh profile: the credential an
+    # backups-c, -d and -e, tv-startup a, c and d, tv-backups c and e and tv-layout start from a fresh profile: the credential an
     # earlier spec saved in this run's private keyring must go too, or the
     # app would restore that session. Same best-effort clear as the
     # python-import group.
-    if [[ "$spec" == */backups-[cd].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */gog-*.spec.ts || "$spec" == */tv-gog-*.spec.ts || "$spec" == */epic-*.spec.ts || "$spec" == */tv-epic*.spec.ts || "$spec" == */amazon-*.spec.ts || "$spec" == */tv-amazon*.spec.ts || "$spec" == */steam-*.spec.ts || "$spec" == */tv-steam*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
+    if [[ "$spec" == */backups-[cde].spec.ts || "$spec" == */tv-startup-[acd].spec.ts || "$spec" == */tv-backups-[ce].spec.ts || "$spec" == */tv-layout.spec.ts || "$spec" == */gog-*.spec.ts || "$spec" == */tv-gog-*.spec.ts || "$spec" == */epic-*.spec.ts || "$spec" == */tv-epic*.spec.ts || "$spec" == */amazon-*.spec.ts || "$spec" == */tv-amazon*.spec.ts || "$spec" == */steam-*.spec.ts || "$spec" == */tv-steam*.spec.ts ]] && command -v secret-tool >/dev/null 2>&1; then
       secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
     fi
     # Every Steam spec starts with an empty Steam Web API key slot (a spec
@@ -1225,7 +1250,7 @@ EOF
       # Only the `first-run-setup` group sees the platform picker after
       # connecting (wdio.conf.ts turns this into
       # GRID_LAUNCHER_E2E_FIRST_RUN_SETUP, read by the e2e build only).
-      if [[ "$name" == "first-run-setup" || "$name" == "settings-screens" || "$name" == "tv-startup" || "$name" == "tv-layout" ]]; then
+      if [[ "$name" == "first-run-setup" || "$name" == "settings-screens" || "$name" == "settings-romm" || "$name" == "tv-startup" || "$name" == "tv-layout" ]]; then
         export E2E_FIRST_RUN_SETUP=1
       fi
       # Only the `library-move` group: the whole run is on one disk, where
