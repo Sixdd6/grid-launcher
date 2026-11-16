@@ -259,7 +259,7 @@ impl ServerBuild<'_> {
 /// without the platform suffix ("PCSX2" for "PCSX2 (Playstation 2)"),
 /// case-insensitive. Compat tools and profiles setup does not offer are
 /// never matched.
-fn profile_for_emulator<'a>(
+pub(crate) fn profile_for_emulator<'a>(
     emulator: &str,
     profiles: &'a [EmulatorProfile],
     table: &Recommendations,

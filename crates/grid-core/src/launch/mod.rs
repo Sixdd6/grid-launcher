@@ -6,6 +6,7 @@ pub mod binary_target;
 pub mod catalog;
 pub mod compat;
 pub mod emu_install;
+pub mod emulators_view;
 pub mod forge;
 pub mod native;
 pub mod platform_slugs;
