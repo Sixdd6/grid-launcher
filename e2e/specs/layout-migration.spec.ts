@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { APP_START_TIMEOUT, configPath, dataDir } from '../helpers/env.js';
+import { startScreen } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -31,11 +32,8 @@ describe('layout-migration', () => {
 
   before(async () => {
     // The migration is finished before the webview exists; waiting for the
-    // connect form is just "the app reached a usable state".
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
+    // welcome (or the shell) is just "the app reached a usable state".
+    await startScreen();
   });
 
   it('moves the flat platform directory under games/', () => {

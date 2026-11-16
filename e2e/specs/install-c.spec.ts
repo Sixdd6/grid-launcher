@@ -7,6 +7,7 @@ import {
   INSTALL_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { openRommPlatform, openLibrary } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -25,16 +26,12 @@ const gameFile = (root: string) => path.join(root, 'games', SNES, 'Super Mario W
  */
 describe('install (c): change the library folder, start fresh, leave files', () => {
   async function showServer() {
-    await $(testId('nav-server')).click();
-    await $(testId('server-view')).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server view never came back',
-    });
+    await openLibrary();
   }
 
   async function installRom101() {
     await showServer();
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-101')).click();
     const panel = $(testId('details-panel'));
@@ -43,7 +40,7 @@ describe('install (c): change the library folder, start fresh, leave files', () 
       timeoutMsg: 'the details overlay never opened for rom 101',
     });
     await $(testId('details-install')).click();
-    await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({
+    await $(`${testId('romm-platform-view')} ${testId('installed-badge-101')}`).waitForExist({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: "the installed badge never appeared on rom 101's card",
     });
@@ -56,10 +53,7 @@ describe('install (c): change the library folder, start fresh, leave files', () 
   }
 
   before(async () => {
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the library never appeared — the stored session was not restored',
-    });
+    await openRommPlatform('snes');
   });
 
   it('reinstalls rom 101 under the first library folder', async () => {
@@ -122,9 +116,9 @@ describe('install (c): change the library folder, start fresh, leave files', () 
 
   it('drops the old row from the library', async () => {
     await showServer();
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({
+    await $(`${testId('romm-platform-view')} ${testId('installed-badge-101')}`).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,
       timeoutMsg: 'rom 101 still shows as installed after Start fresh',

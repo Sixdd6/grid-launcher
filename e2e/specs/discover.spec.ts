@@ -7,7 +7,7 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
-import { openDiscover, openPlatform } from '../helpers/server.js';
+import { connectRomm, openRommPlatform, openRommDiscover } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -22,7 +22,7 @@ async function screenshot(name: string): Promise<void> {
 }
 
 /**
- * Stage `discover`: Server › Discover against `e2e/fixtures-discover`, whose
+ * Stage `discover`: Library › RomM › Discover against `e2e/fixtures-discover`, whose
  * dates are relative to the day the suite runs (`e2e_released_days_ago`,
  * `e2e_added_days_ago` in roms.json):
  *
@@ -103,33 +103,24 @@ describe('discover', () => {
   }
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('server-rail-discover')).waitForExist({
+    await connectRomm();
+    await $(testId('library-rail-romm-discover')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the Server rail never appeared after connecting',
+      timeoutMsg: 'the RomM group never showed Discover after connecting',
     });
   });
 
-  it('opens Server on Discover, the first rail row, with a divider under it', async () => {
+  it('opens on Library › RomM › Discover, the row after Installed', async () => {
     await $(testId('discover')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
-    // Open GRID on is Automatic and the server answers: GRID opens here.
-    await expect($(testId('nav-server'))).toHaveAttribute('aria-current', 'page');
-    await expect($(testId('server-rail-discover'))).toHaveAttribute('aria-current', 'page');
-    const rail = await browser.execute(() => {
-      const nav = document.querySelector('[data-testid="server-rail"]')!;
-      const first = nav.querySelector('button');
-      return {
-        first: first?.dataset.testid ?? '',
-        dividerNext: first?.nextElementSibling?.tagName ?? '',
-      };
-    });
-    expect(rail).toEqual({ first: 'server-rail-discover', dividerNext: 'HR' });
+    // Open GRID on is Automatic and RomM answers: GRID opens here.
+    await expect($(testId('nav-library'))).toHaveAttribute('aria-current', 'page');
+    await expect($(testId('library-rail-romm-discover'))).toHaveAttribute('aria-current', 'page');
+    const rail = await browser.execute(() =>
+      Array.from(document.querySelectorAll('[data-testid="library-rail"] button'))
+        .map((b) => b.getAttribute('data-testid') ?? '')
+        .filter((id) => id.startsWith('library-rail-romm-') || id.startsWith('library-rail-platform-')),
+    );
+    expect(rail.slice(0, 2)).toEqual(['library-rail-romm-installed', 'library-rail-romm-discover']);
     // The folding header and the grid belong to a platform, not to Discover.
     await expect($(testId('server-platform-header'))).not.toExist();
     await expect($(testId('server-search'))).not.toExist();
@@ -148,7 +139,7 @@ describe('discover', () => {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the empty New releases link never opened Settings › Systems',
     });
-    await $(testId('nav-server')).click();
+    await $(testId('nav-library')).click();
     await $(testId('discover')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
   });
 
@@ -191,8 +182,8 @@ describe('discover', () => {
   it('fills New releases from the preferred platforms, newest release first', async () => {
     setSnesDefault();
     // Discover reads the defaults each time it comes to the front.
-    await openPlatform(2);
-    await openDiscover();
+    await openRommPlatform('arcade');
+    await openRommDiscover();
     await $(testId('discover-coverflow')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'New releases never showed a coverflow once SNES had a default',

@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { APP_START_TIMEOUT, FIXTURE_TOKEN, FIXTURE_USERNAME, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { connectRomm } from '../helpers/romm.js';
 import { setServerOffline } from '../helpers/openOn.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
@@ -30,13 +31,7 @@ async function railOrder(): Promise<string[]> {
  */
 describe('romm-library (b): connected', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
+    await connectRomm();
     await $(testId('library-rail-romm-discover')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the RomM group never showed Discover after connecting',

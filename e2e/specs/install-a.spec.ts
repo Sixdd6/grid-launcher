@@ -9,6 +9,7 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { connectRomm, openRommPlatform, openLibrary } from '../helpers/romm.js';
 import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
@@ -36,28 +37,11 @@ describe('install (a): connect, set library path, install', () => {
   }
 
   async function showServer() {
-    await $(testId('nav-server')).click();
-    await $(testId('server-view')).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server view never came back',
-    });
+    await openLibrary();
   }
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    // A fresh profile has no library folder: Connect asks for one.
-    await $(testId('connect-library-path')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('connect-library-path')).setValue(path.join(dataDir(), 'library'));
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after connecting',
-    });
+    await connectRomm({ libraryPath: path.join(dataDir(), 'library') });
 
     // Prove the Downloads pill reaches its view once, up front; the tests
     // below switch back and forth as they need it.
@@ -76,7 +60,7 @@ describe('install (a): connect, set library path, install', () => {
   });
 
   it('installs a game from the details overlay through to the installed badge', async () => {
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('snes');
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-101')).click();
 
@@ -123,7 +107,7 @@ describe('install (a): connect, set library path, install', () => {
       timeoutMsg: 'Play on the installed card never launched the game',
     });
 
-    await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({
+    await $(`${testId('romm-platform-view')} ${testId('installed-badge-101')}`).waitForExist({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: 'the installed badge never appeared on rom 101\'s card',
     });

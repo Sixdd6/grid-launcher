@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { APP_START_TIMEOUT, dataDir, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { APP_START_TIMEOUT, dataDir, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { connectRomm, openRommPlatform } from '../helpers/romm.js';
 import { openRow, waitForStatus } from '../helpers/systems.js';
 
 /**
@@ -16,7 +17,7 @@ import { openRow, waitForStatus } from '../helpers/systems.js';
 const testId = (id: string) => `[data-testid="${id}"]`;
 const OUT = path.resolve(process.cwd(), '..', 'ctr-out', process.env.E2E_SETTINGS_SHOTS || 'settings-screens');
 const INSTALL_WAIT = 60_000;
-const PAGES = ['appearance', 'cloud-saves', 'connection', 'library', 'retroachievements', 'systems', 'updates'];
+const PAGES = ['appearance', 'backup-drives', 'cloud-saves', 'stores', 'library', 'retroachievements', 'systems', 'updates'];
 
 async function shot(name: string): Promise<void> {
   mkdirSync(OUT, { recursive: true });
@@ -60,13 +61,9 @@ async function scrollPane(p: string, to: 'top' | 'bottom'): Promise<void> {
 
 describe('settings screens: every Settings page for a design comparison', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({ timeout: APP_START_TIMEOUT });
+    await $(testId('welcome')).waitForExist({ timeout: APP_START_TIMEOUT });
     await browser.setWindowSize(1280, 800);
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-library-path')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('connect-library-path')).setValue(path.join(dataDir(), 'library'));
-    await $(testId('connect-submit')).click();
+    await connectRomm({ libraryPath: path.join(dataDir(), 'library'), until: 'setup' });
   });
 
   it('Choose your systems, empty and ticked', async () => {
@@ -79,14 +76,15 @@ describe('settings screens: every Settings page for a design comparison', () => 
     await $(testId('sys-tick-windows')).click();
     await shot('setup-2-ticked');
     await $(testId('setup-install')).click();
-    await $(testId('platform-btn-1')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await openRommPlatform('ps2');
   });
 
-  it('waits for the installs so Systems shows Ready rows', async () => {
+  it('waits for the installs so Systems shows installed rows', async () => {
     await $(testId('nav-settings')).click();
     await page('systems');
-    await waitForStatus('ps2', 'ready', INSTALL_WAIT);
-    await waitForStatus('dc', 'ready', INSTALL_WAIT);
+    // PCSX2 and Redream install with no BIOS: Firmware needed (romm-storefront-plan Step 7).
+    await waitForStatus('ps2', 'firmware', INSTALL_WAIT);
+    await waitForStatus('dc', 'firmware', INSTALL_WAIT);
     // Let the setup card finish and leave the corner.
     await browser.pause(12_000);
   });
@@ -101,10 +99,14 @@ describe('settings screens: every Settings page for a design comparison', () => 
         await shot(`${theme}-${p}`);
       }
 
-      await page('connection');
-      await $(testId('settings-connection-edit')).click();
-      await shot(`${theme}-connection-edit`);
-      await $(testId('settings-connection-cancel')).click();
+      // Game stores' RomM card: Edit… opens the sign-in dialog (it replaced
+      // the Connection page).
+      await page('stores');
+      await $(testId('romm-card-edit')).click();
+      await $(testId('romm-signin-dialog')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+      await shot(`${theme}-romm-signin-edit`);
+      await $(testId('romm-signin-cancel')).click();
+      await $(testId('romm-signin-dialog')).waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
 
       await page('systems');
       await openRow('ps2');

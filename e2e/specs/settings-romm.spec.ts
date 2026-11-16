@@ -239,7 +239,7 @@ describe('settings-romm: the RomM card on Settings › Game stores', () => {
       await page('stores');
       await waitText('store-card-pill-romm', 'Sign-in expired', APP_START_TIMEOUT);
       await expect($(testId('nav-settings'))).toExist();
-      await expect($(testId('connect-server-url'))).not.toExist();
+      await expect($(testId('welcome'))).not.toExist();
       await expect($(testId('romm-card-warning'))).toHaveText(
         'Your RomM sign-in expired. Sign in again to browse, install and sync saves. Installed games still play.',
       );
@@ -289,7 +289,7 @@ describe('settings-romm: the RomM card on Settings › Game stores', () => {
     await expect($(testId('romm-card-field-status'))).toHaveText('Not connected');
     await expect($(testId('romm-card-open'))).toHaveText('Open in browser');
     await expect($(testId('nav-settings'))).toExist();
-    await expect($(testId('connect-server-url'))).not.toExist();
+    await expect($(testId('welcome'))).not.toExist();
     await dismissToasts();
     await $(testId('store-card-romm')).scrollIntoView();
     await shot('11-card-not-connected');

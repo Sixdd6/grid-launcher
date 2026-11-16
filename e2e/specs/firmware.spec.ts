@@ -9,6 +9,7 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { connectRomm, openRommPlatform, openLibrary } from '../helpers/romm.js';
 import { addManual, findLine, lineKey, openSystems } from '../helpers/systems.js';
 import { waitForToast } from '../helpers/toasts.js';
 
@@ -57,25 +58,11 @@ describe('firmware', () => {
   }
 
   async function showServer() {
-    await $(testId('nav-server')).click();
-    await $(testId('server-view')).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server view never came back',
-    });
+    await openLibrary();
   }
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after connecting',
-    });
+    await connectRomm();
 
     await $(testId('nav-downloads')).click();
     await $(testId('downloads-view')).waitForDisplayed({
@@ -86,7 +73,7 @@ describe('firmware', () => {
 
   it("downloads the platform's BIOS beside the default emulator after a game install", async () => {
     await showServer();
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('ps');
     await $(testId('game-card-801')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-801')).click();
     await $(testId('details-panel')).waitForExist({
@@ -124,7 +111,7 @@ describe('firmware', () => {
     // Installed; with it gone again, the row offers Install.
 
     await showServer();
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('ps');
     await $(testId('server-firmware-chip')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await browser.waitUntil(async () => (await $(testId('server-firmware-chip')).getText()).startsWith('Firmware: '), {
       timeout: TRANSITION_TIMEOUT,
@@ -137,13 +124,14 @@ describe('firmware', () => {
       timeoutMsg: 'the firmware chip did not open Settings › Systems',
     });
     await browser.waitUntil(
-      async () => ((await $(testId('sys-row-ps')).getAttribute('class')) ?? '').split(/\s+/).includes('open'),
+      async () => ((await $(testId('sys-row-psx')).getAttribute('class')) ?? '').split(/\s+/).includes('open'),
       { timeout: TRANSITION_TIMEOUT, timeoutMsg: "the firmware chip did not open PlayStation's row" },
     );
-    await expect($(testId('sys-row-ps'))).toBeDisplayedInViewport();
-    await expect($(testId(`sys-emu-name-${lineKey('PlayStation')}`))).toHaveText('DuckStation (Playstation 1)');
+    await expect($(testId('sys-row-psx'))).toBeDisplayedInViewport();
+    await expect($(`${testId('sys-row-psx')} [data-testid^="sys-emu-name-"]`)).toHaveText('DuckStation (Playstation 1)');
 
-    const install = $(testId('sys-firmware-install-ps'));
+    // The firmware block's Install from RomM (romm-storefront-plan Step 7).
+    const install = $(testId('sys-fw-romm-psx'));
     await install.waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: "PlayStation's row never listed its firmware",
@@ -158,12 +146,11 @@ describe('firmware', () => {
       timeoutMsg: `Install firmware never wrote ${bios}`,
     });
     // The pass-finished event re-reads the status, which now finds the
-    // BIOS in place: the row says Installed instead of offering Install again.
-    await $(testId('sys-firmware-installed-ps')).waitForExist({
-      timeout: FIRMWARE_TIMEOUT,
-      timeoutMsg: 'the row never said the firmware was installed',
-    });
-    await expect(install).not.toExist();
+    // BIOS in place: its file line says it is installed and verified.
+    await browser.waitUntil(
+      async () => (await $(testId('sys-fw-file-psx-scph5501.bin')).getAttribute('data-state')) === 'verified',
+      { timeout: FIRMWARE_TIMEOUT, timeoutMsg: 'the row never said the firmware was installed' },
+    );
     // … and when it has finished.
     await waitForToast(/firmware installed for DuckStation/, {
       timeout: FIRMWARE_TIMEOUT,
@@ -273,7 +260,11 @@ describe('firmware', () => {
     await expect($(testId(installed))).toHaveText('PS3 firmware 4.93 installed');
     const key = installed.replace('sys-ps3-firmware-installed-', '');
     expect(await $(testId(`sys-ps3-firmware-install-${key}`)).isExisting()).toBe(false);
-    // One line: the server-firmware line does not also offer the download.
-    expect(await $(testId(`sys-firmware-install-${key}`)).isExisting()).toBe(false);
+    // The system's firmware block (romm-storefront-plan Step 7) agrees: it
+    // lists the PUP as installed, not as one to download.
+    await browser.waitUntil(
+      async () => ['verified', 'unverified'].includes((await $(testId('sys-fw-file-ps3-PS3UPDAT.PUP')).getAttribute('data-state')) ?? ''),
+      { timeout: FIRMWARE_TIMEOUT, timeoutMsg: "PlayStation 3's firmware block never listed the PUP as installed" },
+    );
   });
 });

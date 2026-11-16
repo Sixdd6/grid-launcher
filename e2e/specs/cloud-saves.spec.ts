@@ -9,8 +9,8 @@ import {
   REAP_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { connectRomm, openRommPlatform } from '../helpers/romm.js';
 import { waitForToast } from '../helpers/toasts.js';
-import { openPlatform } from '../helpers/server.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -82,7 +82,7 @@ describe('cloud-saves', () => {
 
   async function openDetails(romId: number) {
     // Server opens on Discover: select the platform for its grid.
-    await openPlatform(1);
+    await openRommPlatform('snes');
     await $(testId(`game-card-${romId}`)).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId(`game-card-${romId}`)).click();
     await $(testId('details-panel')).waitForExist({
@@ -114,17 +114,7 @@ describe('cloud-saves', () => {
   }
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after connecting',
-    });
+    await connectRomm();
 
     // Auto-download-on-launch and auto-upload-on-exit both default to
     // `true` (config.rs's `default_true`), so the seed's bare config.toml
@@ -151,7 +141,7 @@ describe('cloud-saves', () => {
     await waitForConfigLine('auto_cloud_save_upload_delay_seconds = 0');
     await waitForConfigLine('cloud_save_retention_limit = 3');
     await waitForConfigLine('cloud_retention_default_migrated = true');
-    await $(testId('nav-server')).click();
+    await $(testId('nav-library')).click();
     await $(testId('settings-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,

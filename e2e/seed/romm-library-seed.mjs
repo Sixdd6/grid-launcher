@@ -6,7 +6,7 @@
  *
  * - `romm-library-a`: a fresh profile with a library folder and nothing
  *   installed (never connected, no RomM games: no RomM group).
- * - `romm-library-b`: a fresh profile again (Connect asks for the server),
+ * - `romm-library-b`: a fresh profile again (the welcome asks for RomM),
  *   with three installed RomM games on the Super Nintendo:
  *   - Super Mario World, rom 101 on the mock: merged with the server's game;
  *   - Hidden Kiln, no rom id: NOT LINKED (no server game has its title, so

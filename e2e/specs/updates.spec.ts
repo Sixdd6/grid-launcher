@@ -9,6 +9,7 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { connectRomm } from '../helpers/romm.js';
 import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
@@ -138,17 +139,7 @@ describe('updates', () => {
   }
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after connecting',
-    });
+    await connectRomm();
 
     // Prove the Downloads pill reaches its view once, up front; both update
     // jobs are observed as rows on it.
@@ -158,7 +149,9 @@ describe('updates', () => {
       timeoutMsg: 'the downloads view never opened',
     });
 
+    // GRID opens on Library › RomM › Discover: the seeded installs are under All games.
     await $(testId('nav-library')).click();
+    await $(testId('library-rail-all')).click();
     await $(testId('library-card-801')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the Library grid never rendered the seeded installs',
@@ -433,16 +426,18 @@ describe('updates', () => {
   // Design §10: the four pages plan 1 left as placeholders. One pass over
   // the rail, reading one line each page owns; the pure rules live in
   // `settings/*.test.ts`.
-  it('walks the Settings rail: Connection, Updates, Cloud saves, RetroAchievements', async () => {
-    await $(testId('settings-nav-connection')).click();
-    await $(testId('settings-page-connection')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
-    await expect($(testId('settings-connection-url'))).toHaveText(mockUrl());
-    await expect($(testId('settings-connection-credential'))).toHaveText(
-      'Stored in the OS keyring · session verified',
-    );
-    // Connected: Reconnect is not on offer, Disconnect is.
-    await expect($(testId('settings-connection-reconnect'))).toBeDisabled();
-    await expect($(testId('settings-connection-disconnect'))).toBeEnabled();
+  it('walks the Settings rail: Game stores, Updates, Cloud saves, RetroAchievements', async () => {
+    // Game stores' RomM card replaced the Connection page (romm-storefront-plan Step 4).
+    await $(testId('settings-nav-stores')).click();
+    await $(testId('settings-page-stores')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('store-card-romm')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('romm-card-field-server'))).toHaveText(mockUrl());
+    await expect($(testId('romm-card-field-signin'))).toHaveText('API token · kept in the OS keyring');
+    await expect($(testId('store-card-pill-romm'))).toHaveText('Connected');
+    // Connected: Show in Library, Reconnect and Disconnect are on offer.
+    await expect($(testId('romm-card-show'))).toBeEnabled();
+    await expect($(testId('romm-card-reconnect'))).toBeEnabled();
+    await expect($(testId('romm-card-disconnect'))).toBeEnabled();
 
     await $(testId('settings-nav-updates')).click();
     await $(testId('settings-page-updates')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });

@@ -8,25 +8,9 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { connectRomm } from '../helpers/romm.js';
 import { waitForToast } from '../helpers/toasts.js';
-import {
-  addManual,
-  configEmulatorNames,
-  editEmulator,
-  findLine,
-  groups,
-  hasLine,
-  lineKey,
-  openRow,
-  openSystems,
-  pick,
-  removeEmulator,
-  rowOrder,
-  saveSheet,
-  selectValue,
-  startManualAdd,
-  tipsText,
-} from '../helpers/systems.js';
+import { addManual, configEmulatorNames, editEmulator, findLine, groups, hasLine, lineKey, openRow, openSystems, pick, removeEmulator, rowOrder, saveSheet, selectValue, startManualAdd, tipsText } from '../helpers/systems.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -73,17 +57,7 @@ describe('emulators', () => {
       writeFileSync(path.join(coresDir, `${core}_libretro.so`), '');
     }
 
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after connecting',
-    });
+    await connectRomm();
 
     await openSystems();
   });
@@ -159,7 +133,11 @@ describe('emulators', () => {
     // Two SNES cores are installed beside it, so RetroArch plays SNES: it is
     // the emulator a SNES launch would use (the first compatible one), and
     // the picker lists it under Installed. A manual add sets no default.
-    expect(await findLine('RetroArch (Multi-System)')).toBe(SNES_LINE);
+    // (RetroArch also serves systems listed above SNES, such as Satellaview,
+    // so the check reads SNES's own row.)
+    await findLine('RetroArch (Multi-System)');
+    await openRow('snes');
+    await expect($(testId(`sys-emu-name-${SNES_LINE}`))).toHaveText('RetroArch (Multi-System)');
     // RetroArch is SNES's recommendation (no standalone emulator serves it).
     expect((await groups('snes')).Installed).toEqual([
       'use:RetroArch (Multi-System)=RetroArch (Multi-System) (recommended)',
@@ -355,7 +333,7 @@ describe('emulators', () => {
   it('the None choice survives leaving and re-entering the page', async () => {
     // Coming forward re-runs list_platforms, which is where the autoconfig
     // backfill used to re-assign RetroArch over a cleared default.
-    await $(testId('nav-server')).click();
+    await $(testId('nav-library')).click();
     await $(testId('settings-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,

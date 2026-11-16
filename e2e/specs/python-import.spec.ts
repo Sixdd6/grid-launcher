@@ -120,7 +120,9 @@ describe('python-import', () => {
     await $(testId('welcome-continue')).click();
     await $(testId('welcome')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
 
+    // GRID opens on Library › RomM › Discover; the imported rows are under All games.
     await $(testId('nav-library')).click();
+    await $(testId('library-rail-all')).click();
     // Rom 101 is "Super Mario World" on the mock: the imported row gets its
     // id, so its card carries it.
     await $(testId('library-card-101')).waitForExist({

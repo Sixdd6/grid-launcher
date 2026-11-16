@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import {
   APP_START_TIMEOUT,
@@ -9,37 +9,53 @@ import {
   mockUrl,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
-import { editEmulator, findLine, lineKey, openSystems, removeEmulator } from '../helpers/systems.js';
+import { connectRomm } from '../helpers/romm.js';
+import { editEmulator, findLine, groups, lineKey, openRow, openSystems, pick, removeEmulator } from '../helpers/systems.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
 /**
- * Stage `server-emulator` (plan B7 / Q3): a ROM on the server's "Emulators"
- * platform is an emulator build. Installing it from the Server view
- * downloads and extracts it like a game (under `games/Emulators/<stem>`),
- * then registers it as an emulator entry, configures it, and shows it as
- * PS2's emulator in Settings › Systems. Removing the entry uninstalls the
- * package.
+ * Stage `server-emulator` (plan B7 / Q3; docs/server-emulator-packages.md): a
+ * build on the server's "Emulators" platform is an emulator. RomM's
+ * Emulators shelf is never a Library row (romm-storefront-plan 0.3), so the
+ * build is installed from Settings › Systems, as a "from your server"
+ * download on PS2's picker. It downloads, extracts under
+ * `emulators/<Profile>/`, registers as an emulator entry, is configured, and
+ * shows as PS2's emulator. Removing the entry uninstalls the build.
  *
  * The fixture set (`e2e/fixtures-server-emulator`) carries platform 1
- * "Emulators" with rom 801, whose `pcsx2-server.zip` holds the mock forge's
- * PCSX2 AppImage stub (mock-romm/server.mjs). Its file name matches the
- * PCSX2 catalog profile's `match_tokens`, so the entry takes the profile's
- * name and args. Platform 2 "Sony PlayStation 2" is there so the defaults
- * backfill has a platform the profile matches.
+ * "Emulators" with rom 801, the `ps2` folder, whose one build
+ * `PCSX2 (v2.0.2) (arch-linux-x64).zip` holds the mock forge's PCSX2
+ * AppImage stub (mock-romm/server.mjs). It is named to the packaging rules,
+ * so the entry takes the PCSX2 profile's name and args. Platform 2 "Sony
+ * PlayStation 2" is the system it serves.
  */
 describe('server-emulator', () => {
   const PCSX2_NAME = 'PCSX2 (Playstation 2)';
   const APPIMAGE = 'pcsx2-v9.9-e2e-linux-appimage-x64-Qt.AppImage';
 
   const library = () => path.join(dataDir(), 'library');
-  const packageDir = () => path.join(library(), 'games', 'Emulators', 'pcsx2-server');
-  const exePath = () => path.join(packageDir(), 'PCSX2', APPIMAGE);
+  const packageDir = () => path.join(library(), 'emulators', PCSX2_NAME);
+  /** The AppImage, wherever the build's folders put it under `packageDir`. */
+  const exePath = (): string => {
+    const walk = (dir: string): string | null => {
+      for (const name of readdirSync(dir)) {
+        const full = path.join(dir, name);
+        if (name === APPIMAGE) return full;
+        if (lstatSync(full).isDirectory()) {
+          const hit = walk(full);
+          if (hit) return hit;
+        }
+      }
+      return null;
+    };
+    return (existsSync(packageDir()) && walk(packageDir())) || path.join(packageDir(), APPIMAGE);
+  };
   /** PCSX2's AppImage roots its data at `<AppImage dir>/PCSX2`; `inis` is a
    *  user-data link into `saves/<Profile>/`, and the writer writes through it. */
   const savedIni = () => path.join(library(), 'saves', PCSX2_NAME, 'inis', 'PCSX2.ini');
 
-  async function show(view: 'server' | 'downloads') {
+  async function show(view: 'downloads') {
     await $(testId(`nav-${view}`)).click();
     await $(testId(`${view}-view`)).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
@@ -56,31 +72,19 @@ describe('server-emulator', () => {
   }
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    // A fresh profile has no library folder: Connect asks for one.
-    await $(testId('connect-library-path')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('connect-library-path')).setValue(library());
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server view never rendered a platform button after connecting',
-    });
+    await connectRomm({ libraryPath: library() });
   });
 
   it('installs the Emulators-platform package with the Emulator badge on its Downloads row', async () => {
-    await $(testId('platform-btn-1')).click();
-    await $(testId('game-card-801')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('game-card-801')).click();
-    await $(testId('details-panel')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the details overlay never opened for rom 801',
-    });
-    await $(testId('details-install')).click();
+    // RomM's Emulators shelf is never a Library rail row (romm-storefront-plan
+    // 0.3): its builds are offered in Settings › Systems, as "from your
+    // server" downloads on the systems they serve.
+    await openSystems();
+    await openRow('ps2');
+    const download = (await groups('ps2')).Download ?? [];
+    const server = download.find((o) => o.endsWith('· from your server'));
+    expect(server).toBeDefined();
+    await pick('ps2', server!.slice(0, server!.indexOf('=')));
 
     await show('downloads');
     await $(testId('download-row-1')).waitForExist({
@@ -94,7 +98,7 @@ describe('server-emulator', () => {
     );
   });
 
-  it('extracts the package under games/Emulators and makes the AppImage executable', () => {
+  it('extracts the build under emulators/<Profile> and makes the AppImage executable', () => {
     expect(existsSync(exePath())).toBe(true);
     expect(statSync(exePath()).mode & 0o111).not.toBe(0);
   });
@@ -116,8 +120,9 @@ describe('server-emulator', () => {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the defaults backfill never made the package the PS2 default',
     });
-    // No forge update source: a server package is not a catalog install.
-    expect(configText()).not.toContain('source_id');
+    // Its update source is the server's folder, not the catalog's forge.
+    expect(configText()).toMatch(/source_id = "romm:ps2\//);
+    expect(configText()).toContain('source_installed_tag = "2.0.2"');
 
     await browser.waitUntil(() => existsSync(savedIni()), {
       timeout: TRANSITION_TIMEOUT,

@@ -8,6 +8,7 @@ import {
   THROTTLED_DOWNLOAD_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { connectRomm, openRommPlatform, openLibrary } from '../helpers/romm.js';
 import { waitForToast } from '../helpers/toasts.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
@@ -37,22 +38,9 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  */
 describe('downloads', () => {
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    // A fresh profile has no library folder: Connect asks for one.
-    await $(testId('connect-library-path')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('connect-library-path')).setValue(path.join(dataDir(), 'library'));
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after connecting',
-    });
+    await connectRomm({ libraryPath: path.join(dataDir(), 'library') });
 
-    await $(testId('platform-btn-2')).click();
+    await openRommPlatform('arcade');
     await $(testId('game-card-301')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'platform 2 never rendered its game cards',
@@ -74,11 +62,7 @@ describe('downloads', () => {
   }
 
   async function install(cardTestId: string, title: string) {
-    await $(testId('nav-server')).click();
-    await $(testId('server-view')).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server view never came back',
-    });
+    await openLibrary();
     await $(testId(cardTestId)).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('details-install')).click();

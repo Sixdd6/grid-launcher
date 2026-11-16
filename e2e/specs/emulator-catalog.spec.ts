@@ -11,6 +11,7 @@ import {
   REAP_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { connectRomm, openRommPlatform } from '../helpers/romm.js';
 import { waitForToast } from '../helpers/toasts.js';
 import { editEmulator, findLine, groups, openRow, openSystems, pick, removeEmulator } from '../helpers/systems.js';
 
@@ -128,7 +129,7 @@ describe('emulator-catalog', () => {
   }
 
   async function closeSystems() {
-    await $(testId('nav-server')).click();
+    await $(testId('nav-library')).click();
     await $(testId('settings-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,
@@ -181,17 +182,7 @@ describe('emulator-catalog', () => {
   }
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after connecting',
-    });
+    await connectRomm();
 
     // Prove the Downloads pill reaches its view once, up front; every
     // install below is asserted through `waitForCompleted`, which switches
@@ -209,8 +200,9 @@ describe('emulator-catalog', () => {
     expect(ps2.Installed).toBeUndefined();
     expect(ps2.Download[0]).toBe(`install:${PCSX2_SOURCE}=Install PCSX2 (recommended)`);
     expect(await group('dc', 'Download')).toContain(`install:${REDREAM_SOURCE}`);
-    // PCSX2 plays PlayStation 2 only.
-    expect(await group('gc', 'Download')).not.toContain(`install:${PCSX2_SOURCE}`);
+    // PCSX2 plays PlayStation 2 only. (The server's `gc` is GRID's `ngc`
+    // GameCube row: same name, one row.)
+    expect(await group('ngc', 'Download')).not.toContain(`install:${PCSX2_SOURCE}`);
   });
 
   it('installs PCSX2 from the PS2 picker and makes it PS2’s emulator', async () => {
@@ -232,16 +224,18 @@ describe('emulator-catalog', () => {
     await waitForConfigLine(pcsx2Path());
     // A picker install makes it the system's emulator once it lands.
     await waitForConfigLine(`"${PLATFORM}" = "${PCSX2_NAME}"`);
-    await browser.waitUntil(async () => (await $(testId('sys-status-ps2')).getAttribute('data-status')) === 'ready', {
+    // PCSX2 needs a BIOS and none is installed: Firmware needed, not Ready
+    // (romm-storefront-plan Step 7 shows the firmware state on every system).
+    await browser.waitUntil(async () => (await $(testId('sys-status-ps2')).getAttribute('data-status')) === 'firmware', {
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'PS2 never showed Ready after the install',
+      timeoutMsg: 'PS2 never showed Firmware needed after the install',
     });
 
     // GameCube is offered PCSX2 nowhere: nothing installed plays it, so it
     // still has no emulator.
-    expect(await group('gc', 'Installed')).toEqual([]);
-    expect(JSON.stringify(await groups('gc'))).not.toContain(PCSX2_NAME);
-    await expect($(testId('sys-status-gc'))).toHaveAttribute('data-status', 'none');
+    expect(await group('ngc', 'Installed')).toEqual([]);
+    expect(JSON.stringify(await groups('ngc'))).not.toContain(PCSX2_NAME);
+    await expect($(testId('sys-status-ngc'))).toHaveAttribute('data-status', 'none');
 
     const fields = await sheetFields(PCSX2_NAME);
     expect(fields.path).toBe(pcsx2Path());
@@ -291,11 +285,7 @@ describe('emulator-catalog', () => {
     await waitForConfigLine(`"${PLATFORM}" = "${PCSX2_NAME}"`);
     await closeSystems();
 
-    await $(testId('server-view')).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server view never came back after leaving Settings',
-    });
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('ps2');
     await $(testId('game-card-401')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-401')).click();
     await $(testId('details-play')).waitForExist({
@@ -368,7 +358,9 @@ describe('emulator-catalog', () => {
     });
     await expect(updateBtn).toHaveText(expect.stringContaining('v9.9.1-e2e'));
     await expect($(testId(`sys-emu-version-${line}`))).toHaveText(expect.stringContaining('v9.9-e2e'));
-    await expect($(testId('sys-status-ps2'))).toHaveAttribute('data-status', 'update');
+    // Firmware needed outranks Update in the row's pill; the Update button
+    // above is what offers the new release.
+    await expect($(testId('sys-status-ps2'))).toHaveAttribute('data-status', 'firmware');
 
     await updateBtn.click();
     await waitForToast(/^Updating .*…$/, { timeoutMsg: 'no "Updating" card for the emulator update' });

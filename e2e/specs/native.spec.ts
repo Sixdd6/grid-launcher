@@ -10,6 +10,7 @@ import {
   REAP_TIMEOUT,
   TRANSITION_TIMEOUT,
 } from '../helpers/env.js';
+import { connectRomm, openRommPlatform, openLibrary } from '../helpers/romm.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -86,26 +87,21 @@ describe('native', () => {
     });
   }
 
+  /** The Library, on the RomM platform last shown (a Details left open stays). */
   async function showServer() {
-    await $(testId('nav-server')).click();
-    await $(testId('server-view')).waitForDisplayed({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the server view never came back',
-    });
+    if (await $(testId('details-panel')).isDisplayed()) return;
+    await openLibrary();
+  }
+
+  /** Another RomM platform: a Details left open over the grid closes first. */
+  async function showPlatform(slug: string) {
+    await showServer();
+    if (await $(testId('details-panel')).isDisplayed()) await closeDetails();
+    await openRommPlatform(slug);
   }
 
   before(async () => {
-    await $(testId('connect-server-url')).waitForExist({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
-    });
-    await $(testId('connect-server-url')).setValue(mockUrl());
-    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
-    await $(testId('connect-submit')).click();
-    await $(testId('platform-btn-1')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the library never rendered a platform button after connecting',
-    });
+    await connectRomm();
 
     await $(testId('nav-downloads')).click();
     await $(testId('downloads-view')).waitForDisplayed({
@@ -114,7 +110,7 @@ describe('native', () => {
     });
 
     await showServer();
-    await $(testId('platform-btn-1')).click();
+    await openRommPlatform('win');
   });
 
   // Native and Windows platforms show neither the emulator nor the firmware
@@ -147,7 +143,7 @@ describe('native', () => {
       async () => (await $(testId('download-detail-1')).getText()).startsWith('Completed'),
       { timeout: INSTALL_TIMEOUT, timeoutMsg: 'the native install never reached Completed' },
     );
-    await $(`${testId('server-view')} ${testId('installed-badge-701')}`).waitForExist({
+    await $(`${testId('romm-platform-view')} ${testId('installed-badge-701')}`).waitForExist({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: "the installed badge never appeared on rom 701's card",
     });
@@ -334,8 +330,7 @@ describe('native', () => {
   // block reason — but it takes NO compat tool, so Play spawns its own
   // executable and the `wine` stub is never reached.
   it('installs a Linux-platform game the same way', async () => {
-    await showServer();
-    await $(testId('platform-btn-2')).click();
+    await showPlatform('linux');
     await openDetails(703);
     await expect($(testId('details-install'))).toHaveText('Install App');
 
@@ -346,7 +341,7 @@ describe('native', () => {
       { timeout: INSTALL_TIMEOUT, timeoutMsg: 'the Linux install never reached Completed' },
     );
     await showServer();
-    await $(`${testId('server-view')} ${testId('installed-badge-703')}`).waitForExist({
+    await $(`${testId('romm-platform-view')} ${testId('installed-badge-703')}`).waitForExist({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: "the installed badge never appeared on rom 703's card",
     });
@@ -384,7 +379,7 @@ describe('native', () => {
   // the native install layout, and Game Settings afterwards. Queue id 4.
   it('treats a custom-named Windows platform as native by its slug', async () => {
     await closeDetails();
-    await $(testId('platform-btn-3')).click();
+    await showPlatform('win-3');
     await expect($(testId('server-emulator-chip'))).not.toExist();
     await expect($(testId('server-firmware-chip'))).not.toExist();
 
@@ -399,7 +394,7 @@ describe('native', () => {
       { timeout: INSTALL_TIMEOUT, timeoutMsg: 'the custom-named Windows install never reached Completed' },
     );
     await showServer();
-    await $(`${testId('server-view')} ${testId('installed-badge-704')}`).waitForExist({
+    await $(`${testId('romm-platform-view')} ${testId('installed-badge-704')}`).waitForExist({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: "the installed badge never appeared on rom 704's card",
     });
@@ -427,7 +422,7 @@ describe('native', () => {
     await $(testId('native-settings-close')).click();
     await $(testId('native-settings')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
     await closeDetails();
-    await $(testId('platform-btn-2')).click();
+    await showPlatform('linux');
     await openDetails(705);
 
     await $(testId('details-install')).click();
@@ -437,7 +432,7 @@ describe('native', () => {
       { timeout: INSTALL_TIMEOUT, timeoutMsg: 'the sidecar-launch install never reached Completed' },
     );
     await showServer();
-    await $(`${testId('server-view')} ${testId('installed-badge-705')}`).waitForExist({
+    await $(`${testId('romm-platform-view')} ${testId('installed-badge-705')}`).waitForExist({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: "the installed badge never appeared on rom 705's card",
     });
