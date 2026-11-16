@@ -85,7 +85,7 @@ The server's **Emulators** platform (RomM's platform named "Emulators", `isEmula
 1. **Emulators** · note "Named for GRID. Each installs as an emulator that Settings › Systems sets up, and RomM's newer builds show as updates." One row per emulator GRID knows that has a build for this computer, by name. The row offers the **newest build for this computer** (the server-emulator rule: system and CPU from the arch tag; a Mac takes `universal` when there is no newer build for its own CPU).
    - Row: a monogram tile (first letter), **name**, the system(s) it runs ("PlayStation 2"; a `multi` emulator from GRID's own list: "GameCube, Wii"; RetroArch "Many systems, through its cores"), then "v2.0.2 · 38 MB", then the file name in mono ("PCSX2 (v2.0.2) (arch-linux-x64).AppImage").
    - **Not installed:** primary **Install**.
-   - **Not installed, GRID's catalog copy installed:** **Install**, plus the line "GRID's catalog copy of DuckStation is installed. This build installs beside it as "DuckStation (server)"." (see Open questions).
+   - **Not installed, GRID's catalog copy installed:** **Install**, plus the line "GRID's catalog copy of DuckStation is installed. This build installs beside it as "DuckStation (server)".".
    - **Queued** (another install is running): line "Queued · waits for the download before it"; **Cancel**.
    - **Downloading:** "Downloading · 46% · 17 of 38 MB" with a bar; **Cancel**. After Cancel: notification "Cancelled PCSX2"; the row returns to Install (or Update).
    - **Installing** (unpacking and checking the program): "Installing · checking the program", an indeterminate bar, no button.
@@ -147,7 +147,7 @@ The server's **Emulators** platform (RomM's platform named "Emulators", `isEmula
 
 ### Settings › Library: Open config folder (2026-11-15)
 
-- The user chose "Settings › General, near the library folder row". The app has no General page; the library folder row lives on **Settings › Library**, so it goes there (see Open questions).
+- The user chose "Settings › General, near the library folder row". The app has no General page; the library folder row lives on **Settings › Library**, so it goes there.
 - Under the **Library folder** block, a second block in the same style: heading **Config folder** · note "GRID's settings file lives here. Games, emulators and saves are in the library folder." · the path in the path box (`/home/player/.config/grid-launcher` in the prototype: the OS's config folder for GRID, the one `open_config_folder` opens) · secondary button **Open config folder** (sentence case like Change…; the old label "Open Config Folder" is retired).
 - Click: opens the folder in the file manager (`open_config_folder` creates it first). No notification on success; on failure an error notification "Couldn't open the config folder: <reason>".
 - Always enabled, also while a library move runs.
@@ -336,11 +336,12 @@ The user signed these off with the TV card on 2026-11-15 (decisions 14–17 in t
 - Rail keys: `romm:installed`, `romm:discover`, `platform:<slug>` (plan 0.3). The prototype uses its own platform codes in the key.
 - **Emulators row (2026-11-15):** plan 0.3 drops the Emulators shelf from the platform rows; that changes. `rommRailGroup` keeps it (`isEmulatorsPlatform`) with its own count; `RommStatus.installed_count`, RomM › Installed, All games, Recent, Updates and Discover still leave Emulators-platform rows out. The view's data is the server-emulator path's (`ServerPackage` folders and files, `ServerBuildInfo`, setup's newest-build rule); files that don't parse are the Other files, installed as an ordinary RomM file of the Emulators platform. Source: `docs/design/prototype/romm_emu.js` / `romm_emu.css`.
 
-## Open questions (2026-11-15)
+## Settled 2026-11-15 (were open questions)
 
-1. **Catalog copy and server build of the same emulator:** today a server build registers beside GRID's catalog copy (possibly as "<name> (server)"). Should the Emulators view say so (as drawn), or should installing the server build replace the catalog copy?
-2. **Open config folder's page:** the plan says Settings › General; there is no General page, so it is on Settings › Library under the library folder. Keep it there, or add a General page?
-3. **"How to name builds" link target:** `docs/server-emulator-packages.md` on GitHub, or nowhere (drop the link)?
+1. **Catalog copy and server build:** keep both. The server build registers beside GRID's catalog copy, as drawn; the user picks per system in Settings › Systems.
+2. **Open config folder:** stays on Settings › Library under the library folder. No General page.
+3. **"How to name builds"** opens https://github.com/Sixdd6/grid-launcher/blob/main/docs/server-emulator-packages.md in the browser.
+
 - Words live in `app/src/lib/romm/words.ts`; this README is the list.
 - The prototype's catalog systems (PS3, Switch, GBA, PSP, Dreamcast), firmware files and Locate results are placeholders, not `firmware-known.json` data. No real BIOS names or hashes are implied beyond common file names.
 - Notifications and the store login window sit above the welcome (z-order), so the import notice and store sign-in work there.

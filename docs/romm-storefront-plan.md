@@ -1187,9 +1187,11 @@ spot. Design it as its own step after Step 9, not inside Steps 3/6.
 
 ## Decisions after Step 8 (2026-11-15)
 
-- **Open Config Folder** moves to Settings › General, near the library folder row.
+- **Open Config Folder** moves to Settings › Library, under the library folder row (no General page).
 - **Emulators platform:** when the server has an Emulators platform, it gets a row in the
   RomM group like any other platform (desktop and TV). Its view installs the server's
   emulator files through the existing server-emulator path, which stays (both named-to-rule
   builds and other files). RomM › Installed and All games still leave emulator files out.
   Designed first, built after Step 9.
+- **Server build beside catalog copy:** keep both; the user picks per system in Settings › Systems.
+- **"How to name builds"** links to `docs/server-emulator-packages.md` on GitHub.
