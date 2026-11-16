@@ -30,11 +30,6 @@ export const IMPORTED_DIALOG = {
 export const CONNECT_TITLE = 'Connect your games';
 export const CONNECT_LEDE = 'Connect the ones you use. Add or change them any time in Settings › Game stores.';
 
-/** "That folder can't be used: …" when the backend refuses the folder. */
-export function folderRefusal(err: unknown): string {
-  return `That folder can't be used: ${err instanceof Error ? err.message : String(err)}`;
-}
-
 /** Next is enabled once a folder is chosen. */
 export function nextReady(lib: string): boolean {
   return lib.trim() !== '';

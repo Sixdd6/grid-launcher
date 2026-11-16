@@ -8,6 +8,7 @@
   // mode, Quit GRID), as on Connect before.
   import { tick } from 'svelte';
   import { api } from '../../api';
+  import { saveLibraryFolder } from '../../welcomeFlow';
   import { tvf } from '../focus/actions';
   import { openFolderBrowser } from '../gameActions';
   import { openLayer, pushPage, scope, setFocus } from '../nav.svelte';
@@ -16,7 +17,6 @@
   import TvWelcomeStores from './TvWelcomeStores.svelte';
   import { welcome } from './welcomeState.svelte';
   import {
-    folderRefusal,
     IMPORTED_DIALOG,
     IMPORTED_NOTE,
     LIBRARY_BROWSER_TITLE,
@@ -59,18 +59,14 @@
   async function next() {
     if (!ready || welcome.busy) return;
     const lib = welcome.lib.trim();
-    if (lib !== welcome.libStored) {
-      welcome.busy = true;
-      try {
-        await api.setLibraryPath(lib);
-        welcome.libStored = lib;
-      } catch (err) {
-        welcome.error = folderRefusal(err);
-        return;
-      } finally {
-        welcome.busy = false;
-      }
+    welcome.busy = true;
+    const refused = await saveLibraryFolder(lib, welcome.libStored);
+    welcome.busy = false;
+    if (refused !== null) {
+      welcome.error = refused;
+      return;
     }
+    welcome.libStored = lib;
     welcome.error = null;
     void pushPage({ title: CONNECT_TITLE, component: TvWelcomeStores, props: {} });
   }
