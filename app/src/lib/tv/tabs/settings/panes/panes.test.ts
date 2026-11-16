@@ -1,10 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MovePreview, StartFreshPreview } from '../../../../api';
 import type { ChoiceRow, Row, SliderRow, SwitchRow } from '../../../rows';
-import { appearanceRows, blurFromPercent, blurPercent, fadeText, THEME_LINE } from './appearance';
+import { appearanceRows, blurFromPercent, blurPercent, fadeText, openOnSub, THEME_LINE } from './appearance';
 import type { ChoiceSpec } from './choice';
 import { cloudRows, delayText, retainText } from './cloud';
-import { connectionRows, credentialLine, disconnectWords } from './connection';
 import {
   browserStart,
   deleteLabel,
@@ -42,7 +41,7 @@ describe('Appearance pane (items 234–240, 527)', () => {
     setBlur: vi.fn(),
     setHardwareAcceleration: vi.fn(),
   };
-  const state = { openOn: 'automatic', theme: 'system', cardDisplay: 'rows', tvCardSize: 'medium', tvCardLabels: 'always', fade: 50, blur: 8, hardwareAcceleration: true } as const;
+  const state = { openOn: 'automatic', rommConnected: true, theme: 'system', cardDisplay: 'rows', tvCardSize: 'medium', tvCardLabels: 'always', fade: 50, blur: 8, hardwareAcceleration: true } as const;
   const rows = appearanceRows(state, acts);
 
   it('lists the rows in order with their lines, with no row that points to desktop mode (2026-11-14)', () => {
@@ -70,6 +69,13 @@ describe('Appearance pane (items 234–240, 527)', () => {
     expect(spec.value).toBe('system');
     spec.pick('light');
     expect(acts.setTheme).toHaveBeenCalledWith('light');
+  });
+
+  it("says GRID opens on All games while RomM isn't connected and the choice isn't Library", () => {
+    expect(openOnSub('automatic', false)).toBe("Here and in desktop mode. RomM isn't connected, so GRID opens on All games.");
+    expect(openOnSub('discover', false)).toBe("Here and in desktop mode. RomM isn't connected, so GRID opens on All games.");
+    expect(openOnSub('library', false)).toBe('Here and in desktop mode');
+    expect(openOnSub('automatic', true)).toBe('Here and in desktop mode');
   });
 
   it('offers Game card display, shared with the desktop', () => {
@@ -148,50 +154,6 @@ describe('Cloud saves pane (items 241–242)', () => {
   it('shows nothing while loading and the reason when the read fails', () => {
     expect(cloudRows(null, null, noop)).toEqual([]);
     expect(summary(cloudRows(null, 'boom', noop))).toEqual([['info', "Couldn't read the cloud save settings", '', 'boom']]);
-  });
-});
-
-describe('Connection pane (items 243–244)', () => {
-  const acts = { reconnect: vi.fn(), connectToServer: vi.fn(), disconnect: vi.fn(), editConnection: vi.fn(), openServerPage: vi.fn(), openConfigFolder: vi.fn() };
-
-  it('shows the server, user and credential line, then Reconnect, Open RomM in browser, Edit connection…, Disconnect and Open settings folder (ruling E1–3)', () => {
-    const rows = connectionRows({ connected: true, offline: false, serverUrl: 'http://romm.local', username: 'sam' }, acts);
-    expect(summary(rows)).toEqual([
-      ['info', 'Server', '', 'http://romm.local'],
-      ['info', 'User', '', 'sam'],
-      ['info', 'Sign-in', '', 'Saved · verified'],
-      ['action', 'Reconnect', '', ''],
-      ['action', 'Open RomM in browser', "Opens your server's site in desktop mode", ''],
-      ['action', 'Edit connection…', 'Change server or sign in again', ''],
-      ['action', 'Disconnect', 'Sign out of this server', ''],
-      ['action', 'Open settings folder', 'Switches to desktop mode', ''],
-    ]);
-    (byKey(rows, 'edit') as { run: () => void }).run();
-    expect(acts.editConnection).toHaveBeenCalled();
-    (byKey(rows, 'server-page') as { run: () => void }).run();
-    expect(acts.openServerPage).toHaveBeenCalled();
-    (byKey(rows, 'config-folder') as { run: () => void }).run();
-    expect(acts.openConfigFolder).toHaveBeenCalled();
-    expect(byKey(rows, 'disconnect').danger).toBe(true);
-    (byKey(rows, 'disconnect') as { run: () => void }).run();
-    expect(acts.disconnect).toHaveBeenCalledWith(disconnectWords('http://romm.local'));
-    expect(disconnectWords('http://romm.local')).toEqual({
-      title: 'Disconnect from http://romm.local?',
-      body: "You'll need to sign in again. Installed games, saves and settings stay.",
-      ok: 'Disconnect',
-    });
-  });
-
-  it('says not verified while offline, and offers only Connect to a server… without one', () => {
-    expect(credentialLine({ connected: false, offline: false })).toBe('Saved · not verified');
-    const rows = connectionRows({ connected: false, offline: true, serverUrl: '', username: '' }, acts);
-    expect(summary(rows)).toEqual([
-      ['info', 'Server', '', 'Not set'],
-      ['info', 'User', '', 'Not set'],
-      ['info', 'Sign-in', '', 'Not used offline'],
-      ['action', 'Connect to a server…', '', ''],
-      ['action', 'Open settings folder', 'Switches to desktop mode', ''],
-    ]);
   });
 });
 

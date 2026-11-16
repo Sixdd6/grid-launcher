@@ -6,7 +6,11 @@
   // store needs attention and `off` when it isn't connected but still has
   // games installed; Available's count is a spinner while the owned list
   // loads and `!` while it can't list games. One folder per store shown
-  // (`storeRailGroups`: Epic Games, GOG).
+  // (`storeRailGroups`: Epic Games, GOG). The RomM group (`romm`) sits among
+  // them by name: Amazon Games, Epic Games, GOG, RomM, Steam
+  // (`STOREFRONT_ORDER`, TVRommStorefront README).
+  import type { Snippet } from 'svelte';
+  import { storefrontGroups } from '../tabs/library/libraryRail';
   import { availBlock, storeRailGroups, type StorePart } from '../../gamestores/rail';
   import { storeName } from '../../gamestores/marks';
   import type { StoreSource, StoreStatus } from '../../api';
@@ -15,9 +19,9 @@
   import TvStoreMark from './TvStoreMark.svelte';
   import { storeFoldKey, storeRowKey, toggleStoreFold, tvStores } from './storeState.svelte';
 
-  let { onSelect }: { onSelect: (source: StoreSource, part: StorePart) => void } = $props();
+  let { onSelect, romm = undefined }: { onSelect: (source: StoreSource, part: StorePart) => void; romm?: Snippet } = $props();
 
-  let groups = $derived(storeRailGroups(gameStores.statuses, (s) => gameStores.library(s)));
+  let entries = $derived(storefrontGroups(storeRailGroups(gameStores.statuses, (s) => gameStores.library(s)), !!romm));
 
   /** `!` (login expired, the tool missing, the owned list failed) or `off` (not connected). */
   function flag(s: StoreStatus | null): '!' | 'off' | null {
@@ -28,7 +32,10 @@
   }
 </script>
 
-{#each groups as g (g.source)}
+{#each entries as g (g === 'romm' ? 'romm' : g.source)}
+  {#if g === 'romm'}
+    {@render romm?.()}
+  {:else}
   {@const st = gameStores.status(g.source)}
   {@const f = flag(st)}
   {@const open = !tvStores.folded(g.source)}
@@ -53,5 +60,6 @@
         onSelect={() => onSelect(g.source, r.part)}>{r.label}</TvRailRow
       >
     {/each}
+  {/if}
   {/if}
 {/each}

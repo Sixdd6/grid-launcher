@@ -8,13 +8,13 @@
   // some systems answered, a warning line and Try again above the results
   // (consultant rulings). Failures are inline, never cards.
   import { installed, isInstalled, matchesInstalled } from '../../stores/installed.svelte';
-  import { session } from '../../stores/session.svelte';
+  import { romm } from '../../stores/romm.svelte';
   import { updates } from '../../stores/updates.svelte';
   import { gameFromSummary } from '../games';
   import { nav, setPageTitle } from '../nav.svelte';
   import { openKeyboard } from '../overlays/overlays.svelte';
   import { useScreen } from '../screen.svelte';
-  import { loadAllGames, type AllGames } from '../tabs/server/server.svelte';
+  import { loadAllGames, type AllGames } from '../romm/tvRomm.svelte';
   import TvButton from '../ui/TvButton.svelte';
   import TvGameCover from '../ui/TvGameCover.svelte';
   import TvGrid from '../ui/TvGrid.svelte';
@@ -84,7 +84,7 @@
       {#if phase === 'failed'}
         <div class="empty" data-testid="tv-search-failed">
           <h2>{LOAD_FAILED_TITLE}</h2>
-          <p>{loadFailedLine(session.serverUrl)}</p>
+          <p>{loadFailedLine(romm.status.server_url)}</p>
           <div class="btns"><TvButton k="sr-retry" primary autofocus testId="tv-search-retry" onA={load}>{RETRY}</TvButton></div>
         </div>
       {:else}

@@ -1153,6 +1153,10 @@ Anything missing there comes back to the orchestrator, not edited in a parallel 
 
 ## Leftovers for Step 9 (collected from Steps 2–7)
 
+- **Step 8 first:** `romm-library-b` (written before the welcome landed) still types into
+  the removed Connect form; connect it through the welcome's RomM row via the new
+  `e2e/helpers/romm.ts`. Check `settings-romm` for leftover `connect-*` ids too.
+
 - api.ts: move Step 2's `BackupPlan.without_romm`, `unavailable` and `PlanUnavailable`
   (typed locally in `backups/dialog.ts` as `RommOffFields`/`PlanUnavailable`) into `api.ts`.
 - `settings/BackupDrivesPage.svelte`: "The server's firmware for the systems you backup" →
@@ -1160,6 +1164,9 @@ Anything missing there comes back to the orchestrator, not edited in a parallel 
 - Backup firmware line without RomM reads "Needs RomM · skipped" with no system names;
   Step 7's `firmware-known.json` could name them.
 - Desktop: "Open Config Folder" left with the Connection page (ask the user where it goes).
+- TV Backup page: pass the unlinked rows to `unavailableRows` (Step 6 passes none).
+- e2e: a TV Can't reach state (unit tests only so far).
+- Remove the legacy `'none'` phase branches in `App.svelte` and `TvShell.svelte`.
 - Remove `session-unauthorized`, the legacy wrappers, `VIEWS`/`initialView`, `'none'` phase.
 
 ## After this rework: Discover

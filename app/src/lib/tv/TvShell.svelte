@@ -7,16 +7,17 @@
   import { tick, untrack } from 'svelte';
   import './tv.css';
   import './stores/tvstores.css';
+  import './romm/tvromm.css';
   import { startStoreEvents } from './stores/storeEvents';
-  import { connectPrefill } from '../connectPrefill';
-  import { librarySelection } from '../library/selection.svelte';
-  import { drives } from '../stores/drives.svelte';
+  import { api } from '../api';
+  import { rommConnecting, rommLive } from '../romm/rail';
   import { libraryUnreachable } from '../stores/libraryUnreachable.svelte';
+  import { romm } from '../stores/romm.svelte';
   import { registerNavigation } from '../stores/navigation.svelte';
   import { session } from '../stores/session.svelte';
   import { uiMode } from '../stores/uiMode.svelte';
   import { setTvThemeActive, setTvWelcomed, uiSettings } from '../stores/uiSettings.svelte';
-  import { initialView } from '../shell';
+  import { initialPlace } from '../shell';
   import { tvPaneFor, tvTabFor } from '../uiMode';
   import { startClock } from './clock.svelte';
   import { startRouter } from './input/router.svelte';
@@ -25,6 +26,7 @@
     nav,
     registerMenu,
     registerView,
+    rememberFocus,
     focusMemory,
     resetNav,
     resetStartup,
@@ -43,11 +45,13 @@
   import { confirmBox, openKeyboard, openList, openMenu, openStartupMenu } from './overlays/overlays.svelte';
   import { notify } from '../notifications/notifier';
   import { openDetails, openSystem, playGame } from './gameActions';
-  import { selectDriveRow } from './tabs/library/library.svelte';
-  import { selectRail as selectServerRail } from './tabs/server/server.svelte';
-  import { resetConnectForm } from './startup/connectForm.svelte';
+  import { selectLibRail } from './tabs/library/library.svelte';
+  import { expiredCard, unreachableCard } from './romm/rommActions';
+  import { rommRowKey, selectRommView, toggleRommFold, tvRomm } from './romm/tvRomm.svelte';
+  import { railRowKey } from './tabs/library/libraryRail';
   import TvChooseSystems from './startup/TvChooseSystems.svelte';
-  import TvConnect from './startup/TvConnect.svelte';
+  import TvWelcome from './startup/TvWelcome.svelte';
+  import { resetWelcome } from './startup/welcomeState.svelte';
   import TvSetupCard from './startup/TvSetupCard.svelte';
   import TvUnreachable from './startup/TvUnreachable.svelte';
   import TvToasts from './TvToasts.svelte';
@@ -82,27 +86,45 @@
   let stageEl = $state<HTMLElement | null>(null);
   let layersEl = $state<HTMLElement | null>(null);
 
+  // Whether the welcome is needed (`welcome_status`), asked while the
+  // session reads the legacy `none` phase: until the desktop moves to
+  // `session.start()` (plan Step 5), a fresh profile, a Python import, a
+  // rejected stored credential and a 401 mid-session all read `none`. Only
+  // the first two get the welcome; the others are the shell, where RomM's
+  // status says what happened (TVRommStorefront README).
+  let welcomeNeeded = $state<boolean | null>(null);
+  $effect(() => {
+    if (session.phase !== 'none') return;
+    untrack(() => {
+      const known = welcomeNeeded;
+      const settle = (needed: boolean) => {
+        welcomeNeeded = needed;
+        if (!needed && session.phase === 'none') session.phase = 'shell';
+      };
+      if (known !== null) settle(known);
+      else
+        api
+          .welcomeStatus()
+          .then((w) => settle(w.needed))
+          .catch(() => settle(false));
+    });
+  });
+
   // What the stage shows (P12): a startup screen — the unreachable library
-  // (GRID can't run without it), Connect, Choose your systems — or the
+  // (GRID can't run without it), the welcome, Choose your systems — or the
   // tabs. Nothing until the session and the settings are known.
-  type Phase = 'loading' | 'unreachable' | 'connect' | 'choose' | 'shell';
-  let phase = $derived<Phase>(
-    !uiSettings.loaded || session.phase === 'loading'
-      ? 'loading'
-      : libraryUnreachable.blocking
-        ? 'unreachable'
-        : session.phase === 'none'
-          ? 'connect'
-          : session.phase === 'setup'
-            ? 'choose'
-            : 'shell',
-  );
+  type Phase = 'loading' | 'unreachable' | 'welcome' | 'choose' | 'shell';
+  let phase = $derived.by<Phase>(() => {
+    if (!uiSettings.loaded || session.phase === 'loading') return 'loading';
+    if (libraryUnreachable.blocking) return 'unreachable';
+    if (session.phase === 'welcome') return 'welcome';
+    if (session.phase === 'none') return welcomeNeeded === true ? 'welcome' : welcomeNeeded === false ? 'shell' : 'loading';
+    if (session.phase === 'setup') return 'choose';
+    return 'shell';
+  });
 
   let entered: Phase | null = null;
   let firstStart = true;
-  /** Used without a server before the drives were known: the first drive
-   *  is selected once they are, unless the player has moved on (item 415). */
-  let pendingDrive: string | null = null;
 
   $effect(() => {
     const p = phase;
@@ -111,41 +133,56 @@
       entered = p;
       setStartup(p !== 'shell');
       if (p === 'loading') return;
-      if (p === 'connect') {
-        resetConnectForm(connectPrefill(session));
-        void resetStartup({ title: 'Connect', component: TvConnect });
+      if (p === 'welcome') {
+        void resetWelcome();
+        void resetStartup({ title: 'Welcome', component: TvWelcome });
       } else if (p === 'choose') {
         void resetStartup({ title: 'Choose your systems', component: TvChooseSystems });
       } else if (p === 'unreachable') {
         void resetStartup({ title: 'Your library', component: TvUnreachable });
       } else {
+        if (welcomeNeeded) welcomeNeeded = false;
         startShell();
       }
     });
   });
 
-  /** The Library on a Backup drive: its folder open, its row selected and
-   *  focused (item 415; tvmode.js `showDrive`). */
-  function selectDrive(key: string) {
-    selectDriveRow(key);
-  }
-
   /**
-   * Where TV mode opens: the desktop view it was entered from (the TV
-   * button), else the shared start rule (Open GRID on; items 413–416):
-   * Server › Discover when connected, else the Library, on the first
-   * connected Backup drive when used without a server.
+   * Where TV mode opens (TVRommStorefront README § Where GRID opens): the
+   * desktop view it was entered from (the TV button); Settings › Game stores
+   * with the RomM row focused after Choose your systems opened from the
+   * RomM page (decision 9); else the shared start rule (Open GRID on):
+   * Library › RomM › Discover when RomM is connected at startup, else All
+   * games, never a Backup drive (decision 16). A RomM that then can't be
+   * reached falls back to RomM › Installed (the Library's own rule).
    */
   function startShell() {
     const from = firstStart ? uiMode.tvStart : null;
     firstStart = false;
-    const start = from ? null : initialView(session.connected, session.offline, drives.firstLibraryDrive, uiSettings.openOn);
-    const tab = from ? from.tab : tvTabFor(start!.view);
-    resetNav(tab, from?.pane ?? null);
-    pendingDrive = null;
-    if (!from && tab === 'server') selectServerRail('discover');
-    if (start?.drive) selectDrive(start.drive);
-    else if (!from && tab === 'library' && session.offline && !session.connected && !drives.loaded) pendingDrive = librarySelection.key;
+    if (from) {
+      resetNav(from.tab, from.pane);
+    } else if (session.setupReturn === 'settings') {
+      session.setupReturn = null;
+      resetNav('settings', 'stores');
+      rememberFocus('tab:settings', 'sto-romm');
+    } else {
+      session.setupReturn = null;
+      // "Connected at startup": the config says so, which the status shows
+      // as connected, connecting, or a probe that failed (Can't reach,
+      // Sign-in expired).
+      const s = romm.status;
+      const configured = rommLive(s) || rommConnecting(s) || s.connection === 'unreachable' || s.connection === 'expired';
+      const place = initialPlace(configured, uiSettings.openOn);
+      resetNav('library', null);
+      if (place.rail === 'romm:discover') {
+        selectRommView('romm:discover');
+        if (!tvRomm.open) toggleRommFold();
+        rememberFocus('tab:library', rommRowKey('romm:discover'));
+      } else {
+        selectLibRail('all');
+        rememberFocus('tab:library', railRowKey('all'));
+      }
+    }
     // The welcome card, once the main screen is up the first time TV mode
     // ever opens (`[ui] tv_welcomed`; Menu › Controls shows it again; user
     // decision 2026-11-10).
@@ -156,16 +193,19 @@
     });
   }
 
+  // RomM's state changing under the shell: a 401 mid-session and a startup
+  // probe that found no answer each raise one card (README § Library ›
+  // RomM group). Reconnect and the sign-in page raise their own.
+  let lastConn: { connection: string; connecting: boolean } | null = null;
   $effect(() => {
-    if (!drives.loaded) return;
+    const s = romm.status;
+    const next = { connection: s.connection, connecting: rommConnecting(s) };
     untrack(() => {
-      const startKey = pendingDrive;
-      if (startKey === null) return;
-      pendingDrive = null;
-      const first = drives.firstLibraryDrive;
-      if (first === null || phase !== 'shell' || nav.tab !== 'library' || nav.pages.length || librarySelection.key !== startKey) return;
-      selectDrive(first);
-      void showTab('library', { again: true });
+      const prev = lastConn;
+      lastConn = next;
+      if (prev === null || phase !== 'shell') return;
+      if (prev.connection === 'connected' && next.connection === 'expired') expiredCard();
+      else if (prev.connecting && next.connection === 'unreachable') unreachableCard();
     });
   });
 
@@ -178,7 +218,7 @@
     // 2026-11-10).
     registerMenu(() => void (nav.startup ? openStartupMenu() : openMenu()));
     // View acts on the newest card with an action, else the screen's own
-    // (Connect pastes, item 396).
+    // (the RomM sign-in page pastes).
     registerView(() => {
       if (!viewNewest()) nav.hooks.view?.();
     });

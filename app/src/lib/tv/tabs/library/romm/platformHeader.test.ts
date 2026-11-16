@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { backupAllLabel, headerChips, matchesTitle, noMatch, searching, searchTitle, srvCount } from './serverHeader';
+import { backupAllLabel, headerChips, matchesTitle, noMatch, searching, searchTitle, platformCount } from './platformHeader';
 
-describe('serverHeader (items 197–205)', () => {
-  it('counts, and how many match while searching', () => {
-    expect(srvCount(3, 3, 1, false)).toBe('3 games · 1 installed');
-    expect(srvCount(3, 2, 1, true)).toBe('2 of 3 games match · 1 installed');
-    expect(srvCount(1, 1, 0, false)).toBe('1 game · 0 installed');
+describe('platformHeader (items 197–205; decision 14)', () => {
+  it("counts RomM's games, then installed and only-here games; how many match while searching", () => {
+    expect(platformCount({ onRomm: 3, installed: 1, onlyHere: 0 }, 3, false)).toBe('3 games on RomM · 1 installed');
+    expect(platformCount({ onRomm: 2, installed: 1, onlyHere: 1 }, 3, false)).toBe('2 games on RomM · 1 installed · plus 1 only on this computer');
+    expect(platformCount({ onRomm: 3, installed: 1, onlyHere: 0 }, 2, true)).toBe('2 of 3 games match');
+    expect(platformCount({ onRomm: 1, installed: 0, onlyHere: 0 }, 1, false)).toBe('1 game on RomM · 0 installed');
   });
 
   it('the emulator chip names the default, or warns with none', () => {

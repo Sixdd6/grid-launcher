@@ -15,6 +15,7 @@
     k,
     game,
     plat = false,
+    tag = null,
     label = true,
     testId = undefined,
     onFocus = undefined,
@@ -24,6 +25,8 @@
     game: TvGame;
     /** The platform tag (mixed lists). */
     plat?: boolean;
+    /** NOT LINKED / NOT ON ROMM on a RomM platform's grid (decision 15). */
+    tag?: string | null;
     label?: boolean;
     testId?: string;
     onFocus?: () => void;
@@ -45,6 +48,7 @@
   update={game.update}
   missing={game.missing}
   platform={plat ? platformTag(game) : null}
+  {tag}
   {queue}
   {label}
   {art}

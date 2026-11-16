@@ -1,19 +1,8 @@
-// The top bar's right side (checklist items 124–125, 517; ruling 21). Pure.
+// The top bar's right side (checklist item 124; ruling 21): the live
+// download. No connection dot or user (TVRommStorefront README § The shell).
+// Pure.
 import type { DownloadEntry } from '../api';
 import { percent } from '../downloads/format';
-
-export type Connection = { dot: 'online' | 'offline' | 'none'; text: string };
-
-/**
- * A green dot and the user when connected; a grey dot and "Offline · no
- * server" when GRID is used without a server; a red dot and "Offline" when
- * the server can't be reached.
- */
-export function connection(s: { connected: boolean; offline: boolean; username: string }): Connection {
-  if (s.connected) return { dot: 'online', text: s.username };
-  if (s.offline) return { dot: 'none', text: 'Offline · no server' };
-  return { dot: 'offline', text: 'Offline' };
-}
 
 export type ActiveDownload = { id: number; title: string; pct: number };
 
@@ -35,4 +24,4 @@ export function activeDownload(entries: readonly DownloadEntry[]): ActiveDownloa
   return { id: e.id, title: e.title, pct: Math.round(pct) };
 }
 
-export const TAB_NAMES = { library: 'Library', server: 'Server', downloads: 'Downloads', settings: 'Settings' } as const;
+export const TAB_NAMES = { library: 'Library', downloads: 'Downloads', settings: 'Settings' } as const;

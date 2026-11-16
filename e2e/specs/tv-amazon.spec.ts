@@ -123,7 +123,7 @@ describe('tv-amazon: Amazon Games in TV mode', () => {
     expect(await $('[data-testid^="tv-pr-dlc-"]').isExisting()).toBe(false);
     expect(await text('tv-store-install')).not.toContain('DLC you own');
     expect(await pageRow('compat')).toMatchObject({ label: 'Compatibility tool', sub: 'The default from Settings › Systems › Windows' });
-    expect(await pageRow('folder')).toMatchObject({ label: 'Install folder', sub: 'The default for Amazon Games games is in Settings › Stores' });
+    expect(await pageRow('folder')).toMatchObject({ label: 'Install folder', sub: 'The default for Amazon Games games is in Settings › Game stores' });
     expect(await hints()).toEqual(expect.arrayContaining(['MENU Install']));
     await key('m');
     await waitGone('tv-store-install');

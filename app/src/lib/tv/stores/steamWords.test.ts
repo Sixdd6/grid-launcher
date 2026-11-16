@@ -39,12 +39,12 @@ describe('TV: Steam in the Library', () => {
     const noclient = tvPanel(steamStatus({}, { client_path: '' }), 'installed', [])!;
     expect(noclient.body).toBe('GRID installs, starts and uninstalls Steam games through the Steam client. Install Steam on this PC and sign in once, then press Check again.');
     expect(noclient.actions).toEqual([{ label: 'Check again', act: 'recheck', primary: true }]);
-    expect(tvPanel(steamStatus({}, { key: 'none' }), 'available', [])!.actions.map((a) => a.label)).toEqual(['Open Settings › Stores']);
+    expect(tvPanel(steamStatus({}, { key: 'none' }), 'available', [])!.actions.map((a) => a.label)).toEqual(['Open Settings › Game stores']);
     const bad = tvPanel(steamStatus({}, { key: 'bad' }), 'available', [])!;
-    expect(bad.body).toBe('The key may have been revoked. Make a new key, then enter it in Settings › Stores › Steam.');
+    expect(bad.body).toBe('The key may have been revoked. Make a new key, then enter it in Settings › Game stores › Steam.');
     expect(tvPanel(steamStatus({}, { key: 'private' }), 'available', [])!.actions.map((a) => [a.label, a.primary])).toEqual([
       ['Refresh', true],
-      ['Open Settings › Stores', false],
+      ['Open Settings › Game stores', false],
     ]);
   });
 

@@ -5,11 +5,10 @@
   import ScreenFrame from './ScreenFrame.svelte';
   import { nav } from './nav.svelte';
   import TvLibrary from './tabs/library/TvLibrary.svelte';
-  import TvServer from './tabs/server/TvServer.svelte';
   import TvDownloads from './tabs/downloads/TvDownloads.svelte';
   import TvSettings from './tabs/settings/TvSettings.svelte';
 
-  const TABS = { library: TvLibrary, server: TvServer, downloads: TvDownloads, settings: TvSettings };
+  const TABS = { library: TvLibrary, downloads: TvDownloads, settings: TvSettings };
   let page = $derived(nav.topPage);
   let Tab = $derived(TABS[nav.tab]);
 </script>

@@ -10,7 +10,7 @@
   import { isWindowsHost } from '../../emulators/compatTools';
   import { canStart, primaryLabel } from '../../setup/choices';
   import { ChooseSystems } from '../../setup/chooseSystemsState.svelte';
-  import { finishSetup } from '../../stores/session.svelte';
+  import { finishSetup, session } from '../../stores/session.svelte';
   import { startSetupRun } from '../../stores/setupRun.svelte';
   import { tvf } from '../focus/actions';
   import Glyph from '../glyphs/Glyph.svelte';
@@ -107,7 +107,7 @@
 <div class="start" data-testid="tv-choose">
   <div class="start-box wide" data-nav="v">
     <h1>{CHOOSE_TITLE}</h1>
-    <p class="sub" data-testid="tv-choose-intro">{#each CHOOSE_INTRO as part, i (i)}{#if typeof part === 'string'}{part}{:else}<Glyph button={part.glyph} />{/if}{/each}</p>
+    <p class="sub" data-testid="tv-choose-intro">{#if session.setupReturn === 'settings'}RomM is connected. {/if}{#each CHOOSE_INTRO as part, i (i)}{#if typeof part === 'string'}{part}{:else}<Glyph button={part.glyph} />{/if}{/each}</p>
     {#if cs.startError}<p class="errline" role="alert" data-testid="tv-choose-error">{cs.startError}</p>{/if}
     <div class="start-body" data-nav="v" id="ch-rows" data-scroll="ch">
       {#if cs.loadError !== null}

@@ -93,12 +93,12 @@ export function selKeep(present: readonly string[]): void {
 }
 
 /** What Y with these picks does (items 443, 447–449). */
-export type SelActOutcome = 'pick-first' | 'offline' | 'drive' | 'backup';
+export type SelActOutcome = 'pick-first' | 'drive' | 'backup';
 
-export function selActOutcome(picked: number, drive: boolean, connected: boolean): SelActOutcome {
+/** Backups work without RomM (decision 8): Y opens the Backup page either way. */
+export function selActOutcome(picked: number, drive: boolean, _connected = true): SelActOutcome {
   if (picked === 0) return 'pick-first';
   if (drive) return 'drive';
-  if (!connected) return 'offline';
   return 'backup';
 }
 
@@ -112,9 +112,6 @@ export function selAct(g: SelectGrid | null = grid): void {
   switch (selActOutcome(ids.length, g.drive(), g.connected())) {
     case 'pick-first':
       pushToast(PICK_FIRST.title, 'success');
-      return;
-    case 'offline':
-      pushToast(BACKUP_NEEDS_SERVER, 'error');
       return;
     default:
       g.act(ids);

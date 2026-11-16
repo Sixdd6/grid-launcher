@@ -9,11 +9,17 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  */
 describe('romm-library (a): never connected, nothing installed', () => {
   before(async () => {
-    await $(testId('connect-use-offline')).waitForClickable({
-      timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the Connect screen never offered "Use without a server"',
+    // A fresh profile starts on the welcome; Skip for now opens the shell
+    // with the suggested library folder and nothing connected.
+    await browser.waitUntil(
+      async () => (await $(testId('welcome-skip')).isExisting()) && (await $(testId('welcome-library-path')).getValue()) !== '',
+      { timeout: APP_START_TIMEOUT, timeoutMsg: 'the welcome never offered Skip for now with a folder' },
+    );
+    await $(testId('welcome-skip')).waitForClickable({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Skip for now never became clickable',
     });
-    await $(testId('connect-use-offline')).click();
+    await $(testId('welcome-skip')).click();
     await $(testId('library-rail')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the Library never appeared',

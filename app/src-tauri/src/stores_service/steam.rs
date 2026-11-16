@@ -3387,8 +3387,13 @@ mod tests {
         assert_eq!(h.uninstalling(), ["3000010"]);
         let cards = h.notices().len();
         let started = h.changed_events();
-        wait_for(|| h.uninstalling().is_empty(), "the watch to time out").await;
-        assert!(h.changed_events() > started, "the end emits stores-changed");
+        // The watch leaves the state just before `changed()` emits, so wait
+        // for both rather than racing the emit.
+        wait_for(
+            || h.uninstalling().is_empty() && h.changed_events() > started,
+            "the watch to time out and emit stores-changed",
+        )
+        .await;
         assert_eq!(h.notices().len(), cards, "no card");
         assert!(
             h.rows().iter().any(|r| r.store_id == "3000010"),

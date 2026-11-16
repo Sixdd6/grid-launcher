@@ -6,17 +6,15 @@ import type { View } from './shell';
 import type { TvTab } from './tv/input/press';
 
 /** Settings › <pane> in TV mode: the desktop's pages plus TV mode, in the
- *  TV rail's order (TVMode README § Tabs › Settings). */
+ *  TV rail's order, by name (TVRommStorefront README § Settings: Connection
+ *  is gone; Stores is Game stores, after Cloud saves). */
 export const TV_PANES = [
   'appearance',
   'backup-drives',
   'cloud-saves',
-  'connection',
+  'stores',
   'library',
   'retroachievements',
-  // Game stores (TVStores README § Settings › Stores: between
-  // RetroAchievements and Systems).
-  'stores',
   'systems',
   'tv',
   'updates',
@@ -27,22 +25,25 @@ export const TV_PANE_LABELS: Record<TvPane, string> = {
   appearance: 'Appearance',
   'backup-drives': 'Backup drives',
   'cloud-saves': 'Cloud saves',
-  connection: 'Connection',
   library: 'Library',
   retroachievements: 'RetroAchievements',
-  stores: 'Stores',
+  stores: 'Game stores',
   systems: 'Systems',
   tv: 'TV mode',
   updates: 'Updates',
 };
 
+/** The TV tab a desktop view opens. TV mode has no Server tab: the legacy
+ *  Server view opens the Library, where RomM is a group. */
 export function tvTabFor(view: View): TvTab {
-  return view;
+  return view === 'server' ? 'library' : view;
 }
 
-/** The TV pane a desktop Settings page opens on. */
+/** The TV pane a desktop Settings page opens on. The legacy Connection page
+ *  opens Game stores, where RomM's page is. */
 export function tvPaneFor(page: SettingsPage): TvPane {
-  return page;
+  const name: string = page;
+  return name === 'connection' ? 'stores' : (page as TvPane);
 }
 
 /** The desktop view a TV tab leaves to, and the Settings page when it is

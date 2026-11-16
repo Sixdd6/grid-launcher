@@ -15,7 +15,7 @@ import { pushToast, TOAST_DURATION_MS, type ToastAction } from '../../stores/toa
 import { installGame } from '../gameActions';
 import { showTab } from '../nav.svelte';
 import { selectLibRail } from '../tabs/library/library.svelte';
-import { loadAllGames } from '../tabs/server/server.svelte';
+import { loadAllGames } from '../romm/tvRomm.svelte';
 import { bumpDrives } from './storeState.svelte';
 import { card, fail, goStoreSettings, installTool, loginFinished, openInstall, playStore, startLogin, toDownloads } from './storeActions';
 import { tvFailureCard } from './storeWords';
