@@ -1,7 +1,9 @@
-// The startup Python-config import's one toast. Module-scoped so the toast
-// survives a Shell remount without repeating: the import itself already
-// happened once, before the webview existed.
-import { api } from '../api';
+// The startup Python-config import's one toast, and the report the welcome
+// reads to show its import notice (decision 12: "Your settings from the
+// previous version are filled in."). Module-scoped so the toast survives a
+// remount without repeating: the import itself already happened once,
+// before the webview existed.
+import { api, type PythonImportReport } from '../api';
 import { importToastText } from '../pythonImport';
 import { pushToast } from './toasts.svelte';
 
@@ -10,6 +12,9 @@ import { pushToast } from './toasts.svelte';
 export const IMPORT_TOAST_DURATION_MS = 20000;
 
 let shown = false;
+
+/** The import's report, `null` until pulled or when nothing was imported. */
+export const pythonImport = $state<{ report: PythonImportReport | null }>({ report: null });
 
 /**
  * Pulls `python_import_notice` once and, when there was an import, shows one
@@ -28,6 +33,7 @@ export async function initPythonImport(): Promise<void> {
   try {
     const report = await api.pythonImportNotice();
     if (report === null) return;
+    pythonImport.report = report;
     pushToast(importToastText(report), 'success', IMPORT_TOAST_DURATION_MS);
   } catch {
     // A failed read is never surfaced: the import either happened or did
