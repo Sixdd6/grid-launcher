@@ -30,6 +30,12 @@
   import { useScreen } from '../screen.svelte';
   import TvButton from '../ui/TvButton.svelte';
   import TvIcon from '../ui/TvIcon.svelte';
+  import { fromLiveServer } from '../../romm/platformGames';
+  import { DETAILS_ACHIEVEMENTS_TEXT, DETAILS_SAVES_TEXT, NEEDS_ROMM, otherServerLine, rommHost } from '../../romm/words';
+  import { hostOf } from '../../shell';
+  import { romm } from '../../stores/romm.svelte';
+  import { rommFix } from '../romm/rommTv';
+  import TvNeedsRomm from '../romm/TvNeedsRomm.svelte';
   import TvAchievementsTab from './details/TvAchievementsTab.svelte';
   import TvMediaTab from './details/TvMediaTab.svelte';
   import TvOverviewTab from './details/TvOverviewTab.svelte';
@@ -114,8 +120,17 @@
       content: d.buttons,
       drive,
       connected: session.connected,
+      rommFix: rommFix(romm.status),
     }),
   );
+  /** An installed game from another RomM server, or gone from this one. */
+  let otherServer = $derived.by(() => {
+    const r = row;
+    if (!r || r.rom_id === null || !session.connected) return '';
+    const own = r.source_server ?? '';
+    if (own === '' || fromLiveServer(r, romm.status.server_url)) return '';
+    return otherServerLine(hostOf(own), rommHost(romm.status));
+  });
   let lines = $derived(
     leftLines({
       installed,
@@ -130,6 +145,7 @@
       noEmulator: noEmu.info,
       size,
       onDrives: subject.drive === undefined ? d.onDrives : '',
+      otherServer,
       drive,
       driveCopy: d.driveCopy,
     }),
@@ -197,7 +213,7 @@
       case 'link':
         if (d.unlinkedRow)
           void pushPage({
-            title: 'Link to server game',
+            title: 'Link to a RomM game',
             component: TvLinkPage,
             props: { row: d.unlinkedRow, held: d.heldRomIds, detailsPage: pageId },
           });
@@ -310,8 +326,12 @@
         <TvOverviewTab {d} />
       {:else if tab === 'media'}
         <TvMediaTab {d} />
+      {:else if tab === 'saves' && !session.connected}
+        <TvNeedsRomm title={NEEDS_ROMM.cloudSaves} text={DETAILS_SAVES_TEXT} k="rneed-d" autofocus={false} testId="tv-det-needs-romm" />
       {:else if tab === 'saves'}
         <TvSavesTab {d} {installed} {unlinked} {noId} lastPlayedAt={row?.last_played_at ?? 0} />
+      {:else if tab === 'achievements' && !session.connected}
+        <TvNeedsRomm title={NEEDS_ROMM.achievements} text={DETAILS_ACHIEVEMENTS_TEXT} k="rneed-d" autofocus={false} testId="tv-det-needs-romm" />
       {:else if tab === 'achievements' && subject.romId !== null}
         <TvAchievementsTab romId={subject.romId} />
       {/if}

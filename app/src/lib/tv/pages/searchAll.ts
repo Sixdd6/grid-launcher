@@ -3,7 +3,7 @@
 // results page, Done with nothing typed just closes the keyboard.
 import { pushPage } from '../nav.svelte';
 import { openKeyboard } from '../overlays/overlays.svelte';
-import { loadAllGames } from '../tabs/server/server.svelte';
+import { loadAllGames } from '../romm/tvRomm.svelte';
 import TvSearchAll from './TvSearchAll.svelte';
 import { SEARCH_ALL_TITLE, searchPageTitle } from './searchResults';
 

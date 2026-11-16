@@ -1,24 +1,25 @@
 // The TV Library rail (checklist items 176–184, 420; tvmode.js `libRailHTML`,
-// `folder`, `railItem`): All games, Recent and Updates with their counts, a
-// divider, then two folders, Platforms (each installed platform with its
-// count) and Backup drives (one row per connected, set-up drive with its game
-// count, or "No backup drives connected"). Pure, over the desktop's rail
-// rules (`library/rail.ts`): the same counts, the same keys.
+// `folder`, `railItem`; TVRommStorefront README § Library › RomM group): All
+// games, Recent and Updates with their counts, a divider, then the Backup
+// drives folder (one row per connected, set-up drive with its game count, or
+// "No backup drives connected"), then the storefront groups. No Platforms
+// folder: platform rows live only in the RomM group (`romm/rail.ts`). Pure,
+// over the desktop's rail rules (`library/rail.ts`): the same counts, the
+// same keys.
 import type { DriveInfo, InstalledGame } from '../../../api';
-import { visibleLibraryGames } from '../../../library';
-import { matchesRail, railEntries, type RailEntry, type RailKey } from '../../../library/rail';
+import { topRailEntries, type RailEntry, type RailKey } from '../../../library/rail';
+import { inStorefrontOrder } from '../../../romm/order';
 
-export type FolderId = 'plat' | 'drives';
+export type FolderId = 'drives';
 
 /** Open / closed per folder; both start open and stay as left for the session (item 183). */
 export type Folds = Record<FolderId, boolean>;
 
-export const DEFAULT_FOLDS: Folds = { plat: true, drives: true };
+export const DEFAULT_FOLDS: Folds = { drives: true };
 
 export type LibraryRail = {
   /** All games, Recent, Updates. */
   filters: RailEntry[];
-  platforms: RailEntry[];
   drives: RailEntry[];
 };
 
@@ -29,27 +30,25 @@ export function libraryRail(
   nowSeconds: number,
   drives: readonly DriveInfo[],
 ): LibraryRail {
-  const all = railEntries(rows, updateRomIds, nowSeconds, drives);
+  const all = topRailEntries(rows, updateRomIds, nowSeconds, drives);
   return {
-    filters: all.slice(0, 3),
-    platforms: all.filter((e) => e.key.startsWith('platform:')),
+    filters: all.filter((e) => e.key === 'all' || e.key === 'recent' || e.key === 'updates'),
     drives: all.filter((e) => e.key.startsWith('drive:')),
   };
 }
 
 /** Every row the rail can select, in order (a vanished key falls back to All games). */
 export function railKeys(rail: LibraryRail): RailKey[] {
-  return [...rail.filters, ...rail.platforms, ...rail.drives].map((e) => e.key);
+  return [...rail.filters, ...rail.drives].map((e) => e.key);
 }
 
 /** The entry for `key`, or All games when it has gone (an unplugged drive). */
 export function railEntry(rail: LibraryRail, key: RailKey): RailEntry {
-  return [...rail.filters, ...rail.platforms, ...rail.drives].find((e) => e.key === key) ?? rail.filters[0];
+  return [...rail.filters, ...rail.drives].find((e) => e.key === key) ?? rail.filters[0];
 }
 
 /** Which folder holds `key`, or null for All games, Recent and Updates. */
 export function folderOf(key: RailKey): FolderId | null {
-  if (key.startsWith('platform:')) return 'plat';
   if (key.startsWith('drive:')) return 'drives';
   return null;
 }
@@ -70,19 +69,16 @@ export function folderHint(open: boolean): string {
 }
 
 /** The folder names (item 176). */
-export const FOLDER_LABELS: Record<FolderId, string> = { plat: 'Platforms', drives: 'Backup drives' };
+export const FOLDER_LABELS: Record<FolderId, string> = { drives: 'Backup drives' };
 
 /** The Backup drives folder with no drive (item 420). */
 export const NO_DRIVES = 'No backup drives connected';
 
-/** What "Backup all N…" on a Library platform row backs up (item 455): its
- *  installed games the server knows (a rom id). N counts these, as the
- *  Backup page does. */
-export function platformBackupIds(rows: InstalledGame[], key: RailKey, updateRomIds: ReadonlySet<number>, nowSeconds: number): number[] {
-  return visibleLibraryGames(rows).flatMap((r) => (matchesRail(r, key, updateRomIds, nowSeconds) && r.rom_id !== null ? [r.rom_id] : []));
-}
-
-/** X on a Library platform row: "Backup all N…", installed games only (item 455). */
-export function backupAllLabel(installed: number): string {
-  return `Backup all ${installed}…`;
+/**
+ * The storefront groups under Backup drives, by name (decision 10): the
+ * store groups shown, with RomM among them when its group shows (Amazon
+ * Games, Epic Games, GOG, RomM, Steam).
+ */
+export function storefrontGroups<G extends { source: string }>(stores: readonly G[], romm: boolean): (G | 'romm')[] {
+  return inStorefrontOrder<G | 'romm'>([...stores, ...(romm ? (['romm'] as const) : [])], (g) => (g === 'romm' ? 'romm' : g.source));
 }

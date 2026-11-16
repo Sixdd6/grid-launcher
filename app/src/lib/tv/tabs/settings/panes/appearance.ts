@@ -1,5 +1,6 @@
 // Settings › Appearance in TV mode (checklist items 10, 12, 13, 234–240,
-// 527; tvmode.js `paneRows('appearance')`). Open GRID on first (README §
+// 527; tvmode.js `paneRows('appearance')`; TVRommStorefront README §
+// Appearance › Open GRID on). Open GRID on first (README §
 // Consultant decisions). Theme and Game card display are shared with the
 // desktop; here "Follow system" shows dark (ruling 22). Card size and Game
 // labels are TV mode's own, stored apart from the desktop's (user decision
@@ -8,6 +9,7 @@
 import type { OpenOn } from '../../../../api';
 import { CARD_DISPLAYS, cardDisplayLabel, type CardDisplay } from '../../../../cards/layout';
 import { OPEN_ON_CHOICES, openOnLabel } from '../../../../settings/openOn';
+import { OPEN_ON_ROMM_OFF } from '../../../../romm/words';
 import { artVisible, BLUR_MAX, type ThemeChoice } from '../../../../theme';
 import {
   TV_CARD_LABEL_MODES,
@@ -22,6 +24,8 @@ import { choiceRow, type OpenChoice } from './choice';
 
 export type AppearanceState = {
   openOn: OpenOn;
+  /** RomM is connected (or connecting at startup): Discover exists. */
+  rommConnected: boolean;
   theme: ThemeChoice;
   cardDisplay: CardDisplay;
   tvCardSize: TvCardSize;
@@ -44,6 +48,13 @@ export type AppearanceActions = {
   setBlur: (v: number) => void;
   setHardwareAcceleration: (on: boolean) => void;
 };
+
+/** Open GRID on's line: where it applies, and, with RomM not connected and
+ *  a choice other than Library, that GRID opens on All games. */
+export function openOnSub(openOn: OpenOn, rommConnected: boolean): string {
+  const base = 'Here and in desktop mode';
+  return !rommConnected && openOn !== 'library' ? `${base}. ${OPEN_ON_ROMM_OFF}` : base;
+}
 
 export const THEME_OPTIONS = [
   ['system', 'Follow system'],
@@ -72,7 +83,7 @@ export function blurFromPercent(pct: number): number {
 export function appearanceRows(s: AppearanceState, a: AppearanceActions): Row[] {
   return [
     choiceRow(
-      { key: 'open-on', label: 'Open GRID on', sub: 'Here and in desktop mode' },
+      { key: 'open-on', label: 'Open GRID on', sub: openOnSub(s.openOn, s.rommConnected) },
       OPEN_ON_CHOICES.map((c) => [c, openOnLabel(c)] as const),
       s.openOn,
       (v) => a.setOpenOn(v as OpenOn),

@@ -35,7 +35,7 @@ export type ScreenHooks = {
    */
   main?: () => { disabled: boolean; why?: string; press: () => void } | null;
   /** After the screen is shown and focus restored: a screen may move focus
-   *  (P7: arriving on Server › Discover focuses its content, item 104). */
+   *  (arriving on Library › RomM › Discover focuses its content, item 104). */
   arrive?: () => void;
   /** View, when no notice offers an action (Connect pastes, item 396). */
   view?: () => void;
@@ -97,7 +97,7 @@ const state = $state<{
   /** Bumped when a screen registers or drops hooks. */
   hooksVersion: number;
 }>({
-  tab: 'server',
+  tab: 'library',
   pane: 'appearance',
   pages: [],
   layers: [],
@@ -110,7 +110,7 @@ let stage: HTMLElement | null = null;
 let layersRoot: HTMLElement | null = null;
 let cur: HTMLElement | null = null;
 /** Where the focused item sat, for a redraw that removes it (item 115). */
-let curPlace: { key: string | null; boxId: string | null; index: number } | null = null;
+let curPlace: { key: string | null; boxId: string | null; index: number; inRail: boolean } | null = null;
 /** Set while a screen first appears or redraws: scrolls jump (item 114). */
 let instant = false;
 let nextPageId = 1;
@@ -396,7 +396,7 @@ export function setFocus(el: HTMLElement | null, opts: { scroll?: boolean; insta
   const k = el.getAttribute('data-k');
   if (k) mem().k = k;
   const box = el.closest('[id]');
-  curPlace = { key: k, boxId: box?.id ?? null, index: box ? focusables(box).indexOf(el) : -1 };
+  curPlace = { key: k, boxId: box?.id ?? null, index: box ? focusables(box).indexOf(el) : -1, inRail: el.closest('[data-rail]') !== null };
   handlersOf(el)?.focus?.();
   refreshFocus();
 }
@@ -605,6 +605,13 @@ export function stageChanged(): void {
     let el: HTMLElement | null = null;
     if (place?.key) {
       el = byKey(root, place.key);
+    }
+    // A rail row that went away (RomM dropped while a platform was open):
+    // the rail's selected row, never a row by its position, since focusing
+    // a rail row selects it (TVRommStorefront README, notes for implementers).
+    if (!el && place?.inRail) {
+      const rail = root.querySelector('[data-rail]');
+      el = rail ? railSelected(rail) : null;
     }
     if (!el && place?.boxId) {
       const box = document.getElementById(place.boxId);

@@ -1,15 +1,23 @@
-// A Server platform's header (checklist items 197–205; tvmode.js `srvCount`,
-// `srvPaint`). Pure, over the desktop's chip rules (server/header.ts).
-import { emulatorChipLabel, firmwareChipLabel, firmwareChipLinks, showsChips, type FirmwareChipState } from '../../../server/header';
-import { NO_EMULATOR_MARKER } from '../../../emulators/defaults';
+// A RomM platform's header (checklist items 197–205, moved under Library ›
+// RomM; TVRommStorefront README § RomM › a platform; tvmode.js `srvPaint`,
+// tvromm.js `rPaintPlatform`). Pure, over the desktop's chip rules
+// (server/header.ts) and RomM's shared words (romm/words.ts).
+import { emulatorChipLabel, firmwareChipLabel, firmwareChipLinks, showsChips, type FirmwareChipState } from '../../../../server/header';
+import { NO_EMULATOR_MARKER } from '../../../../emulators/defaults';
+import { rommPlatformCountsLine } from '../../../../romm/words';
 
 /**
- * "3 games · 1 installed", or "2 of 3 games match · 1 installed" while a
- * search narrows the grid: always the numbers the grid shows (item 197).
+ * The counts line (decision 14): RomM's games, how many of them are
+ * installed, and the installed games only on this computer, in desktop's
+ * words ("3 games on RomM · 1 installed · 1 only on this computer"); while a
+ * search narrows the grid, "2 of 4 games match" over everything it shows.
  */
-export function srvCount(total: number, shown: number, installed: number, searching: boolean): string {
-  const games = total === 1 ? '1 game' : `${total} games`;
-  return `${searching ? `${shown} of ${games} match` : games} · ${installed} installed`;
+export function platformCount(c: { onRomm: number; installed: number; onlyHere: number }, shown: number, isSearching: boolean): string {
+  if (isSearching) {
+    const total = c.onRomm + c.onlyHere;
+    return `${shown} of ${total === 1 ? '1 game' : `${total} games`} match`;
+  }
+  return rommPlatformCountsLine(c.onRomm, c.installed, c.onlyHere);
 }
 
 export type EmulatorChip = { label: string; name: string | null; warn: boolean };

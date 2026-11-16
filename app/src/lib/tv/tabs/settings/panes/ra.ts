@@ -8,6 +8,7 @@
 // Token and Save. Clear acts at once, as on the desktop.
 import { canLogin, canSubmit } from '../../../../emulators/retroachievements';
 import type { Row } from '../../../rows';
+import { NEEDS_ROMM, SETTINGS_RA_TEXT } from '../../../../romm/words';
 
 export type RaState = {
   /** The typed username, else the saved one. */
@@ -113,3 +114,8 @@ export function raRows(s: RaState, a: RaActions): Row[] {
     { type: 'action', key: 'ra-clear', label: 'Clear', danger: true, run: a.clear },
   ];
 }
+
+/** The needs-RomM panel above the rows while RomM isn't connected
+ *  (TVRommStorefront README § Cloud saves and RetroAchievements: needs
+ *  RomM). The login still goes to the emulators, so the rows stay. */
+export const RA_NEEDS_ROMM = { title: NEEDS_ROMM.achievementProgress, text: SETTINGS_RA_TEXT } as const;

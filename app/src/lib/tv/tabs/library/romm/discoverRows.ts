@@ -1,10 +1,10 @@
-// Server › Discover's rows and hero (checklist items 160–169; tvmode.js
+// Library › RomM › Discover's rows and hero (checklist items 160–169; tvmode.js
 // `discoverHTML`, `hero`, `ago`). Pure: TvDiscover feeds it the installed
 // games, the feed's New releases (the last six months, on the preferred
 // platforms, newest first: `grid_core::romm::discover`) and Recently added,
 // and renders what it answers.
-import { formatDay } from '../../../discover/feed';
-import type { LiveInstall, TvGame } from '../../games';
+import { formatDay } from '../../../../discover/feed';
+import type { LiveInstall, TvGame } from '../../../games';
 
 export type ShelfId = 'c' | 'n' | 'r' | 'u' | 'l';
 
@@ -41,7 +41,7 @@ export function discoverShelves(input: { library: readonly TvGame[]; newReleases
   const shelves: Shelf[] = [
     { id: 'c', name: 'Continue playing', extra: null, games: cont },
     { id: 'n', name: 'New releases', extra: 'last six months', games: nr },
-    { id: 'r', name: 'Recently added', extra: 'to your server', games: ra },
+    { id: 'r', name: 'Recently added', extra: 'on RomM', games: ra },
   ];
   if (up.length) shelves.push({ id: 'u', name: 'Updates', extra: gamesWord(up.length), games: up });
   shelves.push({ id: 'l', name: 'Your library', extra: gamesWord(lib.length), games: lib });

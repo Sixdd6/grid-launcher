@@ -291,3 +291,25 @@ describe('the footer (items 479–481)', () => {
     expect(backupMain(model(plan({ fits: false })), vi.fn())).toMatchObject({ label: 'Not enough space', disabled: true, why: 'Couch kit doesn’t have room for this backup.' });
   });
 });
+
+describe('without RomM (RommStorefront README, "Backups without RomM")', () => {
+  const off = () =>
+    localPlan(1, {
+      use_local: true,
+      without_romm: true,
+      unavailable: [{ rom_id: 9, name: 'Far Game', platform_name: 'SNES', reason: 'Its files are not on this computer.' }],
+    } as Partial<BackupPlan>);
+
+  it("the lede says nothing downloads; the unavailable games are listed with why", () => {
+    expect(backupLede('romm.home.lan', off())).toMatch(/^RomM isn’t connected, so GRID copies the games installed on this computer/);
+    const rows = backupPageRows(model(off()), acts());
+    expect(find(rows, 'bk-h-unavailable')).toMatchObject({ text: 'Can’t backup without RomM · 1' });
+    expect(find(rows, 'bk-un-rom-9')).toMatchObject({ label: 'Far Game', sub: 'SNES · Its files are not on this computer. Connect RomM to back it up from the server.' });
+  });
+
+  it('the Source and Firmware switches are locked', () => {
+    const rows = backupPageRows(model(off(), { useLocal: false, includeFirmware: true }), acts());
+    expect(find(rows, 'bk-local')).toMatchObject({ toggle: true, disabled: true });
+    expect(find(rows, 'bk-fw')).toMatchObject({ toggle: false, disabled: true, sub: 'Needs RomM' });
+  });
+});

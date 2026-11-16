@@ -14,6 +14,7 @@ import { rememberFocus, showTab } from '../../nav.svelte';
 import type { StoreSource } from '../../../api';
 import type { StorePart } from '../../../gamestores/rail';
 import { clearStoreView, selectStoreView, tvStores } from '../../stores/storeState.svelte';
+import { clearRommView, tvRomm } from '../../romm/tvRomm.svelte';
 
 export const lib = $state<{ query: string; sort: LibrarySort; driveSort: DriveSort; folds: Folds }>({
   query: '',
@@ -25,10 +26,12 @@ export const lib = $state<{ query: string; sort: LibrarySort; driveSort: DriveSo
 
 /** Moving through the rail selects a row at once; a new row clears the search (item 178). */
 export function selectLibRail(key: RailKey): void {
-  // Leaving a store view (game stores) for one of the desktop's rows.
-  if (tvStores.view !== null) {
+  // Leaving a store view (game stores) or a RomM view for one of the
+  // desktop's rows.
+  if (tvStores.view !== null || tvRomm.view !== null) {
     selEnd();
     clearStoreView();
+    clearRommView();
     lib.query = '';
   }
   if (librarySelection.key === key) return;
@@ -70,6 +73,7 @@ export function selectLibStore(source: StoreSource, part: StorePart): void {
   const v = tvStores.view;
   if (v && v.source === source && v.part === part) return;
   selEnd();
+  clearRommView();
   selectStoreView(source, part);
   lib.query = '';
 }

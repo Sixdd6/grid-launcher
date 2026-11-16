@@ -75,7 +75,7 @@ describe('LB / RB (items 98–99)', () => {
   it('wrap in the order Library, Server, Downloads, Settings', () => {
     expect(stepTab('library', -1)).toBe('settings');
     expect(stepTab('settings', 1)).toBe('library');
-    expect(stepTab('server', 1)).toBe('downloads');
+    expect(stepTab('library', 1)).toBe('downloads');
   });
 });
 

@@ -14,9 +14,8 @@ describe('hidden scrollbars (item 7)', () => {
     expect(css).toMatch(/\[data-scroll\],\s*\S.*\[data-track\] { scrollbar-width: none; }/);
   });
 
-  it('marks the Server tab panels as scrollers', () => {
-    const svelte = readFileSync(join(here, 'tabs/server/TvServer.svelte'), 'utf-8');
-    expect(svelte).toContain('<div class="list" data-scroll="list" data-testid="tv-server-none">');
-    expect(svelte).toContain('<div class="list" data-scroll="list" data-testid="tv-server-offline">');
+  it('marks the RomM Discover connecting panel as a scroller', () => {
+    const svelte = readFileSync(join(here, 'tabs/library/romm/TvRommDiscover.svelte'), 'utf-8');
+    expect(svelte).toContain('<div class="list" data-scroll="list" data-testid="tv-romm-connecting">');
   });
 });

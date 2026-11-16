@@ -14,7 +14,6 @@ import {
   press,
   release,
   waitFocused,
-  waitHintLeft,
   waitPromptSet,
   waitTab,
   XBOX_PAD,
@@ -61,9 +60,9 @@ describe('tv-shell (a): --tv', () => {
     expect(Math.abs(m.top + m.stage + m.hints - m.vh)).toBeLessThan(1.5);
   });
 
-  it('shows the no-server bars (item 517)', async () => {
-    await expect($(testId('tv-connection'))).toHaveText('Offline · no server');
-    await waitHintLeft('No server · Library and backup drives only');
+  it('shows no connection text and no offline line (TVRommStorefront README § The shell)', async () => {
+    expect(await $(testId('tv-connection')).isExisting()).toBe(false);
+    expect(await $(testId('tv-hints-left')).getText()).not.toMatch(/Offline|No server/);
   });
 
   it('opens on the Library rail, and moving through the rail filters at once (items 77, 105)', async () => {
@@ -77,8 +76,9 @@ describe('tv-shell (a): --tv', () => {
 
   it('switches tabs with Q / E and with injected LB / RB, wrapping (item 98)', async () => {
     await connectPad(XBOX_PAD);
+    // Three tabs, no Server tab (TVRommStorefront README § The shell).
     await key('e');
-    await waitTab('server');
+    await waitTab('downloads');
     await key('q');
     await waitTab('library');
     await press('left_bumper');
@@ -86,8 +86,7 @@ describe('tv-shell (a): --tv', () => {
     await press('right_bumper');
     await waitTab('library');
     await press('right_bumper');
-    await waitTab('server');
-    await press('right_bumper');
+    await waitTab('downloads');
     await press('right_bumper');
     await waitTab('settings');
   });
@@ -107,7 +106,7 @@ describe('tv-shell (a): --tv', () => {
     await browser.pause(800);
     await release('dpad_down');
     const after = await focused();
-    const order = ['r-appearance', 'r-backup-drives', 'r-cloud-saves', 'r-connection', 'r-library', 'r-retroachievements', 'r-stores', 'r-systems', 'r-tv', 'r-updates'];
+    const order = ['r-appearance', 'r-backup-drives', 'r-cloud-saves', 'r-stores', 'r-library', 'r-retroachievements', 'r-systems', 'r-tv', 'r-updates'];
     expect(order.indexOf(after ?? '')).toBeGreaterThanOrEqual(3);
     const settled = await focused();
     await browser.pause(400);
@@ -122,7 +121,7 @@ describe('tv-shell (a): --tv', () => {
     const before = await focused();
     await axis('left_stick_y', 0.9);
     await axis('left_stick_y', 0);
-    const order = ['r-appearance', 'r-backup-drives', 'r-cloud-saves', 'r-connection', 'r-library', 'r-retroachievements', 'r-stores', 'r-systems', 'r-tv', 'r-updates'];
+    const order = ['r-appearance', 'r-backup-drives', 'r-cloud-saves', 'r-stores', 'r-library', 'r-retroachievements', 'r-systems', 'r-tv', 'r-updates'];
     await browser.waitUntil(async () => order.indexOf((await focused()) ?? '') === order.indexOf(before ?? '') - 1, {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the left stick did not move focus up',
@@ -175,7 +174,6 @@ describe('tv-shell (a): --tv', () => {
   });
 
   it('the hint bar names the controller pressed last, and the prompts follow it (items 47, 67–68)', async () => {
-    await waitHintLeft('No server · Library and backup drives only');
     // A key was pressed last: the keyboard's keys (README § Keyboard prompts).
     await waitPromptSet('keyboard');
     await press('dpad_down', XBOX_PAD);
@@ -224,7 +222,6 @@ describe('tv-shell (a): --tv', () => {
     await waitTab('library');
     await press('left_bumper', NINTENDO_PAD);
     await waitTab('settings');
-    await waitHintLeft('No server · Library and backup drives only');
     // Xbox style on the Nintendo pad: bottom now selects. The prompts keep the
     // pad's own Nintendo set, with Select drawn on its bottom button (B).
     await waitFocused('r-appearance');
@@ -244,8 +241,7 @@ describe('tv-shell (a): --tv', () => {
     await press('dpad_down', NINTENDO_PAD);
     await disconnectPad(NINTENDO_PAD);
     await disconnectPad(XBOX_PAD);
-    // Not offline would show the name; no-server keeps its line, so check the
-    // TV mode pane's Controller row instead.
+    // The TV mode pane's Controller row says which controller is in use.
     await focusOn(testId('tv-set-rail-tv'));
     await waitFocused('r-tv');
     await expect($(testId('tv-row-tv-controller'))).toHaveText(expect.stringContaining('None connected'));

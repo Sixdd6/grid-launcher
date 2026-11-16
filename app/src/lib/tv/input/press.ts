@@ -132,8 +132,9 @@ export function press(b: TvButton, ctx: PressContext): Command {
   return NONE;
 }
 
-/** The tab LB / RB lands on, wrapping (item 98). */
-export const TAB_ORDER = ['library', 'server', 'downloads', 'settings'] as const;
+/** The tab LB / RB lands on, wrapping (item 98). No Server tab: RomM is a
+ *  Library group (TVRommStorefront README § The shell). */
+export const TAB_ORDER = ['library', 'downloads', 'settings'] as const;
 export type TvTab = (typeof TAB_ORDER)[number];
 
 export function stepTab(tab: TvTab, step: -1 | 1): TvTab {

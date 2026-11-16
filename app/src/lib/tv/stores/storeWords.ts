@@ -116,9 +116,9 @@ function tvSteamWords(p: StorePanel): StorePanel {
     case 'store-state-noclient':
       return { ...p, body: 'GRID installs, starts and uninstalls Steam games through the Steam client. Install Steam on this PC and sign in once, then press Check again.' };
     case 'store-state-nokey':
-      return { ...p, actions: p.actions.map((a) => ({ ...a, label: 'Open Settings › Stores' })) };
+      return { ...p, actions: p.actions.map((a) => ({ ...a, label: 'Open Settings › Game stores' })) };
     case 'store-state-badkey':
-      return { ...p, body: 'The key may have been revoked. Make a new key, then enter it in Settings › Stores › Steam.' };
+      return { ...p, body: 'The key may have been revoked. Make a new key, then enter it in Settings › Game stores › Steam.' };
     default:
       return p;
   }
@@ -220,8 +220,8 @@ export function tvStoreButtons(o: {
       conn === 'connected'
         ? undefined
         : conn === 'not_connected'
-          ? `Connect ${name} in Settings › Stores to install.`
-          : `Your ${name} login expired. Sign in again in Settings › Stores.`;
+          ? `Connect ${name} in Settings › Game stores to install.`
+          : `Your ${name} login expired. Sign in again in Settings › Game stores.`;
     out.push({ act: 'install', label: 'Install…', primary: true, icon: 'download', disabled: why !== undefined, why });
   }
   if (game.installed && game.update_version !== '' && job === null) out.push({ act: 'update', label: updateLabel(game), primary: false });
@@ -526,7 +526,7 @@ export function stopWords(title: string): { title: string; body: string; ok: str
 export const COMPAT_SUB = 'The default from Settings › Systems › Windows';
 
 export function installFolderSub(source: StoreGame['source']): string {
-  return `The default for ${storeName(source)} games is in Settings › Stores`;
+  return `The default for ${storeName(source)} games is in Settings › Game stores`;
 }
 
 /** A folder name from a title, as the prototype makes it ("MarrowindKeep"). */

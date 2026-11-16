@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { gameFromRow, gameFromSummary } from '../../games';
-import { row, summary } from '../../fixtures.test-util';
+import { gameFromRow, gameFromSummary } from '../../../games';
+import { row, summary } from '../../../fixtures.test-util';
 import { ago, daysSince, discoverShelves, EMPTY_SHELF, gamesWord, heroEmulator, heroLine, heroSummary } from './discoverRows';
 
 const inst = (id: number, o = {}) => gameFromRow(row({ rom_id: id, title: `G${id}`, ...o }), new Set([3]));
@@ -13,7 +13,7 @@ describe('discoverShelves (items 164–169)', () => {
     expect(shelves.map((s) => [s.id, s.name, s.extra])).toEqual([
       ['c', 'Continue playing', null],
       ['n', 'New releases', 'last six months'],
-      ['r', 'Recently added', 'to your server'],
+      ['r', 'Recently added', 'on RomM'],
       ['u', 'Updates', '1 game'],
       ['l', 'Your library', '3 games'],
     ]);

@@ -98,8 +98,8 @@ describe('tv-shell (d): overlays and notifications', () => {
     await press('start');
     await $(testId('tv-menu')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await waitFocused('gm0');
-    for (let i = 0; i < 4; i++) await press('dpad_down');
-    await waitFocused('gm4');
+    for (let i = 0; i < 3; i++) await press('dpad_down');
+    await waitFocused('gm3');
     expect((await $(testId('tv-menu-controls')).getText()).trim()).toBe('Controls');
     await press('south');
     await waitLayers(0);
@@ -130,19 +130,19 @@ describe('tv-shell (d): overlays and notifications', () => {
     await $(testId('tv-menu')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await waitFocused('gm0');
     const labels = await menuLabels();
-    expect(labels[0]).toBe('Discover');
-    expect(labels[1]).toBe('Downloads');
-    expect(labels[2]).toMatch(/^Notifications · [1-9]\d*$/);
-    // Used without a server (README § Consultant decisions).
-    expect(labels.slice(3)).toEqual(['Settings', 'Controls', 'Connect to a server…', 'Switch to desktop mode', 'Quit GRID']);
-    expect((await $(testId('tv-menu-head')).getText()).trim()).toBe('Offline · no server');
+    // RomM isn't connected: no Discover, no Reconnect, no head line
+    // (TVRommStorefront README § The shell).
+    expect(labels[0]).toBe('Downloads');
+    expect(labels[1]).toMatch(/^Notifications · [1-9]\d*$/);
+    expect(labels.slice(2)).toEqual(['Settings', 'Controls', 'Switch to desktop mode', 'Quit GRID']);
+    expect(await $(testId('tv-menu-head')).isExisting()).toBe(false);
     expect(await $(testId('tv-menu-clock')).getText()).toMatch(/^\d\d:\d\d$/);
     expect(await hints()).toEqual(['A Select', 'B Close']);
     const w = await browser.execute(() => document.querySelector('[data-testid="tv-menu"]')!.getBoundingClientRect().width / parseFloat(getComputedStyle(document.documentElement).fontSize));
     expect(Math.abs(w - 30)).toBeLessThan(0.1);
     // Focus stays inside the Menu (item 361).
     for (let i = 0; i < 10; i++) await press('dpad_down');
-    await waitFocused('gm7');
+    await waitFocused('gm5');
     await press('east');
     await waitLayers(0);
     await waitFocused(before!);
@@ -176,8 +176,8 @@ describe('tv-shell (d): overlays and notifications', () => {
     const before = await focused();
     await press('start');
     await waitFocused('gm0');
-    for (let i = 0; i < 7; i++) await press('dpad_down');
-    await waitFocused('gm7');
+    for (let i = 0; i < 5; i++) await press('dpad_down');
+    await waitFocused('gm5');
     await press('south');
     await $(testId('tv-confirm')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await waitFocused('dlg-cancel');
@@ -362,10 +362,9 @@ describe('tv-shell (d): overlays and notifications', () => {
   it('lists the session in Menu › Notifications, newest first, and Y clears it (items 356–359)', async () => {
     await press('start');
     await waitFocused('gm0');
-    const label = (await menuLabels())[2];
+    const label = (await menuLabels())[1];
     await press('dpad_down');
-    await press('dpad_down');
-    await waitFocused('gm2');
+    await waitFocused('gm1');
     await press('south');
     await $(testId('tv-notifications')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     const count = Number(await $(testId('tv-notifications-count')).getText());

@@ -45,26 +45,10 @@ describe('buildHints (items 128–133)', () => {
   });
 });
 
-describe('hintLeft (items 135–137, 517; ruling 24)', () => {
-  it('no server', () => {
-    expect(hintLeft({ noServer: true, offline: false, startup: false, padName: 'Pad' })).toEqual({
-      kind: 'noServer',
-      text: 'No server · Library and backup drives only',
-    });
-  });
-  it('offline', () => {
-    expect(hintLeft({ noServer: false, offline: true, startup: false, padName: null })).toEqual({
-      kind: 'offline',
-      pill: 'Offline',
-      text: 'Installed games still play',
-    });
-  });
+describe('hintLeft (ruling 24; TVRommStorefront: no offline line)', () => {
   it('the controller in use, or the no-controller line', () => {
-    expect(hintLeft({ noServer: false, offline: false, startup: false, padName: 'Xbox Wireless Controller' })).toEqual({ kind: 'pad', text: 'Xbox Wireless Controller' });
-    expect(hintLeft({ noServer: false, offline: false, startup: false, padName: null }).text).toBe(NO_CONTROLLER_LINE);
+    expect(hintLeft({ padName: 'Xbox Wireless Controller' })).toEqual({ kind: 'pad', text: 'Xbox Wireless Controller' });
+    expect(hintLeft({ padName: null }).text).toBe(NO_CONTROLLER_LINE);
     expect(NO_CONTROLLER_LINE).toBe('No controller connected');
-  });
-  it('startup screens show the controller even offline', () => {
-    expect(hintLeft({ noServer: true, offline: true, startup: true, padName: null }).kind).toBe('pad');
   });
 });
