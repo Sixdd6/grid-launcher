@@ -154,8 +154,9 @@ mod tests {
             maps.slugs.get("PlayStation").map(String::as_str),
             Some("psx")
         );
+        // Aliases are kept once, ignoring case (the registry reads ignore it too).
         assert_eq!(
-            maps.slugs.get("Sony PlayStation").map(String::as_str),
+            maps.slugs.get("Sony Playstation").map(String::as_str),
             Some("psx")
         );
         assert_eq!(

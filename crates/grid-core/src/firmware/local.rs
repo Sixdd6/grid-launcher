@@ -102,7 +102,7 @@ fn entries(known: &[&KnownFile], server: &[FirmwareRecord]) -> Vec<Entry> {
             },
             md5,
             // A file only RomM lists is needed as far as GRID can tell.
-            required: known_entry.map_or(true, |k| k.required),
+            required: known_entry.is_none_or(|k| k.required),
             group: known_entry.map(|k| k.group.clone()).unwrap_or_default(),
             content: known_entry.is_some_and(|k| k.matching == MatchKind::Content),
         });

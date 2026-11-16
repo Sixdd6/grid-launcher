@@ -763,7 +763,10 @@ mod tests {
             recommendations(),
             &[],
         );
-        let psx = rows.iter().find(|r| r.slug == "psx").expect("PlayStation is a catalog system");
+        let psx = rows
+            .iter()
+            .find(|r| r.slug == "psx")
+            .expect("PlayStation is a catalog system");
         assert_eq!(psx.label, "PlayStation");
         assert_eq!(psx.rom_count, 0);
         assert_eq!(recommended_name(psx), Some("DuckStation (Playstation 1)"));
@@ -771,7 +774,9 @@ mod tests {
         let gba = rows.iter().find(|r| r.slug == "gba").unwrap();
         assert!(gba.core.is_some());
         // The Emulators shelf never shows, and no native platform does.
-        assert!(rows.iter().all(|r| r.slug != "emulators" && r.slug != "win"));
+        assert!(rows
+            .iter()
+            .all(|r| r.slug != "emulators" && r.slug != "win"));
     }
 
     #[test]
