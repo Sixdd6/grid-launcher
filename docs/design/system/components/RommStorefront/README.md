@@ -1,6 +1,11 @@
 A proposal: RomM becomes one optional storefront beside Amazon Games, Epic Games, GOG and Steam. The card is built on Game stores (what main has). It opens where a connected user lands with Open GRID on › Automatic: **Library › RomM › Discover**. Everything not listed here matches Game stores.
 
-**Status: signed off, not built (step D1; user decisions 14–17).** The decisions and contracts are in `docs/romm-storefront-plan.md` (user decisions 1–13, Step 0). TV mode's version is the **TVRommStorefront** card (step D2). Source: `docs/design/prototype/romm.js` and `romm.css`, built by `applayout.py` on top of the GameStores card.
+**Status: signed off, not built (step D1; user decisions 14–17).** The Emulators row and Open config folder (see Changes 2026-11-15) are designed, not yet signed off. The decisions and contracts are in `docs/romm-storefront-plan.md` (user decisions 1–13, Step 0). TV mode's version is the **TVRommStorefront** card (step D2). Source: `docs/design/prototype/romm.js` and `romm.css`, built by `applayout.py` on top of the GameStores card.
+
+## Changes 2026-11-15
+
+- **RomM › Emulators:** the server's Emulators platform is now a row in the RomM group like any other platform (user decision 2026-11-15: "the Emulators platform should be there too if the server has Emulators"). Its view lists the emulator files with Install / Installed / Update / Uninstall. Emulator files still never join RomM › Installed, All games, Recent, Updates or Discover. Section **RomM › Emulators** below.
+- **Open config folder** (left with Settings › Connection) is back, on **Settings › Library** under the library folder. Section **Settings › Library** below.
 
 ## Try it
 
@@ -9,6 +14,8 @@ A proposal: RomM becomes one optional storefront beside Amazon Games, Epic Games
 - **Connect from the card:** set **Never connected**, then RomM card › **Connect RomM…**. The dialog's dashed button picks the next result (works, can't reach the server, rejected (401), another user's token). A successful first connect opens **Choose your systems**; Skip or Install returns to Settings › Game stores.
 - **Locate files:** Settings › Systems › PlayStation (open the row) › **Locate files…**. Tick files, or **Use the whole folder**. Nintendo Switch shows "not verified" keys; PlayStation 3 shows the PUP picker; PlayStation 2 shows the "install an emulator first" state.
 - **Backups without RomM:** set **Not connected**, then Library › RomM › Installed › **Backup all 11…**.
+- **Emulators:** Library › RomM › **Emulators** (first platform row). Install Pico-8 or Ymir (progress, then Installed), Update PCSX2, Uninstall… RetroArch (inline confirm), Install DuckStation (fails: wrong processor; Retry then works), Install an Other file, open **N other builds…**. The dashed **Prototype** select in the header switches: files loaded, Loading, Can't load the list, Nothing for this computer, No Emulators platform (row hidden; selection falls back to RomM › Installed).
+- **Open config folder:** Settings › Library.
 - **Details without RomM:** set **Sign-in expired**, open Lantern Vale (it has an update) and its Saves and Achievements tabs. Hidden Kiln (PlayStation) is an installed game with no RomM link; Sky Lantern (Super Nintendo) came from another RomM server.
 
 ## Removed
@@ -28,19 +35,19 @@ Order: **All games, Recent, Updates** → **BACKUP DRIVES** → storefront group
 - **RomM group** (`rommRailGroup`): heading = the RomM mark (monogram "R", never a logo) + **ROMM** + a flag.
   | State | Flag | Rows |
   |---|---|---|
-  | Connected | none | **Installed** (count), **Discover** (no count), one row per platform (count) |
+  | Connected | none | **Installed** (count), **Discover** (no count), one row per platform (count), including **Emulators** when the server has that platform |
   | Connecting at startup (`busy`, stored connected) | spinner, title "Connecting to RomM" | **Installed**, **Discover** (loading) |
   | Can't reach | **!** "Can't reach RomM" | **Installed** only |
   | Sign-in expired | **!** "RomM sign-in expired" | **Installed** only |
   | Not connected, RomM games installed | **off** "Not connected" | **Installed** only |
   | Not connected, none installed (`in_rail` false) | — | no group |
-- **Platform rows:** the union of the server's platforms and the installed RomM platforms, sorted by label. **Count = RomM's game count for that platform** (user decision 14). Installed games RomM doesn't have show in the platform's grid but are not counted. Installed games carry the dot on their covers.
+- **Platform rows:** the union of the server's platforms and the installed RomM platforms, sorted by label. **Count = RomM's game count for that platform** (user decision 14). The server's **Emulators** platform is one of these rows (2026-11-15): same sort, its own count and view (RomM › Emulators below). Installed games RomM doesn't have show in the platform's grid but are not counted. Installed games carry the dot on their covers.
 - When the selected row disappears (Discover or a platform while RomM drops), selection falls back to **RomM › Installed**, or **All games** when the group is gone.
 
 ## RomM › Installed
 
 - Header: "RomM · Installed", "11 games · 21.2 GB · from romm.home.lan". Chips: "Signed in as player" (Connected, opens Settings › Game stores), "Connecting to romm.home.lan…" (spinner), "Not connected · Connect…" (Not connected). Actions: **Backup all N…**, **Select**. Sort, Size and search as the Library ("Search by title"; folded: "Search installed RomM games…").
-- Grid: every installed RomM game (not the hidden Emulators shelf), with platform tags, Library sort and search.
+- Grid: every installed RomM game, with platform tags, Library sort and search. **Emulator files are not games:** a file installed from RomM › Emulators never shows here, nor in All games, Recent, Updates or Discover, and is not in the Installed count or the RomM card's "installed here" count.
 - **Banner** (one line above the grid, warning edge):
   - Can't reach: "**Can't reach RomM** · romm.home.lan didn't answer. Installed games still play." · **Retry** (Retrying…).
   - Sign-in expired: "**RomM sign-in expired** · Sign in again to browse, install and sync saves. Installed games still play." · **Sign in again…** (opens the sign-in dialog).
@@ -57,6 +64,51 @@ Order: **All games, Recent, Updates** → **BACKUP DRIVES** → storefront group
   - **NOT LINKED**: no `rom_id` (Hidden Kiln).
   - **NOT ON ROMM**: from another RomM server, or gone from this one (Sky Lantern).
   - These rows never show in Discover.
+
+## RomM › Emulators (2026-11-15)
+
+The server's **Emulators** platform (RomM's platform named "Emulators", `isEmulatorsPlatform`; one ROM per folder `ps2`, `pico`, `multi`…, its files the builds; `docs/server-emulator-packages.md`). Installs go through the existing server-emulator path, which stays.
+
+**The rail row**
+- Shows only while RomM is **Connected** and the server has an Emulators platform with at least one file. Hidden in every other state, like the other platform rows (Connecting at startup, Can't reach, Sign-in expired, Not connected), and hidden when the server has no Emulators platform.
+- Label **Emulators**. Place: **sorted by label with the other platform rows** (the default; in the prototype it lands first, before GameCube). Why: the user asked for it as one of RomM's platforms, and a separate slot would need a divider the group has nowhere else.
+- **Count** = what this computer can install: the emulators plus the other files the view lists (not the "other builds"). 8 in the prototype (5 emulators + 3 other files); 0 when nothing is for this computer.
+- Key `platform:<slug>` of that platform, as every platform row (the prototype uses `platform:emulators`). When the row disappears while selected (RomM drops, or the server loses the platform), selection falls back to **RomM › Installed**, as for any platform.
+
+**Header** (the platform screen's folding header, minus what doesn't apply)
+- Title **Emulators**. Counts line: "5 emulators · 3 other files · 3 installed" ("installed" counts emulators installed at any version plus installed other files). Loading: "Loading…". Can't load: "On romm.home.lan". Nothing for this computer: "No builds for this computer".
+- Chips: "Builds for Linux x64" (plain chip; title "GRID installs the newest build for this computer's system and processor"; the words name the running computer: "Windows x64", "Linux 32-bit ARM", "macOS (Apple silicon)"…) and **Settings › Systems** (opens Settings › Systems).
+- Search, placeholder "Search emulators or files" (folded: "Search Emulators…"); it matches emulator name, system, file name and folder.
+- **Not here:** Firmware chip, Emulator chip, Backup all N…, Select, Size, Sort, cloud saves or achievements, cover art.
+
+**Body: three sections of rows, not covers**
+1. **Emulators** · note "Named for GRID. Each installs as an emulator that Settings › Systems sets up, and RomM's newer builds show as updates." One row per emulator GRID knows that has a build for this computer, by name. The row offers the **newest build for this computer** (the server-emulator rule: system and CPU from the arch tag; a Mac takes `universal` when there is no newer build for its own CPU).
+   - Row: a monogram tile (first letter), **name**, the system(s) it runs ("PlayStation 2"; a `multi` emulator from GRID's own list: "GameCube, Wii"; RetroArch "Many systems, through its cores"), then "v2.0.2 · 38 MB", then the file name in mono ("PCSX2 (v2.0.2) (arch-linux-x64).AppImage").
+   - **Not installed:** primary **Install**.
+   - **Not installed, GRID's catalog copy installed:** **Install**, plus the line "GRID's catalog copy of DuckStation is installed. This build installs beside it as "DuckStation (server)"." (see Open questions).
+   - **Queued** (another install is running): line "Queued · waits for the download before it"; **Cancel**.
+   - **Downloading:** "Downloading · 46% · 17 of 38 MB" with a bar; **Cancel**. After Cancel: notification "Cancelled PCSX2"; the row returns to Install (or Update).
+   - **Installing** (unpacking and checking the program): "Installing · checking the program", an indeterminate bar, no button.
+   - **Installed:** pill "✓ Installed", **Uninstall…**; line "Set up in Settings › Systems · Open in Systems" (link).
+   - **Update available** (the installed version is older than the newest build here): primary **Update to v2.0.2**, **Uninstall…**; line "**Installed: v1.6.0** · v2.0.2 is on RomM · Open in Systems".
+   - **Install failed, wrong processor** (the program inside isn't for this computer; nothing registered): red edge, line "Couldn't install. The program in this file is built for Linux ARM64, not Linux x64. Check the file's arch tag on RomM. Nothing was set up."; **Retry**. Error notification: "Couldn't install DuckStation: its program is built for Linux ARM64. Nothing was set up." Any other failure puts the server-emulator path's existing error text on the same line.
+   - **Uninstall confirm** (inline under the row): "**Uninstall PCSX2 v1.6.0?** GRID deletes it from the emulators folder in your library. Games and saves stay. PlayStation 2 games set to it can't start until another emulator is picked." (RetroArch: "Games set to RetroArch can't start…") · **Uninstall** (danger) / Cancel. Notification "PCSX2 uninstalled"; the row returns to Install.
+   - Success notifications: "Pico-8 v0.2.7a6 installed from RomM · set up for Pico-8" (RetroArch: "… set up for its systems"); update: "PCSX2 updated to v2.0.2".
+2. **Other files** · note "These don't follow GRID's naming, so GRID installs them as plain files in your library's Emulators folder. GRID doesn't set them up for a system or check them for updates. How to name builds" (link: opens the packaging guide in the browser). Every file that doesn't register: not named to the rule, no arch tag or no CPU in it, an emulator name GRID doesn't know, an extension GRID doesn't unpack.
+   - Row: a plain tile, the **file name** in mono, line "<folder> folder · <size> · <why>", why being one of "Not named for GRID", "It has no arch tag", "Its arch tag has no processor", "GRID doesn't know an emulator called "Ares Nightly"", "GRID doesn't unpack .rar files".
+   - States: **Install** (secondary, not primary: nothing is set up afterwards), Queued, Downloading, Installing (as above), **Installed** (pill "✓ Installed", **Uninstall…**, line "In your library's Emulators folder · Show folder", which opens that folder in the file manager).
+   - **How this install differs:** the file lands in the library's Emulators folder like any RomM file (unpacked when it's an archive GRID knows), is **not registered** as an emulator, isn't in Settings › Systems, gets no defaults and **no updates**. This view is the only place it shows. Notification "xemu-v0.8.5-x86_64.AppImage installed in your library's Emulators folder".
+   - Uninstall confirm: "**Uninstall xemu-v0.8.5-x86_64.AppImage?** GRID deletes it from the Emulators folder in your library." · Uninstall / Cancel; notification "xemu-v0.8.5-x86_64.AppImage uninstalled".
+3. **"6 other builds GRID doesn't install on this computer"** (a closed disclosure; hidden while searching) · note "GRID installs the newest build for this computer's system and processor (Linux x64)." Dimmed rows, no buttons: file name, "<folder> folder · <size> · <reason>", reason "For Windows x64", "For macOS (universal)", "For Linux 32-bit ARM", "Older than v2.0.2". An emulator whose builds are all for other computers (Dolphin here) shows only in this list.
+
+**Whole-view states**
+- **Loading:** a panel "⟳ Loading the Emulators platform from romm.home.lan…" over four skeleton rows.
+- **Can't load the list** (the request failed while RomM is still Connected): panel "**Can't load the Emulators platform**" · "romm.home.lan didn't answer. Installed emulators still work." · **Retry**. If RomM's state turns to Can't reach, the row goes and selection falls back to RomM › Installed with its banner.
+- **Nothing for this computer** (files exist, none for this computer, no other files): panel "**Nothing here for this computer**" · "RomM's Emulators platform has 6 builds, all for other systems or processors. GRID installs builds for Linux x64." · **How to name builds**; then the other-builds list. Rail count 0.
+- **Empty** (the platform has no files): no row, as for a platform with no games.
+- **Search, no match:** "No emulators or files match "…"".
+- **Not connected / Can't reach / Sign-in expired / Connecting:** no row (rail table above).
+- Installs also show in **Downloads**, as server emulator installs do today.
 
 ## Details (RomM games)
 
@@ -92,6 +144,13 @@ Order: **All games, Recent, Updates** → **BACKUP DRIVES** → storefront group
 - Not connected: "Connect your RomM server to browse its games in the Library, install them with an emulator, and sync their saves and firmware. The 11 RomM games installed here still play." With a stored server: Server, User, Status "Not connected". Actions: **Connect RomM…**, Open in browser (only with a stored server).
 - **Disconnect confirm** (in the card): "**Disconnect RomM?** GRID deletes your RomM sign-in from the OS keyring and stays open. Installed RomM games stay and still play. Cloud saves, firmware downloads and updates stop." · **Disconnect** / Cancel. Card after: Not connected, server and user kept. Notification: "RomM disconnected. Installed RomM games stay and still play."
 - Notifications: "Connected to RomM at romm.home.lan as player", "Signed in to RomM again as player", "Reconnected to romm.home.lan", "Connected to RomM again · romm.home.lan".
+
+### Settings › Library: Open config folder (2026-11-15)
+
+- The user chose "Settings › General, near the library folder row". The app has no General page; the library folder row lives on **Settings › Library**, so it goes there (see Open questions).
+- Under the **Library folder** block, a second block in the same style: heading **Config folder** · note "GRID's settings file lives here. Games, emulators and saves are in the library folder." · the path in the path box (`/home/player/.config/grid-launcher` in the prototype: the OS's config folder for GRID, the one `open_config_folder` opens) · secondary button **Open config folder** (sentence case like Change…; the old label "Open Config Folder" is retired).
+- Click: opens the folder in the file manager (`open_config_folder` creates it first). No notification on success; on failure an error notification "Couldn't open the config folder: <reason>".
+- Always enabled, also while a library move runs.
 
 ### Sign-in dialog (`RommSignInForm`)
 
@@ -199,6 +258,19 @@ Discover and platforms
 - [ ] Platform screen: header, counts "N games on RomM · M installed · plus K only on this computer" (N matches the rail row), chips, Backup all N…, Select, search.
 - [ ] Merged covers: Play / Install; NOT LINKED; NOT ON ROMM; these never in Discover.
 
+RomM › Emulators (2026-11-15)
+- [ ] Row only while Connected and the server has an Emulators platform with files; sorted by label; count = emulators + other files for this computer.
+- [ ] Row gone (RomM drops, platform gone) → selection falls back to RomM › Installed.
+- [ ] Header: title, counts line, "Builds for <system CPU>" chip, Settings › Systems chip, search; no firmware or emulator chip, Backup all, Select, Size.
+- [ ] Emulator rows: Install, catalog-copy line, Queued, Downloading (Cancel), Installing, Installed, Update to vX, Install failed (wrong processor, Retry), inline Uninstall confirm, notifications.
+- [ ] Other files: why line, Install / progress / Installed (Show folder) / Uninstall confirm; not registered, no updates.
+- [ ] Other builds disclosure with reasons; hidden while searching.
+- [ ] Loading, Can't load (Retry), Nothing for this computer, search no match.
+- [ ] Emulator files never in RomM › Installed, All games, Recent, Updates, Discover or their counts.
+
+Settings › Library
+- [ ] Config folder block under Library folder; Open config folder opens it; error notification.
+
 Details
 - [ ] Saves tab needs RomM (three whys, three fix actions).
 - [ ] Achievements tab needs RomM.
@@ -262,6 +334,13 @@ The user signed these off with the TV card on 2026-11-15 (decisions 14–17 in t
 
 - Discover and the platform screens are drawn here with the old Server view's DOM (`S.view 'server'`) under the Library pill; in the app they are RomM views inside `Library.svelte` (Step 3). Their behaviour is the Server view's (folding header, select, Backup all N…, chips).
 - Rail keys: `romm:installed`, `romm:discover`, `platform:<slug>` (plan 0.3). The prototype uses its own platform codes in the key.
+- **Emulators row (2026-11-15):** plan 0.3 drops the Emulators shelf from the platform rows; that changes. `rommRailGroup` keeps it (`isEmulatorsPlatform`) with its own count; `RommStatus.installed_count`, RomM › Installed, All games, Recent, Updates and Discover still leave Emulators-platform rows out. The view's data is the server-emulator path's (`ServerPackage` folders and files, `ServerBuildInfo`, setup's newest-build rule); files that don't parse are the Other files, installed as an ordinary RomM file of the Emulators platform. Source: `docs/design/prototype/romm_emu.js` / `romm_emu.css`.
+
+## Open questions (2026-11-15)
+
+1. **Catalog copy and server build of the same emulator:** today a server build registers beside GRID's catalog copy (possibly as "<name> (server)"). Should the Emulators view say so (as drawn), or should installing the server build replace the catalog copy?
+2. **Open config folder's page:** the plan says Settings › General; there is no General page, so it is on Settings › Library under the library folder. Keep it there, or add a General page?
+3. **"How to name builds" link target:** `docs/server-emulator-packages.md` on GitHub, or nowhere (drop the link)?
 - Words live in `app/src/lib/romm/words.ts`; this README is the list.
 - The prototype's catalog systems (PS3, Switch, GBA, PSP, Dreamcast), firmware files and Locate results are placeholders, not `firmware-known.json` data. No real BIOS names or hashes are implied beyond common file names.
 - Notifications and the store login window sit above the welcome (z-order), so the import notice and store sign-in work there.

@@ -2,6 +2,8 @@ TV mode with RomM as one optional storefront beside Amazon Games, Epic Games, GO
 
 **Status: signed off, not built.** The user approved it with the desktop card (RommStorefront, Step D1) on 2026-11-15, with decisions 14–17: the platform count is RomM's games only, two cover tags (NOT LINKED, NOT ON ROMM), a never-connected GRID opens on All games, and where the two cards' words differed, desktop's words win (this card now uses them; `romm/words.ts` is shared).
 
+**Changes 2026-11-15** (designed, not yet signed off): **RomM › Emulators**, the server's Emulators platform as a row in Library › RomM with its install list (section below; user decision 2026-11-15). Emulator files still never join RomM › Installed, All games, Recent, Updates or Discover. Open config folder is desktop only (Settings › Library on the desktop card); TV mode has no such row. Try it: Library › RomM › Emulators, or Menu › Prototype only › **Show: RomM › Emulators…** (Files loaded, Loading, Can't load the list, Nothing for this computer, No Emulators platform).
+
 TV rules that hold everywhere below:
 - TV flows never send the player to desktop mode. A store's login window, RomM's web page ("Open in browser") and an emulator opened from its System page open over TV mode.
 - Every size is in rem (TV mode's 1/54-of-the-screen-height root), so it reads the same from a couch at 720p, 1080p and 4K.
@@ -34,7 +36,7 @@ The rail: All games, Recent, Updates, then **Backup drives**, then the storefron
 
 | RomM | Heading flag | Rows |
 | --- | --- | --- |
-| Connected | none | **Installed** (count), **Discover**, then one row per platform, by name, with the RomM game count |
+| Connected | none | **Installed** (count), **Discover**, then one row per platform, by name, with the RomM game count; **Emulators** among them when the server has that platform |
 | Startup probe running | spinner | Installed, Discover ("Connecting to RomM…") |
 | Can't reach RomM | **!** | Installed only |
 | Sign-in expired | **!** | Installed only |
@@ -66,6 +68,34 @@ The rail: All games, Recent, Updates, then **Backup drives**, then the storefron
 - The grid merges RomM's games with the installed rows: installed covers show the installed dot (X Play), the rest X Install. Installed rows RomM doesn't have show here with a cover tag (decision 15), and never in Discover:
   - **NOT LINKED**: no RomM link (Brass Comet, Sega Saturn).
   - **NOT ON ROMM**: from another RomM server, or removed from this one (Sky Lantern, Super Nintendo). Its game page's left column starts "From another RomM server (romm.old.lan) · not on romm.home.lan".
+
+### RomM › Emulators (2026-11-15)
+
+The server's Emulators platform as a RomM row, as on desktop (RommStorefront README, "RomM › Emulators": same rules, data and words; TV's own focus, hints and A-says-why lines below).
+
+- **The row:** "Emulators" with the count (emulators plus other files this computer can install; 8 in the prototype, 0 when nothing is for this computer), sorted by name among the platform rows (first, before GameCube, in the prototype). Only while RomM is Connected and the server has an Emulators platform with files; otherwise no row, and a selected row hands selection and focus to **RomM › Installed** (the existing fallback).
+- **Header:** "**Emulators**" and "5 emulators · 3 other files · 3 installed" ("2 of 8 items match" while a search narrows it; "Loading…"; "On romm.home.lan"; "No builds for this computer"). Chips: "Builds for **Linux x64**", the search chip while searching, "(Y) Search". No firmware or emulator chip, no Backup all, no RT Select, no LT Sort.
+- **The list** (a vertical list of rows; Right from the rail or A on the row enters it at the first row or where focus was):
+  - **EMULATORS** heading, note "Named for GRID. Each installs as an emulator that Settings › Systems sets up, and RomM's newer builds show as updates." Rows: a monogram tile, the name, the line "PlayStation 2 · v2.0.2 · 38 MB", the status on the right.
+
+    | State | Line | Right side | A | X |
+    | --- | --- | --- | --- | --- |
+    | Not installed | system · version · size | — | Install | — |
+    | Not installed, catalog copy installed | + "GRID's catalog copy is installed. This build installs beside it as "DuckStation (server)"." | — | Install | — |
+    | Queued | as above | "Queued" | Cancel | — |
+    | Downloading | as above + a bar | "46%" | Cancel | — |
+    | Installing (checking the program) | as above | spinner "Installing…" | dimmed, no A; A says "GRID is checking PCSX2's program. It finishes in a moment." | — |
+    | Installed | as above | "Installed" (ok) | Open in Systems (the system's page; RetroArch and Pico-8 open Settings › Systems) | Uninstall |
+    | Update available | "PlayStation 2 · installed v1.6.0 · v2.0.2 is on RomM" | "Update available" (warning) | Update to v2.0.2 | Uninstall |
+    | Install failed (wrong processor) | + red "Couldn't install: its program is built for Linux ARM64, not Linux x64. Check the file's arch tag on RomM." | "Didn't install" (warning), warning edge | Retry | — |
+
+  - **OTHER FILES** heading, note "These don't follow GRID's naming, so GRID installs them as plain files in your library's Emulators folder. GRID doesn't set them up for a system or check them for updates." Rows: a plain tile, the file name in mono, "<folder> folder · <size> · <why>" (desktop's whys). Not installed: A Install. Queued / Downloading / Installing as above. Installed: "Installed" (ok), line + "In your library's Emulators folder", A Uninstall.
+  - **NOT FOR THIS COMPUTER** heading, one row **Other builds** · "For other computers, or older. GRID doesn't install these here." · the count and a chevron; A Open. It opens a page "**Other builds**" · "On RomM's Emulators platform. GRID installs the newest build for this computer's system and processor (Linux x64), so it doesn't install these here." with one dimmed row per build (file name, "<folder> folder · <size>", the reason on the right: "For Windows x64", "Older than v2.0.2"…). The rows take focus but have no A hint; A says "For Windows x64. GRID installs builds for Linux x64 on this computer." B Back. Hidden while searching.
+- **Confirms** (Cancel focused): "**Uninstall PCSX2 v1.6.0?**" / "GRID deletes it from the emulators folder in your library. Games and saves stay. PlayStation 2 games set to it can't start until another emulator is picked." · **Uninstall** (danger); an other file: "**Uninstall xemu-v0.8.5-x86_64.AppImage?**" / "GRID deletes it from the Emulators folder in your library." Cancel during a download: "**Cancel the PCSX2 install?**" / "The download stops and its files are removed. You can install it again later." · **Cancel install**.
+- **Cards:** "Pico-8 v0.2.7a6 installed from RomM" / "Set up for Pico-8 in Settings › Systems" (RetroArch: "… for its systems …"); "PCSX2 updated to v2.0.2"; "xemu-v0.8.5-x86_64.AppImage installed" / "In your library's Emulators folder"; "PCSX2 uninstalled"; "Cancelled PCSX2"; error "Couldn't install DuckStation" / "Its program is built for Linux ARM64. Nothing was set up."
+- **Whole-view states:** Loading: panel with a spinner "Loading the Emulators platform from romm.home.lan…" and skeleton rows; focus stays on the rail; no hints but Menu. Can't load: panel "**Can't load the Emulators platform**" / "romm.home.lan didn't answer. Installed emulators still work." with **Retry** (A Retry). Nothing for this computer: panel "**Nothing here for this computer**" / "RomM's Emulators platform has 6 builds, all for other systems or processors. GRID installs builds for Linux x64." then the Other builds row. Search no match: "No emulators or files match "…"" · "Press (Y) to change the search."
+- **Hints:** the focused row's A and X (as in the table), Y Search ("Search Emulators" keyboard), Menu. No LT, no RT.
+- Emulator files are not games: never in RomM › Installed, All games, Recent, Updates or Discover, nor their counts.
 
 ## Settings
 
@@ -209,4 +239,5 @@ In `docs/tv-mode/checklist.md` (81 items, and a note at the top): items 89 and 1
 - Selection fallback and focus: when the selected row goes away, select and focus RomM › Installed (or All games); never let a redraw focus a rail row by position, which would change the selection.
 - The Installed banner and the needs-RomM panels are focusable and reachable with Up from the grid / first in the pane; their words come from `romm/words.ts`, shared with desktop. Desktop's words won where the two cards differed (decision 17); this card now uses them, except TV's own buttons, hints and the A-says-why lines.
 - Firmware rows: dimmed action rows, A says why (no A hint). The file list is `firmware_expected`; the report is `LocateReport` (installed / unverified / refused). The TV file browser's file mode is new: multi-pick with ticks, Y checks the folder, Start checks the picks; single mode for the PUP.
+- RomM › Emulators: the rail key is the platform's `platform:<slug>` (`platform:emulators` in the prototype); `rommRailGroup` keeps the Emulators platform (plan 0.3 dropped it) with its own count. Source: `tvromm_emu.js` / `tvromm_emu.css`. Open questions are listed in the desktop card's README.
 - Prototype artefacts, not design: the store groups keep the TVStores card's sample installs in the fresh-profile welcome (so they show **off**), and the OSK's key rows are wider than the stage at 1280×800, as in TV mode.

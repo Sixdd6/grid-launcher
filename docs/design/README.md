@@ -51,6 +51,10 @@ python3 -I docs/design/prototype/applayout.py docs/design/system/components
   card, written by `tvmode.py` on top of the TV mode card.
 - `tvromm.js`, `tvromm.css` — RomM as an optional storefront in TV mode: the
   TVRommStorefront card, written by `tvmode.py` on top of the TVStores card.
+- `romm.js`, `romm.css`, `romm_emu.js`, `romm_emu.css` — RomM as an optional storefront on
+  the desktop: the RommStorefront card, written by `applayout.py` on top of Game stores;
+  `romm_emu.*` adds RomM › Emulators and Settings › Library's Open config folder.
+  `tvromm_emu.js`, `tvromm_emu.css` add RomM › Emulators to the TVRommStorefront card.
 - `glyphs/` — the controller button glyphs the TV mode card inlines (Kenney Input
   Prompts, CC0; `map.json` assigns them, `License.txt` is the pack's license).
 - `icons.json` — icon paths: the app's (`app/src/lib/icons.ts`) plus proposed ones.
