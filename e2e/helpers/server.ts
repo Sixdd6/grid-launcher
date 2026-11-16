@@ -1,34 +1,19 @@
 /**
- * The Server view (app/src/lib/Server.svelte). It opens on Server › Discover,
- * the first rail row, so a spec that wants a platform's grid selects the
- * platform first.
+ * Legacy names for the RomM screens that replaced the Server view
+ * (romm-storefront-plan Step 3): a platform and Discover now live in the
+ * Library's RomM group. New code imports from `romm.ts`.
  */
-import { TRANSITION_TIMEOUT } from './env.js';
-
-const testId = (id: string) => `[data-testid="${id}"]`;
+import { openRommDiscover, openRommPlatform, platformSlug } from './romm.js';
 
 /**
- * Selects the platform `platform-btn-<id>` in the Server rail and waits for
- * its header. The Server view must be the one on screen.
+ * Opens the mock RomM platform `id` (its old `platform-btn-<id>`) as
+ * Library › RomM › <platform>, and waits for its header.
  */
 export async function openPlatform(id: number | string): Promise<void> {
-  const button = $(testId(`platform-btn-${id}`));
-  await button.waitForClickable({
-    timeout: TRANSITION_TIMEOUT,
-    timeoutMsg: `the Server rail never offered platform ${id}`,
-  });
-  await button.click();
-  await $(testId('server-platform-header')).waitForExist({
-    timeout: TRANSITION_TIMEOUT,
-    timeoutMsg: `platform ${id}'s header never appeared`,
-  });
+  await openRommPlatform(typeof id === 'number' || /^\d+$/.test(id) ? await platformSlug(Number(id)) : id);
 }
 
-/** Selects Server › Discover and waits for it. */
+/** Selects Library › RomM › Discover and waits for it. */
 export async function openDiscover(): Promise<void> {
-  await $(testId('server-rail-discover')).click();
-  await $(testId('discover')).waitForDisplayed({
-    timeout: TRANSITION_TIMEOUT,
-    timeoutMsg: 'Server › Discover never appeared',
-  });
+  await openRommDiscover();
 }
