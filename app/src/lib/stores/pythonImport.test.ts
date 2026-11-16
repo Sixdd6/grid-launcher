@@ -20,9 +20,13 @@ describe('initPythonImport', () => {
     }));
     vi.doMock('./toasts.svelte', () => ({ pushToast: (text: string) => shown.push(text) }));
 
-    const { initPythonImport } = await import('./pythonImport.svelte');
+    const { initPythonImport, pythonImport } = await import('./pythonImport.svelte');
+    expect(pythonImport.report).toBeNull();
     await initPythonImport();
     await initPythonImport();
+
+    // The welcome reads the report for its import notice.
+    expect(pythonImport.report).toEqual({ emulators: 2, games: 14, skipped_games: 1, retroachievements: false });
 
     expect(shown).toEqual([
       'Imported 2 emulators and 14 games from the previous version. Enter your RomM token to reconnect.',
@@ -74,10 +78,11 @@ describe('initPythonImport', () => {
     vi.doMock('../api', () => ({ api: { pythonImportNotice: () => Promise.resolve(null) } }));
     vi.doMock('./toasts.svelte', () => ({ pushToast: (text: string) => shown.push(text) }));
 
-    const { initPythonImport } = await import('./pythonImport.svelte');
+    const { initPythonImport, pythonImport } = await import('./pythonImport.svelte');
     await initPythonImport();
 
     expect(shown).toEqual([]);
+    expect(pythonImport.report).toBeNull();
   });
 
   it('swallows a failed pull', async () => {
