@@ -186,6 +186,38 @@ describe('diffSnapshot / noticesFor', () => {
     ).toEqual(['GE-Proton installed and used for Windows games']);
   });
 
+  it('words RomM › Emulators installs from their hints: quiet queue, its name, a plain file’s card', () => {
+    const ctx = (hint: Parameters<typeof noticesFor>[1]['hint']) => ({ setupActive: false, hint });
+    const emu = entry({ job: 'emulator', kind: 'emulator', title: 'PCSX2 (Playstation 2)', source_id: 'romm:ps2/pcsx2 (playstation 2)' });
+    expect(noticesFor({ entry: emu, from: null }, ctx({ label: 'PCSX2', quietQueued: true }))).toEqual([]);
+    expect(noticesFor({ entry: { ...emu, status: 'cancelled' }, from: 'downloading' }, ctx({ label: 'PCSX2' }))[0].text).toBe('Cancelled PCSX2');
+    const wrong = {
+      ...emu,
+      title: 'DuckStation (Playstation 1)',
+      status: 'failed' as const,
+      error: 'This DuckStation build can’t run on this computer: …',
+      failure: { code: 'wrong_machine' as const, reason: 'Linux ARM64', base_title: '', base_gog_id: '', kept: false },
+    };
+    expect(noticesFor({ entry: wrong, from: 'installing' }, ctx({ label: 'DuckStation' }))[0]).toMatchObject({
+      text: "Couldn't install DuckStation: its program is built for Linux ARM64. Nothing was set up.",
+      tvText: "Couldn't install DuckStation",
+      sub: 'Its program is built for Linux ARM64. Nothing was set up.',
+      level: 'error',
+    });
+    const plain = entry({ job: 'emulator', kind: 'emulator', title: 'xemu.AppImage', source_id: 'romm-file:3/31', status: 'completed' });
+    expect(
+      noticesFor({ entry: plain, from: 'installing' }, ctx({ done: 'xemu.AppImage installed in your library’s Emulators folder', doneTv: 'xemu.AppImage installed', doneSub: 'In your library’s Emulators folder' })),
+    ).toEqual([
+      {
+        group: 'tool-installed',
+        text: 'xemu.AppImage installed in your library’s Emulators folder',
+        tvText: 'xemu.AppImage installed',
+        sub: 'In your library’s Emulators folder',
+        level: 'success',
+      },
+    ]);
+  });
+
   it('stays quiet about emulators while the setup card counts them, but not about games', () => {
     expect(
       texts(

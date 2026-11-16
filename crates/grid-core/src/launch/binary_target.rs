@@ -129,6 +129,50 @@ impl BinaryTarget {
     }
 }
 
+/// A computer (or a build) in the short words the Emulators view uses:
+/// "Linux x64", "Linux ARM64", "Linux 32-bit ARM", "Windows x64",
+/// "macOS (Apple silicon)", "macOS (Intel)", "macOS (universal)" (both Mac
+/// processors). An empty `cpus` names the system alone.
+pub fn machine_label(system: System, cpus: &[Cpu]) -> String {
+    let has = |c: Cpu| cpus.contains(&c);
+    if system == System::Macos {
+        return if has(Cpu::X64) && has(Cpu::Arm64) {
+            "macOS (universal)".to_string()
+        } else if has(Cpu::Arm64) {
+            "macOS (Apple silicon)".to_string()
+        } else if has(Cpu::X64) {
+            "macOS (Intel)".to_string()
+        } else {
+            "macOS".to_string()
+        };
+    }
+    let Some(cpu) = cpus.first() else {
+        return system.describe().to_string();
+    };
+    let cpu = match cpu {
+        Cpu::X64 => "x64",
+        Cpu::Arm64 => "ARM64",
+        Cpu::Arm => "32-bit ARM",
+        Cpu::X86 => "32-bit x86",
+    };
+    format!("{} {cpu}", system.describe())
+}
+
+/// [`machine_label`] for this computer; `None` on a system or processor GRID
+/// does not build for.
+pub fn host_machine_label() -> Option<String> {
+    Some(machine_label(System::host()?, &[Cpu::host()?]))
+}
+
+/// [`machine_label`] for what a program was built for: "Linux ARM64";
+/// "an unknown system" for a file whose header is not a native program's.
+pub fn target_label(target: &BinaryTarget) -> String {
+    match target {
+        BinaryTarget::Unknown => "an unknown system".to_string(),
+        BinaryTarget::Native { system, cpus } => machine_label(*system, cpus),
+    }
+}
+
 /// This computer, described the way [`BinaryTarget::describe`] describes a
 /// program: "64-bit x86 Linux".
 pub fn describe_host() -> String {
@@ -293,6 +337,28 @@ fn native(system: System, cpus: Vec<Cpu>) -> BinaryTarget {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn machine_labels_use_the_emulators_view_words() {
+        assert_eq!(machine_label(System::Linux, &[Cpu::X64]), "Linux x64");
+        assert_eq!(machine_label(System::Linux, &[Cpu::Arm64]), "Linux ARM64");
+        assert_eq!(
+            machine_label(System::Linux, &[Cpu::Arm]),
+            "Linux 32-bit ARM"
+        );
+        assert_eq!(machine_label(System::Windows, &[Cpu::X64]), "Windows x64");
+        assert_eq!(
+            machine_label(System::Macos, &[Cpu::Arm64]),
+            "macOS (Apple silicon)"
+        );
+        assert_eq!(machine_label(System::Macos, &[Cpu::X64]), "macOS (Intel)");
+        assert_eq!(
+            machine_label(System::Macos, &[Cpu::X64, Cpu::Arm64]),
+            "macOS (universal)"
+        );
+        assert_eq!(machine_label(System::Windows, &[]), "Windows");
+        assert_eq!(target_label(&BinaryTarget::Unknown), "an unknown system");
+    }
 
     fn elf(machine: u16) -> Vec<u8> {
         let mut bytes = vec![0u8; 64];

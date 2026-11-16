@@ -166,6 +166,9 @@ pub enum FailureCode {
     /// A Windows installer's silent runs all failed where its setup window
     /// may not open (TV mode); `reason` words why.
     InstallerSilentFailed,
+    /// An emulator build's program is for another computer; `reason` is
+    /// what it is built for ("Linux ARM64").
+    WrongMachine,
 }
 
 /// A failed entry's [`FailureCode`] and its parts; blank where a code has
@@ -207,6 +210,10 @@ impl JobFailure {
                 ..failure(FailureCode::InstallerDlcBaseMissing)
             }),
             LibraryError::InstallerExit(_) => Some(failure(FailureCode::InstallerExit)),
+            LibraryError::WrongMachine { built_for, .. } => Some(JobFailure {
+                reason: built_for.clone(),
+                ..failure(FailureCode::WrongMachine)
+            }),
             LibraryError::InstallerSilentFailed { reason, kept } => Some(JobFailure {
                 kept: *kept,
                 reason: reason.words().to_string(),
@@ -1894,6 +1901,21 @@ mod tests {
             JobFailure::from_error(&LibraryError::InstallerRefused("no".into())),
             None
         );
+        // An emulator build for another computer: the text stays the whole
+        // message; the code carries what the program is built for.
+        let wrong = LibraryError::WrongMachine {
+            message: "This DuckStation build can't run on this computer: …".into(),
+            built_for: "Linux ARM64".into(),
+        };
+        assert_eq!(
+            wrong.to_string(),
+            "This DuckStation build can't run on this computer: …"
+        );
+        let failure = JobFailure::from_error(&wrong).unwrap();
+        assert_eq!(failure.code, FailureCode::WrongMachine);
+        assert_eq!(failure.reason, "Linux ARM64");
+        let json = serde_json::to_string(&failure).unwrap();
+        assert!(json.contains(r#""code":"wrong_machine""#), "{json}");
     }
 
     #[test]

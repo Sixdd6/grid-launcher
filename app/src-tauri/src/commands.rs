@@ -6,6 +6,7 @@ pub mod library_path;
 pub mod logging;
 pub mod relink;
 pub mod romm;
+pub mod romm_emulators;
 pub mod setup;
 pub mod specials;
 pub mod store_backups;
@@ -739,18 +740,31 @@ pub fn config_dir_for(config_path: &std::path::Path) -> std::path::PathBuf {
 /// frontend cannot choose what gets opened. The directory is created first,
 /// matching Python's `mkdir(parents=True, exist_ok=True)`, so a first run
 /// that has not written a config yet still opens something.
+///
+/// Settings › Library's "Open config folder" words the failure as
+/// "Couldn't open the config folder: <reason>", so the error is the reason
+/// alone.
 #[tauri::command]
 pub async fn open_config_folder(app: tauri::AppHandle) -> Result<(), String> {
     let dir = tokio::task::spawn_blocking(|| {
         let dir = config_dir_for(&Config::default_path());
-        std::fs::create_dir_all(&dir).map_err(|e| format!("Could not open config folder: {e}"))?;
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         Ok::<std::path::PathBuf, String>(dir)
     })
     .await
     .map_err(|e| format!("open_config_folder did not finish: {e}"))??;
     app.opener()
         .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
-        .map_err(|e| format!("Could not open config folder: {e}"))
+        .map_err(|e| e.to_string())
+}
+
+/// The folder [`open_config_folder`] opens, for Settings › Library's
+/// "Config folder" block.
+#[tauri::command]
+pub fn config_folder_path() -> String {
+    config_dir_for(&Config::default_path())
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Settings › Systems › an emulator's ⋯ › Show program folder: opens the

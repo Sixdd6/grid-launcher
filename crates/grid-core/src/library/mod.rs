@@ -141,6 +141,11 @@ pub enum LibraryError {
     /// An installer GRID refuses, in GRID's words.
     #[error("{0}")]
     InstallerRefused(String),
+    /// An emulator build whose program is for another computer: the whole
+    /// message, and what the program is built for in the Emulators view's
+    /// words ("Linux ARM64", [`binary_target::target_label`]).
+    #[error("{message}")]
+    WrongMachine { message: String, built_for: String },
 }
 
 // --- constants --------------------------------------------------------------
@@ -585,6 +590,52 @@ pub struct ServerEmulatorRequest {
     pub profile_name: String,
 }
 
+/// A request to install one file of the server's Emulators platform as a
+/// plain file ([`InstallService::install_server_file`]): a file that does
+/// not follow `docs/server-emulator-packages.md`, or names an emulator GRID
+/// doesn't know (RommStorefront README, RomM › Emulators "Other files").
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerFileRequest {
+    pub rom_id: i64,
+    pub file_id: i64,
+    pub file_name: String,
+    /// The folder (the ROM's `fs_name`): a platform slug, or `multi`.
+    pub folder: String,
+}
+
+/// The `source_id` of a plain-file install from the Emulators platform:
+/// `romm-file:<rom_id>/<file_id>`. Not [`SERVER_SOURCE_PREFIX`]: nothing is
+/// registered.
+pub fn server_file_source_id(rom_id: i64, file_id: i64) -> String {
+    format!("romm-file:{rom_id}/{file_id}")
+}
+
+/// The platform name the library's Emulators folder is named by.
+pub const SERVER_FILES_PLATFORM: &str = "Emulators";
+
+/// Where a plain file of the Emulators platform's `folder` lands:
+/// `<library>/games/Emulators/<folder>` (the folder a whole-folder install
+/// of the same ROM uses).
+pub fn server_file_dir(library: &Path, folder: &str) -> PathBuf {
+    platform_dir(library, SERVER_FILES_PLATFORM).join(sanitize_component(folder, "files"))
+}
+
+/// What a plain file occupies on disk: the file itself, kept as served, and
+/// the folder it unpacks into. `None` for a name that is not one plain file.
+fn server_file_paths(library: &Path, folder: &str, file_name: &str) -> Option<(PathBuf, PathBuf)> {
+    let name = safe_file_name(file_name, file_name).ok()?;
+    let file = server_file_dir(library, folder).join(name);
+    let unpacked = extraction_dir(&file);
+    Some((file, unpacked))
+}
+
+/// Whether a plain file of the Emulators platform is installed: the file is
+/// there, or the folder it unpacks into.
+pub fn server_file_installed(library: &Path, folder: &str, file_name: &str) -> bool {
+    server_file_paths(library, folder, file_name)
+        .is_some_and(|(file, unpacked)| file.is_file() || unpacked.is_dir())
+}
+
 /// What an [`EmulatorJob`] installs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum JobTarget {
@@ -602,6 +653,10 @@ enum JobTarget {
     /// looks for it ([`crate::backup::steam_runtime::place_runtime`]).
     /// `EmulatorJob::library` is umu's data folder.
     SteamRuntime,
+    /// One file of the RomM server's Emulators platform as a plain file
+    /// ([`InstallService::install_server_file`]): kept, or unpacked when it
+    /// is an archive GRID knows, under [`server_file_dir`]. Never registered.
+    ServerFile,
 }
 
 /// What the download task resolved an [`EmulatorJob`] down to.
@@ -1260,6 +1315,9 @@ pub struct InstallService {
     /// Every server-build request admitted this session, by its source id,
     /// so a failed one can be retried (`retry` has only the job key).
     server_requests: Mutex<HashMap<String, ServerEmulatorRequest>>,
+    /// The plain-file installs from the Emulators platform, by source id, for
+    /// a Retry ([`InstallService::install_server_file`]).
+    server_files: Mutex<HashMap<String, ServerFileRequest>>,
     /// `None` until the app installs one; a finalized compat-tool install
     /// then triggers no notification.
     compat_tools_hook: RwLock<Option<CompatToolsHook>>,
@@ -1385,6 +1443,7 @@ impl InstallService {
             platform_slugs: RwLock::new(BTreeMap::new()),
             platform_labels: RwLock::new(BTreeMap::new()),
             server_requests: Mutex::new(HashMap::new()),
+            server_files: Mutex::new(HashMap::new()),
             compat_tools_hook: RwLock::new(None),
             emulator_installed_hook: RwLock::new(None),
             library_gate: RwLock::new(LibraryGate::default()),
@@ -2135,6 +2194,82 @@ impl InstallService {
             "emulator",
             JobPayload::Emulator(job),
         )
+    }
+
+    /// Starts (or queues) the install of one Emulators-platform file as a
+    /// plain file (RomM › Emulators "Other files"): only that file is
+    /// downloaded, through the server-emulator download path, into
+    /// [`server_file_dir`], and unpacked when it is an archive GRID knows.
+    /// It is not registered as an emulator, gets no defaults and no updates.
+    pub async fn install_server_file(
+        self: &Arc<Self>,
+        client: Arc<RommClient>,
+        request: ServerFileRequest,
+    ) -> Result<(), LibraryError> {
+        self.check_library_gate()?;
+        let library = self.library_root()?;
+        safe_file_name(&request.file_name, &request.file_name)?;
+        let source_id = server_file_source_id(request.rom_id, request.file_id);
+        self.server_files
+            .lock()
+            .unwrap()
+            .insert(source_id.clone(), request.clone());
+        let job = EmulatorJob {
+            space: None,
+            source_id: source_id.clone(),
+            profile_name: request.file_name.clone(),
+            profile_args: String::new(),
+            configured_tag: String::new(),
+            raw_source: Value::Null,
+            library,
+            forge: self.forge()?,
+            resolved: None,
+            target: JobTarget::ServerFile,
+            entry_name: request.file_name.clone(),
+            local: None,
+            romm: Some(RommBuild {
+                client,
+                rom_id: request.rom_id,
+                file_id: request.file_id,
+                file_name: request.file_name.clone(),
+                version: String::new(),
+                folder: request.folder,
+            }),
+        };
+        self.admit(
+            JobKey::Emulator(source_id),
+            &request.file_name,
+            EMULATOR_PLATFORM,
+            "emulator",
+            JobPayload::Emulator(job),
+        )
+    }
+
+    /// Removes a plain file installed by [`Self::install_server_file`]: the
+    /// file and the folder it unpacked into, inside [`server_file_dir`] only.
+    /// `Ok(false)` when nothing was there.
+    pub fn uninstall_server_file(
+        &self,
+        folder: &str,
+        file_name: &str,
+    ) -> Result<bool, LibraryError> {
+        self.check_library_gate()?;
+        let library = self.library_root()?;
+        let Some((file, unpacked)) = server_file_paths(&library, folder, file_name) else {
+            return Err(LibraryError::Extract(format!(
+                "{file_name} does not name a plain file."
+            )));
+        };
+        let mut removed = false;
+        if unpacked.is_dir() {
+            fs::remove_dir_all(&unpacked)?;
+            removed = true;
+        }
+        if file.is_file() {
+            fs::remove_file(&file)?;
+            removed = true;
+        }
+        Ok(removed)
     }
 
     fn admit_emulator_profile(
@@ -3292,6 +3427,13 @@ impl InstallService {
                         .ok_or_else(|| LibraryError::Registry("not connected".to_string()))?;
                     self.dismiss(entry_id);
                     return self.install_server_emulator(client, request).await;
+                }
+                let file = self.server_files.lock().unwrap().get(&source_id).cloned();
+                if let Some(request) = file {
+                    let client = client
+                        .ok_or_else(|| LibraryError::Registry("not connected".to_string()))?;
+                    self.dismiss(entry_id);
+                    return self.install_server_file(client, request).await;
                 }
                 self.dismiss(entry_id);
                 if source_id == umu::UMU_SOURCE_ID {
@@ -5028,6 +5170,9 @@ impl InstallService {
             }
             return Ok(());
         }
+        if job.target == JobTarget::ServerFile {
+            return self.finalize_server_file(id, archive, warning);
+        }
         if job.target == JobTarget::UmuLauncher {
             check_umu_digest(archive, &paths.resolved)?;
         }
@@ -5166,15 +5311,13 @@ impl InstallService {
             } else {
                 None
             };
-            return Err(LibraryError::Extract(match other_machine {
-                Some((path, target)) => wrong_machine_message(job, &path, &target),
-                None => NO_EMULATOR_EXECUTABLE.to_string(),
-            }));
+            return Err(match other_machine {
+                Some((path, target)) => wrong_machine_error(job, &path, &target),
+                None => LibraryError::Extract(NO_EMULATOR_EXECUTABLE.to_string()),
+            });
         };
         if let Some(target) = binary_target::host_mismatch(&exe) {
-            return Err(LibraryError::Extract(wrong_machine_message(
-                job, &exe, &target,
-            )));
+            return Err(wrong_machine_error(job, &exe, &target));
         }
         make_executable(&exe);
 
@@ -5252,6 +5395,35 @@ impl InstallService {
                 compat_tool: false,
                 server_source: job.server_build().then(|| job.source_id.clone()),
             });
+        }
+        Ok(())
+    }
+
+    /// A plain file from the Emulators platform: unpacked beside itself
+    /// ([`extraction_dir`]) when it is an archive GRID knows, the archive
+    /// then deleted; else kept as served (an AppImage made executable).
+    /// Nothing is registered.
+    fn finalize_server_file(
+        &self,
+        id: u64,
+        archive: &Path,
+        warning: &mut String,
+    ) -> Result<(), LibraryError> {
+        if should_extract("", EMULATOR_PLATFORM, archive) {
+            let dest = extraction_dir(archive);
+            let mut progress = |processed, total| self.on_install_progress(id, processed, total);
+            if let Err(e) = extract_archive(archive, &dest, &mut progress) {
+                let _ = fs::remove_dir_all(&dest);
+                return Err(e);
+            }
+            if !delete_with_retry(archive) {
+                append_warning(
+                    warning,
+                    &format!("could not delete archive: {}", archive.display()),
+                );
+            }
+        } else if is_appimage(archive) {
+            make_executable(archive);
         }
         Ok(())
     }
@@ -5635,7 +5807,9 @@ async fn download_emulator(
         }
         JobTarget::UmuLauncher => umu::install_dir(&job.library),
         JobTarget::SteamRuntime => crate::backup::steam_runtime::download_dir(&job.library),
-        JobTarget::Emulator => emu_install::emulator_install_dir(&job.library, &job.entry_name),
+        JobTarget::Emulator | JobTarget::ServerFile => {
+            emu_install::emulator_install_dir(&job.library, &job.entry_name)
+        }
     };
 
     let archive_name =
@@ -5707,7 +5881,11 @@ async fn download_server_build(
     cancel: &AtomicBool,
     on_progress: &mut (dyn FnMut(u64, u64, f64) + Send),
 ) -> Result<(), LibraryError> {
-    let install_dir = emu_install::emulator_install_dir(&job.library, &job.entry_name);
+    let install_dir = if job.target == JobTarget::ServerFile {
+        server_file_dir(&job.library, &build.folder)
+    } else {
+        emu_install::emulator_install_dir(&job.library, &job.entry_name)
+    };
     let archive = install_dir.join(safe_file_name(&build.file_name, &build.file_name)?);
     // As for a forge AppImage: a kept file must not be reused by size.
     if !should_extract("", EMULATOR_PLATFORM, &archive) {
@@ -5758,6 +5936,13 @@ async fn copy_from_drive(
 
 /// The install error for a build whose program cannot run on this computer.
 /// A server build points at its file name's tag, which is what was wrong.
+fn wrong_machine_error(job: &EmulatorJob, exe: &Path, target: &BinaryTarget) -> LibraryError {
+    LibraryError::WrongMachine {
+        message: wrong_machine_message(job, exe, target),
+        built_for: binary_target::target_label(target),
+    }
+}
+
 fn wrong_machine_message(job: &EmulatorJob, exe: &Path, target: &BinaryTarget) -> String {
     let why = binary_target::mismatch_message(exe, target);
     match &job.romm {
@@ -5813,7 +5998,7 @@ fn mark_profile_executables(dir: &Path, profile: &EmulatorProfile) {
 /// The entry name a server build registers under: the one an entry with the
 /// same `source_id` already has (an update), else the profile's own name if
 /// free, else `<Name> (server)`.
-fn server_entry_name(config: &Config, profile_name: &str, source_id: &str) -> String {
+pub fn server_entry_name(config: &Config, profile_name: &str, source_id: &str) -> String {
     if let Some(existing) = config.emulators.iter().find(|e| e.source_id == source_id) {
         return existing.name.clone();
     }
@@ -8345,6 +8530,29 @@ mod tests {
         assert!(is_appimage(Path::new("/x/Game.AppImage")));
         assert!(is_appimage(Path::new("/x/game.appimage")));
         assert!(!is_appimage(Path::new("/x/game.zip")));
+    }
+
+    #[test]
+    fn a_server_file_is_installed_kept_or_unpacked_in_the_emulators_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path();
+        let folder = server_file_dir(library, "xbox");
+        assert_eq!(folder, library.join("games").join("Emulators").join("xbox"));
+        assert!(!server_file_installed(library, "xbox", "xemu.AppImage"));
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("xemu.AppImage"), b"x").unwrap();
+        assert!(server_file_installed(library, "xbox", "xemu.AppImage"));
+        // An archive counts once it is unpacked beside itself.
+        assert!(!server_file_installed(library, "xbox", "ares.zip"));
+        fs::create_dir_all(folder.join("ares")).unwrap();
+        assert!(server_file_installed(library, "xbox", "ares.zip"));
+        // A name that is not one plain file is never installed.
+        assert!(!server_file_installed(
+            library,
+            "xbox",
+            "../xbox/xemu.AppImage"
+        ));
+        assert_eq!(server_file_source_id(3, 31), "romm-file:3/31");
     }
 
     #[test]

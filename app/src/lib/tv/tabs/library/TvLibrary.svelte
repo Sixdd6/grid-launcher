@@ -51,7 +51,7 @@
   import { tvDriveQuick, tvQuick } from '../../stores/storeWords';
   import { driveChips, driveCountLine, driveEmptyState, driveSortItems, emptyState, libraryGrid, countLine, searching, SEARCH_TITLE, SORT_TITLE, TV_SORTS, type EmptyState } from './libraryHeader';
   import { FOLDER_LABELS, folderKey, folderOf, libraryRail, NO_DRIVES, railEntry, railRowKey, type FolderId } from './libraryRail';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { isRommRailKey, rommRailGroup, rommSelectionFallback, type RommRailKey } from '../../../romm/rail';
   import { romm } from '../../../stores/romm.svelte';
   import { focusables } from '../../focus/dom';
@@ -63,6 +63,9 @@
   import TvRommInstalled from './romm/TvRommInstalled.svelte';
   import TvRommPlatform from './romm/TvRommPlatform.svelte';
   import TvRommRail from './romm/TvRommRail.svelte';
+  import TvRommEmulators from './romm/TvRommEmulators.svelte';
+  import { emulatorsPlatform, TV_SEARCH_TITLE as EMULATORS_SEARCH_TITLE } from '../../../romm/emulators';
+  import { ensureEmulators, resetEmulators, rommEmulators } from '../../../romm/emulators.svelte';
   import { searchTitle } from './romm/platformHeader';
 
   // "Now" once per rail recompute, as the desktop's Library reads it.
@@ -87,7 +90,18 @@
     void catalog.loadLaunchDefaults();
   });
   $effect(() => (rommConnected ? catalog.watch() : undefined));
-  let rommGroup = $derived(rommRailGroup(romm.status, rommConnected ? catalog.platforms : null, installed.list));
+  // RomM › Emulators: the list loads once the platforms show an Emulators
+  // platform (the rail row's count and its view).
+  let hasEmulators = $derived(rommConnected && emulatorsPlatform(catalog.platforms) !== null);
+  $effect(() => {
+    const server = romm.status.server_url;
+    const on = hasEmulators;
+    untrack(() => {
+      if (on) ensureEmulators(server);
+      else if (!rommConnected) resetEmulators();
+    });
+  });
+  let rommGroup = $derived(rommRailGroup(romm.status, rommConnected ? catalog.platforms : null, installed.list, rommEmulators.load));
   /**
    * The RomM row on show, after the fallback: when RomM drops while Discover
    * or a platform is open, RomM › Installed; when the group goes, none (All
@@ -102,6 +116,9 @@
     return to === 'all' ? null : (to as RommRailKey);
   });
   let rommRow = $derived(rommKey === null || rommGroup === null ? null : (rommGroup.rows.find((r) => r.key === rommKey) ?? null));
+  /** RomM › Emulators on show: rows, not covers; Y searches only once its list is here. */
+  let emulatorsView = $derived(rommRow?.kind === 'emulators');
+  let emulatorsReady = $derived(rommEmulators.load?.phase === 'ready');
 
   // The fallback written back, with focus on the row now selected.
   $effect(() => {
@@ -408,6 +425,7 @@
     hints: () => {
       if (tvStores.view) return backupInstalled() ? [{ button: 'Y', label: 'Search' }, { button: 'RT', label: 'Select' }] : [{ button: 'Y', label: 'Search' }];
       if (rommKey === 'romm:discover') return rommConnected ? [{ button: 'Y', label: 'Search' }] : [];
+      if (emulatorsView) return emulatorsReady ? [{ button: 'Y', label: 'Search' }] : [];
       if (rommKey !== null && rommKey !== 'romm:installed') return [{ button: 'Y', label: 'Search' }, { button: 'RT', label: 'Select' }];
       return [
         { button: 'Y', label: 'Search' },
@@ -418,15 +436,16 @@
     get y() {
       if (rommKey === 'romm:discover') return rommConnected ? () => openSearchAll() : undefined;
       if (rommKey === 'romm:installed') return () => searchRomm(INSTALLED_SEARCH_TITLE);
+      if (emulatorsView) return emulatorsReady ? () => searchRomm(EMULATORS_SEARCH_TITLE) : undefined;
       if (rommKey !== null) return () => searchRomm(searchTitle(rommRow?.label ?? ''));
       return search;
     },
     get lt() {
-      if (rommKey !== null) return rommKey === 'romm:installed' ? sortList : undefined;
+      if (rommKey !== null) return rommKey === 'romm:installed' && !emulatorsView ? sortList : undefined;
       return tvStores.view ? undefined : sortList;
     },
     get rt() {
-      if (rommKey !== null) return rommKey === 'romm:discover' ? undefined : selToggle;
+      if (rommKey !== null) return rommKey === 'romm:discover' || emulatorsView ? undefined : selToggle;
       return tvStores.view && !backupInstalled() ? undefined : selToggle;
     },
     arrive,
@@ -465,6 +484,8 @@
       <TvRommInstalled />
     {:else if rommKey === 'romm:discover'}
       <TvRommDiscover {catalog} />
+    {:else if rommKey !== null && rommRow && rommRow.kind === 'emulators'}
+      <TvRommEmulators />
     {:else if rommKey !== null && rommRow}
       {#key rommKey}
         <TvRommPlatform {catalog} row={rommRow} />

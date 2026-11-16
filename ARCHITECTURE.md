@@ -146,13 +146,23 @@ Modules as declared in `src/lib.rs`:
   `<redacted>` (`redact_argv`) in logs, errors and the early-exit warning. `launch::umu`
   owns umu-run: the system-then-managed lookup, the managed copy's install directory and
   forge source, its config record (`Config.umu_launcher`) and the python3 >= 3.10 check;
-  `InstallService::install_umu_launcher` installs it.
+  `InstallService::install_umu_launcher` installs it. `launch::emulators_view` is pure:
+  it sorts every file of the server's Emulators platform into Emulators (the newest build
+  for this computer of an emulator GRID knows, with installed / update / catalog-copy
+  state from the config), Other files (with why) and Other builds (for another computer,
+  or older); `binary_target::machine_label` words a computer ("Linux x64").
 - `library` — the install pipeline: download queue, extraction, path rules, launch-file
   selection, the SQLite registry, platform rules, install specials (PS3, extra content),
   update detection, and `relink` (Q4: links installed rows that have no server ROM id
   to their unique server match) and `platform_slug_backfill` (fills the registry v8
   `platform_slug` from ROM details; nativeness reads the slug first). `server_emulator` (Q3) registers a package from the
-  server's "Emulators" platform as an emulator entry; `emulator_removal` removes an
+  server's "Emulators" platform as an emulator entry; `InstallService::install_server_file`
+  installs one Emulators-platform file that doesn't register (Library › RomM › Emulators'
+  Other files) as a plain file through the same one-file download (`JobTarget::ServerFile`,
+  `source_id` `romm-file:<rom>/<file>`), kept or unpacked in `server_file_dir`
+  (`games/Emulators/<folder>`), never registered; `uninstall_server_file` removes it. A
+  build whose program is for another computer fails with `LibraryError::WrongMachine`,
+  the queue's `FailureCode::WrongMachine` carrying what it is built for; `emulator_removal` removes an
   emulator's files and finds the package rows a deleted entry takes with it.
   The queue (`queue.rs`) also runs store jobs: `JobKey::Store { source, store_id, op }`
   and `JobPayload::Store(StoreJob)`, admitted by `InstallService::enqueue_store_job`. A
@@ -591,6 +601,12 @@ The shell owns *when* things run; grid-core owns *what* they do.
     `firmware-known.json`, with installed state from the manifest and who verified it),
     `locate_firmware_files(slug, emulator, paths)` (`LocateReport`: installed, unverified,
     refused with reasons) and `locate_ps3_firmware(emulator, path)`.
+    `commands/romm_emulators.rs` — Library › RomM › Emulators: `romm_emulators` reads the
+    server's Emulators platform and sorts every file with `launch::emulators_view` (the
+    Other files' installed state from the disk); `romm_emulator_install` (the
+    server-emulator path), `romm_emulator_file_install` / `romm_emulator_file_uninstall`
+    (plain files), `open_emulators_folder`, `open_packaging_guide` (a fixed URL).
+    `config_folder_path` (commands.rs) is Settings › Library's Config folder path.
     `commands/setup.rs` `setup_platform_options` takes its platforms from
     `system_platforms` (catalog emulators only without RomM);
     `install_firmware_for_platform` stays Install from RomM.
@@ -747,7 +763,9 @@ existed; a Disconnect or a 401 no longer leaves the shell.
   `Details.svelte` as a sub-view; `shell.ts` `STOREFRONT_VIEWS` is library, downloads,
   settings (`Ctrl+1`..`Ctrl+3`) and `initialPlace` answers `{ view: 'library', rail, drive }`.
   **Removed:** `Server.svelte`. Its Discover and platform screens are rows of the Library's
-  RomM group (`lib/romm/desktop/`), reusing `lib/discover/` and `lib/server/catalog.svelte.ts`
+  RomM group (`lib/romm/desktop/`; the server's Emulators platform is the
+  `RommEmulatorsView.svelte` row, its pure half `lib/romm/emulators.ts` and its shared list
+  and actions `lib/romm/emulators.svelte.ts`, TV's `TvRommEmulators.svelte`), reusing `lib/discover/` and `lib/server/catalog.svelte.ts`
   unchanged; `Shell.svelte` has no chip and no server menu. Discover (`lib/discover/`:
   `Discover.svelte`, with `Coverflow`, `RecentlyAdded`, `Shot` and `GameLogo`; the pure
   halves are `feed.ts` — action label, dates, coverflow geometry, the picture and logo

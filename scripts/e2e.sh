@@ -100,7 +100,10 @@ STAGE_GROUPS=(
   "emulators:specs/emulators.spec.ts"
   "launch:specs/launch.spec.ts"
   "emulator-catalog:specs/emulator-catalog.spec.ts"
-  "server-emulator:specs/server-emulator.spec.ts"
+  # (b) Library › RomM › Emulators (RommStorefront README): the row, the
+  # list, installs of an emulator and an Other file, uninstalls, and
+  # Settings › Library's Config folder; (c) the same row and view in TV mode.
+  "server-emulator:specs/server-emulator.spec.ts specs/romm-emulators.spec.ts specs/tv-romm-emulators.spec.ts"
   "cloud-saves:specs/cloud-saves.spec.ts"
   "images:specs/images-a.spec.ts specs/images-b.spec.ts"
   "ps3-install:specs/ps3-install.spec.ts"

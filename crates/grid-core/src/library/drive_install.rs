@@ -593,7 +593,9 @@ pub(super) async fn copy_local_emulator(
         }
         JobTarget::UmuLauncher => umu::install_dir(&job.library),
         JobTarget::SteamRuntime => crate::backup::steam_runtime::download_dir(&job.library),
-        JobTarget::Emulator => emu_install::emulator_install_dir(&job.library, &job.entry_name),
+        JobTarget::Emulator | JobTarget::ServerFile => {
+            emu_install::emulator_install_dir(&job.library, &job.entry_name)
+        }
     };
     let server_build = job.source_id.starts_with(SERVER_SOURCE_PREFIX);
     let archive_name = if local.manual.is_some() || server_build {

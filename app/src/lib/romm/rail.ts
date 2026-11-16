@@ -5,6 +5,7 @@ import { isHiddenLibraryPlatform } from '../library';
 import { platformLabel } from '../server/platformLabel';
 import { isEmulatorsShelf, platformKeyer, platformRailKey, railSlugs, serverPlatformSlug, type PlatformRailKey } from './platformKey';
 import { ROMM_FLAG_TITLES, ROMM_HEADING } from './words';
+import { emulatorsRailRow, type EmulatorsLoad } from './emulators';
 
 export type RommRailKey = 'romm:installed' | 'romm:discover' | PlatformRailKey;
 
@@ -14,11 +15,14 @@ export type RommFlag = { text: '!' | 'off' | 'busy'; title: string } | null;
 
 export type RommRailRow = {
   key: RommRailKey;
-  kind: 'installed' | 'discover' | 'platform';
+  /** `emulators`: the server's Emulators platform (RomM › Emulators), a
+   *  list of builds rather than games. */
+  kind: 'installed' | 'discover' | 'platform' | 'emulators';
   label: string;
   /** Installed: the installed RomM games. Platform: RomM's game count only
-   *  (decision 14; 0 for a platform only installed games have). Discover:
-   *  `null` (no count). */
+   *  (decision 14; 0 for a platform only installed games have). Emulators:
+   *  what this computer can install, `null` while its list loads or failed.
+   *  Discover: `null` (no count). */
   count: number | null;
   /** `library-rail-romm-installed`, `library-rail-romm-discover`, `library-rail-platform-<slug>`. */
   testId: string;
@@ -105,7 +109,9 @@ function platformRow(slug: string, label: string, count: number, platform: Platf
  * (`null` while it loads). The installed count is read from `installedRows`
  * (live), not from `status.installed_count` (a snapshot).
  *
- * - connected: Installed, Discover, then the platform rows;
+ * - connected: Installed, Discover, then the platform rows (with the
+ *   Emulators row, sorted among them, when the server has that platform:
+ *   `emulators` is its list's load, `null` before one started);
  * - connecting at startup: Installed, Discover;
  * - unreachable, expired, not connected: Installed only.
  */
@@ -113,6 +119,7 @@ export function rommRailGroup(
   status: RommStatus,
   platforms: readonly Platform[] | null,
   installedRows: readonly InstalledGame[],
+  emulators: EmulatorsLoad | null = null,
 ): RommRailGroup | null {
   const installed = rommInstalledRows(installedRows);
   const live = rommLive(status);
@@ -141,7 +148,15 @@ export function rommRailGroup(
       platform: null,
     });
   }
-  if (status.connection === 'connected' && platforms !== null) rows.push(...rommPlatformRows(platforms, installed));
+  if (status.connection === 'connected' && platforms !== null) {
+    const platformRows = rommPlatformRows(platforms, installed);
+    const emu = emulatorsRailRow(platforms, emulators);
+    if (emu !== null) {
+      platformRows.push(emu);
+      platformRows.sort(byLabel);
+    }
+    rows.push(...platformRows);
+  }
   return { heading: ROMM_HEADING, flag: rommFlag(status), rows };
 }
 

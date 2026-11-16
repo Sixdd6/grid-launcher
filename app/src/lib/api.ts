@@ -528,14 +528,15 @@ export type JobPhase =
 
 /** Why a failed row failed, when it is worded from parts (`queue::JobFailure`). */
 export type JobFailure = {
-  code: 'installer_unrecognised' | 'installer_dlc_base_missing' | 'installer_exit' | 'installer_silent_failed';
+  code: 'installer_unrecognised' | 'installer_dlc_base_missing' | 'installer_exit' | 'installer_silent_failed' | 'wrong_machine';
   base_title: string;
   base_gog_id: string;
   /** The download (or installer) was kept for a retry. */
   kept: boolean;
   /**
    * `installer_silent_failed`: why, in GRID's words, as the end of a sentence
-   * ("there isn't enough disk space"); `''` for the other codes.
+   * ("there isn't enough disk space"); `wrong_machine`: what the emulator
+   * build's program is built for ("Linux ARM64"); `''` for the other codes.
    */
   reason: string;
 };
@@ -572,6 +573,76 @@ export type DownloadEntry = {
 };
 
 export type DownloadsSnapshot = { entries: DownloadEntry[] };
+
+// ── Library › RomM › Emulators (commands/romm_emulators.rs; grid-core `launch::emulators_view`). ──
+
+/** One emulator row: the newest build for this computer of an emulator GRID knows. */
+export type RommEmulator = {
+  /** `romm:<folder>/<profile>`: the Downloads row's `source_id`. */
+  source_id: string;
+  /** "PCSX2", "Pico-8". */
+  name: string;
+  profile_name: string;
+  /** "PlayStation 2", "GameCube, Wii", "Many systems, through its cores". */
+  systems: string;
+  many_systems: boolean;
+  /** The folder's platform slug; `null` for `multi`. */
+  system_slug: string | null;
+  /** Without the `v`. */
+  version: string;
+  size_bytes: number;
+  file_name: string;
+  folder: string;
+  rom_id: number;
+  file_id: number;
+  /** The registered entry, when installed (any version). */
+  entry: string | null;
+  installed_version: string | null;
+  update: boolean;
+  /** Not installed, and GRID's catalog copy holds the name. */
+  catalog_copy: boolean;
+  /** The entry name an install registers ("DuckStation (server)"). */
+  install_as: string;
+};
+
+export type RommOtherWhy =
+  | { kind: 'not_named' }
+  | { kind: 'no_arch_tag' }
+  | { kind: 'no_processor' }
+  | { kind: 'unknown_emulator'; value: string }
+  | { kind: 'extension'; value: string };
+
+export type RommOtherFile = {
+  rom_id: number;
+  file_id: number;
+  file_name: string;
+  folder: string;
+  size_bytes: number;
+  why: RommOtherWhy;
+  installed: boolean;
+};
+
+export type RommOtherReason = { kind: 'for'; value: string } | { kind: 'older'; value: string };
+
+export type RommOtherBuild = { file_name: string; folder: string; size_bytes: number; reason: RommOtherReason };
+
+export type RommEmulatorsView = {
+  /** "Linux x64". */
+  host: string;
+  emulators: RommEmulator[];
+  other_files: RommOtherFile[];
+  other_builds: RommOtherBuild[];
+};
+
+export type RommEmulators = {
+  /** The server has an Emulators platform. */
+  present: boolean;
+  platform_id: number;
+  /** Every file on it; 0 hides the row. */
+  file_count: number;
+  /** `null` on a computer GRID can't name. */
+  view: RommEmulatorsView | null;
+};
 
 // ── Game backups (plan §1.3; commands in app/src-tauri/src/commands/backups.rs). ──
 
@@ -1632,8 +1703,36 @@ export const api = {
   /** Opens the configured RomM server in the browser. The URL comes from the
    *  backend's own config read — never from the frontend. */
   openServerPage: () => invoke<void>('open_server_page'),
-  /** Reveals the config directory in the desktop file manager. Takes no path. */
+  /** Reveals the config directory in the desktop file manager. Takes no path.
+   *  Rejects with the reason alone. */
   openConfigFolder: () => invoke<void>('open_config_folder'),
+  /** The folder `openConfigFolder` opens, for Settings › Library. */
+  configFolderPath: () => invoke<string>('config_folder_path'),
+  /** Library › RomM › Emulators: the server's Emulators platform, sorted. */
+  rommEmulators: () => invoke<RommEmulators>('romm_emulators'),
+  /** Installs (or updates) an emulator row's build through the server-emulator path. */
+  rommEmulatorInstall: (e: RommEmulator) =>
+    invoke<void>('romm_emulator_install', {
+      build: {
+        rom_id: e.rom_id,
+        file_id: e.file_id,
+        file_name: e.file_name,
+        version: e.version,
+        folder: e.folder,
+        profile_name: e.profile_name,
+      },
+    }),
+  /** Installs an Other file as a plain file in the library's Emulators folder. */
+  rommEmulatorFileInstall: (f: RommOtherFile) =>
+    invoke<void>('romm_emulator_file_install', {
+      file: { rom_id: f.rom_id, file_id: f.file_id, file_name: f.file_name, folder: f.folder },
+    }),
+  rommEmulatorFileUninstall: (f: RommOtherFile) =>
+    invoke<void>('romm_emulator_file_uninstall', { folder: f.folder, fileName: f.file_name }),
+  /** Opens the library's Emulators folder (Other files) in the file manager. */
+  openEmulatorsFolder: () => invoke<void>('open_emulators_folder'),
+  /** "How to name builds": the packaging guide in the browser. */
+  openPackagingGuide: () => invoke<void>('open_packaging_guide'),
   /** Rejects with a `LaunchFailure` (launchError.ts): `code` is `'umu_missing'`
    *  when a Proton launch found no umu-run. */
   launchGame: (romId: number) =>

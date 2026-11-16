@@ -165,6 +165,86 @@ pub fn parse_package_file(file_name: &str) -> Option<PackageFile> {
     })
 }
 
+/// Why a file name is not a package build ([`parse_package_file`] answered
+/// `None`), for the Emulators view's Other files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotPackage {
+    /// No bracketed tags at all, or tags that still do not make a build
+    /// name (no version, two arch tags, a universal non-macOS build).
+    NotNamed,
+    /// Tags, but none is `(arch-…)`.
+    NoArchTag,
+    /// An `(arch-…)` tag without a processor GRID reads (`arch-linux`).
+    NoProcessor,
+    /// Named to the rule but with an extension GRID doesn't unpack: the
+    /// extension, lower-case, with its dot (`.rar`).
+    Extension(String),
+}
+
+/// Why `file_name` is not a package build. Only meaningful when
+/// [`parse_package_file`] answers `None` for it.
+pub fn not_package_reason(file_name: &str) -> NotPackage {
+    let lower = file_name.to_lowercase();
+    let known = EXTENSIONS.iter().find(|ext| lower.ends_with(*ext));
+    let stem = match known {
+        Some(ext) => &file_name[..file_name.len() - ext.len()],
+        None => file_name
+            .rsplit_once('.')
+            .map(|(stem, _)| stem)
+            .unwrap_or(file_name),
+    };
+    let tags = tags(stem);
+    if tags.is_empty() {
+        return NotPackage::NotNamed;
+    }
+    let Some(arch) = tags.iter().find_map(|t| {
+        t.trim()
+            .to_lowercase()
+            .strip_prefix("arch-")
+            .map(str::to_string)
+    }) else {
+        return NotPackage::NoArchTag;
+    };
+    let cpu = arch.split_once('-').map(|(_, cpu)| cpu).unwrap_or("");
+    if PackageCpu::parse(cpu).is_none() {
+        return NotPackage::NoProcessor;
+    }
+    if known.is_none() {
+        if let Some((_, ext)) = file_name.rsplit_once('.') {
+            if !ext.is_empty() && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return NotPackage::Extension(format!(".{}", ext.to_lowercase()));
+            }
+        }
+    }
+    NotPackage::NotNamed
+}
+
+impl PackageFile {
+    /// Whether this build runs on an `os`/`cpu` computer.
+    pub fn runs_on(&self, os: PackageOs, cpu: Cpu) -> bool {
+        self.os == os && self.cpu.serves(cpu)
+    }
+
+    /// The system and processors this build is for, in
+    /// [`crate::launch::binary_target`]'s terms (a universal build: both Mac
+    /// processors).
+    pub fn machine(&self) -> (crate::launch::binary_target::System, Vec<Cpu>) {
+        use crate::launch::binary_target::System;
+        let system = match self.os {
+            PackageOs::Linux => System::Linux,
+            PackageOs::Windows => System::Windows,
+            PackageOs::Macos => System::Macos,
+        };
+        let cpus = match self.cpu {
+            PackageCpu::X64 => vec![Cpu::X64],
+            PackageCpu::Arm64 => vec![Cpu::Arm64],
+            PackageCpu::Armhf => vec![Cpu::Arm],
+            PackageCpu::Universal => vec![Cpu::X64, Cpu::Arm64],
+        };
+        (system, cpus)
+    }
+}
+
 /// The contents of every `( … )` in `stem`, in order.
 fn tags(stem: &str) -> Vec<&str> {
     let mut out = Vec::new();
@@ -301,6 +381,43 @@ pub fn newest_for_host(files: &[PackageFile], os: PackageOs, cpu: Cpu) -> Vec<&P
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn not_package_reasons_name_what_is_missing() {
+        assert_eq!(
+            not_package_reason("xemu-v0.8.5-x86_64.AppImage"),
+            NotPackage::NotNamed
+        );
+        assert_eq!(
+            not_package_reason("Cemu (v2.4).AppImage"),
+            NotPackage::NoArchTag
+        );
+        assert_eq!(
+            not_package_reason("Cemu (v2.4) (arch-linux).AppImage"),
+            NotPackage::NoProcessor
+        );
+        assert_eq!(
+            not_package_reason("Cemu (v2.4) (arch-linux-sparc).AppImage"),
+            NotPackage::NoProcessor
+        );
+        assert_eq!(
+            not_package_reason("Ares (v141) (arch-linux-x64).rar"),
+            NotPackage::Extension(".rar".to_string())
+        );
+        assert_eq!(
+            not_package_reason("Ares (arch-linux-x64).zip"),
+            NotPackage::NotNamed
+        );
+    }
+
+    #[test]
+    fn a_universal_build_runs_on_both_macs_and_names_both_processors() {
+        let file = parse("Dolphin (v2412) (arch-macos-universal).7z");
+        assert!(file.runs_on(PackageOs::Macos, Cpu::Arm64));
+        assert!(file.runs_on(PackageOs::Macos, Cpu::X64));
+        assert!(!file.runs_on(PackageOs::Linux, Cpu::X64));
+        assert_eq!(file.machine().1, vec![Cpu::X64, Cpu::Arm64]);
+    }
 
     fn parse(name: &str) -> PackageFile {
         parse_package_file(name).unwrap_or_else(|| panic!("{name:?} should parse"))

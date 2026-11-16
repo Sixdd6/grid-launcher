@@ -24,6 +24,9 @@
   import { rommConnecting, rommInstalledRows, rommRailGroup, rommSelectionFallback, type RommRailRow } from './romm/rail';
   import { rommHost, ROMM_INSTALLED } from './romm/words';
   import RommServerView from './romm/desktop/RommServerView.svelte';
+  import RommEmulatorsView from './romm/desktop/RommEmulatorsView.svelte';
+  import { emulatorsPlatform } from './romm/emulators';
+  import { ensureEmulators, resetEmulators, rommEmulators } from './romm/emulators.svelte';
   import RommInstalledHeader from './romm/desktop/RommInstalledHeader.svelte';
   import RommBanner from './romm/desktop/RommBanner.svelte';
   import RommMark from './romm/RommMark.svelte';
@@ -176,7 +179,20 @@
     };
   });
   let rommRows = $derived(rommInstalledRows(installed.list));
-  let rommGroup = $derived(rommRailGroup(romm.status, platformsLoaded ? catalog.platforms : null, installed.list));
+  // RomM › Emulators: the server's Emulators platform list loads once the
+  // platform list shows one (its rail row's count and its view).
+  let hasEmulatorsPlatform = $derived(rommConnected && platformsLoaded && emulatorsPlatform(catalog.platforms) !== null);
+  $effect(() => {
+    const server = romm.status.server_url;
+    const on = hasEmulatorsPlatform;
+    untrack(() => {
+      if (on) ensureEmulators(server);
+      else if (!rommConnected) resetEmulators();
+    });
+  });
+  let rommGroup = $derived(
+    rommRailGroup(romm.status, platformsLoaded ? catalog.platforms : null, installed.list, rommEmulators.load),
+  );
   let rommRowByKey = $derived(new Map<string, RommRailRow>((rommGroup?.rows ?? []).map((r) => [r.key, r])));
 
   let entries = $derived([
@@ -859,7 +875,11 @@
     onSelect={onRailSelect}
   />
 
-  {#if rommScreen !== null}
+  {#if rommScreen !== null && rommScreen.kind === 'emulators'}
+    <!-- Library › RomM › Emulators (RommStorefront README): the server's
+         emulator files as rows. -->
+    <RommEmulatorsView host={rommHost(romm.status)} server={romm.status.server_url} />
+  {:else if rommScreen !== null}
     <!-- Library › RomM › Discover or a platform (RommStorefront README): the
          old Server screens, beside the Library rail. -->
     {#key rommScreen.kind}
