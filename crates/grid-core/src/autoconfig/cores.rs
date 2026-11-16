@@ -731,8 +731,10 @@ mod tests {
     }
 
     #[test]
-    fn embedded_slug_map_parses_and_has_75_slugs() {
-        assert_eq!(slug_core_map().len(), 75);
+    fn embedded_slug_map_parses_and_has_73_slugs() {
+        // 75 before the storefront plan's Step 7: `sg-1000` and `x68000`
+        // are now slug aliases of `sg1000` and `sharp-x68000` only.
+        assert_eq!(slug_core_map().len(), 73);
     }
 
     // --- core_id_from_file_name -----------------------------------------
