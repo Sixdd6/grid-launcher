@@ -5,6 +5,7 @@
   import { quickAction } from './games/quick';
   import { installFromDrive, playInstalled, type RunOutcome } from './games/run';
   import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
+  import { onSessionsSnapshot } from './stores/sessions.svelte';
   import { updates } from './stores/updates.svelte';
   import { installedKey, visibleLibraryGames } from './library';
   import { isMissing } from './library/missing';
@@ -579,6 +580,18 @@
         headingMark: first ? { mono: ROMM_MARK.mono, hue: ROMM_MARK.hue } : undefined,
         headingFlag: first ? rommGroup.flag : undefined,
       };
+    }),
+  );
+
+  // A game played from a RomM screen (Discover, a platform) never leaves the
+  // Library view, so the re-read below, on the view coming forward, does not
+  // run for it: re-read the registry when a game session starts or ends.
+  $effect(() =>
+    onSessionsSnapshot(() => {
+      if (!active) return;
+      refreshInstalled().catch(() => {
+        // The list already on screen stays.
+      });
     }),
   );
 
