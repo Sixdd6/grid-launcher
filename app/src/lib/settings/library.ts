@@ -142,3 +142,9 @@ export function resumeToast(status: LibraryMoveStatus | null): string | null {
   if (status === null || status.phase === null || !status.resumed) return null;
   return `Resuming the library move to ${status.new_root}`;
 }
+
+/** The error card when Open config folder fails: "Couldn't open the config folder: <reason>". */
+export function configFolderError(reason: string): string {
+  const why = reason.trim().replace(/\.$/, '');
+  return why === '' ? "Couldn't open the config folder" : `Couldn't open the config folder: ${why}`;
+}

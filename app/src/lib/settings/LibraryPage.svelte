@@ -11,11 +11,29 @@
   import { api, type LibraryMoveStartOutcome, type StartFreshOutcome } from '../api';
   import { libraryMove } from '../stores/libraryMove.svelte';
   import LibraryChangeDialog from './LibraryChangeDialog.svelte';
-  import { moveInProgress, moveStartNotice, outcomeNotice, paneMoveText, type Notice } from './library';
+  import { configFolderError, moveInProgress, moveStartNotice, outcomeNotice, paneMoveText, type Notice } from './library';
   import { pushToast } from '../stores/toasts.svelte';
   import { SKIPPED_TOAST_MS, skippedRemovalText } from '../uninstallSkips';
 
   let { active = true }: { active?: boolean } = $props();
+
+  // The Config folder block (RommStorefront README "Settings › Library: Open
+  // config folder"): the folder `open_config_folder` opens. Always enabled,
+  // also while a library move runs.
+  let configPath = $state<string | null>(null);
+  $effect(() => {
+    if (!active || configPath !== null) return;
+    api
+      .configFolderPath()
+      .then((p) => (configPath = p))
+      .catch(() => (configPath = ''));
+  });
+
+  function openConfigFolder() {
+    api.openConfigFolder().catch((err) => {
+      pushToast(configFolderError(err instanceof Error ? err.message : String(err)), 'error');
+    });
+  }
 
   let path = $state<string | null>(null);
   let loadError = $state<string | null>(null);
@@ -150,6 +168,15 @@
         {notice.text}
       </p>
     {/if}
+  </section>
+
+  <section class="g-sub" aria-labelledby="config-folder-title" data-testid="settings-config-folder">
+    <h3 id="config-folder-title">Config folder</h3>
+    <p class="g-note">GRID’s settings file lives here. Games, emulators and saves are in the library folder.</p>
+    <code data-testid="config-folder-path" class="g-path">{configPath === null ? '…' : configPath}</code>
+    <div class="g-actions">
+      <button data-testid="config-folder-open" class="g-btn secondary" onclick={openConfigFolder}>Open config folder</button>
+    </div>
   </section>
 </div>
 

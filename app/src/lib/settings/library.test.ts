@@ -12,6 +12,7 @@ import {
   paneMoveText,
   previewSummary,
   resumeToast,
+  configFolderError,
 } from './library';
 import type { LibraryMoveStatus, MovePreview } from '../api';
 
@@ -223,5 +224,13 @@ describe('move existing files', () => {
     expect(resumeToast(status({ resumed: false }))).toBeNull();
     expect(resumeToast(status({ resumed: true, phase: null }))).toBeNull();
     expect(resumeToast(null)).toBeNull();
+  });
+});
+
+describe('configFolderError', () => {
+  it('words the Open config folder failure as drafted', () => {
+    expect(configFolderError('Permission denied (os error 13)')).toBe("Couldn't open the config folder: Permission denied (os error 13)");
+    expect(configFolderError('No such file.')).toBe("Couldn't open the config folder: No such file");
+    expect(configFolderError('  ')).toBe("Couldn't open the config folder");
   });
 });

@@ -63,7 +63,16 @@ export type PlayTarget = { romId: number; title: string; platform: string };
  * `sub` is a card's second line. Only TV mode's cards show it ("Copying from
  * SAMSUNG T7", "Used for PlayStation"); the desktop's card is the text alone.
  */
-export type Notice = { group: NoticeGroup; text: string; level: ToastLevel; action?: NoticeAction; sub?: string };
+export type Notice = {
+  group: NoticeGroup;
+  text: string;
+  level: ToastLevel;
+  action?: NoticeAction;
+  sub?: string;
+  /** TV mode's title when it differs from the desktop's text (the desktop
+   *  card has no second line, so its text carries what TV's `sub` says). */
+  tvText?: string;
+};
 
 const TERMINAL: ReadonlySet<DownloadStatus> = new Set(['completed', 'failed', 'cancelled']);
 
@@ -106,6 +115,14 @@ export type Hint = {
   update?: boolean;
   /** Replaces the completion text (a Proton picked as the Windows default). */
   done?: string;
+  /** TV mode's completion title and second line, with `done`. */
+  doneTv?: string;
+  doneSub?: string;
+  /** The name the cards use instead of the row's title ("PCSX2" for
+   *  "PCSX2 (Playstation 2)"; RomM › Emulators). */
+  label?: string;
+  /** No queued card: the view that queued it shows the row's own progress. */
+  quietQueued?: boolean;
 };
 
 export type NoticeContext = {
@@ -181,6 +198,7 @@ function queuedNotice(entry: DownloadEntry, ctx: NoticeContext): Notice | null {
   // that command's own notice ("DuckStation from Couch kit added to download
   // queue"), so its queue row stays quiet.
   if (isTool(entry) && !ctx.setupActive && entry.drive_label.trim() === '') {
+    if (ctx.hint?.quietQueued) return null;
     return ctx.hint?.update
       ? { group: 'tool-updating', text: `Updating ${t}…`, level: 'success', action: 'downloads' }
       : { group: 'tool-queued', text: `Installing ${t}…`, level: 'success', action: 'downloads' };
@@ -225,16 +243,41 @@ function outcomeNotice(entry: DownloadEntry, ctx: NoticeContext): Notice | null 
     }
   }
   if (!isTool(entry) || ctx.setupActive) return null;
+  const name = ctx.hint?.label?.trim() || t;
   switch (entry.status) {
-    case 'completed':
+    case 'completed': {
+      const hint = ctx.hint;
+      // A worded completion (a plain file from RomM › Emulators, which
+      // registers nothing, so no `emulator-installed` event follows).
+      if (hint?.done && entry.kind !== 'compat_tool') {
+        const n: Notice = { group: 'tool-installed', text: hint.done, level: 'success' };
+        if (hint.doneTv) n.tvText = hint.doneTv;
+        if (hint.doneSub) n.sub = hint.doneSub;
+        return n;
+      }
       // An emulator's completion is the `emulator-installed` event's card
       // (worded install or update by the backend); a compat tool has none.
       if (entry.kind !== 'compat_tool') return null;
       return { group: 'tool-installed', text: ctx.hint?.done ?? `${t} installed`, level: 'success' };
-    case 'failed':
-      return { group: 'tool-failed', text: withReason(`Couldn't install ${t}`, entry.error), level: 'error', action: 'downloads' };
+    }
+    case 'failed': {
+      // A build whose program is for another computer (RomM › Emulators).
+      const builtFor = entry.failure?.code === 'wrong_machine' ? entry.failure.reason.trim() : '';
+      if (builtFor !== '') {
+        const why = `its program is built for ${builtFor}. Nothing was set up.`;
+        return {
+          group: 'tool-failed',
+          text: `Couldn't install ${name}: ${why}`,
+          tvText: `Couldn't install ${name}`,
+          sub: `${why.charAt(0).toUpperCase()}${why.slice(1)}`,
+          level: 'error',
+          action: 'downloads',
+        };
+      }
+      return { group: 'tool-failed', text: withReason(`Couldn't install ${name}`, entry.error), level: 'error', action: 'downloads' };
+    }
     case 'cancelled':
-      return { group: 'cancelled', text: `Cancelled ${t}`, level: 'success' };
+      return { group: 'cancelled', text: `Cancelled ${name}`, level: 'success' };
     default:
       return null;
   }

@@ -17,7 +17,7 @@ export type ToastLevel = 'success' | 'error';
 export type ToastAction = { label: string; run: () => void };
 /** `desktopAction` is the one button a desktop card shows beside Dismiss
  *  (GameStores README: the store cards' Play, Try again, Sign in again…). */
-export type ToastExtra = { sub?: string; action?: ToastAction; desktopAction?: ToastAction };
+export type ToastExtra = { sub?: string; action?: ToastAction; desktopAction?: ToastAction; tvText?: string };
 
 /** A pushed card, as a subscriber (TV mode's card stack) sees it. */
 export type PushedToast = { text: string; level: ToastLevel; durationMs: number } & ToastExtra;

@@ -34,3 +34,21 @@ html[data-ui='tv'] .tv .rstep { flex: 0 0 auto; font-size: .85rem; font-weight: 
 html[data-ui='tv'] .tv .start-box .srow.wrow { min-height: 4.2rem; padding: .5rem 1.2rem; }
 
 html[data-ui='tv'] .tv .btn .sspin { border-color: color-mix(in srgb, currentColor 35%, transparent); border-top-color: currentColor; }
+
+/* RomM › Emulators: a list of the server's emulator files (tvromm_emu.css, 2026-11-15). */
+html[data-ui='tv'] .tv .tre-list { padding: 0 1.2rem 1.2rem; }
+html[data-ui='tv'] .tv .tre-list > .sgroup:first-child { margin-top: .6rem; }
+html[data-ui='tv'] .tv .tre-list .srow { background: var(--panel); border: 1px solid var(--line); }
+html[data-ui='tv'] .tv .tre-list .srow.f { background: var(--selected); }
+html[data-ui='tv'] .tv .tre-note { margin: 0 1.2rem .6rem; }
+html[data-ui='tv'] .tv .tre-tile { flex: none; width: 2.6rem; height: 2.6rem; border-radius: .6rem; display: grid; place-items: center; font-weight: 700; font-size: 1.15rem; color: var(--text-h); background: color-mix(in srgb, var(--primary) 18%, var(--panel)); border: 1px solid var(--line-strong); }
+html[data-ui='tv'] .tv .tre-file { font-family: ui-monospace, monospace; font-size: 1rem; word-break: break-all; }
+html[data-ui='tv'] .tv .tre-err { color: var(--danger); }
+html[data-ui='tv'] .tv .tre-bar { display: block; height: .3rem; margin-top: .45rem; max-width: 24rem; border-radius: 100px; background: var(--field); overflow: hidden; }
+html[data-ui='tv'] .tv .tre-bar b { display: block; height: 100%; background: var(--primary); transition: width .3s; }
+html[data-ui='tv'] .tv .tre-panel { margin: .6rem 0 1rem; }
+html[data-ui='tv'] .tv .tre-panel .note { margin-bottom: .8rem; }
+html[data-ui='tv'] .tv .tre-skel { display: flex; flex-direction: column; gap: .4rem; }
+html[data-ui='tv'] .tv .tre-skel i { display: block; height: 4rem; border-radius: .7rem; background: var(--surface); animation: tre-pulse 1.2s ease-in-out infinite alternate; }
+@keyframes tre-pulse { from { opacity: .5; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { html[data-ui='tv'] .tv .tre-skel i { animation: none; } }

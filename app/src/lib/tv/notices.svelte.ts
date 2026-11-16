@@ -139,7 +139,7 @@ export function attachNotices(on: boolean): void {
 // Every card the app pushes, from app start (the history is the session's).
 onToastPushed((t) =>
   showNotice({
-    title: t.text,
+    title: t.tvText ?? t.text,
     sub: t.sub,
     error: t.level === 'error',
     action: t.action,

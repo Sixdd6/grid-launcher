@@ -64,7 +64,12 @@ function playFromCard(game: PlayTarget): void {
 const coalescer = new Coalescer((text, level, card) => {
   const action = toastAction(card.action);
   const play = card.action !== undefined && card.action !== 'downloads' && 'play' in card.action;
-  pushToast(text, level, TOAST_DURATION_MS, { sub: card.sub, action, ...(play ? { desktopAction: action } : {}) });
+  pushToast(text, level, TOAST_DURATION_MS, {
+    sub: card.sub,
+    action,
+    ...(card.tvText ? { tvText: card.tvText } : {}),
+    ...(play ? { desktopAction: action } : {}),
+  });
 });
 
 /** Shows `notice`, merged with any of its group arriving at the same time. */
@@ -122,6 +127,26 @@ function hintFor(sourceId: string): Hint | undefined {
 
 function dropHint(sourceId: string): void {
   hints.delete(sourceId);
+}
+
+/** The card an `emulator-installed` event shows instead of its default, by
+ *  entry name (RomM › Emulators' "Pico-8 v0.2.7a6 installed from RomM"). */
+const installedCards = new Map<string, { card: Notice; at: number }>();
+
+/**
+ * Words the next `emulator-installed` card for the entry `name`. Call it
+ * before the install is queued.
+ */
+export function expectInstalledCard(name: string, card: Notice): void {
+  if (name.trim() === '') return;
+  installedCards.set(name, { card, at: Date.now() });
+}
+
+function takeInstalledCard(name: string): Notice | undefined {
+  const held = installedCards.get(name);
+  installedCards.delete(name);
+  if (!held || Date.now() - held.at > 10 * 60_000) return undefined;
+  return held.card;
 }
 
 // One card per backup batch (backups/notices.ts), app-wide like the rest.
@@ -219,7 +244,8 @@ export function initNotifications(): () => void {
     // The completion card for an emulator install OR update, worded by the
     // backend's `fresh` flag. The setup card counts its own installs.
     listen<EmulatorInstalledEvent>(EMULATOR_INSTALLED_EVENT, (event) => {
-      if (!setupRun.active) notify(emulatorInstalledNotice(event.payload.name, event.payload.fresh, event.payload.used_for ?? []));
+      const worded = takeInstalledCard(event.payload.name);
+      if (!setupRun.active) notify(worded ?? emulatorInstalledNotice(event.payload.name, event.payload.fresh, event.payload.used_for ?? []));
       // A fresh install or an update both put the newest build on disk.
       markCurrent(event.payload.name);
     }),
