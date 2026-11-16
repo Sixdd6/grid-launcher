@@ -100,6 +100,8 @@ describe('systems-local: Systems and firmware without RomM', () => {
     expect(await textOf('sys-fw-why-psx')).toBe('Install from RomM needs RomM · Connect RomM… · or locate files you have.');
     await expect($(testId('sys-fw-locate-psx'))).toHaveText('Locate files…');
     expect(await $(testId('sys-fw-file-psx-scph5501.bin')).getAttribute('data-state')).toBe('missing');
+    // The file line names the BIOS's region (RommStorefront README, "Required · Japan").
+    expect(await textOf('sys-fw-file-psx-scph5501.bin')).toContain('Required · North America');
     expect(await statusOf('psx')).toBe('firmware');
     await shot('03-firmware-block-needs-romm');
   });

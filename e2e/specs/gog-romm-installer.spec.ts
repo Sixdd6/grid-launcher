@@ -1,5 +1,5 @@
 import { TRANSITION_TIMEOUT } from '../helpers/env.js';
-import { openPlatform } from '../helpers/server.js';
+import { openRommPlatform, platformSlug } from '../helpers/romm.js';
 import { connectRomm, openDownloads, testId, waitForDownloadLine } from '../helpers/gog.js';
 import { waitForToast } from '../helpers/toasts.js';
 
@@ -20,7 +20,7 @@ const BAD_ROM = process.env.E2E_GOG_ROMM_BAD_ROM ?? '';
 async function install(rom: string): Promise<void> {
   // Downloads may be on screen (the previous case ends there): this opens
   // Library › RomM › <platform>.
-  await openPlatform(PLATFORM);
+  await openRommPlatform(await platformSlug(Number(PLATFORM)));
   const card = $(testId(`game-card-${rom}`));
   await card.waitForExist({ timeout: TRANSITION_TIMEOUT });
   await card.moveTo();

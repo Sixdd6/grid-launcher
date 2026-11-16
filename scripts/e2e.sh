@@ -167,8 +167,10 @@ STAGE_GROUPS=(
   # Settings › Game stores and the RomM page, Disconnect, needs-RomM; then
   # (tv-server's checks, the seed giving SNES a default emulator so New
   # releases has games) Discover's rows and hero, a platform's header,
-  # search and X to install, Search everything and Menu › Discover.
-  "tv-romm:specs/tv-romm.spec.ts"
+  # search and X to install, Search everything and Menu › Discover. (b)
+  # relaunches with the mock RomM dropping every request: Can't reach on the
+  # rail, RomM › Installed's banner and Retry, the RomM page and Reconnect.
+  "tv-romm:specs/tv-romm.spec.ts specs/tv-romm-b.spec.ts"
   # TV mode's Library tab (docs/tv-mode/plan.md P8), RomM not connected
   # (seeded): three installed games on two platforms and a fake Backup drive
   # (<data>/media, like `backups`) with a two-game pack. The rail and its

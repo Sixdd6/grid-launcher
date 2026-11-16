@@ -115,6 +115,9 @@ describe('tv-systems-local: Systems and Locate files in TV mode', () => {
     await waitText('tv-crumb', /Locate PlayStation firmware/);
     await browseTo(picks());
     await waitText('tv-fp-picks', 'No files picked. Pick files with (A), or check this whole folder with (Y).');
+    // Each file shows its size (a 104-byte fake BIOS rounds up to 1 KB); a folder shows none.
+    expect(await text('tv-fp-size-scph5501 (1).bin')).toBe('1 KB');
+    expect(await $(testId('tv-fp-size-more')).isExisting()).toBe(false);
     for (const f of ['scph5501 (1).bin', 'scph5502.bin', 'bios-pack.zip', 'readme.txt']) {
       await tap(`#fp-list [data-k="f-${f}"]`);
     }
