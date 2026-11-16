@@ -8,7 +8,7 @@
 // TV flows never send the player to desktop mode).
 import type { OpenOn } from '../../../../api';
 import { CARD_DISPLAYS, cardDisplayLabel, type CardDisplay } from '../../../../cards/layout';
-import { OPEN_ON_CHOICES } from '../../../../settings/openOn';
+import { OPEN_ON_CHOICES, openOnLabel } from '../../../../settings/openOn';
 import { OPEN_ON_ROMM_OFF } from '../../../../romm/words';
 import { artVisible, BLUR_MAX, type ThemeChoice } from '../../../../theme';
 import {
@@ -49,14 +49,6 @@ export type AppearanceActions = {
   setHardwareAcceleration: (on: boolean) => void;
 };
 
-/** Open GRID on's options (TVRommStorefront README § Appearance › Open GRID
- *  on); the stored values don't change. */
-export const OPEN_ON_LABELS: Record<OpenOn, string> = {
-  automatic: 'Automatic: Discover when RomM is connected, else Library',
-  discover: 'Discover (when RomM is connected)',
-  library: 'Library',
-};
-
 /** Open GRID on's line: where it applies, and, with RomM not connected and
  *  a choice other than Library, that GRID opens on All games. */
 export function openOnSub(openOn: OpenOn, rommConnected: boolean): string {
@@ -92,7 +84,7 @@ export function appearanceRows(s: AppearanceState, a: AppearanceActions): Row[] 
   return [
     choiceRow(
       { key: 'open-on', label: 'Open GRID on', sub: openOnSub(s.openOn, s.rommConnected) },
-      OPEN_ON_CHOICES.map((c) => [c, OPEN_ON_LABELS[c]] as const),
+      OPEN_ON_CHOICES.map((c) => [c, openOnLabel(c)] as const),
       s.openOn,
       (v) => a.setOpenOn(v as OpenOn),
       a.open,

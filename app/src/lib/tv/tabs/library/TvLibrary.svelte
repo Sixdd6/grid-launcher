@@ -52,7 +52,7 @@
   import { driveChips, driveCountLine, driveEmptyState, driveSortItems, emptyState, libraryGrid, countLine, searching, SEARCH_TITLE, SORT_TITLE, TV_SORTS, type EmptyState } from './libraryHeader';
   import { FOLDER_LABELS, folderKey, folderOf, libraryRail, NO_DRIVES, railEntry, railRowKey, type FolderId } from './libraryRail';
   import { tick } from 'svelte';
-  import { rommRailGroup, rommSelectionFallback, type RommRailKey } from '../../../romm/rail';
+  import { isRommRailKey, rommRailGroup, rommSelectionFallback, type RommRailKey } from '../../../romm/rail';
   import { romm } from '../../../stores/romm.svelte';
   import { focusables } from '../../focus/dom';
   import { focused, nav, scope, setFocus } from '../../nav.svelte';
@@ -120,8 +120,15 @@
 
   // A row that went away (an unplugged drive, a platform's last game
   // uninstalled) falls back to All games, written back to the store.
+  // A RomM row the desktop selected (the selection is shared for the
+  // session) shows as the RomM view here.
   $effect(() => {
-    if (selected.key !== librarySelection.key) {
+    const key = librarySelection.key;
+    if (isRommRailKey(key)) {
+      if (tvRomm.view === null && !storeView) selectRommView(key);
+      return;
+    }
+    if (selected.key !== key) {
       // The drive went away (item 452): select mode ends with it.
       selEnd();
       selectRail(selected.key);

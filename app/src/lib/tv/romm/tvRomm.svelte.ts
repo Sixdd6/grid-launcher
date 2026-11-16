@@ -11,6 +11,7 @@ import { romm } from '../../stores/romm.svelte';
 import { rememberFocus, showTab } from '../nav.svelte';
 import { selEnd } from '../select.svelte';
 import { clearStoreView } from '../stores/storeState.svelte';
+import { selectRail } from '../../library/selection.svelte';
 
 const state = $state<{
   /** The Library's RomM row on show, or null for another rail row. */
@@ -69,6 +70,8 @@ export function selectRommView(key: RommRailKey): void {
   selEnd();
   state.view = key;
   state.query = '';
+  // The desktop's Library opens on the same row (the selection is shared).
+  selectRail(key);
   if (key !== 'romm:discover') state.pendingArrive = false;
 }
 

@@ -7,7 +7,7 @@
 // over the desktop's rail rules (`library/rail.ts`): the same counts, the
 // same keys.
 import type { DriveInfo, InstalledGame } from '../../../api';
-import { railEntries, type RailEntry, type RailKey } from '../../../library/rail';
+import { topRailEntries, type RailEntry, type RailKey } from '../../../library/rail';
 import { inStorefrontOrder } from '../../../romm/order';
 
 export type FolderId = 'drives';
@@ -30,7 +30,7 @@ export function libraryRail(
   nowSeconds: number,
   drives: readonly DriveInfo[],
 ): LibraryRail {
-  const all = railEntries(rows, updateRomIds, nowSeconds, drives);
+  const all = topRailEntries(rows, updateRomIds, nowSeconds, drives);
   return {
     filters: all.filter((e) => e.key === 'all' || e.key === 'recent' || e.key === 'updates'),
     drives: all.filter((e) => e.key.startsWith('drive:')),
