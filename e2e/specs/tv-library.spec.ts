@@ -29,7 +29,10 @@ async function waitText(id: string, want: string | RegExp): Promise<void> {
 async function railShape(): Promise<string[]> {
   return (await browser.execute(() => {
     const nav = document.querySelector('[data-testid="tv-library"] [data-rail]')!;
-    return Array.from(nav.children).map((c) => (c.tagName === 'BUTTON' ? c.getAttribute('data-k')! : c.tagName === 'HR' ? 'HR' : `note:${c.textContent?.trim()}`));
+    // A folder's panel (`.rgrp`, 2026-11-16) is a wrapper, not a row: its
+    // heading and rows read as the rail's own, in order.
+    const rows = Array.from(nav.children).flatMap((c) => (c.classList.contains('rgrp') ? Array.from(c.children) : [c]));
+    return rows.map((c) => (c.tagName === 'BUTTON' ? c.getAttribute('data-k')! : c.tagName === 'HR' ? 'HR' : `note:${c.textContent?.trim()}`));
   })) as string[];
 }
 

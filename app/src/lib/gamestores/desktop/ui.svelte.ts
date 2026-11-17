@@ -17,7 +17,7 @@ import { toLaunchFailure } from '../../launchError';
 import { gameStores, clearLoginError, onStoreLogin, onStoreNotice, refreshLibrary } from '../../stores/gameStores.svelte';
 import { sessions } from '../../stores/sessions.svelte';
 import { navigation } from '../../stores/navigation.svelte';
-import { selectRail } from '../../library/selection.svelte';
+import { jumpToRail, selectRail } from '../../library/selection.svelte';
 import { pushToast, TOAST_DURATION_MS } from '../../stores/toasts.svelte';
 import { downloads, onSnapshot } from '../../stores/downloads.svelte';
 import { hasStoreCloud, managedByClient } from '../marks';
@@ -196,7 +196,7 @@ export function closeStoreBackup(): void {
 
 /** Library › GOG › Installed (Settings › Stores' "Show in Library"). */
 export function showInLibrary(source: StoreSource, part: 'installed' | 'available' = 'installed'): void {
-  selectRail(storeRailKey(source, part));
+  jumpToRail(storeRailKey(source, part));
   navigation.go('library');
 }
 

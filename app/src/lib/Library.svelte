@@ -63,11 +63,11 @@
     totalBytes,
     type Selection,
   } from './backups/selection';
-  import { librarySelection, selectRail } from './library/selection.svelte';
+  import { jumpToRail, librarySelection, selectRail } from './library/selection.svelte';
   import { LIBRARY_SORTS, normalizeSort, sortGames, sortLabel, titleContains, type LibrarySort } from './library/sort';
   import { cloudPlatformSet } from './cards/badges';
   import { CARD_SIZES, cardSizeLabel, type CardSize } from './cards/size';
-  import { setCardSize, uiSettings } from './stores/uiSettings.svelte';
+  import { setCardSize, toggleRailGroup, uiSettings } from './stores/uiSettings.svelte';
   import { fromDriveGame, fromInstalled, type DetailsSubject } from './details/subject';
   import type { CloudMode } from './details/cloud';
   import GameCard from './GameCard.svelte';
@@ -76,7 +76,8 @@
   import CardGrid from './CardGrid.svelte';
   import FoldingHeader from './FoldingHeader.svelte';
   import { gameCountLine, librarySearchPlaceholder } from './views/fold';
-  import RailPane, { type RailPaneEntry } from './RailPane.svelte';
+  import RailPane, { type RailPaneEntry, type RailPaneGroup, type RailPaneItem } from './RailPane.svelte';
+  import { foldRailEntries, RAIL_HOLDS_DESCRIPTION, railClosedCount, railGroupName, railHoldsTitle, type RailGroupId } from './library/railFold';
   import Details from './Details.svelte';
   import { chordBlocked, chordContext, shouldFocusSearch } from './views/searchKeys';
   import { moveFocus, type NavDirection } from './focus/grid';
@@ -427,7 +428,9 @@
 
   function onRailSelect(key: RailKey) {
     if (key !== librarySelection.key) leaveSelectMode();
-    selectRail(key);
+    // A row's own click (its group is open) or a jump from the view (Open
+    // Discover, Open Available), which opens a closed group.
+    jumpToRail(key);
   }
 
   // A refresh can drop a game: the selection never counts one off screen.
@@ -550,54 +553,70 @@
         ? `store-${key.slice('store:'.length).replace(/:/g, '-')}`
         : key;
 
-  let firstDrive = $derived(entries.findIndex((e) => e.key.startsWith('drive:')));
-
-  /** Each store group's heading, mark and badge, keyed by its first row. */
-  let storeHeads = $derived(
-    new Map(storeGroups.map((g) => [g.rows[0].key as string, { heading: g.heading, mark: storeMark(g.source), flag: g.flag }])),
-  );
+  /** Each store group's mark, badge and rows, by store. */
+  let storeHeads = $derived(new Map(storeGroups.map((g) => [g.source as string, { mark: storeMark(g.source), flag: g.flag, rows: g.rows }])));
   let storeCounts = $derived(new Map(storeGroups.flatMap((g) => g.rows.map((r) => [r.key as string, r.count.kind] as const))));
 
+  /** One rail row as the rail draws it. */
+  function railRow(entry: RailEntry): RailPaneEntry<RailKey> {
+    const base: RailPaneEntry<RailKey> = {
+      key: entry.key,
+      testId: entry.testId,
+      countTestId: `library-rail-count-${slugOf(entry.key)}`,
+      dataRail: entry.testId,
+      label: entry.label,
+      count: entry.count,
+      selected: entry.key === selected.key,
+      icon: entry.key.startsWith('drive:') ? 'drive' : undefined,
+      title: entry.title,
+    };
+    if (entry.key.startsWith('store:')) return { ...base, countKind: storeCounts.get(entry.key) ?? 'number' };
+    const r = rommRowByKey.get(entry.key);
+    // A RomM row's count is RomM's own; Discover has none.
+    if (r !== undefined) return { ...base, countTestId: r.countTestId ?? undefined, count: r.count ?? undefined };
+    return base;
+  }
+
+  /** A folding group (RommStorefront README § Folding groups): Backup
+   *  drives, a store, or RomM, open or closed by the one shared list. */
+  function railGroup(id: RailGroupId, rows: RailEntry[]): RailPaneGroup<RailKey> {
+    const closed = uiSettings.railGroupClosed(id);
+    const drawn = rows.map(railRow);
+    const held = closed ? drawn.find((r) => r.selected) : undefined;
+    let mark: { mono: string; hue: string } | undefined;
+    let flag: RailPaneGroup['flag'] = null;
+    let installed: number | null = null;
+    if (id === 'drives') {
+      installed = rows.length;
+    } else if (id === 'romm') {
+      mark = { mono: ROMM_MARK.mono, hue: ROMM_MARK.hue };
+      flag = rommGroup?.flag ? { ...rommGroup.flag, testId: 'library-rail-romm-installed-flag' } : null;
+      installed = rommGroup?.rows.find((r) => r.kind === 'installed')?.count ?? null;
+    } else {
+      const head = storeHeads.get(id);
+      mark = head ? { mono: head.mark.mono, hue: head.mark.hue } : undefined;
+      flag = head?.flag ? { ...head.flag, testId: `library-rail-store-${id}-installed-flag` } : null;
+      const inst = head?.rows[0].count;
+      installed = inst?.kind === 'number' ? inst.n : null;
+    }
+    return {
+      group: id,
+      name: railGroupName(id),
+      testId: `library-rail-group-${id}`,
+      mark,
+      flag,
+      closed,
+      count: railClosedCount(id, installed),
+      holds: held ? railHoldsTitle(id, held.label) : null,
+      holdsDescription: RAIL_HOLDS_DESCRIPTION,
+      rows: drawn,
+    };
+  }
+
+  // The three fixed entries come first, then the backup drives, then the
+  // storefront groups, each group in its own folding panel.
   let railRows = $derived(
-    entries.map((entry, i): RailPaneEntry<RailKey> => {
-      const base: RailPaneEntry<RailKey> = {
-        key: entry.key,
-        testId: entry.testId,
-        countTestId: `library-rail-count-${slugOf(entry.key)}`,
-        dataRail: entry.testId,
-        label: entry.label,
-        count: entry.count,
-        selected: entry.key === selected.key,
-        // The three fixed entries come first, then the backup drives, then
-        // the storefront groups; each group's heading sits on its first row.
-        heading: i === firstDrive ? 'BACKUP DRIVES' : storeHeads.get(entry.key)?.heading,
-        icon: entry.key.startsWith('drive:') ? 'drive' : undefined,
-        title: entry.title,
-      };
-      if (entry.key.startsWith('store:')) {
-        return {
-          ...base,
-          indent: true,
-          countKind: storeCounts.get(entry.key) ?? 'number',
-          headingMark: storeHeads.get(entry.key)?.mark,
-          headingFlag: storeHeads.get(entry.key)?.flag,
-        };
-      }
-      const r = rommRowByKey.get(entry.key);
-      if (r === undefined || rommGroup === null) return base;
-      // The RomM group: the RomM mark, ROMM and its flag on the Installed row;
-      // Discover has no count.
-      const first = r.kind === 'installed';
-      return {
-        ...base,
-        indent: true,
-        countTestId: r.countTestId ?? undefined,
-        count: r.count ?? undefined,
-        heading: first ? rommGroup.heading : undefined,
-        headingMark: first ? { mono: ROMM_MARK.mono, hue: ROMM_MARK.hue } : undefined,
-        headingFlag: first ? rommGroup.flag : undefined,
-      };
-    }),
+    foldRailEntries(entries).map((item): RailPaneItem<RailKey> => (item.kind === 'row' ? railRow(item.entry) : railGroup(item.id, item.rows))),
   );
 
   // A game played from a RomM screen (Discover, a platform) never leaves the
@@ -884,6 +903,7 @@
     testId="library-rail"
     ariaLabel="Library filters"
     onSelect={onRailSelect}
+    onToggle={(id) => toggleRailGroup(id as RailGroupId)}
   />
 
   {#if rommScreen !== null && rommScreen.kind === 'emulators'}

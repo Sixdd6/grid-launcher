@@ -1,23 +1,20 @@
 // TV mode's store state that outlives a screen (TvStage remounts a tab on
-// every switch): which store view the Library shows, its folders, the cloud
+// every switch): which store view the Library shows, the cloud
 // syncs running, and each drive's GOG games as last read. The stores' own
-// data is the shared `gameStores` store (E1).
+// data is the shared `gameStores` store (E1). The store folders' open or
+// closed is the one list desktop and TV mode share (`[ui] rail_closed`).
 import type { DriveStoreGame, StoreSource } from '../../api';
 import { parseStoreRailKey, storeRailKey, type StorePart, type StoreRailKey } from '../../gamestores/rail';
-import { STORE_ORDER } from '../../gamestores/marks';
 
 const state = $state<{
   /** The Library's store row on show, or null for the desktop's rail rows. */
   view: StoreRailKey | null;
-  /** Each store folder, open by default (designer decision 1). */
-  folds: Record<StoreSource, boolean>;
   /** Game keys whose cloud saves are syncing now (Sync now). */
   syncing: string[];
   /** Bumped when a drive's GOG games may have changed (a restore, a backup, a removal). */
   driveVersion: number;
 }>({
   view: null,
-  folds: Object.fromEntries(STORE_ORDER.map((s) => [s, true])) as Record<StoreSource, boolean>,
   syncing: [],
   driveVersion: 0,
 });
@@ -28,9 +25,6 @@ export const tvStores = {
   },
   get viewKey(): StoreRailKey | null {
     return state.view;
-  },
-  folded(source: StoreSource): boolean {
-    return !state.folds[source];
   },
   syncing(key: string): boolean {
     return state.syncing.includes(key);
@@ -48,14 +42,6 @@ export function selectStoreView(source: StoreSource, part: StorePart): void {
 /** Moving onto any other rail row leaves the store view. */
 export function clearStoreView(): void {
   state.view = null;
-}
-
-export function toggleStoreFold(source: StoreSource): void {
-  state.folds[source] = !state.folds[source];
-}
-
-export function openStoreFold(source: StoreSource): void {
-  state.folds[source] = true;
 }
 
 export function setSyncing(key: string, on: boolean): void {

@@ -31,6 +31,32 @@
     /** The count is a spinner (`loading`) or a `!` (`attention`) instead of a number. */
     countKind?: 'number' | 'loading' | 'attention';
   };
+
+  /** A folding group of the Library rail (RommStorefront README § Library
+   *  rail › Folding groups): an inset panel whose heading button opens and
+   *  closes it. The caller owns whether it is closed (`[ui] rail_closed`). */
+  export type RailPaneGroup<K extends string = string> = {
+    /** The group's id (`drives`, `gog`, `romm`…), handed back to `onToggle`. */
+    group: string;
+    /** Sentence case: "Backup drives", "GOG". */
+    name: string;
+    /** `data-testid` for the heading button. */
+    testId: string;
+    /** The store's monogram tile; none for Backup drives. */
+    mark?: { mono: string; hue: string };
+    /** `!`, `off` or `busy` (a spinner), shown open or closed. */
+    flag?: { text: string; title: string; testId: string } | null;
+    closed: boolean;
+    /** Closed only: the Installed number or the number of drives. */
+    count: { n: number; label: string } | null;
+    /** Closed and holding the selected row: the heading's tooltip. */
+    holds: string | null;
+    /** The heading's accessible description while it holds the selection. */
+    holdsDescription?: string;
+    rows: RailPaneEntry<K>[];
+  };
+
+  export type RailPaneItem<K extends string = string> = RailPaneEntry<K> | RailPaneGroup<K>;
 </script>
 
 <script lang="ts" generics="K extends string">
@@ -43,38 +69,39 @@
     testId,
     ariaLabel,
     onSelect,
+    onToggle = undefined,
   }: {
-    entries: RailPaneEntry<K>[];
+    entries: RailPaneItem<K>[];
     testId: string;
     ariaLabel: string;
     onSelect: (key: K) => void;
+    /** A group heading clicked, or Enter / Space on it. */
+    onToggle?: (group: string) => void;
   } = $props();
+
+  const isGroup = (item: RailPaneItem<K>): item is RailPaneGroup<K> => 'rows' in item;
+  const itemKey = (item: RailPaneItem<K>): string => (isGroup(item) ? `group:${item.group}` : item.key);
 </script>
 
-<nav data-testid={testId} class="rail" aria-label={ariaLabel}>
-  {#each entries as entry (entry.key)}
+{#snippet flagOf(flag: { text: string; title: string; testId: string })}
+  {#if flag.text === 'busy'}
+    <!-- RommStorefront prototype `.rm-flag-spin`: a spinner while RomM connects. -->
+    <span class="rail-flag busy" title={flag.title} aria-label={flag.title} data-testid={flag.testId}
+      ><span class="rail-spin small"></span></span
+    >
+  {:else}
+    <span class="rail-flag" class:off={flag.text === 'off'} title={flag.title} data-testid={flag.testId}>{flag.text}</span>
+  {/if}
+{/snippet}
+
+{#snippet row(entry: RailPaneEntry<K>)}
     {#if entry.heading}
       <span class="rail-heading" class:store-head={entry.headingMark !== undefined}>
         {#if entry.headingMark}
           <span class="rail-mark" style:--st-hue={entry.headingMark.hue} aria-hidden="true" data-mono={entry.headingMark.mono}></span>
         {/if}
         {entry.heading}
-        {#if entry.headingFlag?.text === 'busy'}
-          <!-- RommStorefront prototype `.rm-flag-spin`: a spinner while RomM connects. -->
-          <span
-            class="rail-flag busy"
-            title={entry.headingFlag.title}
-            aria-label={entry.headingFlag.title}
-            data-testid={`${entry.testId}-flag`}><span class="rail-spin small"></span></span
-          >
-        {:else if entry.headingFlag}
-          <span
-            class="rail-flag"
-            class:off={entry.headingFlag.text === 'off'}
-            title={entry.headingFlag.title}
-            data-testid={`${entry.testId}-flag`}>{entry.headingFlag.text}</span
-          >
-        {/if}
+        {#if entry.headingFlag}{@render flagOf({ ...entry.headingFlag, testId: `${entry.testId}-flag` })}{/if}
       </span>
     {/if}
     <button
@@ -82,6 +109,7 @@
       data-rail={entry.dataRail}
       class="rail-item"
       class:indent={entry.indent}
+      class:has-icon={entry.icon !== undefined}
       class:active={entry.selected}
       aria-current={entry.selected ? 'page' : undefined}
       title={entry.title}
@@ -101,6 +129,56 @@
     </button>
     {#if entry.divider}
       <hr class="rail-divider" />
+    {/if}
+{/snippet}
+
+<nav data-testid={testId} class="rail" aria-label={ariaLabel}>
+  {#each entries as item (itemKey(item))}
+    {#if isGroup(item)}
+      {@const rowsId = `${testId}-rows-${item.group}`}
+      <section class="rail-group" class:closed={item.closed} class:holds={item.holds !== null} aria-label={item.name} data-rail-group={item.group}>
+        <button
+          type="button"
+          class="group-head"
+          data-testid={item.testId}
+          aria-expanded={!item.closed}
+          aria-controls={rowsId}
+          title={item.holds ?? undefined}
+          aria-describedby={item.holds !== null && item.holdsDescription ? `${rowsId}-holds` : undefined}
+          onclick={() => onToggle?.(item.group)}
+          onkeydown={(e) => {
+            // Enter or Space toggles, once: handled here (the button's own
+            // activation is cancelled) so it never depends on how the
+            // webview turns a key into a click.
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            if (!e.repeat) onToggle?.(item.group);
+          }}
+        >
+          <span class="group-chev" aria-hidden="true"><Icon name="chevronRight" size={12} /></span>
+          {#if item.mark}
+            <span class="rail-mark" style:--st-hue={item.mark.hue} aria-hidden="true" data-mono={item.mark.mono}></span>
+          {/if}
+          <span class="group-name">{item.name}</span>
+          <span class="group-sp"></span>
+          {#if item.flag}{@render flagOf(item.flag)}{/if}
+          {#if item.closed && item.count}
+            <span class="group-n" title={item.count.label} aria-label={item.count.label} data-testid={`${item.testId}-count`}>{item.count.n}</span>
+          {/if}
+        </button>
+        {#if item.holds !== null && item.holdsDescription}
+          <span class="sr-only" id={`${rowsId}-holds`}>{item.holdsDescription}</span>
+        {/if}
+        <div class="group-rows" id={rowsId} role="group" aria-label={item.name} hidden={item.closed}>
+          {#if !item.closed}
+            {#each item.rows as entry (entry.key)}
+              {@render row(entry)}
+            {/each}
+          {/if}
+        </div>
+      </section>
+    {:else}
+      {@render row(item)}
     {/if}
   {/each}
 </nav>
@@ -258,6 +336,134 @@
     padding-left: 26px;
   }
 
+  /* Library rail: folding groups (RommStorefront README § Folding groups,
+     prototype railfold.css). Each group is an inset panel inside the rail
+     (the `surface` fill, `r-row` corners + 2), 8px under Updates and 6px
+     apart, so one storefront never runs into the next. */
+  .rail-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 8px;
+    padding: 2px;
+    border-radius: calc(var(--r-row) + 2px);
+    background: var(--surface);
+  }
+
+  .rail-group + .rail-group {
+    margin-top: 6px;
+  }
+
+  /* The holds-the-selection description: read, not shown. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .group-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .group-rows[hidden] {
+    display: none;
+  }
+
+  .group-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-height: 30px;
+    box-sizing: border-box;
+    padding: 5px 8px 5px 4px;
+    border: 0;
+    border-radius: var(--r-row);
+    background: transparent;
+    color: var(--text-h);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .group-head:hover {
+    background: var(--field);
+  }
+
+  .group-head:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
+  }
+
+  .group-chev {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 14px;
+    height: 14px;
+    color: var(--text-muted);
+    transition: transform 150ms ease;
+  }
+
+  .rail-group:not(.closed) .group-chev {
+    transform: rotate(90deg);
+  }
+
+  .group-head .rail-mark {
+    width: 16px;
+    height: 16px;
+    font-size: 10px;
+  }
+
+  .group-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .group-sp {
+    flex: 1 1 auto;
+  }
+
+  .group-head .rail-flag {
+    margin-left: 0;
+  }
+
+  .group-n {
+    flex: none;
+    margin-left: 6px;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+
+  /* A closed group holding the selected row: the selected row's fill and bar. */
+  .rail-group.holds .group-head {
+    background: var(--selected);
+    box-shadow: inset 3px 0 0 var(--primary);
+  }
+
+  /* Rows start under the mark (4 + chevron 14 + gap 6 = 24px); a drive
+     row's own icon starts at 20px so its name keeps room in the 220px rail. */
+  .group-rows .rail-item {
+    padding-left: 24px;
+  }
+
+  .group-rows .rail-item.has-icon {
+    padding-left: 20px;
+  }
+
   .rail-count.warn {
     color: var(--warning-text);
     font-weight: 700;
@@ -282,6 +488,10 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .group-chev {
+      transition: none;
+    }
+
     .rail-spin {
       animation: none;
       border-top-color: var(--line-strong);

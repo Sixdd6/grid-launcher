@@ -46,7 +46,7 @@
   import { openDetails, openSystem, playGame } from './gameActions';
   import { selectLibRail } from './tabs/library/library.svelte';
   import { expiredCard, unreachableCard } from './romm/rommActions';
-  import { rommRowKey, selectRommView, toggleRommFold, tvRomm } from './romm/tvRomm.svelte';
+  import { ROMM_FOLD_KEY, rommRowKey, selectRommView } from './romm/tvRomm.svelte';
   import { railRowKey } from './tabs/library/libraryRail';
   import TvChooseSystems from './startup/TvChooseSystems.svelte';
   import TvWelcome from './startup/TvWelcome.svelte';
@@ -148,9 +148,11 @@
       const place = initialPlace(configured, uiSettings.openOn);
       resetNav('library', null);
       if (place.rail === 'romm:discover') {
+        // Startup never opens a folder (TVRommStorefront README § Library ›
+        // Folders): a closed RomM stays closed, its heading holding the
+        // selection and taking the focus.
         selectRommView('romm:discover');
-        if (!tvRomm.open) toggleRommFold();
-        rememberFocus('tab:library', rommRowKey('romm:discover'));
+        rememberFocus('tab:library', uiSettings.railGroupClosed('romm') ? ROMM_FOLD_KEY : rommRowKey('romm:discover'));
       } else {
         selectLibRail('all');
         rememberFocus('tab:library', railRowKey('all'));

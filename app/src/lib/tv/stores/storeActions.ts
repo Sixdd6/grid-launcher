@@ -16,7 +16,8 @@ import { openFolderBrowser } from '../gameActions';
 import { closeLayer, nav, openLayer, pushPage, rememberFocus, setPane, showTab, topLayer } from '../nav.svelte';
 import { openList } from '../overlays/overlays.svelte';
 import { conflictPrompt, keptCard, launchingCard, PICK_INSTALLER_TITLE, READING_INSTALLER, fileName, refusalTitle, tvInspectionView } from './storeWords';
-import { openStoreFold, storeRowKey, bumpDrives } from './storeState.svelte';
+import { storeRowKey, bumpDrives } from './storeState.svelte';
+import { setRailGroupClosed } from '../../stores/uiSettings.svelte';
 import { selectLibStore } from '../tabs/library/library.svelte';
 import TvStoreDetails from './TvStoreDetails.svelte';
 import TvStoreInstallPage from './TvStoreInstallPage.svelte';
@@ -222,7 +223,7 @@ export function openStorePage(source: StoreSource): void {
 
 /** Show in Library: pages close, the Library shows the store's Installed. */
 export function showStoreInLibrary(source: StoreSource): void {
-  openStoreFold(source);
+  setRailGroupClosed(source, false);
   selectLibStore(source, 'installed');
   rememberFocus('tab:library', storeRowKey(source, 'installed'));
   void showTab('library', { again: true });
@@ -230,6 +231,7 @@ export function showStoreInLibrary(source: StoreSource): void {
 
 /** Open Available (the empty Installed panel). */
 export function showAvailable(source: StoreSource): void {
+  setRailGroupClosed(source, false);
   selectLibStore(source, 'available');
   rememberFocus('tab:library', storeRowKey(source, 'available'));
   void showTab('library', { again: true });

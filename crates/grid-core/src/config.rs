@@ -172,6 +172,19 @@ pub struct UiSettings {
     /// the system volume; every player opens at it and a change stores it.
     #[serde(default = "default_video_volume")]
     pub video_volume: u8,
+    /// The Library rail's closed groups, shared by desktop and TV mode
+    /// (RommStorefront README § Library rail › Folding groups › Memory): ids
+    /// such as `"drives"`, `"gog"`, `"romm"`, in any order. A group whose id
+    /// is not listed is open. Ids this build doesn't know round-trip
+    /// untouched (a future store). A value that isn't a list of strings
+    /// reads as empty (every group open) instead of failing the load. An
+    /// inline array, so it sits among the scalar keys; omitted while empty.
+    #[serde(
+        default,
+        deserialize_with = "lenient_string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub rail_closed: Vec<String>,
     /// TV mode's button assignments, per controller: the controller's key
     /// (its gilrs UUID as hex; two pads of one model share a key) →
     /// `"xbox"` or `"nintendo"`. A controller with no entry starts on the
@@ -221,6 +234,25 @@ fn default_video_volume() -> u8 {
     50
 }
 
+/// A list of strings, or empty for anything else (a string, a number, a
+/// table, a list holding a non-string): a hand edit or a newer build's shape
+/// never fails the whole config load.
+fn lenient_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Lenient {
+        List(Vec<String>),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(match Lenient::deserialize(deserializer)? {
+        Lenient::List(list) => list,
+        Lenient::Other(_) => Vec::new(),
+    })
+}
+
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
@@ -238,6 +270,7 @@ impl Default for UiSettings {
             tv_prompts: default_tv_prompts(),
             tv_welcomed: false,
             video_volume: default_video_volume(),
+            rail_closed: Vec::new(),
             tv_assignments: BTreeMap::new(),
         }
     }
@@ -1944,6 +1977,75 @@ mod tests {
             written.contains("open_on = \"automatic\""),
             "written config:\n{written}"
         );
+    }
+
+    /// The rail's closed groups round-trip as an inline list among the
+    /// scalar `[ui]` keys, ahead of the assignments table, unknown ids kept.
+    #[test]
+    fn rail_closed_round_trips_with_unknown_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut assignments = BTreeMap::new();
+        assignments.insert("abc".to_string(), "xbox".to_string());
+        let cfg = Config {
+            ui: UiSettings {
+                rail_closed: vec![
+                    "gog".to_string(),
+                    "drives".to_string(),
+                    "future-store".to_string(),
+                ],
+                tv_assignments: assignments,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        let list = written
+            .find("rail_closed = [")
+            .expect("written config has the list");
+        let table = written.find("[ui.tv_assignments]").unwrap();
+        assert!(list < table, "written config:\n{written}");
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.ui.rail_closed, vec!["gog", "drives", "future-store"]);
+    }
+
+    /// An older config (no key) and an empty list both mean every group
+    /// open; an empty list writes no key.
+    #[test]
+    fn a_missing_rail_closed_loads_empty_and_an_empty_one_writes_nothing() {
+        let loaded = load_text("schema_version = 1\n\n[ui]\ntheme = \"dark\"\n");
+        assert!(loaded.ui.rail_closed.is_empty());
+        assert_eq!(loaded.ui.theme, "dark");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        Config::default().save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !written.contains("rail_closed"),
+            "written config:\n{written}"
+        );
+    }
+
+    /// A value that isn't a list of strings reads as empty and the rest of
+    /// the config still loads.
+    #[test]
+    fn a_malformed_rail_closed_reads_as_empty_without_failing_the_load() {
+        for value in [
+            "\"gog\"",
+            "3",
+            "[1, 2]",
+            "[\"gog\", 2]",
+            "{ gog = true }",
+            "true",
+        ] {
+            let loaded = load_text(&format!(
+                "schema_version = 1\n\n[ui]\ntheme = \"dark\"\nrail_closed = {value}\nvideo_volume = 70\n"
+            ));
+            assert!(loaded.ui.rail_closed.is_empty(), "{value}");
+            assert_eq!(loaded.ui.theme, "dark", "{value}");
+            assert_eq!(loaded.ui.video_volume, 70, "{value}");
+        }
     }
 
     fn load_text(text: &str) -> Config {

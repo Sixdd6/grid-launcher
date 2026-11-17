@@ -787,6 +787,15 @@ existed; a Disconnect or a 401 no longer leaves the shell.
   (`[ui] open_on`, labels and normalisation in `lib/settings/openOn.ts`), the start rule
   shared by the desktop and TV mode; `App.svelte` mounts the shell only once
   `uiSettings.loaded`.
+- Library rail folding groups — `lib/library/railFold.ts` (pure: a rail key's group,
+  the closed list's parsing and edits, a closed heading's count and holds-the-selection
+  words). Which groups are closed is ONE list for desktop and TV mode, `[ui] rail_closed`,
+  kept by `uiSettings` (`setRailGroupClosed`, `toggleRailGroup`, `openRailGroupOf`).
+  The desktop draws the groups in `RailPane.svelte` (`RailPaneGroup`), TV mode in
+  `TvLibrary.svelte`, `TvStoreRail.svelte` and `TvRommRail.svelte`. Jumps that select a
+  row in a closed group open it (`library/selection.svelte.ts` `jumpToRail`, TV's
+  `showRommRow`, `showStoreInLibrary`, `selectDriveRow`); startup and the RomM
+  selection fallback use `selectRail` and never open one.
 - Feature folders — `lib/backups/`, `lib/discover/`, `lib/details/`, `lib/downloads/`, `lib/emulators/`, `lib/settings/`,
   `lib/systems/`, `lib/library/`, `lib/server/`, `lib/cards/`, `lib/focus/`. Each pairs a `.svelte`
   component with a pure `.ts` module holding the logic, and a `.test.ts` beside it. Put

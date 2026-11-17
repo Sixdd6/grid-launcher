@@ -1,7 +1,8 @@
 // The Library tab's state that outlives its screen (TvStage remounts a tab on
-// every switch): the search, the sort and the folders (tvmode.js `S.libQ`,
-// `S.libSort`, `S.folds`). The selected rail row is the desktop's own
-// (`library/selection.svelte.ts`), so both modes agree on it for the session.
+// every switch): the search and the sort (tvmode.js `S.libQ`, `S.libSort`).
+// The selected rail row is the desktop's own (`library/selection.svelte.ts`),
+// so both modes agree on it for the session; which folders are closed is the
+// one list desktop and TV mode share (`[ui] rail_closed`, uiSettings).
 import type { DriveGame } from '../../../api';
 import { librarySelection, selectRail } from '../../../library/selection.svelte';
 import { driveRailKey, type RailKey } from '../../../library/rail';
@@ -9,19 +10,19 @@ import type { LibrarySort } from '../../../library/sort';
 import { selEnd } from '../../select.svelte';
 import { DEFAULT_DRIVE_SORT, DEFAULT_SORT } from './libraryHeader';
 import type { DriveSort } from '../../../library/drive';
-import { DEFAULT_FOLDS, railRowKey, type FolderId, type Folds } from './libraryRail';
+import { railRowKey } from './libraryRail';
+import { setRailGroupClosed } from '../../../stores/uiSettings.svelte';
 import { rememberFocus, showTab } from '../../nav.svelte';
 import type { StoreSource } from '../../../api';
 import type { StorePart } from '../../../gamestores/rail';
 import { clearStoreView, selectStoreView, tvStores } from '../../stores/storeState.svelte';
 import { clearRommView, tvRomm } from '../../romm/tvRomm.svelte';
 
-export const lib = $state<{ query: string; sort: LibrarySort; driveSort: DriveSort; folds: Folds }>({
+export const lib = $state<{ query: string; sort: LibrarySort; driveSort: DriveSort }>({
   query: '',
   sort: DEFAULT_SORT,
   // A Backup drive's sort, apart from the Library's (ruling E5).
   driveSort: DEFAULT_DRIVE_SORT,
-  folds: { ...DEFAULT_FOLDS },
 });
 
 /** Moving through the rail selects a row at once; a new row clears the search (item 178). */
@@ -41,21 +42,17 @@ export function selectLibRail(key: RailKey): void {
   lib.query = '';
 }
 
-/** A on a folder header opens or closes it (item 180). */
-export function toggleFold(id: FolderId): void {
-  lib.folds[id] = !lib.folds[id];
-}
-
 /** Each drive's games as last read, so the grid draws at once when the tab
  *  comes back (from Details, another tab). Not reactive: a cache. */
 export const driveGamesCache = new Map<string, DriveGame[]>();
 
-/** The Library on a Backup drive: its folder open, its row selected and
- *  focused when the tab next shows (items 415, 505; tvmode.js `showDrive`). */
+/** The Library on a Backup drive: its folder open (and remembered), its row
+ *  selected and focused when the tab next shows (items 415, 505; tvmode.js
+ *  `showDrive`). */
 export function selectDriveRow(key: string): void {
   const rail = driveRailKey(key);
   selectLibRail(rail);
-  lib.folds.drives = true;
+  setRailGroupClosed('drives', false);
   rememberFocus('tab:library', railRowKey(rail));
 }
 

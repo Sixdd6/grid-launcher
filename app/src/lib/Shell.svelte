@@ -10,7 +10,7 @@
   import BackupDialog from './backups/BackupDialog.svelte';
   import { backupDialog, closeBackup } from './backups/dialogState.svelte';
   import { driveRailKey } from './library/rail';
-  import { selectRail } from './library/selection.svelte';
+  import { jumpToRail, selectRail } from './library/selection.svelte';
   import { romm } from './stores/romm.svelte';
   import { rommLive } from './romm/rail';
   import { appUpdate } from './stores/appUpdate.svelte';
@@ -64,7 +64,7 @@
 
   /** Library on a backup drive (Settings › Backup drives' Show in Library). */
   function showDriveInLibrary(key: string) {
-    selectRail(driveRailKey(key));
+    jumpToRail(driveRailKey(key));
     view = 'library';
   }
 

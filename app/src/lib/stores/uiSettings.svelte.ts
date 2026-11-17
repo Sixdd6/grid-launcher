@@ -28,6 +28,7 @@ import {
 import { normalizeTvCardLabels, normalizeTvCardSize, type TvCardLabels, type TvCardSize } from '../tv/gridSettings';
 import { tvTheme } from '../tv/theme';
 import { clampVolume, debounced, VOLUME_DEFAULT, VOLUME_SAVE_MS } from '../details/videoVolume';
+import { parseRailClosed, railGroupClosed, railGroupOf, withRailGroup, type RailGroupId } from '../library/railFold';
 
 const state = $state<{
   theme: ThemeChoice;
@@ -46,6 +47,9 @@ const state = $state<{
   tvAssignments: Record<string, TvAssignment>;
   tvWelcomed: boolean;
   videoVolume: number;
+  /** The Library rail's closed groups (`rail_closed`), one list for desktop
+   *  and TV mode. */
+  railClosed: string[];
   /** The stored settings have been read (or the read failed and the
    *  defaults stand). The shell waits for it: Open GRID on decides the view
    *  it opens on. */
@@ -67,6 +71,7 @@ const state = $state<{
   tvAssignments: {},
   tvWelcomed: false,
   videoVolume: VOLUME_DEFAULT,
+  railClosed: [],
   loaded: false,
 });
 
@@ -95,6 +100,7 @@ function payload(): UiSettings {
     tv_assignments: { ...state.tvAssignments },
     tv_welcomed: state.tvWelcomed,
     video_volume: state.videoVolume,
+    rail_closed: [...state.railClosed],
   };
 }
 
@@ -149,6 +155,14 @@ export const uiSettings = {
   /** The video players' own volume, 0–100. */
   get videoVolume(): number {
     return state.videoVolume;
+  },
+  /** The Library rail's closed groups, ids GRID doesn't know included. */
+  get railClosed(): readonly string[] {
+    return state.railClosed;
+  },
+  /** Whether a Library rail group is closed (desktop and TV mode alike). */
+  railGroupClosed(id: RailGroupId): boolean {
+    return railGroupClosed(state.railClosed, id);
   },
   get loaded(): boolean {
     return state.loaded;
@@ -237,6 +251,7 @@ export async function initUiSettings(): Promise<() => void> {
     state.tvAssignments = normalizeTvAssignments(stored.tv_assignments);
     state.tvWelcomed = stored.tv_welcomed === true;
     state.videoVolume = clampVolume(stored.video_volume ?? VOLUME_DEFAULT);
+    state.railClosed = parseRailClosed(stored.rail_closed);
   } catch {
     // Defaults/mirror already in `state`.
   }
@@ -428,4 +443,37 @@ export function setVideoVolume(value: number): void {
   if (v === state.videoVolume) return;
   state.videoVolume = v;
   saveVolume();
+}
+
+/**
+ * Opens or closes a Library rail group (a heading's click, Enter or Space; a
+ * TV A; a jump that opens it), in desktop and TV mode at once, then saves
+ * the list. Best effort: a failed save keeps the state for the session, with
+ * no notification.
+ */
+export function setRailGroupClosed(id: RailGroupId, closed: boolean): void {
+  if (railGroupClosed(state.railClosed, id) === closed) return;
+  state.railClosed = withRailGroup(state.railClosed, id, closed);
+  void (async () => {
+    try {
+      await api.setUiSettings(payload());
+    } catch {
+      // Kept for this session.
+    }
+  })();
+}
+
+export function toggleRailGroup(id: RailGroupId): void {
+  setRailGroupClosed(id, !railGroupClosed(state.railClosed, id));
+}
+
+/**
+ * A jump to a rail row from elsewhere (Show in Library, Open Discover, a
+ * notification): the row's group opens when it is closed, and that is
+ * remembered like a click. Startup and the selection fallback never call
+ * this.
+ */
+export function openRailGroupOf(key: string): void {
+  const id = railGroupOf(key);
+  if (id !== null) setRailGroupClosed(id, false);
 }

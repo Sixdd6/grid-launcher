@@ -40,9 +40,9 @@ describe('romm-library (a): never connected, nothing installed', () => {
     await expect($(testId('library-rail-all'))).toHaveAttribute('aria-current', 'page');
     await expect($(testId('library-rail-romm-installed'))).not.toExist();
     await expect($(testId('library-rail-romm-discover'))).not.toExist();
-    // No PLATFORMS section.
+    // No PLATFORMS section: neither a plain heading nor a folding group.
     const headings = await browser.execute(() =>
-      [...document.querySelectorAll('[data-testid="library-rail"] .rail-heading')].map((h) => h.textContent?.trim()),
+      [...document.querySelectorAll('[data-testid="library-rail"] .rail-heading, [data-testid="library-rail"] .group-name')].map((h) => h.textContent?.trim()),
     );
     expect(headings).not.toContain('PLATFORMS');
   });

@@ -1,6 +1,6 @@
 // TV mode's RomM state that outlives a screen (TvStage remounts a tab on
 // every switch; TVRommStorefront README § Library › RomM group): which RomM
-// row of the Library rail is on show, its folder, the platform search, the
+// row of the Library rail is on show, the platform search, the
 // Discover cover last focused, and the server catalog (platforms, a
 // platform's games). The status itself is the shared `romm` store.
 import { api, type GameSummary } from '../../api';
@@ -12,12 +12,11 @@ import { rememberFocus, showTab } from '../nav.svelte';
 import { selEnd } from '../select.svelte';
 import { clearStoreView } from '../stores/storeState.svelte';
 import { selectRail } from '../../library/selection.svelte';
+import { setRailGroupClosed } from '../../stores/uiSettings.svelte';
 
 const state = $state<{
   /** The Library's RomM row on show, or null for another rail row. */
   view: RommRailKey | null;
-  /** The RomM folder, open by default (README: a folder like a store's). */
-  open: boolean;
   /** The search of RomM › Installed or a platform (Y); a new row clears it. */
   query: string;
   /** Discover's cover last focused (item 104), by `data-k`. */
@@ -25,14 +24,11 @@ const state = $state<{
   /** The Library was arrived on before Discover had covers: the first one
    *  to appear takes focus (item 417). */
   pendingArrive: boolean;
-}>({ view: null, open: true, query: '', discoverKey: null, pendingArrive: false });
+}>({ view: null, query: '', discoverKey: null, pendingArrive: false });
 
 export const tvRomm = {
   get view(): RommRailKey | null {
     return state.view;
-  },
-  get open(): boolean {
-    return state.open;
   },
   get query(): string {
     return state.query;
@@ -80,10 +76,6 @@ export function clearRommView(): void {
   state.view = null;
 }
 
-export function toggleRommFold(): void {
-  state.open = !state.open;
-}
-
 /**
  * Jumps the Library to a RomM row (Menu › Discover, Show in Library, the
  * start rule): pages close, the folder opens, the row is selected and
@@ -92,7 +84,7 @@ export function toggleRommFold(): void {
  */
 export async function showRommRow(key: RommRailKey): Promise<void> {
   selectRommView(key);
-  state.open = true;
+  setRailGroupClosed('romm', false);
   rememberFocus('tab:library', rommRowKey(key));
   await showTab('library', { again: true });
 }
@@ -166,7 +158,6 @@ export function loadAllGames(): Promise<AllGames> {
 /** Tests only. */
 export function resetTvRommForTest(): void {
   state.view = null;
-  state.open = true;
   state.query = '';
   state.discoverKey = null;
   state.pendingArrive = false;

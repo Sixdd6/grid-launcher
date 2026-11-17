@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { driveInfo, packSummary, row } from '../../fixtures.test-util';
-import { DEFAULT_FOLDS, folderHint, folderKey, folderOf, libraryRail, NO_DRIVES, railEntry, railKeys, railRowKey, storefrontGroups } from './libraryRail';
+import { folderHint, folderKey, folderOf, libraryRail, NO_DRIVES, railEntry, railKeys, railRowKey, storefrontGroups } from './libraryRail';
+import { railGroupClosed } from '../../../library/railFold';
 
 const NOW = 1_800_000_000;
 const DAY = 24 * 60 * 60;
@@ -39,7 +40,8 @@ describe('the TV Library rail (items 176–184, 420; TVRommStorefront: no Platfo
   });
 
   it('the drives folder starts open; the header hint is Close / Open; keys as the prototype', () => {
-    expect(DEFAULT_FOLDS).toEqual({ drives: true });
+    // Open unless the shared list (`[ui] rail_closed`) says closed.
+    expect(railGroupClosed([], 'drives')).toBe(false);
     expect(folderHint(true)).toBe('Close');
     expect(folderHint(false)).toBe('Open');
     expect(folderKey('drives')).toBe('fold-drives');

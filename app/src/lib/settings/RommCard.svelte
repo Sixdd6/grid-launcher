@@ -9,7 +9,7 @@
   import { api } from '../api';
   import Icon from '../Icon.svelte';
   import type { RailKey } from '../library/rail';
-  import { selectRail } from '../library/selection.svelte';
+  import { jumpToRail } from '../library/selection.svelte';
   import RommMark from '../romm/RommMark.svelte';
   import RommSignInDialog from '../romm/RommSignInDialog.svelte';
   import { isEmulatorsShelf } from '../romm/platformKey';
@@ -69,7 +69,7 @@
 
   function showInLibrary() {
     // `romm:installed` joins `RailKey` with the Library's RomM group (plan 0.3).
-    selectRail('romm:installed' as RailKey);
+    jumpToRail('romm:installed' as RailKey);
     navigation.go('library');
   }
 

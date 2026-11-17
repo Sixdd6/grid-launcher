@@ -147,6 +147,20 @@ html[data-ui='tv'] .tv .ri.fold .chev.open { transform: rotate(90deg); }
 html[data-ui='tv'] .tv .ri.fold .holds { color: var(--text-muted); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 html[data-ui='tv'] .tv .ri.sub { padding-left: 2.3rem; }
 html[data-ui='tv'] .tv .ri-empty { padding: .5rem .9rem .7rem 2.3rem; color: var(--text-muted); font-size: .95rem; }
+/* Library rail folders (TVRommStorefront README § Library › Folders,
+   prototype tvrailfold.css): each folder in its own inset panel, as on the
+   desktop (the `surface` fill), so one storefront never runs into the next.
+   The panel carries no `data-nav`: movement stays the rail's. */
+html[data-ui='tv'] .tv .rgrp { display: flex; flex-direction: column; gap: .2rem; margin-top: .45rem; padding: .2rem; border-radius: .8rem; background: var(--surface); }
+html[data-ui='tv'] .tv .rail hr + .rgrp { margin-top: 0; }
+html[data-ui='tv'] .tv .rgrp .ri-empty { padding-bottom: .5rem; }
+/* One line per heading; a closed folder's count sits after its flag. */
+html[data-ui='tv'] .tv .ri.fold { white-space: nowrap; }
+html[data-ui='tv'] .tv .ri.fold .n { font-weight: 400; }
+html[data-ui='tv'] .tv .ri.fold .sflag + .n { margin-left: .6rem; }
+/* A closed folder holding the selected row: the selected fill and bar
+   (`.sel`), the heading's own weight. */
+html[data-ui='tv'] .tv .ri.fold.holds { font-weight: 600; }
 html[data-ui='tv'] .tv .main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 html[data-ui='tv'] .tv .vh { flex: 0 0 auto; display: flex; align-items: center; gap: 1rem; padding: .9rem 1.2rem; background: var(--panel); border: 1px solid var(--line); border-radius: 1rem; flex-wrap: wrap; }
 html[data-ui='tv'] .tv .vh h1 { margin: 0; font-size: 1.6rem; font-weight: 600; color: var(--text-h); }

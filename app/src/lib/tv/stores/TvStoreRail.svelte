@@ -8,7 +8,9 @@
   // loads and `!` while it can't list games. One folder per store shown
   // (`storeRailGroups`: Epic Games, GOG). The RomM group (`romm`) sits among
   // them by name: Amazon Games, Epic Games, GOG, RomM, Steam
-  // (`STOREFRONT_ORDER`, TVRommStorefront README).
+  // (`STOREFRONT_ORDER`, TVRommStorefront README). Each folder sits in its own
+  // panel; open or closed is the list desktop and TV mode share
+  // (`[ui] rail_closed`), and a closed one shows its Installed count.
   import type { Snippet } from 'svelte';
   import { storefrontGroups } from '../tabs/library/libraryRail';
   import { availBlock, storeRailGroups, type StorePart } from '../../gamestores/rail';
@@ -17,7 +19,9 @@
   import { gameStores } from '../../stores/gameStores.svelte';
   import TvRailRow from '../ui/TvRailRow.svelte';
   import TvStoreMark from './TvStoreMark.svelte';
-  import { storeFoldKey, storeRowKey, toggleStoreFold, tvStores } from './storeState.svelte';
+  import { storeFoldKey, storeRowKey, tvStores } from './storeState.svelte';
+  import { toggleRailGroup, uiSettings } from '../../stores/uiSettings.svelte';
+  import { railClosedCount } from '../../library/railFold';
 
   let { onSelect, romm = undefined }: { onSelect: (source: StoreSource, part: StorePart) => void; romm?: Snippet } = $props();
 
@@ -38,13 +42,16 @@
   {:else}
   {@const st = gameStores.status(g.source)}
   {@const f = flag(st)}
-  {@const open = !tvStores.folded(g.source)}
+  {@const open = !uiSettings.railGroupClosed(g.source)}
+  {@const inst = g.rows[0].count}
+  <div class="rgrp" class:closed={!open} data-grp={g.source}>
   <TvRailRow
     k={storeFoldKey(g.source)}
     fold={open}
     holdsSel={!open && tvStores.view?.source === g.source}
+    closedCount={railClosedCount(g.source, inst.kind === 'number' ? inst.n : null)}
     testId={`tv-lib-fold-store-${g.source}`}
-    onToggle={() => toggleStoreFold(g.source)}
+    onToggle={() => toggleRailGroup(g.source)}
     ><TvStoreMark source={g.source} />{storeName(g.source)}{#if f}<span class="sflag" class:off={f === 'off'} data-testid={`tv-lib-store-flag-${g.source}`}>{f}</span>{/if}</TvRailRow
   >
   {#if open}
@@ -61,5 +68,6 @@
       >
     {/each}
   {/if}
+  </div>
   {/if}
 {/each}

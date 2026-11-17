@@ -347,6 +347,7 @@ describe('background blur', () => {
       tv_assignments: {},
       tv_welcomed: false,
       video_volume: 50,
+      rail_closed: [],
     });
   });
 
@@ -615,5 +616,69 @@ describe('Open GRID on and the TV keys', () => {
     expect(setUiSettings).toHaveBeenLastCalledWith(
       expect.objectContaining({ open_on: 'discover', tv_prompts: 'match', tv_assignments: { aa: 'xbox' } }),
     );
+  });
+});
+
+describe('the Library rail’s closed groups (rail_closed)', () => {
+  async function loadStore(stored: Record<string, unknown>, save: () => Promise<void> = () => Promise.resolve()) {
+    vi.resetModules();
+    vi.stubGlobal('localStorage', fakeStorage());
+    vi.stubGlobal('document', { documentElement: { dataset: {} } });
+    vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
+    const setUiSettings = vi.fn(save);
+    vi.doMock('../api', () => ({
+      api: {
+        getUiSettings: () =>
+          Promise.resolve({ theme: 'system', background_fade: 25, background_blur: 2, card_size_library: 'medium', card_size_server: 'medium', ...stored }),
+        setUiSettings,
+      },
+    }));
+    const store = await import('./uiSettings.svelte');
+    await store.initUiSettings();
+    return { store, setUiSettings };
+  }
+
+  it('every group is open on a config without the key', async () => {
+    const { store } = await loadStore({});
+    expect(store.uiSettings.railClosed).toEqual([]);
+    expect(store.uiSettings.railGroupClosed('gog')).toBe(false);
+  });
+
+  it('reads a malformed value as empty, with no error', async () => {
+    for (const rail_closed of ['gog', 3, { gog: true }, ['gog', 2]]) {
+      const { store } = await loadStore({ rail_closed });
+      expect(store.uiSettings.railClosed).toEqual([]);
+      expect(store.uiSettings.loaded).toBe(true);
+    }
+  });
+
+  it('writes the whole list on every toggle, unknown ids kept', async () => {
+    const { store, setUiSettings } = await loadStore({ rail_closed: ['future', 'drives'] });
+    expect(store.uiSettings.railGroupClosed('drives')).toBe(true);
+    store.toggleRailGroup('gog');
+    expect(store.uiSettings.railGroupClosed('gog')).toBe(true);
+    expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ rail_closed: ['future', 'drives', 'gog'], background_fade: 25 }));
+    store.toggleRailGroup('drives');
+    expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ rail_closed: ['future', 'gog'] }));
+    expect(setUiSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it('a jump opens only a closed group, and only that one', async () => {
+    const { store, setUiSettings } = await loadStore({ rail_closed: ['romm', 'gog'] });
+    store.openRailGroupOf('all');
+    store.openRailGroupOf('store:steam:installed');
+    expect(setUiSettings).not.toHaveBeenCalled();
+    store.openRailGroupOf('romm:discover');
+    expect(store.uiSettings.railClosed).toEqual(['gog']);
+    expect(setUiSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed save keeps the state for the session, silently', async () => {
+    const { store, setUiSettings } = await loadStore({}, () => Promise.reject(new Error('disk full')));
+    store.setRailGroupClosed('epic', true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(setUiSettings).toHaveBeenCalledTimes(1);
+    expect(store.uiSettings.railGroupClosed('epic')).toBe(true);
   });
 });

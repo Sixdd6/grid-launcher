@@ -180,6 +180,13 @@ STAGE_GROUPS=(
   # folders, filtering at once, the header, sort, live search, Details,
   # Install from drive and an unplugged drive.
   "tv-library:specs/tv-library.spec.ts"
+  # The Library rail's folding groups (RommStorefront README § Library rail ›
+  # Folding groups) on the tv-library profile, desktop starts: (a) every group
+  # open, RomM folded from its heading (flag, Installed count, holding the
+  # selection), Enter / Space on Backup drives, each toggle written to
+  # `[ui] rail_closed`; (b) relaunch: RomM still closed, then the TV button:
+  # the same folder closed in TV mode, and A opens it in both.
+  "rail-fold:specs/rail-fold-a.spec.ts specs/rail-fold-b.spec.ts"
   # TV mode's Details and its pages (docs/tv-mode/plan.md P9) on their own
   # fixtures (the cloud-saves games, a Windows game, a Nintendo 64 game with
   # no emulator) with saves that change when uploaded or deleted. (a)
@@ -848,7 +855,7 @@ seed_script_for_group() {
     tv-shell) printf '%s' "$E2E_DIR/seed/tv-shell-seed.mjs" ;;
     settings-romm) printf '%s' "$E2E_DIR/seed/settings-romm-seed.mjs" ;;
     tv-romm) printf '%s' "$E2E_DIR/seed/tv-romm-seed.mjs" ;;
-    tv-library) printf '%s' "$E2E_DIR/seed/tv-library-seed.mjs" ;;
+    tv-library|rail-fold) printf '%s' "$E2E_DIR/seed/tv-library-seed.mjs" ;;
     tv-details) printf '%s' "$E2E_DIR/seed/tv-details-seed.mjs" ;;
     tv-settings) printf '%s' "$E2E_DIR/seed/tv-settings-seed.mjs" ;;
     tv-large-platform) printf '%s' "$E2E_DIR/seed/tv-large-platform-seed.mjs" ;;
@@ -1302,7 +1309,7 @@ EOF
       # <data>/media (wdio.conf.ts turns this into
       # GRID_LAUNCHER_E2E_DRIVE_ROOTS, read by the e2e build only; the
       # specs plug and unplug drives there, e2e/helpers/drives.ts).
-      if [[ "$name" == "backups" || "$name" == "tv-library" || "$name" == "tv-startup" || "$name" == "tv-backups" || "$name" == "tv-layout" || "$name" == "gog-backups" || "$name" == "tv-gog" ]]; then
+      if [[ "$name" == "backups" || "$name" == "tv-library" || "$name" == "rail-fold" || "$name" == "tv-startup" || "$name" == "tv-backups" || "$name" == "tv-layout" || "$name" == "gog-backups" || "$name" == "tv-gog" ]]; then
         mkdir -p "$data_dir/media"
         export E2E_DRIVE_ROOTS="$data_dir/media"
       fi

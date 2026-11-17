@@ -241,7 +241,7 @@ and "Conflicts" lists at the end are not part of the build.
 - [x] 180. A folder's header row shows a chevron and the folder name; A opens and closes it, the chevron turns 90° when open, and the A hint reads "Open" or "Close" (src: README § Library; tvmode.js `folder`; tvmode.css `.ri.fold .chev.open`).
 - [x] 181. Right on a folder header still goes to the grid (src: README § Library).
 - [x] 182. A closed folder shows no rows, and the grid's header still names the filter (src: README § Library).
-- [x] 183. Both folders start open, and each stays as you left it for the session (src: README § Library; tvmode.js `S.folds`).
+- [x] 183. Every folder starts open; which are closed is remembered across restarts and shared with desktop mode (`[ui] rail_closed`, 2026-11-16; src: TVRommStorefront README § Library › Folders; was "for the session").
 - [x] 184. Rows inside a folder are indented (2.3rem) under its header (src: tvmode.css `.ri.sub`).
 - [x] 185. The header shows the filter name (1.6rem), "<n> games" ("1 game"), a "Search: <text>" chip while searching, then on the right chips for RT "Select", LT "Sort: <order>" and Y "Search" (src: tvmode.js `libPaint`).
 - [x] 186. The grid shows large covers; covers carry platform tags in All games, Recent and Updates, and not under a single platform (src: README § Library; tvmode.js `libPaint`).

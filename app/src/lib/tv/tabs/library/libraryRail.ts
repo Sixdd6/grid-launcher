@@ -12,11 +12,6 @@ import { inStorefrontOrder } from '../../../romm/order';
 
 export type FolderId = 'drives';
 
-/** Open / closed per folder; both start open and stay as left for the session (item 183). */
-export type Folds = Record<FolderId, boolean>;
-
-export const DEFAULT_FOLDS: Folds = { drives: true };
-
 export type LibraryRail = {
   /** All games, Recent, Updates. */
   filters: RailEntry[];

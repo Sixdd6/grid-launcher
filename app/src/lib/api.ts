@@ -84,6 +84,10 @@ export type UiSettings = {
   /** The video players' own volume, 0–100, shared by desktop and TV mode
    *  (`ui.video_volume`, default 50). Not the system volume. */
   video_volume: number;
+  /** The Library rail's closed groups, shared by desktop and TV mode
+   *  (`ui.rail_closed`): `drives`, a store, `romm`, or ids a newer GRID
+   *  wrote. A group not listed is open. Missing in an older config. */
+  rail_closed?: string[];
 };
 /** Where GRID opens: `automatic` (Server › Discover when connected, else the
  *  Library), or forced to `discover` or `library`. */

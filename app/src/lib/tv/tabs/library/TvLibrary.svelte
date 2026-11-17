@@ -35,7 +35,9 @@
   import TvGrid from '../../ui/TvGrid.svelte';
   import TvRail from '../../ui/TvRail.svelte';
   import TvRailRow from '../../ui/TvRailRow.svelte';
-  import { driveGamesCache, lib, selectLibRail, selectLibStore, toggleFold } from './library.svelte';
+  import { driveGamesCache, lib, selectLibRail, selectLibStore } from './library.svelte';
+  import { toggleRailGroup, uiSettings } from '../../../stores/uiSettings.svelte';
+  import { railClosedCount } from '../../../library/railFold';
   import type { DriveStoreGame, StoreGame } from '../../../api';
   import { isStoreRow } from '../../../gameKey';
   import { liveJobFor } from '../../../gamestores/jobs';
@@ -58,7 +60,7 @@
   import { focused, nav, scope, setFocus } from '../../nav.svelte';
   import { openSearchAll } from '../../pages/searchAll';
   import { INSTALLED_SEARCH_TITLE } from '../../romm/rommTv';
-  import { rommCatalog, rommRowKey, selectRommView, tvRomm } from '../../romm/tvRomm.svelte';
+  import { ROMM_FOLD_KEY, rommCatalog, rommRowKey, selectRommView, tvRomm } from '../../romm/tvRomm.svelte';
   import TvRommDiscover from './romm/TvRommDiscover.svelte';
   import TvRommInstalled from './romm/TvRommInstalled.svelte';
   import TvRommPlatform from './romm/TvRommPlatform.svelte';
@@ -130,7 +132,10 @@
     void tick().then(() => {
       if (nav.tab !== 'library' || nav.pages.length > 0 || nav.layers.length > 0) return;
       const root = scope();
-      const el = root?.querySelector<HTMLElement>(`[data-k="${to === null ? railRowKey('all') : rommRowKey(to)}"]`) ?? null;
+      // A closed RomM stays closed (the fallback never opens a folder): its
+      // heading, which holds the selection, takes the focus.
+      const k = to === null ? railRowKey('all') : uiSettings.railGroupClosed('romm') ? ROMM_FOLD_KEY : rommRowKey(to);
+      const el = root?.querySelector<HTMLElement>(`[data-k="${k}"]`) ?? null;
       if (el) setFocus(el, { instant: true });
     });
   });
@@ -452,7 +457,8 @@
   });
 
   const tid = (testId: string) => testId.replace(/^library-rail-/, 'tv-lib-rail-');
-  const holds = (id: FolderId) => !storeView && !rommKey && !lib.folds[id] && folderOf(selected.key) === id;
+  const holds = (id: FolderId) => !storeView && !rommKey && uiSettings.railGroupClosed(id) && folderOf(selected.key) === id;
+  let drivesOpen = $derived(!uiSettings.railGroupClosed('drives'));
   /** A desktop rail row is selected while no store or RomM view shows. */
   const ownSel = (key: string) => !storeView && !rommKey && selected.key === key;
   const coverKey = (g: TvGame) => `${driveKey !== null ? 'dg' : 'lg'}${g.id}`;
@@ -469,14 +475,23 @@
       <TvRailRow k={railRowKey(e.key)} selected={ownSel(e.key)} count={e.count} testId={tid(e.testId)} onSelect={() => selectLibRail(e.key)}>{e.label}</TvRailRow>
     {/each}
     <hr />
-    <TvRailRow k={folderKey('drives')} fold={lib.folds.drives} holdsSel={holds('drives')} testId="tv-lib-fold-drives" onToggle={() => toggleFold('drives')}>{FOLDER_LABELS.drives}</TvRailRow>
-    {#if lib.folds.drives}
-      {#each rail.drives as e (e.key)}
-        <TvRailRow k={railRowKey(e.key)} sub selected={ownSel(e.key)} count={rowCount(e.key, e.count)} testId={tid(e.testId)} onSelect={() => selectLibRail(e.key)}>{e.label}</TvRailRow>
-      {:else}
-        <div class="ri-empty" data-testid="tv-lib-no-drives">{NO_DRIVES}</div>
-      {/each}
-    {/if}
+    <div class="rgrp" class:closed={!drivesOpen} data-grp="drives">
+      <TvRailRow
+        k={folderKey('drives')}
+        fold={drivesOpen}
+        holdsSel={holds('drives')}
+        closedCount={railClosedCount('drives', rail.drives.length)}
+        testId="tv-lib-fold-drives"
+        onToggle={() => toggleRailGroup('drives')}>{FOLDER_LABELS.drives}</TvRailRow
+      >
+      {#if drivesOpen}
+        {#each rail.drives as e (e.key)}
+          <TvRailRow k={railRowKey(e.key)} sub selected={ownSel(e.key)} count={rowCount(e.key, e.count)} testId={tid(e.testId)} onSelect={() => selectLibRail(e.key)}>{e.label}</TvRailRow>
+        {:else}
+          <div class="ri-empty" data-testid="tv-lib-no-drives">{NO_DRIVES}</div>
+        {/each}
+      {/if}
+    </div>
     <TvStoreRail onSelect={selectLibStore} romm={rommGroup ? rommRail : undefined} />
   </TvRail>
   <div class="main" id={rommKey === 'romm:discover' && rommConnected ? 'srv-main' : undefined}>

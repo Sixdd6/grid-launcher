@@ -585,6 +585,7 @@ pub fn normalize_ui_settings(settings: UiSettings) -> UiSettings {
         tv_prompts: normalize_tv_prompts(&settings.tv_prompts),
         tv_welcomed: settings.tv_welcomed,
         video_volume: settings.video_volume.min(MAX_VIDEO_VOLUME),
+        rail_closed: normalize_rail_closed(settings.rail_closed),
         tv_assignments: settings
             .tv_assignments
             .into_iter()
@@ -596,6 +597,28 @@ pub fn normalize_ui_settings(settings: UiSettings) -> UiSettings {
             })
             .collect(),
     }
+}
+
+/// The longest list of closed rail groups kept, and the longest id: far past
+/// the six groups GRID has, so only junk is ever cut.
+const MAX_RAIL_CLOSED: usize = 64;
+const MAX_RAIL_ID_LEN: usize = 64;
+
+/// The Library rail's closed groups as stored: trimmed, blanks and repeats
+/// dropped, the order kept. Ids GRID doesn't know are kept (a future store).
+fn normalize_rail_closed(ids: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in ids {
+        let id = id.trim();
+        if id.is_empty() || id.len() > MAX_RAIL_ID_LEN || out.iter().any(|x| x == id) {
+            continue;
+        }
+        out.push(id.to_string());
+        if out.len() == MAX_RAIL_CLOSED {
+            break;
+        }
+    }
+    out
 }
 
 /// Open GRID on: `"discover"` or `"library"` force a place; anything else
@@ -3489,9 +3512,42 @@ mod ui_settings_tests {
                 tv_prompts: "match".to_string(),
                 tv_welcomed: false,
                 video_volume: 50,
+                rail_closed: Vec::new(),
                 tv_assignments: BTreeMap::new(),
             }
         );
+    }
+
+    /// The closed rail groups keep their order and the ids GRID doesn't
+    /// know; blanks and repeats go.
+    #[test]
+    fn rail_closed_drops_blanks_and_repeats_and_keeps_unknown_ids() {
+        let out = normalize_ui_settings(UiSettings {
+            rail_closed: vec![
+                " gog ".to_string(),
+                String::new(),
+                "drives".to_string(),
+                "gog".to_string(),
+                "future-store".to_string(),
+            ],
+            ..Default::default()
+        });
+        assert_eq!(out.rail_closed, vec!["gog", "drives", "future-store"]);
+    }
+
+    #[test]
+    fn rail_closed_is_capped() {
+        let ids: Vec<String> = (0..100).map(|i| format!("id{i}")).collect();
+        let out = normalize_ui_settings(UiSettings {
+            rail_closed: ids,
+            ..Default::default()
+        });
+        assert_eq!(out.rail_closed.len(), MAX_RAIL_CLOSED);
+        let long = normalize_ui_settings(UiSettings {
+            rail_closed: vec!["x".repeat(MAX_RAIL_ID_LEN + 1)],
+            ..Default::default()
+        });
+        assert!(long.rail_closed.is_empty());
     }
 
     /// The video volume is a percentage: a hand-edited or stale value past
