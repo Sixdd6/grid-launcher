@@ -380,6 +380,9 @@ impl Harness {
 
 // --- tests --------------------------------------------------------------------
 
+// Linux-only: GRID on Windows refuses a Linux installer instead
+// (`stores::offline` words it).
+#[cfg(not(windows))]
 #[tokio::test]
 async fn a_linux_installer_archive_stays_a_romm_game() {
     let h = harness().await;

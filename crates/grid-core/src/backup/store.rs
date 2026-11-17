@@ -621,8 +621,12 @@ mod tests {
 
     #[test]
     fn gog_save_locations_become_folder_strings() {
-        let install = Path::new("/games/GOG/Ashen Tide");
-        let prefix = Path::new("/games/GOG/Ashen Tide/prefix");
+        // An absolute path needs a drive on Windows.
+        let root = if cfg!(windows) { "C:" } else { "" };
+        let install_dir = format!("{root}/games/GOG/Ashen Tide");
+        let prefix_dir = format!("{root}/games/GOG/Ashen Tide/prefix");
+        let install = Path::new(&install_dir);
+        let prefix = Path::new(&prefix_dir);
         let folder = |raw: &str| gog_save_folder(raw, install, Some(prefix));
         assert_eq!(
             folder("<?APPLICATION_DATA_ROAMING?>/Ashen/Saves").as_deref(),
@@ -641,7 +645,7 @@ mod tests {
             Some("%LOCALAPPDATA%\\X")
         );
         assert_eq!(
-            folder("/games/GOG/Ashen Tide/profiles").as_deref(),
+            folder(&format!("{root}/games/GOG/Ashen Tide/profiles")).as_deref(),
             Some("<?INSTALL?>\\profiles")
         );
         assert_eq!(folder("<?APPLICATION_SUPPORT?>/Ashen"), None);

@@ -2196,10 +2196,9 @@ mod tests {
         let spawned = script.spawned.lock().unwrap().clone();
         assert_eq!(spawned.len(), 1);
         assert_eq!(
-            spawned[0].argv[1],
-            shared
-                .join("__redist/ISI/scriptinterpreter.exe")
-                .to_string_lossy()
+            Path::new(&spawned[0].argv[1]),
+            shared.join("__redist/ISI/scriptinterpreter.exe"),
+            "compared as paths: Windows writes it with `\\`"
         );
         assert_eq!(spawned[0].cwd, game, "it runs in the game folder");
         // Marked by its id (with the build in it), so an update's new id

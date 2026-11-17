@@ -704,6 +704,9 @@ mod tests {
         assert!(at("{UserDir}/../../x").is_none());
     }
 
+    // Wine prefixes live on case-sensitive Linux filesystems; on Windows the
+    // filesystem already ignores case, so the walk keeps the given spelling.
+    #[cfg(not(windows))]
     #[test]
     fn existing_parts_match_without_case() {
         let dir = tempfile::tempdir().unwrap();

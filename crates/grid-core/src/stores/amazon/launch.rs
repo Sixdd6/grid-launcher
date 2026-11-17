@@ -219,10 +219,17 @@ mod tests {
 
     const FAKE: &str = "FAKE-STORE-TOKEN-not-real";
 
+    /// The test game's folder: absolute on this OS (Windows needs a drive).
+    const GAME: &str = if cfg!(windows) {
+        "C:/games/Amazon Games/Fogline"
+    } else {
+        "/games/Amazon Games/Fogline"
+    };
+
     fn dry_run_json() -> String {
         format!(
-            r#"{{"command": {{"instruction": "/games/Amazon Games/Fogline/bin/Fogline.exe", "arguments": ["-windowed", "--lang=en", 3]}},
-              "game_directory": "/games/Amazon Games/Fogline",
+            r#"{{"command": {{"instruction": "{GAME}/bin/Fogline.exe", "arguments": ["-windowed", "--lang=en", 3]}},
+              "game_directory": "{GAME}",
               "env": {{"FUEL_DIR": "/d/stores/nile/nile/SDK/Amazon Games Services/Legacy",
                        "AMAZON_GAMES_SDK_PATH": "/d/stores/nile/nile/SDK/Amazon Games Services/AmazonGamesSDK",
                        "AMAZON_GAMES_FUEL_ENTITLEMENT_ID": "ent-1", "AMAZON_GAMES_FUEL_PRODUCT_SKU": "SKU1",
@@ -262,10 +269,7 @@ mod tests {
     fn the_dry_run_parses_amid_other_lines_and_keeps_only_fuel_env() {
         let stdout = format!("{FAKE}\n{}\n", dry_run_json());
         let run = parse_dry_run(&stdout).unwrap();
-        assert_eq!(
-            run.instruction,
-            "/games/Amazon Games/Fogline/bin/Fogline.exe"
-        );
+        assert_eq!(run.instruction, format!("{GAME}/bin/Fogline.exe"));
         assert_eq!(run.arguments, ["-windowed", "--lang=en"]);
         assert_eq!(run.env.len(), 5);
         assert!(run.env.iter().all(|(k, _)| FUEL_ENV.contains(&k.as_str())));
@@ -281,7 +285,7 @@ mod tests {
         let prep = prep_from_dry_run(run.clone(), &row("-windowed --lang=en", false));
         assert_eq!(
             prep.executable,
-            PathBuf::from("/games/Amazon Games/Fogline/bin/Fogline.exe")
+            PathBuf::from(format!("{GAME}/bin/Fogline.exe"))
         );
         assert_eq!(prep.working_dir, PathBuf::new(), "the row's is used");
         assert!(prep.game_args.is_empty(), "no doubling");
@@ -300,7 +304,7 @@ mod tests {
         assert_eq!(pinned.env.len(), 5);
 
         let mut outside = run;
-        outside.instruction = "/games/Amazon Games/Fogline/../../evil.exe".into();
+        outside.instruction = format!("{GAME}/../../evil.exe");
         assert_eq!(
             prep_from_dry_run(outside, &row("", false)).executable,
             PathBuf::new()
