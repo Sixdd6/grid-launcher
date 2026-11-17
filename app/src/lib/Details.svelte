@@ -617,7 +617,15 @@
 
         <div class="tabpanel" role="tabpanel">
           {#if activeTab === 'overview'}
-            <OverviewTab {description} {detail} {serverTitles} {installedNow} {installedVersion} {serverVersion} />
+            <OverviewTab
+              {description}
+              {detail}
+              {serverTitles}
+              {installedNow}
+              {installedVersion}
+              {serverVersion}
+              installedDlc={d.installedDlc}
+            />
           {:else if activeTab === 'media'}
             <MediaTab
               items={mediaItems}

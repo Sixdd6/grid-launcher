@@ -224,6 +224,23 @@ describe('DetailsStore', () => {
       expect(api.contentAvailability).toHaveBeenCalledTimes(2);
     });
 
+    it('fetches content availability for a game installed by its GOG installer, and not for other native games', async () => {
+      api.contentAvailability.mockResolvedValue({ update: false, dlc: true, installed_dlc: ['San Rafaela.7z'] });
+      state.rows = [row({ title: 'Cartel Tycoon', platform: 'Windows', platform_slug: 'win', installed_by_installer: true })];
+      const s = subject({ name: 'Cartel Tycoon', platformName: 'Windows', platformSlug: 'win' });
+      const d = await store(s);
+      d.refreshContentAvailability();
+      await vi.waitFor(() => expect(d.contentAvailability).not.toBeNull());
+      expect(d.buttons).toEqual({ update: false, dlc: true });
+      expect(d.installedDlc).toEqual(['San Rafaela.7z']);
+
+      state.rows = [row({ title: 'Cartel Tycoon', platform: 'Windows', platform_slug: 'win' })];
+      const plain = await store(s);
+      plain.refreshContentAvailability();
+      expect(api.contentAvailability).toHaveBeenCalledTimes(1);
+      expect(plain.installedDlc).toBeNull();
+    });
+
     it('loads both cloud panels for a game with a server id', async () => {
       const d = await store();
       d.loadCloudPanelInfo();

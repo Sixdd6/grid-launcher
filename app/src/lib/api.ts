@@ -474,6 +474,9 @@ export type DownloadKind =
   | 'ps4_content'
   | 'xbox360_content'
   | 'native_update'
+  // One server DLC file (category `dlc`) of a game installed by running its
+  // GOG installer: its installer runs into the game.
+  | 'gog_dlc'
   | 'emulator'
   | 'compat_tool'
   | 'firmware'
@@ -1208,7 +1211,9 @@ export type CloudSettings = {
 
 /// Which extra content kinds the server lists files for, from
 /// `client.rom_detail` — not the registry.
-export type ContentAvailability = { update: boolean; dlc: boolean };
+// `installed_dlc`: for a game installed by running its GOG installer, the
+// server's DLC files (by name) already installed into it; empty otherwise.
+export type ContentAvailability = { update: boolean; dlc: boolean; installed_dlc?: string[] };
 
 export type ContentKind = 'update' | 'dlc';
 

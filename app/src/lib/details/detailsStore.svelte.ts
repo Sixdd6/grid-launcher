@@ -161,6 +161,14 @@ export class DetailsStore {
   installedRow = $derived<InstalledGame | null>(
     installed.list.find((row) => matchesInstalled(row, this.summary, this.subject.platformName)) ?? null,
   );
+  /** Installed by running its GOG installer: its server DLC files install
+   *  through Install DLC, like a PS4 / Xbox 360 game's. */
+  byGogInstaller = $derived(this.installedNow && this.installedRow?.installed_by_installer === true);
+  /** The DLC files installed into a GOG-installer game (the Content fact's
+   *  "(1 installed)"); `null` for every other game. */
+  installedDlc = $derived<string[] | null>(
+    this.byGogInstaller && this.contentAvailability !== null ? (this.contentAvailability.installed_dlc ?? []) : null,
+  );
   // A row the slug backfill has not reached borrows the slug the ROM detail
   // carries, so the cloud commands see the same nativeness as the screen.
   cloudGame = $derived<InstalledGame>(
@@ -313,11 +321,12 @@ export class DetailsStore {
       .catch(() => (this.installBlocked = ''));
   }
 
-  /** Fetched once the game is installed on a content platform, and again
-   *  right after a live install for it finishes. */
+  /** Fetched once the game is installed on a content platform (or by
+   *  running its GOG installer), and again right after a live install for
+   *  it finishes. */
   refreshContentAvailability(): void {
     const romId = this.subject.romId;
-    if (romId === null || !this.installedNow || !this.isContent) {
+    if (romId === null || !this.installedNow || !(this.isContent || this.byGogInstaller)) {
       this.contentAvailability = null;
       this.wasLive = this.liveEntry !== undefined;
       return;
@@ -403,7 +412,8 @@ export class DetailsStore {
     this.cancelPending = false;
   }
 
-  /** Queues a PS4 / Xbox 360 update or DLC. */
+  /** Queues a PS4 / Xbox 360 update or DLC, or a GOG-installer game's
+   *  missing DLC files. */
   async installContent(kind: ContentKind): Promise<void> {
     const romId = this.subject.romId;
     if (romId === null) return;

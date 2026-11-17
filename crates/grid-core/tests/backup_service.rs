@@ -145,15 +145,33 @@ impl Harness {
         files: &[(i64, &str, &[u8], String)],
         delay_ms: u64,
     ) {
+        self.mount_game_with(id, name, slug, fs_name, files, &[], delay_ms)
+            .await;
+    }
+
+    /// [`Self::mount_game_hashed`], with the files named in `dlc` listed as
+    /// RomM category `dlc`.
+    #[allow(clippy::too_many_arguments)]
+    async fn mount_game_with(
+        &self,
+        id: i64,
+        name: &str,
+        slug: &str,
+        fs_name: &str,
+        files: &[(i64, &str, &[u8], String)],
+        dlc: &[&str],
+        delay_ms: u64,
+    ) {
         let file_json: Vec<serde_json::Value> = files
             .iter()
             .map(|(file_id, file_name, body, md5)| {
+                let is_dlc = dlc.contains(file_name);
                 json!({
                     "id": file_id,
                     "file_name": file_name,
                     "file_size_bytes": body.len(),
-                    "is_top_level": true,
-                    "category": null,
+                    "is_top_level": !is_dlc,
+                    "category": if is_dlc { json!("dlc") } else { serde_json::Value::Null },
                     "md5_hash": md5,
                 })
             })
@@ -526,6 +544,59 @@ async fn backs_up_a_single_file_game_and_a_native_game() {
         .find(|e| e.batch == again.batch)
         .unwrap();
     assert_eq!(row.error, "Already on Couch kit");
+}
+
+/// A game installed by running its GOG installer: a backup of the
+/// server's files takes the DLC files installed into it, and only those.
+#[tokio::test]
+async fn a_gog_installer_games_backup_takes_its_installed_dlc_files() {
+    let h = Harness::new().await;
+    let archive = zip_bytes(&[("setup_cartel_run.exe", b"MZ fake")]);
+    let rafaela = zip_bytes(&[("setup_san_rafaela.exe", b"MZ dlc")]);
+    let tide = zip_bytes(&[("setup_tide.exe", b"MZ dlc 2")]);
+    let files: Vec<(i64, &str, &[u8], String)> = [
+        (31, "Cartel.zip", archive.as_slice()),
+        (32, "San_Rafaela.zip", rafaela.as_slice()),
+        (33, "Tide.zip", tide.as_slice()),
+    ]
+    .into_iter()
+    .map(|(id, name, body)| (id, name, body, md5_hex(body)))
+    .collect();
+    h.mount_game_with(
+        3,
+        "Cartel Run",
+        "win",
+        "Cartel Run",
+        &files,
+        &["San_Rafaela.zip", "Tide.zip"],
+        0,
+    )
+    .await;
+    h.registry
+        .upsert(&InstalledGame {
+            title: "Cartel Run".into(),
+            platform: "WIN".into(),
+            platform_slug: "win".into(),
+            rom_id: Some(3),
+            installed_by_installer: true,
+            romm_dlc_files: r#"["San_Rafaela.zip"]"#.into(),
+            ..Default::default()
+        })
+        .unwrap();
+    h.service
+        .start_backup(
+            h.client.clone(),
+            h.drive(),
+            Harness::items(&[(3, "Cartel Run")]),
+        )
+        .unwrap();
+    let row = h.wait_terminal(3).await;
+    assert_eq!(row.status, DownloadStatus::Completed, "{row:#?}");
+    let pack = h.pack();
+    let game = pack.find_game(&h.server.uri(), 3).expect("game 3 indexed");
+    let names: Vec<&str> = game.files.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, vec!["Cartel.zip", "San_Rafaela.zip"]);
+    assert_eq!(game.files[1].category, "dlc");
 }
 
 /// RomM states a zipped ROM's MD5 as the MD5 of the ROM inside, not of

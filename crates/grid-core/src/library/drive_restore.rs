@@ -349,6 +349,10 @@ pub fn restored_record(
             record.native_launch_parameters = row.native_launch_parameters.clone();
             record.native_launch_source = row.native_launch_source.clone();
             record.native_working_dir = row.native_working_dir.clone();
+            // A game installed by running its GOG installer, with the DLC
+            // installed into it: the tree holds both.
+            record.installed_by_installer = row.installed_by_installer;
+            record.romm_dlc_files = row.romm_dlc_files.clone();
             if cfg!(not(windows)) {
                 record.native_wineprefix = path_string(&dest.join(WINE_PREFIX_DIR));
             }

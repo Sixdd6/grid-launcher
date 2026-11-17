@@ -470,6 +470,15 @@ pub struct PackInstalledRow {
     /// that kept its download inside its folder), else empty.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub archive_path: String,
+    /// The game was installed by running its GOG installer (a RomM row's
+    /// `installed_by_installer`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub installed_by_installer: bool,
+    /// The server DLC files whose GOG installers ran into the install (a
+    /// RomM row's `romm_dlc_files`, a JSON array of file names); their
+    /// files are in the tree.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub romm_dlc_files: String,
 }
 
 /// One file of a game, as the server lists it.

@@ -44,8 +44,10 @@ pub const NATIVE_GAME_SUFFIXES: [&str; 5] = ["exe", "bat", "cmd", "ps1", "sh"];
 // Archive / game.json selection
 // ---------------------------------------------------------------------------
 
-/// Picks the server file entry holding a native game's archive: `game.json`
-/// and entries whose name contains a path separator are never candidates.
+/// Picks the server file entry holding a native game's archive: `game.json`,
+/// entries whose name contains a path separator, and update or DLC files
+/// (RomM category `update` / `dlc`, which install after the game) are never
+/// candidates.
 /// Prefers the first candidate whose case-folded name ends with a known
 /// archive suffix, else falls back to the first remaining candidate.
 /// Matches `select_native_archive_entry` (`install_metadata.py:217`).
@@ -57,6 +59,7 @@ pub fn select_archive(files: &[RomFile]) -> Option<&RomFile> {
                 && f.file_name.to_lowercase() != "game.json"
                 && !f.file_name.contains('/')
                 && !f.file_name.contains('\\')
+                && crate::library::content::ContentKind::parse(&f.category).is_none()
         })
         .collect();
 
@@ -980,6 +983,17 @@ mod tests {
         let files = vec![rom_file("game.iso", true), rom_file("extra.txt", true)];
         let selected = select_archive(&files).unwrap();
         assert_eq!(selected.file_name, "game.iso");
+    }
+
+    #[test]
+    fn select_archive_skips_dlc_and_update_files() {
+        let mut dlc = rom_file("A Pack.7z", false);
+        dlc.category = "dlc".into();
+        let mut update = rom_file("Aa Patch.7z", true);
+        update.category = "update".into();
+        let files = vec![dlc, update, rom_file("Cartel Tycoon.7z", true)];
+        let selected = select_archive(&files).unwrap();
+        assert_eq!(selected.file_name, "Cartel Tycoon.7z");
     }
 
     #[test]

@@ -242,6 +242,13 @@ const CONTENT_UNSUPPORTED_PLATFORM: &str =
 /// A native update needs the directory it merges into.
 const NO_NATIVE_INSTALL_DIR: &str =
     "Game install directory could not be found. Reinstall the game and try again.";
+/// Install DLC on a game that wasn't installed by running its GOG installer
+/// (and isn't a PS4 or Xbox 360 game).
+const NO_GOG_DLC_FLOW: &str =
+    "DLC installs only for games installed by running their GOG installer";
+/// Install DLC when every DLC file the server holds is installed already.
+const NO_GOG_DLC_FILES: &str =
+    "No DLC files that aren't installed yet were found for this title in server metadata.";
 /// What every "this game is not in the registry" failure says.
 pub const NOT_INSTALLED: &str = "not installed";
 
@@ -335,6 +342,10 @@ pub enum InstallMode {
     Ps4Content,
     Xbox360Content,
     NativeUpdate,
+    /// One server DLC file (RomM category `dlc`) of a game GRID installed by
+    /// running its GOG installer: the file's own GOG installer runs into the
+    /// installed game ([`specials::gog_installer::install_server_dlc`]).
+    GogDlc,
 }
 
 impl InstallMode {
@@ -346,6 +357,7 @@ impl InstallMode {
             InstallMode::Ps4Content => "ps4_content",
             InstallMode::Xbox360Content => "xbox360_content",
             InstallMode::NativeUpdate => "native_update",
+            InstallMode::GogDlc => "gog_dlc",
         }
     }
 }
@@ -1023,7 +1035,10 @@ fn job_extracts(job: &InstallJob) -> bool {
                 &job.primary_archive,
             ) != BaseRoute::Downloaded
         }
-        InstallMode::Ps4Content | InstallMode::Xbox360Content | InstallMode::NativeUpdate => true,
+        InstallMode::Ps4Content
+        | InstallMode::Xbox360Content
+        | InstallMode::NativeUpdate
+        | InstallMode::GogDlc => true,
     }
 }
 
@@ -1199,6 +1214,86 @@ fn content_job(
         title,
         JobPayload::Game(job),
     )
+}
+
+/// Removes `dir` when it is an empty folder (`None`: nothing).
+fn remove_empty_dir(dir: Option<&Path>) {
+    if let Some(dir) = dir {
+        let _ = fs::remove_dir(dir);
+    }
+}
+
+/// Whether `row` is a RomM game GRID installed by running its GOG
+/// installer, whose server DLC files install through
+/// [`InstallMode::GogDlc`].
+fn is_gog_installer_row(row: &InstalledGame) -> bool {
+    row.installed_by_installer && !row.is_store() && row.is_native()
+}
+
+/// The game's own home directory (`<platform>/<title>`): the row's
+/// `native_game_dir`, else its install folder's parent.
+fn native_home(row: &InstalledGame) -> PathBuf {
+    match row.native_game_dir.trim() {
+        "" => Path::new(row.extracted_dir.trim())
+            .parent()
+            .unwrap_or(Path::new(""))
+            .to_path_buf(),
+        recorded => PathBuf::from(recorded),
+    }
+}
+
+/// Where one DLC file of the game at `home` is downloaded: a folder of its
+/// own under `<home>/dlc/`, so a DLC that installs while the next one
+/// downloads never sees it, and uninstalling the game removes whatever a
+/// failed run kept.
+fn gog_dlc_dir(home: &Path, file: &RomFile) -> PathBuf {
+    home.join("dlc").join(sanitize_component(
+        &content::dlc_label(&file.file_name),
+        "dlc",
+    ))
+}
+
+/// Builds the job for one server DLC file of a game installed by running
+/// its GOG installer ([`InstallMode::GogDlc`]): the admission key, the
+/// Downloads row's title (`<game> (<file stem>)`, like the console content
+/// rows' `<game> (dlc)`), and the payload. The file is fetched by its own
+/// `file_ids`, so the server sends it as it is.
+fn gog_dlc_job(
+    detail: &RomDetail,
+    file: &RomFile,
+    home: &Path,
+    source: GameSource,
+) -> Result<(JobKey, String, JobPayload), LibraryError> {
+    let dest = gog_dlc_dir(home, file).join(&file.file_name);
+    let target = content_target(detail.id, file, dest.clone(), file.file_size_bytes);
+    if let GameSource::Drive(drive) = &source {
+        drive.copy_files(&[file.id], std::slice::from_ref(&target))?;
+    }
+    let job = InstallJob {
+        space: None,
+        rom_id: detail.id,
+        mode: InstallMode::GogDlc,
+        content_kind: Some(ContentKind::Dlc),
+        file_ids: vec![file.id],
+        detail: detail.clone(),
+        targets: vec![target],
+        primary_archive: dest,
+        multi_file_game_dir: None,
+        launch_entry: file.file_name.clone(),
+        native_game_dir: Some(home.to_path_buf()),
+        game_json_target: None,
+        source,
+        restore: None,
+    };
+    let title = format!("{} ({})", detail.name, content::dlc_label(&file.file_name));
+    Ok((
+        JobKey::GogDlc {
+            rom_id: detail.id,
+            file_id: file.id,
+        },
+        title,
+        JobPayload::Game(job),
+    ))
 }
 
 // --- service ----------------------------------------------------------------
@@ -1798,7 +1893,10 @@ impl InstallService {
     ) -> Result<(), LibraryError> {
         self.check_library_gate()?;
         let library = self.library_root()?;
-        self.current_row(rom_id)?;
+        let row = self.current_row(rom_id)?;
+        if kind == ContentKind::Dlc && is_gog_installer_row(&row) {
+            return self.install_gog_dlc(client, rom_id, None).await;
+        }
         let detail = client.rom_detail(rom_id).await?;
         let Some(mode) = content_mode(&detail.platform_name) else {
             return Err(LibraryError::Extract(
@@ -1811,6 +1909,83 @@ impl InstallService {
         }
         let (key, title, payload) = content_job(&library, &detail, kind, mode, file_ids, client);
         self.admit(key, &title, &detail.platform_name, mode.kind(), payload)
+    }
+
+    /// Queues the server DLC files of a game GRID installed by running its
+    /// GOG installer that are not installed into it yet (every one, or only
+    /// `only`, a file id: a retry), one job per file, in server order. Each
+    /// runs its GOG installer into the game after the one before it.
+    ///
+    /// `Err` covers every pre-admission failure: no row, a row that was not
+    /// installed by its GOG installer, an unreachable server, or no DLC file
+    /// left to install. A file already queued is skipped silently.
+    pub async fn install_gog_dlc(
+        self: &Arc<Self>,
+        client: Arc<RommClient>,
+        rom_id: i64,
+        only: Option<i64>,
+    ) -> Result<(), LibraryError> {
+        self.check_library_gate()?;
+        self.refuse_while_backing_up(rom_id)?;
+        let row = self.current_row(rom_id)?;
+        if !is_gog_installer_row(&row) {
+            return Err(LibraryError::Extract(NO_GOG_DLC_FLOW.to_string()));
+        }
+        let detail = client.rom_detail(rom_id).await?;
+        let admitted = self.admit_gog_dlc(&row, &detail, &GameSource::Server(client), only)?;
+        if admitted == 0 {
+            return Err(LibraryError::Extract(NO_GOG_DLC_FILES.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Admits one [`InstallMode::GogDlc`] job per DLC file of `detail` not
+    /// yet installed into `row` (only `only`, when given), and returns how
+    /// many it admitted or found already queued. From a backup drive, only
+    /// the files the drive holds.
+    fn admit_gog_dlc(
+        self: &Arc<Self>,
+        row: &InstalledGame,
+        detail: &RomDetail,
+        source: &GameSource,
+        only: Option<i64>,
+    ) -> Result<usize, LibraryError> {
+        let installed = content::installed_dlc_names(&row.romm_dlc_files);
+        let home = native_home(row);
+        let mut admitted = 0;
+        for file in content::dlc_files_to_install(&detail.files, &installed) {
+            if only.is_some_and(|id| id != file.id) {
+                continue;
+            }
+            if let GameSource::Drive(drive) = source {
+                if !drive.files.contains_key(&file.id) {
+                    continue;
+                }
+            }
+            let (key, title, payload) = gog_dlc_job(detail, file, &home, source.clone())?;
+            self.admit(
+                key,
+                &title,
+                &detail.platform_name,
+                InstallMode::GogDlc.kind(),
+                payload,
+            )?;
+            admitted += 1;
+        }
+        Ok(admitted)
+    }
+
+    /// After a game installed by running its GOG installer: its server DLC
+    /// files are queued behind it (the base still holds the finalize slot,
+    /// so they run after it, one after another). Admission failures are
+    /// logged, never surfaced: the game itself is installed.
+    fn queue_gog_dlc(self: &Arc<Self>, job: &InstallJob, record: &InstalledGame) {
+        if record.rom_id != Some(job.rom_id) {
+            return;
+        }
+        if let Err(error) = self.admit_gog_dlc(record, &job.detail, &job.source, None) {
+            tracing::warn!(%error, "the game's DLC was not queued");
+        }
     }
 
     /// Starts (or queues) an update install for an already installed native
@@ -3460,6 +3635,12 @@ impl InstallService {
                 self.dismiss(entry_id);
                 self.install_native_update(client, rom_id).await
             }
+            Some(JobKey::GogDlc { rom_id, file_id }) => {
+                let client =
+                    client.ok_or_else(|| LibraryError::Registry("not connected".to_string()))?;
+                self.dismiss(entry_id);
+                self.install_gog_dlc(client, rom_id, Some(file_id)).await
+            }
             // An external entry is somebody else's transfer: this service
             // never moved its bytes and has no plan to restart. The owner
             // re-requests it instead, which creates a new row.
@@ -4433,6 +4614,7 @@ impl InstallService {
             InstallMode::Ps4Content => self.finalize_ps4_content(id, job, warning),
             InstallMode::Xbox360Content => self.finalize_xbox360_content(id, job, warning),
             InstallMode::NativeUpdate => self.finalize_native_update(id, job, warning),
+            InstallMode::GogDlc => self.finalize_gog_dlc(id, job, warning),
         }
     }
 
@@ -4543,6 +4725,12 @@ impl InstallService {
             self.queue_xbox360_content(job);
         }
 
+        // A game installed by running its GOG installer: its DLC files on
+        // the server (or on the backup drive) install after it.
+        if is_gog_installer_row(&record) {
+            self.queue_gog_dlc(job, &record);
+        }
+
         // An Emulators-platform package is an emulator build: register and
         // configure it now, while a served-as-is archive still exists. The
         // registry row above stays — cloud scope reads it.
@@ -4636,6 +4824,89 @@ impl InstallService {
         if !applied.warning.is_empty() {
             append_warning(warning, &applied.warning);
         }
+        Ok(())
+    }
+
+    /// Runs one server DLC file's GOG installer into the installed game
+    /// ([`InstallMode::GogDlc`]) and records the file on the game's row.
+    ///
+    /// The file is unpacked next to itself when it is an archive (else it is
+    /// the installer), the installer runs with the Downloads row showing its
+    /// phases, and the unpacked copy is removed whatever happens. On success
+    /// the download goes too. A failure never touches the game: an
+    /// unrecognised installer or one whose setup window exited with an error
+    /// removes the download, any other failure keeps it in the game's
+    /// folder, and the error shows on the row.
+    fn finalize_gog_dlc(
+        &self,
+        id: u64,
+        job: &InstallJob,
+        warning: &mut String,
+    ) -> Result<(), LibraryError> {
+        let row = self.current_row(job.rom_id)?;
+        if !is_gog_installer_row(&row) {
+            return Err(LibraryError::Extract(NO_GOG_DLC_FLOW.to_string()));
+        }
+        let archive = job.primary_archive.as_path();
+        let folder = archive.parent().unwrap_or(Path::new("")).to_path_buf();
+        let staging = folder.join("installer");
+        let _ = fs::remove_dir_all(&staging);
+        let installer = if is_extractable_archive(archive) {
+            let mut progress = |processed, total| self.on_install_progress(id, processed, total);
+            extract_archive(archive, &staging, &mut progress)?;
+            crate::stores::offline::detect_in_dir(&staging)
+        } else {
+            crate::stores::offline::detect_in_dir(&folder)
+        };
+        let Some(installer) = installer else {
+            let _ = fs::remove_dir_all(&folder);
+            remove_empty_dir(folder.parent());
+            return Err(LibraryError::InstallerUnrecognised {
+                file: job.launch_entry.clone(),
+            });
+        };
+        let compat = Config::load(&self.config_path)
+            .map(|config| config.default_compat_tool)
+            .unwrap_or_default();
+        let (spawner, watch) = self.installer_runner.read().unwrap().clone();
+        let cancel = self.cancel_flags.lock().unwrap().get(&id).cloned();
+        let wizard_allowed = (self.wizard_allowed())();
+        let mut sink = ServiceSink {
+            service: self,
+            id,
+            cancel: cancel.as_deref(),
+        };
+        let result = specials::gog_installer::install_server_dlc(
+            &specials::gog_installer::DlcRun {
+                installer: &installer,
+                base: &row,
+                compat: &compat,
+                wizard_allowed,
+                spawner: spawner.as_ref(),
+                watch,
+            },
+            &mut sink,
+        );
+        let _ = fs::remove_dir_all(&staging);
+        if let Err(error) = result {
+            if specials::gog_installer::removes_download(&error) {
+                let _ = fs::remove_dir_all(&folder);
+                remove_empty_dir(folder.parent());
+            }
+            return Err(error);
+        }
+        // Read again: another DLC of the game may have been recorded since
+        // this job started.
+        let current = self.current_row(job.rom_id)?;
+        let files = content::with_installed_dlc(&current.romm_dlc_files, &job.launch_entry);
+        self.registry.update_romm_dlc_files(job.rom_id, &files)?;
+        if fs::remove_dir_all(&folder).is_err() && folder.exists() {
+            append_warning(
+                warning,
+                &format!("could not delete archive: {}", archive.display()),
+            );
+        }
+        remove_empty_dir(folder.parent());
         Ok(())
     }
 

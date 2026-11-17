@@ -26,9 +26,7 @@ use grid_core::launch::profiles::load_profiles;
 use grid_core::launch::selection::emulator_entry_by_name;
 use grid_core::launch::template::host_os;
 use grid_core::launch::umu::{self, UmuRunStatus};
-use grid_core::library::content::{
-    content_availability as compute_availability, ContentAvailability, ContentKind,
-};
+use grid_core::library::content::{content_availability_for, ContentAvailability, ContentKind};
 use grid_core::library::paths::{archive_name, candidate_archives, library_root};
 use grid_core::library::specials::native;
 use serde::Serialize;
@@ -71,7 +69,9 @@ pub async fn install_native_update(state: State<'_, AppState>, rom_id: i64) -> R
 
 /// Which extra content kinds the server lists files for. A live fetch rather
 /// than a registry read: the answer changes when the server's file list does,
-/// and the details view asks for it only when it is open.
+/// and the details view asks for it only when it is open. A game installed
+/// by running its GOG installer offers the DLC files not installed into it
+/// yet, and says which are ([`content_availability_for`]).
 #[tauri::command]
 pub async fn content_availability(
     state: State<'_, AppState>,
@@ -79,7 +79,19 @@ pub async fn content_availability(
 ) -> Result<ContentAvailability, String> {
     let client = state.session.client().ok_or("not connected")?;
     let detail = client.rom_detail(rom_id).await.map_err(err)?;
-    Ok(compute_availability(&detail.files))
+    let row = match state.install.as_ref() {
+        Ok(install) => {
+            let registry = install.registry();
+            tokio::task::spawn_blocking(move || {
+                registry.find_key(&grid_core::stores::GameKey::Rom(rom_id))
+            })
+            .await
+            .map_err(|e| format!("content_availability did not finish: {e}"))?
+            .map_err(err)?
+        }
+        Err(_) => None,
+    };
+    Ok(content_availability_for(&detail.files, row.as_ref()))
 }
 
 /// Why the primary Install button cannot install this game, or `""`. Config

@@ -59,6 +59,11 @@
 // returns every session the mock has stored, each with its id, so a spec
 // can assert on what reached the "server".
 //
+// `POST /__e2e__/hide-files` (outside `/api/`, no auth, not logged), used by
+// the `gog-romm-installer` group's DLC spec: POST { rom_id, category, hidden }
+// leaves that rom's files of that category out of its detail while hidden
+// (DLC files the server didn't hold yet when the game was installed).
+//
 // `GET /__e2e__/requests` (outside `/api/`, no auth) returns the live
 // request log as JSON so a spec can assert on what the mock received
 // (query params, parsed multipart parts, JSON bodies) WHILE the mock is
@@ -100,7 +105,17 @@ import { fileURLToPath } from "node:url";
 import { readFile, writeFile } from "node:fs/promises";
 
 import { buildStfs, buildZip } from "./archives.mjs";
-import { buildLinuxSh, buildUnrecognisedExe } from "../fake-tools/gog-installers.mjs";
+import {
+  buildLinuxDlcSh,
+  buildLinuxSh,
+  buildUnrecognisedExe,
+  EMBER_PASS,
+  HERON_GATE,
+  KESTREL_REACH,
+  LANTERN_ROW,
+  NIGHT_MARKET,
+  TIDE_LINES,
+} from "../fake-tools/gog-installers.mjs";
 import { PCSX2_APPIMAGE_BYTES, PCSX2_ASSET_NAME } from "./mock-forge.mjs";
 
 export const FAKE_TOKEN = "FAKE-E2E-TOKEN-not-real";
@@ -260,10 +275,23 @@ function buildContentFixtures() {
   // fixtures-gog): a Linux `.sh`, and an `.exe` with no GOG game info.
   const gogShZipBytes = buildZip([{ name: "wren_hollow_1_0_3_12345.sh", data: buildLinuxSh() }]);
   const gogBadZipBytes = buildZip([{ name: "setup_iron_lullaby.exe", data: buildUnrecognisedExe() }]);
+  // RomM games with a GOG installer and their own DLC files (category
+  // `dlc`), each DLC file a zipped GOG Linux DLC installer
+  // (gog-romm-installer group, gog-romm-dlc.spec.ts).
+  const shZip = (file, bytes) => buildZip([{ name: file, data: bytes }]);
+  const gogDlcBytes = {
+    "kestrel_reach_gog.zip": shZip("kestrel_reach_1_2.sh", buildLinuxSh(KESTREL_REACH)),
+    "ember pass.zip": shZip("kestrel_reach_ember_pass_1_0.sh", buildLinuxDlcSh(EMBER_PASS)),
+    "tide lines.zip": shZip("kestrel_reach_tide_lines_1_0.sh", buildLinuxDlcSh(TIDE_LINES)),
+    "heron_gate_gog.zip": shZip("heron_gate_0_9.sh", buildLinuxSh(HERON_GATE)),
+    "night market.zip": shZip("heron_gate_night_market_1_0.sh", buildLinuxDlcSh(NIGHT_MARKET)),
+    "lantern row.zip": shZip("heron_gate_lantern_row_1_0.sh", buildLinuxDlcSh(LANTERN_ROW)),
+  };
 
   return {
     gogShZipBytes,
     gogBadZipBytes,
+    gogDlcBytes,
     zipBytes,
     bigZipBytes,
     m3uBytes,
@@ -298,6 +326,7 @@ function contentForFile(fileName, content) {
   if (fileName === "disc1.bin") return content.disc1Bytes;
   if (lower === "wren_hollow_gog.zip") return content.gogShZipBytes;
   if (lower === "iron_lullaby_gog.zip") return content.gogBadZipBytes;
+  if (content.gogDlcBytes[lower]) return content.gogDlcBytes[lower];
   if (fileName === "disc2.bin") return content.disc2Bytes;
   if (lower.endsWith(".m3u")) return content.m3uBytes;
   if (lower === "big arcade game.zip") return content.bigZipBytes;
@@ -785,6 +814,20 @@ async function handleRequest(req, res, state) {
       sendJson(res, 200, { offline: state.offline });
       return;
     }
+    if (req.method === "POST" && pathname === "/__e2e__/hide-files") {
+      const body = await readBody(req);
+      let parsed = {};
+      try {
+        parsed = JSON.parse(body.toString("utf8"));
+      } catch {
+        parsed = {};
+      }
+      const key = `${parsed.rom_id}:${String(parsed.category ?? "").toLowerCase()}`;
+      if (parsed.hidden) state.hiddenFiles.add(key);
+      else state.hiddenFiles.delete(key);
+      sendJson(res, 200, { hidden: [...state.hiddenFiles] });
+      return;
+    }
     if (req.method === "GET" && pathname === "/__e2e__/revoke") {
       sendJson(res, 200, { revoked: state.revoked });
       return;
@@ -925,6 +968,12 @@ async function handleRequest(req, res, state) {
     const detail = state.romDetails[romIdMatch[1]];
     if (!detail) {
       sendJson(res, 404, { detail: "rom not found" });
+      return;
+    }
+    const hidden = (file) =>
+      state.hiddenFiles.has(`${detail.id}:${String(file.category ?? "").toLowerCase()}`);
+    if ((detail.files ?? []).some(hidden)) {
+      sendJson(res, 200, { ...detail, files: detail.files.filter((file) => !hidden(file)) });
       return;
     }
     sendJson(res, 200, detail);
@@ -1157,6 +1206,9 @@ export async function startMockRomm({
   // while true, every /api/ request answers 401 even with the fixture token
   // — a token revoked on the server.
   state.revoked = false;
+  // `<rom id>:<category>` pairs POST /__e2e__/hide-files leaves out of a
+  // rom's detail.
+  state.hiddenFiles = new Set();
   // Every play session POST /api/play-sessions stored, oldest first. Read
   // through GET /__e2e__/play-sessions (the `launch` stage group).
   state.playSessions = [];

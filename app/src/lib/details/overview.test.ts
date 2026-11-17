@@ -59,4 +59,12 @@ describe('contentFact', () => {
   it('is empty with no extra content', () => {
     expect(contentFact([file(1, 1)])).toBe('');
   });
+
+  it('says how many DLC a GOG-installer game has installed', () => {
+    const files = [file(1, 1), file(2, 1, 'dlc'), file(3, 1, 'dlc'), file(4, 1, 'update')];
+    const name = (id: number) => files.find((f) => f.id === id)!.file_name;
+    expect(contentFact(files, [])).toBe('1 update · 2 DLC (none installed)');
+    expect(contentFact(files, [name(2), 'gone.7z'])).toBe('1 update · 2 DLC (1 installed)');
+    expect(contentFact(files, [name(2), name(3)])).toBe('1 update · 2 DLC (all installed)');
+  });
 });

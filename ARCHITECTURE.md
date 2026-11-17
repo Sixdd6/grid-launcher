@@ -273,6 +273,11 @@ Modules as declared in `src/lib.rs`:
   v12 adds `installed_by_installer`: a RomM row whose archive held a GOG installer that
   GRID ran (`specials::gog_installer`), which Details words ("Installed by running its GOG
   installer").
+  v13 adds `romm_dlc_files`: the server DLC files (category `dlc`, a JSON array of file
+  names) whose GOG installers ran into such a row's install (`InstallMode::GogDlc`, one
+  queue job per file, `specials::gog_installer::install_server_dlc`); `library::content`
+  owns the pure bookkeeping (`dlc_files_to_install`, `with_installed_dlc`,
+  `content_availability_for`).
   `Registry::clear_foreign_rom_ids` is the relink guard: it clears `rom_id` on rows whose
   `source_server` names another server (compared by `pack::server_key`).
 - `pcgw` — PCGamingWiki client that resolves a Windows game's save paths.

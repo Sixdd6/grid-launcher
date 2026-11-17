@@ -276,7 +276,9 @@ STAGE_GROUPS=(
   "gog-library:specs/gog-library.spec.ts"
   "gog-cloud:specs/gog-cloud.spec.ts"
   "gog-offline:specs/gog-offline.spec.ts"
-  "gog-romm-installer:specs/gog-romm-installer.spec.ts"
+  # gog-romm-dlc: the game's own DLC files (RomM category `dlc`) install
+  # after a fresh install, and Details' Install DLC adds the missing ones.
+  "gog-romm-installer:specs/gog-romm-installer.spec.ts specs/gog-romm-dlc.spec.ts"
   "gog-backups:specs/gog-backups.spec.ts"
   # Package F's TV mode GOG specs (desktop start, then the TV button; see
   # their `// e2e-app-args:` line) on the same seeded profile. The app's HOME

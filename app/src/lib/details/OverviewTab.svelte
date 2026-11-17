@@ -11,6 +11,7 @@
     installedNow,
     installedVersion,
     serverVersion,
+    installedDlc = null,
   }: {
     description: string;
     detail: RomDetail | null;
@@ -18,6 +19,9 @@
     /** D-UI-10 versions, `''` off PC platforms (`showsFilesVersionLine`). */
     installedVersion: string;
     serverVersion: string;
+    /** A game installed by running its GOG installer: the DLC files
+     *  installed into it; `null` for every other game. */
+    installedDlc?: string[] | null;
     /** Every title on this game's platform, for design §7's "filtered to
      *  titles present on the server". Empty until the list loads. */
     serverTitles: string[];
@@ -46,7 +50,7 @@
         ['franchises', 'Franchises', detail?.franchises ?? ''],
         ['size', 'Size', sizeFact(detail?.files ?? [])],
         ['version', 'Version', versionFact(installedNow, installedVersion, serverVersion)],
-        ['content', 'Content', contentFact(detail?.files ?? [])],
+        ['content', 'Content', contentFact(detail?.files ?? [], installedDlc)],
       ] as const
     ).filter(([, , value]) => value.trim() !== '')
   );

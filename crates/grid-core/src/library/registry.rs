@@ -61,6 +61,7 @@ CREATE TABLE installed_games (
     store_id                 TEXT NOT NULL DEFAULT '',
     store_meta               TEXT NOT NULL DEFAULT '',
     installed_by_installer   INTEGER NOT NULL DEFAULT 0,
+    romm_dlc_files           TEXT NOT NULL DEFAULT '',
     UNIQUE (title_key, platform_key)
 );
 ";
@@ -93,7 +94,7 @@ CREATE TABLE IF NOT EXISTS pending_play_sessions (
 
 /// The schema version this build understands. Bumped when a migration adds
 /// columns or tables (see spec: later milestones add native/PS3/PS4 fields).
-const LATEST_USER_VERSION: i64 = 12;
+const LATEST_USER_VERSION: i64 = 13;
 
 /// The columns v1 -> v2 (milestone 7) adds to `installed_games`.
 const V2_IMAGE_COLUMNS: [&str; 3] = ["cover_small_path", "cover_large_path", "screenshot_urls"];
@@ -418,6 +419,27 @@ fn migrate_11_to_12(conn: &mut Connection) -> Result<(), LibraryError> {
     tx.commit().map_err(registry_err)
 }
 
+/// The column v12 -> v13 adds: the server DLC files (category `dlc`) whose
+/// GOG installers GRID ran into a RomM row's install, as a JSON array of
+/// file names (`["San Rafaela.7z"]`); `''` for none and for every other row.
+const V13_COLUMN: &str = "romm_dlc_files";
+
+/// v12 -> v13: adds [`V13_COLUMN`]. Same transaction + idempotent-`ADD
+/// COLUMN` shape as every migration above it.
+fn migrate_12_to_13(conn: &mut Connection) -> Result<(), LibraryError> {
+    let tx = conn.transaction().map_err(registry_err)?;
+    let existing = installed_games_columns(&tx)?;
+    if !existing.iter().any(|name| name == V13_COLUMN) {
+        tx.execute_batch(&format!(
+            "ALTER TABLE installed_games ADD COLUMN {V13_COLUMN} TEXT NOT NULL DEFAULT '';"
+        ))
+        .map_err(registry_err)?;
+    }
+    tx.pragma_update(None, "user_version", 13)
+        .map_err(registry_err)?;
+    tx.commit().map_err(registry_err)
+}
+
 /// Every column of `installed_games`, in the order selected/inserted below.
 const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_path, \
      extracted_path, extracted_dir, multi_file_game_dir, description, rating, genres, \
@@ -427,7 +449,7 @@ const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_pa
      native_game_dir, included_dlc, ps3_trophy_paths, ps3_game_id, ps3_iso_path, ps4_game_id, \
      ps4_content, ra_id, last_played_at, fanart_urls, images_version, platform_slug, \
      native_launch_source, native_working_dir, source_server, source, store_id, store_meta, \
-     installed_by_installer";
+     installed_by_installer, romm_dlc_files";
 
 /// The path-bearing columns [`Registry::rewrite_paths`] hands to its
 /// closure as plain strings. `ps3_trophy_paths` is the ninth, handled
@@ -555,6 +577,12 @@ pub struct InstalledGame {
     /// install the game (v12, [`V12_COLUMN`]).
     #[serde(default)]
     pub installed_by_installer: bool,
+    /// The server DLC files whose GOG installers ran into this RomM row's
+    /// install (v13, [`V13_COLUMN`]): a JSON array of file names, `""` for
+    /// none. Read and written through [`crate::library::content`]'s
+    /// `installed_dlc_names` / `with_installed_dlc`.
+    #[serde(default)]
+    pub romm_dlc_files: String,
 }
 
 impl InstalledGame {
@@ -674,6 +702,7 @@ impl InstalledGame {
             store_id: row.get(43)?,
             store_meta: row.get(44)?,
             installed_by_installer: row.get(45)?,
+            romm_dlc_files: row.get(46)?,
         })
     }
 }
@@ -760,6 +789,7 @@ impl Registry {
                 9 => migrate_9_to_10(&mut conn)?,
                 10 => migrate_10_to_11(&mut conn)?,
                 11 => migrate_11_to_12(&mut conn)?,
+                12 => migrate_12_to_13(&mut conn)?,
                 v => {
                     return Err(LibraryError::Registry(format!(
                         "no migration from user_version {v}"
@@ -835,12 +865,12 @@ impl Registry {
                 native_wineprefix, native_game_dir, included_dlc, ps3_trophy_paths,
                 ps3_game_id, ps3_iso_path, ps4_game_id, ps4_content, ra_id, images_version,
                 platform_slug, native_launch_source, native_working_dir, source_server,
-                source, store_id, store_meta, installed_by_installer
+                source, store_id, store_meta, installed_by_installer, romm_dlc_files
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
                 ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
                 ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43,
-                ?44, ?45, ?46, ?47
+                ?44, ?45, ?46, ?47, ?48
             )
             ON CONFLICT(title_key, platform_key) DO UPDATE SET
                 title = excluded.title,
@@ -887,6 +917,7 @@ impl Registry {
                 store_id = excluded.store_id,
                 store_meta = excluded.store_meta,
                 installed_by_installer = excluded.installed_by_installer,
+                romm_dlc_files = excluded.romm_dlc_files,
                 platform_slug = CASE WHEN excluded.platform_slug = ''
                     THEN installed_games.platform_slug ELSE excluded.platform_slug END",
             params![
@@ -937,6 +968,7 @@ impl Registry {
                 store_id,
                 rec.store_meta,
                 rec.installed_by_installer,
+                rec.romm_dlc_files,
             ],
         )
         .map_err(registry_err)?;
@@ -1206,6 +1238,27 @@ impl Registry {
                 "UPDATE installed_games SET ps4_game_id = ?1, ps4_content = ?2 \
                  WHERE rom_id = ?3",
                 params![game_id, content_json, rom_id],
+            )
+            .map_err(registry_err)?;
+        Ok(affected > 0)
+    }
+
+    /// Records the DLC files installed into the RomM row for `rom_id`
+    /// ([`InstalledGame::romm_dlc_files`]). `Ok(false)` when no row holds
+    /// that rom id.
+    pub fn update_romm_dlc_files(
+        &self,
+        rom_id: i64,
+        files_json: &str,
+    ) -> Result<bool, LibraryError> {
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute(
+                &format!(
+                    "UPDATE installed_games SET romm_dlc_files = ?1 \
+                     WHERE rom_id = ?2 AND source = '{ROMM_SOURCE}'"
+                ),
+                params![files_json, rom_id],
             )
             .map_err(registry_err)?;
         Ok(affected > 0)

@@ -26,6 +26,10 @@ pub enum JobKey {
     Content(i64, ContentKind),
     /// A native (Windows) game update install, keyed by `rom_id`.
     NativeUpdate(i64),
+    /// One server DLC file of a game installed by running its GOG
+    /// installer, keyed by `rom_id` and the file's id, so a game's DLC
+    /// files queue side by side.
+    GogDlc { rom_id: i64, file_id: i64 },
     /// An emulator acquisition, keyed by the source's `source_id`.
     Emulator(String),
     /// A download this queue does not drive: the entry exists so the
@@ -567,9 +571,10 @@ impl QueueState {
             DownloadStatus::Queued
         };
         let (job, rom_id, source_id) = match &key {
-            JobKey::Rom(rom_id) | JobKey::Content(rom_id, _) | JobKey::NativeUpdate(rom_id) => {
-                ("game", *rom_id, String::new())
-            }
+            JobKey::Rom(rom_id)
+            | JobKey::Content(rom_id, _)
+            | JobKey::NativeUpdate(rom_id)
+            | JobKey::GogDlc { rom_id, .. } => ("game", *rom_id, String::new()),
             JobKey::Emulator(source_id) => ("emulator", 0, source_id.clone()),
             // Never reached: an external entry is created by
             // `admit_external`, which never routes through here.

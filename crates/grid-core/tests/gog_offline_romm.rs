@@ -3,7 +3,8 @@
 //! launch; the Downloads row shows the installer's phase; the failures
 //! carry their codes; a run that needs its setup window keeps the
 //! download, and a retry installs without downloading again; a DLC runs in
-//! its base game's folder and prefix.
+//! its base game's folder and prefix. A game's own server DLC files (RomM
+//! category `dlc`) install after it, and Install DLC adds the missing ones.
 
 use std::fs;
 use std::io::{self, Write};
@@ -12,6 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use grid_core::library::content::ContentKind;
 use grid_core::library::queue::{DownloadEntry, DownloadStatus, FailureCode, JobPhase};
 use grid_core::library::registry::{InstalledGame, Registry};
 use grid_core::library::InstallService;
@@ -110,20 +112,34 @@ enum Script {
 }
 
 /// A scripted installer: writes `goggame-<id>.info` and `bin/game.exe`
-/// into its `/DIR`, or hangs.
+/// into its `/DIR`, or hangs. Each installing run writes the next info
+/// (the last one again once they run out).
 struct Fake {
     runs: Mutex<Vec<Script>>,
-    info: (String, String),
+    infos: Mutex<Vec<(String, String)>>,
     commands: Mutex<Vec<InstallerCommand>>,
 }
 
 impl Fake {
     fn new(runs: &[Script], id: &str, info: String) -> Arc<Fake> {
+        Fake::with_infos(runs, vec![(id.to_string(), info)])
+    }
+
+    fn with_infos(runs: &[Script], infos: Vec<(String, String)>) -> Arc<Fake> {
         Arc::new(Fake {
             runs: Mutex::new(runs.iter().rev().copied().collect()),
-            info: (id.into(), info),
+            infos: Mutex::new(infos.into_iter().rev().collect()),
             commands: Mutex::new(Vec::new()),
         })
+    }
+
+    fn next_info(&self) -> (String, String) {
+        let mut infos = self.infos.lock().unwrap();
+        if infos.len() > 1 {
+            infos.pop().unwrap()
+        } else {
+            infos[0].clone()
+        }
     }
 }
 
@@ -161,13 +177,10 @@ impl InstallerSpawner for Fake {
         Ok(Box::new(Process(match script {
             Script::Installs => {
                 let dir = dir_arg(cmd);
+                let (id, info) = self.next_info();
                 fs::create_dir_all(dir.join("bin")).unwrap();
                 fs::write(dir.join("bin/game.exe"), b"MZ").unwrap();
-                fs::write(
-                    dir.join(format!("goggame-{}.info", self.info.0)),
-                    &self.info.1,
-                )
-                .unwrap();
+                fs::write(dir.join(format!("goggame-{id}.info")), &info).unwrap();
                 Some(Some(0))
             }
             Script::Hangs => None,
@@ -251,6 +264,75 @@ impl Harness {
             .mount(&self.server)
             .await;
         hits
+    }
+
+    /// Serves rom `id` with `files` (`(file id, name, category, bytes)`).
+    async fn serve_files(
+        &self,
+        id: i64,
+        name: &str,
+        platform: (&str, &str),
+        files: Vec<(i64, &str, &str, Vec<u8>)>,
+    ) {
+        let listed: Vec<serde_json::Value> = files
+            .iter()
+            .map(|(file_id, file, category, body)| {
+                json!({
+                    "id": file_id,
+                    "file_name": file,
+                    "file_size_bytes": body.len(),
+                    "is_top_level": category.is_empty(),
+                    "category": if category.is_empty() { serde_json::Value::Null } else { json!(category) },
+                })
+            })
+            .collect();
+        let detail = json!({
+            "id": id,
+            "name": name,
+            "fs_name_no_ext": name,
+            "platform_id": 7,
+            "platform_display_name": platform.0,
+            "platform_slug": platform.1,
+            "fs_name": name,
+            "fs_size_bytes": 0,
+            "updated_at": "2026-01-01T00:00:00Z",
+            "files": listed,
+        });
+        Mock::given(method("GET"))
+            .and(path(format!("/api/roms/{id}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(detail))
+            .mount(&self.server)
+            .await;
+        for (_, file, _, body) in files {
+            Mock::given(method("GET"))
+                .and(path(format!("/api/roms/{id}/content/{file}")))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+                .mount(&self.server)
+                .await;
+        }
+    }
+
+    /// Waits until every row is terminal and returns them, oldest first.
+    async fn wait_all(&self) -> Vec<DownloadEntry> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let mut entries = self.service.snapshot().entries;
+            if !entries.is_empty()
+                && entries.iter().all(|entry| {
+                    matches!(
+                        entry.status,
+                        DownloadStatus::Completed
+                            | DownloadStatus::Failed
+                            | DownloadStatus::Cancelled
+                    )
+                })
+            {
+                entries.sort_by_key(|entry| entry.id);
+                return entries;
+            }
+            assert!(Instant::now() < deadline, "the rows never finished");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     async fn install(&self, rom_id: i64) -> DownloadEntry {
@@ -677,4 +759,317 @@ async fn a_known_linux_dlc_installs_into_its_base_game() {
         row.native_executable_path,
         base_game.join("start.sh").to_string_lossy()
     );
+}
+
+// --- the game's own DLC files ---------------------------------------------------
+
+/// A GOG Linux DLC installer: only its goggame file and one data file.
+fn linux_dlc_sh(id: &str, root: &str, title: &str) -> Vec<u8> {
+    let mut bytes = b"#!/bin/sh\nexit 1\n".to_vec();
+    bytes.extend(zip_bytes(&[
+        (
+            &format!("data/noarch/game/goggame-{id}.info"),
+            goggame(id, root, title, "").as_bytes(),
+        ),
+        (&format!("data/noarch/game/dlc-{id}.pak"), b"pak"),
+    ]));
+    bytes
+}
+
+#[tokio::test]
+async fn a_fresh_install_runs_each_dlc_file_into_the_game_after_it() {
+    let h = harness().await;
+    let base = zip_bytes(&[("kestrel_reach_1_0.sh", &linux_sh("960", "Kestrel Reach"))]);
+    let ember = zip_bytes(&[(
+        "kestrel_reach_ember_pass.sh",
+        &linux_dlc_sh("961", "960", "Kestrel Reach - Ember Pass"),
+    )]);
+    let tide = zip_bytes(&[(
+        "kestrel_reach_tide_lines.sh",
+        &linux_dlc_sh("962", "960", "Kestrel Reach - Tide Lines"),
+    )]);
+    h.serve_files(
+        20,
+        "Kestrel Reach",
+        ("Linux", "linux"),
+        vec![
+            (201, "Ember_Pass.zip", "dlc", ember),
+            (200, "kestrel_reach.zip", "", base),
+            (202, "Tide_Lines.zip", "dlc", tide),
+        ],
+    )
+    .await;
+    h.service.install(h.client.clone(), 20).await.unwrap();
+    let entries = h.wait_all().await;
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
+    assert_eq!(
+        titles,
+        vec![
+            "Kestrel Reach",
+            "Kestrel Reach (Ember_Pass)",
+            "Kestrel Reach (Tide_Lines)"
+        ]
+    );
+    for entry in &entries {
+        assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    }
+    assert_eq!(entries[1].kind, "gog_dlc");
+    assert_eq!(entries[1].phase, JobPhase::Unpacking);
+
+    let home = h.home("Linux", "Kestrel Reach");
+    let game = home.join("game");
+    assert!(game.join("game/orbit").is_file(), "the base game");
+    assert!(game.join("game/goggame-961.info").is_file());
+    assert!(game.join("game/dlc-962.pak").is_file());
+    assert!(!home.join("dlc").exists(), "the DLC downloads are gone");
+    let row = h.row(20);
+    assert_eq!(
+        row.native_executable_path,
+        game.join("start.sh").to_string_lossy(),
+        "the game launches as before"
+    );
+    assert_eq!(row.romm_dlc_files, r#"["Ember_Pass.zip","Tide_Lines.zip"]"#);
+    let availability = grid_core::library::content::content_availability_for(
+        &h.client.rom_detail(20).await.unwrap().files,
+        Some(&row),
+    );
+    assert!(!availability.dlc, "nothing left to install");
+}
+
+#[tokio::test]
+async fn install_dlc_adds_the_missing_files_to_an_installed_game() {
+    let h = harness().await;
+    // Kestrel Reach is installed (it ran its own installer), with Ember
+    // Pass already in it.
+    let home = h.home("Linux", "Kestrel Reach");
+    let game = home.join("game");
+    fs::create_dir_all(game.join("game")).unwrap();
+    fs::write(game.join("start.sh"), b"#!/bin/sh\n").unwrap();
+    fs::write(
+        game.join("game/goggame-960.info"),
+        goggame("960", "960", "Kestrel Reach", "orbit"),
+    )
+    .unwrap();
+    h.registry
+        .upsert(&InstalledGame {
+            rom_id: Some(21),
+            title: "Kestrel Reach".into(),
+            platform: "Linux".into(),
+            platform_slug: "linux".into(),
+            native_game_dir: home.to_string_lossy().into_owned(),
+            extracted_dir: game.to_string_lossy().into_owned(),
+            native_executable_path: game.join("start.sh").to_string_lossy().into_owned(),
+            installed_by_installer: true,
+            romm_dlc_files: r#"["Ember_Pass.zip"]"#.into(),
+            installed_at: 1,
+            ..Default::default()
+        })
+        .unwrap();
+    let ember = zip_bytes(&[(
+        "ember.sh",
+        &linux_dlc_sh("961", "960", "Kestrel Reach - Ember Pass"),
+    )]);
+    let tide = zip_bytes(&[(
+        "tide.sh",
+        &linux_dlc_sh("962", "960", "Kestrel Reach - Tide Lines"),
+    )]);
+    // Another game's DLC, filed under this one by mistake.
+    let stray = zip_bytes(&[("stray.sh", &linux_dlc_sh("971", "970", "Other - Pack"))]);
+    h.serve_files(
+        21,
+        "Kestrel Reach",
+        ("Linux", "linux"),
+        vec![
+            (210, "kestrel_reach.zip", "", Vec::new()),
+            (211, "Ember_Pass.zip", "dlc", ember),
+            (212, "Tide_Lines.zip", "dlc", tide),
+            (213, "Stray.zip", "dlc", stray),
+        ],
+    )
+    .await;
+    h.service
+        .install_content(h.client.clone(), 21, ContentKind::Dlc)
+        .await
+        .unwrap();
+    let entries = h.wait_all().await;
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
+    assert_eq!(
+        titles,
+        vec!["Kestrel Reach (Tide_Lines)", "Kestrel Reach (Stray)"],
+        "only the missing files"
+    );
+    assert_eq!(
+        entries[0].status,
+        DownloadStatus::Completed,
+        "{}",
+        entries[0].error
+    );
+    assert_eq!(entries[1].status, DownloadStatus::Failed);
+    assert_eq!(
+        entries[1].error,
+        "Its archive holds a DLC for another game, not for Kestrel Reach."
+    );
+    assert!(game.join("game/goggame-962.info").is_file());
+    assert!(!game.join("game/goggame-971.info").exists());
+    assert!(game.join("start.sh").is_file(), "the game is untouched");
+    let row = h.row(21);
+    assert_eq!(row.romm_dlc_files, r#"["Ember_Pass.zip","Tide_Lines.zip"]"#);
+
+    // Retry re-plans that one file only.
+    let error = h.service.retry(Some(h.client.clone()), entries[1].id).await;
+    assert!(error.is_ok(), "{error:?}");
+    let entries = h.wait_all().await;
+    let stray: Vec<_> = entries
+        .iter()
+        .filter(|e| e.title == "Kestrel Reach (Stray)")
+        .collect();
+    assert_eq!(stray.len(), 1);
+    assert_eq!(stray[0].status, DownloadStatus::Failed);
+}
+
+#[tokio::test]
+async fn install_dlc_refuses_a_game_that_needs_none() {
+    let h = harness().await;
+    let home = h.home("Linux", "Kestrel Reach");
+    fs::create_dir_all(home.join("game")).unwrap();
+    let row = InstalledGame {
+        rom_id: Some(22),
+        title: "Kestrel Reach".into(),
+        platform: "Linux".into(),
+        platform_slug: "linux".into(),
+        native_game_dir: home.to_string_lossy().into_owned(),
+        extracted_dir: home.join("game").to_string_lossy().into_owned(),
+        installed_by_installer: true,
+        romm_dlc_files: r#"["Ember_Pass.zip"]"#.into(),
+        installed_at: 1,
+        ..Default::default()
+    };
+    h.registry.upsert(&row).unwrap();
+    h.serve_files(
+        22,
+        "Kestrel Reach",
+        ("Linux", "linux"),
+        vec![
+            (220, "kestrel_reach.zip", "", Vec::new()),
+            (221, "Ember_Pass.zip", "dlc", Vec::new()),
+        ],
+    )
+    .await;
+    let error = h
+        .service
+        .install_content(h.client.clone(), 22, ContentKind::Dlc)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "No DLC files that aren't installed yet were found for this title in server metadata."
+    );
+
+    // A native game that didn't run a GOG installer has no DLC flow.
+    h.registry
+        .upsert(&InstalledGame {
+            installed_by_installer: false,
+            ..row
+        })
+        .unwrap();
+    let error = h
+        .service
+        .install_content(h.client.clone(), 22, ContentKind::Dlc)
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("only supported for PS4 and Xbox 360"),
+        "{error}"
+    );
+    assert!(h.service.snapshot().entries.is_empty());
+}
+
+/// A Windows game: each DLC installer (GOG's content-addressed kind, whose
+/// identity is only known after the run) runs silently in the game's own
+/// folder and Wine prefix, and a DLC that fails leaves the game installed.
+#[tokio::test]
+async fn windows_dlc_files_run_in_the_games_folder_and_prefix() {
+    let h = harness().await;
+    let fake = Fake::with_infos(
+        &[Script::Installs, Script::Installs],
+        vec![
+            (
+                "980".into(),
+                goggame("980", "980", "Cartel Run", "bin\\\\game.exe"),
+            ),
+            (
+                "981".into(),
+                goggame("981", "980", "Cartel Run - San Rafaela", ""),
+            ),
+        ],
+    );
+    h.service.set_installer_runner(fake.clone(), fast());
+    let base = zip_bytes(&[
+        ("setup_cartel_run_(1).exe", &opaque_exe()),
+        ("setup_cartel_run_(1)-1.bin", b"part"),
+    ]);
+    let rafaela = zip_bytes(&[("setup_cartel_run_san_rafaela_(1).exe", &opaque_exe())]);
+    let broken = zip_bytes(&[("readme.txt", b"no installer here")]);
+    h.serve_files(
+        23,
+        "Cartel Run",
+        ("Windows", "win"),
+        vec![
+            (230, "cartel_run.zip", "", base),
+            (231, "San_Rafaela.zip", "dlc", rafaela),
+            (232, "Broken.zip", "dlc", broken),
+        ],
+    )
+    .await;
+    h.service.install(h.client.clone(), 23).await.unwrap();
+    let entries = h.wait_all().await;
+    if cfg!(windows) {
+        return;
+    }
+    assert_eq!(entries.len(), 3);
+    assert_eq!(
+        entries[0].status,
+        DownloadStatus::Completed,
+        "{}",
+        entries[0].error
+    );
+    assert_eq!(
+        entries[1].status,
+        DownloadStatus::Completed,
+        "{}",
+        entries[1].error
+    );
+    assert_eq!(entries[1].phase, JobPhase::InstallerSilent);
+    assert_eq!(entries[2].status, DownloadStatus::Failed);
+    assert_eq!(
+        entries[2].failure.clone().unwrap().code,
+        FailureCode::InstallerUnrecognised
+    );
+
+    let home = h.home("Windows", "Cartel Run");
+    let commands = fake.commands.lock().unwrap().clone();
+    assert_eq!(commands.len(), 2);
+    for cmd in &commands {
+        assert_eq!(dir_arg(cmd), home.join("game"));
+        assert!(cmd.env.contains(&(
+            "WINEPREFIX".into(),
+            home.join("prefix").to_string_lossy().into_owned()
+        )));
+    }
+    assert!(home.join("game/goggame-981.info").is_file());
+    assert!(!home.join("dlc").exists(), "both downloads are gone");
+    let row = h.row(23);
+    assert_eq!(
+        row.native_executable_path,
+        home.join("game/bin/game.exe").to_string_lossy()
+    );
+    assert_eq!(row.romm_dlc_files, r#"["San_Rafaela.zip"]"#);
 }

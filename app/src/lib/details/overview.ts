@@ -34,14 +34,25 @@ export function versionFact(installedNow: boolean, installed: string, server: st
   return `${installed} · server ${server}`;
 }
 
-/** The PS4 update / Xbox 360 content the server holds ("1 update · 2 DLC"),
- *  or `''` when it holds none. */
-export function contentFact(files: RomFile[]): string {
+/** The update / DLC content the server holds ("1 update · 2 DLC"), or `''`
+ *  when it holds none. `installedDlc` (a game installed by running its GOG
+ *  installer: the DLC file names installed into it) adds how many of the
+ *  DLC are installed: "3 DLC (1 installed)", "(all installed)",
+ *  "(none installed)". */
+export function contentFact(files: RomFile[], installedDlc: string[] | null = null): string {
   const rows = contentRows(files);
   const updates = rows.filter((row) => row.category === 'update').length;
-  const dlc = rows.length - updates;
+  const dlcRows = rows.filter((row) => row.category === 'dlc');
+  const dlc = dlcRows.length;
   const parts: string[] = [];
   if (updates > 0) parts.push(updates === 1 ? '1 update' : `${updates} updates`);
-  if (dlc > 0) parts.push(`${dlc} DLC`);
+  if (dlc > 0) parts.push(installedDlc === null ? `${dlc} DLC` : `${dlc} DLC (${installedText(dlcRows, installedDlc)})`);
   return parts.join(' · ');
+}
+
+function installedText(dlcRows: { name: string }[], installedDlc: string[]): string {
+  const installed = dlcRows.filter((row) => installedDlc.includes(row.name)).length;
+  if (installed === 0) return 'none installed';
+  if (installed === dlcRows.length) return 'all installed';
+  return `${installed} installed`;
 }

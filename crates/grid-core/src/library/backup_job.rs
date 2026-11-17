@@ -447,13 +447,22 @@ async fn download_game(
         home.as_deref(),
     )
     .await;
-    let (picked, single): (Vec<&RomFile>, bool) = match download_set(&detail)? {
+    let (mut picked, single): (Vec<&RomFile>, bool) = match download_set(&detail)? {
         DownloadSet::Single(file) => (vec![file], true),
         DownloadSet::Multi { files, .. } => (files, false),
         DownloadSet::Native { archive, sidecar } => {
             (std::iter::once(archive).chain(sidecar).collect(), false)
         }
     };
+    // A game installed here by running its GOG installer: the DLC files
+    // installed into it go with it, and a restore installs them after it.
+    if let Some(row) = row.as_ref().filter(|row| row.installed_by_installer) {
+        let installed = crate::library::content::installed_dlc_names(&row.romm_dlc_files);
+        picked.extend(crate::library::content::installed_dlc_files(
+            &detail.files,
+            &installed,
+        ));
+    }
     let files_dir = job.staging.join("files");
     fs::create_dir_all(&files_dir)?;
     let mut targets = Vec::new();

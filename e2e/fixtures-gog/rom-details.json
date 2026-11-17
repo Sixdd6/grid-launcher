@@ -32,5 +32,47 @@
     "updated_at": "2026-01-01T00:00:00Z",
     "files": [{ "id": 9902, "file_name": "iron_lullaby_gog.zip", "file_size_bytes": 0, "is_top_level": true }],
     "metadatum": null
+  },
+  "903": {
+    "id": 903,
+    "name": "Kestrel Reach",
+    "fs_name_no_ext": "kestrel_reach_gog",
+    "platform_id": 1,
+    "platform_display_name": "Linux",
+    "fs_name": "kestrel_reach_gog.zip",
+    "summary": "A RomM archive holding a GOG Linux installer, with two DLC files (category dlc), each a GOG Linux DLC installer: GRID runs them into the game after it.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 9903, "file_name": "kestrel_reach_gog.zip", "file_size_bytes": 0, "is_top_level": true },
+      { "id": 99031, "file_name": "Ember Pass.zip", "file_size_bytes": 0, "is_top_level": false, "category": "dlc" },
+      { "id": 99032, "file_name": "Tide Lines.zip", "file_size_bytes": 0, "is_top_level": false, "category": "dlc" }
+    ],
+    "metadatum": null
+  },
+  "904": {
+    "id": 904,
+    "name": "Heron Gate",
+    "fs_name_no_ext": "heron_gate_gog",
+    "platform_id": 1,
+    "platform_display_name": "Linux",
+    "fs_name": "heron_gate_gog.zip",
+    "summary": "A RomM archive holding a GOG Linux installer whose two DLC files the spec hides until the game is installed: Details then offers Install DLC.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 9904, "file_name": "heron_gate_gog.zip", "file_size_bytes": 0, "is_top_level": true },
+      { "id": 99041, "file_name": "Night Market.zip", "file_size_bytes": 0, "is_top_level": false, "category": "dlc" },
+      { "id": 99042, "file_name": "Lantern Row.zip", "file_size_bytes": 0, "is_top_level": false, "category": "dlc" }
+    ],
+    "metadatum": null
   }
 }

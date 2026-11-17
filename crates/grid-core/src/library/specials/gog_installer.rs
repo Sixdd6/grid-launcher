@@ -169,6 +169,132 @@ pub fn install(
     ))
 }
 
+/// One DLC installer from the game's own server files (RomM category
+/// `dlc`), run into the game it belongs to: a RomM row GRID installed by
+/// running its GOG installer.
+pub struct DlcRun<'a> {
+    /// The installer [`offline::detect_in_dir`] found in the DLC file.
+    pub installer: &'a Path,
+    /// The installed game's row.
+    pub base: &'a InstalledGame,
+    /// The compat tool when the row names none.
+    pub compat: &'a str,
+    pub wizard_allowed: bool,
+    pub spawner: &'a dyn InstallerSpawner,
+    pub watch: Watch,
+}
+
+/// Runs a server DLC file's GOG installer into its game's install folder
+/// and Wine prefix ([`DlcRun`]), and returns the DLC's info.
+///
+/// The file's category says it is a DLC, so the installer runs into the
+/// game even when its identity is only known after the run (GOG's newer
+/// content-addressed installers name only the product id, with no
+/// `rootGameId`). When the installer does carry its game info, a base
+/// game's installer is refused, and so is a DLC for another game (its
+/// `rootGameId` is not a game installed in that folder). A Windows game
+/// takes Windows DLC installers only, a Linux game Linux ones.
+pub fn install_server_dlc(
+    run: &DlcRun<'_>,
+    sink: &mut dyn StoreProgressSink,
+) -> Result<GogGameInfo, LibraryError> {
+    let file = run
+        .installer
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let (insp, refusal) = read_installer(run.installer).map_err(|error| match error {
+        crate::stores::StoreError::Library(error) => error,
+        other => LibraryError::InstallerRefused(other.to_string()),
+    })?;
+    match refusal {
+        None => {}
+        Some(Refusal::NotGog) => return Err(LibraryError::InstallerUnrecognised { file }),
+        Some(_) => {
+            return Err(LibraryError::InstallerRefused(offline::refusal_message(
+                &insp.verdict,
+            )))
+        }
+    }
+    let base = run.base;
+    let offered = insp.kind.platform().unwrap_or_default();
+    let installed = row_platform(base);
+    if offered != installed {
+        return Err(LibraryError::InstallerRefused(format!(
+            "Its archive holds a DLC installer for the {} version of {}, which is installed here as the {} version. A {} game takes {} DLC installers only.",
+            platform_word(offered),
+            base.title,
+            platform_word(installed),
+            platform_word(installed),
+            platform_word(installed)
+        )));
+    }
+    let dest = PathBuf::from(base.extracted_dir.trim());
+    if base.extracted_dir.trim().is_empty() || !dest.is_dir() {
+        return Err(LibraryError::InstallerRefused(format!(
+            "{}'s install folder is missing.",
+            base.title
+        )));
+    }
+    if let Some(info) = insp.info.as_ref() {
+        check_dlc_for(info, &game_ids(&dest), &base.title)?;
+    }
+    let prefix = base_prefix(base, &insp.kind);
+    let compat = if base.native_compat_tool.trim().is_empty() {
+        run.compat.to_string()
+    } else {
+        base.native_compat_tool.trim().to_string()
+    };
+    let ran = offline::run_into_with(
+        &insp,
+        &dest,
+        prefix.as_deref(),
+        &compat,
+        run.wizard_allowed,
+        sink,
+        run.spawner,
+        run.watch,
+    )?;
+    Ok(if ran.is_dlc() {
+        ran
+    } else {
+        insp.info.clone().unwrap_or(ran)
+    })
+}
+
+/// The ids of the games (not DLC) whose goggame files `dest` holds.
+fn game_ids(dest: &Path) -> Vec<String> {
+    installed_infos(dest)
+        .into_iter()
+        .filter(|(_, info)| !info.is_dlc())
+        .map(|(_, info)| info.game_id.trim().to_string())
+        .collect()
+}
+
+/// Whether an installer whose info is `info` may run as a DLC of the game
+/// whose folder holds the games `games`: a full base-game info (its
+/// `rootGameId` is its own id) is refused, as is a DLC whose `rootGameId`
+/// is none of `games` (when the folder names any). An id-only info (no
+/// `rootGameId`, GOG's content-addressed installers) passes.
+pub fn check_dlc_for(
+    info: &GogGameInfo,
+    games: &[String],
+    title: &str,
+) -> Result<(), LibraryError> {
+    let root = info.root_game_id.trim();
+    if !info.is_dlc() && !root.is_empty() {
+        return Err(LibraryError::InstallerRefused(
+            "Its archive holds a game's installer, not a DLC's.".to_string(),
+        ));
+    }
+    if info.is_dlc() && !games.is_empty() && !games.iter().any(|id| id == root) {
+        return Err(LibraryError::InstallerRefused(format!(
+            "Its archive holds a DLC for another game, not for {title}."
+        )));
+    }
+    Ok(())
+}
+
 fn platform_word(platform: GogPlatform) -> &'static str {
     match platform {
         GogPlatform::Linux => "Linux",
@@ -342,4 +468,44 @@ fn base_for(
         )));
     }
     Ok(base)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info(id: &str, root: &str) -> GogGameInfo {
+        GogGameInfo {
+            game_id: id.into(),
+            root_game_id: root.into(),
+            name: "x".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_dlc_of_the_installed_game_passes() {
+        let games = vec!["100".to_string()];
+        assert!(check_dlc_for(&info("101", "100"), &games, "Cartel Tycoon").is_ok());
+        // A folder whose goggame files GRID can't read: the category decides.
+        assert!(check_dlc_for(&info("101", "100"), &[], "Cartel Tycoon").is_ok());
+    }
+
+    #[test]
+    fn an_id_only_identity_passes() {
+        // GOG's content-addressed installers: `{app}\goggame-<id>.ico` only.
+        let games = vec!["100".to_string()];
+        assert!(check_dlc_for(&info("101", ""), &games, "Cartel Tycoon").is_ok());
+    }
+
+    #[test]
+    fn a_base_game_or_another_games_dlc_is_refused() {
+        let games = vec!["100".to_string()];
+        let base = check_dlc_for(&info("100", "100"), &games, "Cartel Tycoon").unwrap_err();
+        assert!(matches!(base, LibraryError::InstallerRefused(m) if m.contains("not a DLC")));
+        let other = check_dlc_for(&info("201", "200"), &games, "Cartel Tycoon").unwrap_err();
+        assert!(
+            matches!(other, LibraryError::InstallerRefused(m) if m.contains("not for Cartel Tycoon"))
+        );
+    }
 }

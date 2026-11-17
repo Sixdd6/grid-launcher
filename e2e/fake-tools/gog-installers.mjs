@@ -49,6 +49,37 @@ export function buildLinuxSh(game = WREN_HOLLOW) {
   return Buffer.concat([header, zip]);
 }
 
+/**
+ * Kestrel Reach and Heron Gate: RomM games whose archive holds a GOG Linux
+ * installer, with two DLC files each (RomM category `dlc`) holding a GOG
+ * Linux DLC installer.
+ */
+export const KESTREL_REACH = { id: "1305779630", name: "Kestrel Reach", version: "1.2", buildId: "" };
+export const EMBER_PASS = { id: "1305779631", rootId: KESTREL_REACH.id, name: "Kestrel Reach - Ember Pass" };
+export const TIDE_LINES = { id: "1305779632", rootId: KESTREL_REACH.id, name: "Kestrel Reach - Tide Lines" };
+export const HERON_GATE = { id: "1305779640", name: "Heron Gate", version: "0.9", buildId: "" };
+export const NIGHT_MARKET = { id: "1305779641", rootId: HERON_GATE.id, name: "Heron Gate - Night Market" };
+export const LANTERN_ROW = { id: "1305779642", rootId: HERON_GATE.id, name: "Heron Gate - Lantern Row" };
+
+/**
+ * A GOG Linux DLC installer: the script, then a zip holding the DLC's
+ * goggame file (its `rootGameId` the base game) and one data file, both
+ * under `data/noarch/game/`, where they land in the base game's folder.
+ */
+export function buildLinuxDlcSh(dlc) {
+  const header = Buffer.from(
+    "#!/bin/sh\n# This script was generated using Makeself 2.4.0 (fake, GRID e2e)\n" +
+      `label="${dlc.name} (GOG.com)"\nexit 0\n`,
+    "utf8",
+  );
+  const zip = buildZip([
+    { name: "data/noarch/gameinfo", data: Buffer.from(`${dlc.name}\n1.0\n${dlc.id}\n`, "utf8") },
+    { name: `data/noarch/game/goggame-${dlc.id}.info`, data: Buffer.from(JSON.stringify(goggameInfo(dlc)), "utf8") },
+    { name: `data/noarch/game/dlc-${dlc.id}.pak`, data: Buffer.from(`${dlc.name}\n`, "utf8") },
+  ]);
+  return Buffer.concat([header, zip]);
+}
+
 export function buildMacPkg() {
   // xar's magic, then nothing a reader could use.
   return Buffer.concat([Buffer.from("xar!", "ascii"), Buffer.alloc(60)]);

@@ -868,7 +868,9 @@ over a dimmed and blurred shell. Esc and the ✕ close it.
 
 The left column is fixed at 240px: the large cover, then the primary action (Play, Stop,
 Install / Install App, or Cancel while an install is live), Update when the server holds a
-newer copy, Install Update / Install DLC for PS4 and Xbox 360 games, Game Settings for
+newer copy, Install Update / Install DLC for PS4 and Xbox 360 games (Install DLC also for a
+game installed by running its GOG installer, while the server holds DLC files not yet
+installed into it), Game Settings for
 native games, Uninstall, and a cloud button that opens the Saves tab. Under them the column
 states when the game was last played and which emulator — and, for RetroArch, which core —
 would launch it.
@@ -913,7 +915,9 @@ flags and the version, then up to four tabs:
   content), which moves under the summary when the popup is narrow. Size is the game's
   own files' total; Version (PC platforms only) is the installed version, with the
   server's beside it when they differ ("v1.0.0 · server v1.1.0"); Content counts the PS4
-  update / Xbox 360 DLC files the server holds ("1 update · 2 DLC"). Screenshots are on
+  update / Xbox 360 DLC files the server holds ("1 update · 2 DLC"); for a game installed by
+  running its GOG installer it adds how many DLC are installed ("3 DLC (1 installed)",
+  "(all installed)", "(none installed)"). Screenshots are on
   the Media tab only. There is no Files tab: firmware installs from Settings › Systems.
 - **Media** — two horizontally scrolling rows, each with its count and arrows when it
   overflows: Screenshots (every screenshot, at its own shape) and Videos (the trailer and
@@ -1627,6 +1631,15 @@ User decisions (2026-11-13):
   stays a RomM game, with every RomM feature. Once installed, Details says "Installed by
   running its GOG installer". Before the download GRID can't know what the archive
   holds, so Details says nothing about an installer then.
+  The game's DLC files on the server (RomM category `dlc`, each holding a GOG DLC
+  installer, `.exe` or Linux `.sh`) install after it: one Downloads row per file, labelled
+  "<game> (<file name without extension>)", each running its installer into the game's
+  folder and Wine prefix, one after another. A DLC that fails shows its error on its row
+  and leaves the game installed. GRID records which DLC files are installed on the game's
+  row; Details' Install DLC (desktop and TV) installs the ones the server holds that are
+  not installed yet. Uninstalling the game removes its DLC; a Backup includes the DLC that
+  is installed (a copy of the install holds their files, a download of the server's files
+  takes those DLC files too and installs them after the game on restore).
 - **GOG backups.** GOG games that did not come from RomM can be backed up (see "Game
   backups"). Epic, Amazon and Steam games cannot.
 

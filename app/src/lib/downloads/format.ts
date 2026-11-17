@@ -202,6 +202,7 @@ export function kindLabel(kind: DownloadKind): string {
       return '';
     case 'ps4_content':
     case 'xbox360_content':
+    case 'gog_dlc':
       return 'Content';
     case 'native_update':
     case 'update':

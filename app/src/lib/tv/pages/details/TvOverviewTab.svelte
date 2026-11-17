@@ -50,7 +50,7 @@
       ['franchises', 'Franchises', detail?.franchises ?? ''],
       ['size', 'Size', sizeFact(detail?.files ?? [])],
       ['version', 'Version', versionFact(d.installedNow, d.installedVersion, d.serverVersion)],
-      ['content', 'Content', contentFact(detail?.files ?? [])],
+      ['content', 'Content', contentFact(detail?.files ?? [], d.installedDlc)],
     ]);
   });
 </script>

@@ -589,6 +589,8 @@ pub fn snapshot_row(row: &InstalledGame, root: &Path, home: Option<&Path>) -> Pa
         included_dlc: row.included_dlc.clone(),
         ra_id: row.ra_id.clone(),
         archive_path: relative_to(&row.archive_path, root, home).unwrap_or_default(),
+        installed_by_installer: row.installed_by_installer,
+        romm_dlc_files: row.romm_dlc_files.clone(),
     }
 }
 
@@ -1198,6 +1200,8 @@ mod tests {
             ps4_content: r#"[{"kind":"update"}]"#.into(),
             included_dlc: r#"["Pack"]"#.into(),
             ra_id: "12".into(),
+            installed_by_installer: true,
+            romm_dlc_files: r#"["San Rafaela.7z"]"#.into(),
             ..base_row("Windows")
         };
         assert_eq!(
@@ -1212,6 +1216,8 @@ mod tests {
                 included_dlc: r#"["Pack"]"#.into(),
                 ra_id: "12".into(),
                 archive_path: String::new(),
+                installed_by_installer: true,
+                romm_dlc_files: r#"["San Rafaela.7z"]"#.into(),
             }
         );
 
