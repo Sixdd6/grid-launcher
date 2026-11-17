@@ -2432,10 +2432,17 @@ mod tests {
         assert_eq!(kettle.download_bytes, 2_200_000);
         assert_eq!(kettle.disk_bytes, 2_200_000);
         let ipc = install_options_ipc(5, "Kettle: Drum?", KETTLE, "/games/Amazon Games", "");
-        assert_eq!(ipc.install_dir, "/games/Amazon Games/Kettle Drum");
+        // Compared as paths: Windows joins the folder with `\`.
+        assert_eq!(
+            std::path::Path::new(&ipc.install_dir),
+            std::path::Path::new("/games/Amazon Games/Kettle Drum")
+        );
         // Nothing left of the title: nile's folder is the product id.
         let ipc = install_options_ipc(5, "???", KETTLE, "/games/Amazon Games", "");
-        assert_eq!(ipc.install_dir, format!("/games/Amazon Games/{KETTLE}"));
+        assert_eq!(
+            std::path::Path::new(&ipc.install_dir),
+            std::path::Path::new(&format!("/games/Amazon Games/{KETTLE}"))
+        );
         assert_eq!(install_options_ipc(5, "K", KETTLE, "", "").install_dir, "");
     }
 

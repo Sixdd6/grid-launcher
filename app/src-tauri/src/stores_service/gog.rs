@@ -2777,7 +2777,10 @@ mod tests {
         let ipc = install_options_ipc(&options, "Ashen: Tide", "/nonexistent/GOG", "GE-Proton");
         assert!(!ipc.versions[0].recommended);
         assert!(ipc.versions[1].recommended);
-        assert!(ipc.install_dir.starts_with("/nonexistent/GOG/"));
+        // Compared as paths: Windows joins the folder with `\`.
+        let dir = std::path::Path::new(&ipc.install_dir);
+        assert!(dir.starts_with("/nonexistent/GOG"));
+        assert_ne!(dir, std::path::Path::new("/nonexistent/GOG"));
         assert!(
             !ipc.install_dir.ends_with("Ashen: Tide"),
             "{}",

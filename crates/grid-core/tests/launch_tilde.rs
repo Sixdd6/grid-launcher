@@ -37,7 +37,7 @@ async fn a_tilde_rom_path_reaches_the_emulator_expanded() {
     fs::write(
         &exe,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nsleep 30\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{0}.tmp'\nmv '{0}.tmp' '{0}'\nsleep 30\n",
             record.to_string_lossy()
         ),
     )

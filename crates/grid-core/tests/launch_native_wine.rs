@@ -40,7 +40,7 @@ async fn a_native_windows_row_launches_through_a_path_resolved_wine() {
     fs::write(
         &wine_exe,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nsleep 30\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{0}.tmp'\nmv '{0}.tmp' '{0}'\nsleep 30\n",
             record.to_string_lossy()
         ),
     )

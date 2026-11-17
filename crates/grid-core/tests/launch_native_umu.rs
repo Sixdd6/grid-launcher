@@ -54,7 +54,7 @@ async fn a_proton_row_needs_a_umu_run_and_the_managed_copy_needs_python_3_10() {
     write_script(
         &umu_run,
         &format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$PROTONPATH\" \"$@\" > '{}'\nexec /bin/sleep 30\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$PROTONPATH\" \"$@\" > '{0}.tmp'\n/bin/mv '{0}.tmp' '{0}'\nexec /bin/sleep 30\n",
             record.to_string_lossy()
         ),
     );

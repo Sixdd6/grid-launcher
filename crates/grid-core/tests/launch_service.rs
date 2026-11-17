@@ -281,7 +281,9 @@ async fn a_store_row_launches_natively_by_its_key() {
     fs::write(
         &exe,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nsleep 30\n",
+            // Written aside and renamed, so `record.is_file()` never sees
+            // the file the shell has created but not yet filled.
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{0}.tmp'\nmv '{0}.tmp' '{0}'\nsleep 30\n",
             record.to_string_lossy()
         ),
     )
@@ -321,7 +323,10 @@ async fn a_store_row_launches_natively_by_its_key() {
         Err(LaunchError::NotInstalled)
     ));
 
-    let recorded = wait_until(|| record.is_file()).await;
+    // Wait for the whole line: `printf > file` creates the file before it
+    // writes, so an existing file can still be empty.
+    let recorded =
+        wait_until(|| fs::read_to_string(&record).is_ok_and(|text| text.ends_with('\n'))).await;
     assert!(recorded, "the launch file never wrote its argv");
     let argv = fs::read_to_string(&record).unwrap();
     assert_eq!(argv.lines().collect::<Vec<_>>(), vec!["--windowed"]);

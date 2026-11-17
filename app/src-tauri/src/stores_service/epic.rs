@@ -2736,7 +2736,10 @@ mod tests {
         assert!(ipc.versions[0].recommended);
         assert!(ipc.languages.is_empty());
         assert_eq!(ipc.dlc[0].download_bytes, 9);
-        assert!(ipc.install_dir.starts_with("/nonexistent/Epic Games/"));
+        // Compared as paths: Windows joins the folder with `\`.
+        let dir = std::path::Path::new(&ipc.install_dir);
+        assert!(dir.starts_with("/nonexistent/Epic Games"));
+        assert_ne!(dir, std::path::Path::new("/nonexistent/Epic Games"));
         assert!(!ipc.install_dir.ends_with("Glimmer: Deep"));
     }
 
