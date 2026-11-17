@@ -142,8 +142,11 @@ describe('first-run setup: choose systems, install their emulators', () => {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the shell never opened after starting setup',
     });
-    // The app opens on Library › RomM › Discover after first-run setup too.
-    await $(testId('discover')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    // The app opens on Library › All games after first-run setup too.
+    await browser.waitUntil(async () => (await $(testId('library-rail-all')).getAttribute('aria-current')) === 'page', {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the app never opened on All games after setup',
+    });
     await $(testId('setup-progress')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     // One segment per install, Proton included, each named by its title.
     const segs = await browser.execute(() =>

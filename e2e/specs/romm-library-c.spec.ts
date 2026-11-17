@@ -13,10 +13,11 @@ async function shot(name: string): Promise<void> {
 
 /**
  * Stage `romm-library`, part C (romm-storefront-plan Step 3): a relaunch
- * with RomM stored as connected and the server not answering. GRID falls
- * back from Discover to RomM › Installed; the RomM group has Installed only, with the `!` flag, and
- * RomM › Installed shows the Can't reach banner. Retry, once the server is
- * back, brings Discover and the platforms back. Then Disconnect on the
+ * with RomM stored as connected and the server not answering. GRID opens on
+ * All games (Discover and Open GRID on are removed for now, 2026-11-17); the
+ * RomM group has Installed only, with the `!` flag, and RomM › Installed
+ * shows the Can't reach banner. Retry, once the server is back, brings the
+ * platforms back. Then Disconnect on the
  * RomM card: a platform row disappears and the selection falls back.
  */
 describe('romm-library (c): Can\'t reach RomM', () => {
@@ -27,17 +28,15 @@ describe('romm-library (c): Can\'t reach RomM', () => {
     });
   });
 
-  it('opens on Discover while connecting, then falls back to RomM › Installed', async () => {
-    // Open GRID on › Automatic with RomM stored as connected: Library › RomM
-    // › Discover while the startup probe runs; when it fails, the selection
-    // falls back to RomM › Installed (SPEC "Where GRID opens").
-    await browser.waitUntil(async () => (await $(testId('library-rail-romm-installed')).getAttribute('aria-current')) === 'page', {
+  it('opens on All games, which still holds the installed RomM games', async () => {
+    // RomM stored as connected: the startup probe fails, and GRID stays on
+    // All games (SPEC "Where GRID opens").
+    await browser.waitUntil(async () => (await $(testId('library-rail-romm-installed-flag')).getText().catch(() => '')) === '!', {
       timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the selection never fell back to RomM › Installed after the failed probe',
+      timeoutMsg: 'the RomM group never showed the ! flag after the failed probe',
     });
-    // All games still holds the installed RomM games.
+    await expect($(testId('library-rail-all'))).toHaveAttribute('aria-current', 'page');
     await expect($(testId('library-rail-count-all'))).toHaveText('3');
-    await $(testId('library-rail-all')).click();
     await expect($(testId('library-card-101'))).toExist();
   });
 
@@ -60,14 +59,14 @@ describe('romm-library (c): Can\'t reach RomM', () => {
     await shot('c-installed-unreachable');
   });
 
-  it('Retry, with the server back, brings Discover and the platforms back', async () => {
+  it('Retry, with the server back, brings the platforms back', async () => {
     await setServerOffline(false);
     await $(testId('romm-banner-action')).click();
-    await $(testId('library-rail-romm-discover')).waitForExist({
+    await $(testId('library-rail-platform-snes')).waitForExist({
       timeout: TRANSITION_TIMEOUT * 2,
       timeoutMsg: 'Retry never reconnected RomM',
     });
-    await $(testId('library-rail-platform-snes')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('library-rail-romm-discover'))).not.toExist();
     await expect($(testId('romm-banner'))).not.toExist();
     await expect($(testId('library-rail-romm-installed-flag'))).not.toExist();
   });

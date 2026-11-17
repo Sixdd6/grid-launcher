@@ -48,10 +48,12 @@ describe('romm-library (d): disconnected, games installed', () => {
     await shot('d-installed-off');
   });
 
-  it('says on Appearance that GRID opens on All games', async () => {
+  it('has no Open GRID on row on Appearance (hidden with Discover, 2026-11-17)', async () => {
     await $(testId('nav-settings')).click();
     await $(testId('settings-nav-appearance')).click();
-    await expect($(testId('open-on-romm-off'))).toHaveText("RomM isn't connected, so GRID opens on All games.");
+    await $(testId('theme-select')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('open-on-select'))).not.toExist();
+    await expect($(testId('open-on-romm-off'))).not.toExist();
     await $(testId('nav-library')).click();
   });
 
@@ -90,23 +92,23 @@ describe('romm-library (d): disconnected, games installed', () => {
     await shot('d-installed-expired');
   });
 
-  it('draws Connecting: the spinner flag, Installed and Discover, and the connecting panel', async () => {
+  it('draws Connecting: the spinner flag and Installed only (no Discover, 2026-11-17)', async () => {
     await emitRomm({ connection: 'not_connected', busy: true });
-    await $(testId('library-rail-romm-discover')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await expect($(testId('library-rail-romm-installed-flag'))).toHaveAttribute('title', 'Connecting to RomM');
-    await expect($(testId('romm-installed-chip'))).toHaveText('Connecting to romm.e2e.invalid…');
-    await shot('d-installed-connecting');
-    await $(testId('library-rail-romm-discover')).click();
-    await expect($(testId('romm-connecting'))).toHaveText(expect.stringContaining('Connecting to romm.e2e.invalid…'));
-    await shot('d-discover-connecting');
-  });
-
-  it('falls back to RomM › Installed when Discover disappears', async () => {
-    await emitRomm({ connection: 'not_connected', busy: false });
-    await browser.waitUntil(async () => (await $(testId('library-rail-romm-installed')).getAttribute('aria-current')) === 'page', {
+    await browser.waitUntil(async () => (await $(testId('library-rail-romm-installed-flag')).getAttribute('title').catch(() => null)) === 'Connecting to RomM', {
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the selection never fell back to RomM › Installed',
+      timeoutMsg: 'the RomM group never showed Connecting',
     });
     await expect($(testId('library-rail-romm-discover'))).not.toExist();
+    await expect($(testId('romm-installed-chip'))).toHaveText('Connecting to romm.e2e.invalid…');
+    await shot('d-installed-connecting');
+  });
+
+  it('keeps RomM › Installed selected when the startup probe ends', async () => {
+    await emitRomm({ connection: 'not_connected', busy: false });
+    await browser.waitUntil(async () => (await $(testId('library-rail-romm-installed-flag')).getText().catch(() => '')) === 'off', {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the RomM group never showed the off flag again',
+    });
+    await expect($(testId('library-rail-romm-installed'))).toHaveAttribute('aria-current', 'page');
   });
 });

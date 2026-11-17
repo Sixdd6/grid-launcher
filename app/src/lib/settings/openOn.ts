@@ -1,6 +1,8 @@
 // Settings › Appearance › Open GRID on (RommStorefront README "Appearance ›
 // Open GRID on"; TV mode README § Decided "Where GRID
 // opens"): one setting, `[ui] open_on`, shared by the desktop and TV mode.
+// Hidden for now with Discover (2026-11-17): no UI shows it and
+// `initialPlace` ignores it; this module stays for Discover's return.
 // Pure; the store persists and `shell.ts` `initialPlace` applies it.
 import type { OpenOn, TvAssignment, TvPrompts } from '../api';
 

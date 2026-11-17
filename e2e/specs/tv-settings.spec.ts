@@ -235,7 +235,9 @@ describe('tv-settings: Downloads and Settings', () => {
 
   it('a slider adjusts with Left / Right while focused, with the D-pad hint (item 230)', async () => {
     await key('ArrowRight');
-    await waitFocused('s-open-on');
+    // Theme is the first row: Open GRID on is hidden (2026-11-17).
+    await waitFocused('s-theme');
+    expect(await $(testId('tv-row-open-on')).isExisting()).toBe(false);
     await moveTo('s-fade', 'ArrowDown');
     expect(await hints()).toContain('DPAD Adjust');
     await waitText('tv-row-fade', /50%/);
@@ -321,7 +323,7 @@ describe('tv-settings: Downloads and Settings', () => {
       await browser.pause(150);
     }
     await waitTab('library');
-    // GRID opened on RomM › Discover: All games holds the installed games.
+    // All games holds the installed games.
     await tvRailTo('r-all');
     await $(`${testId('tv-lib-grid')} .cv`).waitForExist({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the Library grid has no cover' });
     await key('ArrowRight');

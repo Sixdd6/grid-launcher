@@ -144,8 +144,7 @@ export async function waitOskClosed(): Promise<void> {
 }
 
 /**
- * TV mode opens on the Library (RomM › Discover when RomM is connected):
- * focus moves up the rail to All games.
+ * The Library's All games row: focus moves along the rail to it.
  */
 export async function toAllGames(): Promise<void> {
   await waitTab('library');

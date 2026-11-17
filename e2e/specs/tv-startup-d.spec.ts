@@ -30,7 +30,7 @@ async function setupCard(): Promise<Card | null> {
  * The welcome (the suggested library; RomM's sign-in page with a pasted
  * server and a typed token), Continue, then Choose your
  * systems: tick Dreamcast and PlayStation 2, Install 2 emulators. GRID
- * opens on Library › RomM › Discover with the setup card pinned at the top: one
+ * opens on Library › All games with the setup card pinned at the top: one
  * segment per install, a step line, no countdown while anything installs;
  * once both are done, "2 installs done", the ready line, and it closes
  * after 10 seconds.
@@ -62,7 +62,7 @@ describe('tv-startup (d): Install N emulators and the setup card', () => {
     await $(testId('tv-ch-row-ps2')).waitForExist({ timeout: TRANSITION_TIMEOUT });
   });
 
-  it('Install 2 emulators opens Library › RomM › Discover with the setup card pinned, one segment each (items 151, 152, 154, 155, 407)', async () => {
+  it('Install 2 emulators opens Library › All games with the setup card pinned, one segment each (items 151, 152, 154, 155, 407)', async () => {
     await waitFocused('ch-dc');
     await key('Enter');
     await key('ArrowDown');

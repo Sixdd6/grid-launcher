@@ -1,6 +1,4 @@
-import type { OpenOn } from './api';
 import type { RailKey } from './library/rail';
-import type { RommRailKey } from './romm/rail';
 
 /** The views with RomM as a storefront (plan 0.5): Library, Downloads,
  *  Settings, in pill order. The index in this array is also the
@@ -29,7 +27,7 @@ export type SetupReturn = 'welcome' | 'settings';
 /** Where GRID opens with RomM as a storefront: always the Library, on a rail row. */
 export type InitialPlace = {
   view: 'library';
-  rail: RailKey | RommRailKey;
+  rail: RailKey;
   /** Kept for the contract's shape; always `null` (decision 16: GRID opens
    *  on All games, never on the first Backup drive). */
   drive: string | null;
@@ -37,17 +35,11 @@ export type InitialPlace = {
 
 /**
  * Where GRID opens (plan 0.5, decision 16), the same in desktop and TV
- * mode. `rommConnected`: RomM is connected at startup — the config's
- * `stores.romm.connected`, which the status shows as connected or
- * connecting (`romm/rail.ts` `rommLive`) before the restore has answered.
- * - `automatic` and `discover`: RomM › Discover when connected, else All games
- *   (Discover does not exist while RomM is off);
- * - `library`: All games.
- * If the restore then fails, the rail's selection falls back to RomM ›
- * Installed (`rommSelectionFallback`).
+ * mode: Library › All games, always. Discover and Settings › Appearance ›
+ * Open GRID on are removed for now (2026-11-17, pending the Discover
+ * rework); the stored `[ui] open_on` is still read and written, but ignored.
  */
-export function initialPlace(rommConnected: boolean, openOn: OpenOn = 'automatic'): InitialPlace {
-  if (openOn !== 'library' && rommConnected) return { view: 'library', rail: 'romm:discover', drive: null };
+export function initialPlace(): InitialPlace {
   return { view: 'library', rail: 'all', drive: null };
 }
 

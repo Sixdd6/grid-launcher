@@ -9,7 +9,7 @@
   import './stores/tvstores.css';
   import './romm/tvromm.css';
   import { startStoreEvents } from './stores/storeEvents';
-  import { rommConnecting, rommLive } from '../romm/rail';
+  import { rommConnecting } from '../romm/rail';
   import { libraryUnreachable } from '../stores/libraryUnreachable.svelte';
   import { romm } from '../stores/romm.svelte';
   import { registerNavigation } from '../stores/navigation.svelte';
@@ -46,7 +46,6 @@
   import { openDetails, openSystem, playGame } from './gameActions';
   import { selectLibRail } from './tabs/library/library.svelte';
   import { expiredCard, unreachableCard } from './romm/rommActions';
-  import { ROMM_FOLD_KEY, rommRowKey, selectRommView } from './romm/tvRomm.svelte';
   import { railRowKey } from './tabs/library/libraryRail';
   import TvChooseSystems from './startup/TvChooseSystems.svelte';
   import TvWelcome from './startup/TvWelcome.svelte';
@@ -124,10 +123,9 @@
    * Where TV mode opens (TVRommStorefront README § Where GRID opens): the
    * desktop view it was entered from (the TV button); Settings › Game stores
    * with the RomM row focused after Choose your systems opened from the
-   * RomM page (decision 9); else the shared start rule (Open GRID on):
-   * Library › RomM › Discover when RomM is connected at startup, else All
-   * games, never a Backup drive (decision 16). A RomM that then can't be
-   * reached falls back to RomM › Installed (the Library's own rule).
+   * RomM page (decision 9); else the shared start rule: Library › All
+   * games, never a Backup drive (decision 16). Discover and Open GRID on
+   * are removed for now (2026-11-17, pending the Discover rework).
    */
   function startShell() {
     const from = firstStart ? uiMode.tvStart : null;
@@ -140,23 +138,10 @@
       rememberFocus('tab:settings', 'sto-romm');
     } else {
       session.setupReturn = null;
-      // "Connected at startup": the config says so, which the status shows
-      // as connected, connecting, or a probe that failed (Can't reach,
-      // Sign-in expired).
-      const s = romm.status;
-      const configured = rommLive(s) || rommConnecting(s) || s.connection === 'unreachable' || s.connection === 'expired';
-      const place = initialPlace(configured, uiSettings.openOn);
-      resetNav('library', null);
-      if (place.rail === 'romm:discover') {
-        // Startup never opens a folder (TVRommStorefront README § Library ›
-        // Folders): a closed RomM stays closed, its heading holding the
-        // selection and taking the focus.
-        selectRommView('romm:discover');
-        rememberFocus('tab:library', uiSettings.railGroupClosed('romm') ? ROMM_FOLD_KEY : rommRowKey('romm:discover'));
-      } else {
-        selectLibRail('all');
-        rememberFocus('tab:library', railRowKey('all'));
-      }
+      const place = initialPlace();
+      resetNav(place.view, null);
+      selectLibRail(place.rail);
+      rememberFocus('tab:library', railRowKey(place.rail));
     }
     // The welcome card, once the main screen is up the first time TV mode
     // ever opens (`[ui] tv_welcomed`; Menu › Controls shows it again; user

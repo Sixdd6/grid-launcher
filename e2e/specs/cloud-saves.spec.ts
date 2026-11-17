@@ -81,7 +81,7 @@ describe('cloud-saves', () => {
   }
 
   async function openDetails(romId: number) {
-    // Server opens on Discover: select the platform for its grid.
+    // Select the platform for its grid.
     await openRommPlatform('snes');
     await $(testId(`game-card-${romId}`)).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId(`game-card-${romId}`)).click();

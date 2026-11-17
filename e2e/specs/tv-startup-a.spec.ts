@@ -56,8 +56,8 @@ async function expectBoxFits(): Promise<void> {
  * clipboard (seeded with the mock's non-secret address), Sign in with, the
  * button names what is missing while it is disabled, a rejected token comes
  * back with the reason; a good one connects, Continue opens Choose your
- * systems, where Start skips, and GRID opens on Library › RomM › Discover
- * with its first cover focused.
+ * systems, where Start skips, and GRID opens on Library › All games with
+ * its rail row focused.
  */
 describe('tv-startup (a): the welcome, RomM sign-in and Choose your systems in TV mode', () => {
   before(async () => {
@@ -292,22 +292,16 @@ describe('tv-startup (a): the welcome, RomM sign-in and Choose your systems in T
     await waitFocused('ch-skip');
   });
 
-  it('Start skips from anywhere; GRID opens on Library › RomM › Discover with its first cover focused (items 406, 408, 413, 417)', async () => {
+  it('Start skips from anywhere; GRID opens on Library › All games with its rail row focused (items 406, 408, 413; Discover removed 2026-11-17)', async () => {
     await moveTo('ch-dc', 'ArrowUp', 8);
     await press('start');
     await waitTab('library');
     expect(await $(testId('tv-choose')).isExisting()).toBe(false);
-    // Discover's first cover takes focus; these fixtures may give Discover
-    // no covers at all (no dates), and then the Discover row keeps it.
-    await browser.waitUntil(
-      async () =>
-        (await browser.execute(() => {
-          const covers = document.querySelectorAll('#disc [data-cover]');
-          const f = document.querySelector('[data-tv-root] .f');
-          return covers.length ? f === covers[0] : f?.getAttribute('data-k') === 'r-romm:discover';
-        })) as boolean,
-      { timeout: TRANSITION_TIMEOUT * 2, timeoutMsg: `Discover's first cover never took focus (focused: ${await focused()})` },
-    );
+    await browser.waitUntil(async () => (await focused()) === 'r-all', {
+      timeout: TRANSITION_TIMEOUT * 2,
+      timeoutMsg: `All games never took focus (focused: ${await focused()})`,
+    });
+    expect(await $(testId('tv-lib-rail-romm-discover')).isExisting()).toBe(false);
     expect(await hints()).toContain('MENU Menu');
     await waitToast('Welcome to TV mode');
   });

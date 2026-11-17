@@ -49,9 +49,8 @@ describe('connect-restore (c): a rejected token shows Sign-in expired', () => {
     await expect($(testId('romm-signin-dialog'))).not.toExist();
     await expect($(testId('library-rail-romm-discover'))).not.toExist();
     await expect($(testId('library-rail-platform-snes'))).not.toExist();
-    // Connecting at startup opened RomM › Discover; the 401 took Discover
-    // away, so the selection fell back to RomM › Installed.
-    await expect($(testId('library-rail-romm-installed'))).toHaveAttribute('aria-current', 'page');
+    // GRID opens on All games whatever RomM's state (Discover removed, 2026-11-17).
+    await expect($(testId('library-rail-all'))).toHaveAttribute('aria-current', 'page');
   });
 
   it('banners RomM › Installed with RomM sign-in expired · Sign in again…', async () => {

@@ -5,7 +5,8 @@
   // the Backup drives folder, items 176–184, 420, then the storefront groups
   // by name: Amazon Games, Epic Games, GOG, RomM, Steam) beside the header
   // and a windowed grid of large covers (185–195; drives 421–424). The RomM
-  // group's rows show RomM › Installed, Discover or a platform. Moving through the rail filters
+  // group's rows show RomM › Installed or a platform (Discover is removed
+  // for now, 2026-11-17, pending its rework). Moving through the rail filters
   // at once and clears the search; A or Right goes into the grid. Y searches
   // live, LT sorts, RT is select mode (items 439–453): on a drive Y installs
   // or removes the picked games, elsewhere it backs them up.
@@ -56,12 +57,9 @@
   import { tick, untrack } from 'svelte';
   import { isRommRailKey, rommRailGroup, rommSelectionFallback, type RommRailKey } from '../../../romm/rail';
   import { romm } from '../../../stores/romm.svelte';
-  import { focusables } from '../../focus/dom';
-  import { focused, nav, scope, setFocus } from '../../nav.svelte';
-  import { openSearchAll } from '../../pages/searchAll';
+  import { nav, scope, setFocus } from '../../nav.svelte';
   import { INSTALLED_SEARCH_TITLE } from '../../romm/rommTv';
   import { ROMM_FOLD_KEY, rommCatalog, rommRowKey, selectRommView, tvRomm } from '../../romm/tvRomm.svelte';
-  import TvRommDiscover from './romm/TvRommDiscover.svelte';
   import TvRommInstalled from './romm/TvRommInstalled.svelte';
   import TvRommPlatform from './romm/TvRommPlatform.svelte';
   import TvRommRail from './romm/TvRommRail.svelte';
@@ -397,39 +395,12 @@
     });
   }
 
-  /**
-   * Arriving on the Library while Discover is selected focuses Discover's
-   * content, the cover last focused there, else the first, not the rail
-   * (items 104, 417). Before Discover has covers, the first one to appear
-   * takes focus.
-   */
-  function arrive() {
-    if (rommKey !== 'romm:discover' || !rommConnected) return;
-    const cur = focused();
-    if (cur && cur.isConnected && !cur.closest('[data-rail]')) return;
-    const disc = scope()?.querySelector('#disc');
-    const covers = disc ? focusables(disc) : [];
-    const el = covers.find((e) => e.getAttribute('data-k') === tvRomm.discoverKey) ?? covers[0];
-    if (el) setFocus(el, { instant: true });
-    else tvRomm.pendingArrive = true;
-  }
-
-  // RomM answered while Discover is on show (the startup probe, Retry):
-  // focus goes into Discover as on arriving.
-  let wasConnected: boolean | null = null;
-  $effect(() => {
-    const on = rommConnected;
-    if (on && wasConnected === false && rommKey === 'romm:discover') void tick().then(arrive);
-    wasConnected = on;
-  });
-
   useScreen({
     // A store view has Y Search, and RT Select in GOG › Installed
-    // (tvstores.js `TABS.library.hints`); no sort. RomM: Discover has Y
-    // (while connected), Installed Y, LT and RT, a platform Y and RT.
+    // (tvstores.js `TABS.library.hints`); no sort. RomM: Installed Y, LT
+    // and RT, a platform Y and RT.
     hints: () => {
       if (tvStores.view) return backupInstalled() ? [{ button: 'Y', label: 'Search' }, { button: 'RT', label: 'Select' }] : [{ button: 'Y', label: 'Search' }];
-      if (rommKey === 'romm:discover') return rommConnected ? [{ button: 'Y', label: 'Search' }] : [];
       if (emulatorsView) return emulatorsReady ? [{ button: 'Y', label: 'Search' }] : [];
       if (rommKey !== null && rommKey !== 'romm:installed') return [{ button: 'Y', label: 'Search' }, { button: 'RT', label: 'Select' }];
       return [
@@ -439,7 +410,6 @@
       ];
     },
     get y() {
-      if (rommKey === 'romm:discover') return rommConnected ? () => openSearchAll() : undefined;
       if (rommKey === 'romm:installed') return () => searchRomm(INSTALLED_SEARCH_TITLE);
       if (emulatorsView) return emulatorsReady ? () => searchRomm(EMULATORS_SEARCH_TITLE) : undefined;
       if (rommKey !== null) return () => searchRomm(searchTitle(rommRow?.label ?? ''));
@@ -450,10 +420,9 @@
       return tvStores.view ? undefined : sortList;
     },
     get rt() {
-      if (rommKey !== null) return rommKey === 'romm:discover' || emulatorsView ? undefined : selToggle;
+      if (rommKey !== null) return emulatorsView ? undefined : selToggle;
       return tvStores.view && !backupInstalled() ? undefined : selToggle;
     },
-    arrive,
   });
 
   const tid = (testId: string) => testId.replace(/^library-rail-/, 'tv-lib-rail-');
@@ -494,11 +463,9 @@
     </div>
     <TvStoreRail onSelect={selectLibStore} romm={rommGroup ? rommRail : undefined} />
   </TvRail>
-  <div class="main" id={rommKey === 'romm:discover' && rommConnected ? 'srv-main' : undefined}>
+  <div class="main">
     {#if rommKey === 'romm:installed'}
       <TvRommInstalled />
-    {:else if rommKey === 'romm:discover'}
-      <TvRommDiscover {catalog} />
     {:else if rommKey !== null && rommRow && rommRow.kind === 'emulators'}
       <TvRommEmulators />
     {:else if rommKey !== null && rommRow}

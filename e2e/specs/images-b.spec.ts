@@ -45,9 +45,8 @@ describe('images (b): offline startup, cached cover, retry, replenish', () => {
       { timeout: APP_START_TIMEOUT, timeoutMsg: "the RomM group never flagged Can't reach" },
     );
     await expect($(testId('library-section'))).toBeDisplayed();
-    // Connecting at startup opened RomM › Discover; the server didn't answer,
-    // so the selection fell back to RomM › Installed. Rom 101 is in All games.
-    await expect($(testId('library-rail-romm-installed'))).toHaveAttribute('aria-current', 'page');
+    // GRID opens on All games (Discover removed, 2026-11-17). Rom 101 is in All games.
+    await expect($(testId('library-rail-all'))).toHaveAttribute('aria-current', 'page');
     await $(testId('library-rail-all')).click();
 
     await $(testId('library-card-101')).waitForExist({
@@ -95,12 +94,8 @@ describe('images (b): offline startup, cached cover, retry, replenish', () => {
 
     // Retry lives on RomM › Installed's banner (and the Settings card).
     await $(testId('romm-banner-action')).click();
-    await $(testId('library-rail-romm-discover')).waitForExist({
-      timeout: TRANSITION_TIMEOUT * 2,
-      timeoutMsg: 'Retry never reconnected RomM',
-    });
     await $(testId('library-rail-platform-snes')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
+      timeout: TRANSITION_TIMEOUT * 2,
       timeoutMsg: 'the RomM group never listed a platform after retrying',
     });
     await expect($(testId('romm-banner'))).not.toExist();

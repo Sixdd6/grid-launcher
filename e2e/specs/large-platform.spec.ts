@@ -108,7 +108,7 @@ async function msUntilCover(id: number, limit: number): Promise<number> {
 describe('large platform: windowed grid, bounded cover loading', () => {
   before(async () => {
     await connectRomm();
-    // Server opens on Discover: select the 2500-game platform.
+    // Select the 2500-game platform.
     await openRommPlatform('arcade');
   });
 

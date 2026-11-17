@@ -11,8 +11,6 @@
   import { backupDialog, closeBackup } from './backups/dialogState.svelte';
   import { driveRailKey } from './library/rail';
   import { jumpToRail, selectRail } from './library/selection.svelte';
-  import { romm } from './stores/romm.svelte';
-  import { rommLive } from './romm/rail';
   import { appUpdate } from './stores/appUpdate.svelte';
   import { noteInput, notePointerAt } from './stores/inputMode.svelte';
   import { registerNavigation } from './stores/navigation.svelte';
@@ -44,11 +42,8 @@
     initialSettingsPage?: SettingsPage;
   } = $props();
 
-  // Set once when the shell first mounts, by Settings › Appearance › Open
-  // GRID on (plan 0.5, decision 16; App.svelte mounts the shell only once
-  // the setting is loaded): Library › RomM › Discover when RomM is connected
-  // (or connecting at startup) and the choice isn't Library, else All games.
-  // If RomM then drops, the Library's rail falls back to RomM › Installed.
+  // Set once when the shell first mounts (plan 0.5, decision 16): Library ›
+  // All games. Discover and Open GRID on are removed for now (2026-11-17).
   // Switching views afterward is a user action — a pill, Ctrl+1..3, or `show()`.
   const forced = untrack(() => forcedView);
   let view = $state<View>('library');
@@ -57,7 +52,7 @@
       view = forced;
       return;
     }
-    const place = initialPlace(rommLive(romm.status), uiSettings.openOn);
+    const place = initialPlace();
     view = place.view;
     selectRail(place.rail);
   });

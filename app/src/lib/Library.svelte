@@ -171,7 +171,7 @@
           if (!cancelled) platformsLoaded = true;
         })
         .catch(() => {
-          // The group shows Installed and Discover; a refused list leaves out the platforms.
+          // The group shows Installed; a refused list leaves out the platforms.
         });
       void catalog.checkLibraryPath();
       void catalog.loadLaunchDefaults();
@@ -429,7 +429,7 @@
   function onRailSelect(key: RailKey) {
     if (key !== librarySelection.key) leaveSelectMode();
     // A row's own click (its group is open) or a jump from the view (Open
-    // Discover, Open Available), which opens a closed group.
+    // Available), which opens a closed group.
     jumpToRail(key);
   }
 
@@ -1079,11 +1079,6 @@
         <span class="romm-empty-ico"><RommMark size="lg" /></span>
         <h3>{ROMM_INSTALLED.emptyTitle}</h3>
         <p>{rommConnected ? ROMM_INSTALLED.emptyConnected : ROMM_INSTALLED.emptyOff}</p>
-        {#if rommConnected}
-          <button data-testid="library-romm-open-discover" class="g-btn" onclick={() => onRailSelect('romm:discover')}>
-            {ROMM_INSTALLED.openDiscover}
-          </button>
-        {/if}
       </div>
     {:else if rommInstalledView && items.length === 0}
       <p data-testid="library-empty" class="empty panel">{ROMM_INSTALLED.noMatch(search.trim())}</p>

@@ -10,7 +10,7 @@ const GAMES = [903, 904, 905, 906];
 /**
  * Stage `tv-backups/tv-backups-b` (docs/tv-mode/plan.md P13): the drive is
  * pulled out mid-backup. Runs on spec a's profile (the session restores from
- * the keyring; --tv opens Library › RomM › Discover) and drive, which already holds
+ * the keyring; --tv opens Library › All games) and drive, which already holds
  * Cinder Peaks, Moss and Marrow, PCSX2 and the PS2 firmware, so this backup
  * is four throttled game rows ("Big Arcade Game" first, about ten seconds).
  */

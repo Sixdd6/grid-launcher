@@ -22,8 +22,8 @@ async function railOrder(): Promise<string[]> {
 
 /**
  * Stage `romm-library`, part B (romm-storefront-plan Step 3): RomM
- * connected. The Library opens on RomM › Discover (Open GRID on ›
- * Automatic); the RomM group has Installed, Discover and one row per
+ * connected. The Library opens on All games (Discover and Open GRID on are
+ * removed for now, 2026-11-17); the RomM group has Installed and one row per
  * platform with RomM's game count; a platform's grid merges the server's
  * games with the installed ones (NOT LINKED, NOT ON ROMM). The seed installed
  * three Super Nintendo games: Super Mario World (rom 101), Hidden Kiln (no
@@ -32,21 +32,21 @@ async function railOrder(): Promise<string[]> {
 describe('romm-library (b): connected', () => {
   before(async () => {
     await connectRomm();
-    await $(testId('library-rail-romm-discover')).waitForExist({
+    await $(testId('library-rail-romm-installed')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the RomM group never showed Discover after connecting',
+      timeoutMsg: 'the RomM group never showed after connecting',
     });
   });
 
-  it('opens on Library › RomM › Discover, with the Library pill selected', async () => {
+  it('opens on Library › All games, with the Library pill selected and no Discover', async () => {
     await expect($(testId('nav-library'))).toHaveAttribute('aria-current', 'page');
-    await expect($(testId('library-rail-romm-discover'))).toHaveAttribute('aria-current', 'page');
-    await $(testId('discover')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
-    await expect($(`${testId('discover-recent')} .lede`)).toHaveText('New on RomM.');
-    await shot('b-discover');
+    await expect($(testId('library-rail-all'))).toHaveAttribute('aria-current', 'page');
+    await expect($(testId('library-rail-romm-discover'))).not.toExist();
+    await expect($(testId('discover'))).not.toExist();
+    await shot('b-all-games');
   });
 
-  it('lists Installed, Discover and the platforms with RomM\'s game counts', async () => {
+  it('lists Installed and the platforms with RomM\'s game counts', async () => {
     await $(testId('library-rail-platform-snes')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the platform rows never appeared',
@@ -56,7 +56,6 @@ describe('romm-library (b): connected', () => {
     // Platforms by label: Arcade, Super Nintendo Entertainment System, Windows 9x.
     expect(romm).toEqual([
       'library-rail-romm-installed',
-      'library-rail-romm-discover',
       'library-rail-platform-arcade',
       'library-rail-platform-snes',
       'library-rail-platform-win',
@@ -147,14 +146,11 @@ describe('romm-library (b): connected', () => {
     await $(testId('library-view')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
   });
 
-  it('words Open GRID on for RomM and drops the Server card size', async () => {
+  it('hides Open GRID on (2026-11-17) and drops the Server card size', async () => {
     await $(testId('nav-settings')).click();
     await $(testId('settings-nav-appearance')).click();
-    await $(testId('open-on-select')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
-    const options = await browser.execute(() =>
-      [...(document.querySelector('[data-testid="open-on-select"]') as HTMLSelectElement).options].map((o) => o.textContent?.trim()),
-    );
-    expect(options).toEqual(['Automatic: Discover when RomM is connected, else Library', 'Discover (when RomM is connected)', 'Library']);
+    await $(testId('theme-select')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('open-on-select'))).not.toExist();
     await expect($(testId('open-on-romm-off'))).not.toExist();
     await expect($(testId('card-size-server'))).not.toExist();
     await expect($(testId('card-size-library'))).toExist();

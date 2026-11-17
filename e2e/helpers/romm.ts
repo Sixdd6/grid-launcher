@@ -7,7 +7,7 @@
  *   `skipWelcome()` presses Skip for now.
  * - A profile past the welcome starts in the shell: `connectRomm()` connects
  *   through Settings › Game stores' RomM card.
- * - The Library's RomM group: `openRommInstalled()`, `openRommDiscover()`,
+ * - The Library's RomM group: `openRommInstalled()`,
  *   `openRommPlatform(slug)` (`library-rail-platform-<slug>`; the platform
  *   screens keep the old Server test ids: `server-platform-header`,
  *   `server-grid`, `game-card-<id>`, `server-search`, …).
@@ -168,8 +168,8 @@ async function connectInSettings(url: string, token: string, opts: ConnectOption
 /**
  * Connects RomM to the stage's mock server (or `opts.url`): through the
  * welcome's RomM row on a fresh data dir (then Continue), otherwise through
- * Settings › Game stores. With RomM connected and Open GRID on › Automatic,
- * the shell opens on Library › RomM › Discover after the welcome.
+ * Settings › Game stores. The shell opens on Library › All games after the
+ * welcome.
  */
 export async function connectRomm(opts: ConnectOptions = {}): Promise<void> {
   const url = opts.url ?? mockUrl();
@@ -203,15 +203,6 @@ export async function openRommInstalled(): Promise<void> {
   await expect($(testId('library-title'))).toHaveText(expect.stringContaining('Installed'));
 }
 
-/** Library › RomM › Discover (RomM connected). */
-export async function openRommDiscover(): Promise<void> {
-  await clickRail('library-rail-romm-discover', 'RomM › Discover');
-  await $(testId('discover')).waitForDisplayed({
-    timeout: TRANSITION_TIMEOUT,
-    timeoutMsg: 'RomM › Discover never appeared',
-  });
-}
-
 /**
  * Library › RomM › <platform> (RomM connected), by the platform's slug
  * (`library-rail-platform-<slug>`), and waits for its header.
@@ -243,7 +234,7 @@ export async function platformSlug(id: number): Promise<string> {
 
 // --- TV mode -----------------------------------------------------------------
 // TV mode's Library rail (`[data-testid="tv-library"] [data-rail]`) holds the
-// RomM group: `r-romm:installed`, `r-romm:discover` and one
+// RomM group: `r-romm:installed` and one
 // `r-platform:<slug>` row per platform (test ids `tv-lib-rail-…`). Moving
 // onto a row shows it. The platform screen's ids: `tv-romm-platform-header`,
 // `tv-lib-count`, `tv-lib-search`, `tv-romm-emu`, `tv-romm-fw`,
@@ -298,12 +289,6 @@ export async function tvOpenRommPlatform(slug: string): Promise<void> {
   });
 }
 
-/** TV Library › RomM › Discover; waits for it. */
-export async function tvOpenRommDiscover(): Promise<void> {
-  await tvRailTo('r-romm:discover');
-  await $(testId('tv-discover')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT, timeoutMsg: 'TV Discover never appeared' });
-}
-
 /** TV Library › RomM › Installed; waits for its header. */
 export async function tvOpenRommInstalled(): Promise<void> {
   await tvRailTo('r-romm:installed');
@@ -314,8 +299,8 @@ export async function tvOpenRommInstalled(): Promise<void> {
 }
 
 /**
- * From the desktop shell, the TV button: TV mode opens on the Library (RomM
- * › Discover when RomM is connected and Open GRID on is Automatic).
+ * From the desktop shell, the TV button: TV mode opens on the view the
+ * desktop showed.
  */
 export async function enterTvMode(): Promise<void> {
   await $(testId('tv-mode-button')).waitForDisplayed({ timeout: APP_START_TIMEOUT, timeoutMsg: 'the desktop shell never loaded' });

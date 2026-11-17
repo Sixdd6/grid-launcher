@@ -75,7 +75,7 @@ describe('tv-romm (b): RomM can’t be reached after it was connected', () => {
     await waitText('tv-rows-main', 'Reconnect');
   });
 
-  it('with the server answering again, Reconnect connects RomM and brings Discover back', async () => {
+  it('with the server answering again, Reconnect connects RomM and brings the platforms back', async () => {
     await setServerOffline(false);
     await press('start');
     await waitText('tv-rows-sub', `Signed in as ${FIXTURE_USERNAME} · ${host()}`);
@@ -88,10 +88,11 @@ describe('tv-romm (b): RomM can’t be reached after it was connected', () => {
     await $(testId('tv-romm-page')).waitForExist({ reverse: true, timeout: TRANSITION_TIMEOUT });
     await tap(testId('tv-tab-library'));
     await waitTab('library');
-    await browser.waitUntil(async () => (await tvRailKeys()).includes('r-romm:discover'), {
+    await browser.waitUntil(async () => (await tvRailKeys()).some((k) => k.startsWith('r-platform:')), {
       timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'Discover never came back to the RomM group',
+      timeoutMsg: 'the platforms never came back to the RomM group',
     });
+    expect(await tvRailKeys()).not.toContain('r-romm:discover');
     expect(await $(testId('tv-lib-romm-flag')).isExisting()).toBe(false);
   });
 

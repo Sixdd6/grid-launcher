@@ -89,7 +89,8 @@ export async function showRommRow(key: RommRailKey): Promise<void> {
   await showTab('library', { again: true });
 }
 
-/** Menu › Discover (README § The shell). */
+/** Menu › Discover (README § The shell). Dormant: the Menu has no Discover
+ *  item and the rail no Discover row for now (2026-11-17). */
 export function goDiscover(): Promise<void> {
   return showRommRow('romm:discover');
 }

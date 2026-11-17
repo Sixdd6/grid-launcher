@@ -7,6 +7,8 @@ import { isEmulatorsShelf, platformKeyer, platformRailKey, railSlugs, serverPlat
 import { ROMM_FLAG_TITLES, ROMM_HEADING } from './words';
 import { emulatorsRailRow, type EmulatorsLoad } from './emulators';
 
+/** `romm:discover` is dormant (Discover is removed for now, 2026-11-17): no
+ *  row has it, so a remembered one falls back to Installed. */
 export type RommRailKey = 'romm:installed' | 'romm:discover' | PlatformRailKey;
 
 /** The heading's badge: a spinner while connecting, `!` for Can't reach and
@@ -44,13 +46,13 @@ export function rommInstalledRows(rows: readonly InstalledGame[]): InstalledGame
 /**
  * Whether RomM is starting up: a probe runs for a stored connection while
  * RomM is not connected yet (the startup restore; also a connect over a
- * stored server). The rail treats it as live: Installed plus Discover.
+ * stored server). The rail treats it as live: the group shows.
  */
 export function rommConnecting(status: Pick<RommStatus, 'connection' | 'busy' | 'server_url'>): boolean {
   return status.connection === 'not_connected' && status.busy && status.server_url !== '';
 }
 
-/** Connected, or connecting at startup: Discover (and Automatic's landing) exist. */
+/** Connected, or connecting at startup. */
 export function rommLive(status: Pick<RommStatus, 'connection' | 'busy' | 'server_url'>): boolean {
   return status.connection === 'connected' || rommConnecting(status);
 }
@@ -109,10 +111,14 @@ function platformRow(slug: string, label: string, count: number, platform: Platf
  * (`null` while it loads). The installed count is read from `installedRows`
  * (live), not from `status.installed_count` (a snapshot).
  *
- * - connected: Installed, Discover, then the platform rows (with the
- *   Emulators row, sorted among them, when the server has that platform:
- *   `emulators` is its list's load, `null` before one started);
- * - connecting at startup: Installed, Discover;
+ * - connected: Installed, then the platform rows (with the Emulators row,
+ *   sorted among them, when the server has that platform: `emulators` is
+ *   its list's load, `null` before one started);
+ * - connecting at startup: Installed only (the group shows, spinner flag);
+ *
+ * Discover is removed for now (2026-11-17, pending its rework): the group
+ * has no Discover row, and a stale `romm:discover` selection falls back to
+ * Installed (`rommSelectionFallback`).
  * - unreachable, expired, not connected: Installed only.
  */
 export function rommRailGroup(
@@ -136,18 +142,6 @@ export function rommRailGroup(
       platform: null,
     },
   ];
-  if (live) {
-    rows.push({
-      key: 'romm:discover',
-      kind: 'discover',
-      label: 'Discover',
-      count: null,
-      testId: 'library-rail-romm-discover',
-      countTestId: null,
-      slug: null,
-      platform: null,
-    });
-  }
   if (status.connection === 'connected' && platforms !== null) {
     const platformRows = rommPlatformRows(platforms, installed);
     const emu = emulatorsRailRow(platforms, emulators);

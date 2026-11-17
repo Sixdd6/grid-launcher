@@ -101,8 +101,8 @@ const platforms = [
 describe('the Emulators rail row', () => {
   it('shows sorted by label among the platform rows, with what this computer can install as its count', () => {
     const g = rommRailGroup(rommStatus(), platforms, [], ready());
-    expect(g?.rows.map((r) => r.key)).toEqual(['romm:installed', 'romm:discover', 'platform:emulators', 'platform:ngc', 'platform:snes']);
-    expect(g?.rows[2]).toMatchObject({
+    expect(g?.rows.map((r) => r.key)).toEqual(['romm:installed', 'platform:emulators', 'platform:ngc', 'platform:snes']);
+    expect(g?.rows[1]).toMatchObject({
       kind: 'emulators',
       label: 'Emulators',
       count: 4,

@@ -12,10 +12,12 @@ export function activeCount(entries: readonly DownloadEntry[]): number {
 }
 
 /**
- * The items, in order (item 364). Discover only while RomM is connected or
- * the startup probe runs (`rommLive`): it opens Library › RomM › Discover.
+ * The items, in order (item 364). Discover (first, while RomM is connected
+ * or the startup probe runs) is removed for now with Discover itself
+ * (2026-11-17, pending its rework): `discover` defaults to false and the
+ * Menu never passes it.
  */
-export function menuItems(active: number, notices: number, discover = true): { key: MenuItemKey; label: string }[] {
+export function menuItems(active: number, notices: number, discover = false): { key: MenuItemKey; label: string }[] {
   return [
     ...(discover ? [{ key: 'discover' as const, label: 'Discover' }] : []),
     { key: 'downloads', label: active > 0 ? `Downloads · ${active} active` : 'Downloads' },

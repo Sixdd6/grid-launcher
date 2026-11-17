@@ -16,9 +16,10 @@ describe('connect-restore (b): relaunch', () => {
       timeout: APP_START_TIMEOUT,
       timeoutMsg: 'the RomM platform rows never appeared — the stored session was not restored',
     });
-    // Where GRID opens, Automatic and connected: Library › RomM › Discover.
+    // Where GRID opens: Library › All games (Discover removed, 2026-11-17).
     await expect($(testId('nav-library'))).toHaveAttribute('aria-current', 'page');
-    await expect($(testId('library-rail-romm-discover'))).toHaveAttribute('aria-current', 'page');
+    await expect($(testId('library-rail-all'))).toHaveAttribute('aria-current', 'page');
+    await expect($(testId('library-rail-romm-discover'))).not.toExist();
     // No welcome and no sign-in form: nothing asked for the token again.
     await expect($(testId('welcome'))).not.toExist();
     await expect($(testId('romm-signin-dialog'))).not.toExist();

@@ -3,7 +3,7 @@
   // group; prototype `rRailGroup`): a folder like a store's, with RomM's mark
   // and name (A opens and closes it), its flag (a spinner while connecting,
   // `!` for Can't reach and Sign-in expired, `off` for not connected), then
-  // Installed (count), Discover, and one row per platform with RomM's game
+  // Installed (count) and one row per platform with RomM's game
   // count (`romm/rail.ts` `rommRailGroup`). Its own panel; open or closed is
   // the list desktop and TV mode share (`[ui] rail_closed`).
   import type { RommRailGroup, RommRailKey } from '../../../../romm/rail';

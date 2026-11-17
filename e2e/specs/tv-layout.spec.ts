@@ -15,7 +15,7 @@ import {
   XBOX_PAD,
 } from '../helpers/tv.js';
 import { tvRailTo } from '../helpers/romm.js';
-import { captureErrors, libCover, pageErrors, testId, text, typeKeys, waitGone, waitOskClosed } from '../helpers/tvDetails.js';
+import { captureErrors, libCover, pageErrors, testId, text, waitGone, waitOskClosed } from '../helpers/tvDetails.js';
 import { byK, driveRow, tap, tapK } from '../helpers/tvBackups.js';
 
 /**
@@ -165,9 +165,9 @@ describe('tv-layout: every screen fits at 720p, 1080p and 4K', () => {
 
   it('Choose your systems (when this profile is offered it)', async () => {
     // A profile whose systems all have an emulator goes straight to the shell.
-    await browser.waitUntil(async () => (await $(testId('tv-choose')).isExisting()) || (await $(testId('tv-discover')).isExisting()), {
+    await browser.waitUntil(async () => (await $(testId('tv-choose')).isExisting()) || (await $(testId('tv-library')).isExisting()), {
       timeout: TRANSITION_TIMEOUT * 3,
-      timeoutMsg: 'neither Choose your systems nor Discover showed after Continue',
+      timeoutMsg: 'neither Choose your systems nor the Library showed after Continue',
     });
     if (!(await $(testId('tv-choose')).isExisting())) return;
     await browser.waitUntil(async () => (await focused())?.startsWith('ch-') ?? false, { timeout: TRANSITION_TIMEOUT * 2 });
@@ -182,24 +182,13 @@ describe('tv-layout: every screen fits at 720p, 1080p and 4K', () => {
     await waitTab('library');
   });
 
-  it('Library › RomM › Discover, Search everything, the Menu and its pages', async () => {
-    await waitShown('tv-discover', 'Discover');
-    await sweep('discover', ['ArrowDown', 'ArrowRight', 'ArrowRight', 'ArrowDown', 'ArrowRight']);
-    // The sweeps' moves can leave Discover for the rail, where Down selects
-    // the next row: back on Discover, into its covers.
-    await tvRailTo('r-romm:discover');
-    await key('ArrowRight');
-    await key('y');
-    await waitShown('tv-osk', 'the search keyboard');
-    expect(await $(testId('tv-osk')).getAttribute('aria-label')).toBe('Search everything');
-    await sweep('search-keyboard', ['ArrowDown', 'ArrowDown', 'ArrowRight']);
-    await typeKeys('a');
-    await key('Enter');
-    await waitOskClosed();
-    await waitShown('tv-search-all', 'Search everything');
-    await browser.pause(800);
-    await sweep('search-results', ['ArrowRight', 'ArrowDown']);
-    await back('tv-search-all');
+  // Discover and Search everything are removed for now (2026-11-17): GRID
+  // opens on Library › All games.
+  it('Library › All games, the Menu and its pages', async () => {
+    await waitShown('tv-library', 'the Library');
+    await tvRailTo('r-all');
+    await sweep('library-all', ['ArrowRight', 'ArrowRight', 'ArrowDown']);
+    await tvRailTo('r-all');
     await key('m');
     await waitShown('tv-menu', 'the Menu');
     await sweep('menu', repeat('ArrowDown', 6));

@@ -31,7 +31,6 @@ const noop = () => {};
 describe('Appearance pane (items 234–240, 527)', () => {
   const acts = {
     open: vi.fn(),
-    setOpenOn: vi.fn(),
     setTheme: vi.fn(),
     setCardDisplay: vi.fn(),
     setTvCardSize: vi.fn(),
@@ -41,12 +40,11 @@ describe('Appearance pane (items 234–240, 527)', () => {
     setBlur: vi.fn(),
     setHardwareAcceleration: vi.fn(),
   };
-  const state = { openOn: 'automatic', rommConnected: true, theme: 'system', cardDisplay: 'rows', tvCardSize: 'medium', tvCardLabels: 'always', fade: 50, blur: 8, hardwareAcceleration: true } as const;
+  const state = { theme: 'system', cardDisplay: 'rows', tvCardSize: 'medium', tvCardLabels: 'always', fade: 50, blur: 8, hardwareAcceleration: true } as const;
   const rows = appearanceRows(state, acts);
 
-  it('lists the rows in order with their lines, with no row that points to desktop mode (2026-11-14)', () => {
+  it('lists the rows in order with their lines, with no row that points to desktop mode (2026-11-14) and no Open GRID on (2026-11-17)', () => {
     expect(summary(rows)).toEqual([
-      ['choice', 'Open GRID on', 'Here and in desktop mode', 'automatic'],
       ['choice', 'Theme', THEME_LINE, 'system'],
       ['choice', 'Game card display', 'Here and in desktop mode', 'rows'],
       ['choice', 'Card size', 'Every grid in TV mode', 'medium'],
@@ -59,9 +57,8 @@ describe('Appearance pane (items 234–240, 527)', () => {
     expect(THEME_LINE).toBe('Dark in TV mode');
   });
 
-  it('offers the Open GRID on and Theme options, with a check on the current value', () => {
-    const open = byKey<ChoiceRow>(rows, 'open-on');
-    expect(open.options.map((o) => o[1])).toEqual(['Automatic: Discover when RomM is connected, else Library', 'Discover (when RomM is connected)', 'Library']);
+  it('offers the Theme options, with a check on the current value', () => {
+    expect(byKey<ChoiceRow>(rows, 'open-on')).toBeUndefined();
     expect(byKey<ChoiceRow>(rows, 'theme').options.map((o) => o[1])).toEqual(['Follow system', 'Dark', 'Light']);
     byKey<ChoiceRow>(rows, 'theme').choose();
     const spec = acts.open.mock.calls[0][0] as ChoiceSpec;
@@ -119,7 +116,7 @@ describe('Appearance pane (items 234–240, 527)', () => {
     blur.set(30);
     expect(acts.setBlur).toHaveBeenCalledWith(12);
     // Background art is off at a full fade (item 12).
-    const off = appearanceRows({ ...state, openOn: 'library', theme: 'dark', cardDisplay: 'columns', fade: 100, blur: 0, hardwareAcceleration: false }, acts);
+    const off = appearanceRows({ ...state, theme: 'dark', cardDisplay: 'columns', fade: 100, blur: 0, hardwareAcceleration: false }, acts);
     expect(byKey<SwitchRow>(off, 'art').on).toBe(false);
     // "Dark in TV mode" describes Follow system only.
     expect(byKey<ChoiceRow>(off, 'theme').sub).toBeUndefined();

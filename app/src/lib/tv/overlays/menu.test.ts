@@ -10,9 +10,8 @@ describe('the Menu (items 363–364; TVRommStorefront: no Reconnect)', () => {
     expect(activeCount(rows)).toBe(3);
   });
 
-  it('lists the items in order, with the counts, and no Reconnect', () => {
+  it('lists the items in order, with the counts, and no Reconnect or Discover (2026-11-17)', () => {
     expect(menuItems(2, 5).map((i) => i.label)).toEqual([
-      'Discover',
       'Downloads · 2 active',
       'Notifications · 5',
       'Settings',
@@ -20,12 +19,12 @@ describe('the Menu (items 363–364; TVRommStorefront: no Reconnect)', () => {
       'Switch to desktop mode',
       'Quit GRID',
     ]);
-    expect(menuItems(0, 0)[1].label).toBe('Downloads');
-    expect(menuItems(0, 0)[2].label).toBe('Notifications · 0');
+    expect(menuItems(0, 0)[0].label).toBe('Downloads');
+    expect(menuItems(0, 0)[1].label).toBe('Notifications · 0');
   });
 
-  it('leaves Discover out while RomM is not connected', () => {
-    expect(menuItems(0, 0, false).map((i) => i.key)).toEqual(['downloads', 'notifications', 'settings', 'controls', 'desktop', 'quit']);
+  it('leaves Discover out by default (removed for now, 2026-11-17)', () => {
+    expect(menuItems(0, 0).map((i) => i.key)).toEqual(['downloads', 'notifications', 'settings', 'controls', 'desktop', 'quit']);
   });
 
   it('on a startup screen offers only Switch to desktop mode and Quit GRID (user decision 2026-11-10)', () => {

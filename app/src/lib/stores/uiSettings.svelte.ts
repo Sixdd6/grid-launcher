@@ -468,7 +468,7 @@ export function toggleRailGroup(id: RailGroupId): void {
 }
 
 /**
- * A jump to a rail row from elsewhere (Show in Library, Open Discover, a
+ * A jump to a rail row from elsewhere (Show in Library, a
  * notification): the row's group opens when it is closed, and that is
  * remembered like a click. Startup and the selection fallback never call
  * this.

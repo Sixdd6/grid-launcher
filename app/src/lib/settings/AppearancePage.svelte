@@ -14,7 +14,6 @@
     setBackgroundEnabled,
     setCardDisplay,
     setHardwareAcceleration,
-    setOpenOn,
     setCardLabels,
     setCardSize,
     setTheme,
@@ -25,11 +24,8 @@
   import { CARD_LABEL_MODES, cardLabelsLabel, normalizeCardLabels } from '../cards/labels';
   import { CARD_DISPLAYS, cardDisplayLabel, normalizeCardDisplay } from '../cards/layout';
   import { backgroundEnabled, CARD_SIZE_VIEWS } from './appearance';
-  import { normalizeOpenOn, OPEN_ON_CHOICES, OPEN_ON_HINT, openOnLabel } from './openOn';
   import SegmentedSwitch from '../SegmentedSwitch.svelte';
   import SettingRow from './SettingRow.svelte';
-  import { romm } from '../stores/romm.svelte';
-  import { OPEN_ON_ROMM_OFF } from '../romm/words';
 
   function onThemeChange(e: Event) {
     const value = (e.currentTarget as HTMLSelectElement).value as ThemeChoice;
@@ -37,10 +33,6 @@
       // The attribute is already applied; a failed save is not worth a
       // blocking error in a settings pane.
     });
-  }
-
-  function onOpenOnChange(e: Event) {
-    setOpenOn(normalizeOpenOn((e.currentTarget as HTMLSelectElement).value)).catch(() => {});
   }
 
   function onToggle(e: Event) {
@@ -88,34 +80,13 @@
     debugPrints = (e.currentTarget as HTMLInputElement).checked;
     api.setDebugPrints(debugPrints).catch(() => {});
   }
-
-  // RommStorefront README: with RomM not connected and a choice other than
-  // Library, GRID opens on All games, and the row says so.
-  let openOnFallback = $derived(uiSettings.openOn !== 'library' && romm.status.connection !== 'connected');
 </script>
 
-<!-- The design prototype's order (attachments/proposed-ui/30), after Open
-     GRID on, which the TV mode design puts first (README § Consultant
-     decisions): theme, the background art, the cards, then the two switches
-     that act on restart or on logging. Each row is a `SettingRow`. -->
-<SettingRow label="Open GRID on" hint={OPEN_ON_HINT} forId="open-on-select">
-  <select
-    class="g-field"
-    data-testid="open-on-select"
-    id="open-on-select"
-    aria-describedby="open-on-select-hint"
-    value={uiSettings.openOn}
-    onchange={onOpenOnChange}
-  >
-    {#each OPEN_ON_CHOICES as choice (choice)}
-      <option value={choice}>{openOnLabel(choice)}</option>
-    {/each}
-  </select>
-  {#if openOnFallback}
-    <small data-testid="open-on-romm-off" class="open-on-note">{OPEN_ON_ROMM_OFF}</small>
-  {/if}
-</SettingRow>
-
+<!-- The design prototype's order (attachments/proposed-ui/30): theme, the
+     background art, the cards, then the two switches that act on restart or
+     on logging. Each row is a `SettingRow`. Open GRID on, first here before,
+     is hidden for now with Discover (2026-11-17, pending the Discover
+     rework); `[ui] open_on` is still stored and ignored. -->
 <SettingRow label="Theme" forId="theme-select">
   <select class="g-field" data-testid="theme-select" id="theme-select" value={uiSettings.theme} onchange={onThemeChange}>
     <option value="system">Follow system</option>
@@ -231,11 +202,3 @@
     Enable debug prints
   </label>
 </SettingRow>
-
-<style>
-  /* Prototype: the "opens on All games" line beside the select. */
-  .open-on-note {
-    font-size: 11px;
-    color: var(--text-muted);
-  }
-</style>

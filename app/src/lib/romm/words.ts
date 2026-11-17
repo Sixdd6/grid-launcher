@@ -184,9 +184,8 @@ export const ROMM_INSTALLED = {
   search: 'Search by title',
   searchFolded: 'Search installed RomM games…',
   emptyTitle: 'No RomM games installed yet',
-  emptyConnected: 'Install games from Discover or a platform under it.',
+  emptyConnected: 'Install games from a platform under it.',
   emptyOff: "Install games from RomM once it's connected again.",
-  openDiscover: 'Open Discover',
   noMatch: (query: string) => `No installed RomM games match "${query}"`,
 } as const;
 

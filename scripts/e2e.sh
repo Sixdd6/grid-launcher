@@ -76,24 +76,14 @@ STAGE_GROUPS=(
   "connect-restore:specs/connect-restore-a.spec.ts specs/connect-restore-b.spec.ts specs/connect-restore-c.spec.ts"
   "library:specs/library.spec.ts specs/library-grid.spec.ts"
   # RomM as a storefront (romm-storefront-plan Step 3): (a) never connected,
-  # nothing installed: no RomM group; (b) connected: Installed, Discover and
-  # the platform rows, a platform merging server and installed games (NOT
+  # nothing installed: no RomM group; (b) connected: Installed and the
+  # platform rows, a platform merging server and installed games (NOT
   # LINKED, NOT ON ROMM); (c) relaunch, server unreachable: Installed only
   # with the ! flag and the Retry banner; (d) relaunch after Disconnect:
   # Installed only with the off flag. Its seed runs before every spec.
   "romm-library:specs/romm-library-a.spec.ts specs/romm-library-b.spec.ts specs/romm-library-c.spec.ts specs/romm-library-d.spec.ts"
-  # Library › RomM › Discover against its own fixture set, whose release and
-  # added dates are relative to the day the run starts (mock-romm
-  # applyRelativeDates).
-  "discover:specs/discover.spec.ts"
-  # Where GRID opens (Settings › Appearance › Open GRID on, shared with TV
-  # mode): (a) Automatic + connected → Library › RomM › Discover, and the
-  # setting's row; (b) relaunch, server unreachable → falls back to RomM ›
-  # Installed with Can't reach; (c) forced Discover, still unreachable →
-  # RomM › Installed and the Appearance note; (d) forced Library while
-  # connected → All games. Each spec relaunches against the same data
-  # directory.
-  "open-on:specs/open-on-a.spec.ts specs/open-on-b.spec.ts specs/open-on-c.spec.ts specs/open-on-d.spec.ts"
+  # The `discover` and `open-on` groups are gone with Discover and Open GRID
+  # on (removed for now, 2026-11-17, pending the Discover rework).
   # install-c: Settings › Library — change the folder, Start fresh › Leave (Q2).
   "install:specs/install-a.spec.ts specs/install-b.spec.ts specs/install-c.spec.ts"
   "downloads:specs/downloads.spec.ts"
@@ -168,9 +158,9 @@ STAGE_GROUPS=(
   # Discover fixtures, --tv on a seeded profile whose welcome isn't done:
   # the welcome, the RomM sign-in page, Choose your systems, Library › RomM,
   # Settings › Game stores and the RomM page, Disconnect, needs-RomM; then
-  # (tv-server's checks, the seed giving SNES a default emulator so New
-  # releases has games) Discover's rows and hero, a platform's header,
-  # search and X to install, Search everything and Menu › Discover. (b)
+  # (tv-server's checks, the seed giving SNES a default emulator) the RomM
+  # group's rows, a platform's header, search and X to install (Discover,
+  # Search everything and Menu › Discover are removed for now, 2026-11-17). (b)
   # relaunches with the mock RomM dropping every request: Can't reach on the
   # rail, RomM › Installed's banner and Retry, the RomM page and Reconnect.
   "tv-romm:specs/tv-romm.spec.ts specs/tv-romm-b.spec.ts"
@@ -193,7 +183,7 @@ STAGE_GROUPS=(
   # connects on the desktop: Details' buttons, tabs, reading, the right
   # stick, Saves, Uninstall's confirmation, Playing and the gate; (b) --tv:
   # Link to a RomM game, Locate… through the folder browser, Game settings;
-  # (c) --tv: the platform search rule, Search everything's failure and the
+  # (c) --tv: the platform search rule and the
   # launch card's "Set up <Platform>"; (d) --tv: the media viewer's videos
   # (a trailer's offline fallback, a server video's seek and volume).
   "tv-details:specs/tv-details-a.spec.ts specs/tv-details-b.spec.ts specs/tv-details-c.spec.ts specs/tv-details-d.spec.ts"
@@ -745,7 +735,7 @@ mock_args_for_group() {
     # The first-run-setup set plus a "Sony PlayStation 4", whose ShadPS4
     # installs with its Qt launcher companion from the mock forge.
     systems|tv-systems) printf -- '--fixtures-dir fixtures-systems' ;;
-    discover|tv-romm) printf -- '--fixtures-dir fixtures-discover' ;;
+    tv-romm) printf -- '--fixtures-dir fixtures-discover' ;;
     tv-details) printf -- '--fixtures-dir fixtures-tv-details --stateful-saves' ;;
     # An "Emulators" platform with one package (rom 801) that zips the mock
     # forge's PCSX2 AppImage stub, plus a PS2 platform for the defaults.

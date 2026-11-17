@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { dataDir, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+import { dataDir, TRANSITION_TIMEOUT } from '../helpers/env.js';
 import { connectPad, focused, hints, invoke, key, waitFocused, waitTab, waitToast, XBOX_PAD } from '../helpers/tv.js';
 import { tvOpenRommPlatform } from '../helpers/romm.js';
 import { captureErrors, moveTo, openLibraryDetails, pageErrors, testId, text, toAllGames, typeKeys, waitGone, waitOskClosed, waitText } from '../helpers/tvDetails.js';
@@ -32,26 +32,16 @@ async function seek(k: string): Promise<void> {
   await waitFocused(k);
 }
 
-async function setOffline(offline: boolean): Promise<void> {
-  const res = await fetch(`${mockUrl()}/__e2e__/offline`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ offline }),
-  });
-  if (!res.ok) throw new Error(`the mock refused /__e2e__/offline: ${res.status}`);
-}
-
 /**
  * Stage `tv-details`, spec c: starts with --tv on the saved session. The
  * Server platform search follows the Library's rule (a blank search is no
- * filter; B restores the search it had); Search everything says when
- * nothing could be searched and tries again; a launch with no emulator
+ * filter; B restores the search it had); a launch with no emulator
  * offers "Set up <Platform>" on its card, which View opens; an install with
  * no library folder asks for one (checklist 530); a native game's Saves
  * lists its save locations, adds one through the folder browser and removes
  * it, asked first (531).
  */
-describe('tv-details (c): search rules, Search everything failure, Set up <Platform>, prompts, save locations', () => {
+describe('tv-details (c): search rules, Set up <Platform>, prompts, save locations', () => {
   before(async () => {
     await $(testId('tv-shell')).waitForExist({ timeout: 60_000, timeoutMsg: 'TV mode never opened' });
     await captureErrors();
@@ -77,28 +67,6 @@ describe('tv-details (c): search rules, Search everything failure, Set up <Platf
     await key('Escape');
     await waitOskClosed();
     await waitText('tv-lib-search', 'Search: save');
-  });
-
-  it('Search everything with the server not answering shows the failure and Try again (consultant ruling)', async () => {
-    await key('Escape');
-    await moveTo('r-romm:discover', 'ArrowUp', 12);
-    await key('ArrowRight');
-    await browser.waitUntil(async () => ((await focused()) ?? '').length > 0 && (await focused()) !== 'r-romm:discover', { timeout: TRANSITION_TIMEOUT });
-    await setOffline(true);
-    try {
-      await key('y');
-      await typeKeys('save');
-      await key('Enter');
-      await $(testId('tv-search-failed')).waitForExist({ timeout: 30_000, timeoutMsg: 'the failure never showed' });
-      expect(await text('tv-search-failed')).toContain("Can't reach your server");
-      expect(await text('tv-search-failed')).toContain("isn't answering, so nothing could be searched.");
-      await waitFocused('sr-retry');
-    } finally {
-      await setOffline(false);
-    }
-    await key('Enter');
-    await waitText('tv-search-heading', '3 results for “save”');
-    await key('Escape');
   });
 
   it('a launch with no emulator offers "Set up <Platform>"; View opens the system page (item 318)', async () => {

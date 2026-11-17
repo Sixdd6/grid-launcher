@@ -1,14 +1,14 @@
 // Settings › Appearance in TV mode (checklist items 10, 12, 13, 234–240,
 // 527; tvmode.js `paneRows('appearance')`; TVRommStorefront README §
-// Appearance › Open GRID on). Open GRID on first (README §
-// Consultant decisions). Theme and Game card display are shared with the
+// Appearance › Open GRID on). Open GRID on, first here before, is hidden
+// for now with Discover (2026-11-17, pending the Discover rework;
+// `openOnSub` stays for its return). Theme and Game card display are shared with the
 // desktop; here "Follow system" shows dark (ruling 22). Card size and Game
 // labels are TV mode's own, stored apart from the desktop's (user decision
 // 2026-11-14, which replaced the "More grid options · In desktop mode" row:
 // TV flows never send the player to desktop mode).
 import type { OpenOn } from '../../../../api';
 import { CARD_DISPLAYS, cardDisplayLabel, type CardDisplay } from '../../../../cards/layout';
-import { OPEN_ON_CHOICES, openOnLabel } from '../../../../settings/openOn';
 import { OPEN_ON_ROMM_OFF } from '../../../../romm/words';
 import { artVisible, BLUR_MAX, type ThemeChoice } from '../../../../theme';
 import {
@@ -23,9 +23,6 @@ import type { Row } from '../../../rows';
 import { choiceRow, type OpenChoice } from './choice';
 
 export type AppearanceState = {
-  openOn: OpenOn;
-  /** RomM is connected (or connecting at startup): Discover exists. */
-  rommConnected: boolean;
   theme: ThemeChoice;
   cardDisplay: CardDisplay;
   tvCardSize: TvCardSize;
@@ -37,7 +34,6 @@ export type AppearanceState = {
 
 export type AppearanceActions = {
   open: OpenChoice;
-  setOpenOn: (v: OpenOn) => void;
   setTheme: (v: ThemeChoice) => void;
   setCardDisplay: (v: CardDisplay) => void;
   setTvCardSize: (v: TvCardSize) => void;
@@ -82,13 +78,6 @@ export function blurFromPercent(pct: number): number {
 
 export function appearanceRows(s: AppearanceState, a: AppearanceActions): Row[] {
   return [
-    choiceRow(
-      { key: 'open-on', label: 'Open GRID on', sub: openOnSub(s.openOn, s.rommConnected) },
-      OPEN_ON_CHOICES.map((c) => [c, openOnLabel(c)] as const),
-      s.openOn,
-      (v) => a.setOpenOn(v as OpenOn),
-      a.open,
-    ),
     choiceRow({ key: 'theme', label: 'Theme', sub: s.theme === 'system' ? THEME_LINE : undefined }, THEME_OPTIONS, s.theme, (v) => a.setTheme(v as ThemeChoice), a.open),
     choiceRow(
       { key: 'card-display', label: 'Game card display', sub: 'Here and in desktop mode' },

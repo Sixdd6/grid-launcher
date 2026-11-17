@@ -149,7 +149,7 @@ describe('updates', () => {
       timeoutMsg: 'the downloads view never opened',
     });
 
-    // GRID opens on Library › RomM › Discover: the seeded installs are under All games.
+    // GRID opens on Library › All games, where the seeded installs are.
     await $(testId('nav-library')).click();
     await $(testId('library-rail-all')).click();
     await $(testId('library-card-801')).waitForExist({

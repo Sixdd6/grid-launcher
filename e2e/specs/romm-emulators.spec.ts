@@ -82,7 +82,6 @@ describe('server-emulator (b): Library › RomM › Emulators', () => {
     const order = (await railOrder()).filter((id) => id.startsWith('library-rail-romm-') || id.startsWith('library-rail-platform-'));
     expect(order).toEqual([
       'library-rail-romm-installed',
-      'library-rail-romm-discover',
       'library-rail-platform-emulators',
       'library-rail-platform-ps2',
     ]);

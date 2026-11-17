@@ -15,20 +15,9 @@ describe('viewLabel / hostOf', () => {
   });
 });
 
-describe('initialPlace (RomM as a storefront, plan 0.5, decision 16)', () => {
-  it.each([
-    // [rommConnected, openOn, rail]
-    [true, 'automatic', 'romm:discover'],
-    [false, 'automatic', 'all'],
-    [true, 'discover', 'romm:discover'],
-    [false, 'discover', 'all'],
-    [true, 'library', 'all'],
-    [false, 'library', 'all'],
-  ] as const)('connected=%s, %s → %s', (connected, openOn, rail) => {
-    expect(initialPlace(connected, openOn)).toEqual({ view: 'library', rail, drive: null });
-  });
-  it('defaults to automatic', () => {
-    expect(initialPlace(true).rail).toBe('romm:discover');
+describe('initialPlace (plan 0.5, decision 16; Discover removed 2026-11-17)', () => {
+  it('always opens on Library › All games', () => {
+    expect(initialPlace()).toEqual({ view: 'library', rail: 'all', drive: null });
   });
 });
 

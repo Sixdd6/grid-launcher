@@ -104,8 +104,8 @@ describe('RomM › Installed (README § RomM › Installed)', () => {
     expect(installedChip(rommStatus({ connection: 'expired' }))).toBeNull();
   });
 
-  it('empty: Install from Discover while connected, else where to fix RomM; a search with no match', () => {
-    expect(installedEmpty(rommStatus(), '')).toEqual({ title: 'No RomM games installed yet', body: 'Install games from Discover or a platform under it.' });
+  it('empty: Install from a platform while connected, else where to fix RomM; a search with no match', () => {
+    expect(installedEmpty(rommStatus(), '')).toEqual({ title: 'No RomM games installed yet', body: 'Install games from a platform under it.' });
     expect(installedEmpty(rommStatus({ connection: 'not_connected' }), '').body).toBe('Connect RomM in Settings › Game stores.');
     expect(installedEmpty(rommStatus({ connection: 'expired' }), '').body).toBe('Your RomM sign-in expired. Sign in again in Settings › Game stores.');
     expect(installedEmpty(rommStatus({ connection: 'unreachable' }), '').body).toBe("Can't reach RomM right now. GRID tries again when you press Retry.");

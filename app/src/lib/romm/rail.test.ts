@@ -18,14 +18,14 @@ const rows = [
 const keys = (g: ReturnType<typeof rommRailGroup>) => g?.rows.map((r) => r.key);
 
 describe('rommRailGroup', () => {
-  it('connected: Installed, Discover, then the platform rows by label', () => {
+  it('connected: Installed, then the platform rows by label (no Discover row, 2026-11-17)', () => {
     const g = rommRailGroup(rommStatus(), servers, rows);
     expect(g?.heading).toBe('ROMM');
     expect(g?.flag).toBeNull();
-    expect(keys(g)).toEqual(['romm:installed', 'romm:discover', 'platform:n64', 'platform:saturn', 'platform:snes']);
+    expect(keys(g)).toEqual(['romm:installed', 'platform:n64', 'platform:saturn', 'platform:snes']);
     // Installed counts RomM rows only, not the Emulators shelf or store rows.
     expect(g?.rows[0]).toMatchObject({ label: 'Installed', count: 2, testId: 'library-rail-romm-installed', countTestId: 'library-rail-count-romm-installed' });
-    expect(g?.rows[1]).toMatchObject({ label: 'Discover', count: null, testId: 'library-rail-romm-discover' });
+    expect(g?.rows.some((r) => r.kind === 'discover')).toBe(false);
   });
 
   it('counts RomM games only on platform rows (decision 14)', () => {
@@ -37,14 +37,14 @@ describe('rommRailGroup', () => {
     expect(saturn).toMatchObject({ count: 0, label: 'Sega Saturn', platform: null });
   });
 
-  it('connected while the platform list loads: Installed and Discover', () => {
-    expect(keys(rommRailGroup(rommStatus(), null, rows))).toEqual(['romm:installed', 'romm:discover']);
+  it('connected while the platform list loads: Installed only', () => {
+    expect(keys(rommRailGroup(rommStatus(), null, rows))).toEqual(['romm:installed']);
   });
 
-  it('connecting at startup counts as live: Installed and Discover, with a spinner flag', () => {
+  it('connecting at startup counts as live: Installed, with a spinner flag', () => {
     const status = rommStatus({ connection: 'not_connected', busy: true });
     const g = rommRailGroup(status, null, []);
-    expect(keys(g)).toEqual(['romm:installed', 'romm:discover']);
+    expect(keys(g)).toEqual(['romm:installed']);
     expect(g?.flag).toEqual({ text: 'busy', title: 'Connecting to RomM' });
   });
 
@@ -109,9 +109,13 @@ describe('rommSelectionFallback', () => {
   });
   it('falls back to Installed when Discover or a platform disappears', () => {
     expect(rommSelectionFallback('romm:discover', off)).toBe('romm:installed');
+    // Discover is removed for now (2026-11-17): a remembered selection of it
+    // lands on Installed while connected too.
+    expect(rommSelectionFallback('romm:discover', connected)).toBe('romm:installed');
     expect(rommSelectionFallback('platform:snes', off)).toBe('romm:installed');
   });
   it('falls back to All games when the group is gone', () => {
     expect(rommSelectionFallback('romm:installed', null)).toBe('all');
+    expect(rommSelectionFallback('romm:discover', null)).toBe('all');
   });
 });

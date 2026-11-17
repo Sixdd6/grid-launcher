@@ -1,17 +1,15 @@
 <script lang="ts">
   // The Menu (Start; items 362–366; tvmode.js `guideMenu`; TVRommStorefront
   // README § The shell): a 30rem panel from the right with the clock, then
-  // Discover (only while RomM is connected or the startup probe runs; it
-  // opens Library › RomM › Discover), Downloads (with the active count),
+  // Downloads (with the active count),
   // Notifications (with the count), Settings, Controls, Switch to desktop
-  // mode and Quit GRID. No Reconnect and no "<user> · <server>" line.
+  // mode and Quit GRID. No Reconnect and no "<user> · <server>" line. No
+  // Discover either: it is removed for now (2026-11-17, pending its rework).
   // Each item closes the Menu first. The prototype's "Prototype only"
   // section is not part of the app. Controls shows the welcome card again.
   // On a startup screen (`startup`) the panel holds only Switch to desktop
   // mode and Quit GRID under the clock (user decision 2026-11-10).
   import { downloads } from '../../stores/downloads.svelte';
-  import { rommLive } from '../../romm/rail';
-  import { romm } from '../../stores/romm.svelte';
   import { leaveTv } from '../../stores/uiMode.svelte';
   import { clock } from '../clock.svelte';
   import { tvf } from '../focus/actions';
@@ -25,11 +23,11 @@
 
   let { startup = false }: { startup?: boolean } = $props();
 
-  let items = $derived(startup ? startupMenuItems() : menuItems(activeCount(downloads.entries), tvNotices.history.length, rommLive(romm.status)));
+  let items = $derived(startup ? startupMenuItems() : menuItems(activeCount(downloads.entries), tvNotices.history.length));
 
   const RUN: Record<MenuItemKey, () => void> = {
-    // Discover selected in the Library's RomM group; the Library's `arrive`
-    // then focuses Discover's content (items 104, 365).
+    // Dormant (the Menu has no Discover item for now): Discover selected in
+    // the Library's RomM group, its content focused (items 104, 365).
     discover: () => void goDiscover(),
     downloads: () => void showTab('downloads'),
     notifications: () => void pushPage({ title: 'Notifications', component: TvNotifications }, { fresh: true }),

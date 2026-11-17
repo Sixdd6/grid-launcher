@@ -19,10 +19,9 @@ export function selectRail(key: RailKey): void {
 
 /**
  * A jump to a rail row from elsewhere (Settings' Show in Library, Open
- * Discover, Open Available, a notification): selects it and opens its group
- * when closed (RommStorefront README § Folding groups). Startup (Open GRID
- * on) and the RomM selection fallback use `selectRail`, which never opens a
- * group.
+ * Available, a notification): selects it and opens its group when closed
+ * (RommStorefront README § Folding groups). Startup and the RomM selection
+ * fallback use `selectRail`, which never opens a group.
  */
 export function jumpToRail(key: RailKey): void {
   openRailGroupOf(key);

@@ -16,7 +16,7 @@
     heading?: string;
     /** A `data-rail` attribute value for the row, when the view wants one. */
     dataRail?: string;
-    /** A divider under this row (Server's Discover row). */
+    /** A divider under this row. */
     divider?: boolean;
     /** An icon before the label (Library's backup drive rows). */
     icon?: IconName;

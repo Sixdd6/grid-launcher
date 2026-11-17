@@ -58,7 +58,7 @@ describe('server-emulator (c): TV Library › RomM › Emulators', () => {
       timeoutMsg: 'the TV rail never showed the Emulators row',
     });
     const rows = (await tvRailKeys()).filter((k) => k.startsWith('r-romm:') || k.startsWith('r-platform:'));
-    expect(rows).toEqual(['r-romm:installed', 'r-romm:discover', 'r-platform:emulators', 'r-platform:ps2']);
+    expect(rows).toEqual(['r-romm:installed', 'r-platform:emulators', 'r-platform:ps2']);
     await browser.waitUntil(async () => (await text('tv-lib-rail-platform-emulators')).includes('3'), {
       timeout: APP_START_TIMEOUT,
       timeoutMsg: 'the Emulators row never counted 3',

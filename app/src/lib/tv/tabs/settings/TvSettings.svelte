@@ -13,8 +13,6 @@
   import { api, type CloudSettings, type LibraryPathCheck, type RaStatus } from '../../../api';
   import { appUpdate, dismiss as dismissUpdate, refreshAppUpdateStatus } from '../../../stores/appUpdate.svelte';
   import { libraryMove } from '../../../stores/libraryMove.svelte';
-  import { romm } from '../../../stores/romm.svelte';
-  import { rommLive } from '../../../romm/rail';
   import { pushToast } from '../../../stores/toasts.svelte';
   import {
     commitBackgroundBlur,
@@ -22,7 +20,6 @@
     setBackgroundEnabled,
     setCardDisplay,
     setHardwareAcceleration,
-    setOpenOn,
     setTheme,
     setTvAssignment,
     setTvCardLabels,
@@ -354,8 +351,6 @@
       case 'appearance':
         return appearanceRows(
           {
-            openOn: uiSettings.openOn,
-            rommConnected: rommLive(romm.status),
             theme: uiSettings.theme,
             cardDisplay: uiSettings.cardDisplay,
             tvCardSize: uiSettings.tvCardSize,
@@ -366,7 +361,6 @@
           },
           {
             open: openChoice,
-            setOpenOn: (v) => void setOpenOn(v).catch(fail),
             setTheme: (v) => void setTheme(v).catch(() => {}),
             setCardDisplay: (v) => void setCardDisplay(v).catch(fail),
             setTvCardSize: (v) => void setTvCardSize(v).catch(fail),
