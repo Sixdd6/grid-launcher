@@ -4,7 +4,9 @@
    tvstores_bk.js; it wraps their functions and never edits them.
    - No Server tab: three tabs (Library, Downloads, Settings) and GRID opens on the Library.
    - The Library rail has a RomM group, in name order among the stores: Installed, then
-     Discover and one row per platform while RomM is connected.
+     one row per platform while RomM is connected.
+   - Discover, Search everything, Menu › Discover and Open GRID on are removed until the
+     Discover rework (2026-11-17): GRID opens on Library › All games. Their code stays.
    - Settings › Game stores (was Stores) has a RomM row and page; Connection is gone.
    - A neutral welcome replaces Connect. Systems and firmware work without RomM.
    No top-bar connection text, no offline hint line, no Menu › Reconnect.
@@ -55,7 +57,7 @@ function rRailGroup() {
   if (!rInRail()) return '';
   var row = function (key, label, n) { return railItem(key, label, n, S.libRail === key, 'lib').replace('class="ri', 'class="ri sub'); };
   var html = row('romm:installed', 'Installed', rInstalled().length);
-  if (rLive()) html += row('romm:discover', 'Discover', null);
+  /* No Discover row for now (removed 2026-11-17, pending the Discover rework). */
   if (rOn()) html += rPlats().map(function (p) { return row('platform:' + p, PLAT[p], rOnRomm(p).length); }).join('');
   return folder('romm', rmark() + 'RomM', 0, '', html).replace('</button>', rFlag() + '</button>');
 }
@@ -73,7 +75,7 @@ function rFixRail() {
   var r = S.libRail, to = null;
   if (r.indexOf('romm:') !== 0 && r.indexOf('platform:') !== 0) return;
   if (!rInRail()) to = 'all';
-  else if ((r === 'romm:discover' && !rLive()) || (r.indexOf('platform:') === 0 && !rOn())) to = 'romm:installed';
+  else if (r === 'romm:discover' || (r.indexOf('platform:') === 0 && !rOn())) to = 'romm:installed';
   if (!to) return;
   S.libRail = to; S.libQ = ''; if (S.selMode) { S.selMode = false; S.sel = []; }
   if (TABS.library._k === 'r-' + r || (TABS.library._k || '').indexOf('r-') !== 0) TABS.library._k = 'r-' + to;
@@ -201,15 +203,12 @@ TABS.library.lt = function () { var k = rKind(); if (k === 'disc' || k === 'plat
 ACT.rBackupInst = function () { var L = rInstalled(); openBackup(L.map(function (g) { return g.id; }), 'Backup RomM · ' + plural(L.length, 'game')); };
 
 /* ---- Where GRID opens (desktop and TV alike) ----
-   Automatic and Discover: RomM › Discover when RomM is connected at startup (the config
-   says so; the probe runs after the shell is up), else All games. Library: All games.
-   Never a Backup drive, even when RomM was never connected (decision 16). */
+   Library › All games, always: Discover and Open GRID on are removed for now
+   (2026-11-17). Never a Backup drive, even when RomM was never connected (decision 16). */
 openStart = function () {
   S.pages = []; S.layers.forEach(function (l) { l.el.remove(); }); S.layers = []; S.selMode = false; S.startup = false;
-  var conf = ROMM.conn === 'connected' || ROMM.startupProbe, where = CFG.startOn;
   S.tab = 'library'; S.libQ = '';
-  if (where !== 'library' && conf) { S.libRail = 'romm:discover'; S.folds.romm = true; }
-  else S.libRail = 'all';
+  S.libRail = 'all';
   TABS.library._k = 'r-' + S.libRail;
   /* A restart lands where the setting says, never on the row focused before it. */
   if (cur) cur.classList.remove('f'); cur = null;
@@ -255,8 +254,8 @@ setPaint = function () {
 var tvrRows = paneRows;
 paneRows = function (id) {
   var R = tvrRows(id);
-  if (id === 'appearance') R[0].sub = 'Here and in desktop mode' + (!rOn() && CFG.startOn !== 'library' ? '. RomM isn\'t connected, so GRID opens on All games.' : '');
-  if (id === 'appearance') R[0].opts = [['auto', 'Automatic: Discover when RomM is connected, else Library'], ['discover', 'Discover (when RomM is connected)'], ['library', 'Library']];
+  /* Appearance › Open GRID on (its first row) is hidden for now (2026-11-17). */
+  if (id === 'appearance' && R[0] && R[0].key === 'startOn') R.shift();
   if (id === 'ra') R.forEach(function (r) { if (r.label === 'Save') r.fn = function () { toast('RetroAchievements login saved', { s: rOn() ? 'Sent to 3 emulators and your RomM account' : 'Sent to 3 emulators' }); }; });
   return R;
 };
@@ -700,7 +699,7 @@ ACT.rCard = function () { rCardPage(); };
 ACT.rReconnect = function () { rReconnect(); };
 ACT.rSignIn = function () { rSignInPage('again', 'settings'); };
 
-/* ---- Menu: no Reconnect, no server line; Discover only while RomM is connected ---- */
+/* ---- Menu: no Reconnect, no server line, no Discover (removed for now, 2026-11-17) ---- */
 var tvrGuide = guideMenu;
 guideMenu = function () {
   tvrGuide();
@@ -709,7 +708,7 @@ guideMenu = function () {
   box.querySelectorAll('[data-gi]').forEach(function (b) {
     var it = L.gi[+b.dataset.gi];
     if (it[0] === 'Reconnect') b.remove();
-    if (it[0] === 'Discover') { if (!rLive()) b.remove(); else it[1] = function () { S.pages = []; S.tab = 'library'; S.libRail = 'romm:discover'; S.folds.romm = true; S.libQ = ''; TABS.library._k = 'r-romm:discover'; rJump(); }; }
+    if (it[0] === 'Discover') b.remove();
   });
   box.querySelectorAll('[data-gp]').forEach(function (b) {
     var t = L.gp[+b.dataset.gp][0];
@@ -770,6 +769,6 @@ function rRestart(ok) {
     rApply();
   }, 2400);
 }
-/* The card opens on Library › RomM › Discover (Automatic, RomM connected), with the
+/* The card opens on Library › All games, with the
    store jobs of the Game stores card running in Downloads. */
 function rBoot() { CFG.startOn = 'auto'; openStart(); }

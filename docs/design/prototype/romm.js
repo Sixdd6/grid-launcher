@@ -5,8 +5,10 @@
      views are Library, Downloads and Settings (Ctrl+1..3).
    - The Library rail: All games, Recent, Updates; Backup drives; then the
      storefront groups by name: Amazon, Epic, GOG, RomM, Steam. RomM's group
-     is Installed, Discover and one row per platform while connected, and
-     Installed only (with the "!" or "off" flag) otherwise.
+     is Installed and one row per platform while connected, and Installed
+     only (with the "!" or "off" flag) otherwise. Discover and Open GRID on
+     are removed until the Discover rework (2026-11-17): no Discover row, no
+     Open Discover, no Open GRID on row; GRID opens on All games.
    - Settings › Game stores (renamed from Stores) has a RomM card; the
      Connection pane is gone. The welcome replaces the Connect screen.
    - Settings › Systems works without RomM: catalog systems, Install from
@@ -97,6 +99,8 @@ function rmFixSel() {
   var srvOk = rmOn() || (RM.conn === 'checking' && S.platform === 'DISCOVER');
   if (S.view === 'server' && !srvOk) { S.view = 'library'; S.libFilter = rmInRail() ? 'romm:installed' : 'all'; }
   if (S.view === 'server' && S.platform !== 'DISCOVER' && !G.some(function (g) { return g.p === S.platform; })) S.platform = 'DISCOVER';
+  /* Discover is removed for now (2026-11-17): a Discover selection falls back. */
+  if (S.view === 'server' && S.platform === 'DISCOVER') { S.view = 'library'; S.libFilter = rmInRail() ? 'romm:installed' : 'all'; }
   if (S.libFilter === 'romm:installed' && !rmInRail()) S.libFilter = 'all';
 }
 var rmOrigAll = renderAll;
@@ -119,7 +123,7 @@ function rmPlats() {
 function rmRailHTML() {
   if (!rmInRail()) return '';
   var rows = [['romm:installed', 'Installed', rmInst().length]];
-  if (rmOn() || RM.conn === 'checking') rows.push(['romm:discover', 'Discover', null]);
+  /* No Discover row for now (removed 2026-11-17, pending the Discover rework). */
   if (rmOn()) rmPlats().forEach(function (p) { rows.push(['platform:' + p, PLAT[p], G.filter(function (g) { return g.p === p && !g.local; }).length]); });
   var cur = S.view === 'server' ? (S.platform === 'DISCOVER' ? 'romm:discover' : 'platform:' + S.platform) : S.libFilter;
   var flag = RM.conn === 'checking' ? '<span class="st-flag rm-flag-spin" title="Connecting to RomM"><span class="st-spin"></span></span>'
@@ -179,8 +183,8 @@ function rmRenderInstalled() {
   if (!list.length) {
     el.className = 'grid';
     el.innerHTML = rmBanner() + stState({ icon: rmMark('lg'), h: 'No RomM games installed yet',
-      p: rmOn() ? 'Install games from Discover or a platform under it.' : 'Install games from RomM once it’s connected again.',
-      acts: rmOn() ? '<button class="g-btn" data-rm-go="romm:discover">Open Discover</button>' : '' });
+      p: rmOn() ? 'Install games from a platform under it.' : 'Install games from RomM once it’s connected again.',
+      acts: '' });
   } else if (!shown.length) {
     el.innerHTML = rmBanner() + '<p class="g-panel empty">No installed RomM games match “' + esc(q) + '”</p>';
   } else el.insertAdjacentHTML('afterbegin', rmBanner());
@@ -265,14 +269,7 @@ renderSettings = function () {
   var el = $('set-pane'), h2 = el.querySelector('h2');
   if (S.setPane === 'cloud' && !rmOn() && h2) h2.insertAdjacentHTML('afterend', rmNeedsHTML({ h: 'Cloud saves need RomM', p: rmWhy() + ' GRID keeps your emulator saves and states on your RomM server. These settings apply when it’s connected. GOG and Epic games sync with their own store’s cloud.', act: rmFixAct() }));
   if (S.setPane === 'ra' && !rmOn() && h2) h2.insertAdjacentHTML('afterend', rmNeedsHTML({ h: 'Achievement progress needs RomM', p: rmWhy() + ' Details › Achievements shows your progress from RomM. Signing in here still turns on achievements in RetroArch, DuckStation and Dolphin.', act: rmFixAct() }));
-  if (S.setPane === 'appearance') {
-    var row = el.querySelector('.setting');
-    var opts = [['automatic', 'Automatic: Discover when RomM is connected, else Library'], ['discover', 'Discover (when RomM is connected)'], ['library', 'Library']];
-    var fallback = RM.openOn !== 'library' && !rmOn() ? '<small>RomM isn’t connected, so GRID opens on All games.</small>' : '';
-    var html = '<label class="setting"><span>Open GRID on<small>Here and in TV mode</small></span><span><span class="g-control"><select id="set-openon" data-rm-openon>' +
-      opts.map(function (o) { return '<option value="' + o[0] + '"' + (RM.openOn === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></span>' + fallback + '</span></label>';
-    if (row) row.insertAdjacentHTML('afterend', html);
-  }
+  /* Appearance › Open GRID on is hidden for now (2026-11-17, with Discover). */
   gIcons(el);
   if (FR.phase === 'welcome') rwRender();
 };
@@ -506,7 +503,7 @@ var rmOrigHide = freshHide;
 freshHide = function () {
   var ret = FR.ret; FR.ret = null;
   if (ret === 'settings') { S.view = 'settings'; S.setPane = 'stores'; }
-  else if (ret === 'welcome') { if (rmOn()) { S.view = 'server'; S.platform = 'DISCOVER'; } else { S.view = 'library'; S.libFilter = 'all'; } }
+  else if (ret === 'welcome') { S.view = 'library'; S.libFilter = 'all'; }
   rmOrigHide();
 };
 
@@ -700,7 +697,7 @@ document.addEventListener('keydown', function (e) {
 
 function rmBoot() {
   stBoot();
-  /* Open GRID on › Automatic with RomM connected: Library › RomM › Discover. */
-  S.view = 'server'; S.platform = 'DISCOVER';
+  /* GRID opens on Library › All games (Discover and Open GRID on removed 2026-11-17). */
+  S.view = 'library'; S.libFilter = 'all';
   renderAll();
 }

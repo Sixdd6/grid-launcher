@@ -4,6 +4,8 @@ TV mode is GRID's second, fullscreen interface: every feature on main, driven en
 
 **RomM storefront (2026-11-15):** RomM becomes an optional storefront (`docs/romm-storefront-plan.md`). The **TVRommStorefront** card replaces the Server tab, Connect, the offline mode, the Connection pane and RomM-only Systems; the items it replaces are marked *Superseded* below, and its README lists them all.
 
+**Changes 2026-11-17:** Discover (Server › Discover, later Library › RomM › Discover), Search everything and Settings › Appearance › Open GRID on are removed from the app, in desktop and TV mode, until the Discover rework; TV mode opens on Library › All games. The rows below that name them describe the design before then. See the TVRommStorefront card.
+
 ## Try it
 
 The card is a working prototype. Click inside it first (that only hands it the keyboard: TV mode ignores the mouse), then use the keyboard as a controller:

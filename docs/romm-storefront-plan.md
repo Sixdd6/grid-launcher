@@ -4,6 +4,19 @@ Status: decisions settled 2026-11-15; plan written 2026-11-15; revised 2026-11-1
 user answered Q1–Q8 (decision 3 reversed, decisions 9–12 added). One open question
 remains (end of the plan). It is not decided.
 
+> **Note 2026-11-17: Discover and Open GRID on removed for now.** The user took the
+> Discover view out of the app, in desktop and TV mode, until the Discover rework (see
+> "After this rework: Discover"). The RomM rail group has no Discover row (connected:
+> Installed, then the platform rows; connecting at startup: Installed only); a stale
+> `romm:discover` selection falls back to RomM › Installed, or All games. Settings ›
+> Appearance › Open GRID on is hidden and GRID always opens on Library › All games; the
+> `[ui] open_on` value is still read and written, and ignored. The desktop "Open Discover"
+> button, TV Menu › Discover and TV's Search everything are gone too. Discover's code
+> (`app/src/lib/discover/`, `TvRommDiscover.svelte`, `discoverRows.ts`, `searchAll.ts`,
+> `romm::discover`, `commands/discover.rs`) stays dormant with its unit tests; the e2e
+> `discover` and `open-on` groups were removed. Where this plan describes Discover or
+> Open GRID on below, read it as the state before 2026-11-17.
+
 GRID stops being "a launcher for RomM" with stores beside it. RomM becomes one optional
 storefront next to GOG, Epic, Amazon and Steam. Its engine (platforms, emulators,
 firmware, per-emulator cloud saves, relink, drive packs) stays; what changes is how it is

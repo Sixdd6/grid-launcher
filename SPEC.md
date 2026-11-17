@@ -30,23 +30,21 @@ light / dark toggle. There is no server chip, connection dot or server menu: Rom
 state and its Reconnect, Disconnect and Open in browser live on its Library group and
 its Settings › Game stores card (see Overview). `Ctrl+1`..`Ctrl+3` switch views from the
 keyboard (not while a text field has focus or a dialog is open). Emulators are set up in
-Settings › Systems; there is no Emulators view, and no Server view: RomM's Discover and
-platform screens are rows of the Library's RomM group.
+Settings › Systems; there is no Emulators view, and no Server view: RomM's platform
+screens are rows of the Library's RomM group (Discover is removed for now, see RomM ›
+Discover).
 
-**Where GRID opens.** The view is always the Library. Which rail row is selected when
-the main window first appears (after startup, the welcome or Choose your systems) follows
-Settings › Appearance › **Open GRID on**, one setting shared with TV mode:
-- **Automatic** (the default): Library › RomM › Discover when RomM is connected at
-  startup, else All games.
-- **Discover (when RomM is connected)**: Library › RomM › Discover when RomM is connected
-  at startup, else All games (the Discover row exists only while RomM is connected).
-- **Library**: All games.
-"Connected at startup" means the config says RomM is connected: the startup probe runs
-after the shell is up, so an unreachable server never holds the window. While it runs,
-the RomM group shows its Connecting state, with Discover in it. If the probe then fails,
-the selection falls back to RomM › Installed, or All games when the group is gone. A user
-who never connected RomM opens on All games. The stored values (`automatic`, `discover`,
-`library`) are unchanged from earlier versions.
+**Where GRID opens.** The view is always the Library, on **All games**, when the main
+window first appears (after startup, the welcome or Choose your systems), in desktop and
+TV mode alike. The startup probe of a stored RomM connection runs after the shell is up,
+so an unreachable server never holds the window; while it runs, the RomM group shows its
+Connecting state.
+
+*Removed for now (2026-11-17), pending the Discover rework:* Settings › Appearance ›
+**Open GRID on** (Automatic: Discover when RomM is connected, else Library; Discover;
+Library) is hidden in desktop and TV mode, and GRID always opens on All games. The stored
+`[ui] open_on` value (`automatic`, `discover`, `library`) is still read and written
+unchanged, and ignored, so the setting can come back with Discover.
 
 **Light / dark toggle.** A 28×28 icon button showing the current mode — a sun in light,
 a moon in dark — whose label names the switch ("Switch to dark mode"). On the startup
@@ -138,7 +136,7 @@ no per-emulator queued, installed or failed cards are shown.
 
 # Main Sections
 There are three main sections to the application with buttons across the top bar to navigate between them:
-- Library (every storefront's games, RomM's Discover and platform screens included; see
+- Library (every storefront's games, RomM's platform screens included; see
   Where GRID opens under Top Bar)
 - Downloads
 - Settings (storefronts are connected in its Game stores pane, emulators set up in its
@@ -213,15 +211,16 @@ There are three main sections to the application with buttons across the top bar
 
   | RomM | Flag | Rows |
   |---|---|---|
-  | Connected | none | **Installed** (count), **Discover** (no count), then one row per platform (count) |
-  | Connecting at startup | spinner, "Connecting to RomM" | **Installed**, **Discover** (a connecting panel) |
+  | Connected | none | **Installed** (count), then one row per platform (count) |
+  | Connecting at startup | spinner, "Connecting to RomM" | **Installed** only |
   | Can't reach | **!** "Can't reach RomM" | **Installed** only |
   | Sign-in expired | **!** "RomM sign-in expired" | **Installed** only |
   | Not connected, RomM games installed | **off** "Not connected" | **Installed** only |
   | Not connected, none installed | — | no group |
 
-  When the selected row goes away (RomM drops while Discover or a platform is open), the
-  selection falls back to RomM › Installed, or All games when the group is gone.
+  When the selected row goes away (RomM drops while a platform is open), the selection
+  falls back to RomM › Installed, or All games when the group is gone. There is no
+  Discover row for now (removed 2026-11-17, pending its rework; see RomM › Discover).
 
   **RomM › Installed** is every installed RomM game (never the hidden Emulators shelf),
   with platform tags and the Library's sort, size and search ("Search by title"; folded:
@@ -234,9 +233,8 @@ There are three main sections to the application with buttons across the top bar
   - Sign-in expired: "**RomM sign-in expired** · Sign in again to browse, install and
     sync saves. Installed games still play." · **Sign in again…** (the sign-in dialog);
   - Not connected: no banner; the **off** flag and the chip say it, as for a store.
-  Empty: "No RomM games installed yet" with "Install games from Discover or a platform
-  under it." and **Open Discover** (connected), else "Install games from RomM once it's
-  connected again.". With RomM not connected RomM games show no UPDATE tag (Disconnect
+  Empty: "No RomM games installed yet" with "Install games from a platform under it."
+  (connected), else "Install games from RomM once it's connected again.". With RomM not connected RomM games show no UPDATE tag (Disconnect
   clears updates); Can't reach and Sign-in expired keep the last known ones.
 
   **A RomM platform** shows a platform header (name, the counts line "4 games on RomM ·
@@ -264,9 +262,13 @@ There are three main sections to the application with buttons across the top bar
   emulator is picked.
   Native platforms (games native to this OS, and Windows games run through Proton) and
   the Emulators shelf show neither chip, and their firmware status is never fetched.
-- **RomM › Discover** is the RomM group's second row, shown only while RomM is connected
+- **RomM › Discover** — *removed for now (2026-11-17), pending a rework.* The RomM group
+  has no Discover row in desktop or TV mode, nothing opens it (no Open Discover, no Menu ›
+  Discover, no Open GRID on) and TV's Search everything went with it; its code stays,
+  unwired, for the rework. What follows describes it as it was.
+  It was the RomM group's second row, shown only while RomM is connected
   (or connecting at startup). A connected app, and the app after Choose your systems,
-  opens on it (unless Open GRID on says Library). The top bar's pill stays on Library.
+  opened on it (unless Open GRID on said Library). The top bar's pill stays on Library.
   While the startup probe runs it shows a panel: a spinner, "Connecting to
   romm.home.lan…" and "Discover and the platforms show when RomM answers. Installed games
   play now.". It has no folding header and no search; Ctrl+F does nothing there. Its lists come from the server's `created_at` and
@@ -647,13 +649,8 @@ There are three main sections to the application with buttons across the top bar
     Backup drive without RomM, come later and are not built. They will add a game source
     whose games join Systems by slug, as installed RomM games do, and a Library group of
     their own; Systems, firmware and the label lookup need no change for them.
-- **Appearance** (under Settings) starts with **Open GRID on**, a select with "Automatic:
-  Discover when RomM is connected, else Library", "Discover (when RomM is connected)" and
-  "Library", and the help text "Here and in TV mode" (see Where GRID opens under Top
-  Bar). While RomM isn't connected and the choice isn't Library, a line reads "RomM isn't
-  connected, so GRID opens on All games." It applies the next time
-  GRID opens and is stored as `open_on` (`automatic`, `discover` or `library`) under `[ui]`.
-  It then chooses the theme — follow the OS, dark, or light;
+- **Appearance** (under Settings; its first row, **Open GRID on**, is hidden for now: see
+  Where GRID opens under Top Bar) chooses the theme — follow the OS, dark, or light;
   the light / dark toggle sets dark or light here too —
   turns the background art on or off, sets its fade from 0 to 100 percent with a live
   preview behind the pane (0 shows the art at full strength; each step fades it toward
@@ -758,7 +755,7 @@ welcome does not leave it at once, so the other rows can be connected first. The
 emulator step without RomM: until local ROMs are supported (see Later: bring your own ROMs
 under Settings › Systems), a user without RomM has no games that need one, and Windows
 games need only the Proton default in Settings › Systems. With RomM connected and setup
-needed, Continue leads to Choose your systems, then the Library on RomM › Discover;
+needed, Continue leads to Choose your systems, then the Library on All games;
 otherwise the welcome opens the Library on All games. Either way the welcome is not shown
 again.
 
@@ -816,7 +813,7 @@ their game counts, in alphabetical order, each with a tick box, none ticked:
   when only an installed Proton version was picked, **Use selected emulators** when
   everything ticked is already installed, and is disabled ("Install emulators") while
   nothing is ticked.
-- Installing goes on at once: from the welcome to the Library on RomM › Discover, from the
+- Installing goes on at once: from the welcome to the Library on All games, from the
   Settings card back to Settings › Game stores. A card at the top of the notification
   stack follows the installs, Proton included: "Setting up 3 installs · 1 done", then
   "3 installs done" and "3 systems are ready to play." (Windows counts once its Proton
@@ -1451,8 +1448,7 @@ the player to desktop mode.
   Fullscreen API). Leaving restores the desktop window, and the window geometry GRID saves
   is always the desktop one, so a desktop start never opens fullscreen.
 - Where GRID opens follows the same rule as the desktop (Where GRID opens, under Top Bar):
-  the Library tab, on RomM › Discover when RomM is connected at startup, else All games
-  (Settings › Appearance › Open GRID on, "Here and in desktop mode"). A "Welcome to TV mode" card shows the first time TV mode opens
+  the Library tab, on All games (Open GRID on is hidden for now, 2026-11-17). A "Welcome to TV mode" card shows the first time TV mode opens
   (`[ui] tv_welcomed`); Menu › Controls shows it again.
 
 ## Controllers
@@ -1509,24 +1505,24 @@ the player to desktop mode.
   mode), between LB / RB. There is no Server tab. **Pages** pushed over a tab (B goes
   back): Details and its tabs (Overview, Media, Saves, Achievements), Playing, System, the
   emulator form, Game settings, Link…, the folder browser (every path in TV
-  mode, and its file mode for Locate files), Search everything, Notifications, the
+  mode, and its file mode for Locate files), Notifications (Search everything is removed
+  for now with Discover, 2026-11-17), the
   Backup page, the drive pages, the RomM page, the RomM sign-in page, More systems and
   the Firmware check report. **Overlays:** the Menu, lists, confirmations (Cancel focused;
   a destructive action always asks) and the on-screen keyboard.
 - **Library tab.** The rail is the desktop's: All games, Recent, Updates, Backup drives,
   then the storefront folders in name order (Amazon Games, Epic Games, GOG, RomM, Steam);
   there is no Platforms folder. The RomM folder's rows follow RomM's state as on the
-  desktop (Installed only unless connected; Installed, Discover's shelves and one page
-  per platform when connected; a spinner and Discover's "Connecting to RomM…" panel
-  while the startup probe runs). RomM › Installed has the one-line banner (Retry / Sign
+  desktop (Installed only unless connected; Installed and one page per platform when
+  connected; a spinner on the folder while the startup probe runs; no Discover for now,
+  2026-11-17). RomM › Installed has the one-line banner (Retry / Sign
   in again…), focusable with Up from the grid. A platform page shows the RomM game count,
   the emulator and firmware chips (A opens the System page), Backup all N…, RT Select and
   Y Search, and tags installed rows the server doesn't have NOT LINKED or NOT ON ROMM.
   When the selected row goes away, selection and focus move to RomM › Installed, or All
   games.
-- **Menu (Start / Guide):** the clock, then Discover (only while RomM is connected or the
-  startup probe runs), Downloads, Notifications, Settings, Switch to desktop mode and Quit
-  GRID. There is no Reconnect and no user and server line.
+- **Menu (Start / Guide):** the clock, then Downloads, Notifications, Settings, Controls,
+  Switch to desktop mode and Quit GRID (its Discover item is removed for now, 2026-11-17). There is no Reconnect and no user and server line.
 - **Settings › Game stores** lists one row per storefront in name order, RomM between GOG
   and Steam, each with its line and pill (RomM: Connected / Can't reach / Sign-in expired
   / Not connected, or a spinner). A on the RomM row opens **the RomM page**, a page of

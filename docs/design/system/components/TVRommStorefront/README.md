@@ -6,6 +6,8 @@ TV mode with RomM as one optional storefront beside Amazon Games, Epic Games, GO
 
 **Changes 2026-11-16** (signed off and built (5a62b77)): **the Library rail's folders are remembered, shared with desktop mode, and each sits in its own panel** (user request 2026-11-16; user decision: one open/closed state for both modes). The folders already opened and closed with A for the session; now which are closed lasts across restarts and mode switches, a closed folder shows its count, and a closed folder holding the selected row wears the selected fill. Section **Library › Folders** below; the memory rules are the desktop card's (RommStorefront README § Library rail › Folding groups › Memory). Source: `tvrailfold.js` / `tvrailfold.css`.
 
+**Changes 2026-11-17** (user decision): **Discover and Open GRID on are removed until the Discover rework.** Library › RomM has no Discover row (connected: Installed, then the platforms; connecting at startup: Installed only, with the spinner), the Menu has no Discover item, Search everything (Y on Discover) is gone with it, and **Settings › Appearance › Open GRID on** is hidden: TV mode opens on Library › All games with its rail row focused (`[ui] open_on` is still stored and ignored). The sections below that describe Discover, Search everything and Open GRID on are kept for the rework and do not apply now. The prototype no longer shows them.
+
 TV rules that hold everywhere below:
 - TV flows never send the player to desktop mode. A store's login window, RomM's web page ("Open in browser") and an emulator opened from its System page open over TV mode.
 - Every size is in rem (TV mode's 1/54-of-the-screen-height root), so it reads the same from a couch at 720p, 1080p and 4K.

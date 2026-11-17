@@ -4,6 +4,7 @@ A proposal: RomM becomes one optional storefront beside Amazon Games, Epic Games
 
 ## Changes 2026-11-17
 
+- **Discover and Open GRID on are removed until the Discover rework (user decision 2026-11-17).** The RomM group has no **Discover** row (connected: Installed, then the platform rows; connecting at startup: Installed only, with the spinner flag); a stale `romm:discover` selection falls back to RomM › Installed, or All games. RomM › Installed's empty state has no **Open Discover** button and reads "Install games from a platform under it.". **Settings › Appearance › Open GRID on** is hidden; GRID always opens on Library › All games (`[ui] open_on` is still stored and ignored). The sections below that describe Discover and Open GRID on are kept for the rework and do not apply now. The prototype no longer shows the Discover row, the Open Discover button or the Open GRID on row; Discover's own prototype code (`discover.js` / `discover.css`) stays.
 - **Rail scrollbar lane and wrapping names (user, 2026-11-17):** the desktop rail's scrollbar has its own 8px lane (styled, so WebKitGTK no longer overlays it on the rows; `scrollbar-gutter: stable` keeps the lane while nothing scrolls), and the rail's right padding drops to 2px beside it. Row labels wrap onto more lines (1.3 line height) instead of an ellipsis, as in TV mode, so a long RomM platform name such as "TurboGrafx-16 / PC Engine CD-ROM²" is shown whole. Built in `RailPane.svelte`.
 
 ## Changes 2026-11-16

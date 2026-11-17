@@ -745,8 +745,9 @@ existed; a Disconnect or a 401 no longer leaves the shell.
 - `lib/romm/` — RomM's pure modules, shared by desktop and TV:
   `order.ts` (`STOREFRONT_ORDER`: amazon, epic, gog, romm, steam, for both rails, the Game
   stores pane and the welcome), `rail.ts` (`rommRailGroup`: the RomM group's heading flag
-  and rows per `RommStatus`; rail keys `romm:installed`, `romm:discover`,
-  `platform:<slug>`), `platformKey.ts` (a server platform's or installed row's slug),
+  and rows per `RommStatus`; rail keys `romm:installed` and `platform:<slug>`, plus the
+  dormant `romm:discover`, which no row has while Discover is removed and which
+  `rommSelectionFallback` turns into RomM › Installed), `platformKey.ts` (a server platform's or installed row's slug),
   `platformGames.ts` (a platform view's merge of server games and installed rows by ROM id,
   O(n)), `words.ts` (every RomM string: pill, banners, needs-RomM reasons; the desktop
   design's words win), `signIn.ts` and `RommSignInForm.svelte` (the sign-in form used by
@@ -766,7 +767,8 @@ existed; a Disconnect or a 401 no longer leaves the shell.
   `LibraryUnreachableDialog.svelte`, whose pure half is `lib/libraryUnreachable.ts`).
 - Views — `Library.svelte`, `Downloads.svelte`, `Settings.svelte`, plus
   `Details.svelte` as a sub-view; `shell.ts` `STOREFRONT_VIEWS` is library, downloads,
-  settings (`Ctrl+1`..`Ctrl+3`) and `initialPlace` answers `{ view: 'library', rail, drive }`.
+  settings (`Ctrl+1`..`Ctrl+3`) and `initialPlace` answers `{ view: 'library', rail, drive }`
+  (always All games while Discover and Open GRID on are removed, 2026-11-17).
   **Removed:** `Server.svelte`. Its Discover and platform screens are rows of the Library's
   RomM group (`lib/romm/desktop/`; the server's Emulators platform is the
   `RommEmulatorsView.svelte` row, its pure half `lib/romm/emulators.ts` and its shared list
@@ -775,7 +777,12 @@ existed; a Disconnect or a 401 no longer leaves the shell.
   `Discover.svelte`, with `Coverflow`, `RecentlyAdded`, `Shot` and `GameLogo`; the pure
   halves are `feed.ts` — action label, dates, coverflow geometry, the picture and logo
   colours — `rotation.ts`, Recently added's pausable 10 s timer, and `filters.ts`, its
-  platform filter pills; its data is `feedStore.svelte.ts`). `shell.ts` holds the view
+  platform filter pills; its data is `feedStore.svelte.ts`) is **dormant since
+  2026-11-17**: removed from the UI pending its rework, in desktop and TV mode, with
+  Settings › Appearance › Open GRID on (`lib/settings/openOn.ts`; `[ui] open_on` is still
+  stored and ignored) and TV's Search everything (`lib/tv/pages/searchAll.ts`). Its
+  modules, TV's `TvRommDiscover.svelte` and `discoverRows.ts`, the Rust
+  `romm::discover` and `commands/discover.rs` and their tests stay, unwired. `shell.ts` holds the view
   list (its order is the `Ctrl+1`..`Ctrl+3` accelerators) and the session phases.
   Emulators live in Settings › Systems; a platform header's chips route there with
   `Settings.show('systems', { system })`.
