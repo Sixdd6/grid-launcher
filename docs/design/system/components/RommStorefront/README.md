@@ -1,6 +1,6 @@
 A proposal: RomM becomes one optional storefront beside Amazon Games, Epic Games, GOG and Steam. The card is built on Game stores (what main has). It opens where a connected user lands with Open GRID on › Automatic: **Library › RomM › Discover**. Everything not listed here matches Game stores.
 
-**Status: signed off, not built (step D1; user decisions 14–17).** The Emulators row and Open config folder (see Changes 2026-11-15) and the folding, remembered rail groups (Changes 2026-11-16) are designed, not yet signed off. The decisions and contracts are in `docs/romm-storefront-plan.md` (user decisions 1–13, Step 0). TV mode's version is the **TVRommStorefront** card (step D2). Source: `docs/design/prototype/romm.js` and `romm.css`, built by `applayout.py` on top of the GameStores card.
+**Status: signed off, not built (step D1; user decisions 14–17).** The Emulators row and Open config folder (see Changes 2026-11-15) and the folding, remembered rail groups (Changes 2026-11-16) are signed off and built (5a62b77). The decisions and contracts are in `docs/romm-storefront-plan.md` (user decisions 1–13, Step 0). TV mode's version is the **TVRommStorefront** card (step D2). Source: `docs/design/prototype/romm.js` and `romm.css`, built by `applayout.py` on top of the GameStores card.
 
 ## Changes 2026-11-16
 
