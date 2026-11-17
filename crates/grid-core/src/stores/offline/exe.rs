@@ -100,13 +100,13 @@ fn identify(bytes: &[u8], whole: bool) -> Identified {
     let mut identity = ExeIdentity::default();
     if let Some(header) = installer.header() {
         identity.app_name = header.app_name().unwrap_or_default().trim().to_string();
-        identity.version = header.app_version().unwrap_or_default().trim().to_string();
+        identity.version = clean_version(header.app_version().unwrap_or_default());
     }
     identity.lang = pick_lang(
         installer
             .languages()
             .iter()
-            .map(|lang| String::from_utf8_lossy(&lang.name).into_owned()),
+            .map(|lang| lang_name(&lang.name)),
     );
     if installer.offset_table().offset_setup1 == 0 {
         let per_disk = installer
@@ -127,8 +127,23 @@ fn identify(bytes: &[u8], whole: bool) -> Identified {
         .filter_map(|file| goggame_id(&file.destination).map(|id| (id, file)))
         .collect();
     if goggame.is_empty() {
-        // An Inno installer without GOG's game info is not GOG's.
-        return Identified::Done(ExeRead::NotGog);
+        // GOG's newer installers (Cartel Tycoon 1.0.9, 2026) keep every file
+        // content-addressed under `{tmp}` and put the game together at run
+        // time, so `goggame-<id>.info` is not in the list; only another
+        // `{app}\goggame-<id>.*` (the `.ico`) is. That still names the
+        // product: an id-only identity, and the info is read from the install
+        // folder after the run. An Inno installer with neither is not GOG's.
+        return match other_goggame_id(installer.files().iter().map(|f| f.destination.as_str())) {
+            Some(game_id) => {
+                identity.info = Some(GogGameInfo {
+                    game_id,
+                    name: identity.app_name.clone(),
+                    ..Default::default()
+                });
+                Identified::Done(ExeRead::Inno(Box::new(identity)))
+            }
+            None => Identified::Done(ExeRead::NotGog),
+        };
     }
     let mut infos = Vec::new();
     let mut unreadable = false;
@@ -169,6 +184,35 @@ pub fn goggame_id(destination: &str) -> Option<String> {
     (!id.is_empty() && id.bytes().all(|b| b.is_ascii_digit())).then(|| id.to_string())
 }
 
+/// `AppVersion` without the build tag GOG's newer installers append
+/// (`1.0.9.6411.[57148737038647048]` → `1.0.9.6411`).
+pub fn clean_version(version: &str) -> String {
+    let version = version.trim();
+    match version.rsplit_once(".[") {
+        Some((head, tag)) if tag.ends_with(']') && !head.is_empty() => head.to_string(),
+        _ => version.to_string(),
+    }
+}
+
+/// The product id from a GOG installer's other `goggame-<id>.<ext>` file
+/// (`{app}\goggame-1579393346.ico`), for an installer that lists no
+/// `goggame-<id>.info`. Only files placed in the game folder (`{app}`)
+/// count; one id, or the first when several are listed.
+pub fn other_goggame_id<'a>(destinations: impl Iterator<Item = &'a str>) -> Option<String> {
+    destinations
+        .filter(|dest| {
+            dest.get(..5)
+                .is_some_and(|head| head.eq_ignore_ascii_case("{app}"))
+        })
+        .find_map(|dest| {
+            let file = dest.rsplit(['\\', '/']).next()?.to_ascii_lowercase();
+            let rest = file.strip_prefix("goggame-")?;
+            let (id, ext) = rest.split_once('.')?;
+            (!id.is_empty() && !ext.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
+                .then(|| id.to_string())
+        })
+}
+
 /// The base game among several infos (a bundle with DLC), else the first.
 pub fn pick_base(mut infos: Vec<GogGameInfo>) -> Option<GogGameInfo> {
     let base = infos.iter().position(|info| !info.is_dlc());
@@ -176,6 +220,27 @@ pub fn pick_base(mut infos: Vec<GogGameInfo>) -> Option<GogGameInfo> {
         Some(index) => Some(infos.swap_remove(index)),
         None => infos.into_iter().next(),
     }
+}
+
+/// An Inno language name from its raw bytes. Unicode installers (every
+/// GOG installer since Inno Setup 5.6 "(u)") store it as UTF-16LE, which
+/// read as UTF-8 gave `e\0n\0g\0…` and a `/LANG=` full of NULs.
+pub fn lang_name(bytes: &[u8]) -> String {
+    let utf16 = bytes.len() >= 2
+        && bytes.len().is_multiple_of(2)
+        && bytes.iter().skip(1).step_by(2).all(|b| *b == 0);
+    let name = if utf16 {
+        let units: Vec<u16> = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
+            .collect();
+        String::from_utf16_lossy(&units)
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    };
+    name.trim_matches(char::from(0)).trim().to_string()
 }
 
 fn pick_lang(names: impl Iterator<Item = String>) -> String {
@@ -336,6 +401,54 @@ mod tests {
         assert_eq!(goggame_id("{app}/GOGGAME-5.INFO"), Some("5".into()));
         assert_eq!(goggame_id("{app}\\goggame-abc.info"), None);
         assert_eq!(goggame_id("{app}\\game.exe"), None);
+    }
+
+    #[test]
+    fn another_goggame_file_in_the_game_folder_names_the_product() {
+        // The listing shape of GOG's newer installers (Cartel Tycoon 1.0.9).
+        let listing = [
+            "",
+            "{tmp}/2c/5f\\2c5f0bdc9111caad703c6fd7644fe524",
+            "{app}\\goggame-1579393346.ico",
+        ];
+        assert_eq!(
+            other_goggame_id(listing.into_iter()),
+            Some("1579393346".into())
+        );
+        assert_eq!(
+            other_goggame_id(["{APP}/GOGGAME-7.ICO"].into_iter()),
+            Some("7".into())
+        );
+        // Not in the game folder, no extension, or not an id: not GOG's.
+        assert_eq!(other_goggame_id(["{tmp}\\goggame-1.ico"].into_iter()), None);
+        assert_eq!(other_goggame_id(["{app}\\goggame-1"].into_iter()), None);
+        assert_eq!(
+            other_goggame_id(["{app}\\goggame-abc.ico"].into_iter()),
+            None
+        );
+        assert_eq!(other_goggame_id(["{app}\\game.exe"].into_iter()), None);
+    }
+
+    #[test]
+    fn language_names_read_utf16_and_ansi() {
+        assert_eq!(lang_name(b"e\0n\0g\0l\0i\0s\0h\0"), "english");
+        assert_eq!(lang_name(b"english"), "english");
+        assert_eq!(lang_name(b"german\0"), "german");
+        assert_eq!(
+            pick_lang(["polish".to_string(), lang_name(b"e\0n\0g\0l\0i\0s\0h\0")].into_iter()),
+            "english"
+        );
+    }
+
+    #[test]
+    fn versions_lose_gogs_build_tag() {
+        assert_eq!(
+            clean_version("1.0.9.6411.[57148737038647048]"),
+            "1.0.9.6411"
+        );
+        assert_eq!(clean_version(" 1.4 "), "1.4");
+        assert_eq!(clean_version("2.0 [beta]"), "2.0 [beta]");
+        assert_eq!(clean_version(".[x]"), ".[x]");
     }
 
     #[test]
