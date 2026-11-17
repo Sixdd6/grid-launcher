@@ -131,7 +131,19 @@ export function installDevMock(): void {
   const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
     romm_status: () => rommStatus,
     romm_restore: () => rommStatus,
-    list_platforms: () => [],
+    // `?platforms` gives RomM a few platforms, long names among them, for
+    // rail checks (connect with `__gridFake.romm('connected')`).
+    list_platforms: () =>
+      new URLSearchParams(window.location.search).has('platforms')
+        ? [
+            ['snes', 'Super Nintendo Entertainment System'],
+            ['win', 'PC Fangames & Ports'],
+            ['ps2', 'PlayStation 2'],
+            ['gb', 'Game Boy'],
+            ['tg16', 'TurboGrafx-16 / PC Engine CD-ROM²'],
+            ['neo-geo-pocket-color', 'Neo Geo Pocket Color'],
+          ].map(([slug, name], i) => ({ id: i + 1, name, slug, rom_count: 10 + i, custom_name: null, display_name: name }))
+        : [],
     list_games: () => [],
     get_ui_mode: () => ({ mode: tvMode ? 'tv' : 'desktop', started_with_tv: tvMode, fullscreen: false }),
     setup_status: () => ({ needed: false }),

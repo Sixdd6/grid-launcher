@@ -2,6 +2,10 @@ A proposal: RomM becomes one optional storefront beside Amazon Games, Epic Games
 
 **Status: signed off, not built (step D1; user decisions 14–17).** The Emulators row and Open config folder (see Changes 2026-11-15) and the folding, remembered rail groups (Changes 2026-11-16) are signed off and built (5a62b77). The decisions and contracts are in `docs/romm-storefront-plan.md` (user decisions 1–13, Step 0). TV mode's version is the **TVRommStorefront** card (step D2). Source: `docs/design/prototype/romm.js` and `romm.css`, built by `applayout.py` on top of the GameStores card.
 
+## Changes 2026-11-17
+
+- **Rail scrollbar lane and wrapping names (user, 2026-11-17):** the desktop rail's scrollbar has its own 8px lane (styled, so WebKitGTK no longer overlays it on the rows; `scrollbar-gutter: stable` keeps the lane while nothing scrolls), and the rail's right padding drops to 2px beside it. Row labels wrap onto more lines (1.3 line height) instead of an ellipsis, as in TV mode, so a long RomM platform name such as "TurboGrafx-16 / PC Engine CD-ROM²" is shown whole. Built in `RailPane.svelte`.
+
 ## Changes 2026-11-16
 
 - **The Library rail's groups fold, and GRID remembers them** (user request 2026-11-16: "add the collapsing storefront rows, separate the different storefronts from each other visually, and add memory so the collapsed/expanded storefronts persist their state across screens and restarts in desktop and tv mode"). Backup drives, Amazon Games, Epic Games, GOG, RomM and Steam each open and close from their heading. Closed or open is **one remembered list shared with TV mode** (user decision 2026-11-16: closing GOG in either mode closes it in both). Section **Library rail › Folding groups** below.

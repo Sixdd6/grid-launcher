@@ -200,6 +200,31 @@
     border: 1px solid var(--line);
     border-radius: var(--r-panel);
     overflow-y: auto;
+    /* The scrollbar gets a lane of its own instead of overlaying the rows
+       (WebKitGTK draws GTK overlay scrollbars unless one is styled), and the
+       lane is kept while nothing scrolls, so rows never shift when a group
+       opens. The padding's right side gives way to the lane. */
+    padding-right: 2px;
+    scrollbar-gutter: stable;
+  }
+
+  .rail::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .rail::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .rail::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .rail::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-muted);
   }
 
   /* Labels start 16px in (the rail's 8px + 8px here): the same left edge as
@@ -253,12 +278,13 @@
     color: inherit;
   }
 
+  /* A long name (a RomM platform such as "PC Fangames & Ports") wraps onto
+     more lines, as in TV mode, instead of being cut off. */
   .rail-label {
     flex: 1 1 auto;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
   }
 
   .rail-divider {
