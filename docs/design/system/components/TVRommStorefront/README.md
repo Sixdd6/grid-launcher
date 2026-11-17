@@ -4,6 +4,8 @@ TV mode with RomM as one optional storefront beside Amazon Games, Epic Games, GO
 
 **Changes 2026-11-15** (designed, not yet signed off): **RomM › Emulators**, the server's Emulators platform as a row in Library › RomM with its install list (section below; user decision 2026-11-15). Emulator files still never join RomM › Installed, All games, Recent, Updates or Discover. Open config folder is desktop only (Settings › Library on the desktop card); TV mode has no such row. Try it: Library › RomM › Emulators, or Menu › Prototype only › **Show: RomM › Emulators…** (Files loaded, Loading, Can't load the list, Nothing for this computer, No Emulators platform).
 
+**Changes 2026-11-16** (designed, not yet signed off): **the Library rail's folders are remembered, shared with desktop mode, and each sits in its own panel** (user request 2026-11-16; user decision: one open/closed state for both modes). The folders already opened and closed with A for the session; now which are closed lasts across restarts and mode switches, a closed folder shows its count, and a closed folder holding the selected row wears the selected fill. Section **Library › Folders** below; the memory rules are the desktop card's (RommStorefront README § Library rail › Folding groups › Memory). Source: `tvrailfold.js` / `tvrailfold.css`.
+
 TV rules that hold everywhere below:
 - TV flows never send the player to desktop mode. A store's login window, RomM's web page ("Open in browser") and an emulator opened from its System page open over TV mode.
 - Every size is in rem (TV mode's 1/54-of-the-screen-height root), so it reads the same from a couch at 720p, 1080p and 4K.
@@ -21,6 +23,7 @@ Click inside the card, then use the keyboard as a controller (TV mode's README h
   - **Show: restart GRID (RomM answers)** and **(RomM doesn't answer)**: the startup probe.
   - **Show: Settings › Game stores › RomM**, **Show: Settings › Systems**, **Show: Choose your systems (from the RomM page)**.
   - TVStores' items stay (store states, Settings › Game stores, GOG offline installer, Amazon sign-in), and TV mode's unreachable library, Couch kit and failed install.
+- **Folders (2026-11-16):** Left into the rail, then A on a folder heading (Backup drives, Amazon Games, Epic Games, GOG, RomM, Steam). Close RomM while Discover shows, go to the grid and press Left: focus lands on the RomM heading, which holds the selection. Reload: the folders stay as you left them. The RommStorefront card in the same browser shares the state (localStorage `grid.railClosed`; clear it to start fresh).
 - **Locate files:** Settings › Systems › PlayStation (or PlayStation 2, Nintendo Switch, Sega Saturn) › Locate files… opens `/run/media/USB-1TB/bios`. Pick `scph5501 (1).bin`, `scph1001.bin`, `BIOS pack.zip` and `readme.txt`, then Start; or Y checks the whole folder. PlayStation 3 › Locate PS3UPDAT.PUP… opens `~/Downloads` (a good file); the copy on the USB drive is a bad one.
 
 ## The shell
@@ -45,7 +48,39 @@ The rail: All games, Recent, Updates, then **Backup drives**, then the storefron
 
 - Installed RomM games stay mixed into All games, Recent and Updates in every state, with their platform tag.
 - **Selection falls back:** when RomM drops while Discover or a platform is open, the selection and focus move to **RomM › Installed**; when the group goes, to **All games**. A redraw never moves focus anywhere else.
+- **Folders:** RomM's folder follows the rules in **Library › Folders** below, like every other folder.
 - **Platform count (decision 14):** the platform row shows RomM's game count only. Installed games RomM doesn't have show in the platform's grid but are not counted. Installed games carry the installed dot on their covers.
+
+### Library › Folders (2026-11-16)
+
+Every folder in the rail: **Backup drives** (always shown in TV mode, with "No backup drives connected" when empty, as before) and the storefront folders **Amazon Games, Epic Games, GOG, RomM, Steam** (each under its existing rule). All games, Recent and Updates are plain rows above the divider and never fold.
+
+**Look**
+
+- **Panel per folder:** the heading and its rows sit in an inset panel: `surface` fill, 0.8rem corners, 0.2rem padding, 0.2rem between rows, 0.45rem between panels (none under the divider). The desktop rail now has the same panels, so the two modes read alike.
+- **Heading** (unchanged parts): chevron (right when closed, down when open), mark (store monogram, RomM's "R"; none for Backup drives), name in sentence case, flag (**!**, **off**, spinner) at the right. It now stays on one line.
+- **Closed:** after the flag (0.6rem), the folder's count in `text-muted`: stores and RomM their **Installed** number, Backup drives the number of drives (none when no drive is connected); no count when Installed shows **!** (Steam not installed). Open: no count.
+- **Closed and holding the selected row:** the selected row's look (`selected` fill, the 0.25rem `primary` bar). With focus on it, the focus ring sits on top as on any row.
+
+**Controller**
+
+- Up / Down move through headings and open folders' rows as before; a closed folder is one stop. A on a heading opens or closes it (hint **A Open** / **A Close**); focus stays on the heading; nothing else on screen changes. Right from a heading goes into the grid (as Right from any rail row).
+- **Arriving in the rail** (B or Left from the grid) lands on the selected row, or on the closed heading that holds it (`data-holds-sel`), so entering the rail never changes the selection.
+- **Moving onto a row** selects it, as today; moving across a heading changes nothing.
+- **Jumps** that select a row in a closed folder open it (and that is remembered): Settings › a drive › Show in Library, Settings › Game stores › a store's or RomM's Show in Library, Open Discover, the welcome's and Choose your systems' way into the Library, a notification card's View. **Startup and the RomM selection fallback never open a folder:** GRID opening on RomM › Discover keeps a closed RomM closed, its heading holding the selection.
+- No new hints, no new words, nothing sends the player to desktop mode.
+
+**Memory** (same list as desktop, `[ui] rail_closed`): closed ids `drives`, `amazon`, `epic`, `gog`, `romm`, `steam`; anything not listed is open; written on every open or close; kept across tab switches (Library, Downloads, Settings), pages and back, desktop and TV mode switches and restarts; a folder that goes away (store disconnected, RomM gone from the rail) keeps its state for when it comes back. This replaces "Folders stay as you left them for the session" (TV mode checklist item 183).
+
+**States to check**
+
+- [ ] All folders open (fresh profile): panels, chevrons down, no counts.
+- [ ] Closed store folder: chevron right, Installed count; Amazon "!" and the count; Steam without its client: "!" and no count.
+- [ ] Closed RomM: Connected (count), Connecting (spinner and count), Can't reach / Sign-in expired ("!" and count), Not connected ("off" and count).
+- [ ] Closed Backup drives: drive count; no count with no drive connected.
+- [ ] Closed folder holding the selection: selected fill and bar; B / Left from the grid lands on it; A opens it with the row still selected.
+- [ ] Jumps open a closed folder; startup on Discover doesn't.
+- [ ] State shared with desktop and kept across restarts.
 
 ### RomM › Installed
 
@@ -237,6 +272,7 @@ In `docs/tv-mode/checklist.md` (81 items, and a note at the top): items 89 and 1
 - The prototype's states come from one `RommStatus` (plan 0.2): `connected`, `unreachable`, `expired`, `not_connected`, `busy`, `installed_count`, `in_rail`. The rail group is `rommRailGroup` (0.8); the TV Library uses the same `STOREFRONT_ORDER` as desktop.
 - **Startup probe (decision for Step 1):** while the startup probe runs with `stores.romm.connected` true, the group shows Installed and Discover, Discover shows "Connecting to RomM…", and the heading flag and the RomM pill show a spinner. Platform rows appear once RomM answers. `rommRailGroup` needs to treat busy-at-startup like this, or Discover can't be where GRID opens.
 - Selection fallback and focus: when the selected row goes away, select and focus RomM › Installed (or All games); never let a redraw focus a rail row by position, which would change the selection.
+- **Folders (2026-11-16):** `lib.folds.drives`, `storeState` `folds` and `tvRomm.open` give way to the one shared fold store the desktop card describes (`[ui] rail_closed`). `TvRailRow`'s `holdsSel` already routes entry; it now also draws the selected look, and a closed heading gets its count. A wrapper element per folder draws the panel; it must not carry `data-nav`, so movement stays the rail's. `selectDriveRow`, `openStoreFold` and the RomM jumps open through the shared store; `openOn`'s startup selection must not open RomM.
 - The Installed banner and the needs-RomM panels are focusable and reachable with Up from the grid / first in the pane; their words come from `romm/words.ts`, shared with desktop. Desktop's words won where the two cards differed (decision 17); this card now uses them, except TV's own buttons, hints and the A-says-why lines.
 - Firmware rows: dimmed action rows, A says why (no A hint). The file list is `firmware_expected`; the report is `LocateReport` (installed / unverified / refused). The TV file browser's file mode is new: multi-pick with ticks, Y checks the folder, Start checks the picks; single mode for the PUP.
 - RomM › Emulators: the rail key is the platform's `platform:<slug>` (`platform:emulators` in the prototype); `rommRailGroup` keeps the Emulators platform (plan 0.3 dropped it) with its own count. Source: `tvromm_emu.js` / `tvromm_emu.css`. Open questions are listed in the desktop card's README.

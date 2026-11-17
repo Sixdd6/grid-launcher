@@ -55,6 +55,9 @@ python3 -I docs/design/prototype/applayout.py docs/design/system/components
   the desktop: the RommStorefront card, written by `applayout.py` on top of Game stores;
   `romm_emu.*` adds RomM › Emulators and Settings › Library's Open config folder.
   `tvromm_emu.js`, `tvromm_emu.css` add RomM › Emulators to the TVRommStorefront card.
+- `railfold.js`, `railfold.css` (RommStorefront) and `tvrailfold.js`, `tvrailfold.css`
+  (TVRommStorefront) — the Library rail's folding, remembered storefront groups, each in
+  its own panel (2026-11-16); both cards share the state in localStorage `grid.railClosed`.
 - `glyphs/` — the controller button glyphs the TV mode card inlines (Kenney Input
   Prompts, CC0; `map.json` assigns them, `License.txt` is the pack's license).
 - `icons.json` — icon paths: the app's (`app/src/lib/icons.ts`) plus proposed ones.

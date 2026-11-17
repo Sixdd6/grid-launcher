@@ -1,0 +1,25 @@
+  /* Library rail: folding storefront groups (2026-11-16). Each group is an inset
+     panel inside the rail (the `surface` fill, `r-row` corners), 8px apart, so one
+     storefront never runs into the next; the heading is a full-width button. */
+  .rf-group { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; padding: 2px; border-radius: calc(var(--r-row) + 2px); background: var(--surface); }
+  .rf-group + .rf-group { margin-top: 6px; }
+  .rf-rows { display: flex; flex-direction: column; gap: 2px; }
+  .rf-rows[hidden] { display: none; }
+  .rf-head { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 30px; box-sizing: border-box; padding: 5px 8px 5px 4px; border: 0; border-radius: var(--r-row); background: transparent; color: var(--text-h); font: inherit; font-size: 12px; font-weight: 600; text-align: left; cursor: pointer; }
+  .rf-head:hover { background: var(--field); }
+  .rf-head:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .rf-chev { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; color: var(--text-muted); transition: transform 150ms ease; }
+  .rf-group:not(.closed) .rf-chev { transform: rotate(90deg); }
+  .rf-head .st-mono { width: 16px; height: 16px; font-size: 10px; }
+  .rf-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rf-sp { flex: 1 1 auto; }
+  .rf-head .st-flag { margin-left: 0; }
+  .rf-n { flex: none; margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--text-muted); }
+  .rf-group:not(.closed) .rf-n { display: none; }
+  /* A closed group holding the selected row: the selected row's fill and bar. */
+  .rf-group.holds .rf-head { background: var(--selected); box-shadow: inset 3px 0 0 var(--primary); }
+  /* Rows start under the mark (4 + chevron 14 + gap 6 = 24px); a drive row's own
+     icon starts at 20px so its name keeps room in the 220px rail. */
+  .rf-rows .g-rail-item.st-row { padding-left: 24px; }
+  .rf-rows .g-rail-item.bk-rail { padding-left: 20px; }
+  @media (prefers-reduced-motion: reduce) { .rf-chev { transition: none; } }

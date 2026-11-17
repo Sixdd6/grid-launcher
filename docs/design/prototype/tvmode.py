@@ -67,7 +67,10 @@ open(os.path.join(d, 'preview.html'), 'w').write(TVS)
 # Connect; RomM is a Library group and a Settings › Game stores row; Systems works
 # without RomM. It opens on Library › RomM › Discover.
 RM_CSS = open(os.path.join(HERE, 'tvromm.css')).read() + '\n' + open(os.path.join(HERE, 'tvromm_emu.css')).read()
+RM_CSS += '\n' + open(os.path.join(HERE, 'tvrailfold.css')).read()
 RM_JS = open(os.path.join(HERE, 'tvromm.js')).read() + '\n' + open(os.path.join(HERE, 'tvromm_emu.js')).read()
+# 2026-11-16: the rail's folders sit in their own panels and are remembered, shared with desktop.
+RM_JS += '\n' + open(os.path.join(HERE, 'tvrailfold.js')).read()
 TVR = HTML
 TVR = sub(TVR, 'subtitle="TV mode: the fullscreen, controller-first GRID.', 'subtitle="TV mode with RomM as an optional storefront: the welcome, the RomM group in the Library, RomM in Settings › Game stores, and Systems without RomM.')
 TVR = sub(TVR, '<title>TV mode</title>', '<title>TV mode: RomM storefront</title>')

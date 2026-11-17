@@ -769,7 +769,10 @@ print('GameStores written', len(st))
 # Connect screen gone, the welcome, and Settings › Systems working without
 # RomM. Its own card, so Game stores keeps showing what is on main.
 RM_JS = open(os.path.join(HERE, 'romm.js')).read() + '\n' + open(os.path.join(HERE, 'romm_emu.js')).read()
+# 2026-11-16: the rail's storefront groups fold, sit in their own panels and are remembered.
+RM_JS += '\n' + open(os.path.join(HERE, 'railfold.js')).read()
 RM_CSS = open(os.path.join(HERE, 'romm.css')).read() + '\n' + open(os.path.join(HERE, 'romm_emu.css')).read()
+RM_CSS += '\n' + open(os.path.join(HERE, 'railfold.css')).read()
 rm = st
 rm = sub(rm, 'subtitle="Game stores: GOG (and its offline installers), Epic Games, Amazon Games and Steam in the Library, with Settings › Stores"', 'subtitle="RomM as an optional storefront: a RomM group in the Library, a RomM card in Settings › Game stores, the welcome, and Systems without RomM"')
 rm = sub(rm, '<title>Game stores</title>', '<title>RomM storefront</title>')

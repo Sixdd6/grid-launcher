@@ -1,6 +1,12 @@
 A proposal: RomM becomes one optional storefront beside Amazon Games, Epic Games, GOG and Steam. The card is built on Game stores (what main has). It opens where a connected user lands with Open GRID on › Automatic: **Library › RomM › Discover**. Everything not listed here matches Game stores.
 
-**Status: signed off, not built (step D1; user decisions 14–17).** The Emulators row and Open config folder (see Changes 2026-11-15) are designed, not yet signed off. The decisions and contracts are in `docs/romm-storefront-plan.md` (user decisions 1–13, Step 0). TV mode's version is the **TVRommStorefront** card (step D2). Source: `docs/design/prototype/romm.js` and `romm.css`, built by `applayout.py` on top of the GameStores card.
+**Status: signed off, not built (step D1; user decisions 14–17).** The Emulators row and Open config folder (see Changes 2026-11-15) and the folding, remembered rail groups (Changes 2026-11-16) are designed, not yet signed off. The decisions and contracts are in `docs/romm-storefront-plan.md` (user decisions 1–13, Step 0). TV mode's version is the **TVRommStorefront** card (step D2). Source: `docs/design/prototype/romm.js` and `romm.css`, built by `applayout.py` on top of the GameStores card.
+
+## Changes 2026-11-16
+
+- **The Library rail's groups fold, and GRID remembers them** (user request 2026-11-16: "add the collapsing storefront rows, separate the different storefronts from each other visually, and add memory so the collapsed/expanded storefronts persist their state across screens and restarts in desktop and tv mode"). Backup drives, Amazon Games, Epic Games, GOG, RomM and Steam each open and close from their heading. Closed or open is **one remembered list shared with TV mode** (user decision 2026-11-16: closing GOG in either mode closes it in both). Section **Library rail › Folding groups** below.
+- **Each group sits in its own inset panel** in the rail, so one storefront never runs into the next. Headings are now sentence case at 12px (the TV rail's polish), not 10px capitals.
+- Source: `docs/design/prototype/railfold.js` / `railfold.css` (loaded after `romm_emu.*`). The TVRommStorefront card has the TV side (`tvrailfold.*`).
 
 ## Changes 2026-11-15
 
@@ -16,6 +22,7 @@ A proposal: RomM becomes one optional storefront beside Amazon Games, Epic Games
 - **Backups without RomM:** set **Not connected**, then Library › RomM › Installed › **Backup all 11…**.
 - **Emulators:** Library › RomM › **Emulators** (first platform row). Install Pico-8 or Ymir (progress, then Installed), Update PCSX2, Uninstall… RetroArch (inline confirm), Install DuckStation (fails: wrong processor; Retry then works), Install an Other file, open **N other builds…**. The dashed **Prototype** select in the header switches: files loaded, Loading, Can't load the list, Nothing for this computer, No Emulators platform (row hidden; selection falls back to RomM › Installed).
 - **Open config folder:** Settings › Library.
+- **Folding groups (2026-11-16):** click a group heading in the Library rail, or Tab to it and press Enter or Space. Close **RomM** while Discover shows: the heading takes the selected fill. Reload the card: the groups stay as you left them. Open the TVRommStorefront card in the same browser: it shows the same groups closed (both cards read localStorage `grid.railClosed`; clear it to start fresh).
 - **Details without RomM:** set **Sign-in expired**, open Lantern Vale (it has an update) and its Saves and Achievements tabs. Hidden Kiln (PlayStation) is an installed game with no RomM link; Sky Lantern (Super Nintendo) came from another RomM server.
 
 ## Removed
@@ -43,6 +50,40 @@ Order: **All games, Recent, Updates** → **BACKUP DRIVES** → storefront group
   | Not connected, none installed (`in_rail` false) | — | no group |
 - **Platform rows:** the union of the server's platforms and the installed RomM platforms, sorted by label. **Count = RomM's game count for that platform** (user decision 14). The server's **Emulators** platform is one of these rows (2026-11-15): same sort, its own count and view (RomM › Emulators below). Installed games RomM doesn't have show in the platform's grid but are not counted. Installed games carry the dot on their covers.
 - When the selected row disappears (Discover or a platform while RomM drops), selection falls back to **RomM › Installed**, or **All games** when the group is gone.
+
+### Folding groups (2026-11-16)
+
+Every group under All games, Recent and Updates folds: **Backup drives** (shown while at least one set-up drive is connected, as before) and the storefront groups **Amazon Games, Epic Games, GOG, RomM, Steam** (each shown under its existing rule). All games, Recent and Updates never fold.
+
+**Look** (the Discover and platform screens show the same rail):
+
+- **Group panel:** each group is an inset panel inside the rail: `surface` fill, 10px corners (`r-row` + 2), 2px padding, 2px between its rows. 8px between Updates and the first group, 6px between groups. No divider lines: the panels do the separating, the way the TV rail's spacing does.
+- **Heading** (a full-width button, the panel's first line, min 30px tall): chevron · mark · name · flag · (closed) count.
+  - Chevron: `chevronRight` 12px in a 14px box, `text-muted`; points right when closed, turns 90° to point down when open (150ms ease; no turn animation with reduced motion).
+  - Mark: the store's monogram tile, now 16px (10px letter); RomM's "R" tile; **Backup drives has no mark** (as on TV).
+  - Name, sentence case, 12px / 600, `text-h`, one line with an ellipsis: **Backup drives**, **Amazon Games**, **Epic Games**, **GOG**, **RomM**, **Steam**. The 10px capitals (BACKUP DRIVES, AMAZON GAMES…) are retired.
+  - Flag, right-aligned, unchanged and shown **open or closed**: **!** (needs attention: login expired, store tool missing, Steam key or client, Can't reach RomM, RomM sign-in expired), **off** (not connected, games still installed), the spinner (RomM connecting). Its tooltip and accessible name are unchanged.
+  - Count, **closed only**, 11px `text-muted`, 6px after the flag: stores and RomM show their **Installed** row's number (tooltip and accessible name "3 installed"); Backup drives shows the number of drives listed ("2 drives"). No count when the Installed row shows **!** (Steam not installed); the flag says it. Open, the heading has no count (the rows carry them).
+  - Hover: `field` fill. Keyboard focus: the 2px `focus` ring, inset.
+- **Rows** sit under the heading inside the panel: store and RomM rows start at 24px (under the mark), drive rows at 20px (their own drive icon, so the name keeps room in the 220px rail). Rows are otherwise unchanged.
+
+**Behaviour:**
+
+- **Click** anywhere on the heading opens or closes the group. **Keyboard:** the heading is a button in the Tab order, before its rows; **Enter** or **Space** toggles it; focus stays on the heading. A closed group's rows are not rendered, so Tab skips them. The arrow keys keep driving the grid (the rail has no arrow-key movement today; this adds none).
+- **Closing the group that holds the selected row:** the selection does not change and the grid keeps showing that view. The closed heading **holds the selection**: the selected row's look (`selected` fill and the 3px `primary` bar), tooltip "Showing GOG › Installed", accessible description "Holds the view you're in". Opening the group shows the row selected as before.
+- **Jumps from elsewhere open the group:** Settings › Game stores › Show in Library, a drive's Show in Library, Open Discover, a store view's Open Available, a notification's Show: when the target row's group is closed, it opens (and that is remembered, like a click). **Startup and selection fallback never open a group:** Open GRID on › Automatic landing on RomM › Discover with RomM closed keeps it closed (the heading holds the selection); RomM dropping from Discover to RomM › Installed leaves the group as it was.
+- Toggling a group never moves the selection, never scrolls the grid and never changes Select mode.
+- Accessibility: each group is a `section` named by its storefront; the heading button has `aria-expanded` and `aria-controls` (its rows, a `role="group"` with the same name).
+
+**Memory** (shared by desktop and TV mode; the TVRommStorefront card points here):
+
+- **What is remembered:** the set of **closed** groups, by id: `drives`, `amazon`, `epic`, `gog`, `romm`, `steam` (the `STOREFRONT_ORDER` ids plus `drives`). One list for both modes: closing GOG in desktop mode closes it in TV mode and the other way round.
+- **Where:** the config file, `[ui] rail_closed = ["gog", "drives"]` (a list of ids, any order), beside `[ui] open_on` and `[ui] video_volume`. It is not a secret and holds nothing else.
+- **Default:** a group whose id is not in the list is **open**: a group never seen, a fresh profile, a missing key, or a file written by an older GRID. A value that isn't a list of strings reads as empty (all open), with no error shown. Ids GRID doesn't know are kept as they are when the list is written back.
+- **When it is written:** each time a group opens or closes (a click, Enter or Space, a TV A, or a jump that opens it). Best effort: if saving fails, the state holds for the session; no notification.
+- **Lasts across:** switching rail rows, views (Library, Downloads, Settings and back), the RomM Discover and platform screens (they show the same rail), desktop and TV mode switches (same list, no reload) and restarts.
+- **A group that goes and comes back keeps its state:** a store disconnected and later reconnected, the last drive unplugged and plugged back in, RomM leaving the rail (never connected, nothing installed) and returning. Hiding a group never removes its id from the list; only opening it does.
+- **RomM while not usable:** Connecting, Can't reach, Sign-in expired and Not connected (games installed) all keep the remembered state; the group's rows change with the state, not its open or closed. Closed, it shows its flag and the Installed count.
 
 ## RomM › Installed
 
@@ -245,6 +286,18 @@ Library rail
 - [ ] Selection falls back to Installed (or All games).
 - [ ] All games / Recent / Updates include installed RomM games in every state.
 
+Library rail › Folding groups (2026-11-16)
+- [ ] Each group in its own inset panel; 8px under Updates, 6px between groups; no dividers.
+- [ ] Heading: chevron, mark (none for Backup drives), sentence-case name, flag; closed adds the count.
+- [ ] Open heading: chevron down, no count. Closed heading: chevron right, count (Installed / drives), rows not rendered.
+- [ ] Flags stay visible closed: Amazon "!", RomM "off", RomM spinner, Steam "!" (no count).
+- [ ] Click, Enter and Space toggle; focus stays; Tab skips a closed group's rows; arrows still drive the grid.
+- [ ] Closed group holding the selection: selected fill and bar, "Showing … › …" tooltip; selection and grid unchanged.
+- [ ] Jumps (Show in Library, Open Discover, Open Available, notification Show) open a closed target group.
+- [ ] Startup on RomM › Discover and RomM's selection fallback leave a closed RomM closed.
+- [ ] Memory: survives row and view switches, Discover and platform screens, mode switches and restarts; shared with TV mode.
+- [ ] A group that disappears and comes back keeps its state; never-seen groups are open.
+
 RomM › Installed
 - [ ] Header, counts, chips per state, Backup all N…, Select, prototype select.
 - [ ] Banner: Can't reach · Retry (Retrying…).
@@ -334,6 +387,7 @@ The user signed these off with the TV card on 2026-11-15 (decisions 14–17 in t
 
 - Discover and the platform screens are drawn here with the old Server view's DOM (`S.view 'server'`) under the Library pill; in the app they are RomM views inside `Library.svelte` (Step 3). Their behaviour is the Server view's (folding header, select, Backup all N…, chips).
 - Rail keys: `romm:installed`, `romm:discover`, `platform:<slug>` (plan 0.3). The prototype uses its own platform codes in the key.
+- **Folding groups (2026-11-16):** one shared store for both modes, keyed `'drives' | StoreSource | 'romm'`, read from and written to `[ui] rail_closed` through the `uiSettings` store. It replaces TV mode's three session-only fold states (`lib.folds.drives` in `tv/tabs/library/library.svelte.ts`, `folds` in `tv/stores/storeState.svelte.ts`, `tvRomm.open`). On the desktop, `RailPaneEntry`'s `heading` / `headingMark` / `headingFlag` / `indent` become a group (id, name, mark, flag, closed count, rows) rendered as described above; the pure parts (which group a key belongs to, the closed count, holds-selection, parsing the stored list) belong in a `.ts` module with vitest. Jumps that select a row in a closed group open it through the same store; startup (`openOn`) and the RomM selection fallback must not. Source: `docs/design/prototype/railfold.js` / `railfold.css`.
 - **Emulators row (2026-11-15):** plan 0.3 drops the Emulators shelf from the platform rows; that changes. `rommRailGroup` keeps it (`isEmulatorsPlatform`) with its own count; `RommStatus.installed_count`, RomM › Installed, All games, Recent, Updates and Discover still leave Emulators-platform rows out. The view's data is the server-emulator path's (`ServerPackage` folders and files, `ServerBuildInfo`, setup's newest-build rule); files that don't parse are the Other files, installed as an ordinary RomM file of the Emulators platform. Source: `docs/design/prototype/romm_emu.js` / `romm_emu.css`.
 
 ## Settled 2026-11-15 (were open questions)

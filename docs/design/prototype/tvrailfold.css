@@ -1,0 +1,12 @@
+/* Library rail (2026-11-16): each folder sits in its own inset panel, as on the desktop
+   (the `surface` fill), so one storefront never runs into the next. */
+.rgrp { display: flex; flex-direction: column; gap: .2rem; margin-top: .45rem; padding: .2rem; border-radius: .8rem; background: var(--surface); }
+.rail hr + .rgrp { margin-top: 0; }
+.rgrp .ri-empty { padding-bottom: .5rem; }
+/* One line per heading; a closed folder's count sits after its flag. */
+.ri.fold { white-space: nowrap; }
+.ri.fold .n { font-weight: 400; }
+.ri.fold .sflag + .n { margin-left: .6rem; }
+/* A closed folder holding the selected row: the selected fill and bar (`.sel`), the
+   heading's own weight. */
+.ri.fold.holds { font-weight: 600; }
