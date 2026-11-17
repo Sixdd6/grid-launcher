@@ -354,10 +354,7 @@ pub fn profile_available_on_host(profile: &EmulatorProfile, host: &str) -> bool 
         .filter(|p| !p.is_empty())
         .map(|p| p.to_lowercase())
         .collect();
-    if !allowed.is_empty() && !allowed.contains(&host_casefold) {
-        return false;
-    }
-    true
+    allowed.is_empty() || allowed.contains(&host_casefold)
 }
 
 /// Each item trimmed, blank items dropped — the shape every cloud-save list
