@@ -123,19 +123,44 @@ fn key_images(metadata: &Value) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
+/// The cover width GRID asks Epic's CDN for: the largest card on a 2x
+/// screen. Epic's full covers are 1200x1600 or more (5 MB at worst), and a
+/// Library of them decoded at full size froze WebKitGTK's GPU rendering.
+pub const COVER_WIDTH: u32 = 600;
+/// The screenshot width GRID asks for (some are 3840x2160).
+pub const SCREENSHOT_WIDTH: u32 = 1920;
+
+/// `url` at most `width` pixels wide, for Epic's image CDN
+/// (`cdn1.epicgames.com` resizes on `?w=<px>&resize=1`, keeping the shape
+/// and never enlarging). Any other host, or a URL that already has a
+/// query, is unchanged.
+pub fn sized(url: &str, width: u32) -> String {
+    let host = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .and_then(|rest| rest.split('/').next())
+        .unwrap_or("");
+    if host.eq_ignore_ascii_case("cdn1.epicgames.com") && !url.contains(['?', '#']) {
+        format!("{url}?w={width}&resize=1")
+    } else {
+        url.to_string()
+    }
+}
+
 fn cover_of(images: &[(String, String)]) -> String {
     COVER_TYPES
         .iter()
         .find_map(|want| images.iter().find(|(kind, _)| kind == want))
-        .map(|(_, url)| url.clone())
+        .map(|(_, url)| sized(url, COVER_WIDTH))
         .unwrap_or_default()
 }
 
 fn screenshots_of(images: &[(String, String)]) -> Vec<String> {
     let mut shots: Vec<String> = Vec::new();
     for (kind, url) in images {
-        if SCREENSHOT_TYPES.contains(&kind.as_str()) && !shots.contains(url) {
-            shots.push(url.clone());
+        let url = sized(url, SCREENSHOT_WIDTH);
+        if SCREENSHOT_TYPES.contains(&kind.as_str()) && !shots.contains(&url) {
+            shots.push(url);
         }
     }
     if shots.is_empty() {
@@ -143,7 +168,7 @@ fn screenshots_of(images: &[(String, String)]) -> Vec<String> {
             .iter()
             .find_map(|want| images.iter().find(|(kind, _)| kind == want))
         {
-            shots.push(url.clone());
+            shots.push(sized(url, SCREENSHOT_WIDTH));
         }
     }
     shots
@@ -522,7 +547,10 @@ mod tests {
         assert_eq!(names, ["Starlight", "IronOrchard", "NorthernStatic"]);
         let s = &games[0];
         assert_eq!(s.title, "Starlight Courier");
-        assert_eq!(s.cover, "https://cdn1.epicgames.com/ns1/tall.jpg");
+        assert_eq!(
+            s.cover,
+            "https://cdn1.epicgames.com/ns1/tall.jpg?w=600&resize=1"
+        );
         assert_eq!(
             s.screenshots,
             [
@@ -547,7 +575,10 @@ mod tests {
         );
         assert_eq!(games[1].third_party.as_deref(), Some("the EA app"));
         assert_eq!(games[1].build_version, "");
-        assert_eq!(games[1].cover, "https://cdn1.epicgames.com/io/tall.jpg");
+        assert_eq!(
+            games[1].cover,
+            "https://cdn1.epicgames.com/io/tall.jpg?w=600&resize=1"
+        );
         assert_eq!(games[2].third_party.as_deref(), Some("Ubisoft Connect"));
         assert!(games[2].screenshots.is_empty());
         assert!(!games[2].can_run_offline);
@@ -581,9 +612,36 @@ mod tests {
                               "releaseInfo": [{"dateAdded": "n/a"}]}}]"#,
         )
         .unwrap();
-        assert_eq!(games[0].cover, "https://cdn1.epicgames.com/w.jpg");
-        assert_eq!(games[0].screenshots, ["https://cdn1.epicgames.com/w.jpg"]);
+        assert_eq!(
+            games[0].cover,
+            "https://cdn1.epicgames.com/w.jpg?w=600&resize=1"
+        );
+        assert_eq!(
+            games[0].screenshots,
+            ["https://cdn1.epicgames.com/w.jpg?w=1920&resize=1"]
+        );
         assert_eq!(games[0].year, "");
+    }
+
+    #[test]
+    fn only_epics_cdn_is_asked_for_a_smaller_image() {
+        assert_eq!(
+            sized("https://cdn1.epicgames.com/a/b.jpg", 600),
+            "https://cdn1.epicgames.com/a/b.jpg?w=600&resize=1"
+        );
+        assert_eq!(
+            sized("https://CDN1.epicgames.com/b.png", 1920),
+            "https://CDN1.epicgames.com/b.png?w=1920&resize=1"
+        );
+        // Another host, or a URL that already has a query: unchanged.
+        for url in [
+            "https://cdn2.unrealengine.com/s1.jpg",
+            "https://cdn1.epicgames.com/b.jpg?h=10",
+            "https://cdn1.epicgames.com.evil.example/b.jpg",
+            "",
+        ] {
+            assert_eq!(sized(url, 600), url);
+        }
     }
 
     #[test]
