@@ -71,6 +71,26 @@ export const INITIAL_WINDOW_CARDS = 96;
  *  movement and an ordinary scroll find the next cards already there. */
 export const BUFFER_PX = 600;
 
+/** How many loaded covers a grid needs before its typical shape stands in
+ *  for the ones still loading. */
+export const TYPICAL_SHAPE_MIN = 3;
+
+/**
+ * The grid's shapes with every unknown one (a cover still loading) set to
+ * the grid's typical shape: the median of the known ones, to 2 places, once
+ * `TYPICAL_SHAPE_MIN` are known. A store's covers mostly share one shape
+ * (Steam's are 2:3, not the 3:4 default), so a cover that arrives then
+ * rarely re-flows the rows under the pointer. With fewer known, unknown
+ * stays unknown (`DEFAULT_SHAPE`).
+ */
+export function withTypicalShape(shapes: readonly (number | undefined)[]): (number | undefined)[] {
+  const known = shapes.filter((s): s is number => s !== undefined && Number.isFinite(s) && s > 0);
+  if (known.length < TYPICAL_SHAPE_MIN || known.length === shapes.length) return [...shapes];
+  const sorted = [...known].sort((a, b) => a - b);
+  const typical = Math.round(sorted[Math.floor(sorted.length / 2)] * 100) / 100;
+  return shapes.map((s) => s ?? typical);
+}
+
 export function clampShape(shape: number | undefined): number {
   if (shape === undefined || !Number.isFinite(shape) || shape <= 0) return DEFAULT_SHAPE;
   return Math.min(MAX_SHAPE, Math.max(MIN_SHAPE, shape));

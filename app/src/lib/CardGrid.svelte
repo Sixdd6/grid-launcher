@@ -9,6 +9,7 @@
     neighbor as neighborOf,
     rowsLayout,
     visibleRange,
+    withTypicalShape,
     type CardDisplay,
     type Layout,
     type NavDirection,
@@ -68,10 +69,12 @@
 
   let labelRow = $derived(labelRowPx(labels));
   let shapes = $derived(
-    items.map((item) => {
-      const pair = cover(item);
-      return shapeOf(pair.large) ?? shapeOf(pair.small);
-    })
+    withTypicalShape(
+      items.map((item) => {
+        const pair = cover(item);
+        return shapeOf(pair.large) ?? shapeOf(pair.small);
+      })
+    )
   );
   let layout: Layout = $derived.by(() => {
     const w = width ?? FALLBACK_WIDTH;

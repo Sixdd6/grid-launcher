@@ -3,6 +3,7 @@ import {
   cardDisplayLabel,
   CARD_DISPLAYS,
   clampShape,
+  withTypicalShape,
   normalizeCardDisplay,
   columnsLayout,
   DEFAULT_SHAPE,
@@ -187,5 +188,26 @@ describe('Game card display setting', () => {
 
   it('names both layouts for the select', () => {
     expect(CARD_DISPLAYS.map(cardDisplayLabel)).toEqual(['Equal height', 'Equal width']);
+  });
+});
+
+describe('withTypicalShape', () => {
+  it('gives covers still loading the grid’s typical shape', () => {
+    const steam = 600 / 900;
+    expect(withTypicalShape([steam, steam, undefined, steam, undefined])).toEqual([steam, steam, 0.67, steam, 0.67]);
+  });
+
+  it('takes the median, so one odd cover does not set it', () => {
+    expect(withTypicalShape([0.67, 0.67, 2, undefined])).toEqual([0.67, 0.67, 2, 0.67]);
+  });
+
+  it('leaves unknown shapes alone until enough covers have loaded', () => {
+    expect(withTypicalShape([0.67, 0.67, undefined])).toEqual([0.67, 0.67, undefined]);
+    expect(withTypicalShape([undefined, undefined])).toEqual([undefined, undefined]);
+    expect(withTypicalShape([])).toEqual([]);
+  });
+
+  it('keeps every known shape as it is', () => {
+    expect(withTypicalShape([0.5, 0.75, 1.5])).toEqual([0.5, 0.75, 1.5]);
   });
 });

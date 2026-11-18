@@ -23,7 +23,7 @@
   // `scroll` names the grid's own scroll area. Without it the grid sits in
   // a page that scrolls (Search everything) and uses that.
   import { flushSync, onMount, untrack, type Snippet } from 'svelte';
-  import { columnsLayout, rowsLayout, visibleRange, type Layout } from '../../cards/layout';
+  import { columnsLayout, rowsLayout, visibleRange, withTypicalShape, type Layout } from '../../cards/layout';
   import { CARD_CELL_ASPECT } from '../../cards/size';
   import { shapeOf } from '../../stores/coverShapes.svelte';
   import { uiSettings } from '../../stores/uiSettings.svelte';
@@ -82,7 +82,7 @@
   let scroller: Element | null = null;
 
   let count = $derived(items?.length ?? 0);
-  let shapes = $derived(items ? items.map((it) => shapeOf(cover?.(it) ?? null)) : []);
+  let shapes = $derived(items ? withTypicalShape(items.map((it) => shapeOf(cover?.(it) ?? null))) : []);
   let layout: Layout = $derived.by(() => {
     const w = width ?? 1280;
     const common = { shapes, width: w, labelRow: labelRem * rem, gap: GAP_REM * rem, rowGap: ROW_GAP_REM * rem };
